@@ -161,10 +161,6 @@
   <string name="avatar_url_dialog_title">Input Image URL</string>
   <string name="avatar_url_hint">Enter image URL</string>
   <string name="back">Back</string>
-  <string name="backup_page_reminder_dismiss">Dismiss</string>
-  <string name="backup_page_reminder_last_days">Last backup %1$d days ago</string>
-  <string name="backup_page_reminder_never_backed_up">Never backed up</string>
-  <string name="backup_page_reminder_title">Backup Reminder</string>
   <string name="calculating">Calculating...</string>
   <string name="cancel">Cancel</string>
   <string name="chain_of_thought_collapse">Collapse</string>

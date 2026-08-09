@@ -45,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -78,7 +77,6 @@ import app.amber.feature.ui.components.ui.Greeting
 import app.amber.feature.ui.components.ui.Tooltip
 import app.amber.feature.ui.components.ui.UIAvatar
 import app.amber.feature.ui.components.ui.WorkspaceDivider
-import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.Navigator
@@ -425,47 +423,6 @@ fun ChatDrawerContent(
         )
     }
 
-}
-
-@Composable
-private fun DrawerNavRow(
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-    tone: WorkspaceTone = WorkspaceTone.Neutral,
-) {
-    val workspace = workspaceColors()
-    val tint = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.muted
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(6.dp),
-        color = if (tone == WorkspaceTone.Accent) workspace.blueContainer else Color.Transparent,
-        contentColor = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
-                .padding(horizontal = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = tint,
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (tone == WorkspaceTone.Accent) workspace.blue else workspace.ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
 }
 
 /** V3 convo-history.jsx NavRow —— accent=true 时 newchat 用 accent 字色, 否则 ink */

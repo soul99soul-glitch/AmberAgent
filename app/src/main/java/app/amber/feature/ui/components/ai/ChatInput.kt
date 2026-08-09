@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -829,35 +828,5 @@ private fun InlineAttachmentIcon(
             tint = chatTheme.inkSoft,
             modifier = Modifier.size(23.dp),
         )
-    }
-}
-
-private val ComposerButtonSize = 44.dp
-private val ComposerButtonIconSize = 28.dp
-private val ComposerModelGroupHeight = 48.dp
-
-@Composable
-private fun ActionIconButton(
-    onClick: () -> Unit,
-    accent: Boolean = false,
-    content: @Composable () -> Unit,
-) {
-    val workspace = workspaceColors()
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.size(ComposerButtonSize),
-        shape = RoundedCornerShape(8.dp),
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        // V3 review P3 #8: action icon button 切 chatTheme.accent 跟主题
-        color = if (accent) app.amber.feature.ui.pages.chat.LocalChatTheme.current.accentSoft else workspace.paper,
-        contentColor = if (accent) app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent else workspace.ink,
-        border = BorderStroke(1.dp, workspace.hairline),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center
-        ) {
-            content()
-        }
     }
 }

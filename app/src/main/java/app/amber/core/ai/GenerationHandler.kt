@@ -104,16 +104,10 @@ private const val PERF_TAG = "AmberChatPerf"
 // smoothness should come from the lightweight display/reveal layer, while
 // Markdown parse/layout stays on a lower-frequency budget.
 private const val STREAM_UI_FLUSH_INTERVAL_MS = 33L
-private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS = 5_000L
-private const val GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS = 800
 // "Did the model produce real prose?" threshold for skipping the local fallback widget
 // after a retry. ~30 chars is "looks like a real sentence in either CN or EN", below
 // that we treat the response as effectively empty and let the skeleton widget kick in.
 private const val MEANINGFUL_TEXT_MIN_CHARS = 30
-
-private class GenerativeUiReasoningOnlyStreamException : RuntimeException(
-    "Generative UI stream emitted only hidden reasoning without visible content"
-)
 
 private class GenerativeUiInvalidWidgetStreamException(
     val issue: String,
@@ -487,10 +481,6 @@ class GenerationHandler(
         )
         val generativeUiWidgetRequirement =
             GenerativeUiPlanner.widgetRequirement(settings.agentRuntime.generativeUi, messages)
-        // G6 (2026-08-08): the shared planner removed `needsVisibleStreamingFallback`
-        // — keyword routing no longer forces reasoning-only mode. Invalid-widget
-        // detection below still drives the visible-fallback retry on its own.
-        val shouldGuardGenerativeUiReasoningOnly = false
         if (stream) {
             runProviderCallWithRetry(
                 retrySetting = settings.agentRuntime.generationRetry,
@@ -513,28 +503,15 @@ class GenerationHandler(
                 suspend fun streamWith(
                     providerMessages: List<UIMessage>,
                     streamParams: TextGenerationParams,
-                    guardReasoningOnly: Boolean,
                     widgetRequirement: GenerativeUiWidgetRequirement,
                 ) {
                     val accumulator = MessageStreamAccumulator(baseMessages, model)
                     var lastFlushAt = 0L
-                    val streamStartedAt = System.currentTimeMillis()
-                    var visibleTextChars = 0
-                    var reasoningChars = 0
                     providerImpl.streamText(
                         providerSetting = provider,
                         messages = providerMessages,
                         params = streamParams,
                     ).collect { chunk ->
-                        val deltaParts = chunk.choices.getOrNull(0)?.let { choice ->
-                            choice.delta?.parts ?: choice.message?.parts
-                        }.orEmpty()
-                        visibleTextChars += deltaParts
-                            .filterIsInstance<UIMessagePart.Text>()
-                            .sumOf { it.text.length }
-                        reasoningChars += deltaParts
-                            .filterIsInstance<UIMessagePart.Reasoning>()
-                            .sumOf { it.reasoning.length }
                         accumulator.append(chunk)
                         val now = System.currentTimeMillis()
                         if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
@@ -545,17 +522,6 @@ class GenerationHandler(
                             )
                             onUpdateMessages(GenerationUpdate.streamingTail(messages))
                             lastFlushAt = now
-                        }
-                        if (
-                            guardReasoningOnly &&
-                            visibleTextChars == 0 &&
-                            reasoningChars > 0 &&
-                            (
-                                reasoningChars >= GENERATIVE_UI_REASONING_ONLY_FALLBACK_CHARS ||
-                                    now - streamStartedAt >= GENERATIVE_UI_REASONING_ONLY_FALLBACK_MS
-                                )
-                        ) {
-                            throw GenerativeUiReasoningOnlyStreamException()
                         }
                     }
                     messages = accumulator.snapshot()
@@ -575,15 +541,11 @@ class GenerationHandler(
                     streamWith(
                         providerMessages = internalMessages,
                         streamParams = params,
-                        guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
                         widgetRequirement = generativeUiWidgetRequirement,
                     )
                 } catch (error: Throwable) {
-                    if (
-                        error is GenerativeUiReasoningOnlyStreamException ||
-                        error is GenerativeUiInvalidWidgetStreamException
-                    ) {
-                        val widgetIssue = (error as? GenerativeUiInvalidWidgetStreamException)?.issue
+                    if (error is GenerativeUiInvalidWidgetStreamException) {
+                        val widgetIssue = error.issue
                         messages = baseMessages
                         onUpdateMessages(GenerationUpdate.full(messages))
                         processingStatus.value = if (generativeUiWidgetRequirement.expectSlides) {
@@ -600,7 +562,6 @@ class GenerationHandler(
                                 tools = emptyList(),
                                 reasoningLevel = ReasoningLevel.OFF,
                             ),
-                            guardReasoningOnly = false,
                             widgetRequirement = GenerativeUiWidgetRequirement.None,
                         )
                         // Only force-inject the local fallback widget when the retry
@@ -632,7 +593,6 @@ class GenerationHandler(
                     streamWith(
                         providerMessages = prepareInternalMessages(forceImageToText = true),
                         streamParams = params,
-                        guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
                         widgetRequirement = generativeUiWidgetRequirement,
                     )
                 }

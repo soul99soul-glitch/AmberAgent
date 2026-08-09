@@ -69,7 +69,7 @@ fun contextMeterFilledBars(used: Int, total: Int): Int {
  * 设计来源 convo-agent.jsx HeaderContextRing + ContextUsagePanel：
  *   - 22dp ring + 2.6dp stroke + leading head dot
  *   - 主题阈值色 (Paper 棕渐变 / 其他蓝-黄-红)
- *   - 点击展开 290dp 浮层：5h 额度 / 周额度 / Context / meta strip
+ *   - 点击展开 290dp 浮层：Context / meta strip
  *   - 浮层位置：top right of screen，箭头指向 ring
  */
 @Composable
@@ -165,9 +165,8 @@ fun ContextRing(
  * 用量与上下文 popup —— 290dp 宽，从 ring 下方 10dp 弹出，箭头指向 ring。
  *
  * 设计来源 convo-agent.jsx ContextUsagePanel:
- *   - 5h 额度 / 本周额度 (硬编码 placeholder，app 当前没追踪)
  *   - Context 用真实 used/total
- *   - meta strip: 本次 / 缓存命中 / 速度 (placeholder)
+ *   - meta strip: 本次 / 缓存命中 / 速度
  */
 @Composable
 private fun ContextUsagePopup(
@@ -188,11 +187,6 @@ private fun ContextUsagePopup(
     val panelWidth = 260
     val panelOffsetTop = 46  // 36dp ring 高 + 10dp gap
     val panelOffsetRight = -8
-    // TODO: 当前 5h/周额度是真实接入前的预留 UI. Codex OAuth/Anthropic 限额查询
-    //   需要 inject 额度 store + 当前 model 的 provider 类型判断. 接口未铺好之前
-    //   默认 false, 只显示 Context 行. 接通 Codex 后传 true + 真数据.
-    val quotaSupported = false
-
     // V3 review P3: 之前 popupPositionProvider 用硬编码 *2.5f 和 *2 作为"density approx",
     // 只在 ~xhdpi (2x) / xxhdpi (2.5x ~ 3x) 设备正确. 改用 LocalDensity 在 PopupPositionProvider
     // 构造前算好 px, 让不同 dpi 设备 (hdpi 1.5x / xxxhdpi 4x / 折叠屏) 都一致.
@@ -271,32 +265,6 @@ private fun ContextUsagePopup(
                         letterSpacing = 0.3.sp,
                         modifier = Modifier.padding(bottom = 10.dp),
                     )
-
-                    if (quotaSupported) {
-                        UsageRow(
-                            label = "5 小时额度",
-                            value = 0.46f,
-                            caption = "46 / 100 次",
-                            fillColor = theme.accent,
-                            theme = theme,
-                        )
-                        UsageRow(
-                            label = "本周额度",
-                            value = 0.18f,
-                            caption = "450 / 2,500 次",
-                            fillColor = theme.accent,
-                            theme = theme,
-                        )
-
-                        // 分隔线 (仅在显示限额行时画)
-                        Box(
-                            modifier = Modifier
-                                .padding(top = 12.dp, bottom = 10.dp)
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .background(theme.hair),
-                        )
-                    }
 
                     UsageRow(
                         label = "Context",

@@ -65,19 +65,6 @@ internal data class TimelineHistoryLoadSignal(
     val loadedNodeCount: Int,
 )
 
-internal data class FollowLayoutSignal(
-    val totalItems: Int,
-    val visibleItems: Int,
-    val bottomAnchorVisible: Boolean,
-    val lastVisibleIndex: Int,
-    val lastVisibleOffset: Int,
-    val lastVisibleSize: Int,
-    val viewportEndOffset: Int,
-    val followingBottom: Boolean,
-    val userScrollInTimeline: Boolean,
-    val scrollInProgress: Boolean,
-)
-
 internal data class TimelineScrollAnchor(
     val key: Any,
     val offset: Int,

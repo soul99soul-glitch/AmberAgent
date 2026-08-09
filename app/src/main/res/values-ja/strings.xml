@@ -161,10 +161,6 @@
   <string name="avatar_url_dialog_title">画像URLを入力</string>
   <string name="avatar_url_hint">画像URLを入力してください</string>
   <string name="back">戻る</string>
-  <string name="backup_page_reminder_dismiss">閉じる</string>
-  <string name="backup_page_reminder_last_days">最終バックアップは%1$d日前</string>
-  <string name="backup_page_reminder_never_backed_up">バックアップしたことがありません</string>
-  <string name="backup_page_reminder_title">バックアップのリマインダー</string>
   <string name="calculating">計算中...</string>
   <string name="cancel">キャンセル</string>
   <string name="chain_of_thought_collapse">折りたたむ</string>

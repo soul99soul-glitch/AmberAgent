@@ -161,10 +161,6 @@
   <string name="avatar_url_dialog_title">Введите URL изображения</string>
   <string name="avatar_url_hint">Введите URL изображения</string>
   <string name="back">Назад</string>
-  <string name="backup_page_reminder_dismiss">Отклонить</string>
-  <string name="backup_page_reminder_last_days">Последняя резервная копия создана %1$d дн. назад</string>
-  <string name="backup_page_reminder_never_backed_up">Резервное копирование не выполнялось</string>
-  <string name="backup_page_reminder_title">Напоминание о резервном копировании</string>
   <string name="calculating">Вычисление...</string>
   <string name="cancel">Отмена</string>
   <string name="chain_of_thought_collapse">Свернуть</string>
