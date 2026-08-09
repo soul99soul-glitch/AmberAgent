@@ -127,16 +127,11 @@ enum IOSSubAgentToolPolicy {
     }
 }
 
-/// iOS entry point for calling SubAgentManager.start/read/wait/cancel.
-/// Uses IosSubAgentFactory (KMP iosMain). Real provider if API key configured;
-/// otherwise falls back to an honest stub runner for call-chain validation.
+/// iOS entry point for engine-based, multi-turn sub-agent execution.
 @MainActor
 @Observable
 final class SubAgentRunner {
-    @ObservationIgnored private var manager: SubAgentManager?
-    @ObservationIgnored private var currentRunId: String?
     @ObservationIgnored private let taskStore: IOSAdvancedTaskStore
-    @ObservationIgnored private var currentTaskId: String?
     @ObservationIgnored private var currentEngineRunTask: Task<IOSAgentToolEngineResult, Never>?
     @ObservationIgnored private var currentEngineExecutionId: UUID?
 
@@ -158,49 +153,11 @@ final class SubAgentRunner {
     }
 #endif
 
-    private func ensureManager() -> SubAgentManager? {
-        if let manager { return manager }
-        guard let docsDir = try? FileManager.default.url(
-            for: .documentDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        ).path else { return nil }
-
-        let store = SettingsStore()
-        let baseUrl = store.baseUrl
-        let apiKey = store.currentApiKey
-        let modelId = store.modelId
-
-        let m: SubAgentManager
-        if !apiKey.isEmpty {
-            m = IosSubAgentFactory.shared.createWithRealProvider(
-                documentsDir: docsDir,
-                baseUrl: baseUrl,
-                apiKey: apiKey,
-                modelId: modelId
-            )
-        } else {
-            m = IosSubAgentFactory.shared.create(documentsDir: docsDir)
-        }
-        manager = m
-        return m
-    }
-
-    func runTestCycle() {
-        Task {
-            lastRunResult = await run(
-                objective: "验证 iOS SubAgentManager start/read/wait/cancel 调用链",
-                roleId: "explorer"
-            )
-        }
-    }
-
     // MARK: - Engine-based multi-turn execution (Android GenerationSubAgentRunner parity)
     //
-    // The KMP RealOpenAISubAgentRunner does a single non-streaming call with no
-    // tools and never passes parentTools (it's a stub). This Swift path uses the
-    // reusable IOSAgentToolEngine to run a real multi-turn loop: the model can
-    // call the allowed parent tools + subagent_report, the engine executes each
-    // and re-calls the model, and the structured report is captured. Mirrors
+    // This path uses the reusable IOSAgentToolEngine to run a real multi-turn
+    // loop with the allowed parent tools + subagent_report. The engine executes
+    // each call, re-calls the model, and captures the structured report. Mirrors
     // Android's GenerationSubAgentRunner (maxTurns loop + subagent_report
     // capture + resultOrFallback). Real-model behavior is validated via manual
     // smoke; the loop mechanics are unit-tested with a scripted provider.
@@ -279,7 +236,6 @@ final class SubAgentRunner {
                 "engine": "true"
             ]
         )
-        currentTaskId = task.id
         lastTask = task
         isRunning = true
         defer { isRunning = false }
@@ -621,203 +577,13 @@ final class SubAgentRunner {
         Swift.min(Swift.max(value, lower), upper)
     }
 
-    func run(objective: String, roleId: String = "explorer", requestedToolScope: [String] = []) async -> String {
-        guard let m = ensureManager() else {
-            return "SubAgent 不可用：无法构造 Manager（文档目录不可用）。"
-        }
-        let role = Self.resolveDispatchRole(
-            roleId: roleId,
-            customRoleName: nil,
-            customRoleLens: nil,
-            customRolePrompt: nil,
-            savedRolePromptOverride: nil,
-            maxTurnsOverride: nil,
-            outputBudgetCharsOverride: nil
-        )
-        guard let role else {
-            return Self.json([
-                "ok": false,
-                "error": "Unknown sub-agent role_id: \(roleId).",
-                "valid_role_ids": IOSSubAgentRoleCatalog.validRoleIds,
-                "hint": "Omit role_id for the default role, or pass custom_role_prompt to define a one-off custom role."
-            ])
-        }
-        let requested = requestedToolScope
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        let deniedRequested = requested.filter(IOSSubAgentToolPolicy.isDenied)
-        if !deniedRequested.isEmpty {
-            return Self.json([
-                "ok": false,
-                "denied": true,
-                "reason": "SubAgent is a read-only worker: requested tool_scope includes tools it may never execute (write, destructive, nested-agent, or sensitive WebMount tools).",
-                "requested_tools": deniedRequested,
-                "removed_tools": deniedRequested,
-                "hint": "Narrow tool_scope to read-only tools (for example search_web, workspace_file_read, wm_get) or omit tool_scope to use the role allowlist."
-            ])
-        }
-        let scopedTools = requested.isEmpty
-            ? role.toolAllowlist
-            : requested.filter { role.toolAllowlist.contains($0) }
-        let tools = scopedTools.isEmpty ? role.toolAllowlist : scopedTools
-        let removedTools = requested.filter { !tools.contains($0) }
-        let providerMode = SettingsStore().currentApiKey.isEmpty ? "stub_fallback" : "real_provider"
-        let task = taskStore.startTask(
-            kind: .subAgent,
-            title: "\(role.name) · \(objective.prefix(36))",
-            objective: objective,
-            roleId: role.id,
-            toolScope: tools,
-            budgetSummary: "turns \(role.maxTurns) · timeout \(role.timeoutSeconds)s · output \(role.outputBudgetChars) chars",
-            sourceToolName: "subagent_dispatch",
-            metadata: [
-                "provider_mode": providerMode,
-                "role_name": role.name
-            ]
-        )
-        currentTaskId = task.id
-        lastTask = task
-        isRunning = true
-        defer { isRunning = false }
-
-        let input = IosSubAgentFactory.shared.startInput(
-            objective: objective,
-            subagentId: role.id,
-            outputFormat: "返回针对 objective 的最终 Markdown 回答。",
-            toolsAndSources: tools.joined(separator: ", "),
-            boundaries: "只使用列出的工具范围。不要请求用户输入，不要伪造真实工具结果。\(role.systemPrompt)",
-            context: "iOS SubAgent task. Role: \(role.name). Routing: \(role.routing). Provider mode: \(providerMode)."
-        )
-
-        // start
-        let startResult: (runId: String, status: String) = await withCheckedContinuation { cont in
-            m.start(parentConversationId: KotlinUuid.companion.random(), input: input, parentTools: []) { result, error in
-                if let error {
-                    cont.resume(returning: ("(unknown)", "error: \(error.localizedDescription)"))
-                } else if let result {
-                    cont.resume(returning: (
-                        IosSubAgentFactory.shared.extractRunId(result: result),
-                        IosSubAgentFactory.shared.extractStatus(result: result)
-                    ))
-                } else {
-                    cont.resume(returning: ("(unknown)", "empty"))
-                }
-            }
-        }
-        guard startResult.runId != "(unknown)" else {
-            let message = "SubAgent 启动失败：\(startResult.status)"
-            lastTask = taskStore.updateTask(
-                id: task.id,
-                status: .failed,
-                resultSummary: message,
-                error: startResult.status,
-                retryable: true,
-                cancelCapability: false
-            )
-            return message
-        }
-        currentRunId = startResult.runId
-        lastTask = taskStore.updateTask(
-            id: task.id,
-            metadata: ["kmp_run_id": startResult.runId, "start_status": startResult.status]
-        )
-
-        // wait (15s budget, matches runTestCycle)
-        let waitStatus: String = await withCheckedContinuation { cont in
-            m.wait(runId: startResult.runId, waitTimeoutMs: 15_000) { waitResult, waitError in
-                if let waitError {
-                    cont.resume(returning: "wait 错误: \(waitError.localizedDescription)")
-                } else if let waitResult {
-                    cont.resume(returning: IosSubAgentFactory.shared.extractStatus(result: waitResult))
-                } else {
-                    cont.resume(returning: "wait 空结果")
-                }
-            }
-        }
-
-        // read final status (the honest result we expose as tool output)
-        let finalStatus: String = await withCheckedContinuation { cont in
-            m.read(runId: startResult.runId) { readResult, readError in
-                if let readError {
-                    cont.resume(returning: "read 错误: \(readError.localizedDescription)")
-                } else if let readResult {
-                    cont.resume(returning: IosSubAgentFactory.shared.extractStatus(result: readResult))
-                } else {
-                    cont.resume(returning: "read 空结果")
-                }
-            }
-        }
-        let mappedStatus = mapStatus(finalStatus)
-        let summary = "SubAgent \(role.name) 已执行。runId: \(startResult.runId)，start: \(startResult.status)，wait: \(waitStatus)，final: \(finalStatus)。"
-        lastTask = taskStore.updateTask(
-            id: task.id,
-            status: mappedStatus,
-            resultSummary: summary,
-            logTail: "role=\(role.id)\ntools=\(tools.joined(separator: ", "))\nobjective=\(objective)",
-            error: mappedStatus == .failed ? finalStatus : "",
-            retryable: mappedStatus != .completed,
-            cancelCapability: false,
-            metadata: ["final_status": finalStatus]
-        )
-        lastRunResult = summary
-        return Self.json([
-            "ok": mappedStatus == .completed,
-            "task_id": task.id,
-            "kind": IOSAdvancedTaskKind.subAgent.rawValue,
-            "role_id": role.id,
-            "role_name": role.name,
-            "run_id": startResult.runId,
-            "status": mappedStatus.rawValue,
-            "tool_scope": tools,
-            "removed_tools": removedTools,
-            "summary": summary
-        ])
-    }
-
     func cancelCurrentRun() {
-        if let currentEngineRunTask {
-            currentEngineRunTask.cancel()
-            lastRunResult = "正在取消 SubAgent…"
+        guard let currentEngineRunTask else {
+            lastRunResult = "没有正在运行的 SubAgent"
             return
         }
-        guard let m = ensureManager(), let runId = currentRunId else {
-            lastRunResult = "没有可取消的 SubAgent runId"
-            return
-        }
-        m.cancel(runId: runId) { [weak self] result, error in
-            let summary: String
-            if let error {
-                summary = "cancel 错误: \(error.localizedDescription)"
-            } else if let result {
-                let status = IosSubAgentFactory.shared.extractStatus(result: result)
-                summary = "cancel 已返回\nrunId: \(runId)\nstatus: \(status)"
-            } else {
-                summary = "cancel 返回空结果"
-            }
-            DispatchQueue.main.async {
-                self?.lastRunResult = summary
-                if let taskId = self?.currentTaskId {
-                    self?.lastTask = self?.taskStore.updateTask(
-                        id: taskId,
-                        status: .cancelled,
-                        resultSummary: summary,
-                        retryable: true,
-                        cancelCapability: false
-                    )
-                }
-            }
-        }
-    }
-
-    private func mapStatus(_ status: String) -> IOSAdvancedTaskStatus {
-        let normalized = status.lowercased()
-        if normalized.contains("completed") { return .completed }
-        if normalized.contains("cancel") { return .cancelled }
-        if normalized.contains("timed") || normalized.contains("timeout") { return .timedOut }
-        if normalized.contains("interrupt") { return .interrupted }
-        if normalized.contains("error") || normalized.contains("fail") { return .failed }
-        if normalized.contains("running") { return .running }
-        return .completed
+        currentEngineRunTask.cancel()
+        lastRunResult = "正在取消 SubAgent…"
     }
 
     static func json(_ object: [String: Any]) -> String {

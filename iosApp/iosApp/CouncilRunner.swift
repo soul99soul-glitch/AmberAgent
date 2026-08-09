@@ -2585,7 +2585,6 @@ private extension String {
 @MainActor
 @Observable
 final class CouncilRunner {
-    @ObservationIgnored private var manager: ModelCouncilManager?
     @ObservationIgnored private let taskStore: IOSAdvancedTaskStore
     @ObservationIgnored private let roomSettingsStore: IOSCouncilRoomSettingsStore
     @ObservationIgnored private let roomStreamer: any IOSCouncilTextStreaming
@@ -2606,35 +2605,6 @@ final class CouncilRunner {
 
     var recentTasks: [IOSAdvancedTaskRecord] {
         taskStore.recent(kind: .modelCouncil, limit: 5)
-    }
-
-    private func ensureManager() -> ModelCouncilManager? {
-        if let m = manager { return m }
-        guard let docsDir = try? FileManager.default.url(
-            for: .documentDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        ).path else { return nil }
-
-        // Try real provider first (needs valid API key from SettingsStore).
-        // If no key configured, fall back to stub for chain validation.
-        let store = SettingsStore()
-        let baseUrl = store.baseUrl
-        let apiKey = store.currentApiKey
-        let modelId = store.modelId
-
-        let m: ModelCouncilManager
-        if !apiKey.isEmpty {
-            m = IosCouncilFactory.shared.createWithRealProvider(
-                documentsDir: docsDir,
-                baseUrl: baseUrl,
-                apiKey: apiKey,
-                modelId: modelId
-            )
-        } else {
-            m = IosCouncilFactory.shared.create(documentsDir: docsDir)
-        }
-        manager = m
-        return m
     }
 
     /// Run an input-driven Council Room cycle for the chat-tool dispatch path.
@@ -2711,35 +2681,6 @@ final class CouncilRunner {
             result["reason"] = outcome.failureReason ?? outcome.status.title
         }
         return Self.json(result)
-    }
-
-    func runTestCycle() {
-        guard let m = ensureManager() else {
-            lastRunResult = "无法构造 Manager（文档目录不可用）"
-            return
-        }
-        isRunning = true
-        lastRunResult = "正在启动…"
-
-        let input = IosCouncilFactory.shared.startInput(objective: "试运行模型议会")
-
-        m.start(input: input) { [weak self] result, error in
-            let summary: String
-            if let error = error {
-                summary = "start 错误: \(error.localizedDescription)"
-            } else if let result = result {
-                let runId = IosCouncilFactory.shared.extractRunId(result: result)
-                let status = IosCouncilFactory.shared.extractStatus(result: result)
-                summary = "模型议会已完成试运行\nrunId: \(runId)\nstatus: \(status)\n\n配置 API Key 后会使用真实模型生成。"
-            } else {
-                summary = "start 返回空结果"
-            }
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isRunning = false
-                self.lastRunResult = summary
-            }
-        }
     }
 
     private static func defaultSeatDescriptors() -> [IOSCouncilSeatDescriptor] {

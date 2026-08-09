@@ -15,9 +15,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             api(project(":ai-core"))
-            api(project(":ai-provider-openai"))
             api(libs.kotlinx.serialization.json)
-            api(libs.kotlinx.datetime)
         }
     }
 }
