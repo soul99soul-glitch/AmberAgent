@@ -185,6 +185,25 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         XCTAssertEqual(result.actions, [])
     }
 
+    func testUserDragEndedResumesFollowingOnlyAtBottom() {
+        let cases: [(isAtBottom: Bool, expected: NativeTimelineScrollState)] = [
+            (false, .pausedForUser),
+            (true, .followingBottom(virtualOffset: 520, target: 520, lastFollowRequestAt: 9)),
+        ]
+
+        for testCase in cases {
+            let result = NativeTimelineScrollCore.reduce(
+                state: .pausedForUser,
+                intent: .userDragEnded(isAtBottom: testCase.isAtBottom),
+                geometry: geometry(offsetY: 520, distanceToBottom: testCase.isAtBottom ? 0 : 200),
+                now: 9
+            )
+
+            XCTAssertEqual(result.state, testCase.expected)
+            XCTAssertEqual(result.actions, [])
+        }
+    }
+
     @MainActor
     func testInvalidateAndReattachPreservesExistingHistoryPosition() {
         let driver = NativeTimelineScrollDriver()

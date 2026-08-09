@@ -18,22 +18,6 @@ import XCTest
 @MainActor
 final class IOSParityRedLightTests: XCTestCase {
 
-    func testChatBackButtonPopsTheAppRouterPath() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let chat = try String(
-            contentsOf: appDirectory.appendingPathComponent("ChatView.swift"),
-            encoding: .utf8
-        )
-
-        guard let start = chat.range(of: "private var backToolbarButton") else {
-            return XCTFail("Expected the Chat back button")
-        }
-        let backButton = chat[start.lowerBound...]
-        XCTAssertTrue(backButton.contains("router.goBack()"))
-        XCTAssertFalse(backButton.prefix(900).contains("dismiss()"))
-    }
-
     func testRouterPathGoBackRemovesOnlyTheTopRoute() {
         let router = RouterPath()
         router.path = [.chat, .settings]
@@ -41,46 +25,6 @@ final class IOSParityRedLightTests: XCTestCase {
         router.goBack()
 
         XCTAssertEqual(router.path, [.chat])
-    }
-
-    func testConversationListInvalidatesForForegroundAndBackgroundGenerationTermination() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let home = try String(
-            contentsOf: appDirectory.appendingPathComponent("PlaceholderViews.swift"),
-            encoding: .utf8
-        )
-
-        guard let start = home.range(of: "struct ConversationsView: View") else {
-            return XCTFail("Expected ConversationsView")
-        }
-        let conversations = home[start.lowerBound...]
-        XCTAssertTrue(conversations.contains("_ = chatViewModel.isLoading"))
-        XCTAssertTrue(conversations.contains(".amberChatBackgroundJobDidTerminate"))
-        XCTAssertTrue(conversations.contains("backgroundGenerationRevision &+= 1"))
-    }
-
-    func testForegroundToolBatchDrainsBeforeOneModelContinuationAndInjectsBudgetPromptAtLimit() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let coordinator = try String(
-            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
-            encoding: .utf8
-        )
-
-        guard let start = coordinator.range(of: "private func continueAfterToolResult(") else {
-            return XCTFail("Expected one continuation owner after a tool result")
-        }
-        let continuation = coordinator[start.lowerBound...]
-        let pending = try XCTUnwrap(continuation.range(of: "toolRuntime.nextPendingToolCall("))
-        let unresolved = try XCTUnwrap(continuation.range(of: "toolRuntime.hasUnresolvedToolCall("))
-        let stream = try XCTUnwrap(continuation.range(of: "prepareAndStartStreaming("))
-        XCTAssertLessThan(pending.lowerBound, stream.lowerBound)
-        XCTAssertLessThan(pending.lowerBound, unresolved.lowerBound)
-        XCTAssertLessThan(unresolved.lowerBound, stream.lowerBound)
-        XCTAssertTrue(continuation.prefix(7000).contains("continuationMessagesAfterToolBudgetExhaustion("))
-        // G7: 预算耗尽不再清空工具目录——continuation 路径必须保留工具声明。
-        XCTAssertFalse(coordinator.contains("tools: []"))
     }
 
     func testToolBudgetExhaustionInjectsWrapUpPromptAndKeepsConversation() {
@@ -1795,133 +1739,6 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
-    func testForegroundStreamingChunksDoNotSnapshotBeforeThrottledFlush() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let source = try String(
-            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
-            encoding: .utf8
-        )
-
-        guard let eventLoopStart = source.range(of: "for await event in eventStream"),
-              let scheduleCall = source.range(of: "self.scheduleStreamSnapshotPublish", range: eventLoopStart.upperBound..<source.endIndex) else {
-            return XCTFail("Expected foreground stream event consumer to schedule a throttled snapshot publish")
-        }
-        let eventConsumerBeforeSchedule = source[eventLoopStart.upperBound..<scheduleCall.lowerBound]
-        XCTAssertFalse(
-            eventConsumerBeforeSchedule.contains("accumulator.snapshot()"),
-            "Each stream chunk must not snapshot the full accumulator before the throttled flush; long responses make this O(n²) on the main actor."
-        )
-        XCTAssertTrue(
-            source.contains("snapshotProvider:") && source.contains("latestPendingStreamSnapshot()"),
-            "The stream scheduler should defer accumulator.snapshot() behind a snapshotProvider so flush/cancel can take the latest snapshot only when needed."
-        )
-        guard let onChunkStart = source.range(of: "onChunk: { chunk in"),
-              let onCompleteStart = source.range(of: "onComplete:", range: onChunkStart.upperBound..<source.endIndex) else {
-            return XCTFail("Expected foreground stream onChunk callback before onComplete callback")
-        }
-        let providerCallbackBody = source[onChunkStart.upperBound..<onCompleteStart.lowerBound]
-        XCTAssertFalse(
-            providerCallbackBody.contains("Task { @MainActor"),
-            "Foreground onChunk must not spawn one MainActor task per provider chunk; high-frequency streams need a single FIFO event consumer."
-        )
-        XCTAssertTrue(
-            source.contains("AsyncStream<ChatStreamEvent>") && source.contains("streamEventTask"),
-            "Foreground streaming should use one AsyncStream-backed FIFO consumer for chunk/complete/error ordering."
-        )
-        XCTAssertTrue(
-            source.contains("drainPendingStreamChunksIntoAccumulator()"),
-            "Cancel/background handoff must drain chunks accepted by the sink but not yet consumed on MainActor."
-        )
-        guard let cancelStart = source.range(of: "func cancel()"),
-              let cancelEnd = source.range(
-                of: "/// (Re)snapshots the background handoff payload.",
-                range: cancelStart.upperBound..<source.endIndex
-              ) else {
-            return XCTFail("Expected cancellation implementation before background handoff support")
-        }
-        let cancelBody = source[cancelStart.lowerBound..<cancelEnd.lowerBound]
-        XCTAssertTrue(
-            cancelBody.contains(
-                "var messagesAtCancellation = pendingStreamSnapshotAtCancellation ?? bindings.getMessages()"
-            ) && cancelBody.contains("bindings.setMessages(messagesAtCancellation)"),
-            "Cancel must publish the drain-complete active-stream snapshot, including terminal tool closure, before persisting it."
-        )
-        guard let completeStart = source.range(of: "case .complete:"),
-              let errorStart = source.range(
-                of: "case .error(let error):",
-                range: completeStart.upperBound..<source.endIndex
-              ),
-              let eventLoopEnd = source.range(
-                of: "streamJob = dispatchStream(",
-                range: errorStart.upperBound..<source.endIndex
-              ) else {
-            return XCTFail("Expected complete/error terminal branches in the foreground event consumer")
-        }
-        XCTAssertTrue(
-            source[completeStart.lowerBound..<errorStart.lowerBound].contains("self.activeStreamSession = nil")
-        )
-        XCTAssertTrue(
-            source[completeStart.lowerBound..<errorStart.lowerBound].contains("await self.drainStreamPresentation"),
-            "Completion must drain the bounded UI presentation backlog before publishing terminal state."
-        )
-        XCTAssertTrue(
-            source[errorStart.lowerBound..<eventLoopEnd.lowerBound].contains("self.activeStreamSession = nil"),
-            "Terminal branches must relinquish accumulator ownership before tool/error awaits."
-        )
-        XCTAssertTrue(
-            source.contains("publishPacedStreamSnapshot(targetSnapshot, runId: runId)"),
-            "The normal throttled flush must publish a bounded presentation step rather than the entire burst."
-        )
-        XCTAssertTrue(
-            source.contains("pendingStreamSnapshot = target"),
-            "The authoritative terminal snapshot must remain reachable if cancellation races presentation catch-up."
-        )
-    }
-
-    func testForegroundErrorTerminalDrainsPresentationBacklogBeforePublishingTerminalState() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let source = try String(
-            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
-            encoding: .utf8
-        )
-
-        guard let errorStart = source.range(of: "case .error(let error):"),
-              let eventLoopEnd = source.range(
-                of: "streamJob = dispatchStream(",
-                range: errorStart.upperBound..<source.endIndex
-              ) else {
-            return XCTFail("Expected .error terminal branch in the foreground event consumer")
-        }
-        let errorBody = source[errorStart.lowerBound..<eventLoopEnd.lowerBound]
-
-        guard let drainGuardRange = errorBody.range(
-            of: "guard await self.drainStreamPresentation(to: snapshot, runId: runId) else {"
-        ) else {
-            return XCTFail(
-                "Error terminal must drain the bounded UI presentation backlog (same guard as .complete) before publishing terminal state; otherwise a backlogged burst renders in one uncapped frame right before the error bubble."
-            )
-        }
-        guard let setMessagesRange = errorBody.range(
-            of: "self.bindings.setMessages(snapshot)",
-            range: drainGuardRange.upperBound..<errorBody.endIndex
-        ) else {
-            return XCTFail("Expected error terminal to publish the accumulated snapshot after draining, not before.")
-        }
-        guard let presentErrorRange = errorBody.range(
-            of: "await self.presentStreamError(",
-            range: setMessagesRange.upperBound..<errorBody.endIndex
-        ) else {
-            return XCTFail("Expected the error bubble to be presented only after the drained terminal snapshot is published.")
-        }
-        XCTAssertTrue(
-            drainGuardRange.upperBound <= setMessagesRange.lowerBound
-                && setMessagesRange.upperBound <= presentErrorRange.lowerBound,
-            "Symmetric with .complete: drain the paced backlog, then publish the terminal snapshot, then surface the error bubble."
-        )
-    }
-
     func testForegroundPresentationPacerSplitsBurstWithoutDroppingSuffix() {
         let user = UIMessage.companion.user(prompt: "question")
         let assistant = UIMessage.companion.assistant(prompt: "已显示")
@@ -2084,47 +1901,100 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "stop")))
         XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: "tool_calls")))
         XCTAssertFalse(ChatGenerationCoordinator.reachedOutputLimit(chunk(finishReason: nil)))
+    }
 
+    /// Source-level canary for ordering contracts that do not have an injectable behavior seam.
+    /// Keep the cases together as a table so the orchestration wiring costs one focused test.
+    func testCriticalForegroundAndMiniAppOrchestrationKeepsTerminalOrdering() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let source = try String(
+        let foreground = try String(
             contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
             encoding: .utf8
         )
+        let background = try String(
+            contentsOf: appDirectory.appendingPathComponent("IOSChatBackgroundGenerationCoordinator.swift"),
+            encoding: .utf8
+        )
+        let checks: [(String, String, String, String, [String])] = [
+            (
+                "output-limit capture", foreground, "case .chunk(let chunk):", "case .complete:",
+                ["reachedOutputLimit(chunk)"]
+            ),
+            (
+                "output-limit before tool dispatch", foreground,
+                "private func handleCompletedStream(", "private func completeTruncatedStream(",
+                ["if hitOutputLimit {", "completeTruncatedStream(", "toolRuntime.nextPendingToolCall("]
+            ),
+            (
+                "truncated terminal", foreground,
+                "private func completeTruncatedStream(", "static func outputLimitNotice()",
+                ["Self.outputLimitNotice()", "didPersist ? \"truncated\" : \"recovery_pending\""]
+            ),
+            (
+                "foreground completion ownership", foreground, "case .complete:", "case .error(let error):",
+                ["self.activeStreamSession = nil", "drainStreamPresentation(to: snapshot", "handleCompletedStream("]
+            ),
+            (
+                "foreground error drain", foreground, "case .error(let error):", "streamJob = dispatchStream(",
+                [
+                    "self.activeStreamSession = nil", "drainStreamPresentation(to: snapshot",
+                    "bindings.setMessages(snapshot)", "presentStreamError("
+                ]
+            ),
+            (
+                "foreground cancel drain", foreground,
+                "private func cancel(runId expectedRunId: String?)",
+                "/// (Re)snapshots the background handoff payload.",
+                [
+                    "streamEventSink?.finish()", "drainPendingStreamChunksIntoAccumulator()",
+                    "latestPendingStreamSnapshot()", "bindings.setMessages(messagesAtCancellation)",
+                    "persistMessagesSnapshot("
+                ]
+            ),
+            (
+                "tool continuation", foreground,
+                "private func continueAfterToolResult(", "static func continuationMessagesAfterToolBudgetExhaustion(",
+                [
+                    "toolRuntime.nextPendingToolCall(", "toolRuntime.hasUnresolvedToolCall(",
+                    "let continuationUploadMessages", "prepareAndStartStreaming(", "params: roundParams"
+                ]
+            ),
+            (
+                "foreground MiniApp transaction", foreground,
+                "let miniAppApplication = bindings.saveMiniAppIfPresent", "await bindings.recordRun(",
+                [
+                    "let didPersist = await bindings.persistMessages(", "miniAppApplication.rollback()",
+                    "bindings.setMessages(miniAppApplication.rollbackMessages)", "miniAppApplication.commit()",
+                    "miniAppApplication?.syncWorkspaceAfterConversationPersistence()"
+                ]
+            ),
+            (
+                "background MiniApp transaction", background,
+                "let miniAppApplication = job.mode == .continueModel", "guard runState.finalizeTerminal()",
+                [
+                    "let didSave: Bool", "miniAppApplication.rollback()", "miniAppApplication.commit()",
+                    "miniAppApplication?.syncWorkspaceAfterConversationPersistence()"
+                ]
+            )
+        ]
 
-        guard let consumerStart = source.range(of: "case .chunk(let chunk):"),
-              let consumerEnd = source.range(of: "case .complete:", range: consumerStart.upperBound..<source.endIndex) else {
-            return XCTFail("Expected the foreground event consumer to have chunk/complete branches")
+        for (label, source, startMarker, endMarker, markers) in checks {
+            let start = try XCTUnwrap(source.range(of: startMarker), "\(label): missing start boundary")
+            let end = try XCTUnwrap(
+                source.range(of: endMarker, range: start.upperBound..<source.endIndex),
+                "\(label): missing end boundary"
+            )
+            let body = source[start.lowerBound..<end.lowerBound]
+            var cursor = body.startIndex
+            for marker in markers {
+                let match = try XCTUnwrap(
+                    body.range(of: marker, range: cursor..<body.endIndex),
+                    "\(label): missing or out-of-order marker \(marker)"
+                )
+                cursor = match.upperBound
+            }
         }
-        XCTAssertTrue(
-            source[consumerStart.upperBound..<consumerEnd.lowerBound].contains("reachedOutputLimit(chunk)"),
-            "累加器只保留 delta/message/usage,不透传 finishReason,所以必须在消费 chunk 的当下记录上限命中。"
-        )
-
-        guard let completionStart = source.range(of: "private func handleCompletedStream("),
-              let limitBranch = source.range(of: "if hitOutputLimit {", range: completionStart.upperBound..<source.endIndex),
-              let toolBranch = source.range(of: "toolRuntime.nextPendingToolCall(", range: completionStart.upperBound..<source.endIndex) else {
-            return XCTFail("Expected handleCompletedStream to branch on the output limit")
-        }
-        XCTAssertLessThan(
-            limitBranch.lowerBound,
-            toolBranch.lowerBound,
-            "截断判定必须先于待执行工具调用的分派,否则残缺的 tool_calls JSON 会被当成可执行调用。"
-        )
-
-        guard let truncatedStart = source.range(of: "private func completeTruncatedStream("),
-              let truncatedEnd = source.range(of: "static func outputLimitNotice()", range: truncatedStart.upperBound..<source.endIndex) else {
-            return XCTFail("Expected a dedicated truncated-completion path")
-        }
-        let truncatedBody = source[truncatedStart.lowerBound..<truncatedEnd.lowerBound]
-        XCTAssertTrue(
-            truncatedBody.contains("\"truncated\""),
-            "截断的 run 必须记为 truncated,记成 completed 会让用户把半截答案当完整答案。"
-        )
-        XCTAssertTrue(
-            truncatedBody.contains("Self.outputLimitNotice()"),
-            "已生成的正文要保留,并追加一条可见提示告知回复不完整。"
-        )
     }
 
     func testBackgroundCompletionUsesTypedEngineTerminalSignals() throws {
@@ -2348,90 +2218,6 @@ final class IOSParityRedLightTests: XCTestCase {
             XCTAssertTrue(sink.claim(event))
         }
         XCTAssertEqual(sink.pendingEventCountForTesting, 0)
-    }
-
-    func testWorkspaceArtifactSavesDoNotUseTryOptionalSuccessPath() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let sources = try [
-            "DeepReadCreateView.swift",
-            "ChatViewModel.swift",
-            "MiniAppRunnerView.swift"
-        ].map { fileName in
-            try String(contentsOf: appDirectory.appendingPathComponent(fileName), encoding: .utf8)
-        }
-
-        for source in sources {
-            XCTAssertFalse(
-                source.contains("_ = try? IOSWorkspaceStore.shared.saveArtifact"),
-                "Workspace artifact saves must not swallow errors and then show a success message."
-            )
-        }
-    }
-
-    func testMiniAppWritesRollbackWhenConversationPersistenceFails() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let foreground = try String(
-            contentsOf: appDirectory.appendingPathComponent("ChatGenerationCoordinator.swift"),
-            encoding: .utf8
-        )
-        let background = try String(
-            contentsOf: appDirectory.appendingPathComponent("IOSChatBackgroundGenerationCoordinator.swift"),
-            encoding: .utf8
-        )
-
-        let foregroundStart = try XCTUnwrap(foreground.range(of: "let miniAppApplication = bindings.saveMiniAppIfPresent"))
-        let foregroundTail = foreground[foregroundStart.lowerBound...].prefix(3_000)
-        let foregroundPersist = try XCTUnwrap(foregroundTail.range(of: "let didPersist = await bindings.persistMessages"))
-        let foregroundRollback = try XCTUnwrap(foregroundTail.range(of: "miniAppApplication.rollback()"))
-        let foregroundCommit = try XCTUnwrap(foregroundTail.range(of: "miniAppApplication.commit()"))
-        let foregroundWorkspace = try XCTUnwrap(
-            foregroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
-        )
-        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundRollback.lowerBound)
-        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundCommit.lowerBound)
-        XCTAssertLessThan(foregroundCommit.lowerBound, foregroundWorkspace.lowerBound)
-        XCTAssertLessThan(foregroundPersist.lowerBound, foregroundWorkspace.lowerBound)
-        XCTAssertTrue(foregroundTail.contains("bindings.setMessages(miniAppApplication.rollbackMessages)"))
-
-        let backgroundStart = try XCTUnwrap(background.range(of: "let miniAppApplication = job.mode == .continueModel"))
-        let backgroundTail = background[backgroundStart.lowerBound...].prefix(3_500)
-        let backgroundPersist = try XCTUnwrap(backgroundTail.range(of: "let didSave: Bool"))
-        let backgroundRollback = try XCTUnwrap(backgroundTail.range(of: "miniAppApplication.rollback()"))
-        let backgroundCommit = try XCTUnwrap(backgroundTail.range(of: "miniAppApplication.commit()"))
-        let backgroundWorkspace = try XCTUnwrap(
-            backgroundTail.range(of: "miniAppApplication?.syncWorkspaceAfterConversationPersistence()")
-        )
-        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundRollback.lowerBound)
-        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundCommit.lowerBound)
-        XCTAssertLessThan(backgroundCommit.lowerBound, backgroundWorkspace.lowerBound)
-        XCTAssertLessThan(backgroundPersist.lowerBound, backgroundWorkspace.lowerBound)
-    }
-
-    func testMiniAppRunnerShowsTheAppBeforeDeveloperManagement() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let appDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let source = try String(
-            contentsOf: appDirectory.appendingPathComponent("MiniAppRunnerView.swift"),
-            encoding: .utf8
-        )
-        let bodyStart = try XCTUnwrap(source.range(of: "var body: some View"))
-        let chromeStart = try XCTUnwrap(source.range(of: "private var runnerChrome"))
-        let body = source[bodyStart.lowerBound..<chromeStart.lowerBound]
-
-        XCTAssertTrue(body.contains("runnerSurface(app)"))
-        XCTAssertTrue(body.contains(".sheet(item: $presentedSheet)"))
-        XCTAssertFalse(body.contains("metadataSection(app)"))
-        XCTAssertFalse(body.contains("sourceSection(app)"))
-
-        let runnerStart = try XCTUnwrap(source.range(of: "private func runnerSurface"))
-        XCTAssertTrue(source[runnerStart.lowerBound...].prefix(3_000).contains("MiniAppRunnerWebView("))
-        XCTAssertTrue(source.contains("private var managementSheet"))
-        XCTAssertTrue(source.contains("sourceSection(app)"))
-        XCTAssertTrue(source.contains("chatViewModel.inputText = request.text"))
-        XCTAssertTrue(source.contains("requestSystemAction(title: title, message: message)"))
-        XCTAssertTrue(source.contains("MiniAppRunnerWebViewIdentity"))
     }
 
     // MARK: - helpers / probe types

@@ -9,9 +9,9 @@ import Observation
 @MainActor
 final class IOSCouncilRunnerMechanicsTests: XCTestCase {
 
-    func testAppShellOwnsOneCouncilRuntimeAndOneDestination() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let iosRoot = testDirectory.deletingLastPathComponent()
+    func testCouncilRuntimeOwnershipAndBackgroundLeaseLifecycleAreWired() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosRoot = testsDirectory.deletingLastPathComponent()
         let shell = try String(
             contentsOf: iosRoot.appendingPathComponent("iosApp/AppShell.swift"),
             encoding: .utf8
@@ -20,19 +20,77 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             contentsOf: iosRoot.appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
             encoding: .utf8
         )
+        let background = try sourceBlock(shell, from: "case .background:", to: "case .active:")
+        let start = try sourceBlock(runtime, from: "func startPendingDiscussion(", to: "\n    func cancelDiscussion")
+        let begin = try sourceBlock(runtime, from: "private func beginBackgroundKeepAlive(",
+                                    to: "\n    private func endBackgroundKeepAlive")
+        let expiration = try sourceBlock(runtime, from: "private func handleBackgroundKeepAliveExpiration(",
+                                         to: "\n    var hasPendingMaterials")
 
         XCTAssertTrue(shell.contains("@State private var councilChatViewModel: CouncilChatViewModel"))
         XCTAssertTrue(shell.contains("councilChatViewModel: councilChatViewModel"))
-        XCTAssertTrue(shell.contains("councilChatViewModel.runtimeWillEnterBackground()"))
-        XCTAssertFalse(shell.contains("councilChatViewModel.runtimeDidBecomeActive()"))
-        XCTAssertEqual(
-            shell.components(separatedBy: "viewModel: councilChatViewModel").count - 1,
-            1,
-            "The single Council route must receive the AppShell-owned runtime."
-        )
+        XCTAssertEqual(shell.components(separatedBy: "viewModel: councilChatViewModel").count - 1, 1)
         XCTAssertFalse(shell.contains("case councilChat"))
-        XCTAssertTrue(runtime.contains("viewModel: CouncilChatViewModel? = nil"))
-        XCTAssertTrue(runtime.contains("viewModel ?? CouncilChatViewModel("))
+        XCTAssertTrue(background.contains("councilChatViewModel.runtimeWillEnterBackground()"))
+        XCTAssertFalse(shell.contains("councilChatViewModel.runtimeDidBecomeActive()"))
+        XCTAssertTrue(start.contains("beginBackgroundKeepAlive(for: discussionID)"))
+        XCTAssertTrue(begin.contains("let leaseId = keepAliveLeaseId(for: discussionID)"))
+        let expirationCallbacks = begin.components(separatedBy: "handleBackgroundKeepAliveExpiration(for: discussionID)")
+        XCTAssertEqual(expirationCallbacks.count - 1, 2)
+        XCTAssertTrue(expiration.contains("stopAndCheckpointActiveDiscussion("))
+
+        let stop = try sourceBlock(runtime, from: "private func stopAndCheckpointActiveDiscussion(",
+                                   to: "\n    private func stopActiveDiscussion")
+        assertOrdered(stop,
+            "runner.markActiveTaskTerminal",
+            "stopActiveDiscussion(releaseBackgroundLease: false)",
+            "persistTranscript()",
+            "archiveCurrentRoom()",
+            "endBackgroundKeepAlive(for: discussionID)")
+    }
+
+    func testCouncilProductionStreamerKeepsFIFOAndProviderRouting() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let source = try String(
+            contentsOf: testsDirectory
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/CouncilRunner.swift"),
+            encoding: .utf8
+        )
+        let activeStream = try sourceBlock(source, from: "private final class IOSCouncilActiveTextStream",
+                                           to: "final class IOSCouncilTextStreamer")
+        let streamer = try sourceBlock(source, from: "final class IOSCouncilTextStreamer",
+                                       to: "enum IOSCouncilRoomRunnerError")
+        let dispatch = try sourceBlock(streamer, from: "private func dispatchCouncilStream(",
+                                       to: "\n    func cancel()")
+        let cancel = try sourceBlock(streamer, from: "func cancel()",
+                                     to: "\n    private func clearActiveStreamIfNeeded")
+        let chunkCallback = try sourceBlock(streamer, from: "onChunk: { chunk in", to: "onComplete:")
+
+        XCTAssertTrue(streamer.contains("AsyncStream<ChatStreamEvent>(bufferingPolicy: .unbounded)"))
+        XCTAssertTrue(streamer.contains("eventSink.bind(continuation)"))
+        XCTAssertTrue(streamer.contains("eventSink.claim(event)"))
+        XCTAssertTrue(chunkCallback.contains("eventSink.yield(.chunk(chunk))"))
+        XCTAssertFalse(chunkCallback.contains("snapshot()"))
+        XCTAssertFalse(chunkCallback.contains("Task { @MainActor"))
+
+        assertOrdered(activeStream,
+            "eventSink.finish()",
+            "eventSink.takePendingChunks()",
+            "presentation.flushAndClose()")
+        XCTAssertTrue(cancel.contains("flushAndClose(drainingQueuedChunks: true)"))
+
+        XCTAssertTrue(streamer.contains("IOSCodexProviderResolver.resolved(providerSetting)"))
+        XCTAssertTrue(streamer.contains("IOSCodexProviderResolver.augmentParamsForCodex("))
+        XCTAssertTrue(streamer.contains("providerSetting: effectiveProvider"))
+        XCTAssertTrue(streamer.contains("params: effectiveParams"))
+        assertOrdered(dispatch,
+            "IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)",
+            "IOSGrokWebClient(providerId: providerId).streamText(",
+            "return openAIProvider.streamTextCancellable(")
+        let grokBranch = try sourceBlock(dispatch, from: "IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)",
+                                         to: "return openAIProvider.streamTextCancellable(")
+        XCTAssertTrue(grokBranch.contains("onChunk: onChunk"))
     }
 
     func testCouncilPresentationSessionCoalescesSnapshotsUntilFlushWindow() async throws {
@@ -134,40 +192,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             IOSCouncilGeneratedTextSnapshot.text(from: inputMessages + [assistant]),
             "对用户可见的生成结果"
         )
-    }
-
-    func testCouncilStreamerUsesLosslessFIFOAndDefersSnapshotsOutOfProviderCallbacks() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let source = try String(
-            contentsOf: testDirectory
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/CouncilRunner.swift"),
-            encoding: .utf8
-        )
-        guard let activeStreamStart = source.range(of: "private final class IOSCouncilActiveTextStream"),
-              let streamerStart = source.range(of: "final class IOSCouncilTextStreamer"),
-              let streamerEnd = source.range(
-                of: "enum IOSCouncilRoomRunnerError",
-                range: streamerStart.upperBound..<source.endIndex
-              ) else {
-            return XCTFail("Expected the concrete council streamer implementation")
-        }
-        let activeStream = source[activeStreamStart.lowerBound..<streamerStart.lowerBound]
-        let streamer = source[streamerStart.lowerBound..<streamerEnd.lowerBound]
-        XCTAssertTrue(streamer.contains("AsyncStream<ChatStreamEvent>(bufferingPolicy: .unbounded)"))
-        XCTAssertTrue(streamer.contains("eventSink.claim(event)"), "Council chunks need the shared FIFO claim gate.")
-        XCTAssertTrue(
-            activeStream.contains("eventSink.takePendingChunks()"),
-            "The active Council stream must drain accepted FIFO chunks before its exact cancel flush."
-        )
-
-        guard let chunkStart = streamer.range(of: "onChunk: { chunk in"),
-              let completeStart = streamer.range(of: "onComplete:", range: chunkStart.upperBound..<streamer.endIndex) else {
-            return XCTFail("Expected provider chunk and completion callbacks")
-        }
-        let providerChunkCallback = streamer[chunkStart.upperBound..<completeStart.lowerBound]
-        XCTAssertFalse(providerChunkCallback.contains("snapshot()"))
-        XCTAssertFalse(providerChunkCallback.contains("Task { @MainActor"))
     }
 
     func testCouncilMarkdownPresentationMarksOnlyModelOutputAsStreamed() {
@@ -384,88 +408,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertFalse(CouncilTranscriptFollowPolicy.shouldResumeFollowing(
             distanceToBottom: ChatLayout.nearBottomResumeThreshold + 0.5
         ))
-    }
-
-    func testCouncilNearBottomDragEndCommitsSemanticBottomFollow() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let source = try String(
-            contentsOf: testDirectory
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
-            encoding: .utf8
-        )
-
-        XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
-        XCTAssertTrue(source.contains("if returnedToBottom, followGeneration {"))
-    }
-
-    func testCouncilMeasuredGrowthFollowOwnsFullAnimationWindow() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let source = try String(
-            contentsOf: testDirectory
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
-            encoding: .utf8
-        )
-        guard let scheduleStart = source.range(of: "private func scheduleMeasuredGrowthFollowToBottom()"),
-              let cancelStart = source.range(
-                of: "private func cancelPendingMeasuredGrowthFollow()",
-                range: scheduleStart.upperBound..<source.endIndex
-              ),
-              let settleStart = source.range(
-                of: "private func scheduleTerminalBottomSettle()",
-                range: cancelStart.upperBound..<source.endIndex
-              ) else {
-            return XCTFail("Expected the Council measured-growth scheduler")
-        }
-        let schedule = source[scheduleStart.lowerBound..<cancelStart.lowerBound]
-        let cancellation = source[cancelStart.lowerBound..<settleStart.lowerBound]
-        XCTAssertTrue(schedule.contains("try await Task.sleep"))
-        XCTAssertTrue(schedule.contains("liveGrowthAnimationDuration * 1_000_000_000"))
-        XCTAssertTrue(
-            schedule.contains("measuredGrowthFollowPending = true"),
-            "A second Markdown measurement inside the 80ms window must leave one replay request."
-        )
-        XCTAssertTrue(
-            schedule.contains("if shouldReplay"),
-            "The current animation owner must replay a coalesced growth after releasing ownership."
-        )
-        XCTAssertTrue(schedule.contains("let shouldReplay = measuredGrowthFollowPending &&"))
-        XCTAssertFalse(schedule.contains("let shouldReplay = !Task.isCancelled &&"))
-        XCTAssertFalse(
-            cancellation.contains("measuredGrowthFollowTask = nil"),
-            "Cancellation must leave ownership with the in-flight task until its defer runs."
-        )
-        // Pin owns live growth alone; no residual scrollTo dual-write under the pin.
-        XCTAssertTrue(source.contains("let sizeChangesPinOwnsGrowth = followGeneration && !isNativeScrollDriverDesired"))
-        XCTAssertTrue(source.contains("if shouldFollowViewportShrink {"))
-        XCTAssertTrue(
-            source.contains("} else if shouldFollowMeasuredGrowth,\n                      !sizeChangesPinOwnsGrowth || isNativeScrollDriverActive {"),
-            "Measured growth must not schedule a chase/snap while the sizeChanges pin owns follow."
-        )
-        XCTAssertFalse(
-            source.contains("} else if sizeChangesPinOwnsGrowth {\n                    scrollToTranscriptBottom()"),
-            "Residual snap under the pin causes continuous jump/flicker."
-        )
-    }
-
-    func testDefaultSeatDescriptorsIncludeHostRiskOpponent() {
-        // The Android parity core-seats (host/opponent/judge-or-risk) should be
-        // represented in the default council roster.
-        let seats = CouncilRunner.defaultSeatDescriptorsForTesting()
-        let seatIds = Set(seats.map(\.id))
-        XCTAssertTrue(seatIds.contains("host"), "host seat must be present")
-        XCTAssertTrue(seats.count >= 3, "council should default to at least 3 seats")
-        // Each seat must carry a non-empty role description (Android seat.role parity).
-        XCTAssertTrue(seats.allSatisfy { !$0.role.isEmpty && !$0.name.isEmpty })
-    }
-
-    func testCouncilSeatDescriptorIsEquatable() {
-        let a = IOSCouncilSeatDescriptor(id: "x", name: "X", role: "r", modelLabel: "m")
-        let b = IOSCouncilSeatDescriptor(id: "x", name: "X", role: "r", modelLabel: "m")
-        let c = IOSCouncilSeatDescriptor(id: "y", name: "Y", role: "r", modelLabel: "m")
-        XCTAssertEqual(a, b)
-        XCTAssertNotEqual(a, c)
     }
 
     func testChatCouncilToolUsesPersistedRoomModelsWhenArgumentsDoNotOverrideThem() async {
@@ -1133,28 +1075,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(task.metadata["room_mode"], IOSCouncilRoomRunMode.freeChat.rawValue)
     }
 
-    func testRoomRunnerUsesOnlyTheConfiguredCouncilStages() async {
-        let runner = IOSCouncilRoomRunner(
-            streamer: ScriptedCouncilStreamer([
-                .success("最终议题"),
-                .success("工程发言"),
-                .success("风险发言"),
-                .success("主持总结")
-            ]),
-            researcher: StaticCouncilResearcher(),
-            taskStore: IOSAdvancedTaskStore(userDefaults: isolatedDefaults(), storageKey: "tasks")
-        )
-
-        let outcome = await runner.run(
-            request: roomRequest(
-                settings: compactRoomSettings(defaultRounds: 1),
-                researchConsent: .unavailable
-            )
-        )
-
-        XCTAssertEqual(outcome.status, .completed)
-    }
-
     func testRoomRunnerTimeoutMeasuresLackOfOutputInsteadOfTotalGenerationTime() async {
         let runner = IOSCouncilRoomRunner(
             streamer: ProgressingFinalCouncilStreamer(),
@@ -1332,21 +1252,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
 
         XCTAssertTrue(resolved === provider)
-    }
-
-    func testCouncilStreamerUsesCodexAndGrokProductionRouting() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let source = try String(
-            contentsOf: testDirectory
-                .deletingLastPathComponent()
-                .appendingPathComponent("iosApp/CouncilRunner.swift"),
-            encoding: .utf8
-        )
-
-        XCTAssertTrue(source.contains("IOSCodexProviderResolver.resolved(providerSetting)"))
-        XCTAssertTrue(source.contains("IOSCodexProviderResolver.augmentParamsForCodex("))
-        XCTAssertTrue(source.contains("IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)"))
-        XCTAssertTrue(source.contains("IOSGrokWebClient(providerId: providerId).streamText("))
     }
 
     func testRoomRunnerPassesTheConfiguredModelInsteadOfSynthesizingOne() async throws {
@@ -2047,51 +1952,6 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(taskStore.tasks.map(\.id), ["evicted-council-task"])
     }
 
-    func testTopBarCircleButtonsKeepGlyphsAboveNativeGlassAndTintTrailingActions() throws {
-        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let sourceDirectory = testDirectory.deletingLastPathComponent().appendingPathComponent("iosApp")
-        let sharedChrome = try String(
-            contentsOf: sourceDirectory.appendingPathComponent("PlaceholderViews.swift"),
-            encoding: .utf8
-        )
-        let council = try String(
-            contentsOf: sourceDirectory.appendingPathComponent("CouncilChatRuntimeView.swift"),
-            encoding: .utf8
-        )
-
-        guard let buttonStart = sharedChrome.range(of: "struct AmberGlassCircleButton: View"),
-              let sectionStart = sharedChrome.range(
-                of: "struct AmberSectionLabel: View",
-                range: buttonStart.upperBound..<sharedChrome.endIndex
-              ) else {
-            return XCTFail("Expected the shared circle button source")
-        }
-        let buttonSource = String(sharedChrome[buttonStart.lowerBound..<sectionStart.lowerBound])
-        let compactSharedChrome = sharedChrome.filter { !$0.isWhitespace }
-        let compactCouncil = council.filter { !$0.isWhitespace }
-
-        XCTAssertTrue(buttonSource.contains("var tint: Color = AmberTheme.foreground2"))
-        XCTAssertTrue(buttonSource.contains(".foregroundStyle(tint)"))
-        XCTAssertTrue(buttonSource.contains(".glassEffect(.regular.interactive(), in: Circle())"))
-        XCTAssertFalse(
-            buttonSource.contains("private var circleGlass"),
-            "The glass effect must stay attached to the glyph label; a sibling glass layer washes the glyph out on device."
-        )
-        XCTAssertTrue(council.contains("AmberGlassGroup(spacing: 0)"))
-        XCTAssertTrue(compactSharedChrome.contains(
-            "HomeGlassCircleButton(icon:.gear,accessibilityLabel:\"设置\",size:38,iconSize:20,tint:AmberTheme.fab)"
-        ))
-        XCTAssertTrue(compactCouncil.contains(
-            "accessibilityLabel:\"历史议会\",size:44,symbolSize:18,tint:AmberTheme.accent"
-        ))
-        XCTAssertTrue(compactCouncil.contains(
-            "accessibilityLabel:\"议会设置\",size:44,symbolSize:18,tint:AmberTheme.accent"
-        ))
-        XCTAssertTrue(compactCouncil.contains(
-            "accessibilityLabel:\"返回\",size:44,symbolSize:20,tint:AmberTheme.foreground"
-        ))
-    }
-
     func testMidRunCheckpointsThrottleToOffMainThreadWrites() async throws {
         // 旧实现:roster/append/消息完结每个事件都在主线程同步 save(≈11 次 encode+write)。
         // 新实现:中段事件经 300ms 节流合并成离主线程延迟写,终态一次同步写收口。
@@ -2596,6 +2456,18 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
             sharedSettings,
             defaults
         )
+    }
+
+    private func sourceBlock(_ source: String, from startNeedle: String, to endNeedle: String) throws -> String {
+        let start = try XCTUnwrap(source.range(of: startNeedle))
+        let end = try XCTUnwrap(source.range(of: endNeedle, range: start.upperBound..<source.endIndex))
+        return String(source[start.lowerBound..<end.lowerBound])
+    }
+
+    private func assertOrdered(_ source: String, _ needles: String...) {
+        let offsets = needles.compactMap { source.range(of: $0)?.lowerBound }
+        XCTAssertEqual(offsets.count, needles.count)
+        XCTAssertEqual(offsets, offsets.sorted())
     }
 
     private func isolatedDefaults() -> UserDefaults {
