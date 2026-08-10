@@ -31,12 +31,15 @@ enum NovelSessionComposerPolicy {
 
     static func showsGenerationStatus(
         isRunning: Bool,
+        isTerminalPresenting: Bool = false,
         activeRunKind: NovelRunKind?
     ) -> Bool {
-        guard isRunning else { return false }
-        return activeRunKind == .prose ||
-            activeRunKind == .regenerate ||
-            activeRunKind == .polish
+        guard activeRunKind == .prose ||
+                activeRunKind == .regenerate ||
+                activeRunKind == .polish else { return false }
+        // Keep the strip slot through terminal presentation drain so safeArea
+        // height does not collapse mid-finish (scroll jump).
+        return isRunning || isTerminalPresenting
     }
 
     static func runtimeActionBlocker(
@@ -71,6 +74,9 @@ struct NovelSessionTransientTail: Equatable, Sendable {
     let granularity: NovelGenerationGranularity?
     let kind: NovelSessionMessageKind
     let content: String
+    /// Presentation-only thinking stream. Never manuscript / candidate content.
+    let reasoningContent: String
+    let isReasoningLive: Bool
     /// Monotonic per-tail revision owned by the Session ViewModel.
     /// The row digest uses this instead of hashing an ever-growing whole chapter.
     let renderRevision: UInt64
@@ -82,7 +88,9 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         content: String,
         renderRevision: UInt64,
         startingUserContent: String? = nil,
-        phase: NovelSessionTransientTailPhase
+        phase: NovelSessionTransientTailPhase,
+        reasoningContent: String = "",
+        isReasoningLive: Bool = false
     ) {
         branchID = run.branchID
         sessionID = run.sessionID
@@ -99,6 +107,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         case .polish: .polishCandidate
         }
         self.content = content
+        self.reasoningContent = reasoningContent
+        self.isReasoningLive = isReasoningLive
         self.renderRevision = renderRevision
         startedAt = run.startedAt
         self.phase = phase
@@ -107,7 +117,9 @@ struct NovelSessionTransientTail: Equatable, Sendable {
     func updating(
         content: String,
         renderRevision: UInt64,
-        phase: NovelSessionTransientTailPhase
+        phase: NovelSessionTransientTailPhase,
+        reasoningContent: String? = nil,
+        isReasoningLive: Bool? = nil
     ) -> NovelSessionTransientTail {
         NovelSessionTransientTail(
             branchID: branchID,
@@ -121,6 +133,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
             granularity: granularity,
             kind: kind,
             content: content,
+            reasoningContent: reasoningContent ?? self.reasoningContent,
+            isReasoningLive: isReasoningLive ?? self.isReasoningLive,
             renderRevision: renderRevision,
             startedAt: startedAt,
             phase: phase
@@ -138,6 +152,19 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         )
     }
 
+    func updatingReasoning(
+        content: String,
+        isLive: Bool
+    ) -> NovelSessionTransientTail {
+        updating(
+            content: self.content,
+            renderRevision: renderRevision &+ 1,
+            phase: phase,
+            reasoningContent: content,
+            isReasoningLive: isLive
+        )
+    }
+
     private init(
         branchID: NovelBranchID,
         sessionID: NovelSessionID,
@@ -150,6 +177,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         granularity: NovelGenerationGranularity?,
         kind: NovelSessionMessageKind,
         content: String,
+        reasoningContent: String,
+        isReasoningLive: Bool,
         renderRevision: UInt64,
         startedAt: Date,
         phase: NovelSessionTransientTailPhase
@@ -165,6 +194,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         self.granularity = granularity
         self.kind = kind
         self.content = content
+        self.reasoningContent = reasoningContent
+        self.isReasoningLive = isReasoningLive
         self.renderRevision = renderRevision
         self.startedAt = startedAt
         self.phase = phase
@@ -293,6 +324,9 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
     let granularity: NovelGenerationGranularity?
     let kind: NovelSessionMessageKind
     let content: String
+    /// Presentation-only thinking text for the active/transient assistant row.
+    let reasoningContent: String
+    let isReasoningLive: Bool
     let createdAt: Date
     let runID: NovelRunID?
     let runStatus: NovelRunStatus?
@@ -311,6 +345,48 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
         case .waitingForFirstToken, .streaming: true
         case .terminalAwaitingRefresh, .interrupted, .failed, .persistenceBlocked, nil: false
         }
+    }
+
+    init(
+        id: NovelMessageID,
+        sequence: Int64,
+        role: NovelSessionRole,
+        mode: NovelSessionMode,
+        granularity: NovelGenerationGranularity?,
+        kind: NovelSessionMessageKind,
+        content: String,
+        reasoningContent: String = "",
+        isReasoningLive: Bool = false,
+        createdAt: Date,
+        runID: NovelRunID?,
+        runStatus: NovelRunStatus?,
+        candidate: NovelSessionCandidatePresentation?,
+        committedChange: NovelSessionCommittedChangeSummary?,
+        askUser: NovelAskUserPresentation?,
+        archive: NovelDiscussionArchivePresentation?,
+        transientPhase: NovelSessionTransientTailPhase?,
+        actions: [NovelSessionRowActionAvailability],
+        digest: NovelSessionRowDigest
+    ) {
+        self.id = id
+        self.sequence = sequence
+        self.role = role
+        self.mode = mode
+        self.granularity = granularity
+        self.kind = kind
+        self.content = content
+        self.reasoningContent = reasoningContent
+        self.isReasoningLive = isReasoningLive
+        self.createdAt = createdAt
+        self.runID = runID
+        self.runStatus = runStatus
+        self.candidate = candidate
+        self.committedChange = committedChange
+        self.askUser = askUser
+        self.archive = archive
+        self.transientPhase = transientPhase
+        self.actions = actions
+        self.digest = digest
     }
 }
 
@@ -571,6 +647,8 @@ enum NovelSessionPresentation {
             granularity: current.granularity,
             kind: current.kind,
             content: presentedContent(for: tail),
+            reasoningContent: tail.reasoningContent,
+            isReasoningLive: tail.isReasoningLive,
             createdAt: current.createdAt,
             runID: current.runID,
             runStatus: current.runStatus,
@@ -1090,6 +1168,8 @@ private extension NovelSessionPresentation {
             granularity: tail.granularity,
             kind: presentedKind,
             content: presentedContent(for: tail),
+            reasoningContent: tail.reasoningContent,
+            isReasoningLive: tail.isReasoningLive,
             createdAt: tail.startedAt,
             runID: tail.runID,
             runStatus: transientRunStatus(for: tail.phase),

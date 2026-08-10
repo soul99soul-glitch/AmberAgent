@@ -560,14 +560,20 @@ struct NovelQuickStartRegenerationSheet: View {
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
     @State private var isConfirmingCoreIdeaLoad = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextEditor(text: $draft)
-                        .frame(minHeight: 160)
-                        .accessibilityLabel(editorTitle)
+                    NovelIMETextEditor(
+                        text: $draft,
+                        placeholder: editorTitle,
+                        minHeight: 160,
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 160)
+                    .accessibilityLabel(editorTitle)
                 } header: {
                     HStack(spacing: 12) {
                         Text(editorTitle)
@@ -610,7 +616,7 @@ struct NovelQuickStartRegenerationSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(isStarting)
                         .confirmationDialog(
@@ -626,7 +632,7 @@ struct NovelQuickStartRegenerationSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("生成") {
-                        NovelTextInputCommitter.perform { start() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { start() }
                     }
                         .disabled(isStarting || viewModel.isPerforming)
                 }

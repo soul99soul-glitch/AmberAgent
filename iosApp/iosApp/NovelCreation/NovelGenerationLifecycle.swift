@@ -1459,6 +1459,18 @@ private extension DefaultNovelCreation {
         switch event {
         case .activity:
             break
+        case .reasoningDelta(let text):
+            // Presentation-only: refresh "still alive" lease subtitle path without
+            // touching manuscript partialContent / sidecar body.
+            guard !text.isEmpty else { return }
+            broadcast(.reasoningDelta(text), runID: runID)
+            if runtime.partialContent.isEmpty {
+                await updateBackgroundLease(
+                    runID: runID,
+                    completed: 1,
+                    subtitle: "模型思考中"
+                )
+            }
         case .textDelta(let text):
             guard !text.isEmpty else { return }
             let isFirstVisibleContent = runtime.partialContent.isEmpty
@@ -1507,10 +1519,16 @@ private extension DefaultNovelCreation {
             }
             var presentationEvents: [NovelRunEvent] = []
             var shouldUpdateVisibleLease = false
+            var hasReasoningOnlyActivity = false
             for frameEvent in frame.events {
                 switch frameEvent {
                 case .activity:
                     break
+                case .reasoningDelta(let text):
+                    guard !text.isEmpty else { continue }
+                    // Never fold reasoning into runtime.partialContent.
+                    presentationEvents.append(.reasoningDelta(text))
+                    hasReasoningOnlyActivity = hasReasoningOnlyActivity || runtime.partialContent.isEmpty
                 case .textDelta(let text):
                     guard !text.isEmpty else { continue }
                     shouldUpdateVisibleLease = shouldUpdateVisibleLease || runtime.partialContent.isEmpty
@@ -1537,6 +1555,12 @@ private extension DefaultNovelCreation {
                     runID: runID,
                     completed: 2,
                     subtitle: "正在生成正文"
+                )
+            } else if hasReasoningOnlyActivity {
+                await updateBackgroundLease(
+                    runID: runID,
+                    completed: 1,
+                    subtitle: "模型思考中"
                 )
             }
             // The partial and its remote cursor move in one sidecar record. The

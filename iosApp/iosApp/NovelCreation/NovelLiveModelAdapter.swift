@@ -1167,18 +1167,22 @@ private extension NovelLiveModelAdapter {
         var events: [NovelModelEvent] = []
         for choice in chunk.choices {
             if let delta = choice.delta {
+                let reasoning = reasoningText(in: delta)
+                if !reasoning.isEmpty {
+                    events.append(.reasoningDelta(reasoning))
+                }
                 let text = text(in: delta)
                 if !text.isEmpty {
                     events.append(.textDelta(text))
-                } else if hasReasoningActivity(in: delta) {
-                    events.append(.activity)
                 }
             } else if let message = choice.message {
+                let reasoning = reasoningText(in: message)
+                if !reasoning.isEmpty {
+                    events.append(.reasoningDelta(reasoning))
+                }
                 let text = text(in: message)
                 if !text.isEmpty {
                     events.append(.textReplacement(text))
-                } else if hasReasoningActivity(in: message) {
-                    events.append(.activity)
                 }
             }
         }
@@ -1198,18 +1202,22 @@ private extension NovelLiveModelAdapter {
             var events: [NovelModelFrameEvent] = []
             for choice in chunk.choices {
                 if let delta = choice.delta {
+                    let reasoning = reasoningText(in: delta)
+                    if !reasoning.isEmpty {
+                        events.append(.reasoningDelta(reasoning))
+                    }
                     let text = text(in: delta)
                     if !text.isEmpty {
                         events.append(.textDelta(text))
-                    } else if hasReasoningActivity(in: delta) {
-                        events.append(.activity)
                     }
                 } else if let message = choice.message {
+                    let reasoning = reasoningText(in: message)
+                    if !reasoning.isEmpty {
+                        events.append(.reasoningDelta(reasoning))
+                    }
                     let text = text(in: message)
                     if !text.isEmpty {
                         events.append(.textReplacement(text))
-                    } else if hasReasoningActivity(in: message) {
-                        events.append(.activity)
                     }
                 }
             }
@@ -1241,11 +1249,14 @@ private extension NovelLiveModelAdapter {
         message.parts.compactMap { ($0 as? UIMessagePart.Text)?.text }.joined()
     }
 
+    /// Joined reasoning/thinking text from message parts. Presentation-only;
+    /// callers must never fold this into manuscript `partialContent`.
+    static func reasoningText(in message: UIMessage) -> String {
+        message.parts.compactMap { ($0 as? UIMessagePart.Reasoning)?.reasoning }.joined()
+    }
+
     static func hasReasoningActivity(in message: UIMessage) -> Bool {
-        message.parts.contains {
-            guard let reasoning = $0 as? UIMessagePart.Reasoning else { return false }
-            return !reasoning.reasoning.isEmpty
-        }
+        !reasoningText(in: message).isEmpty
     }
 
     static func joinedAssistantText(in messages: [UIMessage]) -> String {

@@ -234,7 +234,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(request.messages.map { $0.toText() }, ["仅使用小说上下文。", "继续写。"])
     }
 
-    func testReasoningOnlyChunkPublishesHeartbeatActivityWithoutVisibleText() async throws {
+    func testReasoningOnlyChunkPublishesReasoningDeltaWithoutManuscriptText() async throws {
         let chunk = Self.reasoningChunk("正在梳理人物关系")
         let foregroundFixture = makeFixture(apiKey: "test-key", reasoning: true)
         let foregroundAdapter = NovelLiveModelAdapter(
@@ -249,7 +249,11 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         let foregroundEvents = await Self.collect(
             try await foregroundAdapter.start(makeRequest(model: foregroundModel))
         )
-        XCTAssertEqual(foregroundEvents, [.activity, .completed])
+        XCTAssertEqual(foregroundEvents, [.reasoningDelta("正在梳理人物关系"), .completed])
+        XCTAssertFalse(
+            foregroundEvents.contains { if case .textDelta = $0 { return true }; return false },
+            "Reasoning must not be folded into manuscript text deltas."
+        )
 
         let durableFixture = makeResponsesFixture()
         let cursor = NovelResponsesResumeCursor(responseID: "resp_reasoning", sequenceNumber: 1)
@@ -268,7 +272,68 @@ final class NovelLiveModelAdapterTests: XCTestCase {
             try await durableAdapter.start(makeRequest(model: durableModel))
         )
         XCTAssertEqual(durableEvents, [
-            .responseFrame(NovelModelResponseFrame(cursor: cursor, events: [.activity])),
+            .responseFrame(NovelModelResponseFrame(
+                cursor: cursor,
+                events: [.reasoningDelta("正在梳理人物关系")]
+            )),
+            .completed,
+        ])
+    }
+
+    func testReasoningAndTextInSameChunkEmitBothChannels() async throws {
+        let createdAt = KotlinInstant.companion.fromEpochMilliseconds(epochMilliseconds: 0)
+        let message = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [
+                UIMessagePart.Reasoning(
+                    reasoning: "先想人物动机",
+                    createdAt: createdAt,
+                    finishedAt: nil,
+                    metadata: nil
+                ),
+                UIMessagePart.Text(text: "正文第一句", metadata: nil),
+            ],
+            annotations: [],
+            createdAt: Kotlinx_datetimeLocalDateTime(
+                year: 2026,
+                month: 8,
+                day: 4,
+                hour: 0,
+                minute: 0,
+                second: 0,
+                nanosecond: 0
+            ),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        let chunk = MessageChunk(
+            id: "mixed",
+            model: "novel-live",
+            choices: [UIMessageChoice(
+                index: 0,
+                delta: message,
+                message: nil,
+                finishReason: nil
+            )],
+            usage: nil
+        )
+        let fixture = makeFixture(apiKey: "test-key", reasoning: true)
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: { fixture.catalog },
+            kmpTransport: { _, callbacks in
+                callbacks.onChunk(chunk)
+                callbacks.onComplete()
+                return nil
+            }
+        )
+        let model = try await adapter.resolveModel(for: .global)
+        let events = await Self.collect(try await adapter.start(makeRequest(model: model)))
+        XCTAssertEqual(events, [
+            .reasoningDelta("先想人物动机"),
+            .textDelta("正文第一句"),
             .completed,
         ])
     }

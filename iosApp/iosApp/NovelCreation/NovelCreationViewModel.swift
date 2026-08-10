@@ -1208,7 +1208,7 @@ final class NovelCreationViewModel {
                     guard quickStartTaskRunIDs[owner] == run.id else { return }
                     reportQuickStartRefreshFailure(error, owner: owner)
                 }
-            case .delta, .replaced:
+            case .delta, .replaced, .reasoningDelta:
                 continue
             case .completed(let snapshot):
                 do {

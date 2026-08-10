@@ -6,6 +6,9 @@ struct NovelSessionBubble: View {
     let kind: NovelSessionMessageKind
     let granularity: NovelGenerationGranularity?
     let content: String
+    /// Presentation-only thinking; never mixed into `content` / candidates.
+    var reasoningContent: String = ""
+    var isReasoningLive: Bool = false
     let isStreaming: Bool
     let transientPhase: NovelSessionTransientTailPhase?
     let hasEverStreamed: Bool
@@ -40,6 +43,9 @@ struct NovelSessionBubble: View {
 
     /// Candidate manuscript should never render as Chat code cards when the model
     /// mistakenly wraps it in ```html / ```markdown fences.
+    ///
+    /// Streaming tails already enter the buffer pre-normalized (same string the
+    /// pacer advances). Only durable/completed rows still need a full strip.
     private static func displayMarkdown(
         _ content: String,
         kind: NovelSessionMessageKind,
@@ -48,7 +54,7 @@ struct NovelSessionBubble: View {
         switch kind {
         case .proseCandidate, .polishCandidate, .interruptedDraft:
             return isStreaming
-                ? NovelPromptCatalog.normalizedStreamingCandidateProse(content)
+                ? content
                 : NovelPromptCatalog.normalizedCandidateProse(content)
         case .discussion, .userInput, .error:
             return content
@@ -65,9 +71,13 @@ struct NovelSessionBubble: View {
         .padding(.vertical, ChatLayout.userMessageRowVerticalPadding)
     }
 
+    private var hasVisibleReasoning: Bool {
+        ChatReasoningCard.hasVisibleText(reasoningContent)
+    }
+
     @ViewBuilder
     private var assistantBubble: some View {
-        if isStreaming && content.isEmpty {
+        if isStreaming && content.isEmpty && !hasVisibleReasoning {
             ChatAssistantPendingResponseView(label: { elapsed in
                 NovelSessionPendingPresentation.label(for: transientPhase, elapsed: elapsed)
             })
@@ -75,12 +85,29 @@ struct NovelSessionBubble: View {
             ChatAssistantStack {
                 ChatAgentName()
 
+                if hasVisibleReasoning {
+                    ChatReasoningCard(
+                        bodyText: reasoningContent,
+                        isThinking: isReasoningLive,
+                        autoCloseThinking: true
+                    )
+                }
+
                 if content.isEmpty, askUser == nil {
-                    ChatAssistantText {
-                        Text(emptyAssistantText)
-                            .foregroundStyle(AmberTheme.muted)
+                    if !hasVisibleReasoning {
+                        ChatAssistantText {
+                            Text(emptyAssistantText)
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                    } else if isStreaming {
+                        // Thinking is already visible; keep a light live hint without
+                        // duplicating the empty "模型思考中" pending card.
+                        ChatAssistantText {
+                            Text("正在整理正文…")
+                                .foregroundStyle(AmberTheme.muted)
+                        }
                     }
-                } else {
+                } else if !content.isEmpty {
                     ChatAssistantMarkdownView(
                         markdown: Self.displayMarkdown(
                             content,
@@ -443,6 +470,7 @@ private struct NovelAskUserCard: View {
     @State private var selectedOption: String?
     @State private var customValue = ""
     @State private var validationMessage: String?
+    @State private var imeBank = NovelIMEFieldBank()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -476,7 +504,7 @@ private struct NovelAskUserCard: View {
                 }
 
                 Button("确认选择") {
-                    NovelTextInputCommitter.perform { submit() }
+                    NovelTextInputCommitter.perform(fieldBank: imeBank) { submit() }
                 }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity, alignment: .trailing)
@@ -528,13 +556,16 @@ private struct NovelAskUserCard: View {
                 .buttonStyle(.plain)
             }
 
-            TextField(
-                presentation.prompt.options.isEmpty ? "输入你的想法" : "或者直接输入自己的选择",
+            NovelIMETextEditor(
                 text: customInput,
-                axis: .vertical
+                placeholder: presentation.prompt.options.isEmpty
+                    ? "输入你的想法"
+                    : "或者直接输入自己的选择",
+                isEnabled: blocker == nil,
+                minHeight: 72,
+                bank: imeBank
             )
-            .lineLimit(2...6)
-            .textFieldStyle(.plain)
+            .frame(minHeight: 72)
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))

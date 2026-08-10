@@ -137,9 +137,13 @@ struct NovelSessionView: View {
             VStack(spacing: 0) {
                 if NovelSessionComposerPolicy.showsGenerationStatus(
                     isRunning: viewModel.isRunning,
+                    isTerminalPresenting: viewModel.isTerminalPresenting,
                     activeRunKind: viewModel.activeRunKind
                 ) {
                     generationStatusStrip
+                        // Fixed caption slot: avoid safeArea height collapse when
+                        // the strip appears/disappears around stream start/finish.
+                        .frame(minHeight: 28, alignment: .leading)
                 }
                 composer(listModel: listModel)
             }
@@ -254,16 +258,26 @@ struct NovelSessionView: View {
                         .buttonStyle(.plain)
                     }
 
+                    // Windowed history is already bounded (`historyWindowLimit`).
+                    // Keep it eager so multi-thousand-pt chapter bubbles are not
+                    // unloaded by LazyVStack estimates (mid-list blank gaps +
+                    // scroll jumps). Cold history stays behind "更早的创作记录".
                     if !visibleHistoricalRows.isEmpty {
-                        LazyVStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 14) {
                             ForEach(visibleHistoricalRows) { row in
                                 transcriptRow(row, activeTailID: listModel?.activeTailID)
                             }
                         }
                     }
 
-                    ForEach(activeRunRows) { row in
-                        transcriptRow(row, activeTailID: listModel?.activeTailID)
+                    // Active run stays in a sibling eager stack so complete/retire
+                    // does not reparent the same id from a different lazy container.
+                    if !activeRunRows.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(activeRunRows) { row in
+                                transcriptRow(row, activeTailID: listModel?.activeTailID)
+                            }
+                        }
                     }
 
                     ForEach(viewModel.pendingCharacterIdentityMentions) { mention in
@@ -1251,7 +1265,10 @@ struct NovelSessionView: View {
         return ChatContextSnapshot(
             messageCount: viewModel.durableMessages.count,
             modelId: receipt?.modelID ?? composerModelLabel,
-            supportsReasoning: false,
+            // Ring badge only: true while this session is actively showing thinking.
+            supportsReasoning: viewModel.transientTail.map {
+                $0.isReasoningLive || !$0.reasoningContent.isEmpty
+            } ?? false,
             pendingSelectedFileName: nil,
             pendingSelectedFileBytesText: nil,
             promptTokens: estimatedTokens,
@@ -1554,6 +1571,8 @@ struct NovelSessionView: View {
             }
         case .followBottom(let animated):
             if isNativeScrollDriverActive {
+                // Single owner while native driver is attached: never also call
+                // SwiftUI scrollPosition.scrollTo in this branch.
                 if animated {
                     scrollDriver.submit(
                         .explicitBottom(
@@ -1563,7 +1582,17 @@ struct NovelSessionView: View {
                         )
                     )
                 } else {
-                    scrollDriver.submit(.streamContentGrew)
+                    // Snap only when the user is not interacting. `explicitBottom`
+                    // is allowed during UIKit tracking (unlike streamContentGrew),
+                    // so reusing it for stream growth must not fight a drag.
+                    guard !userDragging, !scrollDriver.isUIKitUserInteracting else { return }
+                    scrollDriver.submit(
+                        .explicitBottom(
+                            source: .streamGrowth,
+                            animated: false,
+                            keyboardToken: nil
+                        )
+                    )
                 }
                 return
             }
@@ -1621,7 +1650,10 @@ struct NovelSessionView: View {
 
     private func performLiveBottomFollow() {
         if isNativeScrollDriverActive {
-            scrollDriver.submit(.streamContentGrew)
+            guard !userDragging, !scrollDriver.isUIKitUserInteracting else { return }
+            scrollDriver.submit(
+                .explicitBottom(source: .streamGrowth, animated: false, keyboardToken: nil)
+            )
             return
         }
         scrollToBottomWithoutAnimation()
@@ -1717,6 +1749,9 @@ struct NovelSessionView: View {
     /// 文案必须区分「重写」与「续写/整章」:重新生成的候选默认收录方式是
     /// **替换原章**,若沿用整章文案会显示「收录后成为新章」,与实际行为相反。
     private var generationStatusText: String {
+        if viewModel.isTerminalPresenting {
+            return "正在呈现全文 · 完成后可继续操作"
+        }
         guard let kind = viewModel.activeRunKind else { return "正在生成" }
         if kind == .regenerate { return "重写本章 · 收录后替换原文" }
         if kind == .polish { return "正在润色本章 · 完成后检查剧情一致性" }
@@ -1726,16 +1761,19 @@ struct NovelSessionView: View {
     }
 
     private var generationStatusIcon: String {
+        if viewModel.isTerminalPresenting {
+            return "text.alignleft"
+        }
         switch viewModel.activeRunKind {
-        case .regenerate: "arrow.triangle.2.circlepath"
-        case .polish: "wand.and.sparkles"
-        default: "doc.text"
+        case .regenerate: return "arrow.triangle.2.circlepath"
+        case .polish: return "wand.and.sparkles"
+        default: return "doc.text"
         }
     }
 
     /// 生成中的候选状态条。原本挂在气泡里正文的正下方,正文每增长一次它就被
     /// 重新布局并被跟随逻辑推动,肉眼就是小幅上下抖动;移到输入框上方后它的
-    /// 位置与正文增长解耦。只在生成中出现。
+    /// 位置与正文增长解耦。只在生成中 / 终态呈现窗口出现。
     private var generationStatusStrip: some View {
         // 粒度必须取**活动 run 的记录值**,不能取 composer 的当前设置:
         // `start(_:)` 不回写 viewModel.granularity,重试一个失败的续写 run 时
@@ -1822,6 +1860,8 @@ private struct NovelSessionRowView: View, Equatable {
                 kind: row.kind,
                 granularity: row.granularity,
                 content: row.content,
+                reasoningContent: row.reasoningContent,
+                isReasoningLive: row.isReasoningLive,
                 isStreaming: row.isStreaming,
                 transientPhase: row.transientPhase,
                 hasEverStreamed: row.role == .assistant,
@@ -1914,8 +1954,7 @@ private struct NovelCharacterIdentityQuestionCard: View {
     @State private var isProposalFieldPresented = false
     @State private var clarification = ""
     @State private var proposalGuidance = ""
-    @FocusState private var isClarificationFocused: Bool
-    @FocusState private var isProposalGuidanceFocused: Bool
+    @State private var imeBank = NovelIMEFieldBank()
 
     private var normalizedClarification: String {
         clarification.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1997,7 +2036,6 @@ private struct NovelCharacterIdentityQuestionCard: View {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         isProposalFieldPresented.toggle()
                     }
-                    isProposalGuidanceFocused = isProposalFieldPresented
                 } label: {
                     Label("新建人物", systemImage: "person.crop.circle.badge.plus")
                         .font(.footnote.weight(.semibold))
@@ -2022,7 +2060,6 @@ private struct NovelCharacterIdentityQuestionCard: View {
                     withAnimation(.easeInOut(duration: 0.18)) {
                         isClarificationFieldPresented.toggle()
                     }
-                    isClarificationFocused = isClarificationFieldPresented
                 } label: {
                     Label("补充说明", systemImage: "square.and.pencil")
                         .font(.footnote.weight(.semibold))
@@ -2036,21 +2073,21 @@ private struct NovelCharacterIdentityQuestionCard: View {
 
             if isProposalFieldPresented && activeProposal == nil {
                 VStack(alignment: .trailing, spacing: 8) {
-                    TextField(
-                        "可选：补充身份、关系或剧情方向",
+                    NovelIMETextEditor(
                         text: $proposalGuidance,
-                        axis: .vertical
+                        placeholder: "可选：补充身份、关系或剧情方向",
+                        isEnabled: !isDisabled,
+                        minHeight: 72,
+                        bank: imeBank
                     )
-                    .lineLimit(2 ... 5)
-                    .focused($isProposalGuidanceFocused)
+                    .frame(minHeight: 72)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
 
                     Button {
-                        NovelTextInputCommitter.perform {
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) {
                             onGenerate(proposalGuidance)
-                            isProposalGuidanceFocused = false
                         }
                     } label: {
                         Label("生成建议", systemImage: "arrow.up")
@@ -2068,21 +2105,21 @@ private struct NovelCharacterIdentityQuestionCard: View {
 
             if isClarificationFieldPresented {
                 VStack(alignment: .trailing, spacing: 8) {
-                    TextField(
-                        "例如：一次性路人，不需要建档",
+                    NovelIMETextEditor(
                         text: $clarification,
-                        axis: .vertical
+                        placeholder: "例如：一次性路人，不需要建档",
+                        isEnabled: !isDisabled,
+                        minHeight: 64,
+                        bank: imeBank
                     )
-                    .lineLimit(2 ... 4)
-                    .focused($isClarificationFocused)
+                    .frame(minHeight: 64)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
 
                     Button {
-                        NovelTextInputCommitter.perform {
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) {
                             onClarify(normalizedClarification)
-                            isClarificationFocused = false
                         }
                     } label: {
                         Label("确认说明", systemImage: "checkmark")

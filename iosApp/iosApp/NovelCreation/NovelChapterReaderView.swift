@@ -555,6 +555,7 @@ private struct NovelChapterEditSheet: View {
     @State private var isFindPresented = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel, version: NovelChapterVersionRecord) {
         self.viewModel = viewModel
@@ -567,7 +568,14 @@ private struct NovelChapterEditSheet: View {
         NavigationStack {
             Form {
                 Section("章节") {
-                    TextField("章节标题", text: $title)
+                    NovelIMETextField(
+                        text: $title,
+                        placeholder: "章节标题",
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 36)
+                    // Keep system TextEditor only for findNavigator; flush via first-responder
+                    // unmark on save still covers IME for this long body field.
                     TextEditor(text: $content)
                         .frame(minHeight: 360)
                         .findNavigator(isPresented: $isFindPresented)
@@ -596,7 +604,7 @@ private struct NovelChapterEditSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(isSaving)
                         .confirmationDialog(
@@ -612,7 +620,13 @@ private struct NovelChapterEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        NovelTextInputCommitter.perform { save() }
+                        // Body stays system TextEditor for findNavigator; if it is
+                        // first responder, pull UIKit text before binding lag.
+                        if let body = NovelTextInputCommitter.activeFirstResponder() as? UITextView {
+                            body.unmarkText()
+                            content = body.text ?? content
+                        }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { save() }
                     }
                         .disabled(isSaving)
                 }

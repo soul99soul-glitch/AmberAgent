@@ -94,13 +94,225 @@ final class NovelSessionReplayTests: XCTestCase {
         )
     }
 
-    func testPresentationPacerSnapsOnNonPrefixReplacement() {
-        let step = NovelSessionPresentationPacer.step(
+    func testPresentationPacerPacesNonPrefixReplacementInsteadOfSnapping() {
+        let target = "最终前缀与结尾" + String(repeating: "续", count: 40)
+        let first = NovelSessionPresentationPacer.step(
             displayedContent: "应被替换的旧文",
-            targetContent: "最终前缀与结尾"
+            targetContent: target
         )
-        XCTAssertEqual(step.content, "最终前缀与结尾")
-        XCTAssertTrue(step.isCaughtUp)
+        XCTAssertTrue(target.hasPrefix(first.content))
+        XCTAssertLessThan(
+            first.content.count,
+            target.count,
+            "Divergent replacement must not dump the full target in one frame."
+        )
+        XCTAssertLessThanOrEqual(
+            first.content.count,
+            NovelSessionPresentationPacer.maximumTextAdvance
+        )
+        XCTAssertFalse(first.isCaughtUp)
+
+        var displayed = first.content
+        var ticks = 0
+        while displayed != target, ticks < 20 {
+            let step = NovelSessionPresentationPacer.step(
+                displayedContent: displayed,
+                targetContent: target
+            )
+            displayed = step.content
+            ticks += 1
+        }
+        XCTAssertEqual(displayed, target)
+    }
+
+    func testManuscriptPresentationContentStripsStreamingFence() {
+        let body = "巷口旧雨。"
+        let fenced = "```markdown\n\(body)\n"
+        XCTAssertEqual(
+            NovelSessionPresentationPacer.presentationContent(fenced, runKind: .prose),
+            body
+        )
+        XCTAssertEqual(
+            NovelSessionPresentationPacer.presentationContent(fenced, runKind: .discussion),
+            fenced,
+            "Discussion keeps raw text; only manuscript kinds strip fences."
+        )
+    }
+
+    func testGenerationStatusStaysVisibleThroughTerminalPresenting() {
+        XCTAssertTrue(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: false,
+                isTerminalPresenting: true,
+                activeRunKind: .prose
+            )
+        )
+        XCTAssertFalse(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: false,
+                isTerminalPresenting: true,
+                activeRunKind: .discussion
+            )
+        )
+        XCTAssertFalse(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: false,
+                isTerminalPresenting: false,
+                activeRunKind: .prose
+            )
+        )
+    }
+
+    /// Quiet retire clears `terminalAwaitingRefresh` first but leaves the tail on
+    /// `.terminalAwaitingRefresh` until delay elapses — chrome must stay up.
+    func testTerminalPresentingChromeCoversQuietRetireWindow() {
+        // Mirrors NovelSessionViewModel.isTerminalPresenting without spinning a VM:
+        // flag OR terminal tail phase.
+        func chromeVisible(
+            terminalAwaitingRefresh: Bool,
+            phase: NovelSessionTransientTailPhase?
+        ) -> Bool {
+            if terminalAwaitingRefresh { return true }
+            if case .terminalAwaitingRefresh = phase { return true }
+            return false
+        }
+        XCTAssertTrue(chromeVisible(terminalAwaitingRefresh: true, phase: .streaming))
+        XCTAssertTrue(
+            chromeVisible(terminalAwaitingRefresh: false, phase: .terminalAwaitingRefresh),
+            "Quiet window after unlock still shows terminal tail."
+        )
+        XCTAssertFalse(chromeVisible(terminalAwaitingRefresh: false, phase: .streaming))
+        XCTAssertFalse(chromeVisible(terminalAwaitingRefresh: false, phase: .interrupted))
+        XCTAssertFalse(chromeVisible(terminalAwaitingRefresh: false, phase: nil))
+        XCTAssertTrue(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: false,
+                isTerminalPresenting: chromeVisible(
+                    terminalAwaitingRefresh: false,
+                    phase: .terminalAwaitingRefresh
+                ),
+                activeRunKind: .prose
+            )
+        )
+    }
+
+    /// 终态大积压与 Chat 共用连续 whoosh 曲线：24k 字 ≤16 拍、墙钟 ≤0.5s。
+    func testTerminalDrainWhooshesLargeBacklogWithinBoundedRealtime() {
+        let backlog = 24_000
+        let advance = NovelSessionPresentationPacer.terminalDrainAdvance(backlogCount: backlog)
+        let delayNanos = NovelSessionPresentationPacer.terminalDrainDelayNanos(advance: advance)
+        XCTAssertEqual(
+            advance,
+            ChatStreamPresentationPacer.terminalDrainAdvance(backlogCount: backlog),
+            "Novel terminal drain advance must match Chat shared policy."
+        )
+        XCTAssertEqual(
+            delayNanos,
+            ChatStreamPresentationPacer.terminalDrainDelayNanos(advance: advance)
+        )
+
+        let target = String(repeating: "章", count: backlog)
+        var displayed = ""
+        var ticks = 0
+        var caughtUp = false
+        while !caughtUp, ticks < 100 {
+            let step = NovelSessionPresentationPacer.step(
+                displayedContent: displayed,
+                targetContent: target,
+                mode: .terminalDrain,
+                fixedTerminalAdvance: advance
+            )
+            displayed = step.content
+            caughtUp = step.isCaughtUp
+            ticks += 1
+        }
+
+        XCTAssertTrue(caughtUp)
+        XCTAssertEqual(displayed, target)
+        XCTAssertLessThanOrEqual(ticks, 16, "终态 2.4 万字积压应在 16 拍内排空")
+        let realtimeSeconds = Double(ticks) * Double(delayNanos) / 1_000_000_000
+        XCTAssertLessThanOrEqual(
+            realtimeSeconds,
+            0.5,
+            "大积压 whoosh 排空真实耗时不得超过 0.5s，实际 \(realtimeSeconds)s"
+        )
+    }
+
+    /// 小积压终态仍按流式上限分多拍，避免收尾半句一拍跳出。
+    func testTerminalDrainPacesSmallBacklogLikeStreaming() {
+        let displayed = "已显示"
+        let tail = "需要我调整到更精确的 500 字、换主题，或者换个风格再写吗？"
+        let target = displayed + tail
+        var current = displayed
+        var ticks = 0
+        var caughtUp = false
+        var maximumAdvance = 0
+        while !caughtUp, ticks < 100 {
+            let before = current.count
+            let step = NovelSessionPresentationPacer.step(
+                displayedContent: current,
+                targetContent: target,
+                mode: .terminalDrain
+            )
+            current = step.content
+            maximumAdvance = max(maximumAdvance, current.count - before)
+            caughtUp = step.isCaughtUp
+            ticks += 1
+        }
+        XCTAssertTrue(caughtUp)
+        XCTAssertEqual(current, target)
+        XCTAssertLessThanOrEqual(
+            maximumAdvance,
+            NovelSessionPresentationPacer.maximumTextAdvance,
+            "小积压终态排空单拍不得超流式上限"
+        )
+        XCTAssertGreaterThan(ticks, 1, "小积压应分多拍排空")
+    }
+
+    func testTerminalPacingBaseStripsStreamingFenceWhenTargetIsNormalized() {
+        let body = String(repeating: "围城旧雨。", count: 20)
+        let fenced = "```markdown\n\(body)\n```"
+        let base = NovelSessionPresentationPacer.terminalPacingBase(
+            displayedContent: fenced,
+            targetContent: body,
+            runKind: .prose
+        )
+        XCTAssertEqual(base, body)
+        let step = NovelSessionPresentationPacer.terminalStep(
+            displayedContent: fenced,
+            targetContent: body + "续",
+            runKind: .prose,
+            fixedTerminalAdvance: 12
+        )
+        XCTAssertTrue(step.content.hasPrefix(body))
+        XCTAssertFalse(step.content.hasPrefix("```"))
+    }
+
+    func testTranscriptUsesEagerStacksForWindowedHistory() throws {
+        let source = try String(
+            contentsOfFile: URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .deletingLastPathComponent()
+                .appendingPathComponent("iosApp/NovelCreation/NovelSessionView.swift")
+                .path,
+            encoding: .utf8
+        )
+        XCTAssertTrue(
+            source.contains("Keep it eager so multi-thousand-pt chapter bubbles"),
+            "Novel session transcript must document why history is eager."
+        )
+        XCTAssertFalse(
+            source.contains("LazyVStack(alignment: .leading, spacing: 14)"),
+            "Windowed novel history must not use LazyVStack (blank-gap source)."
+        )
+        XCTAssertTrue(
+            source.contains("source: .streamGrowth"),
+            "Live follow must snap via explicitBottom(.streamGrowth), not eased streamContentGrew only."
+        )
+        XCTAssertTrue(
+            source.contains("!scrollDriver.isUIKitUserInteracting"),
+            "Stream-growth snap must not fire during UIKit user interaction."
+        )
     }
 
     func testDragResumeUsesSharedNearBottomThreshold() {

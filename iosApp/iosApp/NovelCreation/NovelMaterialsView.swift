@@ -343,6 +343,7 @@ struct NovelMaterialEditorSheet: View {
     @State private var isSaving = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(
         viewModel: NovelCreationViewModel,
@@ -400,8 +401,13 @@ struct NovelMaterialEditorSheet: View {
                         .disabled(material != nil)
 
                         if kindChoice == .custom {
-                            TextField("自定义类型名称", text: $customKindName)
-                                .disabled(material != nil)
+                            NovelIMETextField(
+                                text: $customKindName,
+                                placeholder: "自定义类型名称",
+                                isEnabled: material == nil,
+                                bank: imeBank
+                            )
+                            .frame(minHeight: 36)
                         }
                     } else {
                         LabeledContent("资料类型", value: readOnlyKindName)
@@ -410,13 +416,33 @@ struct NovelMaterialEditorSheet: View {
 
                 Section("内容") {
                     if isEditable {
-                        TextField("标题", text: $title)
+                        NovelIMETextField(
+                            text: $title,
+                            placeholder: "标题",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
                         if kindChoice == .character {
-                            TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                            NovelIMETextField(
+                                text: $aliases,
+                                placeholder: "曾用名或别名，用逗号分隔",
+                                bank: imeBank
+                            )
+                            .frame(minHeight: 36)
                         }
-                        TextEditor(text: $content)
-                            .frame(minHeight: 220)
-                        TextField("标签，用逗号分隔", text: $tags)
+                        NovelIMETextEditor(
+                            text: $content,
+                            placeholder: "内容",
+                            minHeight: 220,
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 220)
+                        NovelIMETextField(
+                            text: $tags,
+                            placeholder: "标签，用逗号分隔",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
                     } else {
                         LabeledContent("标题", value: title)
                         if kindChoice == .character, !aliases.isEmpty {
@@ -468,7 +494,7 @@ struct NovelMaterialEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(isEditable || isSaving ? "取消" : "完成") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(isSaving)
                         .confirmationDialog(
@@ -485,7 +511,7 @@ struct NovelMaterialEditorSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if isEditable || isSaving {
                         Button("保存") {
-                            NovelTextInputCommitter.perform { save() }
+                            NovelTextInputCommitter.perform(fieldBank: imeBank) { save() }
                         }
                             .disabled(isSaving)
                     } else {
@@ -602,6 +628,7 @@ struct NovelPolishPreferenceSheet: View {
     @State private var isSaving = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel) {
         self.viewModel = viewModel
@@ -614,8 +641,13 @@ struct NovelPolishPreferenceSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextEditor(text: $preference)
-                        .frame(minHeight: 220)
+                    NovelIMETextEditor(
+                        text: $preference,
+                        placeholder: "润色偏好",
+                        minHeight: 220,
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 220)
                 } header: {
                     Text("偏好")
                 } footer: {
@@ -636,13 +668,13 @@ struct NovelPolishPreferenceSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        NovelTextInputCommitter.perform { save() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { save() }
                     }
                         .disabled(isSaving || viewModel.isPerforming)
                 }
@@ -720,6 +752,7 @@ struct NovelProposalAcceptanceSheet: View {
     @State private var isSubmitting = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel, proposal: NovelSettingProposalRecord) {
         self.viewModel = viewModel
@@ -740,11 +773,20 @@ struct NovelProposalAcceptanceSheet: View {
         NavigationStack {
             Form {
                 Section("建议") {
-                    TextField(titlePlaceholder, text: $title)
-                        .font(.headline)
-                    TextEditor(text: $content)
-                        .frame(minHeight: 200)
-                        .accessibilityLabel("建议内容")
+                    NovelIMETextField(
+                        text: $title,
+                        placeholder: titlePlaceholder,
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 36)
+                    NovelIMETextEditor(
+                        text: $content,
+                        placeholder: "建议内容",
+                        minHeight: 200,
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 200)
+                    .accessibilityLabel("建议内容")
                 }
 
                 Section("写入位置") {
@@ -756,7 +798,12 @@ struct NovelProposalAcceptanceSheet: View {
                     }
 
                     if kindChoice == .custom {
-                        TextField("自定义类型名称", text: $customKindName)
+                        NovelIMETextField(
+                            text: $customKindName,
+                            placeholder: "自定义类型名称",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
                     }
 
                     Picker("目标资料", selection: $selectedMaterialID) {
@@ -766,10 +813,20 @@ struct NovelProposalAcceptanceSheet: View {
                         }
                     }
 
-                    TextField("标签，用逗号分隔", text: $tags)
+                    NovelIMETextField(
+                        text: $tags,
+                        placeholder: "标签，用逗号分隔",
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 36)
 
                     if selectedKind == .character {
-                        TextField("曾用名或别名，用逗号分隔", text: $aliases)
+                        NovelIMETextField(
+                            text: $aliases,
+                            placeholder: "曾用名或别名，用逗号分隔",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
                     }
 
                     Picker("默认注入", selection: $injectionMode) {
@@ -794,7 +851,9 @@ struct NovelProposalAcceptanceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { requestDismiss() }
+                    Button("取消") {
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
+                    }
                         .disabled(isSubmitting)
                         .confirmationDialog(
                             "放弃建议修改？",
@@ -809,7 +868,7 @@ struct NovelProposalAcceptanceSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("写入") {
-                        NovelTextInputCommitter.perform { accept() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { accept() }
                     }
                         .disabled(isSubmitting || viewModel.isPerforming)
                 }
@@ -877,7 +936,7 @@ struct NovelProposalAcceptanceSheet: View {
     }
 
     private func requestDismiss() {
-        NovelTextInputCommitter.perform {
+        NovelTextInputCommitter.perform(fieldBank: imeBank) {
             if hasUnsavedChanges {
                 isConfirmingDiscard = true
             } else {
@@ -972,6 +1031,7 @@ struct NovelInjectionPreviewSheet: View {
     @State private var materialOverrides: [NovelMaterialID: NovelPreviewMaterialOverride] = [:]
     @State private var previewSignature: String?
     @State private var validationMessage: String?
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel) {
         self.viewModel = viewModel
@@ -1007,7 +1067,7 @@ struct NovelInjectionPreviewSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("预览") {
-                        NovelTextInputCommitter.perform { preview() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { preview() }
                     }
                         .disabled(!viewModel.canMutate || viewModel.isPerforming)
                 }
@@ -1036,8 +1096,13 @@ struct NovelInjectionPreviewSheet: View {
                 .pickerStyle(.segmented)
             }
 
-            TextField("这次准备让 Agent 做什么", text: $userText, axis: .vertical)
-                .lineLimit(2...5)
+            NovelIMETextEditor(
+                text: $userText,
+                placeholder: "这次准备让 Agent 做什么",
+                minHeight: 72,
+                bank: imeBank
+            )
+            .frame(minHeight: 72)
 
             Stepper(value: $budgetTokens, in: 2_000...64_000, step: 2_000) {
                 LabeledContent("上下文长度", value: "约 \(budgetTokens.formatted()) 单位")

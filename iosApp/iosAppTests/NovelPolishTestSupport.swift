@@ -226,7 +226,7 @@ class NovelPolishTestCase: XCTestCase {
                 completed = message
             case .failed(let failure), .persistenceBlocked(let failure):
                 XCTFail("Polish generation failed: \(failure)")
-            case .started, .delta, .replaced, .interrupted:
+            case .started, .delta, .replaced, .reasoningDelta, .interrupted:
                 break
             }
         }

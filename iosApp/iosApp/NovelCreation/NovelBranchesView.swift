@@ -411,6 +411,7 @@ struct NovelBranchRenameSheet: View {
     @State private var name: String
     @State private var isSubmitting = false
     @State private var failureMessage: String?
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel, branch: NovelBranchRecord) {
         self.viewModel = viewModel
@@ -424,8 +425,16 @@ struct NovelBranchRenameSheet: View {
                 Text("分支名称")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted)
-                TextField("分支名称", text: $name)
-                    .textFieldStyle(.roundedBorder)
+                NovelIMETextField(
+                    text: $name,
+                    placeholder: "分支名称",
+                    isEnabled: !isSubmitting,
+                    bank: imeBank
+                )
+                .frame(minHeight: 36)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                 if let failureMessage {
                     Label(failureMessage, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
@@ -445,7 +454,7 @@ struct NovelBranchRenameSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        NovelTextInputCommitter.perform { save() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { save() }
                     }
                         .disabled(
                             name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -490,6 +499,7 @@ struct NovelBranchForkSheet: View {
     @State private var checkpointID: NovelCheckpointID
     @State private var isSubmitting = false
     @State private var failureMessage: String?
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(
         viewModel: NovelCreationViewModel,
@@ -514,7 +524,12 @@ struct NovelBranchForkSheet: View {
                 }
 
                 Section("新分支") {
-                    TextField("分支名称", text: $name)
+                    NovelIMETextField(
+                        text: $name,
+                        placeholder: "分支名称",
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 36)
                 }
 
                 Section {
@@ -540,7 +555,7 @@ struct NovelBranchForkSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("创建") {
-                        NovelTextInputCommitter.perform { fork() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { fork() }
                     }
                         .disabled(
                             name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -668,6 +683,7 @@ struct NovelBranchOverrideEditorSheet: View {
     @State private var isSubmitting = false
     @State private var failureMessage: String?
     @State private var isConfirmingDiscard = false
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel, material: NovelMaterialRecord) {
         self.viewModel = viewModel
@@ -721,10 +737,25 @@ struct NovelBranchOverrideEditorSheet: View {
                     }
                 } else if mode == .newRevision {
                     Section("分支版本") {
-                        TextField("标题", text: $title)
-                        TextEditor(text: $content)
-                            .frame(minHeight: 220)
-                        TextField("标签，用逗号分隔", text: $tags)
+                        NovelIMETextField(
+                            text: $title,
+                            placeholder: "标题",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
+                        NovelIMETextEditor(
+                            text: $content,
+                            placeholder: "内容",
+                            minHeight: 220,
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 220)
+                        NovelIMETextField(
+                            text: $tags,
+                            placeholder: "标签，用逗号分隔",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
                         Picker("默认注入", selection: $injectionMode) {
                             ForEach(NovelInjectionMode.allCases, id: \.self) { value in
                                 Text(value.displayName).tag(value)
@@ -754,7 +785,7 @@ struct NovelBranchOverrideEditorSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(isSubmitting)
                         .confirmationDialog(
@@ -770,7 +801,7 @@ struct NovelBranchOverrideEditorSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") {
-                        NovelTextInputCommitter.perform { save() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { save() }
                     }
                         .disabled(isSubmitting || !viewModel.canMutate)
                 }

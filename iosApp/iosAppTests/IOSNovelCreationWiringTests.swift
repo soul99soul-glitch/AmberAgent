@@ -483,15 +483,15 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
 
         XCTAssertTrue(support.contains("(firstResponder as? UITextInput)?.unmarkText()"))
-        XCTAssertTrue(support.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(
+            support.contains("await Task.yield()")
+                || support.contains("DispatchQueue.main.async"),
+            "Deferred main flush so SwiftUI bindings see committed text"
+        )
         XCTAssertTrue(
             support.contains("unmark before resign")
                 || support.contains("unmarkText") && support.contains("resignFirstResponder"),
             "Committer must unmark before resign so IME composition is not discarded"
-        )
-        XCTAssertTrue(
-            support.contains("DispatchQueue.main.async {\n            DispatchQueue.main.async"),
-            "Double main-async flush so SwiftUI bindings see committed text"
         )
         XCTAssertTrue(support.contains("static func hasMarkedText"))
         for file in [projectList, compendium, materials, branches, reader, sheets, bubble] {
@@ -510,9 +510,37 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             "Clearing FocusState before unmarkText discards the last IME composition"
         )
         // Writing-context toolbar must commit marked text before apply/dismiss.
-        XCTAssertTrue(sheets.contains(
-            "NovelTextInputCommitter.perform {\n                            onApply(overrides, budgetTokens)"
-        ) || sheets.contains("NovelTextInputCommitter.perform {\n                        onApply(overrides, budgetTokens)"))
+        XCTAssertTrue(sheets.contains("fieldBank: planFieldBank"))
+        XCTAssertTrue(
+            sheets.contains("NovelIMETextField") && sheets.contains("planPlacementBinding"),
+            "本章计划「与总纲的位置」must use UIKit-backed IME field, not plain TextField"
+        )
+        XCTAssertTrue(sheets.contains("NovelIMETextEditor"))
+        XCTAssertTrue(sheets.contains("planFieldBank.commitAll()"))
+        XCTAssertTrue(sheets.contains("planFieldsDirty"))
+        XCTAssertTrue(support.contains("struct NovelIMETextField"))
+        XCTAssertTrue(support.contains("struct NovelIMETextEditor"))
+        XCTAssertTrue(support.contains("final class NovelIMEFieldBank"))
+        XCTAssertTrue(support.contains("commitAndReadActiveUIKitText"))
+        // Save-bound form sheets must flush via field bank, not plain TextField alone.
+        for (file, label) in [
+            (projectList, "project list"),
+            (materials, "materials"),
+            (branches, "branches"),
+            (reader, "chapter reader"),
+            (compendium, "compendium"),
+            (bubble, "ask-user bubble"),
+        ] {
+            XCTAssertTrue(
+                file.contains("NovelIMEFieldBank") || file.contains("imeBank"),
+                "\(label) should own an IME field bank"
+            )
+            XCTAssertTrue(
+                file.contains("fieldBank: imeBank") || file.contains("fieldBank: planFieldBank"),
+                "\(label) save path should pass fieldBank into NovelTextInputCommitter"
+            )
+        }
+        XCTAssertTrue(try source("iosApp/NovelCreation/NovelSessionView.swift").contains("imeBank"))
     }
 
     func testHistoricalCharacterIdentityFlowsThroughSessionAndCharacterSurfaces() throws {

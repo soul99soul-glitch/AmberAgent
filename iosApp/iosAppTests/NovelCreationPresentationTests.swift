@@ -204,7 +204,7 @@ final class NovelCreationPresentationTests: XCTestCase {
         XCTAssertNil(textField.markedTextRange)
         XCTAssertFalse(
             ranSynchronously,
-            "Action must wait for main-queue flush so SwiftUI bindings can catch unmarkText"
+            "Action must wait for yield flush so SwiftUI bindings can catch unmarkText"
         )
         await fulfillment(of: [action], timeout: 1)
         XCTAssertTrue(ranSynchronously)
@@ -222,6 +222,55 @@ final class NovelCreationPresentationTests: XCTestCase {
 
         XCTAssertNil(textField.markedTextRange)
         XCTAssertEqual(textField.text, "李雷")
+    }
+
+    func testCommitAndReadActiveUIKitTextReturnsUnmarkedValue() {
+        let textField = UITextField()
+        textField.text = "第"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("3章", selectedRange: NSRange(location: 2, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+
+        let committed = NovelTextInputCommitter.commitAndReadActiveUIKitText(
+            firstResponder: textField
+        )
+
+        XCTAssertEqual(committed, "第3章")
+        XCTAssertNil(textField.markedTextRange)
+    }
+
+    @MainActor
+    func testIMEFieldBankCommitAllFlushesMarkedTextIntoBinding() {
+        final class Host: NovelIMEFieldHosting {
+            var text: String
+            var marked: String?
+            init(text: String, marked: String?) {
+                self.text = text
+                self.marked = marked
+            }
+            var hasMarkedText: Bool { marked != nil }
+            func flushMarkedTextIntoBinding() {
+                if let marked {
+                    text += marked
+                    self.marked = nil
+                }
+            }
+        }
+
+        let bank = NovelIMEFieldBank()
+        let placement = Host(text: "第", marked: "3章")
+        let goal = Host(text: "冲突", marked: nil)
+        bank.register(placement)
+        bank.register(goal)
+        XCTAssertTrue(bank.hasAnyMarkedText)
+
+        bank.commitAll()
+
+        XCTAssertEqual(placement.text, "第3章")
+        XCTAssertNil(placement.marked)
+        XCTAssertEqual(goal.text, "冲突")
+        XCTAssertFalse(bank.hasAnyMarkedText)
     }
 
     func testPresentationUsesHistoricalCharacterNamesAsEffectiveAliases() throws {

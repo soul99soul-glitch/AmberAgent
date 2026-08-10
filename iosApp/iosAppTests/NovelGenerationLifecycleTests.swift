@@ -261,6 +261,44 @@ final class NovelGenerationLifecycleTests: XCTestCase {
         XCTAssertTrue(final.candidates.isEmpty)
     }
 
+    /// Reasoning is presentation-only: broadcast to UI, never manuscript partial/candidate/message.
+    func testReasoningDeltaIsBroadcastAndNeverPollutesManuscript() async throws {
+        let reasoning = "先分析人物动机与冲突。"
+        let prose = "雨夜的巷口，她停住了脚步。"
+        let document = try NovelTestFixtures.document()
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: [
+                .reasoningDelta(reasoning),
+                .delta(prose),
+                .complete,
+            ])]
+        )
+        let request = makeRequest(document: document, kind: .prose, granularity: .continuation)
+
+        let events = await capturedEvents(try await harness.creation.start(request).events)
+        XCTAssertTrue(events.contains(.reasoningDelta(reasoning)))
+        XCTAssertTrue(events.contains(.delta(prose)))
+        guard case .completed(let snapshot) = events.last else {
+            return XCTFail("Expected prose completion")
+        }
+        XCTAssertEqual(snapshot.message.content, prose)
+        XCTAssertFalse(snapshot.message.content.contains(reasoning))
+
+        let final = try await harness.repository.document(request.projectID)
+        XCTAssertEqual(final.activeRuns.first?.status, .completed)
+        XCTAssertEqual(final.activeRuns.first?.partialContent, prose)
+        XCTAssertFalse(final.activeRuns.first?.partialContent.contains(reasoning) ?? true)
+        XCTAssertEqual(final.candidates.count, 1)
+        XCTAssertEqual(final.candidates[0].content, prose)
+        XCTAssertFalse(final.candidates[0].content.contains(reasoning))
+        let assistantBodies = final.sessions[0].messages
+            .filter { $0.role == .assistant }
+            .map(\.content)
+        XCTAssertTrue(assistantBodies.contains(prose))
+        XCTAssertFalse(assistantBodies.contains { $0.contains(reasoning) })
+    }
+
     func testInvalidQuickStartJSONFailsBeforeAnyProposalIsCommitted() async throws {
         let document = try quickStartDocument()
         let harness = try await makeHarness(
@@ -2063,6 +2101,7 @@ private extension NovelGenerationLifecycleTests {
 
     enum CapturedEvent: Equatable {
         case started(NovelRunID)
+        case reasoningDelta(String)
         case delta(String)
         case replaced(String)
         case completed(NovelSessionMessageSnapshot)
@@ -2218,6 +2257,7 @@ private extension NovelGenerationLifecycleTests {
         for await event in stream {
             switch event {
             case .started(let receipt): result.append(.started(receipt.runID))
+            case .reasoningDelta(let text): result.append(.reasoningDelta(text))
             case .delta(let text): result.append(.delta(text))
             case .replaced(let text): result.append(.replaced(text))
             case .completed(let message): result.append(.completed(message))

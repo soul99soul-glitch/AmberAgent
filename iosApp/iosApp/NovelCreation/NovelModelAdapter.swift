@@ -99,6 +99,8 @@ struct NovelResponsesResumeCursor: Codable, Equatable, Sendable {
 
 enum NovelModelFrameEvent: Equatable, Sendable {
     case activity
+    /// Provider reasoning/thinking text for UI only. Never manuscript.
+    case reasoningDelta(String)
     case textDelta(String)
     case textReplacement(String)
     case usage(NovelModelUsage)
@@ -125,6 +127,9 @@ extension NovelModelFailure: LocalizedError {
 
 enum NovelModelEvent: Equatable, Sendable {
     case activity
+    /// Provider reasoning/thinking text for UI only. Must never enter
+    /// `partialContent`, candidates, collect, or structured JSON sources.
+    case reasoningDelta(String)
     case textDelta(String)
     case textReplacement(String)
     case usage(NovelModelUsage)

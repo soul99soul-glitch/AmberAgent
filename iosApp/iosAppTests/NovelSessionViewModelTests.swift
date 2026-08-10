@@ -664,6 +664,43 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.durableMessages.last?.content, expected)
     }
 
+    func testReasoningPresentsOnTailWithoutEnteringDurableManuscript() async throws {
+        let reasoning = "先想清楚人物动机。"
+        let prose = "巷口的雨停了。"
+        let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
+            .reasoningDelta(reasoning),
+            .pause,
+            .delta(prose),
+            .complete,
+        ])])
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let didStart = await harness.session.send(text: "写一段")
+        XCTAssertTrue(didStart)
+        let sawReasoning = await eventually {
+            harness.session.transientTail?.reasoningContent == reasoning &&
+                harness.session.transientTail?.isReasoningLive == true
+        }
+        XCTAssertTrue(sawReasoning, "Thinking must surface on the transient tail.")
+        XCTAssertEqual(harness.session.transientTail?.content ?? "", "")
+
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        await harness.adapter.resume(runID: runID)
+        let didFinish = await eventually(timeout: 5) {
+            !harness.session.isRunning &&
+                harness.session.durableMessages.last?.content == prose
+        }
+        XCTAssertTrue(didFinish)
+        XCTAssertEqual(harness.session.availableProseCandidates.first?.content, prose)
+        XCTAssertFalse(
+            harness.session.availableProseCandidates.first?.content.contains(reasoning) ?? true
+        )
+        XCTAssertFalse(
+            harness.session.durableMessages.contains { $0.content.contains(reasoning) }
+        )
+    }
+
     func testTerminalBurstDrainsVisibleBacklogAfterGenerationControlCloses() async throws {
         let target = String(repeating: "终", count: 720)
         let harness = try await makeHarness(scripts: [NovelModelScript(steps: [
@@ -726,11 +763,16 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         let didStart = await harness.session.send(text: "生成带围栏的正文")
         XCTAssertTrue(didStart)
-        let sawPartialFence = await eventually {
+        // Presentation buffer strips the spurious fence so pacer and bubble share
+        // one string; visible text is a paced prefix of the manuscript body.
+        let sawPacedBody = await eventually {
             guard let content = harness.session.transientTail?.content else { return false }
-            return content.hasPrefix("```markdown\n") && content.count < fencedTarget.count
+            return !content.hasPrefix("```") &&
+                target.hasPrefix(content) &&
+                !content.isEmpty &&
+                content.count < target.count
         }
-        XCTAssertTrue(sawPartialFence)
+        XCTAssertTrue(sawPacedBody, "Fenced model output must present as paced bare manuscript.")
 
         let runID = try XCTUnwrap(harness.session.activeRunID)
         await harness.adapter.resume(runID: runID)
@@ -747,7 +789,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertLessThan(
             visibleContent.count,
             target.count,
-            "去除模型围栏时必须沿当前可见正文继续 pacing，不能瞬时替换整章。"
+            "Terminal fence normalize must continue pacing, not snap the whole chapter."
         )
 
         let didFinish = await eventually(timeout: 5) {

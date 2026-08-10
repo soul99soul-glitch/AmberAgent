@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import UIKit
 
 @MainActor
@@ -10,18 +11,28 @@ enum NovelTextInputCommitter {
     /// sheet dismiss, or focus transitions. Never clear `FocusState` *before*
     /// calling this — resigning without `unmarkText` can discard the last
     /// Chinese composition so the subsequent binding read misses those glyphs.
+    ///
+    /// For multi-field Form editors (本章计划 etc.), prefer
+    /// `NovelIMEFieldBank.commitAll()` so UIKit text is written into bindings
+    /// synchronously; SwiftUI `TextField` bindings alone remain racy under IME.
     static func perform(
         firstResponder: UIView? = nil,
+        fieldBank: NovelIMEFieldBank? = nil,
         _ action: @escaping @MainActor () -> Void
     ) {
+        // UIKit-backed fields: flush marked text into @Binding before resign.
+        fieldBank?.commitAll()
+        // Also capture any remaining first-responder UIKit text (native
+        // SwiftUI TextField wraps UITextField/UITextView) into the bank-less path.
+        _ = commitAndReadActiveUIKitText(firstResponder: firstResponder)
         commitMarkedText(in: firstResponder)
         // SwiftUI TextField/TextEditor often apply UIKit text → Binding one
-        // main turn after `unmarkText`. A second turn covers cases where the
-        // first only runs resign-side bookkeeping.
-        DispatchQueue.main.async {
-            DispatchQueue.main.async {
-                action()
-            }
+        // main turn after `unmarkText`. Two yields cover resign-side bookkeeping
+        // without crossing a @Sendable DispatchQueue boundary under Swift 6.
+        Task { @MainActor in
+            await Task.yield()
+            await Task.yield()
+            action()
         }
     }
 
@@ -30,6 +41,25 @@ enum NovelTextInputCommitter {
         let responder = firstResponder ?? activeFirstResponder()
         guard let input = responder as? UITextInput else { return false }
         return input.markedTextRange != nil
+    }
+
+    /// Unmark the active field and return its UIKit text immediately.
+    /// Prefer this over reading a SwiftUI binding right after a button tap.
+    @discardableResult
+    static func commitAndReadActiveUIKitText(firstResponder: UIView? = nil) -> String? {
+        let responder = firstResponder ?? activeFirstResponder()
+        if let textField = responder as? UITextField {
+            textField.unmarkText()
+            return textField.text
+        }
+        if let textView = responder as? UITextView {
+            textView.unmarkText()
+            return textView.text
+        }
+        if let input = responder as? UITextInput {
+            input.unmarkText()
+        }
+        return nil
     }
 
     static func commitMarkedText(in firstResponder: UIView? = nil) {
@@ -53,7 +83,7 @@ enum NovelTextInputCommitter {
         )
     }
 
-    private static func activeFirstResponder() -> UIView? {
+    static func activeFirstResponder() -> UIView? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         for scene in scenes {
             for window in scene.windows where !window.isHidden {
@@ -73,6 +103,301 @@ enum NovelTextInputCommitter {
             }
         }
         return nil
+    }
+}
+
+// MARK: - UIKit-backed IME-safe fields
+
+/// Tracks UIKit-backed novel form fields so save can flush marked text into
+/// SwiftUI bindings **synchronously** (not after a racy Binding update).
+@MainActor
+final class NovelIMEFieldBank {
+    private final class WeakBox {
+        weak var host: NovelIMEFieldHosting?
+        init(_ host: NovelIMEFieldHosting) { self.host = host }
+    }
+
+    private var hosts: [ObjectIdentifier: WeakBox] = [:]
+
+    func register(_ host: NovelIMEFieldHosting) {
+        hosts[ObjectIdentifier(host)] = WeakBox(host)
+        prune()
+    }
+
+    func unregister(_ host: NovelIMEFieldHosting) {
+        hosts.removeValue(forKey: ObjectIdentifier(host))
+    }
+
+    /// Unmark every registered field and push UIKit text into its binding.
+    func commitAll() {
+        prune()
+        for box in hosts.values {
+            box.host?.flushMarkedTextIntoBinding()
+        }
+    }
+
+    var hasAnyMarkedText: Bool {
+        prune()
+        return hosts.values.contains { $0.host?.hasMarkedText == true }
+    }
+
+    private func prune() {
+        hosts = hosts.filter { $0.value.host != nil }
+    }
+}
+
+@MainActor
+protocol NovelIMEFieldHosting: AnyObject {
+    var hasMarkedText: Bool { get }
+    func flushMarkedTextIntoBinding()
+}
+
+/// Single-line field: UITextField that ignores external binding writes while
+/// Chinese (or any) IME composition is active.
+struct NovelIMETextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = ""
+    var isEnabled: Bool = true
+    var bank: NovelIMEFieldBank? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, bank: bank)
+    }
+
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.placeholder = placeholder
+        textField.text = text
+        textField.font = .preferredFont(forTextStyle: .body)
+        textField.adjustsFontForContentSizeCategory = true
+        textField.textColor = .label
+        textField.tintColor = UIColor(AmberTheme.accent)
+        textField.borderStyle = .none
+        textField.clearButtonMode = .never
+        textField.autocorrectionType = .no
+        textField.spellCheckingType = .no
+        textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textField.addTarget(
+            context.coordinator,
+            action: #selector(Coordinator.editingChanged(_:)),
+            for: .editingChanged
+        )
+        context.coordinator.textField = textField
+        bank?.register(context.coordinator)
+        return textField
+    }
+
+    func updateUIView(_ textField: UITextField, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.bank = bank
+        bank?.register(context.coordinator)
+        textField.placeholder = placeholder
+        textField.isEnabled = isEnabled
+        // Never clobber an in-progress composition, and never replace equal text
+        // (avoids caret jumps that also break IME).
+        if textField.markedTextRange == nil, textField.text != text {
+            textField.text = text
+        }
+        if !isEnabled, textField.isFirstResponder {
+            textField.resignFirstResponder()
+        }
+    }
+
+    static func dismantleUIView(_ uiView: UITextField, coordinator: Coordinator) {
+        coordinator.bank?.unregister(coordinator)
+        if coordinator.textField === uiView {
+            coordinator.textField = nil
+        }
+    }
+
+    final class Coordinator: NSObject, UITextFieldDelegate, NovelIMEFieldHosting {
+        var text: Binding<String>
+        var bank: NovelIMEFieldBank?
+        weak var textField: UITextField?
+
+        init(text: Binding<String>, bank: NovelIMEFieldBank?) {
+            self.text = text
+            self.bank = bank
+        }
+
+        var hasMarkedText: Bool { textField?.markedTextRange != nil }
+
+        func flushMarkedTextIntoBinding() {
+            guard let textField else { return }
+            textField.unmarkText()
+            let value = textField.text ?? ""
+            if text.wrappedValue != value {
+                text.wrappedValue = value
+            }
+        }
+
+        func textFieldDidChangeSelection(_ textField: UITextField) {
+            // Selection changes during IME; keep binding in sync with provisional text
+            // so the UI never "snaps back" to a stale @State when composition ends.
+            let value = textField.text ?? ""
+            if text.wrappedValue != value {
+                text.wrappedValue = value
+            }
+        }
+
+        func textFieldDidEndEditing(_ textField: UITextField) {
+            flushMarkedTextIntoBinding()
+        }
+
+        func textField(
+            _ textField: UITextField,
+            shouldChangeCharactersIn range: NSRange,
+            replacementString string: String
+        ) -> Bool {
+            true
+        }
+
+        @objc func editingChanged(_ textField: UITextField) {
+            let value = textField.text ?? ""
+            if text.wrappedValue != value {
+                text.wrappedValue = value
+            }
+        }
+    }
+}
+
+/// Multi-line field: UITextView with the same marked-text safety as the composer.
+struct NovelIMETextEditor: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = ""
+    var isEnabled: Bool = true
+    var minHeight: CGFloat = 88
+    var bank: NovelIMEFieldBank? = nil
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, bank: bank, placeholder: placeholder)
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.text = text
+        textView.font = .preferredFont(forTextStyle: .body)
+        textView.adjustsFontForContentSizeCategory = true
+        textView.textColor = .label
+        textView.backgroundColor = .clear
+        textView.tintColor = UIColor(AmberTheme.accent)
+        textView.textContainerInset = UIEdgeInsets(top: 6, left: 0, bottom: 6, right: 0)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = true
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        context.coordinator.textView = textView
+        context.coordinator.installPlaceholder(in: textView)
+        bank?.register(context.coordinator)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        context.coordinator.text = $text
+        context.coordinator.bank = bank
+        context.coordinator.placeholder = placeholder
+        bank?.register(context.coordinator)
+        textView.isEditable = isEnabled
+        textView.isSelectable = isEnabled
+        if textView.markedTextRange == nil, textView.text != text {
+            textView.text = text
+        }
+        context.coordinator.refreshPlaceholder()
+        if !isEnabled, textView.isFirstResponder {
+            textView.resignFirstResponder()
+        }
+    }
+
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        coordinator.bank?.unregister(coordinator)
+        if coordinator.textView === uiView {
+            coordinator.textView = nil
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: UITextView,
+        context: Context
+    ) -> CGSize? {
+        let width = proposal.width ?? uiView.bounds.width
+        guard width > 0 else {
+            return CGSize(width: proposal.width ?? 0, height: minHeight)
+        }
+        let fitting = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(width: width, height: max(minHeight, ceil(fitting.height)))
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate, NovelIMEFieldHosting {
+        var text: Binding<String>
+        var bank: NovelIMEFieldBank?
+        var placeholder: String
+        weak var textView: UITextView?
+        private let placeholderLabel = UILabel()
+
+        init(text: Binding<String>, bank: NovelIMEFieldBank?, placeholder: String) {
+            self.text = text
+            self.bank = bank
+            self.placeholder = placeholder
+        }
+
+        var hasMarkedText: Bool { textView?.markedTextRange != nil }
+
+        func flushMarkedTextIntoBinding() {
+            guard let textView else { return }
+            textView.unmarkText()
+            let value = textView.text ?? ""
+            if text.wrappedValue != value {
+                text.wrappedValue = value
+            }
+            refreshPlaceholder()
+        }
+
+        func installPlaceholder(in textView: UITextView) {
+            placeholderLabel.font = textView.font
+            placeholderLabel.textColor = .placeholderText
+            placeholderLabel.numberOfLines = 0
+            placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+            textView.addSubview(placeholderLabel)
+            NSLayoutConstraint.activate([
+                placeholderLabel.topAnchor.constraint(
+                    equalTo: textView.topAnchor,
+                    constant: textView.textContainerInset.top
+                ),
+                placeholderLabel.leadingAnchor.constraint(
+                    equalTo: textView.leadingAnchor,
+                    constant: textView.textContainerInset.left
+                        + textView.textContainer.lineFragmentPadding
+                ),
+                placeholderLabel.trailingAnchor.constraint(
+                    equalTo: textView.trailingAnchor,
+                    constant: -(textView.textContainerInset.right
+                        + textView.textContainer.lineFragmentPadding)
+                ),
+            ])
+            refreshPlaceholder()
+        }
+
+        func refreshPlaceholder() {
+            placeholderLabel.text = placeholder
+            let isEmpty = (textView?.text ?? "").isEmpty
+            placeholderLabel.isHidden = !isEmpty || placeholder.isEmpty
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            let value = textView.text ?? ""
+            if text.wrappedValue != value {
+                text.wrappedValue = value
+            }
+            refreshPlaceholder()
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            flushMarkedTextIntoBinding()
+        }
     }
 }
 

@@ -1632,6 +1632,8 @@ struct NovelRun: Sendable {
 
 enum NovelRunEvent: Sendable {
     case started(NovelRunReceipt)
+    /// Presentation-only thinking stream. Must not be written into manuscript partials.
+    case reasoningDelta(String)
     case delta(String)
     case replaced(String)
     case completed(NovelSessionMessageSnapshot)

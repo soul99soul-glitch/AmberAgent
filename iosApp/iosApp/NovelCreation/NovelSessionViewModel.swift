@@ -114,8 +114,15 @@ struct NovelSessionPresentationBuffer {
 ///
 /// The per-tick advance policy is shared with Chat via
 /// `StreamPresentationPacingPolicy` — this type only adapts it to the novel
-/// session's single-String shape. Terminal paths use the same bounded advance.
+/// session's single-String shape. Terminal drain uses the same continuous
+/// whoosh curve as `ChatStreamPresentationPacer` (fixed advance anchor +
+/// dynamic tick interval), not the live streaming 36-char cap.
 enum NovelSessionPresentationPacer {
+    enum Mode {
+        case streaming
+        case terminalDrain
+    }
+
     static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
     static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
     static var preferredDrainTicks: Int { StreamPresentationPacingPolicy.preferredDrainTicks }
@@ -129,39 +136,90 @@ enum NovelSessionPresentationPacer {
         StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
     }
 
-    static func step(displayedContent: String, targetContent: String) -> Step {
+    static func terminalDrainAdvance(backlogCount: Int) -> Int {
+        StreamPresentationPacingPolicy.terminalDrainAdvance(backlogCount: backlogCount)
+    }
+
+    static func terminalDrainDelayNanos(advance: Int) -> UInt64 {
+        StreamPresentationPacingPolicy.terminalDrainDelayNanos(advance: advance)
+    }
+
+    /// Manuscript kinds strip accidental ``` fences in the presentation buffer so
+    /// pacer + bubble share one string (no dual strip / height snap).
+    static func presentationContent(_ text: String, runKind: NovelRunKind?) -> String {
+        switch runKind {
+        case .prose, .regenerate, .polish:
+            return NovelPromptCatalog.normalizedStreamingCandidateProse(text)
+        case .quickStart, .characterProposal, .discussion, nil:
+            return text
+        }
+    }
+
+    static func step(
+        displayedContent: String,
+        targetContent: String,
+        mode: Mode = .streaming,
+        fixedTerminalAdvance: Int? = nil
+    ) -> Step {
         if displayedContent == targetContent {
             return Step(content: targetContent, isCaughtUp: true)
         }
-        // Replacement / divergence: publish the authoritative target in one frame.
-        guard targetContent.hasPrefix(displayedContent) else {
-            return Step(content: targetContent, isCaughtUp: true)
+        let advanceBudget: (Int) -> Int = { backlog in
+            switch mode {
+            case .streaming:
+                return textAdvance(backlogCount: backlog)
+            case .terminalDrain:
+                return StreamPresentationPacingPolicy.terminalTextAdvance(
+                    backlogCount: backlog,
+                    fixedAdvance: fixedTerminalAdvance
+                )
+            }
         }
-        let backlog = targetContent.count - displayedContent.count
-        let advance = textAdvance(backlogCount: backlog)
-        let next = String(targetContent.prefix(displayedContent.count + advance))
+        if targetContent.hasPrefix(displayedContent) {
+            let backlog = targetContent.count - displayedContent.count
+            let advance = advanceBudget(backlog)
+            let next = String(targetContent.prefix(displayedContent.count + advance))
+            return Step(content: next, isCaughtUp: next == targetContent)
+        }
+        // Replacement / divergence: re-anchor on the longest common prefix and
+        // pace toward the new target — never dump multi-k chars in one frame.
+        let sharedCount = displayedContent.commonPrefix(with: targetContent).count
+        let backlog = max(0, targetContent.count - sharedCount)
+        let advance = max(advanceBudget(backlog), minimumTextAdvance)
+        let nextCount = min(targetContent.count, sharedCount + advance)
+        let next = String(targetContent.prefix(nextCount))
         return Step(content: next, isCaughtUp: next == targetContent)
+    }
+
+    /// Visible pacing base when terminal manuscript normalization may have
+    /// stripped a streaming fence that the bubble already hid.
+    static func terminalPacingBase(
+        displayedContent: String,
+        targetContent: String,
+        runKind: NovelRunKind?
+    ) -> String {
+        let display = presentationContent(displayedContent, runKind: runKind)
+        if targetContent.hasPrefix(display) { return display }
+        return displayedContent
     }
 
     static func terminalStep(
         displayedContent: String,
         targetContent: String,
-        runKind: NovelRunKind?
+        runKind: NovelRunKind?,
+        fixedTerminalAdvance: Int? = nil
     ) -> Step {
-        guard let runKind else {
-            return step(displayedContent: displayedContent, targetContent: targetContent)
-        }
-        let pacingBase: String
-        switch runKind {
-        case .prose, .regenerate, .polish:
-            // The bubble strips common prose fences while streaming. When lifecycle
-            // removes that same wrapper at terminal, keep pacing from the visible text.
-            let normalized = NovelPromptCatalog.normalizedStreamingCandidateProse(displayedContent)
-            pacingBase = targetContent.hasPrefix(normalized) ? normalized : displayedContent
-        case .quickStart, .characterProposal, .discussion:
-            pacingBase = displayedContent
-        }
-        return step(displayedContent: pacingBase, targetContent: targetContent)
+        let pacingBase = terminalPacingBase(
+            displayedContent: displayedContent,
+            targetContent: targetContent,
+            runKind: runKind
+        )
+        return step(
+            displayedContent: pacingBase,
+            targetContent: targetContent,
+            mode: .terminalDrain,
+            fixedTerminalAdvance: fixedTerminalAdvance
+        )
     }
 }
 
@@ -1892,8 +1950,25 @@ final class NovelSessionViewModel {
 extension NovelSessionViewModel {
     /// 生成中状态条按**真实 run** 显示文案,而不是 composer 的当前设置:
     /// `start(_:)` 不回写 mode/granularity,重试失败 run 时两者会分叉。
-    var activeRunKind: NovelRunKind? { activeRun?.kind }
-    var activeRunGranularity: NovelGenerationGranularity? { activeRun?.granularity }
+    /// Prefer the live run record; fall back to the bound transient run so status
+    /// chrome stays correct through terminal presentation drain.
+    var activeRunKind: NovelRunKind? {
+        activeRun?.kind ?? transientRunRecord?.kind
+    }
+    var activeRunGranularity: NovelGenerationGranularity? {
+        activeRun?.granularity ?? transientRunRecord?.granularity
+    }
+    /// True while the manuscript terminal is still chrome-visible.
+    ///
+    /// Covers both the drain/save lock (`terminalAwaitingRefresh`) and the quiet
+    /// window after unlock: retire clears the flag first so composer unlocks, but
+    /// the tail stays on `.terminalAwaitingRefresh` until quiet elapses. Without
+    /// this, the generation strip collapses ~28pt before the tail retires.
+    var isTerminalPresenting: Bool {
+        if terminalAwaitingRefresh { return true }
+        if case .terminalAwaitingRefresh = transientTail?.phase { return true }
+        return false
+    }
 }
 
 private extension NovelSessionViewModel {
@@ -2149,7 +2224,10 @@ private extension NovelSessionViewModel {
         case .started:
             _ = await refreshDurable(binding: binding, token: token)
             adoptDurableRunRecord(runID: runID)
+        case .reasoningDelta(let text):
+            applyReasoningPresentation(text, runID: runID, token: token)
         case .delta(let text):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             if draft.kind == .quickStart {
                 appendQuickStartStructuredDelta(text, runID: runID, token: token)
             } else if draft.kind == .characterProposal {
@@ -2158,6 +2236,7 @@ private extension NovelSessionViewModel {
                 enqueuePresentationDelta(text, runID: runID, token: token)
             }
         case .replaced(let text):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             if draft.kind == .quickStart {
                 replaceQuickStartStructuredContent(text, runID: runID, token: token)
             } else if draft.kind == .characterProposal {
@@ -2166,6 +2245,7 @@ private extension NovelSessionViewModel {
                 enqueuePresentationReplacement(text, runID: runID, token: token)
             }
         case .completed(let snapshot):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
@@ -2178,6 +2258,7 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .interrupted(let snapshot):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
@@ -2192,6 +2273,7 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .failed(let failure):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
@@ -2208,6 +2290,7 @@ private extension NovelSessionViewModel {
             let refreshed = await refreshDurable(binding: binding, token: token)
             if refreshed { retireTerminalTransientTail(runID: runID, token: token) }
         case .persistenceBlocked(let failure):
+            markReasoningFinishedIfNeeded(runID: runID, token: token)
             guard await publishTerminalPresentation(
                 runID: runID,
                 token: token,
@@ -2465,6 +2548,51 @@ private extension NovelSessionViewModel {
         )
     }
 
+    /// Presentation-only thinking stream. Never touches manuscript presentation buffer.
+    func applyReasoningPresentation(
+        _ text: String,
+        runID: NovelRunID,
+        token: UUID
+    ) {
+        guard !text.isEmpty,
+              bindingToken == token,
+              let current = transientTail,
+              current.runID == runID else { return }
+        let merged: String
+        if text.hasPrefix(current.reasoningContent) || current.reasoningContent.isEmpty {
+            merged = text
+        } else if current.reasoningContent.hasPrefix(text) {
+            return
+        } else {
+            merged = current.reasoningContent + text
+        }
+        guard merged != current.reasoningContent || !current.isReasoningLive else { return }
+        // Promote waiting placeholder once thinking is visible.
+        let nextPhase: NovelSessionTransientTailPhase =
+            current.phase == .waitingForFirstToken ? .streaming : current.phase
+        transientTail = current.updating(
+            content: current.content,
+            renderRevision: current.renderRevision &+ 1,
+            phase: nextPhase,
+            reasoningContent: merged,
+            isReasoningLive: true
+        )
+    }
+
+    func markReasoningFinishedIfNeeded(runID: NovelRunID, token: UUID) {
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID,
+              current.isReasoningLive else { return }
+        transientTail = current.updating(
+            content: current.content,
+            renderRevision: current.renderRevision &+ 1,
+            phase: current.phase,
+            reasoningContent: current.reasoningContent,
+            isReasoningLive: false
+        )
+    }
+
     func enqueuePresentationDelta(
         _ text: String,
         runID: NovelRunID,
@@ -2476,6 +2604,7 @@ private extension NovelSessionViewModel {
               bindingToken == token else { return }
         preparePresentationBuffer(for: current, token: token)
         presentationBuffer?.append(text)
+        normalizePresentationBufferIfNeeded(runKind: transientRunRecord?.kind)
         schedulePresentationFlush(
             runID: runID,
             messageID: current.messageID,
@@ -2493,11 +2622,24 @@ private extension NovelSessionViewModel {
               bindingToken == token else { return }
         preparePresentationBuffer(for: current, token: token)
         presentationBuffer?.replace(with: text)
+        normalizePresentationBufferIfNeeded(runKind: transientRunRecord?.kind)
         schedulePresentationFlush(
             runID: runID,
             messageID: current.messageID,
             token: token
         )
+    }
+
+    /// Keep buffer target in the same form the bubble displays for manuscript kinds.
+    func normalizePresentationBufferIfNeeded(runKind: NovelRunKind?) {
+        guard var buffer = presentationBuffer else { return }
+        let normalized = NovelSessionPresentationPacer.presentationContent(
+            buffer.targetContent,
+            runKind: runKind
+        )
+        guard normalized != buffer.targetContent else { return }
+        buffer.replace(with: normalized)
+        presentationBuffer = buffer
     }
 
     func preparePresentationBuffer(
@@ -2676,7 +2818,11 @@ private extension NovelSessionViewModel {
             bufferedContent = nil
         }
         presentationBuffer = nil
-        let targetContent = authoritativeContent ?? bufferedContent ?? current.content
+        let rawTarget = authoritativeContent ?? bufferedContent ?? current.content
+        let targetContent = NovelSessionPresentationPacer.presentationContent(
+            rawTarget,
+            runKind: transientRunRecord?.kind
+        )
         terminalAwaitingRefresh = true
         var didPublishTerminal = false
         defer {
@@ -2689,7 +2835,25 @@ private extension NovelSessionViewModel {
 
         // 与标准 Chat 的终态语义一致：complete/error/cancel 到达时，模型全文可能
         // 已领先可见文本很多拍。不能绕过 pacer 一次发布全部积压，否则正文高度会在
-        // 单帧暴涨，滚动驱动只能随后追赶。先逐拍追平，再切终态和刷新 durable。
+        // 单帧暴涨，滚动驱动只能随后追赶。先按 Chat 同源终态连续曲线逐拍追平，
+        // 再切终态和刷新 durable（完成时积压一次定锚，不逐拍衰减回慢节拍）。
+        let initialBase = NovelSessionPresentationPacer.terminalPacingBase(
+            displayedContent: current.content,
+            targetContent: targetContent,
+            runKind: transientRunRecord?.kind
+        )
+        let initialBacklog: Int
+        if targetContent.hasPrefix(initialBase) {
+            initialBacklog = targetContent.count - initialBase.count
+        } else {
+            initialBacklog = targetContent.count
+        }
+        let drainAdvance = NovelSessionPresentationPacer.terminalDrainAdvance(
+            backlogCount: initialBacklog
+        )
+        let drainDelayNanos = NovelSessionPresentationPacer.terminalDrainDelayNanos(
+            advance: drainAdvance
+        )
         while !Task.isCancelled,
               bindingToken == token,
               let visibleTail = transientTail,
@@ -2697,7 +2861,8 @@ private extension NovelSessionViewModel {
             let step = NovelSessionPresentationPacer.terminalStep(
                 displayedContent: visibleTail.content,
                 targetContent: targetContent,
-                runKind: transientRunRecord?.kind
+                runKind: transientRunRecord?.kind,
+                fixedTerminalAdvance: drainAdvance
             )
             if step.isCaughtUp {
                 if step.content != visibleTail.content || visibleTail.phase != phase {
@@ -2708,7 +2873,7 @@ private extension NovelSessionViewModel {
             }
             updateTail(content: step.content, phase: .streaming)
             do {
-                try await Task.sleep(nanoseconds: Self.presentationFlushDelayNanos)
+                try await Task.sleep(nanoseconds: drainDelayNanos)
             } catch {
                 return false
             }
@@ -2740,7 +2905,7 @@ private extension NovelSessionViewModel {
         transientRunRecord = run
         transientTail = NovelSessionTransientTail(
             run: run,
-            content: content,
+            content: NovelSessionPresentationPacer.presentationContent(content, runKind: run.kind),
             renderRevision: renderRevision,
             startingUserContent: startingUserContent,
             phase: phase
@@ -2768,7 +2933,9 @@ private extension NovelSessionViewModel {
             content: current.content,
             renderRevision: current.renderRevision,
             startingUserContent: current.startingUserContent,
-            phase: current.phase
+            phase: current.phase,
+            reasoningContent: current.reasoningContent,
+            isReasoningLive: current.isReasoningLive
         )
     }
 

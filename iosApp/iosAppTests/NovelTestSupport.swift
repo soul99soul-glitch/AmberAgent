@@ -13,6 +13,8 @@ extension NovelScriptedModelError: LocalizedError {
 
 enum NovelModelScriptStep: Equatable, Sendable {
     case activity
+    /// Presentation-only thinking; must never land in manuscript partials.
+    case reasoningDelta(String)
     case delta(String)
     case replacement(String)
     case usage(NovelModelUsage)
@@ -131,6 +133,8 @@ actor ScriptedNovelModelAdapter: NovelModelRunning {
             switch step {
             case .activity:
                 continuation.yield(.activity)
+            case .reasoningDelta(let text):
+                continuation.yield(.reasoningDelta(text))
             case .delta(let text):
                 continuation.yield(.textDelta(text))
             case .replacement(let text):

@@ -207,6 +207,10 @@ enum StreamPresentationPacingPolicy {
     static let maximumTextAdvance = 36
     /// 尽量在这么多拍内清空*当前*积压。
     static let preferredDrainTicks = 16
+    /// 24K-char terminal bursts are the observed worst normal reply; drain
+    /// that backlog within the existing 16 ticks without changing live pacing.
+    /// Shared by Chat and novel session presentation pacers.
+    static let terminalMaximumTextAdvance = 24 * 1_024 / preferredDrainTicks
 
     /// 按积压自适应的每拍推进量。
     ///
@@ -219,6 +223,32 @@ enum StreamPresentationPacingPolicy {
         let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
         return min(maximumTextAdvance, max(minimumTextAdvance, adaptive))
     }
+
+    /// 终态排空的节奏锚：整轮由完成时积压一次决定，不逐拍衰减。
+    /// 连续于积压、无阈值断点——小积压（几十字）≈12 字/拍 × 48ms；大积压
+    /// 趋近 1500 字/拍 × 8ms，约 16 拍 whoosh。Chat 与小说共用。
+    static func terminalDrainAdvance(backlogCount: Int) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
+
+    /// 排空拍间隔：由整轮节奏锚决定。advance≤36 保持 48ms 流式节拍；
+    /// advance 1500 时 8ms（120Hz 逐帧）。
+    static func terminalDrainDelayNanos(advance: Int) -> UInt64 {
+        let intervalMs = min(48.0, max(8.0, 48.0 * Double(maximumTextAdvance) / Double(max(advance, 1))))
+        return UInt64(intervalMs * 1_000_000)
+    }
+
+    /// 终态单拍推进量；`fixedAdvance` 为完成时定锚的整轮节奏。
+    static func terminalTextAdvance(
+        backlogCount: Int,
+        fixedAdvance: Int? = nil
+    ) -> Int {
+        guard backlogCount > 0 else { return 0 }
+        let adaptive = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+    }
 }
 
 enum ChatStreamPresentationPacer {
@@ -230,40 +260,27 @@ enum ChatStreamPresentationPacer {
     static var minimumTextAdvance: Int { StreamPresentationPacingPolicy.minimumTextAdvance }
     static var maximumTextAdvance: Int { StreamPresentationPacingPolicy.maximumTextAdvance }
     static var preferredDrainTicks: Int { StreamPresentationPacingPolicy.preferredDrainTicks }
-    /// 24K-char terminal bursts are the observed worst normal reply; drain
-    /// that backlog within the existing 16 ticks without changing live pacing.
-    private static let terminalMaximumTextAdvance = 24 * 1_024 / StreamPresentationPacingPolicy.preferredDrainTicks
 
     static func textAdvance(backlogCount: Int) -> Int {
         StreamPresentationPacingPolicy.textAdvance(backlogCount: backlogCount)
     }
 
-    /// 终态排空的节奏锚：整轮由完成时积压一次决定，不逐拍衰减。
-    /// 连续于积压、无阈值断点——小积压（几十字）≈12 字/拍 × 48ms，收尾读作
-    /// 打字的自然延续（真机录像里「最后半句一拍跳出、上跳一格」的载体是旧
-    /// 快排对小积压也一拍倒 36+ 字）；大积压趋近 1500 字/拍 × 8ms，16 拍
-    /// whoosh 平滑扫底，滚动层缓动把逐帧增长抹成连续快滚。逐拍衰减
-    /// （backlog/16 随剩余量缩小）会让后段掉回慢节拍，24k 实测拖到 2.4s。
     static func terminalDrainAdvance(backlogCount: Int) -> Int {
-        guard backlogCount > 0 else { return 0 }
-        let adaptive = (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
-        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+        StreamPresentationPacingPolicy.terminalDrainAdvance(backlogCount: backlogCount)
     }
 
-    /// 排空拍间隔：由整轮节奏锚决定。advance≤36 保持 48ms 流式节拍；
-    /// advance 1500 时 8ms（120Hz 逐帧）。
     static func terminalDrainDelayNanos(advance: Int) -> UInt64 {
-        let intervalMs = min(48.0, max(8.0, 48.0 * 36.0 / Double(max(advance, 1))))
-        return UInt64(intervalMs * 1_000_000)
+        StreamPresentationPacingPolicy.terminalDrainDelayNanos(advance: advance)
     }
 
     private static func terminalTextAdvance(
         backlogCount: Int,
         fixedAdvance: Int? = nil
     ) -> Int {
-        guard backlogCount > 0 else { return 0 }
-        let adaptive = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
-        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+        StreamPresentationPacingPolicy.terminalTextAdvance(
+            backlogCount: backlogCount,
+            fixedAdvance: fixedAdvance
+        )
     }
 
     /// 排空循环取当前剩余积压，供动态拍间隔使用。

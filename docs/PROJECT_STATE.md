@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-10 (ghostwrite chain-closure review fixes)
+Last updated: 2026-08-10 (ghostwrite chain-closure + chat streaming polish + novel session WIP)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -136,6 +136,27 @@ Last updated: 2026-08-10 (ghostwrite chain-closure review fixes)
 - Review 精准修复：skill enable/list/use 统一以目录名为键；单文件 `SKILL.md` import 顺带 sibling `mcp.json`；`mcp_import_from_skill` 跳过已存在同名 server；前台 `maxToolResumeCount` 4→6（与后台一致）。
 - 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests`（含 optional `visual-svg` seed/恢复/删除）**TEST SUCCEEDED**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
 - 未覆盖：真机对话闭环（启用 `visual-svg` 后画流程/插画）、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
+
+## Novel Session Streaming Parity（2026-08-10，进行中）
+
+计划：`docs/superpowers/plans/2026-08-10-novel-session-streaming-parity.md`。
+
+**已落地（本轮）：**
+- **A1 终态排空**：`StreamPresentationPacingPolicy` 抽出 `terminalDrainAdvance/DelayNanos/terminalTextAdvance`；Chat 与 `NovelSessionPresentationPacer` 共用；`publishTerminalPresentation` 完成时一次定锚 + 动态拍间隔（不再 36×48ms 慢拖）。
+- **B 思考流（presentation-only）**：`NovelModelEvent/FrameEvent/RunEvent.reasoningDelta`；adapter 发思考正文；lifecycle **只 broadcast 不写** `partialContent`/sidecar；Session tail + bubble 复用 `ChatReasoningCard`；结构化 executor 只心跳不并入 JSON 文本。AGENTS 已写防火墙。
+- **C1/C2 列表与滚动**：窗口内历史/活动行改 **eager VStack**（去掉 LazyVStack 空洞源）；native driver 跟底改 **explicitBottom(.streamGrowth) 钉底**，避免 τ 缓动欠账双写。
+
+**验证：** `NovelSessionReplayTests` + `NovelLiveModelAdapterTests` **70/70**；VM 终态/围栏/整章 **3/3**。审查修复定点 **4/4**（lifecycle 污染、session reasoning 呈现、eager 契约、adapter reasoning-only）。真机未验。
+
+**审查修复（精准）：** `NovelModelScript.reasoningDelta` + emit；`capturedEvents` 捕获思考；lifecycle/session 污染与呈现锁；stream-growth snap 在 userDragging/UIKit interacting 时 no-op。
+
+**A2/C3/D 收口（2026-08-10）：** 呈现缓冲对 manuscript 围栏归一化（pacer/bubble 同源）；非前缀 replacement 按公共前缀限速推进；生成状态条覆盖终态呈现窗 + minHeight 28；上下文环 `supportsReasoning` 随当前 tail 思考态。定点 7/7 绿。
+
+**审查 2 精准修复：** `isTerminalPresenting` 含 quiet retire 窗（flag 已清但 tail 仍为 `.terminalAwaitingRefresh`），避免完成后状态条先塌 ~28pt。不改 reparent/refresh 粘 busy（无真机证据 / 既有语义）。
+
+**真机安装（2026-08-10）：** iPhone Air（iPhone18,4，coredevice `94918570-0680-5B93-8E38-7E6B355D4426` / UDID `00008150-000A594E0AF8401C`）Debug arm64 覆盖安装，未卸载。Team `89QRFX9548`，`codesign --verify --deep --strict` 通过，`app.amber.ios` 已 launch。容器 `60BD71D5-7B03-4578-8D65-43C4B9203792`。含小说流式对齐全切片（A1–A2/B/C1–C3/D + quiet 状态条）。
+
+**未做 / 下一刀：** 真机 D1–D6 手感验收（思考卡 / 贴底 / 空白 / 完成瞬间）。
 
 ## Current Product Truth
 

@@ -590,6 +590,7 @@ private struct NovelProjectCreateSheet: View {
     @State private var coreIdea = ""
     @State private var isConfirmingDiscard = false
     @State private var validationMessage: String?
+    @State private var imeBank = NovelIMEFieldBank()
 
     var body: some View {
         NavigationStack {
@@ -603,24 +604,29 @@ private struct NovelProjectCreateSheet: View {
                 }
 
                 Section("项目") {
-                    TextField("小说名称", text: $name)
-                        .textInputAutocapitalization(.never)
+                    NovelIMETextField(
+                        text: $name,
+                        placeholder: "小说名称",
+                        bank: imeBank
+                    )
+                    .frame(minHeight: 36)
                 }
 
                 if mode == .quickStart {
                     Section {
-                        TextField("题材，例如：近未来悬疑", text: $genre)
-                        TextEditor(text: $coreIdea)
-                            .frame(minHeight: 120)
-                            .overlay(alignment: .topLeading) {
-                                if coreIdea.isEmpty {
-                                    Text("核心想法")
-                                        .foregroundStyle(.secondary)
-                                        .padding(.horizontal, 5)
-                                        .padding(.vertical, 8)
-                                        .allowsHitTesting(false)
-                                }
-                            }
+                        NovelIMETextField(
+                            text: $genre,
+                            placeholder: "题材，例如：近未来悬疑",
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 36)
+                        NovelIMETextEditor(
+                            text: $coreIdea,
+                            placeholder: "核心想法",
+                            minHeight: 120,
+                            bank: imeBank
+                        )
+                        .frame(minHeight: 120)
                     } header: {
                         Text("故事种子")
                     } footer: {
@@ -642,7 +648,7 @@ private struct NovelProjectCreateSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") {
-                        NovelTextInputCommitter.perform { requestDismiss() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { requestDismiss() }
                     }
                         .disabled(viewModel.isPerforming)
                         .confirmationDialog(
@@ -658,7 +664,7 @@ private struct NovelProjectCreateSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("创建") {
-                        NovelTextInputCommitter.perform { create() }
+                        NovelTextInputCommitter.perform(fieldBank: imeBank) { create() }
                     }
                         .disabled(viewModel.isProjectSelectionBlocked)
                 }
@@ -721,7 +727,7 @@ struct NovelProjectRenameSheet: View {
     @State private var name: String
     @State private var isSubmitting = false
     @State private var failureMessage: String?
-    @FocusState private var isNameFocused: Bool
+    @State private var imeBank = NovelIMEFieldBank()
 
     init(viewModel: NovelCreationViewModel, project: NovelProjectSummary) {
         self.viewModel = viewModel
@@ -743,11 +749,16 @@ struct NovelProjectRenameSheet: View {
                 Text("小说名称")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AmberTheme.muted)
-                TextField("小说名称", text: $name)
-                    .focused($isNameFocused)
-                    .submitLabel(.done)
-                    .onSubmit(commitNameAndSave)
-                    .textFieldStyle(.roundedBorder)
+                NovelIMETextField(
+                    text: $name,
+                    placeholder: "小说名称",
+                    isEnabled: !isSubmitting && canRename,
+                    bank: imeBank
+                )
+                .frame(minHeight: 36)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 8))
                 if let failureMessage {
                     Label(failureMessage, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
@@ -784,9 +795,7 @@ struct NovelProjectRenameSheet: View {
     }
 
     private func commitNameAndSave() {
-        // Do not clear FocusState before committer: that resigns without
-        // unmarkText and can drop the last IME composition from `name`.
-        NovelTextInputCommitter.perform {
+        NovelTextInputCommitter.perform(fieldBank: imeBank) {
             save(name.trimmingCharacters(in: .whitespacesAndNewlines))
         }
     }
