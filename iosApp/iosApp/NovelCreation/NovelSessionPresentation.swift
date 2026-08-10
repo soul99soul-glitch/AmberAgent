@@ -1838,6 +1838,9 @@ enum NovelSessionBottomFollowEvent: Equatable, Sendable {
 enum NovelSessionBottomFollowCommand: Equatable, Sendable {
     case anchorBottom
     case followBottom(animated: Bool)
+    /// 生成终态：driver 激活时发 generationTerminated（逐帧钉底 + 静默交还），
+    /// 与 Chat 同构；driver 未激活时退回 followBottom + quietSettle。
+    case terminateGeneration
     case setBottomButton(Bool)
     case scheduleTerminalQuietSettle(token: UInt64, delay: TimeInterval)
 }
@@ -2009,7 +2012,10 @@ private extension NovelSessionBottomFollowPolicy {
             state.nextSettleToken &+= 1
             let token = state.nextSettleToken
             state.mode = .settlingTerminal(token: token)
-            commands.append(.followBottom(animated: false))
+            // driver 激活时由它逐帧钉底（generationTerminated），视图层不再
+            // 需要 quietSettle 定时器——driver 的 idleStopInterval(0.3s) 静默
+            // 交还 + viewportChanged idle 近底重锚兜底晚到布局。
+            commands.append(.terminateGeneration)
             commands.append(.scheduleTerminalQuietSettle(
                 token: token,
                 delay: terminalQuietDelay

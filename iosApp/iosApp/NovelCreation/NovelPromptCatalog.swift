@@ -64,6 +64,7 @@ enum NovelPromptCatalog {
                 "novel.prose-whole-chapter.v1",
                 "novel.prose-whole-chapter.v2",
                 "novel.prose-whole-chapter.v3",
+                "novel.prose-whole-chapter.v4",
             ])
         case .wholeChapterPolish:
             versions.insert("novel.whole-chapter-polish.v2")
@@ -207,17 +208,20 @@ enum NovelPromptCatalog {
         case .proseWholeChapter:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.prose-whole-chapter.v4",
+                version: "novel.prose-whole-chapter.v5",
                 systemText: """
                 Write one complete next chapter with a coherent chapter-level arc: an opening grounded in the
                 prior chapter, sustained development through connected scenes or beats, a meaningful change, and
                 an ending beat or hook. Preserve all supplied project rules, established branch facts, character
                 motivations, point of view, and tone. Continue from the prior chapter without recapping or
                 rewriting it. Do not stop after a single short scene unless the user explicitly requests a short
-                chapter. Begin with one concise Markdown H1 chapter heading that names this chapter, followed by
-                the full polished chapter candidate. Return no analysis, preface, or afterword. Do not wrap the
-                chapter in Markdown code fences (for example ```html or ```markdown). This output is a draft
-                candidate and does not become canonical until the user collects it. Use the user's language.
+                chapter. Begin with one Markdown H1 chapter heading, followed by the full polished chapter
+                candidate. The heading must be a concise evocative title of 1–8 characters in the user's
+                language (e.g. 两脚羊, 同行, 野宿, 渡河, 千里送京娘). Do not prefix with "第X章" or chapter
+                numbers. Do not use a full sentence as the heading. Return no analysis, preface, or afterword.
+                Do not wrap the chapter in Markdown code fences (for example ```html or ```markdown). This output
+                is a draft candidate and does not become canonical until the user collects it. Use the user's
+                language.
                 """
             )
 
@@ -381,7 +385,9 @@ enum NovelPromptCatalog {
                 recent written beats as new obligations. Prefer forward motion over recap.
                 mustHappen must contain at least one concrete event the chapter must deliver.
                 mustNotHappen lists clear bans (may be empty). endingHook and visibleFacts may be empty
-                strings / empty arrays when unused. outlinePlacement should name chapter position briefly.
+                strings / empty arrays when unused. outlinePlacement must be a concise evocative
+                chapter title of 1–8 characters (e.g. 两脚羊, 同行, 野宿, 渡河, 千里送京娘).
+                Do not prefix with "第X章" or chapter numbers. Do not use a full sentence.
                 Use the user's language. Return only the JSON object.
 
                 \(chapterPlanProposalJSONContract)
@@ -605,8 +611,21 @@ enum NovelPromptCatalog {
             motivations, point of view, and tone. Continue from the prior chapter without recapping or
             rewriting it. Do not stop after a single short scene unless the user explicitly requests a short
             chapter. Begin with one concise Markdown H1 chapter heading that names this chapter, followed by
-            the full polished chapter candidate. Return no analysis, preface, or afterword. This output is a
-            draft candidate and does not become canonical until the user collects it. Use the user's language.
+            the full polished chapter candidate. Return no analysis, preface, or afterword. Do not wrap the
+            chapter in Markdown code fences (for example ```html or ```markdown). This output is a draft
+            candidate and does not become canonical until the user collects it. Use the user's language.
+            """
+        case (.proseWholeChapter, "novel.prose-whole-chapter.v4"):
+            """
+            Write one complete next chapter with a coherent chapter-level arc: an opening grounded in the
+            prior chapter, sustained development through connected scenes or beats, a meaningful change, and
+            an ending beat or hook. Preserve all supplied project rules, established branch facts, character
+            motivations, point of view, and tone. Continue from the prior chapter without recapping or
+            rewriting it. Do not stop after a single short scene unless the user explicitly requests a short
+            chapter. Begin with one concise Markdown H1 chapter heading that names this chapter, followed by
+            the full polished chapter candidate. Return no analysis, preface, or afterword. Do not wrap the
+            chapter in Markdown code fences (for example ```html or ```markdown). This output is a draft
+            candidate and does not become canonical until the user collects it. Use the user's language.
             """
         case (.wholeChapterPolish, "novel.whole-chapter-polish.v2"):
             """

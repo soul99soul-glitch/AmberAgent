@@ -1844,7 +1844,9 @@ final class NovelSessionReplayTests: XCTestCase {
             return XCTFail("Expected late Markdown growth to restart terminal settling")
         }
         XCTAssertGreaterThan(thirdToken, secondToken)
-        XCTAssertTrue(postQuietGrowth.commands.contains(.followBottom(animated: false)))
+        // 终态 settle 现在发 terminateGeneration（driver 逐帧钉底），
+        // 不再发 followBottom(animated:false)（旧一次性 snap）。
+        XCTAssertTrue(postQuietGrowth.commands.contains(.terminateGeneration))
         XCTAssertTrue(postQuietGrowth.commands.contains(
             .scheduleTerminalQuietSettle(
                 token: thirdToken,

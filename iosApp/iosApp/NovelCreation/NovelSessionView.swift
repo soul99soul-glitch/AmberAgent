@@ -435,6 +435,18 @@ struct NovelSessionView: View {
             for event in followEvents {
                 dispatchFollowEvent(event)
             }
+            // 生成中近底被动恢复跟随（与 Chat resumeNativeBottomFollowFromGeometryIfNeeded
+            // 同语义）：driver 激活时，内容增长把视口推离底部但仍落在 driver 的
+            // resumeEpsilon(48pt) 内、用户没在拖——再发一拍 streamContentGrew，
+            // driver 的 idle+nearBottom 分支会自动接管恢复 followingBottom。
+            // browsingHistory（用户主动拖离 → driver pausedForUser）不受影响：
+            // streamContentGrew 在 pausedForUser 下是 no-op（NativeTimelineScrollCore:140-141）。
+            if isNativeScrollDriverActive, !userDragging,
+               !scrollDriver.isUIKitUserInteracting,
+               isLiveTailPhase(listSignal.activeTailPhase),
+               newValue.isNearBottom, !newValue.isAtBottom {
+                scrollDriver.submit(.streamContentGrew)
+            }
         }
         .transaction(value: listSignal.activeTailDigest) { transaction in
             if isLiveTailPhase(listSignal.activeTailPhase) {
@@ -1571,9 +1583,8 @@ struct NovelSessionView: View {
             }
         case .followBottom(let animated):
             if isNativeScrollDriverActive {
-                // Single owner while native driver is attached: never also call
-                // SwiftUI scrollPosition.scrollTo in this branch.
                 if animated {
+                    // 底部按钮回底：带动画的显式锚定。
                     scrollDriver.submit(
                         .explicitBottom(
                             source: .button,
@@ -1582,17 +1593,12 @@ struct NovelSessionView: View {
                         )
                     )
                 } else {
-                    // Snap only when the user is not interacting. `explicitBottom`
-                    // is allowed during UIKit tracking (unlike streamContentGrew),
-                    // so reusing it for stream growth must not fight a drag.
-                    guard !userDragging, !scrollDriver.isUIKitUserInteracting else { return }
-                    scrollDriver.submit(
-                        .explicitBottom(
-                            source: .streamGrowth,
-                            animated: false,
-                            keyboardToken: nil
-                        )
-                    )
+                    // 流式增长：提交 streamContentGrew 让 driver 走 followingBottom
+                    // + frame driver 连续追底（与 Chat 同构）。旧实现用一次性
+                    // explicitBottom(.streamGrowth) snap，回调间隔内的增长欠账
+                    // 无人追 → 滑不到底。streamContentGrew 在用户交互时由 driver
+                    // 自动 paused，无需视图层守卫。
+                    scrollDriver.submit(.streamContentGrew)
                 }
                 return
             }
@@ -1601,6 +1607,14 @@ struct NovelSessionView: View {
             } else if explicitBottomAnimationTask != nil {
                 explicitBottomFollowPending = true
             } else {
+                performLiveBottomFollow()
+            }
+        case .terminateGeneration:
+            if isNativeScrollDriverActive {
+                // 与 Chat 终态同构：driver 逐帧钉底 + 静默交还 + idle 近底重锚。
+                scrollDriver.submit(.generationTerminated)
+            } else {
+                // driver 未激活（fallback 模式）：退回 followBottom snap。
                 performLiveBottomFollow()
             }
         case .setBottomButton:

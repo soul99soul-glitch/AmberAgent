@@ -225,22 +225,35 @@ struct NovelChapterReaderView: View {
     }
 
     private var reader: some View {
-        ScrollView {
-            if let version = currentVersion {
-                ChatAssistantMarkdownView(
-                    markdown: version.content,
-                    renderCacheNamespace: "novel:chapter:\(version.id)"
-                )
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 22)
-                .padding(.top, 28)
-                .padding(.bottom, 44)
-            } else {
-                ContentUnavailableView("章节不存在", systemImage: "doc.text.magnifyingglass")
-                    .padding(.top, 80)
+        ScrollViewReader { proxy in
+            ScrollView {
+                // 固定锚点：切章时 scrollTo("chapter-top") 回到开头。
+                Color.clear
+                    .frame(height: 0)
+                    .id("chapter-top")
+
+                if let version = currentVersion {
+                    ChatAssistantMarkdownView(
+                        markdown: version.content,
+                        renderCacheNamespace: "novel:chapter:\(version.id)"
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 22)
+                    .padding(.top, 28)
+                    .padding(.bottom, 44)
+                } else {
+                    ContentUnavailableView("章节不存在", systemImage: "doc.text.magnifyingglass")
+                        .padding(.top, 80)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: chapterID) { _, _ in
+                proxy.scrollTo("chapter-top", anchor: .top)
+            }
+            .onAppear {
+                proxy.scrollTo("chapter-top", anchor: .top)
             }
         }
-        .scrollIndicators(.hidden)
     }
 
     private var chapterNavigation: some View {

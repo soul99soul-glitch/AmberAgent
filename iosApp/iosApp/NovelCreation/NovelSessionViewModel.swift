@@ -3137,6 +3137,11 @@ extension NovelSessionViewModel {
               workspace.projectSnapshot?.project.collaborationMode == .ghostwrite
         else { return false }
         if canResumeGhostwriteWithoutPlan { return true }
+        // 完批后开新批：允许没有确认计划（pipeline 自动拟定），与批内第 2～N 章同路径。
+        if ghostwriteProgressStorage?.pauseReason == .batchCompleted
+            || ghostwriteProgressStorage?.pauseReason == .chapterCompleted {
+            return true
+        }
         return workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) != nil
     }
 
@@ -3184,7 +3189,14 @@ extension NovelSessionViewModel {
                 : (targetChapterCount ?? ghostwriteTargetChapterCount)
         )
         let confirmedPlan = workspace.projectSnapshot?.confirmedChapterPlan(for: binding.branchID)
-        if confirmedPlan == nil, !canResumeGhostwriteWithoutPlan {
+        // 完批后开新批：允许没有确认计划直接进入 pipeline 的 planning 阶段自动拟定
+        //（与批内第 2～N 章同路径，proposeAndConfirmNextChapterPlan）。
+        // 首次启动（无前批）仍需用户手动确认计划。
+        let isStartingNewBatchAfterCompletion = !resumingBatch
+            && (previous?.pauseReason == .batchCompleted || previous?.pauseReason == .chapterCompleted)
+        if confirmedPlan == nil,
+           !canResumeGhostwriteWithoutPlan,
+           !isStartingNewBatchAfterCompletion {
             operationErrorMessage = "代笔需要已确认的本章计划。"
             return false
         }
@@ -4025,6 +4037,11 @@ extension NovelSessionViewModel {
     private func proposeNextGhostwritePlan(
         expectedBinding: NovelSessionBinding
     ) async throws -> NovelChapterPlanRecord? {
+        // 新批首章（completed==0）：拟完计划后暂停让用户确认。
+        // 批内后续（completed>0）：拟完直接连写，不中断节奏。
+        let completedBeforeProposal = ghostwriteProgressStorage?.completedChapterCount ?? 0
+        let isAutoProposalForUserConfirmation = completedBeforeProposal == 0
+
         mutateGhostwriteProgress(binding: expectedBinding) {
             $0.phase = .planning
             $0.pauseReason = nil
@@ -4062,6 +4079,16 @@ extension NovelSessionViewModel {
                     previousPlanSummary: previousSummary
                 )
                 _ = await refreshDurable(binding: binding, token: bindingToken)
+                if isAutoProposalForUserConfirmation {
+                    // 新批首章：计划已拟定并落盘，暂停等用户确认后再连写。
+                    pauseGhostwritePipeline(
+                        binding: expectedBinding,
+                        reason: .planProposedForNewBatch,
+                        detail: nil,
+                        candidateID: ghostwriteProgressStorage?.candidateID
+                    )
+                    return nil
+                }
                 mutateGhostwriteProgress(binding: expectedBinding) {
                     $0.chapterPlanDigest = plan.contentDigest
                     $0.phase = .writing
@@ -4459,7 +4486,7 @@ extension NovelSessionViewModel {
         candidateID: NovelCandidateID?
     ) {
         let phase: NovelGhostwritePhase = switch reason {
-        case .chapterCompleted, .batchCompleted: .waitingUser
+        case .chapterCompleted, .batchCompleted, .planProposedForNewBatch: .waitingUser
         case .healBudgetExhausted: .waitingUser
         case .acceptanceFailed, .obviousRepetition, .blockingContinuity,
              .continuityAuditIncomplete, .userPaused, .cancelled,
@@ -4478,7 +4505,8 @@ extension NovelSessionViewModel {
                 $0.supersededCandidateIDs.insert(candidateID)
             }
         }
-        if reason != .chapterCompleted, reason != .batchCompleted {
+        if reason != .chapterCompleted, reason != .batchCompleted,
+           reason != .planProposedForNewBatch {
             operationErrorMessage = detail ?? reason.displayMessage
         }
     }

@@ -1026,21 +1026,42 @@ struct NovelWritingContextSheet: View {
                     }
                 }
                 ToolbarItemGroup(placement: .confirmationAction) {
-                    if selectedTab == .context {
+                    if collaborationMode == .ghostwrite {
+                        // 代笔模式：右上角是代笔操作入口（比预览实用得多）。
+                        // 代笔进行中→暂停；未进行→开始/继续/下一批。
+                        if session.isGhostwriting {
+                            Button("暂停") {
+                                session.pauseGhostwrite()
+                            }
+                        } else if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
+                            // 新批首章计划已自动拟定，等用户确认后连写。
+                            Button("确认计划，开始写") {
+                                _ = session.continueGhostwriteChapter()
+                            }
+                            .disabled(!session.canStartGhostwriteChapter)
+                        } else if shouldShowContinueGhostwrite {
+                            Button(continueGhostwriteButtonTitle) {
+                                _ = session.continueGhostwriteChapter()
+                            }
+                            .disabled(!session.canStartGhostwriteChapter)
+                        } else {
+                            let isNextBatch = session.ghostwriteProgress?.pauseReason == .batchCompleted
+                                || session.ghostwriteProgress?.pauseReason == .chapterCompleted
+                            Button(isNextBatch ? "代笔下一批" : "开始代笔") {
+                                let n = NovelGhostwriteBatch.clamp(session.ghostwriteTargetChapterCount)
+                                _ = session.startGhostwriteChapter(targetChapterCount: n)
+                            }
+                            .disabled(!session.canStartGhostwriteChapter)
+                        }
+                    } else {
+                        // 共创模式：预览注入计划。
                         Button("预览") {
                             NovelTextInputCommitter.perform(fieldBank: planFieldBank) {
                                 preview()
                             }
                         }
-                            .disabled(!canPreview || workspace.isPerforming)
+                        .disabled(!canPreview || workspace.isPerforming)
                     }
-                    Button("应用") {
-                        NovelTextInputCommitter.perform(fieldBank: planFieldBank) {
-                            onApply(overrides, budgetTokens)
-                            dismiss()
-                        }
-                    }
-                    .disabled(workspace.isPerforming)
                 }
             }
             .overlay {
@@ -1048,6 +1069,17 @@ struct NovelWritingContextSheet: View {
             }
         }
         .interactiveDismissDisabled(workspace.isPerforming)
+        .onDisappear {
+            // 面板关闭（下滑或切走）时兜底：计划有未保存改动 → 存草稿；
+            // 预算兜底回写（滑块拖动中不触发，关闭时落定）。
+            // 资料覆盖已在勾选时即时回写，无需重复。
+            NovelTextInputCommitter.perform(fieldBank: planFieldBank) {
+                if planFieldsDirty {
+                    Task { await saveChapterPlan(status: .draft) }
+                }
+                onApply(overrides, budgetTokens)
+            }
+        }
         .confirmationDialog(
             "清除本章计划？",
             isPresented: $confirmClearPlan,
@@ -1293,6 +1325,20 @@ struct NovelWritingContextSheet: View {
                             .buttonStyle(.bordered)
                             .controlSize(.regular)
                             .contentShape(Rectangle())
+                        } else if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
+                            // 与右上角按钮同文案同动作。
+                            Button {
+                                _ = session.continueGhostwriteChapter()
+                            } label: {
+                                Text("确认计划，开始写")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .contentShape(Rectangle())
+                            .disabled(!session.canStartGhostwriteChapter)
                         } else if shouldShowContinueGhostwrite {
                             if session.ghostwriteProgress?.shouldOfferRevisionSheet == true {
                                 Button {
@@ -1336,10 +1382,15 @@ struct NovelWritingContextSheet: View {
                             }
                         } else {
                             let n = NovelGhostwriteBatch.clamp(session.ghostwriteTargetChapterCount)
+                            let isStartingNextBatch = session.ghostwriteProgress?.pauseReason == .batchCompleted
+                                || session.ghostwriteProgress?.pauseReason == .chapterCompleted
                             Button {
                                 _ = session.startGhostwriteChapter(targetChapterCount: n)
                             } label: {
-                                Text(n == 1 ? "开始代笔本章" : "开始代笔 · \(n) 章")
+                                Text(isStartingNextBatch
+                                    ? (n == 1 ? "代笔下一章" : "代笔下一批 · \(n) 章")
+                                    : (n == 1 ? "开始代笔本章" : "开始代笔 · \(n) 章")
+                                )
                                     .lineLimit(1)
                                     .minimumScaleFactor(0.8)
                                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -1685,10 +1736,15 @@ struct NovelWritingContextSheet: View {
     private var modeSectionFooter: String {
         var parts = [collaborationMode.shortSummary]
         if collaborationMode == .ghostwrite {
-            if shouldShowContinueGhostwrite {
+            if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
+                parts.append("已自动拟定下一章计划。确认后开始写，批内后续章节全自动连写。")
+            } else if shouldShowContinueGhostwrite {
                 parts.append("本批未完成：可继续；质量问题会自动改写几次，仍不过再停住。")
             } else if session.isGhostwriting {
                 parts.append("代笔进行中，可在下方暂停。")
+            } else if session.ghostwriteProgress?.pauseReason == .batchCompleted
+                        || session.ghostwriteProgress?.pauseReason == .chapterCompleted {
+                parts.append("上一批已完成。在下方「代笔」区点按钮开始下一批。")
             } else {
                 parts.append("可用「开始代笔」按批自动写整章并验收收录；也可以继续自己点。")
             }
@@ -1704,11 +1760,26 @@ struct NovelWritingContextSheet: View {
 
     private var ghostwriteAdvanceSectionTitle: String {
         if session.isGhostwriting { return "代笔进行中" }
+        // planProposedForNewBatch 优先级在 shouldShowContinueGhostwrite 之前，
+        // 与 toolbar 按钮分支顺序一致，避免文案矛盾。
+        if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
+            return "确认计划后开始写"
+        }
         if shouldShowContinueGhostwrite { return "继续本批代笔" }
+        // 完批/完章后：用户看到的应是「下一批」而非看起来像初始的「开始代笔」。
+        if session.ghostwriteProgress?.pauseReason == .batchCompleted {
+            return "开启下一批代笔"
+        }
+        if session.ghostwriteProgress?.pauseReason == .chapterCompleted {
+            return "代笔下一章"
+        }
         return "开始代笔"
     }
 
     private var ghostwriteAdvanceSectionFooter: String {
+        if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
+            return "已自动拟定下一章计划。确认后开始写本章，批内后续章节全自动连写。"
+        }
         if shouldShowContinueGhostwrite {
             if session.ghostwriteProgress?.shouldOfferRevisionSheet == true {
                 return "建议先「按审稿意见润修」（可改要求）；也可整章重写或先改本章计划。不会用旧稿再验。"
@@ -1717,6 +1788,13 @@ struct NovelWritingContextSheet: View {
                 return "继续将重写本章，不会用同一篇旧稿再验收。"
             }
             return "继续本批：先处理同步或拟定计划，再往下写。"
+        }
+        // 完批后明确告诉用户：上一批已完成，点按钮开始下一批。
+        if session.ghostwriteProgress?.pauseReason == .batchCompleted {
+            return "上一批已全部完成并收录。点「代笔下一批」继续连写，或修改章数后再开始。"
+        }
+        if session.ghostwriteProgress?.pauseReason == .chapterCompleted {
+            return "本章已完成。点「代笔下一章」继续，或修改章数后再开始。"
         }
         return "最多连续 \(NovelGhostwriteBatch.maxChapterCount) 章。首章需已确认计划；之后自动拟计划并连写。写不过会自动改写几次，仍不过会停，不会假装写完。"
     }
@@ -2087,7 +2165,9 @@ struct NovelWritingContextSheet: View {
     private var budgetSliderValue: Binding<Double> {
         Binding(
             get: { Double(budgetTokens) },
-            set: { budgetTokens = Int($0.rounded()) }
+            set: { newValue in
+                budgetTokens = Int(newValue.rounded())
+            }
         )
     }
 
@@ -2103,13 +2183,12 @@ struct NovelWritingContextSheet: View {
         guard let preview = workspace.injectionPreview,
               previewSignature == currentPreviewSignature,
               preview.projectID == workspace.selectedProjectID,
-              preview.branchID == workspace.selectedBranchID,
-              preview.requestedInputBudgetTokens == budgetTokens,
-              preview.projectRevision == workspace.projectSnapshot?.project.revision,
-              preview.configRevision == workspace.projectSnapshot?.project.configRevision,
-              preview.branchHeadRevision == workspace.branchSnapshot?.branch.headRevision else {
+              preview.branchID == workspace.selectedBranchID else {
             return nil
         }
+        // 预算和 overrides 签名已在 currentPreviewSignature 里覆盖；
+        // revision 变化（收录章节、同步状态等）不影响已算出的注入计划，
+        // 旧实现把它们也纳入匹配，导致预览频繁「已失效」。
         return preview
     }
 
@@ -2150,6 +2229,8 @@ struct NovelWritingContextSheet: View {
                 } else {
                     materialChoices[materialID] = choice
                 }
+                // 即时回写：勾选/取消即时生效，不需要再点「应用」。
+                onApply(overrides, budgetTokens)
             }
         )
     }

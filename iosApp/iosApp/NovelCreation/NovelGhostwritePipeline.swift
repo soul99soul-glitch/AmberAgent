@@ -78,6 +78,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     case cancelled
     /// 自动改写预算用尽，等待润修或改合同。
     case healBudgetExhausted
+    /// 新批首章已自动拟定计划，等用户确认后连写。
+    case planProposedForNewBatch
     /// 基建失败（传输/取消外的模型执行故障等）：不是质量判定，候选不背锅。
     case infrastructureFailed
 
@@ -99,6 +101,7 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
         case .planProposalFailed: "自动拟定下一章计划失败，已暂停代笔。"
         case .chapterCompleted: "本章已收录并同步。请先定好下一章计划再继续。"
         case .batchCompleted: "本批代笔已完成。"
+        case .planProposedForNewBatch: "已自动拟定下一章计划，确认后开始写。"
         case .cancelled: "代笔已取消。"
         case .healBudgetExhausted:
             "自动改写已达上限仍未过关。建议按审稿意见润修，或整章重写 / 改本章计划。"
@@ -110,7 +113,7 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     /// 合同已消费、但本批仍可续跑时，继续不要求已确认合同。
     var resumesWithoutConfirmedPlan: Bool {
         switch self {
-        case .syncFailed, .planProposalFailed, .infrastructureFailed: true
+        case .syncFailed, .planProposalFailed, .infrastructureFailed, .planProposedForNewBatch: true
         default: false
         }
     }
@@ -122,7 +125,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
              .incompleteCandidate, .planMismatch, .healBudgetExhausted:
             return true
         case .userPaused, .continuityAuditIncomplete, .collectFailed, .syncFailed,
-             .planProposalFailed, .chapterCompleted, .batchCompleted, .cancelled,
+             .planProposalFailed, .planProposedForNewBatch,
+             .chapterCompleted, .batchCompleted, .cancelled,
              .infrastructureFailed:
             return false
         }
@@ -720,6 +724,8 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
                 return "本批已完成\(done)"
             case .chapterCompleted:
                 return "本章已完成"
+            case .planProposedForNewBatch:
+                return "已拟定计划 · 待确认"
             case .healBudgetExhausted:
                 return "代笔待润修\(batch)"
             default:
@@ -755,6 +761,9 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             if pauseReason == .chapterCompleted || pauseReason == .batchCompleted {
                 return "写✓验✓收✓同✓" + batchSuffix
             }
+            if pauseReason == .planProposedForNewBatch {
+                return "同✓ · 计划已拟定" + batchSuffix
+            }
             if pauseReason == .healBudgetExhausted {
                 return "待润修" + batchSuffix
             }
@@ -779,7 +788,8 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             return false
         case .userPaused, .acceptanceFailed, .obviousRepetition, .blockingContinuity,
              .continuityAuditIncomplete, .collectFailed, .syncFailed, .incompleteCandidate,
-             .planMismatch, .planProposalFailed, .healBudgetExhausted, .infrastructureFailed:
+             .planMismatch, .planProposalFailed, .planProposedForNewBatch,
+             .healBudgetExhausted, .infrastructureFailed:
             return true
         }
     }
