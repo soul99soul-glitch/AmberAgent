@@ -112,6 +112,23 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testChinesePipelineErrorPassesThroughInsteadOfGenericReload() {
+        // 回归：代笔等链路直接抛中文 invalidInput，曾被统一抹成「请重新载入后再试」。
+        // 中文详情原样透传；英文未知详情仍走兜底。
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "本章已收录，但未能清除计划。请手动清除后再继续。"
+            )),
+            "本章已收录，但未能清除计划。请手动清除后再继续。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "Some unmatched invariants."
+            )),
+            "当前操作的内容或项目状态不匹配，请重新载入后再试。"
+        )
+    }
+
     func testMalformedPersistedStateSyncFailureHasActionableCopy() {
         XCTAssertEqual(
             NovelPresentation.stateSyncFailureMessage("The model returned malformed JSON."),

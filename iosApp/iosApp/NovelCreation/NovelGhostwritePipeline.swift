@@ -11,8 +11,41 @@ enum NovelGhostwriteBatch {
     static let minChapterCount = 1
     static let maxChapterCount = 10
 
+    /// 代笔写稿的输入预算请求值：对齐结构化执行器内部上限，
+    /// 由 `effectiveInputBudget` 再按模型窗口与输出留位收敛。
+    /// 此前硬编码 16_000，总纲等常驻资料一多就必撞注入预算墙。
+    static let writeInputBudgetTokens =
+        NovelStructuredModelExecutor.maximumInternalInputBudgetTokens
+
     static func clamp(_ value: Int) -> Int {
         min(max(value, minChapterCount), maxChapterCount)
+    }
+}
+
+/// 代笔基建重试（纯逻辑，可单测）：只对执行器标记为可重试的失败做有界重试。
+/// 与章计划拟定的 3 次重试对齐——验收/连续性审计此前零重试，
+/// 一次传输抖动就把整批代笔打停。取消必须立即透传，绝不重试。
+enum NovelGhostwriteInfraRetry {
+    static let maxAttempts = 3
+
+    static func run<T: Sendable>(
+        maxAttempts: Int = maxAttempts,
+        onRetry: @Sendable (Int) async -> Void = { _ in },
+        operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                return try await operation()
+            } catch let failure as NovelStructuredModelExecutionFailure
+                where failure.failure.isRetryable
+                    && failure.failure.code != "cancelled"
+                    && attempt < maxAttempts {
+                await onRetry(attempt)
+                try await Task.sleep(for: .milliseconds(400 * attempt))
+            }
+        }
     }
 }
 
@@ -45,6 +78,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     case cancelled
     /// 自动改写预算用尽，等待润修或改合同。
     case healBudgetExhausted
+    /// 基建失败（传输/取消外的模型执行故障等）：不是质量判定，候选不背锅。
+    case infrastructureFailed
 
     var displayMessage: String {
         switch self {
@@ -67,13 +102,15 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
         case .cancelled: "代笔已取消。"
         case .healBudgetExhausted:
             "自动改写已达上限仍未过关。建议按审稿意见润修，或整章重写 / 改本章计划。"
+        case .infrastructureFailed:
+            "模型调用失败（非质量判定）。继续将从当前阶段重试，已产候选不丢弃。"
         }
     }
 
     /// 合同已消费、但本批仍可续跑时，继续不要求已确认合同。
     var resumesWithoutConfirmedPlan: Bool {
         switch self {
-        case .syncFailed, .planProposalFailed: true
+        case .syncFailed, .planProposalFailed, .infrastructureFailed: true
         default: false
         }
     }
@@ -82,11 +119,11 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     var requiresRewriteOnContinue: Bool {
         switch self {
         case .acceptanceFailed, .obviousRepetition, .blockingContinuity,
-             .continuityAuditIncomplete, .incompleteCandidate, .planMismatch,
-             .healBudgetExhausted:
+             .incompleteCandidate, .planMismatch, .healBudgetExhausted:
             return true
-        case .userPaused, .collectFailed, .syncFailed, .planProposalFailed,
-             .chapterCompleted, .batchCompleted, .cancelled:
+        case .userPaused, .continuityAuditIncomplete, .collectFailed, .syncFailed,
+             .planProposalFailed, .chapterCompleted, .batchCompleted, .cancelled,
+             .infrastructureFailed:
             return false
         }
     }
@@ -113,7 +150,9 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
                 break
             }
         }
-        return .acceptanceFailed
+        // 其余抛错全是基建面（传输/解码/执行故障），不是质量判定：
+        // 归入 infra，继续时从当前阶段重试，不强制重写已产候选。
+        return .infrastructureFailed
     }
 }
 
@@ -740,7 +779,7 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             return false
         case .userPaused, .acceptanceFailed, .obviousRepetition, .blockingContinuity,
              .continuityAuditIncomplete, .collectFailed, .syncFailed, .incompleteCandidate,
-             .planMismatch, .planProposalFailed, .healBudgetExhausted:
+             .planMismatch, .planProposalFailed, .healBudgetExhausted, .infrastructureFailed:
             return true
         }
     }

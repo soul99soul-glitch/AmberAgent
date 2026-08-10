@@ -534,6 +534,11 @@ struct NovelSessionView: View {
                 errorBanner(error)
             }
 
+            // 代笔状态条：中断/失败后主界面也能直接「继续」，不必打开管理面板。
+            if let ghostwrite = viewModel.ghostwriteProgress {
+                ghostwriteStatusBar(ghostwrite)
+            }
+
             HStack(alignment: .bottom, spacing: 8) {
                 HStack(alignment: .center, spacing: 6) {
                     ZStack(alignment: .leading) {
@@ -969,6 +974,49 @@ struct NovelSessionView: View {
             }
         }
         .padding(.horizontal, 4)
+    }
+
+    /// 主界面代笔状态条：状态 + 详情 + 暂停/继续。复用会话 VM 既有入口，
+    /// 不引入新状态；继续键沿用与面板一致的 `canStartGhostwriteChapter` 门。
+    private func ghostwriteStatusBar(_ progress: NovelGhostwriteProgress) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: viewModel.isGhostwriting ? "pencil.and.scribble" : "pause.circle")
+                .foregroundStyle(AmberTheme.accentAmber)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(progress.statusLabel)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let detail = progress.detailMessage, !detail.isEmpty {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if viewModel.isGhostwriting {
+                Button("暂停") {
+                    viewModel.pauseGhostwrite()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            } else if progress.shouldContinueSameBatch {
+                Button("继续") {
+                    _ = viewModel.continueGhostwriteChapter()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .disabled(!viewModel.canStartGhostwriteChapter)
+            }
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
     }
 
     private func quickStartRecovery(

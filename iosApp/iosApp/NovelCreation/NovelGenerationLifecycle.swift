@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 struct NovelGenerationPolicy: Equatable, Sendable {
     let sidecarByteThreshold: Int
@@ -1049,12 +1050,20 @@ private extension DefaultNovelCreation {
         subtitle: String
     ) async {
         await MainActor.run {
+            let leaseID = novelRunBackgroundLeaseID(for: runID)
             BackgroundGenerationKeepAlive.shared.updateProgress(
-                novelRunBackgroundLeaseID(for: runID),
+                leaseID,
                 completed: completed,
                 total: 4,
                 subtitle: subtitle
             )
+            // completed>=2 表示已见可见正文；此时再挂系统进度卡才安全。
+            if completed >= 2 {
+                BackgroundGenerationKeepAlive.shared.promoteSystemTaskIfNeeded(
+                    leaseID,
+                    subtitle: subtitle
+                )
+            }
         }
     }
 
@@ -1263,37 +1272,47 @@ private extension DefaultNovelCreation {
         projectID: NovelProjectID,
         runID: NovelRunID
     ) async {
+        let hasCursor = generationRuntimes[runID]?.responseCursor != nil
         await MainActor.run {
             let leaseID = novelRunBackgroundLeaseID(for: runID)
+            let rearm: () -> Void = { [weak self] in
+                Task { await self?.beginRecoveredBackgroundLease(projectID: projectID, runID: runID) }
+            }
+            let onLoss: () -> Void = { [weak self] in
+                Task { @MainActor in
+                    // 非后台丢租约：重挂，避免控制中心/进度卡误杀。
+                    if UIApplication.shared.applicationState != .background {
+                        rearm()
+                        return
+                    }
+                    await self?.interruptForBackground(
+                        projectID: projectID,
+                        deadline: Date(),
+                        runID: runID
+                    )
+                }
+            }
+            // 恢复时若已有 cursor，说明已有输出，可直接挂系统卡；否则等同首 token 前。
             BackgroundGenerationKeepAlive.shared.begin(
                 leaseID,
                 title: "Amber 小说创作中",
                 subtitle: "恢复后台生成",
-                onExpire: { [weak self] in
-                    Task {
-                        await self?.interruptForBackground(
-                            projectID: projectID,
-                            deadline: Date(),
-                            runID: runID
-                        )
-                    }
-                },
-                onSystemTaskExpiration: { [weak self] in
-                    Task {
-                        await self?.interruptForBackground(
-                            projectID: projectID,
-                            deadline: Date(),
-                            runID: runID
-                        )
-                    }
-                }
+                onExpire: onLoss,
+                onSystemTaskExpiration: onLoss,
+                submitSystemTask: hasCursor
             )
             BackgroundGenerationKeepAlive.shared.updateProgress(
                 leaseID,
-                completed: 1,
+                completed: hasCursor ? 2 : 1,
                 total: 4,
-                subtitle: "恢复模型响应"
+                subtitle: hasCursor ? "恢复生成正文" : "恢复模型响应"
             )
+            if hasCursor {
+                BackgroundGenerationKeepAlive.shared.promoteSystemTaskIfNeeded(
+                    leaseID,
+                    subtitle: "恢复生成正文"
+                )
+            }
         }
     }
 

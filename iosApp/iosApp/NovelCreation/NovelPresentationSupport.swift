@@ -268,6 +268,10 @@ enum NovelPresentation {
         if detail.contains("pending novel operation changed") {
             return "同步期间项目内容发生了变化，请重新载入后再试。"
         }
+        // 代笔等链路直接抛中文 invalidInput：原样透传，不抹成「重新载入」。
+        if detail.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+            return detail
+        }
         return "当前操作的内容或项目状态不匹配，请重新载入后再试。"
     }
 

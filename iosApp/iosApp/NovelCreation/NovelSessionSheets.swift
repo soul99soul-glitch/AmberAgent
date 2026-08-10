@@ -1232,6 +1232,17 @@ struct NovelWritingContextSheet: View {
                             .foregroundStyle(AmberTheme.muted)
                     }
 
+                    // 启动/续跑失败等操作错误：进度区未必有对应 detail，这里兜底露出。
+                    // 与红色 detail 相同则不重复渲染。
+                    if let operationError = session.operationErrorMessage,
+                       !operationError.isEmpty,
+                       operationError != session.ghostwriteProgress?.detailMessage {
+                        Label(operationError, systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(AmberTheme.accentRed)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
                     Group {
                         if session.isGhostwriting {
                             Button {

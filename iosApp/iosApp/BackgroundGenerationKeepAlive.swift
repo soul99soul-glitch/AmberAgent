@@ -33,9 +33,12 @@ final class BackgroundGenerationKeepAlive {
     private struct Lease {
         var uiTaskId: UIBackgroundTaskIdentifier
         var systemTask: BGContinuedProcessingTask?
-        let title: String
+        var title: String
         var subtitle: String
-        let submitSystemTask: Bool
+        /// Whether a system continued-processing task should be submitted.
+        var submitSystemTask: Bool
+        /// True after a system request was handed to BGTaskScheduler (adopted or still queued).
+        var didSubmitSystemTask: Bool
         var progressTotalUnitCount: Int64?
         var progressCompletedUnitCount: Int64
         /// BG handler 挂起在这里等 `end`；nil 表示系统还没调度到这一轮。
@@ -143,6 +146,7 @@ final class BackgroundGenerationKeepAlive {
             title: title,
             subtitle: subtitle,
             submitSystemTask: submitSystemTask,
+            didSubmitSystemTask: false,
             progressTotalUnitCount: nil,
             progressCompletedUnitCount: 0,
             waiter: nil,
@@ -168,6 +172,27 @@ final class BackgroundGenerationKeepAlive {
         lease.waiter?.resume()
         lease.systemTask?.setTaskCompleted(success: true)
         IOSBackgroundLifecycleLog.record("keepAliveEnd(\(leaseId))", detail: snapshotDetail)
+    }
+
+    /// 首 token 后再提交系统 continued-processing 进度卡。
+    ///
+    /// 小说在「等待模型」阶段若提前挂系统卡，用户/系统关掉进度卡会立刻
+    /// `onSystemTaskExpiration` → 空正文硬中断（「生成在输出内容前已中断」）。
+    /// 准备阶段只靠 UIKit 短窗；有可见输出后再升级。
+    func promoteSystemTaskIfNeeded(
+        _ leaseId: String,
+        title: String? = nil,
+        subtitle: String? = nil
+    ) {
+        guard var lease = leases[leaseId],
+              !lease.didSubmitSystemTask,
+              lease.systemTask == nil else { return }
+        if let title { lease.title = title }
+        if let subtitle { lease.subtitle = subtitle }
+        lease.submitSystemTask = true
+        leases[leaseId] = lease
+        submitContinuedTask(leaseId, title: lease.title, subtitle: lease.subtitle)
+        IOSBackgroundLifecycleLog.record("keepAlivePromoteSystem(\(leaseId))", detail: snapshotDetail)
     }
 
     /// 更新这一轮系统继续处理任务的真实阶段进度。
@@ -294,6 +319,7 @@ final class BackgroundGenerationKeepAlive {
 
         do {
             try submitTaskRequest(request)
+            leases[leaseId]?.didSubmitSystemTask = true
             IOSBackgroundLifecycleLog.record("keepAliveSubmitted(\(leaseId))", detail: snapshotDetail)
         } catch {
             NSLog("[AmberKeepAlive] submit failed for \(taskIdentifier): \(error)")

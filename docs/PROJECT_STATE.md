@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-09 (ghostwrite self-heal P0/P1)
+Last updated: 2026-08-10 (ghostwrite chain-closure review fixes)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -185,6 +185,19 @@ Last updated: 2026-08-09 (ghostwrite self-heal P0/P1)
 - **已落地**：P0–P3；P2 基建重试/指纹熔断/复读 mustNot；**单条 must 措辞对齐**（仅缺 1 条、无禁止与复读、每章一次，允许等价表达并记 amendments）；跨进程 sidecar 进度。
 - **未落地**：真机多章批跑 + 杀进程恢复验收。
 - 门禁：`NovelCollaborationModeTests` **36/36 PASSED**。
+
+### 代笔链路闭环复审修复（2026-08-10，真实使用「一篇都出不来」驱动）
+
+- 复审范围：写→验收→连续性→收录→清合同→同步→次章拟合同全链；结论全部钉死为真问题、无假阳性（Grok review 作参考）。
+- **B1 预算墙**：代笔写稿 `inputBudgetTokens` 硬编码 16_000，常驻资料一多必撞注入预算墙（required 检查在 smart 裁剪之前）。现改为 `NovelGhostwriteBatch.writeInputBudgetTokens = NovelStructuredModelExecutor.maximumInternalInputBudgetTokens`，仍由 `effectiveInputBudget` 按窗口与输出留位收敛。
+- **B2 审计未完整误强制重写**（Phase 5 回归）：`.continuityAuditIncomplete` 从 `requiresRewriteOnContinue` 移除；连续性门只在 `.blockingContinuity` 时 `qualityAttemptIndex+1` 并作废候选，审计未完整只留回执；`obtainGhostwriteCandidate` 的 mustRewrite 自愈三重条件加 `pauseReason == nil` 判别（暂停态一律以 pauseReason 为唯一权威）。
+- **B3 基建错误误标质量失败**：新增暂停原因 `.infrastructureFailed`（不重写、可续跑、不进自愈、phase→failed、不带确认合同可续）；`failedReason(from:)` 全部抛错归基建（保留 invalidInput 的「不完整/合同/计划」子串映射）；外环 catch 不再把传输抖动变成强制重写循环。
+- **验收/连续性审计补有界基建重试**：`NovelGhostwriteInfraRetry.run`（3 次、退避 400ms×attempt、仅 retryable 且非 `cancelled`；取消立即透传），与章计划拟定的 3 次重试对齐；VM 包裹层在进度面板提示「验收调用失败，正在重试 k/3…」。
+- **U2 中文错误透传**：`operationErrorMessage` 对中文 invalidInput 原样透传，不再统一抹成「请重新载入后再试」（英文未知详情仍走兜底）。
+- **U3/U1 露出**：代笔推进面板显示 `operationErrorMessage`（与红色 detail 去重）；主会话 composer 上方新增最小代笔状态条（状态+详情+暂停/继续，继续走 `canStartGhostwriteChapter` 门，44pt 命中区），中断后主界面可直接续跑。
+- **测试**：新增谓词测试（审计未完整保留候选、基建原因 flags、`failedReason` 映射表）、重试 runner 四场景、预算常量契约、中文透传；**补上单章 happy-path VM 集成测试**（此前批循环零覆盖是本次漏检根因）——写→验→连续性→收录→清合同→stateRebuild 同步→chapterCompleted，断言恰好 4 次模型调用。注意：收录后的同步执行 `stateRebuild`（manualSync 交易），不是 stateDelta。
+- 验证：`build` 成功；`NovelCollaborationModeTests` + `NovelCreationPresentationTests` + `NovelStructuredModelExecutorTests` 定点绿；回归门禁 `NovelSessionViewModelTests`/`NovelSessionReplayTests`/`NovelStructuredOutputTests`/`IOSNovelCreationWiringTests`/`NovelInjectionPlannerTests`/`NovelGenerationLifecycleTests` 全绿（iPhone 17 Pro Simulator，串行）。
+- 未验证/刻意不做：真机批跑与后台寿命（B4 首 token 系统卡升级为工作区既有未提交改动，非本轮）；fail-closed 提示词严格度与自愈预算属产品决策；sidecar fire-and-forget 持久化小窗由自愈兜底；240s 同步墙钟有界可恢复。
 
 
 ### Phase 4 — 有界多章代笔（最多 10 章，2026-08-09）

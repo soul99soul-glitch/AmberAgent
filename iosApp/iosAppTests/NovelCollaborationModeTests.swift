@@ -325,6 +325,134 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertFalse(session.canStartGhostwriteChapter)
     }
 
+    @MainActor
+    func testGhostwriteSingleChapterHappyPathCollectsAndSyncs() async throws {
+        // 端到端链路守护：写 → 验收 → 连续性 → 收录 → 清合同 → 同步 → 完批。
+        // 此前批循环零测试覆盖，真机「一篇都出不来」漏检。四个脚本 FIFO 消费，
+        // 任一环断裂都会落到非 chapterCompleted 终态或第 5 次意外调用。
+        let chapterText = "林晚潜入密室，夺回了信物。\n\n她推开了封死的门，月光落在掌心。"
+        let acceptanceJSON = """
+        {
+          "schemaVersion": 2,
+          "accepted": true,
+          "missingMustHappen": [],
+          "forbiddenViolations": [],
+          "obviousRepetition": [],
+          "summary": "按计划完成。"
+        }
+        """
+        let continuityJSON = """
+        {
+          "schemaVersion": 1,
+          "consistent": true,
+          "issues": []
+        }
+        """
+        // 收录后的同步执行 stateRebuild（manualSync 交易，见
+        // executeManualSyncTransaction 的 taskKind: .stateRebuild）；evidence 必须
+        // 逐字锚定在收录后的正文里，否则同步被证据校验拦下。
+        let stateRebuildJSON = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "林晚夺回了信物，推开了封死的门。",
+          "branchOutline": "林晚继续追查碎裂信物的来历。",
+          "events": [{
+            "id": "door-opened",
+            "kind": "discovery",
+            "summary": "林晚推开了封死的门。",
+            "entityReferences": ["林晚"],
+            "evidence": "她推开了封死的门，月光落在掌心。"
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": [],
+          "settingProposals": []
+        }
+        """
+
+        var document = try seedGhostwriteMaterials(in: NovelTestFixtures.document())
+        let branchID = try XCTUnwrap(document.branches.first?.id)
+        document = try NovelReducer.apply(.setCollaborationMode(
+            NovelSetCollaborationModeCommand(
+                context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+                projectID: document.project.id,
+                branchID: branchID,
+                mode: .ghostwrite
+            )
+        ), to: document).document
+        document = try NovelReducer.apply(.upsertChapterPlan(
+            NovelUpsertChapterPlanCommand(
+                context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+                projectID: document.project.id,
+                branchID: branchID,
+                planID: NovelChapterPlanID(),
+                status: .confirmed,
+                outlinePlacement: "第 1 章",
+                goalAndConflict: "夺回信物",
+                mustHappen: ["夺回信物"],
+                mustNotHappen: [],
+                endingHook: "信物碎裂",
+                visibleFacts: []
+            )
+        ), to: document).document
+
+        let repository = InMemoryNovelProjectRepository()
+        _ = try await repository.createProject(document)
+        let adapter = ScriptedNovelModelAdapter(
+            resolvedModel: NovelResolvedModel(
+                providerID: "test-provider",
+                ownerProviderID: "test-owner",
+                modelID: "test-model",
+                wireModelID: "test-wire",
+                displayName: "Test Model",
+                contextWindowTokens: 128_000
+            ),
+            scripts: [
+                NovelModelScript(steps: [.delta(chapterText), .complete]),
+                NovelModelScript(steps: [.delta(acceptanceJSON), .complete]),
+                NovelModelScript(steps: [.delta(continuityJSON), .complete]),
+                NovelModelScript(steps: [.delta(stateRebuildJSON), .complete]),
+            ]
+        )
+        let workspace = NovelCreationViewModel(creation: DefaultNovelCreation(
+            repository: repository,
+            modelRunner: adapter
+        ))
+        await workspace.loadProjects(selecting: document.project.id)
+        let session = NovelSessionViewModel(workspace: workspace)
+        await session.bindToCurrentSelection()
+
+        XCTAssertTrue(session.canStartGhostwriteChapter)
+        XCTAssertTrue(session.startGhostwriteChapter(targetChapterCount: 1))
+
+        let deadline = Date().addingTimeInterval(30)
+        while Date() < deadline {
+            if let progress = session.ghostwriteProgress,
+               progress.pauseReason != nil,
+               !session.isGhostwriting {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        let progress = try XCTUnwrap(session.ghostwriteProgress)
+        XCTAssertEqual(progress.pauseReason, .chapterCompleted)
+        XCTAssertEqual(progress.phase, .waitingUser)
+        XCTAssertEqual(progress.completedChapterCount, 1)
+
+        // 候选已自动收录、合同已消费、无操作错误残留。
+        let collected = workspace.projectSnapshot?.candidates.first { $0.status == .collected }
+        XCTAssertNotNil(collected)
+        XCTAssertTrue(collected?.content.contains("封死的门") == true)
+        XCTAssertNil(workspace.projectSnapshot?.confirmedChapterPlan(for: branchID))
+        XCTAssertNil(session.operationErrorMessage)
+
+        // 恰好四次模型调用：写稿 → 验收 → 连续性 → 状态重建同步。
+        let requests = await adapter.requests
+        XCTAssertEqual(requests.count, 4)
+    }
+
     func testCollaborationModeCanSwitchBackToCocreation() throws {
         var document = try seedGhostwriteMaterials(in: try NovelTestFixtures.document())
         document = try NovelReducer.apply(.setCollaborationMode(NovelSetCollaborationModeCommand(
@@ -1140,6 +1268,180 @@ final class NovelCollaborationModeTests: XCTestCase {
         )
     }
 
+    func testContinuityAuditIncompleteRetainsAcceptedCandidateOnResume() {
+        // 回归（2026-08-10 真实链路 review）：连续性审计未完整 ≠ 质量失败。
+        // 继续时复验同一已验收候选，不强制重写、不消耗改写预算、不作废候选。
+        XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.requiresRewriteOnContinue)
+        XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.allowsAutomaticQualityHeal)
+        XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.resumesWithoutConfirmedPlan)
+
+        let keptID = NovelCandidateID()
+        let progress = NovelGhostwriteProgress(
+            binding: NovelSessionBinding(
+                projectID: NovelProjectID(),
+                branchID: NovelBranchID()
+            ),
+            phase: .paused,
+            pauseReason: .continuityAuditIncomplete,
+            candidateID: keptID,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 3,
+            completedChapterCount: 0,
+            currentChapterIndex: 1
+        )
+        XCTAssertFalse(progress.mustRewriteCandidateOnResume)
+        XCTAssertTrue(progress.shouldContinueSameBatch)
+        XCTAssertFalse(progress.supersededCandidateIDs.contains(keptID))
+    }
+
+    func testInfrastructureFailureIsNotAQualityVerdict() {
+        // 基建失败（传输/解码/执行故障）不是质量判定：
+        // 不强制重写、不进自动改写、可续跑，且不得误标成 acceptanceFailed。
+        let reason = NovelGhostwritePauseReason.infrastructureFailed
+        XCTAssertFalse(reason.requiresRewriteOnContinue)
+        XCTAssertFalse(reason.allowsAutomaticQualityHeal)
+        XCTAssertTrue(reason.resumesWithoutConfirmedPlan)
+        XCTAssertFalse(reason.displayMessage.isEmpty)
+
+        // 批级语义：基建失败后可续跑同一批，且不丢当前候选。
+        let keptID = NovelCandidateID()
+        let progress = NovelGhostwriteProgress(
+            binding: NovelSessionBinding(
+                projectID: NovelProjectID(),
+                branchID: NovelBranchID()
+            ),
+            phase: .failed,
+            pauseReason: .infrastructureFailed,
+            candidateID: keptID,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 3,
+            completedChapterCount: 0,
+            currentChapterIndex: 1
+        )
+        XCTAssertTrue(progress.shouldContinueSameBatch)
+        XCTAssertTrue(progress.canResumeWithoutConfirmedPlan)
+        XCTAssertFalse(progress.mustRewriteCandidateOnResume)
+        XCTAssertFalse(progress.supersededCandidateIDs.contains(keptID))
+
+        XCTAssertEqual(
+            NovelGhostwritePauseReason.failedReason(
+                from: NovelError.repositoryFailure("disk full")
+            ),
+            .infrastructureFailed
+        )
+        XCTAssertEqual(
+            NovelGhostwritePauseReason.failedReason(
+                from: NovelStructuredModelExecutionFailure(
+                    code: "provider_stream_failed",
+                    message: "上游断流",
+                    isRetryable: true
+                )
+            ),
+            .infrastructureFailed
+        )
+        XCTAssertEqual(
+            NovelGhostwritePauseReason.failedReason(
+                from: NovelError.invalidInput("本章正文不完整，需要重新生成。")
+            ),
+            .incompleteCandidate
+        )
+        XCTAssertEqual(
+            NovelGhostwritePauseReason.failedReason(
+                from: NovelError.invalidInput("这篇稿和当前合同对不上。")
+            ),
+            .planMismatch
+        )
+        XCTAssertEqual(
+            NovelGhostwritePauseReason.failedReason(
+                from: NovelError.invalidInput("无关键词错误")
+            ),
+            .infrastructureFailed
+        )
+    }
+
+    func testGhostwriteInfraRetryRetriesOnlyRetryableNonCancelled() async throws {
+        // 可重试失败：第二次成功；onRetry 恰好回调一次。
+        let probe = GhostwriteRetryProbe()
+        let value = try await NovelGhostwriteInfraRetry.run(onRetry: { attempt in
+            probe.recordRetry(attempt)
+        }) {
+            probe.bumpAttempt()
+            if probe.attempts == 1 {
+                throw NovelStructuredModelExecutionFailure(
+                    code: "provider_stream_failed",
+                    message: "上游断流",
+                    isRetryable: true
+                )
+            }
+            return 7
+        }
+        XCTAssertEqual(value, 7)
+        XCTAssertEqual(probe.attempts, 2)
+        XCTAssertEqual(probe.retries, [1])
+
+        // 可重试但耗尽：抛原错误，总尝试次数 == maxAttempts。
+        let burnout = GhostwriteRetryProbe()
+        do {
+            let _: Int = try await NovelGhostwriteInfraRetry.run {
+                burnout.bumpAttempt()
+                throw NovelStructuredModelExecutionFailure(
+                    code: "provider_stream_failed",
+                    message: "上游断流",
+                    isRetryable: true
+                )
+            }
+            XCTFail("重试耗尽后必须抛出原错误")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "provider_stream_failed")
+        }
+        XCTAssertEqual(burnout.attempts, NovelGhostwriteInfraRetry.maxAttempts)
+
+        // 取消：即使被标记 retryable 也绝不重试，立即透传。
+        let cancelled = GhostwriteRetryProbe()
+        do {
+            let _: Int = try await NovelGhostwriteInfraRetry.run {
+                cancelled.bumpAttempt()
+                throw NovelStructuredModelExecutionFailure(
+                    code: "cancelled",
+                    message: "模型任务已取消，可以重试。",
+                    isRetryable: true
+                )
+            }
+            XCTFail("取消不得重试")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "cancelled")
+        }
+        XCTAssertEqual(cancelled.attempts, 1)
+
+        // 不可重试失败：立即抛出。
+        let nonRetryable = GhostwriteRetryProbe()
+        do {
+            let _: Int = try await NovelGhostwriteInfraRetry.run {
+                nonRetryable.bumpAttempt()
+                throw NovelStructuredModelExecutionFailure(
+                    code: "invalid_structured_output",
+                    message: "格式错误",
+                    isRetryable: false
+                )
+            }
+            XCTFail("不可重试失败不得重试")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "invalid_structured_output")
+        }
+        XCTAssertEqual(nonRetryable.attempts, 1)
+    }
+
+    func testGhostwriteWriteBudgetFollowsStructuredExecutorCeiling() {
+        // 回归：代笔写稿预算曾硬编码 16_000，常驻资料一多必撞注入预算墙。
+        // 现跟随结构化执行器内部上限，由 effectiveInputBudget 按窗口与输出留位再收敛。
+        XCTAssertEqual(
+            NovelGhostwriteBatch.writeInputBudgetTokens,
+            NovelStructuredModelExecutor.maximumInternalInputBudgetTokens
+        )
+        XCTAssertGreaterThan(NovelGhostwriteBatch.writeInputBudgetTokens, 16_000)
+    }
+
+
     func testGhostwriteFingerprintFuseStopsSameFailureLoop() {
         let binding = NovelSessionBinding(
             projectID: NovelProjectID(),
@@ -1723,5 +2025,23 @@ final class NovelCollaborationModeTests: XCTestCase {
             tags: [],
             injectionMode: .always
         )), to: document).document
+    }
+}
+
+/// 重试测试的计数探针：闭包是 @Sendable，计数走锁保证可变捕获合法。
+private final class GhostwriteRetryProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var attemptCount = 0
+    private var retryLog: [Int] = []
+
+    var attempts: Int { lock.withLock { attemptCount } }
+    var retries: [Int] { lock.withLock { retryLog } }
+
+    func bumpAttempt() {
+        lock.withLock { attemptCount += 1 }
+    }
+
+    func recordRetry(_ attempt: Int) {
+        lock.withLock { retryLog.append(attempt) }
     }
 }

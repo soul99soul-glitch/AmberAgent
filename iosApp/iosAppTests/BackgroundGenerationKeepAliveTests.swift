@@ -93,6 +93,29 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertTrue(keepAlive.holdsLease("novel-run"))
     }
 
+    func testPromoteSystemTaskSubmitsAfterDeferredBegin() {
+        let spy = SystemSpy()
+        let keepAlive = spy.makeKeepAlive()
+
+        keepAlive.begin(
+            "novel-run",
+            title: "Amber 小说创作中",
+            subtitle: "准备生成",
+            submitSystemTask: false
+        )
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
+
+        keepAlive.promoteSystemTaskIfNeeded("novel-run", subtitle: "正在生成正文")
+
+        XCTAssertEqual(spy.submittedRequests.count, 1)
+        XCTAssertEqual(spy.submittedRequests.first?.subtitle, "正在生成正文")
+        XCTAssertTrue(keepAlive.holdsLease("novel-run"))
+
+        // Idempotent: do not queue a second system request for the same lease.
+        keepAlive.promoteSystemTaskIfNeeded("novel-run", subtitle: "再次 promote")
+        XCTAssertEqual(spy.submittedRequests.count, 1)
+    }
+
     func testIdentifierStaysInsidePermittedNamespace() {
         let keepAlive = SystemSpy().makeKeepAlive()
 

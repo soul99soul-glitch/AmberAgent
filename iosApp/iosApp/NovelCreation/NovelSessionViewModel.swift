@@ -3432,11 +3432,16 @@ extension NovelSessionViewModel {
                 $0.candidateID = candidateID
                 $0.chapterPlanDigest = plan.contentDigest
             }
-            let acceptance = try await workspace.acceptChapterPlan(
-                projectID: expectedBinding.projectID,
-                branchID: expectedBinding.branchID,
-                candidateID: candidateID
-            )
+            let acceptance = try await withGhostwriteInfraRetry(
+                binding: expectedBinding,
+                stage: "验收"
+            ) {
+                try await workspace.acceptChapterPlan(
+                    projectID: expectedBinding.projectID,
+                    branchID: expectedBinding.branchID,
+                    candidateID: candidateID
+                )
+            }
             try Task.checkCancellation()
             if !acceptance.accepted {
                 let detail = acceptance.summary.isEmpty
@@ -3478,15 +3483,19 @@ extension NovelSessionViewModel {
             let pauseOnBlockingContinuity = workspace.projectSnapshot?.project
                 .pauseGhostwriteOnBlockingContinuity ?? true
             if pauseOnBlockingContinuity {
-                let continuityReport = try await workspace.auditContinuityIncludingCandidate(
-                    projectID: expectedBinding.projectID,
-                    branchID: expectedBinding.branchID,
-                    candidateID: candidateID
-                )
+                let continuityReport = try await withGhostwriteInfraRetry(
+                    binding: expectedBinding,
+                    stage: "连续性检查"
+                ) {
+                    try await workspace.auditContinuityIncludingCandidate(
+                        projectID: expectedBinding.projectID,
+                        branchID: expectedBinding.branchID,
+                        candidateID: candidateID
+                    )
+                }
                 try Task.checkCancellation()
                 if let reason = NovelGhostwriteContinuityGate.pauseReason(for: continuityReport),
                    let detail = NovelGhostwriteContinuityGate.pauseDetail(for: continuityReport) {
-                    // 严重连续性：默认不停自动改写空转，直接等人润修/处理。
                     let receipt = NovelGhostwriteFailureReceipt.make(
                         reason: reason,
                         summary: detail,
@@ -3494,14 +3503,25 @@ extension NovelSessionViewModel {
                         repetitionBeats: [],
                         continuityNotes: NovelGhostwriteContinuityGate
                             .blockingIssueSummaries(in: continuityReport),
-                        attemptIndex: (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) + 1,
+                        attemptIndex: reason == .blockingContinuity
+                            ? (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) + 1
+                            : (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0),
                         sourceCandidateID: candidateID,
                         planDigest: plan.contentDigest
                     )
-                    mutateGhostwriteProgress(binding: expectedBinding) {
-                        $0.qualityAttemptIndex += 1
-                        $0.lastFailureReceipt = receipt
-                        $0.supersededCandidateIDs.insert(candidateID)
+                    if reason == .blockingContinuity {
+                        // 严重连续性：质量停机，记尝试并作废候选，等人润修/处理。
+                        mutateGhostwriteProgress(binding: expectedBinding) {
+                            $0.qualityAttemptIndex += 1
+                            $0.lastFailureReceipt = receipt
+                            $0.supersededCandidateIDs.insert(candidateID)
+                        }
+                    } else {
+                        // 审计未完整：不是质量判定。留回执供界面呈现，
+                        // 但不消耗改写预算、不作废候选——继续时复验同一已验收稿。
+                        mutateGhostwriteProgress(binding: expectedBinding) {
+                            $0.lastFailureReceipt = receipt
+                        }
                     }
                     pauseGhostwritePipeline(
                         binding: expectedBinding,
@@ -3964,7 +3984,11 @@ extension NovelSessionViewModel {
         let superseded = ghostwriteProgressStorage?.supersededCandidateIDs ?? []
         // 质量失败 / 自动改写中：必须产新稿，禁止复用已作废或当前失败候选。
         let mustRewrite: Bool = {
-            if ghostwriteProgressStorage?.lastFailureReceipt != nil,
+            // 第一条款仅描述「章内自愈在途」（heal 置 phase=.writing 且清 pauseReason）；
+            // 已暂停状态一律以 pauseReason 为唯一权威，避免「审计未完整」这类
+            // 保留候选的暂停被误判成强制重写。
+            if ghostwriteProgressStorage?.pauseReason == nil,
+               ghostwriteProgressStorage?.lastFailureReceipt != nil,
                (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) > 0,
                ghostwriteProgressStorage?.phase == .writing {
                 return true
@@ -4036,7 +4060,7 @@ extension NovelSessionViewModel {
             sourceChapterVersionID: nil,
             askUserResponse: nil,
             injectionOverrides: .none,
-            inputBudgetTokens: 16_000,
+            inputBudgetTokens: NovelGhostwriteBatch.writeInputBudgetTokens,
             ghostwritePlanID: plan.id,
             suppressRecentSessionMessages: isHealRewrite
         ))
@@ -4233,7 +4257,8 @@ extension NovelSessionViewModel {
              .continuityAuditIncomplete, .userPaused, .cancelled,
              .planProposalFailed:
             .paused
-        case .collectFailed, .syncFailed, .incompleteCandidate, .planMismatch:
+        case .collectFailed, .syncFailed, .incompleteCandidate, .planMismatch,
+             .infrastructureFailed:
             .failed
         }
         mutateGhostwriteProgress(binding: expectedBinding) {
@@ -4274,6 +4299,20 @@ extension NovelSessionViewModel {
         body(&progress)
         ghostwriteProgressStorage = progress
         persistGhostwriteProgress(progress)
+    }
+
+    /// 验收/连续性审计的基建重试入口：重试时在进度面板给出阶段性提示。
+    private func withGhostwriteInfraRetry<T: Sendable>(
+        binding expectedBinding: NovelSessionBinding,
+        stage: String,
+        operation: @Sendable () async throws -> T
+    ) async throws -> T {
+        try await NovelGhostwriteInfraRetry.run(onRetry: { [weak self] attempt in
+            await self?.mutateGhostwriteProgress(binding: expectedBinding) {
+                $0.detailMessage =
+                    "\(stage)调用失败，正在重试 \(attempt + 1)/\(NovelGhostwriteInfraRetry.maxAttempts)…"
+            }
+        }, operation: operation)
     }
 
     /// 冷启动 / 重绑会话：从 sidecar 恢复本批代笔进度（不抢正在跑的 task）。

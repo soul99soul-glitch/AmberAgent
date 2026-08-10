@@ -1806,34 +1806,64 @@ final class NovelCreationViewModel {
     /// 页面订阅只是观察者；后台到期回调走同一条可持久化中断路径。
     func beginBackgroundGeneration(for request: NovelRunRequest) {
         let leaseID = novelRunBackgroundLeaseID(for: request.id)
+        // 首 token 前不挂系统进度卡：准备/等模型阶段关掉进度卡会立刻空中断。
+        // 有正文后再 `promoteSystemTaskIfNeeded`（见 generation lifecycle）。
         BackgroundGenerationKeepAlive.shared.begin(
             leaseID,
             title: "Amber 小说创作中",
-            subtitle: "后台生成",
+            subtitle: "准备生成",
             onExpire: { [weak self] in
                 Task { @MainActor [weak self] in
-                    await self?.interruptSessionForBackground(
+                    await self?.handleNovelGenerationKeepAliveLoss(
                         projectID: request.projectID,
                         runID: request.id,
-                        deadline: Date()
+                        rearm: { self?.beginBackgroundGeneration(for: request) }
                     )
                 }
             },
             onSystemTaskExpiration: { [weak self] in
                 Task { @MainActor [weak self] in
-                    await self?.interruptSessionForBackground(
+                    await self?.handleNovelGenerationKeepAliveLoss(
                         projectID: request.projectID,
                         runID: request.id,
-                        deadline: Date()
+                        rearm: {
+                            // 已有输出后系统卡丢失：重挂并立即 promote。
+                            self?.beginBackgroundGeneration(for: request)
+                            BackgroundGenerationKeepAlive.shared.promoteSystemTaskIfNeeded(
+                                leaseID,
+                                subtitle: "正在生成正文"
+                            )
+                        }
                     )
                 }
-            }
+            },
+            submitSystemTask: false
         )
         BackgroundGenerationKeepAlive.shared.updateProgress(
             leaseID,
             completed: 0,
             total: 4,
             subtitle: "准备生成"
+        )
+    }
+
+    /// KeepAlive 短窗/系统进度卡丢失时：
+    /// - 非后台（前台 / inactive 控制中心等）：不砍流，重挂租约。
+    /// - 真正进后台：可持久化中断（有 cursor 则 detach，否则 interrupt）。
+    private func handleNovelGenerationKeepAliveLoss(
+        projectID: NovelProjectID,
+        runID: NovelRunID,
+        rearm: () -> Void
+    ) async {
+        // inactive（下拉通知中心、App Switcher 半屏）不能当后台砍流。
+        if UIApplication.shared.applicationState != .background {
+            rearm()
+            return
+        }
+        await interruptSessionForBackground(
+            projectID: projectID,
+            runID: runID,
+            deadline: Date()
         )
     }
 
