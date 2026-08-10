@@ -31,6 +31,62 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertTrue(requests.isEmpty)
     }
 
+    func testSystemAutoCollectUsesInlineStateDeltaAndStaysSynchronized() async throws {
+        let fixture = try autoCollectableCandidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta(validDeltaJSON()), .complete])]
+        )
+        var command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        command.source = .systemAutoCollect
+
+        guard case .candidateCollected = try await harness.creation.perform(
+            .collectCandidate(command)
+        ) else {
+            return XCTFail("Expected collection outcome")
+        }
+
+        let final = try await harness.repository.document(command.projectID)
+        XCTAssertEqual(final.candidates[0].status, .collected)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertFalse(final.injectionReceipts.isEmpty)
+        XCTAssertFalse(final.generationReceipts.isEmpty)
+        XCTAssertEqual(final.stateSnapshots.count, fixture.document.stateSnapshots.count + 1)
+        let requests = await harness.adapter.requests
+        XCTAssertFalse(requests.isEmpty)
+    }
+
+    func testSystemAutoCollectFallsBackToWithoutStateSyncWhenDeltaFails() async throws {
+        let fixture = try autoCollectableCandidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [NovelModelScript(steps: [.delta("not-valid-json"), .complete])]
+        )
+        var command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        command.source = .systemAutoCollect
+
+        guard case .candidateCollected = try await harness.creation.perform(
+            .collectCandidate(command)
+        ) else {
+            return XCTFail("Expected fallback collection outcome")
+        }
+
+        let final = try await harness.repository.document(command.projectID)
+        XCTAssertEqual(final.candidates[0].status, .collected)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        // 回退后无成功 finalize 的 stateDelta receipts 也可；章已进书，后续 manual rebuild。
+        let requests = await harness.adapter.requests
+        XCTAssertFalse(requests.isEmpty, "应先尝试过 stateDelta 再回退")
+    }
+
     func testDeferredSyncRebuildsAnImmediatelyCollectedChapter() async throws {
         var fixture = try candidateDocument()
         fixture.document.project.modelPolicy = .fixed(
@@ -1553,6 +1609,56 @@ private extension NovelFactTransactionLifecycleTests {
         document.candidates = [candidate]
         try NovelDocumentValidator.validate(document)
         return (document, candidate)
+    }
+
+    /// 带已确认本章合同 + digest 绑定的候选，满足 systemAutoCollect 门禁。
+    func autoCollectableCandidateDocument(
+        content: String = "Mara opened the archive.\n\nThe bell rang twice."
+    ) throws -> (
+        document: NovelProjectDocumentV1,
+        candidate: NovelCandidateRecord
+    ) {
+        var fixture = try candidateDocument(content: content)
+        let branchID = fixture.document.branches[0].id
+        let planID = NovelChapterPlanID()
+        let now = fixture.document.project.updatedAt
+        fixture.document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(
+                configRevision: fixture.document.project.configRevision
+            ),
+            projectID: fixture.document.project.id,
+            branchID: branchID,
+            planID: planID,
+            status: .confirmed,
+            outlinePlacement: "Chapter One",
+            goalAndConflict: "Mara must open the archive",
+            mustHappen: ["Open the archive"],
+            mustNotHappen: ["Ignore the bell"],
+            endingHook: "The bell rings twice",
+            visibleFacts: ["The archive is sealed"]
+        )), to: fixture.document, now: now).document
+        let plan = try XCTUnwrap(fixture.document.confirmedChapterPlan(for: branchID))
+        let unbound = fixture.document.candidates[0]
+        let bound = NovelCandidateRecord(
+            id: unbound.id,
+            kind: unbound.kind,
+            branchID: unbound.branchID,
+            sessionID: unbound.sessionID,
+            sourceMessageID: unbound.sourceMessageID,
+            baseCheckpointID: unbound.baseCheckpointID,
+            baseHeadRevision: unbound.baseHeadRevision,
+            status: unbound.status,
+            content: unbound.content,
+            sourceChapterVersionID: unbound.sourceChapterVersionID,
+            clonedFromCandidateID: unbound.clonedFromCandidateID,
+            collectedCheckpointID: unbound.collectedCheckpointID,
+            chapterPlanDigest: plan.contentDigest,
+            ghostwritePlanID: unbound.ghostwritePlanID,
+            createdAt: unbound.createdAt
+        )
+        fixture.document.candidates = [bound]
+        try NovelDocumentValidator.validate(fixture.document)
+        return (fixture.document, bound)
     }
 
     func preparedLongManualSync(

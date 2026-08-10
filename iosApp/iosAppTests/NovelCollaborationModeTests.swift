@@ -1766,6 +1766,16 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertTrue(afterSyncKill.pendingSyncChapterCredit)
         XCTAssertTrue(afterSyncKill.shouldContinueSameBatch)
 
+        // 已同步成功后补记账：credit 清掉、completed+1（未达 target 时 batch 未完成）。
+        var mid = afterSyncKill
+        mid.completedChapterCount = 2
+        mid.targetChapterCount = 5
+        mid.pendingSyncChapterCredit = true
+        XCTAssertFalse(mid.applyPendingSyncChapterCredit())
+        XCTAssertEqual(mid.completedChapterCount, 3)
+        XCTAssertFalse(mid.pendingSyncChapterCredit)
+        XCTAssertNil(mid.pauseReason)
+
         var done = encoded
         done.completedChapterCount = 5
         done.phase = .waitingUser

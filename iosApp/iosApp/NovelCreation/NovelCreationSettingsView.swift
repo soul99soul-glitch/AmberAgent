@@ -30,6 +30,23 @@ struct NovelCreationSettingsView: View {
                 Text("创作偏长文与文风；剧情同步偏稳定与结构化输出；审稿用来核对是否按计划写、前后是否打架。")
             }
 
+            Section {
+                Toggle(isOn: stateSyncReasoningBinding) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("剧情同步使用推理")
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("默认关闭。开启后 DeepSeek Flash 等会先思考再出 JSON，通常更慢。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                    }
+                }
+                .tint(AmberTheme.accentAmber)
+            } header: {
+                Text("剧情同步")
+            } footer: {
+                Text("只影响状态抽取与重建（收录后同步 / 代笔 stateDelta），不改变创作与审稿模型。")
+            }
+
             if let viewModel {
                 Section("项目管理") {
                     NavigationLink {
@@ -108,6 +125,19 @@ struct NovelCreationSettingsView: View {
         preferences.set(policy, for: purpose)
         revision += 1
         activePicker = nil
+    }
+
+    private var stateSyncReasoningBinding: Binding<Bool> {
+        Binding(
+            get: {
+                _ = revision
+                return preferences.stateSyncReasoningEnabled
+            },
+            set: { enabled in
+                preferences.stateSyncReasoningEnabled = enabled
+                revision += 1
+            }
+        )
     }
 }
 

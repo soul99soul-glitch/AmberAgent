@@ -4185,7 +4185,13 @@ extension NovelSessionViewModel {
     private func awaitGhostwriteStateSync(
         expectedBinding: NovelSessionBinding
     ) async -> Bool {
-        let startedAt = Date()
+        // 不用「从进入起 240s」墙钟：多 chunk rebuild 本身就可能超过 4 分钟。
+        // 有进展（chunk/activity/状态变化）就刷新；仅在空闲/失败且 kick 用尽，
+        // 或长时间完全无进展时才判失败。
+        let idleStallTimeout: TimeInterval = 240
+        let inFlightStallTimeout: TimeInterval = 900
+        var lastProgressAt = Date()
+        var lastProgressSignature = ""
         var infraRetries = 0
         let maxInfra = NovelGhostwriteHeal.defaultMaxInfraRetries
         var lastKickAt: Date?
@@ -4198,6 +4204,7 @@ extension NovelSessionViewModel {
             if branch?.syncStatus == .synchronized, pending.isEmpty {
                 mutateGhostwriteProgress(binding: expectedBinding) {
                     $0.infraRetryCount = 0
+                    $0.detailMessage = nil
                 }
                 return true
             }
@@ -4206,10 +4213,45 @@ extension NovelSessionViewModel {
                 projectID: expectedBinding.projectID,
                 branchID: expectedBinding.branchID
             )
+            let activity = workspace.stateSyncActivity
+            let isRunning = workspace.isStateSyncOperationRunning
+            let pendingStatus = pending.first?.status
+            let nextChunk = pending.first?.manualSyncProgress?.nextChunkIndex
+            let completedChars = activity?.completedCharacters ?? -1
+            let completedChunks = activity?.completedChunks ?? -1
+            let progressSignature = [
+                branch?.syncStatus.rawValue ?? "?",
+                "\(pending.count)",
+                pendingStatus?.rawValue ?? "-",
+                "\(nextChunk.map(String.init) ?? "-")",
+                "\(completedChunks)",
+                "\(completedChars)",
+                activity.map { "\($0.phase)" } ?? "none",
+                isRunning ? "run" : "idle",
+                syncFailedMessage ?? ""
+            ].joined(separator: "|")
+            if progressSignature != lastProgressSignature {
+                lastProgressSignature = progressSignature
+                lastProgressAt = Date()
+                // chunk 前进视为真实进展，重置 kick 预算。
+                if let nextChunk, nextChunk > 0 {
+                    infraRetries = 0
+                }
+            }
+
+            let workInFlight = isRunning
+                || activity != nil
+                || pending.contains {
+                    $0.kind == .manualSync && $0.status == .pending
+                }
             let idleNeedsSync = branch?.syncStatus == .needsSync
                 && pending.isEmpty
-                && workspace.stateSyncActivity == nil
-            let shouldKick = (idleNeedsSync || syncFailedMessage != nil)
+                && !workInFlight
+            let stuckRetryable = pending.count == 1
+                && pending[0].kind == .manualSync
+                && pending[0].status == .retryable
+                && !workInFlight
+            let shouldKick = (idleNeedsSync || stuckRetryable || syncFailedMessage != nil)
                 && infraRetries < maxInfra
                 && (lastKickAt.map { Date().timeIntervalSince($0) >= 1.5 } ?? true)
 
@@ -4229,15 +4271,14 @@ extension NovelSessionViewModel {
                 continue
             }
 
-            if idleNeedsSync,
+            if (idleNeedsSync || stuckRetryable || syncFailedMessage != nil),
                infraRetries >= maxInfra,
-               Date().timeIntervalSince(startedAt) > 3 {
+               Date().timeIntervalSince(lastProgressAt) > 3 {
                 return false
             }
-            if syncFailedMessage != nil, infraRetries >= maxInfra {
-                return false
-            }
-            if Date().timeIntervalSince(startedAt) > 240 {
+
+            let stallLimit = workInFlight ? inFlightStallTimeout : idleStallTimeout
+            if Date().timeIntervalSince(lastProgressAt) > stallLimit {
                 return false
             }
             try? await Task.sleep(for: .milliseconds(400))

@@ -18,26 +18,33 @@ extension DefaultNovelCreation {
             return replay
         }
 
-        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+        // 代笔自动收录且分支已同步：一次 stateDelta 直接落新 state，避免
+        //「先无状态收录 → 多 chunk rebuild」的慢路径。失败再回退 withoutSync+rebuild。
+        if prefersInlineStateDeltaCollect(command, in: loaded.document) {
+            do {
+                return try await executeInlineStateDeltaCollect(
+                    command,
+                    payloadSHA256: payloadSHA256,
+                    loaded: loaded
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let failure as NovelStructuredModelExecutionFailure
+                where failure.failure.code == "cancelled" {
+                throw failure
+            } catch {
+                return try await executeCollectionWithoutStateSyncFallback(
+                    command,
+                    payloadSHA256: payloadSHA256
+                )
+            }
+        }
+
+        return try await commitCollectionWithoutStateSync(
             command,
             payloadSHA256: payloadSHA256,
-            in: loaded.document,
-            now: now()
+            loaded: loaded
         )
-        do {
-            _ = try await commitFactDocument(committed.document, replacing: loaded)
-            return committed.outcome
-        } catch {
-            if let replay = try await reconcileFactOutcome(
-                projectID: command.projectID,
-                context: command.context,
-                kind: .collectCandidate,
-                payloadSHA256: payloadSHA256
-            ) {
-                return replay
-            }
-            throw error
-        }
     }
 
     func executeSyncManualEdits(
@@ -183,6 +190,278 @@ extension DefaultNovelCreation {
 }
 
 private extension DefaultNovelCreation {
+    /// 代笔自动收录：分支已同步、无挂起事务、无在途 run 时优先单章 stateDelta。
+    func prefersInlineStateDeltaCollect(
+        _ command: NovelCollectCandidateCommand,
+        in document: NovelProjectDocumentV1
+    ) -> Bool {
+        guard command.source == .systemAutoCollect else { return false }
+        guard let branch = document.branches.first(where: { $0.id == command.branchID }) else {
+            return false
+        }
+        guard branch.syncStatus == .synchronized,
+              branch.activeRunID == nil,
+              branch.lifecycle == .active else {
+            return false
+        }
+        return !document.pendingOperations.contains(where: { $0.branchID == branch.id })
+    }
+
+    func executeInlineStateDeltaCollect(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        loaded: NovelLoadedProject
+    ) async throws -> NovelOutcome {
+        let prepared = try NovelFactTransactionReducer.prepareCollection(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: loaded.document,
+            now: now()
+        )
+        guard prepared.pending.status == .pending else {
+            throw NovelError.invalidInput(
+                "This collection previously failed and must be resumed with its retry action."
+            )
+        }
+        let pendingLoaded = try await commitFactDocument(
+            prepared.document,
+            replacing: loaded
+        )
+        return try await executeCollectionTransaction(
+            projectID: command.projectID,
+            pendingID: command.pendingID,
+            retryCommand: nil,
+            replayContext: command.context,
+            replayKind: .collectCandidate,
+            replayPayloadSHA256: payloadSHA256,
+            pendingDocument: pendingLoaded.document
+        )
+    }
+
+    /// stateDelta 失败后：若仍有 collection pending 则无状态提交（再靠 manual rebuild）；
+    /// 否则按原 command 直接 withoutSync 收录。
+    func executeCollectionWithoutStateSyncFallback(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String
+    ) async throws -> NovelOutcome {
+        let reloaded = try await reloadFactDocument(projectID: command.projectID)
+        if let replay = try NovelFactTransactionReducer.replayOutcome(
+            context: command.context,
+            kind: .collectCandidate,
+            payloadSHA256: payloadSHA256,
+            in: reloaded.document
+        ) {
+            return replay
+        }
+        if let applied = reloaded.document.appliedOperations.last(where: { record in
+            if record.operationID == command.context.operationID {
+                return true
+            }
+            guard record.kind == .collectCandidate,
+                  case .candidateCollected(_, _, let candidateID, _, _, _) = record.outcome else {
+                return false
+            }
+            return candidateID == command.candidateID
+        }) {
+            return applied.outcome
+        }
+        if reloaded.document.pendingOperations.contains(where: {
+            $0.id == command.pendingID && $0.kind == .collection
+        }) {
+            let branch = reloaded.document.branches.first(where: { $0.id == command.branchID })
+            let retry = NovelRetryPendingCommand(
+                context: NovelMutationContext(
+                    operationID: NovelOperationID(),
+                    expectedProjectRevision: reloaded.document.project.revision,
+                    expectedConfigRevision: reloaded.document.project.configRevision,
+                    expectedBranchHeadRevision: branch?.headRevision
+                ),
+                projectID: command.projectID,
+                pendingID: command.pendingID
+            )
+            let committed = try NovelFactTransactionReducer.recoverPendingCollectionWithoutStateSync(
+                retry,
+                in: reloaded.document,
+                now: now()
+            )
+            do {
+                _ = try await commitFactDocument(committed.document, replacing: reloaded)
+                return committed.outcome
+            } catch {
+                if let replay = try await reconcileFactOutcome(
+                    projectID: command.projectID,
+                    context: retry.context,
+                    kind: .retryPending,
+                    payloadSHA256: try retry.canonicalPayloadSHA256()
+                ) {
+                    return replay
+                }
+                throw error
+            }
+        }
+        return try await commitCollectionWithoutStateSync(
+            command,
+            payloadSHA256: payloadSHA256,
+            loaded: reloaded
+        )
+    }
+
+    func commitCollectionWithoutStateSync(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        loaded: NovelLoadedProject
+    ) async throws -> NovelOutcome {
+        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: loaded.document,
+            now: now()
+        )
+        do {
+            _ = try await commitFactDocument(committed.document, replacing: loaded)
+            return committed.outcome
+        } catch {
+            if let replay = try await reconcileFactOutcome(
+                projectID: command.projectID,
+                context: command.context,
+                kind: .collectCandidate,
+                payloadSHA256: payloadSHA256
+            ) {
+                return replay
+            }
+            throw error
+        }
+    }
+
+    /// 单章 stateDelta 收录：一次结构化抽取后带新 state 提交，分支保持 synchronized。
+    func executeCollectionTransaction(
+        projectID: NovelProjectID,
+        pendingID: NovelPendingOperationID,
+        retryCommand: NovelRetryPendingCommand?,
+        replayContext: NovelMutationContext,
+        replayKind: NovelOperationKind,
+        replayPayloadSHA256: String,
+        pendingDocument: NovelProjectDocumentV1
+    ) async throws -> NovelOutcome {
+        guard let pending = pendingDocument.pendingOperations.first(where: {
+            $0.id == pendingID && $0.kind == .collection
+        }) else {
+            throw NovelError.invalidInput("The pending collection is unavailable.")
+        }
+        do {
+            let extractionInput = try NovelFactTransactionReducer.collectionExtractionInput(
+                pendingID: pendingID,
+                in: pendingDocument
+            )
+            let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
+            let stateSyncPolicy = modelPolicy(for: .stateSync, in: pendingDocument)
+            let preparation = try await executor.prepare(
+                modelPolicy: stateSyncPolicy,
+                taskKind: .stateDelta,
+                requestedInputBudgetTokens: NovelStructuredModelExecutor
+                    .maximumInternalInputBudgetTokens
+            )
+            let plan = try NovelInjectionPlanner.plan(
+                document: pendingDocument,
+                request: NovelInjectionPlanningRequest(
+                    branchID: pending.branchID,
+                    promptKind: .stateDeltaV1,
+                    userText: extractionInput.manuscript,
+                    stateSnapshotIDOverride: extractionInput.baseStateSnapshot.id,
+                    sessionCursorLimit: extractionInput.pending.sessionCursor,
+                    budget: factInjectionBudget(
+                        maxEstimatedInputTokens: preparation.effectiveInputBudgetTokens
+                    )
+                )
+            )
+            let attemptStartedAt = now()
+            let attempt = try NovelFactTransactionAttempt(
+                pending: pending,
+                retryCommand: retryCommand
+            )
+            let invocation = try executor.prepareInvocation(
+                NovelStructuredModelExecutionRequest(
+                    runID: NovelRunID(),
+                    modelPolicy: stateSyncPolicy,
+                    task: .stateDelta(
+                        context: plan.contextText,
+                        manuscript: extractionInput.manuscript
+                    )
+                ),
+                preparation: preparation
+            )
+            let receipts = makeFactReceipts(
+                projectID: projectID,
+                branchID: pending.branchID,
+                pending: pending,
+                attempt: attempt,
+                kind: .stateDelta,
+                plan: plan,
+                invocation: invocation,
+                requestedInputBudgetTokens: preparation.requestedInputBudgetTokens,
+                createdAt: attemptStartedAt
+            )
+
+            try Task.checkCancellation()
+            let beforeRequest = try await reloadFactDocument(projectID: projectID)
+            try validatePendingGuard(pending, in: beforeRequest.document)
+            let requestDocument = try NovelFactRequestReceiptReducer.reserve(
+                receipts,
+                pendingID: pendingID,
+                in: beforeRequest.document,
+                now: now()
+            )
+            _ = try await commitFactDocument(
+                requestDocument,
+                replacing: beforeRequest
+            )
+            try Task.checkCancellation()
+            // 与 manual rebuild 一致：连续无输出超时，流式有增量则刷新计时。
+            let execution = try await executor.executePrepared(
+                invocation,
+                noOutputTimeout: factRequestTimeout
+            )
+            guard case .stateDelta(let delta) = execution.output else {
+                throw NovelError.invalidInput("The collection returned the wrong structured result.")
+            }
+
+            let reloaded = try await reloadFactDocument(projectID: projectID)
+            try validatePendingGuard(pending, in: reloaded.document)
+            let finalized = try NovelFactTransactionReducer.finalizeCollection(
+                pendingID: pendingID,
+                delta: delta,
+                retryCommand: retryCommand,
+                artifacts: receipts,
+                in: reloaded.document,
+                now: now()
+            )
+            do {
+                _ = try await commitFactDocument(
+                    finalized.document,
+                    replacing: reloaded
+                )
+                return finalized.outcome
+            } catch {
+                if let replay = try await reconcileFactOutcome(
+                    projectID: projectID,
+                    context: replayContext,
+                    kind: replayKind,
+                    payloadSHA256: replayPayloadSHA256
+                ) {
+                    return replay
+                }
+                throw error
+            }
+        } catch {
+            await markPendingRetryable(
+                projectID: projectID,
+                pendingID: pendingID,
+                error: error
+            )
+            throw error
+        }
+    }
+
     func executeManualSyncTransaction(
         projectID: NovelProjectID,
         pendingID: NovelPendingOperationID,

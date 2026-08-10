@@ -144,6 +144,10 @@ struct NovelStructuredModelExecutor: Sendable {
     static let unknownWindowFallbackInputBudgetTokens = 16_000
 
     let modelRunner: any NovelModelRunning
+    /// 剧情同步是否允许推理。默认读小说设置；测试可注入。
+    var stateSyncReasoningEnabled: @Sendable () -> Bool = {
+        NovelCreationModelPreferences.shared.stateSyncReasoningEnabled
+    }
 
     func prepare(
         modelPolicy: NovelProjectModelPolicy,
@@ -151,7 +155,9 @@ struct NovelStructuredModelExecutor: Sendable {
         requestedInputBudgetTokens: Int
     ) async throws -> NovelStructuredModelPreparation {
         let model = try await resolveModel(for: modelPolicy)
-        let parameters = taskKind.parameters
+        let parameters = taskKind.parameters(
+            stateSyncReasoningEnabled: stateSyncReasoningEnabled()
+        )
         return NovelStructuredModelPreparation(
             modelPolicy: modelPolicy,
             taskKind: taskKind,
@@ -179,7 +185,7 @@ struct NovelStructuredModelExecutor: Sendable {
         let invocation = try makeInvocation(
             request,
             resolvedModel: model,
-            parameters: request.task.parameters
+            parameters: liveParameters(for: request.task)
         )
         return try await executePrepared(invocation)
     }
@@ -192,12 +198,16 @@ struct NovelStructuredModelExecutor: Sendable {
         let invocation = try makeInvocation(
             request,
             resolvedModel: model,
-            parameters: request.task.parameters
+            parameters: liveParameters(for: request.task)
         )
         return try await executePrepared(
             invocation,
             noOutputTimeout: noOutputTimeout
         )
+    }
+
+    private func liveParameters(for task: NovelStructuredModelTask) -> NovelModelParameters {
+        task.parameters(stateSyncReasoningEnabled: stateSyncReasoningEnabled())
     }
 
     func executeWithEvidence(
@@ -703,7 +713,13 @@ private extension NovelStructuredModelTask {
     }
 
     var parameters: NovelModelParameters {
-        kind.parameters
+        parameters(
+            stateSyncReasoningEnabled: NovelCreationModelPreferences.shared.stateSyncReasoningEnabled
+        )
+    }
+
+    func parameters(stateSyncReasoningEnabled: Bool) -> NovelModelParameters {
+        kind.parameters(stateSyncReasoningEnabled: stateSyncReasoningEnabled)
     }
 
     func decode(_ text: String) throws -> NovelStructuredModelOutput {
@@ -746,14 +762,30 @@ extension NovelStructuredModelTaskKind {
         }
     }
 
+    /// 默认尊重小说设置「剧情同步使用推理」（缺省关闭）。
     var parameters: NovelModelParameters {
+        parameters(
+            stateSyncReasoningEnabled: NovelCreationModelPreferences.shared.stateSyncReasoningEnabled
+        )
+    }
+
+    /// - Parameter stateSyncReasoningEnabled: 仅影响 `.stateDelta` / `.stateRebuild`。
+    ///   关闭时对 DeepSeek 等会发 `thinking: disabled`，同步更快。
+    func parameters(stateSyncReasoningEnabled: Bool) -> NovelModelParameters {
         switch self {
-        case .stateDelta, .stateRebuild, .discussionArchive, .chapterPlanProposal:
+        case .stateDelta, .stateRebuild:
             .init(
                 temperature: 0.1,
                 topP: 0.8,
                 // 不给模型设硬上限(用户明确裁决):写多少由模型决定,不人为截断。
                 // 输入侧的留位由 `outputReservationTokens` 独立承担。
+                maxOutputTokens: nil,
+                reasoningLevel: stateSyncReasoningEnabled ? .automatic : .off
+            )
+        case .discussionArchive, .chapterPlanProposal:
+            .init(
+                temperature: 0.1,
+                topP: 0.8,
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic
             )

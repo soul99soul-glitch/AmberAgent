@@ -7,6 +7,8 @@ final class NovelCreationModelPreferences: @unchecked Sendable {
         static let creation = "novel.creation.default-model-policy"
         static let stateSync = "novel.creation.state-sync-model-policy"
         static let review = "novel.creation.review-model-policy"
+        /// 剧情同步（stateDelta / stateRebuild）是否允许模型推理。默认 false。
+        static let stateSyncReasoningEnabled = "novel.creation.state-sync-reasoning-enabled"
     }
 
     private let lock = NSLock()
@@ -34,6 +36,22 @@ final class NovelCreationModelPreferences: @unchecked Sendable {
                 userDefaults.removeObject(forKey: key(for: purpose))
             } else if let data = try? encoder.encode(policy) {
                 userDefaults.set(data, forKey: key(for: purpose))
+            }
+        }
+    }
+
+    /// 剧情同步是否开启推理。默认关闭：DeepSeek Flash 等带 REASONING 能力的模型
+    /// 在 automatic 下会先 thinking 再出 JSON，同步明显变慢。
+    var stateSyncReasoningEnabled: Bool {
+        get {
+            lock.withLock {
+                // 缺省 false；只有显式写成 true 才开启。
+                userDefaults.object(forKey: Keys.stateSyncReasoningEnabled) as? Bool ?? false
+            }
+        }
+        set {
+            lock.withLock {
+                userDefaults.set(newValue, forKey: Keys.stateSyncReasoningEnabled)
             }
         }
     }

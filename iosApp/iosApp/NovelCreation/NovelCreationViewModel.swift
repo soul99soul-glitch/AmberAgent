@@ -650,8 +650,9 @@ final class NovelCreationViewModel {
 
     func interruptSessionForBackground(deadline: Date) async {
         guard !Task.isCancelled else { return }
-        manualStateSyncTask?.cancel()
-        automaticStateSyncTask?.cancel()
+        // 不在这里 cancel 自动/手动剧情同步：它们有独立 keepAlive 与 expire 回调。
+        // 后台总中断若一并掐掉 sync，会和代笔 awaitGhostwriteStateSync 竞态成假 syncFailed
+        // （正文已收录，批进度却停在待记账）。生成 run 仍由下方 interrupt 收口。
         continuityAuditTask?.cancel()
         queuedAutomaticStateSyncTarget = nil
         var projectIDs = Set(projects.map(\.id))
@@ -2123,10 +2124,12 @@ final class NovelCreationViewModel {
         let branchPending = project.pendingOperations.filter {
             $0.branchID == branch.branch.id
         }
+        // pending 与 retryable 都要能恢复；仅 retryable 时旧逻辑直接 return 会「看起来欠同步却不动」。
         guard branchPending.isEmpty ||
                 (branchPending.count == 1 &&
                     branchPending[0].kind == .manualSync &&
-                    branchPending[0].status == .pending) else {
+                    (branchPending[0].status == .pending ||
+                        branchPending[0].status == .retryable)) else {
             return
         }
         scheduleAutomaticStateSync(
