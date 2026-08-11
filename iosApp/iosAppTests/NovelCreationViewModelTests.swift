@@ -1964,6 +1964,44 @@ final class NovelCreationViewModelTests: XCTestCase {
         """
     }
 
+    /// 接线契约：agent 写工具经 executor 直接 perform（绕过 VM 的 perform wrapper）后，
+    /// 领域 mutation 广播必须驱动 VM 自动刷新——否则项目列表/顶栏/面板要等 run
+    /// 终态甚至重进才更新（R1/R2 修复的回归锁）。
+    func testExternalMutationBroadcastRefreshesProjectList() async throws {
+        let creation = DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        let projectID = NovelProjectID()
+        let branchID = NovelBranchID()
+        _ = try await creation.perform(.createProject(NovelTestFixtures.createCommand(
+            projectID: projectID,
+            branchID: branchID,
+            name: "旧名"
+        )))
+        let viewModel = NovelCreationViewModel(creation: creation)
+        await viewModel.loadProjects(restoresSelection: false)
+        XCTAssertEqual(viewModel.projects.first(where: { $0.id == projectID })?.name, "旧名")
+
+        // executor 同款路径：不经过 VM wrapper 的直接 perform。
+        guard case .project(let snapshot) = try await creation.snapshot(.project(projectID)) else {
+            XCTFail("Expected a project snapshot")
+            return
+        }
+        _ = try await creation.perform(.renameProject(NovelRenameProjectCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: snapshot.project.revision,
+                expectedConfigRevision: nil,
+                expectedBranchHeadRevision: nil
+            ),
+            projectID: projectID,
+            name: "agent 改的名"
+        )))
+
+        let refreshed = await eventually {
+            viewModel.projects.first(where: { $0.id == projectID })?.name == "agent 改的名"
+        }
+        XCTAssertTrue(refreshed, "mutation 广播后项目列表未自动刷新：\(viewModel.projects.map(\.name))")
+    }
+
     private func eventually(
         timeout: TimeInterval = 2,
         condition: @MainActor () async -> Bool

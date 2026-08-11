@@ -146,6 +146,10 @@ final class ChatToolRuntime {
     /// P1-c: 线程编排工具执行体（spawn_agent/list_agents/interrupt_agent）。
     /// 可选：未注入时三工具返回结构化「不可用」错误而不是静默缺失。
     private let orchestrationToolService: IOSThreadOrchestrationToolService?
+    /// 小说讨论写工具的领域入口（weak：AppShell 先构造本 runtime 再构造
+    /// DefaultNovelCreation，由 NovelCreationComposition 回填；weak 保证
+    /// runtime ↔ creation 不形成引用环）。nil 时讨论引擎不注册小说写工具。
+    weak var novelProjectCreation: DefaultNovelCreation?
     /// 跨会话读取工具（session_search/session_read）的会话存储源。可选：
     /// 未注入时两工具返回结构化「不可用」错误（照 orchestrationToolService 先例；
     /// 测试注入隔离 store）。
@@ -209,13 +213,27 @@ final class ChatToolRuntime {
     }
 
     /// Tool set for the novel discussion agent. Ask User is always available;
-    /// search continues to respect the global Web Search consent switch.
-    func novelDiscussionToolExecutors() -> [String: any IOSToolExecutor] {
+    /// search continues to respect the global Web Search consent switch. The
+    /// novel project write tools are registered only when a per-run project
+    /// context is provided (discussion runs started by the novel lifecycle),
+    /// regardless of the web-search switch.
+    func novelDiscussionToolExecutors(
+        projectContext: NovelProjectToolRunContext? = nil
+    ) -> [String: any IOSToolExecutor] {
         var executors: [String: any IOSToolExecutor] = [
             "ask_user": IOSClosureToolExecutor { _, _, _ in
                 .needsApproval("等待用户回答")
             }
         ]
+        if let projectContext {
+            let projectExecutor = IOSNovelProjectToolExecutor(
+                projectContext: projectContext,
+                creation: novelProjectCreation
+            )
+            for name in IOSNovelProjectToolExecutor.supportedToolNames {
+                executors[name] = projectExecutor
+            }
+        }
         guard sharedSettings.snapshot.enableWebSearch else { return executors }
         for name in IOSSearchExecutor.supportedToolNames {
             executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in

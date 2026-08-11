@@ -70,6 +70,88 @@ fun createAskUserToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+// MARK: - Novel discussion project tools
+//
+// Novel-session-only write tools. They are declared here but deliberately NOT
+// registered in the `iosToolDeclaration` catalog or ToolSearch: the discussion
+// agent assembles them only inside the novel discussion transport
+// (`NovelLiveModelAdapter.makeParameters`), so they never leak into ordinary
+// Chat/subagent tool sets. Execution lives in `IOSNovelProjectToolExecutor`,
+// which routes every call through `DefaultNovelCreation.perform` (the single
+// reducer transaction path).
+
+fun createNovelRenameProjectToolDeclaration(): Tool = Tool(
+    name = "novel_rename_project",
+    description = """
+        Rename the user's novel project. Use when the user asks to change the project title.
+        `title` is the new project name; `reason` is an optional short note for the rename.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelRenameProjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelSetPolishPreferenceToolDeclaration(): Tool = Tool(
+    name = "novel_set_polish_preference",
+    description = """
+        Set the novel project's polish preference (style requirements applied when polishing chapters).
+        Pass an empty `preference` string to clear the stored preference.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelSetPolishPreferenceParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelUpsertUpcomingArcToolDeclaration(): Tool = Tool(
+    name = "novel_upsert_upcoming_arc",
+    description = """
+        Save the branch's upcoming-arc notes ("往后几章") as a bounded soft direction.
+        `beats` is a list of short beat notes: at most 8 beats, each at most 160 characters;
+        longer or extra beats are rejected. Replaces any previously saved arc on this branch.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelUpsertUpcomingArcParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelClearUpcomingArcToolDeclaration(): Tool = Tool(
+    name = "novel_clear_upcoming_arc",
+    description = """
+        Clear the branch's upcoming-arc notes ("往后几章") on the user's novel project.
+        Takes no arguments. Fails if the branch has no arc notes to clear.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelReviseMaterialToolDeclaration(): Tool = Tool(
+    name = "novel_revise_material",
+    description = """
+        Create or update a setting material (设定资料) in the user's novel project.
+        With `material_id`, update that existing material (its `kind` must match); without it, create a new material.
+        `kind` is one of world/character/relationship/masterOutline/writingRequirements/custom;
+        `aliases` only applies to character materials; `custom_name` names a new custom card
+        (default「自定义」). When the user's intent is ambiguous,
+        ask the user first (ask_user) before writing. The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelReviseMaterialParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelProposeChapterPlanToolDeclaration(): Tool = Tool(
+    name = "novel_propose_chapter_plan",
+    description = """
+        Save a DRAFT chapter plan for the current branch of the user's novel project.
+        The plan is always stored as a draft and must be manually confirmed by the user in the
+        project control panel before ghostwrite can use it; never present it as already confirmed.
+        `must_happen`/`must_not_happen`/`visible_facts` may be empty arrays; `goal_and_conflict` is required.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelProposeChapterPlanParameters() },
+    execute = { emptyList() }
+)
+
 fun createMemoryToolDeclaration(): Tool = Tool(
     name = "memory_tool",
     description = """
@@ -1616,6 +1698,117 @@ private fun askUserParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("question", "options")
+)
+
+private fun novelRenameProjectParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("title", buildJsonObject {
+            put("type", "string")
+            put("description", "The new project name")
+        })
+        put("reason", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional short note the user gave for the rename")
+        })
+    },
+    required = listOf("title")
+)
+
+private fun novelSetPolishPreferenceParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("preference", buildJsonObject {
+            put("type", "string")
+            put("description", "The polish preference text; pass an empty string to clear it")
+        })
+    },
+    required = listOf("preference")
+)
+
+private fun novelUpsertUpcomingArcParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("beats", buildJsonObject {
+            put("type", "array")
+            put("description", "Upcoming-arc beat notes; at most 8 beats, each at most 160 characters")
+            put("items", buildJsonObject { put("type", "string") })
+            put("maxItems", 8)
+        })
+    },
+    required = listOf("beats")
+)
+
+private fun novelReviseMaterialParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("material_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional existing material id; when present the material is updated and its kind must match")
+        })
+        put("kind", buildJsonObject {
+            put("type", "string")
+            put("description", "Material category")
+            put("enum", buildJsonArray {
+                add("world")
+                add("character")
+                add("relationship")
+                add("masterOutline")
+                add("writingRequirements")
+                add("custom")
+            })
+        })
+        put("title", buildJsonObject {
+            put("type", "string")
+            put("description", "Material title")
+        })
+        put("content", buildJsonObject {
+            put("type", "string")
+            put("description", "Material body text")
+        })
+        put("aliases", buildJsonObject {
+            put("type", "array")
+            put("description", "Optional aliases for character materials only")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("custom_name", buildJsonObject {
+            put("type", "string")
+            put("description", "Display name used only when creating a kind=custom material; ignored on update (the existing name is kept)")
+        })
+    },
+    required = listOf("kind", "title", "content")
+)
+
+private fun novelProposeChapterPlanParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("outline_placement", buildJsonObject {
+            put("type", "string")
+            put("description", "Short placement note such as \"第 3 章 · 中段转折\"")
+        })
+        put("goal_and_conflict", buildJsonObject {
+            put("type", "string")
+            put("description", "The chapter's goal and conflict (required, non-empty)")
+        })
+        put("must_happen", buildJsonObject {
+            put("type", "array")
+            put("description", "Beat items that must happen this chapter; may be empty")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("must_not_happen", buildJsonObject {
+            put("type", "array")
+            put("description", "Beat items that must not happen this chapter; may be empty")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+        put("ending_hook", buildJsonObject {
+            put("type", "string")
+            put("description", "The chapter's ending hook; may be an empty string")
+        })
+        put("visible_facts", buildJsonObject {
+            put("type", "array")
+            put("description", "Facts the POV is allowed to know in this chapter; may be empty")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+    },
+    required = listOf(
+        "outline_placement", "goal_and_conflict", "must_happen",
+        "must_not_happen", "ending_hook", "visible_facts"
+    )
 )
 
 private fun webMountStationsParameters(): InputSchema = InputSchema.Obj(

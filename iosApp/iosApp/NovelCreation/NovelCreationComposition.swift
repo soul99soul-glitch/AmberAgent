@@ -41,12 +41,17 @@ enum NovelCreationComposition {
             sharedSettings: sharedSettings,
             toolRuntime: toolRuntime
         )
-        return DefaultNovelCreation(
+        let creation = DefaultNovelCreation(
             repository: repository,
             modelRunner: modelAdapter,
             defaultModelPolicy: { purpose in
                 NovelCreationModelPreferences.shared.policy(for: purpose)
             }
         )
+        // The runtime is constructed before the creation (AppShell), so the
+        // weak back-reference is filled here. It lets the discussion tool
+        // engine reach the creation actor without any strong cycle.
+        toolRuntime?.novelProjectCreation = creation
+        return creation
     }
 }

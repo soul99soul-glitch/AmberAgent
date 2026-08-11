@@ -1,8 +1,9 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-10 (ghostwrite chain-closure + chat streaming polish + novel session WIP)
+Last updated: 2026-08-12 (novel discussion field-write tools)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
 
 ## Repository
 
@@ -137,6 +138,26 @@ Last updated: 2026-08-10 (ghostwrite chain-closure + chat streaming polish + nov
 - Review 精准修复：skill enable/list/use 统一以目录名为键；单文件 `SKILL.md` import 顺带 sibling `mcp.json`；`mcp_import_from_skill` 跳过已存在同名 server；前台 `maxToolResumeCount` 4→6（与后台一致）。
 - 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests`（含 optional `visual-svg` seed/恢复/删除）**TEST SUCCEEDED**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
 - 未覆盖：真机对话闭环（启用 `visual-svg` 后画流程/插画）、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
+
+## 小说讨论项目写工具（2026-08-11，未提交）
+
+完整工作记录（plan + 实现 + 三轮复核）：[`NOVEL_AGENT_FIELD_TOOLS_WORKLOG.md`](NOVEL_AGENT_FIELD_TOOLS_WORKLOG.md)。
+
+小说会话讨论工具循环新增 6 个项目字段写工具（`novel_rename_project` / `novel_set_polish_preference` / `novel_upsert_upcoming_arc` / `novel_clear_upcoming_arc` / `novel_revise_material` / `novel_propose_chapter_plan`），全部经既有 reducer 事务（`DefaultNovelCreation.perform`），无平行写通道。
+
+- KMP：Tool.kt 加 6 个 `createNovel*ToolDeclaration()`（JSON schema + 英文描述），**不进 iosToolDeclaration 注册表/ToolSearch**（仅小说讨论作用域）；`NovelProjectToolDeclarationsTest` 7 项 schema 契约。
+- iOS：新文件 `IOSNovelProjectToolExecutor.swift`（弱引用 creation + projectID + branchID；JSON 解码 → action → perform；成功返回旧值→新值人读回执；非法参数/非法 kind/arc 超限（>8 条或 >160 字）返回 failed 并说明；`novel_propose_chapter_plan` 恒存 draft）。
+- 上下文注入：`NovelModelRequest`/`NovelLiveTransportRequest` 新增可选 projectID/branchID（默认 nil，非 discussion 零影响）；`startGenerationCore` 透传；executor 工厂签名改为 `(NovelProjectToolRunContext?) -> [String: any IOSToolExecutor]`；`ChatToolRuntime.novelDiscussionToolExecutors(projectContext:)` 注册 6 工具（weak `novelProjectCreation` 由 Composition 回填，无环）。
+- 声明接线：`makeParameters` 加 `includeProjectTools`——与 executor 注册**共用同一谓词**（`novelProjectContext != nil && discussionTransport != nil`，context 由 purpose==.discussion 且非 GrokWeb 时从 request projectID/branchID 构造），防"声明了但没 executor"悬空。
+- 提示词：讨论模板 **v6→v7**（NovelPromptCatalog），新增 PROJECT WRITE TOOLS 段——六工具契约与使用纪律（先收敛再一次写入、rename/revise_material 未明令时先确认且与写入分轮、chapter plan 恒草稿须面板人工确认、代笔中拒绝、上限文案与 executor 校验对齐）；v6 全文归档进 acceptedVersions/systemText，旧 receipt 校验不受影响。
+- 代笔守卫：`novel_revise_material` 与 `novel_propose_chapter_plan` 仅在代笔进度 phase ∈ {writing/accepting/collecting/syncing/planning/revising} 时拒绝（对齐 UI `isGhostwriting` 判定）；rename/preference/arc 不挡。**不查 activeRuns**——调用方本身就是一条 .running 的 discussion run（checker 抓到的自锁 CRITICAL，已修并加真实 paused-run 回归锁）。
+- 已确认合同保护：`novel_propose_chapter_plan` 遇到 status==.confirmed 的既有合同拒绝落草稿（reducer 只按 planID 判撞不拦状态回退），提示去面板处理。
+- 验证：`:ai-core:jvmTest` 全绿；定点四套件 **101/101**——`IOSNovelProjectToolExecutorTests` **15/15**（6 工具 happy path + 非法参数 + arc 超限 + 代笔守卫 + 真实 discussion run 在场不自锁 + 确认合同拒降级 + adapter.start 组装链端到端）、`NovelLiveModelAdapterTests` 27/27（4 处讨论工具集契约改带项目上下文请求）、`NovelGenerationLifecycleTests` 53/53、`NovelPromptCatalogTests` 6/6（快照哈希随 v7 上限文案显式更新）；回归 125 项中仅 `NovelCollaborationModeTests.testGhostwriteSingleChapterHappyPathCollectsAndSyncs` 失败=**纯 HEAD 8e5a222d7 既有基线**（syncFailed，与本 diff 无关）。xcodegen 重新生成工程后 BUILD SUCCEEDED。
+- 基线注记：同上——`NovelCollaborationModeTests` 1 用例（syncFailed）、`IOSNovelCreationWiringTests` 6 用例、`NovelSessionViewModelTests` 3 用例为纯 HEAD 基线失败。
+- 第二轮复核（checker + UI 审查，2026-08-11 深夜）：逻辑链 PASS_WITH_NOTES。已修——①`decisionLog` 从工具白名单（KMP schema/executor/prompt v7/测试）移除：该类卡 UI 四 tab 不展示、编辑器无法保存，agent 写了会"失踪"，留作 pipeline 专用（后续 UI 支持后再开放）；②custom 卡更新保留既有自定义显示名、不按关联值判等（新增回归测试）。
+- 第三轮精准修复（2026-08-12，全部收口）：**R1+R2（刷新链路断）**——根因是 agent 写入经 executor 直接 perform、绕过 VM perform wrapper（唯一会刷新快照的路径）；修复=`NovelCreation.mutationEvents()` 领域广播（每次成功 perform 发布 {projectID, operationID}，协议默认空流、8+ 测试替身免实现），`NovelCreationViewModel` 订阅后复用 `refreshCurrentSelection`（一处同时刷项目列表+选中快照）。**回声抑制**（首轮实现引发 13 个 VM 测试竞态失败的教训）：VM 两个 perform 入口（私有 wrapper + performSessionAction）登记自有 operationID，订阅跳过回声，否则异步刷新与 VM 自身流程中间状态竞争。**R3（会话流零工具痕迹）**——prompt 级修复：v7 补"写入成功后须在回复里说明改动（旧→新），回执不进 UI"，不新建工具胶囊 UI。**D2（custom 卡同名难区分）**——`custom_name` 可选参数端到端（KMP schema/executor/prompt/测试），新建可命名、更新仍保留原名。D3（面板"旧值+预览失效"临时割裂）判为非 bug 不修：字段禁用、预览拒显假数据、终态自愈，行为自洽。
+- 验证（终态）：定点五套件 **152/152**（executor 17、VM 49 含 mutation 广播接线测试、lifecycle 53、adapter 27、catalog 6）；`:ai-core:jvmTest` 绿；回归 218 项中 14 失败全在既有基线集（syncFailed 1 例、SessionVM 1 例、wiring 3 例源码断言——断言对象是用户并发 WIP 改动的 NovelMaterialsView，本 diff 未触碰；另有用户连续性审计 WIP 8 文件非本轮范围）。
+- 未验证：真实 provider 下模型真实调用 6 工具、真机。
 
 ## Novel Session Streaming Parity（2026-08-10，进行中）
 

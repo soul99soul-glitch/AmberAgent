@@ -240,9 +240,27 @@ final class NovelCreationViewModel {
     /// Targets whose Stop was pressed but mutation/task teardown has not finished yet.
     /// Keeps a visible “正在停止” state so selection block is not unexplained.
     private var stateSyncStoppingTargets: Set<NovelAutomaticStateSyncTarget> = []
+    /// 领域 mutation 广播的订阅任务；weak self 退出，不占额外生命周期管理。
+    @ObservationIgnored private var mutationEventsTask: Task<Void, Never>?
+    /// 本 VM 发起的 mutation 的 operationID 集合，用于抑制广播回声；成功广播到达即移除。
+    @ObservationIgnored private var ownMutationOperationIDs: Set<NovelOperationID> = []
 
     init(creation: any NovelCreation) {
         self.creation = creation
+        // 非 UI 写入源（讨论工具 executor 等）落盘后广播的 mutation 事件：复用
+        // refreshCurrentSelection 一处刷新项目列表与选中快照，否则顶栏标题/面板/
+        // 设定页/列表行要等 run 终态甚至重进才更新。自身 UI 写入的回流是幂等重复
+        // 刷新（latest-wins），不额外抑制；VM 释放后下一条事件让任务自行退出。
+        mutationEventsTask = Task { @MainActor [weak self] in
+            guard let stream = await self?.creation.mutationEvents() else { return }
+            for await event in stream {
+                guard let self else { return }
+                // 自身发起的写入已在自己的流程里刷新；回声刷新会与这些流程的
+                // 中间状态竞争（分支选择/快照序列），必须按 operationID 抑制。
+                if self.ownMutationOperationIDs.remove(event.operationID) != nil { continue }
+                _ = try? await self.refreshCurrentSelection(projectID: event.projectID)
+            }
+        }
     }
 
     /// 跨进程：写入本批代笔进度 sidecar；不该保留时删除。
@@ -1895,6 +1913,7 @@ final class NovelCreationViewModel {
                 stopStateSyncActivity(ownerID: activityOwnerID)
             }
         }
+        ownMutationOperationIDs.insert(action.context.operationID)
         return try await creation.perform(action)
     }
 
@@ -2628,6 +2647,7 @@ final class NovelCreationViewModel {
         }
 
         do {
+            ownMutationOperationIDs.insert(action.context.operationID)
             _ = try await creation.perform(action)
         } catch {
             let operationError = error

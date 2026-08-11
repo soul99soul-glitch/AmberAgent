@@ -235,7 +235,9 @@ extension DefaultNovelCreation {
             model: model,
             purpose: modelPurpose(for: request),
             messages: modelMessages(plan: plan, userText: request.userText),
-            parameters: parameters
+            parameters: parameters,
+            projectID: request.projectID,
+            branchID: request.branchID
         )
         let parameterEvidence = parameters.evidenceDictionary
         let startedAt = now()

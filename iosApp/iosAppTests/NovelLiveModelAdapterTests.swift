@@ -3,6 +3,16 @@ import XCTest
 @preconcurrency import Shared
 @testable import iosApp
 
+/// 小说讨论写工具在组装点恒声明（与 IOSNovelProjectToolExecutor.supportedToolNames 同源）。
+private let novelDiscussionProjectToolNames: [String] = [
+    "novel_rename_project",
+    "novel_set_polish_preference",
+    "novel_upsert_upcoming_arc",
+    "novel_clear_upcoming_arc",
+    "novel_revise_material",
+    "novel_propose_chapter_plan",
+]
+
 final class NovelLiveModelAdapterTests: XCTestCase {
     func testGlobalAndFixedPoliciesResolveStableProviderAndModelUUIDs() async throws {
         let fixture = makeFixture(apiKey: "test-key")
@@ -392,11 +402,15 @@ final class NovelLiveModelAdapterTests: XCTestCase {
 
         _ = await Self.collect(try await adapter.start(makeRequest(
             model: resolved,
-            purpose: .discussion
+            purpose: .discussion,
+            withProjectContext: true
         )))
 
         let request = try XCTUnwrap(captured.value)
-        XCTAssertEqual(Set(request.parameters.tools.map(\.name)), ["ask_user", "search_web", "scrape_web"])
+        XCTAssertEqual(
+            Set(request.parameters.tools.map(\.name)),
+            Set(["ask_user", "search_web", "scrape_web"] + novelDiscussionProjectToolNames)
+        )
         XCTAssertEqual(request.parameters.model.tools.count, 1)
     }
 
@@ -406,7 +420,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         let executor = RecordingNovelSearchExecutor()
         let transport = NovelLiveModelAdapter.discussionSearchTransport(
             using: provider,
-            executors: { ["search_web": executor] }
+            executors: { _ in ["search_web": executor] }
         )
         let adapter = NovelLiveModelAdapter(
             catalogProvider: { fixture.catalog },
@@ -444,7 +458,7 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         let executor = RecordingNovelSearchExecutor()
         let transport = NovelLiveModelAdapter.discussionSearchTransport(
             using: provider,
-            executors: { ["search_web": executor] }
+            executors: { _ in ["search_web": executor] }
         )
         let adapter = NovelLiveModelAdapter(
             catalogProvider: { fixture.catalog },
@@ -502,10 +516,14 @@ final class NovelLiveModelAdapterTests: XCTestCase {
 
         _ = await Self.collect(try await adapter.start(makeRequest(
             model: resolved,
-            purpose: .discussion
+            purpose: .discussion,
+            withProjectContext: true
         )))
 
-        XCTAssertEqual(captured.value?.parameters.tools.map(\.name), ["ask_user"])
+        XCTAssertEqual(
+            captured.value?.parameters.tools.map(\.name),
+            ["ask_user"] + novelDiscussionProjectToolNames
+        )
         XCTAssertTrue(captured.value?.parameters.model.tools.isEmpty == true)
     }
 
@@ -560,7 +578,10 @@ final class NovelLiveModelAdapterTests: XCTestCase {
                 return nil
             },
             discussionTransport: { request, callbacks in
-                XCTAssertEqual(Set(request.parameters.tools.map(\.name)), ["ask_user", "search_web", "scrape_web"])
+                XCTAssertEqual(
+                    Set(request.parameters.tools.map(\.name)),
+                    Set(["ask_user", "search_web", "scrape_web"] + novelDiscussionProjectToolNames)
+                )
                 order.mutate { $0.append("transport") }
                 callbacks.onComplete()
                 return nil
@@ -570,7 +591,8 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         let resolved = try await adapter.resolveModel(for: .global)
         let events = await Self.collect(try await adapter.start(makeRequest(
             model: resolved,
-            purpose: .discussion
+            purpose: .discussion,
+            withProjectContext: true
         )))
 
         XCTAssertEqual(events, [.completed])
@@ -611,12 +633,16 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         let resolved = try await adapter.resolveModel(for: .global)
         let events = await Self.collect(try await adapter.start(makeRequest(
             model: resolved,
-            purpose: .discussion
+            purpose: .discussion,
+            withProjectContext: true
         )))
 
         XCTAssertEqual(events, [.completed])
         XCTAssertTrue(captured.value?.providerSetting is ProviderSetting.Claude)
-        XCTAssertEqual(Set(captured.value?.parameters.tools.map(\.name) ?? []), ["ask_user", "search_web", "scrape_web"])
+        XCTAssertEqual(
+            Set(captured.value?.parameters.tools.map(\.name) ?? []),
+            Set(["ask_user", "search_web", "scrape_web"] + novelDiscussionProjectToolNames)
+        )
         XCTAssertNil(captured.value?.grokIsolation)
     }
 
@@ -1155,7 +1181,8 @@ final class NovelLiveModelAdapterTests: XCTestCase {
     private func makeRequest(
         model: NovelResolvedModel,
         purpose: NovelModelPurpose = .prose,
-        reasoning: NovelModelReasoningLevel = .off
+        reasoning: NovelModelReasoningLevel = .off,
+        withProjectContext: Bool = false
     ) -> NovelModelRequest {
         NovelModelRequest(
             runID: NovelRunID(),
@@ -1170,7 +1197,9 @@ final class NovelLiveModelAdapterTests: XCTestCase {
                 topP: 0.95,
                 maxOutputTokens: 4_096,
                 reasoningLevel: reasoning
-            )
+            ),
+            projectID: withProjectContext ? NovelProjectID() : nil,
+            branchID: withProjectContext ? NovelBranchID() : nil
         )
     }
 

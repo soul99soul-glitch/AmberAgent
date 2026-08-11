@@ -1642,9 +1642,19 @@ enum NovelRunEvent: Sendable {
     case persistenceBlocked(NovelFailure)
 }
 
+/// 一次成功项目 mutation 的广播元素。operationID 供订阅方抑制自身发起的回流。
+struct NovelProjectMutationEvent: Sendable, Equatable {
+    let projectID: NovelProjectID
+    let operationID: NovelOperationID
+}
+
 protocol NovelCreation: Sendable {
     func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot
     func perform(_ action: NovelAction) async throws -> NovelOutcome
+    /// 项目文档每次成功 mutation 后广播事件。订阅方（UI VM）据此刷新快照，
+    /// 让非 UI 写入源（如讨论工具 executor）的改动即时反映到界面。
+    /// 默认实现为立即结束的空流，测试替身免实现。
+    func mutationEvents() async -> AsyncStream<NovelProjectMutationEvent>
     func start(_ request: NovelRunRequest) async throws -> NovelRun
     /// Closes a user-visible run across the pre-durable start and durable runtime boundary.
     /// Success means the requested run can no longer become an active hidden run.
@@ -1716,6 +1726,10 @@ protocol NovelCreation: Sendable {
 }
 
 extension NovelCreation {
+    func mutationEvents() async -> AsyncStream<NovelProjectMutationEvent> {
+        AsyncStream { $0.finish() }
+    }
+
     func loadGhostwriteBatchProgress(
         projectID: NovelProjectID,
         branchID: NovelBranchID

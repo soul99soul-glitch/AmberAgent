@@ -33,6 +33,24 @@ struct NovelLiveTransportRequest: @unchecked Sendable {
     let messages: [UIMessage]
     let parameters: TextGenerationParams
     let grokIsolation: NovelGrokIsolationOptions?
+    /// Discussion-only: owning project + current branch for the novel project
+    /// write tools. Nil for every other purpose — zero impact on non-discussion
+    /// transports.
+    let novelProjectContext: NovelProjectToolRunContext?
+
+    init(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        parameters: TextGenerationParams,
+        grokIsolation: NovelGrokIsolationOptions?,
+        novelProjectContext: NovelProjectToolRunContext? = nil
+    ) {
+        self.providerSetting = providerSetting
+        self.messages = messages
+        self.parameters = parameters
+        self.grokIsolation = grokIsolation
+        self.novelProjectContext = novelProjectContext
+    }
 }
 
 struct NovelLiveTransportCallbacks: @unchecked Sendable {
@@ -172,7 +190,9 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
         self.discussionTransport = toolRuntime.map { runtime in
             Self.discussionSearchTransport(
                 using: streamingProvider,
-                executors: { runtime.novelDiscussionToolExecutors() }
+                executors: { projectContext in
+                    runtime.novelDiscussionToolExecutors(projectContext: projectContext)
+                }
             )
         }
         self.discussionSearchEnabled = {
@@ -251,13 +271,24 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
                 && (isGrokWeb || discussionTransport != nil)
             try ensureRunStillActive(request.runID)
             let messages = Self.makeMessages(request.messages)
+            // 声明与 executor 注册共用一个谓词：只有 context 能构造出来时才声明
+            // 项目写工具，避免"声明了但没有 executor"的悬空工具。
+            let novelProjectContext: NovelProjectToolRunContext? = request.purpose == .discussion && !isGrokWeb
+                ? request.projectID.flatMap { projectID in
+                    request.branchID.map {
+                        NovelProjectToolRunContext(projectID: projectID, branchID: $0)
+                    }
+                }
+                : nil
             var parameters = try Self.makeParameters(
                 request.parameters,
                 model: route.model,
                 includeSearchTools: searchEnabled && !isGrokWeb,
                 includeAskUserTool: (request.purpose == .discussion || request.purpose == .quickStart) &&
                     discussionTransport != nil &&
-                    !isGrokWeb
+                    !isGrokWeb,
+                includeProjectTools: novelProjectContext != nil &&
+                    discussionTransport != nil
             )
             var effectiveProvider = route.provider
             if codex.isCodex(route.provider) {
@@ -287,7 +318,8 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
                 grokIsolation: isGrokWeb ? .forPurpose(
                     request.purpose,
                     searchEnabled: searchEnabled
-                ) : nil
+                ) : nil,
+                novelProjectContext: novelProjectContext
             )
             let useDurableTransport = Self.usesBackgroundResponses(
                 provider: effectiveProvider,
@@ -971,13 +1003,13 @@ extension NovelLiveModelAdapter {
 
     static func discussionSearchTransport(
         using provider: any IOSAgentTextProvider,
-        executors: @escaping @MainActor @Sendable () -> [String: any IOSToolExecutor]
+        executors: @escaping @MainActor @Sendable (NovelProjectToolRunContext?) -> [String: any IOSToolExecutor]
     ) -> NovelLiveTransport {
         { request, callbacks in
             let task = Task { @MainActor in
                 let engine = IOSAgentToolEngine(
                     provider: provider,
-                    executors: executors(),
+                    executors: executors(request.novelProjectContext),
                     configuration: .init(maxSteps: 4, honorApprovalPause: true)
                 )
                 let stepText = DiscussionStepTextAccumulator()
@@ -1087,7 +1119,8 @@ private extension NovelLiveModelAdapter {
         _ source: NovelModelParameters,
         model: Model,
         includeSearchTools: Bool = false,
-        includeAskUserTool: Bool = false
+        includeAskUserTool: Bool = false,
+        includeProjectTools: Bool = false
     ) throws -> TextGenerationParams {
         if let maxTokens = source.maxOutputTokens, maxTokens <= 0 {
             throw failure(
@@ -1124,6 +1157,14 @@ private extension NovelLiveModelAdapter {
                 (includeSearchTools ? [
                     ToolKt.createSearchWebToolDeclaration(),
                     ToolKt.createScrapeWebToolDeclaration(),
+                ] : []) +
+                (includeProjectTools ? [
+                    ToolKt.createNovelRenameProjectToolDeclaration(),
+                    ToolKt.createNovelSetPolishPreferenceToolDeclaration(),
+                    ToolKt.createNovelUpsertUpcomingArcToolDeclaration(),
+                    ToolKt.createNovelClearUpcomingArcToolDeclaration(),
+                    ToolKt.createNovelReviseMaterialToolDeclaration(),
+                    ToolKt.createNovelProposeChapterPlanToolDeclaration(),
                 ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,

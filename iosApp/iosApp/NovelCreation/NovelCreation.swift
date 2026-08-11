@@ -618,6 +618,7 @@ actor DefaultNovelCreation: NovelCreation {
                 finalCommitAuthorization: finalCommitAuthorization
             )
             clearInFlight(action)
+            publishMutation(action)
             return outcome
         } catch {
             if requiresRepositoryReconciliation(error) {
@@ -625,6 +626,35 @@ actor DefaultNovelCreation: NovelCreation {
             }
             clearInFlight(action)
             throw error
+        }
+    }
+
+    // MARK: - Mutation notifications
+
+    private var mutationContinuations: [UUID: AsyncStream<NovelProjectMutationEvent>.Continuation] = [:]
+
+    func mutationEvents() -> AsyncStream<NovelProjectMutationEvent> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            mutationContinuations[id] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { await self?.removeMutationContinuation(id) }
+            }
+        }
+    }
+
+    private func removeMutationContinuation(_ id: UUID) {
+        mutationContinuations[id] = nil
+    }
+
+    private func publishMutation(_ action: NovelAction) {
+        guard !mutationContinuations.isEmpty else { return }
+        let event = NovelProjectMutationEvent(
+            projectID: action.projectID,
+            operationID: action.context.operationID
+        )
+        for continuation in mutationContinuations.values {
+            continuation.yield(event)
         }
     }
 

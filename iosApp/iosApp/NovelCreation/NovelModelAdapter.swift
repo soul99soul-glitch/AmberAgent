@@ -59,6 +59,30 @@ struct NovelModelRequest: Codable, Equatable, Sendable {
     let purpose: NovelModelPurpose
     let messages: [NovelModelMessage]
     let parameters: NovelModelParameters
+    /// Discussion run context: the owning project and its current branch.
+    /// Only discussion runs set these; they let the transport build the
+    /// novel project write-tool executors. Defaults keep every other caller
+    /// (structured executors, tests) unchanged.
+    let projectID: NovelProjectID?
+    let branchID: NovelBranchID?
+
+    init(
+        runID: NovelRunID,
+        model: NovelResolvedModel,
+        purpose: NovelModelPurpose,
+        messages: [NovelModelMessage],
+        parameters: NovelModelParameters,
+        projectID: NovelProjectID? = nil,
+        branchID: NovelBranchID? = nil
+    ) {
+        self.runID = runID
+        self.model = model
+        self.purpose = purpose
+        self.messages = messages
+        self.parameters = parameters
+        self.projectID = projectID
+        self.branchID = branchID
+    }
 }
 
 extension NovelModelRequest {

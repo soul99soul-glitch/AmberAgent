@@ -9,6 +9,14 @@ final class NovelPromptCatalogTests: XCTestCase {
             "\($0.kind.rawValue)\n\($0.version)\n\($0.systemText)"
         }.joined(separator: "\n---\n")
 
+        // 2026-08-11 显式更新:`.discussion` 升到 `novel.discussion.v7`。在既有工具规则
+        // （ask_user + 搜索）段落后追加「PROJECT WRITE TOOLS」段:6 个讨论专用项目字段
+        // 写工具（novel_rename_project / novel_set_polish_preference /
+        // novel_upsert_upcoming_arc / novel_clear_upcoming_arc / novel_revise_material /
+        // novel_propose_chapter_plan）的存在、契约与使用纪律（先收敛再一次写入、
+        // 确认与写入分轮、chapter_plan 落草稿由用户在面板确认且代笔中拒绝、项目标题
+        // 1–8 字轻指引）；旧 v6 文本归档进 `systemText(for:version:)` 并进 acceptedVersions。
+        //
         // 2026-08-09 显式更新:新增 `.chapterPlanProposalV1`（代笔多章自动拟定下一章合同）。
         //
         // 2026-08-08 显式更新:`.discussion` 升到 `novel.discussion.v6`。把「即使用户说
@@ -33,9 +41,19 @@ final class NovelPromptCatalogTests: XCTestCase {
         //
         // 2026-07-26 显式更新(第一次):新增 `.wholeChapterRegeneration` 模板(整章重新
         // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
+        //
+        // 2026-08-11 显式更新(第二次):discussion v7 工具契约补执行层上限文案
+        // (preference ≤8000、chapter plan 各字段上限、已确认合同拒绝草稿降级),
+        // 与 IOSNovelProjectToolExecutor 实际校验对齐;其余模板未动。
+        //
+        // 2026-08-11 显式更新(第三次):v7 kind 白名单移除 decisionLog——该类卡 UI
+        // 四个设定 tab 均不展示、编辑器无法保存,agent 写了会"失踪",留作 pipeline 专用。
+        //
+        // 2026-08-12 显式更新(第四次):v7 补"写入后回复里须说明改动"(回执不进 UI)与
+        // custom_name 参数契约(新建 custom 卡命名);其余模板未动。
         XCTAssertEqual(
             sha256(snapshot),
-            "67e03dddaef9d3e55d9317268cc298c35fb9c095f8d9f4cffa04cd4247a4b5be"
+            "593bc26ffd69d579330409af0a29871351777590e21fb2e76c65b9c8b740d201"
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
     }
@@ -55,6 +73,29 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.contains("recommended direction first"))
         XCTAssertTrue(discussion.contains("options array when free input"))
         XCTAssertTrue(discussion.contains("you may ask one next material decision"))
+        for tool in [
+            "novel_rename_project",
+            "novel_set_polish_preference",
+            "novel_upsert_upcoming_arc",
+            "novel_clear_upcoming_arc",
+            "novel_revise_material",
+            "novel_propose_chapter_plan",
+        ] {
+            XCTAssertTrue(discussion.contains(tool), "Discussion prompt is missing \(tool)")
+        }
+        XCTAssertTrue(discussion.contains("available only in discussion"))
+        XCTAssertTrue(discussion.contains("saves the agreed chapter plan as a draft only"))
+        XCTAssertTrue(discussion.contains("confirms it manually in the project panel"))
+        XCTAssertTrue(discussion.contains("during an active ghostwriting run"))
+        XCTAssertTrue(discussion.contains("and writing must be separate turns"))
+        XCTAssertTrue(discussion.contains("never call ask_user in the same turn as a write tool"))
+        XCTAssertTrue(discussion.contains("empty string clears it"))
+        XCTAssertTrue(discussion.contains("at most 8 beats"))
+        XCTAssertTrue(discussion.contains("160 characters"))
+        XCTAssertTrue(discussion.contains("masterOutline/writingRequirements/custom"))
+        XCTAssertTrue(discussion.contains("custom_name"))
+        XCTAssertFalse(discussion.contains("decisionLog"), "decisionLog 卡 UI 不可见不可编辑，不开放给 agent")
+        XCTAssertTrue(discussion.contains("1–8 characters"))
         XCTAssertTrue(quickStart.contains("use ask_user"))
         XCTAssertTrue(normalizedQuickStart.contains("putting your recommended direction first"))
         XCTAssertTrue(quickStart.contains("you may ask one next material decision"))
@@ -158,6 +199,11 @@ final class NovelPromptCatalogTests: XCTestCase {
             for: .discussion,
             version: "novel.discussion.v5"
         ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v6"
+        ))
+        XCTAssertTrue(NovelPromptCatalog.acceptedVersions(for: .discussion).contains("novel.discussion.v6"))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,
             version: "novel.prose-continuation.v1"
