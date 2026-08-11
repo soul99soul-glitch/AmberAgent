@@ -36,12 +36,14 @@ extension DefaultNovelCreation {
     func auditContinuityIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
-        candidateID: NovelCandidateID
+        candidateID: NovelCandidateID,
+        maxPriorManuscriptChapters: Int?
     ) async throws -> NovelContinuityAuditReport {
         let prepared = try await prepareContinuityAuditIncludingCandidate(
             projectID: projectID,
             branchID: branchID,
-            candidateID: candidateID
+            candidateID: candidateID,
+            maxPriorManuscriptChapters: maxPriorManuscriptChapters
         )
         return try await runPreparedContinuityAudit(
             prepared,
@@ -77,7 +79,7 @@ private extension DefaultNovelCreation {
         for chunk in prepared.chunks {
             try Task.checkCancellation()
             do {
-                let audit = try await runContinuityAuditChunk(
+                let audit = try await runContinuityAuditChunkWithRetry(
                     chunk,
                     prepared: prepared,
                     priorIssues: issues,
@@ -92,9 +94,14 @@ private extension DefaultNovelCreation {
                 droppedIssueCount += mapped.droppedCount
             } catch is CancellationError {
                 throw CancellationError()
+            } catch let structured as NovelStructuredModelExecutionFailure
+                where structured.failure.code == "cancelled" {
+                // 取消不得记成 incomplete 软失败,否则多块末段取消会误暂停代笔。
+                throw structured
             } catch {
                 // 一块失败不作废其余块:前面的块已经花过一次模型调用,把结果连同
                 // 失败块数一起交出去,比让用户从头重扫诚实也便宜。
+                // 可恢复错误已在块内有界重试;到这里仍失败才计入 incomplete。
                 failedChunkCount += 1
                 lastFailure = error
             }
@@ -115,6 +122,50 @@ private extension DefaultNovelCreation {
             droppedIssueCount: droppedIssueCount,
             createdAt: now()
         )
+    }
+
+    /// 单块有界重试:只对明确 `isRetryable` 的失败再试一次,取消立即透传。
+    /// 不把部分失败抬成「整次审计 throw」——那会丢掉已成功块的结果。
+    func runContinuityAuditChunkWithRetry(
+        _ chunk: NovelContinuityAuditChunk,
+        prepared: PreparedContinuityAudit,
+        priorIssues: [NovelContinuityIssue],
+        executor: NovelStructuredModelExecutor
+    ) async throws -> NovelContinuityAuditV1 {
+        var attempt = 0
+        while true {
+            attempt += 1
+            do {
+                return try await runContinuityAuditChunk(
+                    chunk,
+                    prepared: prepared,
+                    priorIssues: priorIssues,
+                    executor: executor
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard attempt < continuityAuditChunkMaxAttempts,
+                      isRetryableContinuityChunkFailure(error) else {
+                    throw error
+                }
+            }
+        }
+    }
+
+    /// 块级尝试次数:1 次初试 + 1 次可恢复重试。常量而非配置,避免旋钮膨胀。
+    var continuityAuditChunkMaxAttempts: Int { 2 }
+
+    func isRetryableContinuityChunkFailure(_ error: Error) -> Bool {
+        if error is CancellationError { return false }
+        if let structured = error as? NovelStructuredModelExecutionFailure {
+            return structured.failure.isRetryable
+                && structured.failure.code != "cancelled"
+        }
+        if let model = error as? NovelModelFailure {
+            return model.isRetryable
+        }
+        return false
     }
 
     func runContinuityAuditChunk(
@@ -179,7 +230,8 @@ private extension DefaultNovelCreation {
     func prepareContinuityAuditIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
-        candidateID: NovelCandidateID
+        candidateID: NovelCandidateID,
+        maxPriorManuscriptChapters: Int?
     ) async throws -> PreparedContinuityAudit {
         let loaded = try await loadContinuityAuditContext(
             projectID: projectID,
@@ -198,20 +250,25 @@ private extension DefaultNovelCreation {
             throw NovelError.invalidInput("候选正文为空，无法做连续性检查。")
         }
 
-        var chapters = try continuityAuditChapters(
-            branch: loaded.branch,
-            discardedChapterIDs: loaded.discardedChapterIDs,
-            document: loaded.document
+        let manuscriptChapters = NovelContinuityAuditScope.priorManuscriptChapters(
+            try continuityAuditChapters(
+                branch: loaded.branch,
+                discardedChapterIDs: loaded.discardedChapterIDs,
+                document: loaded.document
+            ),
+            maxPrior: maxPriorManuscriptChapters
         )
         let placement = loaded.document.confirmedChapterPlan(for: branchID)?
             .outlinePlacement
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var chapters = manuscriptChapters
         chapters.append(NovelContinuityAuditChapter(
             chapterID: NovelChapterID(),
             ordinal: loaded.branch.workingChapterSelections.count + 1,
             title: placement.isEmpty ? "候选下一章" : placement,
             content: candidate.content
         ))
+        // 过期判断仍用全书 eligible：近距门只缩小扫描窗，不改「分支正文清单」权威。
         return try await finalizePreparedContinuityAudit(
             branch: loaded.branch,
             document: loaded.document,

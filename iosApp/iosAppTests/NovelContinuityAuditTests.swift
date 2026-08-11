@@ -121,7 +121,8 @@ final class NovelContinuityAuditTests: XCTestCase {
         let report = try await harness.creation.auditContinuityIncludingCandidate(
             projectID: harness.projectID,
             branchID: harness.branchID,
-            candidateID: candidateID
+            candidateID: candidateID,
+            maxPriorManuscriptChapters: nil
         )
 
         XCTAssertEqual(report.scannedChapterCount, 4)
@@ -131,6 +132,93 @@ final class NovelContinuityAuditTests: XCTestCase {
         let user = try XCTUnwrap(requests[0].messages.first { $0.role == .user }?.content)
         XCTAssertTrue(user.contains("# Chapter 4: 候选下一章"))
         XCTAssertTrue(user.contains(candidateBody))
+    }
+
+    /// 代笔近距门：只带最近 N 章正文 + 候选，序数仍用全书口径。
+    func testAuditIncludingCandidateRespectsNearScopePriorLimit() async throws {
+        var fixture = try documentWithChapters([
+            ("渡口", firstChapterContent),
+            ("雨夜", secondChapterContent),
+            ("茶馆", thirdChapterContent),
+            ("清晨", "第二天清晨，渡船照常开走了。"),
+        ])
+        let branch = fixture.document.branches[0]
+        let candidateID = NovelCandidateID()
+        let messageID = NovelMessageID()
+        let candidateBody = "林岸第四次来到渡口，把刀插回鞘里。"
+        var session = fixture.document.sessions[0]
+        session.messages.append(NovelSessionMessageRecord(
+            id: messageID,
+            sequence: Int64(session.messages.count),
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: candidateBody,
+            createdAt: now,
+            runID: NovelRunID(),
+            candidateID: candidateID
+        ))
+        session.revision += 1
+        fixture.document.sessions[0] = session
+        fixture.document.candidates.append(NovelCandidateRecord(
+            id: candidateID,
+            kind: .prose,
+            branchID: branch.id,
+            sessionID: session.id,
+            sourceMessageID: messageID,
+            baseCheckpointID: branch.headCheckpointID,
+            baseHeadRevision: branch.headRevision,
+            status: .available,
+            content: candidateBody,
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            createdAt: now
+        ))
+        try NovelDocumentValidator.validate(fixture.document)
+
+        let harness = try await makeHarness(
+            fixture: fixture,
+            scripts: [script(consistentJSON)],
+            model: resolvedModel
+        )
+        let report = try await harness.creation.auditContinuityIncludingCandidate(
+            projectID: harness.projectID,
+            branchID: harness.branchID,
+            candidateID: candidateID,
+            maxPriorManuscriptChapters: 2
+        )
+
+        // 近 2 已收 + 1 候选 = 3
+        XCTAssertEqual(report.scannedChapterCount, 3)
+        let requests = await harness.adapter.requests
+        let user = try XCTUnwrap(requests[0].messages.first { $0.role == .user }?.content)
+        XCTAssertFalse(user.contains("# Chapter 1: 渡口"))
+        XCTAssertFalse(user.contains("# Chapter 2: 雨夜"))
+        XCTAssertTrue(user.contains("# Chapter 3: 茶馆"))
+        XCTAssertTrue(user.contains("# Chapter 4: 清晨"))
+        XCTAssertTrue(user.contains("# Chapter 5: 候选下一章"))
+        XCTAssertTrue(user.contains(candidateBody))
+    }
+
+    func testNearScopePriorLimitKeepsSuffixOnly() {
+        let chapters = (1...5).map {
+            NovelContinuityAuditChapter(
+                chapterID: NovelChapterID(),
+                ordinal: $0,
+                title: "第\($0)章",
+                content: "正文\($0)"
+            )
+        }
+        let scoped = NovelContinuityAuditScope.priorManuscriptChapters(chapters, maxPrior: 2)
+        XCTAssertEqual(scoped.map(\.ordinal), [4, 5])
+        XCTAssertEqual(
+            NovelContinuityAuditScope.priorManuscriptChapters(chapters, maxPrior: nil).count,
+            5
+        )
+        XCTAssertEqual(
+            NovelContinuityAuditScope.priorManuscriptChapters(chapters, maxPrior: 0).count,
+            5
+        )
     }
 
     /// 模型有权引用块里的章节标头(提示词说的是「本块正文任一连续片段」),
@@ -251,13 +339,14 @@ final class NovelContinuityAuditTests: XCTestCase {
     }
 
     /// 一块失败不该把前面已经扫完(已经花过钱)的结果一起作废。
+    /// 不可恢复失败不重试,避免多烧脚本/调用。
     func testAuditKeepsResultsFromSucceededChunksWhenOneChunkFails() async throws {
         let harness = try await makeLongHarness(scripts: [
             script(longFirstChunkIssueJSON),
             NovelModelScript(steps: [.fail(NovelModelFailure(
-                code: "provider_error",
-                message: "模型暂时不可用。",
-                isRetryable: true
+                code: "invalid_output",
+                message: "结构不可恢复。",
+                isRetryable: false
             ))]),
             script(consistentJSON),
             script(consistentJSON),
@@ -272,8 +361,65 @@ final class NovelContinuityAuditTests: XCTestCase {
         XCTAssertEqual(report.failedChunkCount, 1)
     }
 
+    /// 可恢复的单块失败应就地再试一次;成功则不得记 incomplete。
+    func testAuditRetriesRetryableChunkFailureAndRecovers() async throws {
+        let harness = try await makeLongHarness(scripts: [
+            script(longFirstChunkIssueJSON),
+            NovelModelScript(steps: [.fail(NovelModelFailure(
+                code: "provider_error",
+                message: "模型暂时不可用。",
+                isRetryable: true
+            ))]),
+            script(consistentJSON), // 第二块重试成功
+            script(consistentJSON),
+            script(consistentJSON),
+        ])
+
+        let report = try await harness.creation.auditContinuity(
+            projectID: harness.projectID,
+            branchID: harness.branchID
+        )
+
+        XCTAssertEqual(report.failedChunkCount, 0)
+        XCTAssertEqual(report.issues.count, 1)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 5, "4 块中 1 块重试一次 → 5 次模型调用")
+    }
+
+    /// 可恢复失败重试仍挂:计 failedChunk,保留其它块结果。
+    func testAuditCountsChunkFailedAfterRetryableAttemptsExhausted() async throws {
+        let fail = NovelModelScript(steps: [.fail(NovelModelFailure(
+            code: "provider_error",
+            message: "模型暂时不可用。",
+            isRetryable: true
+        ))])
+        let harness = try await makeLongHarness(scripts: [
+            script(longFirstChunkIssueJSON),
+            fail,
+            fail, // 同块第二次仍失败
+            script(consistentJSON),
+            script(consistentJSON),
+        ])
+
+        let report = try await harness.creation.auditContinuity(
+            projectID: harness.projectID,
+            branchID: harness.branchID
+        )
+
+        XCTAssertEqual(report.issues.count, 1)
+        XCTAssertEqual(report.failedChunkCount, 1)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 5)
+    }
+
     func testAuditFailsWhenEveryChunkFails() async throws {
+        // 单块 + 可恢复:初试与块内重试各一次,仍全挂才抛。
         let harness = try await makeHarness(scripts: [
+            NovelModelScript(steps: [.fail(NovelModelFailure(
+                code: "provider_error",
+                message: "模型暂时不可用。",
+                isRetryable: true
+            ))]),
             NovelModelScript(steps: [.fail(NovelModelFailure(
                 code: "provider_error",
                 message: "模型暂时不可用。",

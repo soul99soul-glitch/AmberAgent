@@ -3662,15 +3662,42 @@ extension NovelSessionViewModel {
             let pauseOnBlockingContinuity = workspace.projectSnapshot?.project
                 .pauseGhostwriteOnBlockingContinuity ?? true
             if pauseOnBlockingContinuity {
-                let continuityReport = try await withGhostwriteInfraRetry(
+                var continuityReport = try await withGhostwriteInfraRetry(
                     binding: expectedBinding,
                     stage: "连续性检查"
                 ) {
                     try await workspace.auditContinuityIncludingCandidate(
                         projectID: expectedBinding.projectID,
                         branchID: expectedBinding.branchID,
-                        candidateID: candidateID
+                        candidateID: candidateID,
+                        maxPriorManuscriptChapters:
+                            NovelGhostwriteContinuityGate.nearScopePriorChapterCount
                     )
+                }
+                // 规则恢复：incomplete 再静默整次近距扫描 1 次，仍失败才停人。
+                // 不烧质量预算；blocking 干净报告不进此循环。
+                var silentRerun = 0
+                while NovelGhostwriteContinuityGate.shouldSilentRerunIncomplete(
+                    failedChunkCount: continuityReport.failedChunkCount,
+                    alreadyReran: silentRerun
+                ) {
+                    try Task.checkCancellation()
+                    silentRerun += 1
+                    mutateGhostwriteProgress(binding: expectedBinding) {
+                        $0.detailMessage = "连续性检查未扫稳，正在再检…"
+                    }
+                    continuityReport = try await withGhostwriteInfraRetry(
+                        binding: expectedBinding,
+                        stage: "连续性检查"
+                    ) {
+                        try await workspace.auditContinuityIncludingCandidate(
+                            projectID: expectedBinding.projectID,
+                            branchID: expectedBinding.branchID,
+                            candidateID: candidateID,
+                            maxPriorManuscriptChapters:
+                                NovelGhostwriteContinuityGate.nearScopePriorChapterCount
+                        )
+                    }
                 }
                 try Task.checkCancellation()
                 if let reason = NovelGhostwriteContinuityGate.pauseReason(for: continuityReport),

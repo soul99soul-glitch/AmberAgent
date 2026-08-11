@@ -1005,20 +1005,26 @@ struct NovelSessionView: View {
     /// 主界面代笔状态条：状态 + 详情 + 暂停/继续。复用会话 VM 既有入口，
     /// 不引入新状态；继续键沿用与面板一致的 `canStartGhostwriteChapter` 门。
     private func ghostwriteStatusBar(_ progress: NovelGhostwriteProgress) -> some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .center, spacing: 12) {
             Image(systemName: viewModel.isGhostwriting ? "pencil.and.scribble" : "pause.circle")
+                .font(.body)
                 .foregroundStyle(AmberTheme.accentAmber)
-            VStack(alignment: .leading, spacing: 2) {
+                .frame(width: 22, alignment: .center)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(progress.statusLabel)
-                    .font(.footnote)
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(AmberTheme.foreground2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let detail = progress.detailMessage, !detail.isEmpty {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(2)
+                        .lineLimit(3)
+                        .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
@@ -1028,21 +1034,33 @@ struct NovelSessionView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .frame(minHeight: 44)
+                .frame(minWidth: 64, minHeight: 44)
                 .contentShape(Rectangle())
             } else if progress.shouldContinueSameBatch {
-                Button("继续") {
+                Button(ghostwriteStatusBarContinueTitle(progress)) {
                     _ = viewModel.continueGhostwriteChapter()
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
-                .frame(minHeight: 44)
+                .frame(minWidth: 72, minHeight: 44)
                 .contentShape(Rectangle())
                 .disabled(!viewModel.canStartGhostwriteChapter)
             }
         }
         .padding(.horizontal, 4)
+        .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
+    }
+
+    private func ghostwriteStatusBarContinueTitle(_ progress: NovelGhostwriteProgress) -> String {
+        switch progress.pauseReason {
+        case .continuityAuditIncomplete: return "再检查"
+        case .syncFailed: return "继续同步"
+        case .healBudgetExhausted: return "继续"
+        case .blockingContinuity: return "继续"
+        default:
+            return progress.mustRewriteCandidateOnResume ? "重写" : "继续"
+        }
     }
 
     private func quickStartRecovery(

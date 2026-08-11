@@ -1,9 +1,20 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-12 (novel discussion field-write tools)
+Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
+## 代笔弹性 P0–P3（2026-08-12）
+
+产品目标：硬地板不动，基建自愈，近距软门，停机文案可行动。
+
+- **P0**：块内可恢复重试 2 次；incomplete ≠ 质量；继续再检不重写；文案分型。
+- **P1**：代笔软门 `maxPriorManuscriptChapters=4`（近 4 已收 + 候选）；手动全书扫描仍 `auditContinuity` 全量；`NovelContinuityAuditScope`。
+- **P2**：chunk 外层 `cancelled` rethrow（不记 incomplete）；`failedChunkCount>0` 静默近距再扫 1 次（`shouldSilentRerunIncomplete`）；不烧 quality。
+- **P3**：status/board CTA 分型（再检查 / 情节硬伤 / 重写）；session 条对齐与 44pt；面板按钮与 footer；开关文案改为「代笔收录前做连续性检查」（关=整段软门，含 incomplete）。
+- **审查**：code-reviewer P0 approve-with-nits；P1–P3 approve-with-nits；已补 cancel rethrow、静默再扫规则单测、UI 文案契约。
+- **门禁**：`NovelContinuityAuditTests` 30+；协作 incomplete/blocking/silentRerun 契约绿。
+- **刻意不做**：Supervisor Agent、近距用户旋钮、全书 partial 整次自动重跑、打扰预算、改验收 fail-closed。
 
 ## Repository
 
@@ -139,7 +150,7 @@ Last updated: 2026-08-12 (novel discussion field-write tools)
 - 定点测试：`IOSSkillMcpToolsTests` + `IOSSkillFileStoreTests`（含 optional `visual-svg` seed/恢复/删除）**TEST SUCCEEDED**。`project.yml` 排除已知 API 漂移的 `IOSMemoryRecallPolicyTests` / `NovelCollaborationModeTests`。
 - 未覆盖：真机对话闭环（启用 `visual-svg` 后画流程/插画）、zip skill 导入、按 MCP 工具展开为 `mcp__*` 声明。
 
-## 小说讨论项目写工具（2026-08-11，未提交）
+## 小说讨论项目写工具（2026-08-11，已提交 89ae266a7）
 
 完整工作记录（plan + 实现 + 三轮复核）：[`NOVEL_AGENT_FIELD_TOOLS_WORKLOG.md`](NOVEL_AGENT_FIELD_TOOLS_WORKLOG.md)。
 

@@ -1260,7 +1260,7 @@ struct NovelWritingContextSheet: View {
                 }
 
                 Section {
-                    Toggle("连续性出现「严重」问题时暂停", isOn: $pauseOnBlockingContinuity)
+                    Toggle("代笔收录前做连续性检查", isOn: $pauseOnBlockingContinuity)
                         .disabled(!workspace.canMutate || workspace.isPerforming || session.isGhostwriting)
                         .onChange(of: pauseOnBlockingContinuity) { _, enabled in
                             Task { await setPauseOnBlockingContinuity(enabled) }
@@ -1805,6 +1805,9 @@ struct NovelWritingContextSheet: View {
             if session.ghostwriteProgress?.shouldOfferRevisionSheet == true {
                 return "建议先「按审稿意见润修」（可改要求）；也可整章重写或先改本章计划。不会用旧稿再验。"
             }
+            if session.ghostwriteProgress?.pauseReason == .continuityAuditIncomplete {
+                return "检查链路未扫稳（不是剧情硬伤）。继续会对同一已验收稿再检，不会重写。"
+            }
             if session.ghostwriteProgress?.mustRewriteCandidateOnResume == true {
                 return "继续将重写本章，不会用同一篇旧稿再验收。"
             }
@@ -1823,6 +1826,12 @@ struct NovelWritingContextSheet: View {
     /// 质量失败时标明「将重写」，避免用户以为再点继续是复验旧稿。
     private var continueGhostwriteButtonTitle: String {
         guard let progress = session.ghostwriteProgress else { return "继续代笔" }
+        if progress.pauseReason == .continuityAuditIncomplete {
+            return "再检查同一篇"
+        }
+        if progress.pauseReason == .syncFailed {
+            return "继续同步"
+        }
         if progress.pauseReason == .healBudgetExhausted {
             return "继续重写本章"
         }

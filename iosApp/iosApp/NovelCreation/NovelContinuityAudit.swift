@@ -97,6 +97,20 @@ struct NovelContinuityAuditChunk: Equatable, Sendable {
     }
 }
 
+/// 代笔近距连续门：只取最近若干已收正文，再拼候选。手动全书扫描不走这里。
+enum NovelContinuityAuditScope {
+    /// `nil` / ≤0 → 不裁切；大于章数 → 全取。
+    static func priorManuscriptChapters(
+        _ chapters: [NovelContinuityAuditChapter],
+        maxPrior: Int?
+    ) -> [NovelContinuityAuditChapter] {
+        guard let maxPrior, maxPrior > 0, chapters.count > maxPrior else {
+            return chapters
+        }
+        return Array(chapters.suffix(maxPrior))
+    }
+}
+
 enum NovelContinuityAuditPlanner {
     /// 按整章打包成块 —— 刻意不在章内切断。矛盾检查报的是「第几章」,一章被拦腰
     /// 切开就会出现半截章节没有标头、序号对不上的块,报回来的落点无法映射。

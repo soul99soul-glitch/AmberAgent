@@ -118,7 +118,7 @@ final class NovelCollaborationModeTests: XCTestCase {
         )
         XCTAssertEqual(
             NovelGhostwriteContinuityGate.pauseDetail(for: report),
-            "连续性检查未完整完成，已暂停自动收录。"
+            NovelGhostwritePauseReason.continuityAuditIncomplete.displayMessage
         )
         XCTAssertEqual(
             NovelGhostwriteContinuityGate.pauseReason(for: report),
@@ -1274,6 +1274,9 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.requiresRewriteOnContinue)
         XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.allowsAutomaticQualityHeal)
         XCTAssertFalse(NovelGhostwritePauseReason.continuityAuditIncomplete.resumesWithoutConfirmedPlan)
+        XCTAssertTrue(
+            NovelGhostwritePauseReason.continuityAuditIncomplete.displayMessage.contains("不会重写")
+        )
 
         let keptID = NovelCandidateID()
         let progress = NovelGhostwriteProgress(
@@ -1292,6 +1295,37 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertFalse(progress.mustRewriteCandidateOnResume)
         XCTAssertTrue(progress.shouldContinueSameBatch)
         XCTAssertFalse(progress.supersededCandidateIDs.contains(keptID))
+        XCTAssertTrue(progress.statusLabel.contains("检查未稳"))
+        XCTAssertTrue(progress.boardStepSummary.contains("将再检"))
+        XCTAssertFalse(progress.boardStepSummary.contains("将重写"))
+        XCTAssertEqual(NovelGhostwriteContinuityGate.nearScopePriorChapterCount, 4)
+        XCTAssertEqual(NovelGhostwriteContinuityGate.incompleteSilentRerunCount, 1)
+    }
+
+    func testBlockingContinuityUIMarksHardInjuryNotIncomplete() {
+        let progress = NovelGhostwriteProgress(
+            binding: NovelSessionBinding(
+                projectID: NovelProjectID(),
+                branchID: NovelBranchID()
+            ),
+            phase: .paused,
+            pauseReason: .blockingContinuity,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 2,
+            completedChapterCount: 0,
+            currentChapterIndex: 1
+        )
+        XCTAssertTrue(progress.mustRewriteCandidateOnResume)
+        XCTAssertTrue(progress.statusLabel.contains("情节硬伤"))
+        XCTAssertTrue(progress.boardStepSummary.contains("情节硬伤"))
+        XCTAssertFalse(progress.boardStepSummary.contains("将再检"))
+    }
+
+    func testSilentRerunOnlyWhenChunksFailed() {
+        // 规则恢复入口条件：仅 failedChunk 触发静默再扫；blocking 干净报告不进入。
+        XCTAssertTrue(NovelGhostwriteContinuityGate.shouldSilentRerunIncomplete(failedChunkCount: 1, alreadyReran: 0))
+        XCTAssertFalse(NovelGhostwriteContinuityGate.shouldSilentRerunIncomplete(failedChunkCount: 0, alreadyReran: 0))
+        XCTAssertFalse(NovelGhostwriteContinuityGate.shouldSilentRerunIncomplete(failedChunkCount: 2, alreadyReran: 1))
     }
 
     func testInfrastructureFailureIsNotAQualityVerdict() {

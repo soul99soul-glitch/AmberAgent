@@ -93,7 +93,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
         case .blockingContinuity:
             "前后情节有严重问题，已暂停自动收录。建议按审稿意见润修或改合同。"
         case .continuityAuditIncomplete:
-            "连续性检查未完整完成，已暂停自动收录。"
+            // 基建未扫完,不是剧情硬伤;继续会对同一已验收候选再检。
+            "连续性检查还没跑稳，已暂停自动收录。继续将再检查同一篇稿，不会重写。"
         case .collectFailed: "自动收录失败，已暂停代笔。"
         case .syncFailed: "剧情同步还没完成，代笔已暂停，不会开始下一章。"
         case .incompleteCandidate: "本章正文不完整。继续将重新生成整章。"
@@ -582,6 +583,16 @@ struct NovelGhostwriteBatchProgressRecord: Codable, Equatable, Sendable {
 }
 
 enum NovelGhostwriteContinuityGate {
+    /// 批内软门默认只带最近已收正文章数 + 当前候选；全书深扫走手动入口。
+    static let nearScopePriorChapterCount = 4
+    /// incomplete 后静默整次再扫次数（块内重试之外）；仍失败才停人。
+    static let incompleteSilentRerunCount = 1
+
+    /// 是否应再静默跑一轮近距审计（纯规则，可单测）。
+    static func shouldSilentRerunIncomplete(failedChunkCount: Int, alreadyReran: Int) -> Bool {
+        failedChunkCount > 0 && alreadyReran < incompleteSilentRerunCount
+    }
+
     /// 仅 `blocking`（界面「严重」）触发暂停；`major`/`minor` 不挡自动收录。
     static func blockingIssueSummaries(in report: NovelContinuityAuditReport) -> [String] {
         report.issues
@@ -594,7 +605,7 @@ enum NovelGhostwriteContinuityGate {
     /// 有块失败则审计未结论；不得当作「无严重问题」放行。
     static func pauseDetail(for report: NovelContinuityAuditReport) -> String? {
         if report.failedChunkCount > 0 {
-            return "连续性检查未完整完成，已暂停自动收录。"
+            return NovelGhostwritePauseReason.continuityAuditIncomplete.displayMessage
         }
         let blocking = blockingIssueSummaries(in: report)
         return blocking.isEmpty ? nil : blocking.joined(separator: "；")
@@ -714,6 +725,12 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
         case .revising: return "代笔中\(batch) · 按意见润修"
         case .paused:
             if pauseReason == .cancelled { return "代笔已取消\(batch)" }
+            if pauseReason == .continuityAuditIncomplete {
+                return "代笔已暂停\(batch) · 检查未稳"
+            }
+            if pauseReason == .blockingContinuity {
+                return "代笔已暂停\(batch) · 情节硬伤"
+            }
             return "代笔已暂停\(batch)"
         case .waitingUser:
             switch pauseReason {
@@ -729,6 +746,7 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             case .healBudgetExhausted:
                 return "代笔待润修\(batch)"
             default:
+                // incomplete/blocking 走 .paused，不进 waitingUser。
                 return "代笔等待继续\(batch)"
             }
         case .failed: return "代笔失败\(batch)"
@@ -766,6 +784,12 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             }
             if pauseReason == .healBudgetExhausted {
                 return "待润修" + batchSuffix
+            }
+            if pauseReason == .continuityAuditIncomplete {
+                return "已中断·将再检" + batchSuffix
+            }
+            if pauseReason == .blockingContinuity {
+                return "已中断·情节硬伤" + batchSuffix
             }
             if let reason = pauseReason, reason.requiresRewriteOnContinue {
                 return "已中断·将重写" + batchSuffix
@@ -874,8 +898,9 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
     /// 是否适合展示「按审稿意见润修」入口。
     var shouldOfferRevisionSheet: Bool {
         switch pauseReason {
+        // incomplete 是基建未扫稳，主 CTA 是再检同一稿，不推润修。
         case .healBudgetExhausted, .acceptanceFailed, .obviousRepetition,
-             .blockingContinuity, .continuityAuditIncomplete:
+             .blockingContinuity:
             return true
         default:
             return false

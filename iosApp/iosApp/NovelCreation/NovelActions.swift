@@ -1688,10 +1688,12 @@ protocol NovelCreation: Sendable {
         branchID: NovelBranchID
     ) async throws -> NovelContinuityAuditReport
     /// 代笔软门：把尚未收录的整章候选当作下一章，与已有正文一并做连续性检查。不写盘。
+    /// - Parameter maxPriorManuscriptChapters: 只带最近若干已收正文 + 候选；`nil` 表示全书（手动深扫）。
     func auditContinuityIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
-        candidateID: NovelCandidateID
+        candidateID: NovelCandidateID,
+        maxPriorManuscriptChapters: Int?
     ) async throws -> NovelContinuityAuditReport
     /// 代笔验收：用审稿模型核对候选是否满足已确认本章计划。结果不写进项目文档。
     func acceptChapterPlan(
@@ -1784,7 +1786,8 @@ extension NovelCreation {
     func auditContinuityIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
-        candidateID: NovelCandidateID
+        candidateID: NovelCandidateID,
+        maxPriorManuscriptChapters: Int?
     ) async throws -> NovelContinuityAuditReport {
         throw NovelError.invalidInput("This novel runtime cannot audit story continuity.")
     }

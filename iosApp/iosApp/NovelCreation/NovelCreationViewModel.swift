@@ -1980,12 +1980,14 @@ final class NovelCreationViewModel {
     func auditContinuityIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
-        candidateID: NovelCandidateID
+        candidateID: NovelCandidateID,
+        maxPriorManuscriptChapters: Int? = nil
     ) async throws -> NovelContinuityAuditReport {
         try await creation.auditContinuityIncludingCandidate(
             projectID: projectID,
             branchID: branchID,
-            candidateID: candidateID
+            candidateID: candidateID,
+            maxPriorManuscriptChapters: maxPriorManuscriptChapters
         )
     }
 
