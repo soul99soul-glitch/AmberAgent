@@ -1908,6 +1908,70 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertTrue(context.contains("试探"))
     }
 
+    /// 草稿不算 confirmed；同 ID 可覆盖（重新生成），换 ID 则被 reducer 拒绝。
+    func testChapterPlanDraftProposalDoesNotTreatAsConfirmed() throws {
+        var document = try NovelTestFixtures.document()
+        let branchID = document.branches[0].id
+        let planID = NovelChapterPlanID()
+        document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision,
+                branchHeadRevision: document.branches[0].headRevision
+            ),
+            projectID: document.project.id,
+            branchID: branchID,
+            planID: planID,
+            status: .draft,
+            outlinePlacement: "第 1 章",
+            goalAndConflict: "开局冲突",
+            mustHappen: ["见面"],
+            mustNotHappen: [],
+            endingHook: "钩子",
+            visibleFacts: []
+        )), to: document).document
+        XCTAssertEqual(document.chapterPlan(for: branchID)?.status, .draft)
+        XCTAssertNil(document.confirmedChapterPlan(for: branchID))
+
+        // 复用 ID 覆盖草稿（对齐 proposeNextChapterPlan 落盘策略）。
+        document = try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision,
+                branchHeadRevision: document.branches[0].headRevision
+            ),
+            projectID: document.project.id,
+            branchID: branchID,
+            planID: planID,
+            status: .draft,
+            outlinePlacement: "第 1 章 · 重拟",
+            goalAndConflict: "新冲突",
+            mustHappen: ["重见"],
+            mustNotHappen: [],
+            endingHook: "新钩子",
+            visibleFacts: []
+        )), to: document).document
+        XCTAssertEqual(document.chapterPlan(for: branchID)?.id, planID)
+        XCTAssertEqual(document.chapterPlan(for: branchID)?.goalAndConflict, "新冲突")
+        XCTAssertNil(document.confirmedChapterPlan(for: branchID))
+
+        // 不同 ID 必须失败，防止双 plan 并存。
+        XCTAssertThrowsError(try NovelReducer.apply(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
+            context: NovelTestFixtures.context(
+                configRevision: document.project.configRevision,
+                branchHeadRevision: document.branches[0].headRevision
+            ),
+            projectID: document.project.id,
+            branchID: branchID,
+            planID: NovelChapterPlanID(),
+            status: .draft,
+            outlinePlacement: "x",
+            goalAndConflict: "y",
+            mustHappen: ["z"],
+            mustNotHappen: [],
+            endingHook: "",
+            visibleFacts: []
+        )), to: document))
+    }
+
     func testWholeChapterHighlightsCountTowardRequiredBudget() throws {
         var document = try NovelTestFixtures.document()
         let cap = NovelStateSnapshotRecord.maxHighlightCharacterCount

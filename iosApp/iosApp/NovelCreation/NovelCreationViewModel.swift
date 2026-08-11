@@ -1939,6 +1939,25 @@ final class NovelCreationViewModel {
         return plan
     }
 
+    /// 根据前文生成草稿本章计划（不自动确认）；成功后尽量刷新快照。
+    /// 刷新失败不吞掉已生成的 plan（调用方可用返回值回填）。
+    func proposeNextChapterPlanDraft(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        let plan = try await creation.proposeNextChapterPlanDraft(
+            projectID: projectID,
+            branchID: branchID,
+            nextChapterOrdinal: nextChapterOrdinal,
+            previousPlanSummary: previousPlanSummary
+        )
+        // 刷新失败不抛：盘上已有 draft，调用方用返回的 plan 回填字段。
+        try? await refreshCurrentSelection(projectID: projectID)
+        return plan
+    }
+
     func auditContinuityIncludingCandidate(
         projectID: NovelProjectID,
         branchID: NovelBranchID,

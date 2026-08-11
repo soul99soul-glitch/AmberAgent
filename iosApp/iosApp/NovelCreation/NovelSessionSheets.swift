@@ -924,6 +924,8 @@ struct NovelWritingContextSheet: View {
     @State private var arcFieldsDirty = false
     @State private var isReloadingPlanFields = false
     @State private var isReloadingArcFields = false
+    /// 根据前文生成草稿本章计划（模型调用中）。
+    @State private var isProposingPlanDraft = false
 
     init(
         workspace: NovelCreationViewModel,
@@ -1068,13 +1070,14 @@ struct NovelWritingContextSheet: View {
                 if workspace.isPerforming { ProgressView() }
             }
         }
-        .interactiveDismissDisabled(workspace.isPerforming)
+        .interactiveDismissDisabled(workspace.isPerforming || isProposingPlanDraft)
         .onDisappear {
             // 面板关闭（下滑或切走）时兜底：计划有未保存改动 → 存草稿；
             // 预算兜底回写（滑块拖动中不触发，关闭时落定）。
             // 资料覆盖已在勾选时即时回写，无需重复。
+            // 正在根据前文生成时不写本地 dirty，避免盖掉模型刚落盘的草稿。
             NovelTextInputCommitter.perform(fieldBank: planFieldBank) {
-                if planFieldsDirty {
+                if planFieldsDirty, !isProposingPlanDraft {
                     Task { await saveChapterPlan(status: .draft) }
                 }
                 onApply(overrides, budgetTokens)
@@ -1246,7 +1249,7 @@ struct NovelWritingContextSheet: View {
                         LabeledContent("本章计划", value: planStatusLabel)
                         LabeledContent("审稿模型", value: reviewModelLabel)
                         LabeledContent("往后几章", value: upcomingArcStatusLabel)
-                        Text("先确认本章计划，再开始代笔。首章计划由你确认；多章时后续计划会自动拟定。")
+                        Text("先确认本章计划，再开始代笔。可在下方「本章计划」一键根据前文生成草稿；多章时后续计划会自动拟定。")
                             .font(.footnote)
                             .foregroundStyle(AmberTheme.muted)
                     }
@@ -1488,6 +1491,28 @@ struct NovelWritingContextSheet: View {
                     .foregroundStyle(planMessageIsError ? AmberTheme.accentRed : AmberTheme.muted)
                 }
 
+                if canShowProposePlanDraft {
+                    Button {
+                        Task { await proposeChapterPlanDraft() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isProposingPlanDraft {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text(proposePlanDraftButtonTitle)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .contentShape(Rectangle())
+                    .disabled(!canProposePlanDraft)
+                    .accessibilityLabel(proposePlanDraftButtonTitle)
+                }
+
                 HStack(spacing: 12) {
                     Button("保存草稿") {
                         commitPlanFieldsThen {
@@ -1498,7 +1523,7 @@ struct NovelWritingContextSheet: View {
                     .controlSize(.small)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
-                    .disabled(!canEditChapterPlan)
+                    .disabled(!canEditChapterPlan || isProposingPlanDraft)
 
                     Button("确认计划") {
                         commitPlanFieldsThen {
@@ -1509,7 +1534,7 @@ struct NovelWritingContextSheet: View {
                     .controlSize(.small)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
-                    .disabled(!canEditChapterPlan)
+                    .disabled(!canEditChapterPlan || isProposingPlanDraft)
 
                     Spacer(minLength: 0)
 
@@ -1521,17 +1546,13 @@ struct NovelWritingContextSheet: View {
                         .controlSize(.small)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
-                        .disabled(!canEditChapterPlan)
+                        .disabled(!canEditChapterPlan || isProposingPlanDraft)
                     }
                 }
             } header: {
                 Text("本章计划")
             } footer: {
-                Text(
-                    collaborationMode == .ghostwrite
-                        ? "代笔写整章前要先确认计划；代笔进行中不能改。"
-                        : "可以先写好本章计划；确认后写整章时会带上。"
-                )
+                Text(chapterPlanSectionFooter)
             }
 
             Section {
@@ -1796,7 +1817,7 @@ struct NovelWritingContextSheet: View {
         if session.ghostwriteProgress?.pauseReason == .chapterCompleted {
             return "本章已完成。点「代笔下一章」继续，或修改章数后再开始。"
         }
-        return "最多连续 \(NovelGhostwriteBatch.maxChapterCount) 章。首章需已确认计划；之后自动拟计划并连写。写不过会自动改写几次，仍不过会停，不会假装写完。"
+        return "最多连续 \(NovelGhostwriteBatch.maxChapterCount) 章。首章可用「根据前文生成草稿」再确认；之后自动拟计划并连写。写不过会自动改写几次，仍不过会停，不会假装写完。"
     }
 
     /// 质量失败时标明「将重写」，避免用户以为再点继续是复验旧稿。
@@ -1870,11 +1891,39 @@ struct NovelWritingContextSheet: View {
     }
 
     private var canEditChapterPlan: Bool {
-        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting
+        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting && !isProposingPlanDraft
     }
 
     private var canEditUpcomingArc: Bool {
-        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting
+        workspace.canMutate && !workspace.isPerforming && !session.isGhostwriting && !isProposingPlanDraft
+    }
+
+    /// 尚无确认计划时露出「根据前文生成」；已确认则隐藏（避免盖掉手改合同）。
+    private var canShowProposePlanDraft: Bool {
+        currentChapterPlan?.status != .confirmed
+    }
+
+    private var canProposePlanDraft: Bool {
+        canEditChapterPlan && !isProposingPlanDraft
+    }
+
+    private var proposePlanDraftButtonTitle: String {
+        if isProposingPlanDraft { return "正在根据前文生成…" }
+        if currentChapterPlan?.status == .draft { return "重新根据前文生成" }
+        return "根据前文生成草稿"
+    }
+
+    private var chapterPlanSectionFooter: String {
+        if collaborationMode == .ghostwrite {
+            if canShowProposePlanDraft {
+                return "可先「根据前文生成草稿」，核对后点确认计划，再开始代笔。代笔进行中不能改。"
+            }
+            return "代笔写整章前要先确认计划；代笔进行中不能改。"
+        }
+        if canShowProposePlanDraft {
+            return "可先「根据前文生成草稿」，也可手写；确认后写整章时会带上。"
+        }
+        return "可以先写好本章计划；确认后写整章时会带上。"
     }
 
     private func reloadPlanFieldsFromWorkspace() {
@@ -1951,6 +2000,53 @@ struct NovelWritingContextSheet: View {
             planMessage = workspace.errorMessage ?? "本章计划保存失败。"
             planMessageIsError = true
         }
+    }
+
+    /// 用总纲/剧情状态/上一批摘要生成草稿本章计划，不自动确认。
+    private func proposeChapterPlanDraft() async {
+        guard canProposePlanDraft,
+              let projectID = workspace.selectedProjectID,
+              let branchID = workspace.selectedBranchID else {
+            planMessage = "当前无法生成计划。"
+            planMessageIsError = true
+            return
+        }
+        planMessage = nil
+        planMessageIsError = false
+        planFieldBank.commitAll()
+        isProposingPlanDraft = true
+        defer { isProposingPlanDraft = false }
+
+        let branch = workspace.projectSnapshot?.branches.first { $0.id == branchID }
+        let ordinal = max(1, (branch?.workingChapterSelections.count ?? 0) + 1)
+        let previousSummary = session.ghostwriteProgress?.lastCompletedPlanSummary
+        do {
+            let plan = try await workspace.proposeNextChapterPlanDraft(
+                projectID: projectID,
+                branchID: branchID,
+                nextChapterOrdinal: ordinal,
+                previousPlanSummary: previousSummary
+            )
+            // 优先用返回值回填，避免 refresh 滞后时字段仍空。
+            applyChapterPlanToFields(plan)
+            planMessage = "已根据前文生成草稿，请核对后点「确认计划」。"
+            planMessageIsError = false
+        } catch {
+            planMessage = NovelPresentation.operationErrorMessage(error)
+            planMessageIsError = true
+        }
+    }
+
+    private func applyChapterPlanToFields(_ plan: NovelChapterPlanRecord) {
+        isReloadingPlanFields = true
+        planPlacement = plan.outlinePlacement
+        planGoal = plan.goalAndConflict
+        planMustHappen = plan.mustHappen.joined(separator: "\n")
+        planMustNotHappen = plan.mustNotHappen.joined(separator: "\n")
+        planEndingHook = plan.endingHook
+        planVisibleFacts = plan.visibleFacts.joined(separator: "\n")
+        planFieldsDirty = false
+        isReloadingPlanFields = false
     }
 
     private func clearChapterPlan() async {

@@ -2,13 +2,48 @@ import Foundation
 
 extension DefaultNovelCreation {
     /// 代笔多章：用创作模型根据总纲/状态/下一弧自动拟下一章合同，并直接确认落盘。
-    /// 首章仍须用户确认；此路径只服务批循环第 2～N 章。
+    /// 批循环第 2～N 章、以及完批后「下一批」首章自动拟定走此路径。
     @discardableResult
     func proposeAndConfirmNextChapterPlan(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
         nextChapterOrdinal: Int,
         previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        try await proposeNextChapterPlan(
+            projectID: projectID,
+            branchID: branchID,
+            nextChapterOrdinal: nextChapterOrdinal,
+            previousPlanSummary: previousPlanSummary,
+            status: .confirmed
+        )
+    }
+
+    /// 首次/无确认计划：根据前文生成**草稿**本章计划，仍须用户点确认后才能开代笔。
+    @discardableResult
+    func proposeNextChapterPlanDraft(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        try await proposeNextChapterPlan(
+            projectID: projectID,
+            branchID: branchID,
+            nextChapterOrdinal: nextChapterOrdinal,
+            previousPlanSummary: previousPlanSummary,
+            status: .draft
+        )
+    }
+
+    /// 共用拟定：`status` 为 `.draft` 时落草稿；`.confirmed` 时直接确认（批内自动连写）。
+    @discardableResult
+    func proposeNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?,
+        status: NovelChapterPlanStatus
     ) async throws -> NovelChapterPlanRecord {
         try await recoverGenerationStateIfNeeded(requiredProjectID: projectID)
         let loaded = try await loadCommittedProject(id: projectID)
@@ -60,7 +95,9 @@ extension DefaultNovelCreation {
             )
         }
 
-        let planID = NovelChapterPlanID()
+        // 与 ViewModel.upsertChapterPlan 一致：分支已有 plan 时复用 ID，
+        // 否则「重新生成草稿」/ 残留 draft 后再 auto-confirm 会撞 reducer 的不同 ID 拒绝。
+        let planID = loaded.document.chapterPlan(for: branchID)?.id ?? NovelChapterPlanID()
         _ = try await perform(.upsertChapterPlan(NovelUpsertChapterPlanCommand(
             context: NovelMutationContext(
                 operationID: NovelOperationID(),
@@ -71,7 +108,7 @@ extension DefaultNovelCreation {
             projectID: projectID,
             branchID: branchID,
             planID: planID,
-            status: .confirmed,
+            status: status,
             outlinePlacement: proposal.outlinePlacement,
             goalAndConflict: proposal.goalAndConflict,
             mustHappen: proposal.mustHappen,
@@ -81,8 +118,13 @@ extension DefaultNovelCreation {
         )))
 
         let refreshed = try await loadCommittedProject(id: projectID)
-        guard let plan = refreshed.document.confirmedChapterPlan(for: branchID) else {
-            throw NovelError.invalidInput("自动拟定的本章计划未能确认保存。")
+        guard let plan = refreshed.document.chapterPlan(for: branchID),
+              plan.status == status else {
+            throw NovelError.invalidInput(
+                status == .confirmed
+                    ? "自动拟定的本章计划未能确认保存。"
+                    : "自动拟定的本章计划草稿未能保存。"
+            )
         }
         return plan
     }

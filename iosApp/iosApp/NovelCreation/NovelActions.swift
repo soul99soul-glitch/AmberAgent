@@ -1689,8 +1689,15 @@ protocol NovelCreation: Sendable {
         branchID: NovelBranchID,
         candidateID: NovelCandidateID
     ) async throws -> NovelChapterPlanAcceptanceV1
-    /// 代笔多章：自动拟定并确认下一章合同（创作模型）。首章仍须用户确认。
+    /// 代笔多章：自动拟定并确认下一章合同（创作模型）。批内第 2～N 章走此路径。
     func proposeAndConfirmNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord
+    /// 首次/无确认计划：根据前文生成草稿本章计划，仍须用户确认。
+    func proposeNextChapterPlanDraft(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
         nextChapterOrdinal: Int,
@@ -1777,6 +1784,15 @@ extension NovelCreation {
     }
 
     func proposeAndConfirmNextChapterPlan(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        nextChapterOrdinal: Int,
+        previousPlanSummary: String?
+    ) async throws -> NovelChapterPlanRecord {
+        throw NovelError.invalidInput("This novel runtime cannot propose chapter plans.")
+    }
+
+    func proposeNextChapterPlanDraft(
         projectID: NovelProjectID,
         branchID: NovelBranchID,
         nextChapterOrdinal: Int,
