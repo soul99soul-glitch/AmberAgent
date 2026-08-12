@@ -996,7 +996,7 @@ final class IOSEvolutionMetricsTests: XCTestCase {
             interruptedReason: nil
         )
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            dao.insertRun(run: run) { _ in
+            dao.insertRunIfAbsent(run: run) { _, _ in
                 continuation.resume()
             }
         }

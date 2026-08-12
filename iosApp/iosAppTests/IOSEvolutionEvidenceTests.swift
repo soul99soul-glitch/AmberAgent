@@ -346,7 +346,7 @@ final class IOSEvolutionEvidenceTests: XCTestCase {
             interruptedReason: status == "interrupted" ? "user_cancelled" : nil
         )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { cont.resume(throwing: error) }
                 else { cont.resume() }
             }
@@ -356,26 +356,21 @@ final class IOSEvolutionEvidenceTests: XCTestCase {
     private func insertEvent(
         dao: AgentRuntimeDao,
         runId: String,
-        seq: Int64,
+        seq _: Int64,
         type: String,
         payload: String
     ) async throws {
-        let event = AgentEventEntity(
-            eventId: UUID().uuidString,
-            runId: runId,
-            parentRunId: nil,
-            seq: seq,
-            type: type,
-            payloadType: type,
-            payload: payload,
-            payloadSchemaVersion: 1,
-            agentDescriptorId: IOSAgentRunLedger.agentDescriptorId,
-            agentVersion: IOSAgentRunLedger.agentVersion,
-            isFinal: false,
-            ts: Int64(Date().timeIntervalSince1970 * 1000)
-        )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertEvent(event: event) { error in
+            dao.insertRunEvent(
+                runId: runId,
+                eventId: UUID().uuidString,
+                type: type,
+                payloadType: type,
+                payload: payload,
+                payloadSchemaVersion: 1,
+                isFinal: false,
+                ts: Int64(Date().timeIntervalSince1970 * 1_000)
+            ) { _, error in
                 if let error { cont.resume(throwing: error) }
                 else { cont.resume() }
             }

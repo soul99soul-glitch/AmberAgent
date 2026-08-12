@@ -177,7 +177,7 @@ final class IOSRecipeExperienceFeedbackTests: XCTestCase {
             interruptedReason: nil
         )
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            dao.insertRun(run: run) { _ in continuation.resume() }
+            dao.insertRunIfAbsent(run: run) { _, _ in continuation.resume() }
         }
         await ledger.recordToolCallFinished(
             runId: runId,
