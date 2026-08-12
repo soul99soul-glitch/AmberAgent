@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-13（Soul/MCP 闭环已装 iPhone Air；待提交推送）
+Last updated: 2026-08-13（小说会话正文一律走 Markdown；Soul/MCP 已在 iPhone Air）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 

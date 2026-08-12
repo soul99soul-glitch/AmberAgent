@@ -76,12 +76,6 @@ struct NovelSessionBubble: View {
         ChatReasoningCard.hasVisibleText(reasoningContent)
     }
 
-    /// Keep incremental markdown across stream→complete so we never cold-typeset a
-    /// finished chapter in ParagraphUIView (post-generation 0x8BADF00D).
-    private var markdownRendersAsLive: Bool {
-        isStreaming || hasEverStreamed
-    }
-
     @ViewBuilder
     private var assistantBubble: some View {
         if isStreaming && content.isEmpty && !hasVisibleReasoning {
@@ -115,40 +109,21 @@ struct NovelSessionBubble: View {
                         }
                     }
                 } else if !content.isEmpty {
+                    // Always parse markdown — never show raw `**` / `#` markers.
+                    // Match Chat: isStreaming drives animation; hasEverStreamed (from
+                    // parent sticky IDs) keeps block renderer across complete.
                     let markdown = Self.displayMarkdown(
                         content,
                         kind: kind,
-                        isStreaming: markdownRendersAsLive
+                        isStreaming: isStreaming
                     )
-                    if markdownRendersAsLive {
-                        // Live / streamed this visit: incremental path only.
-                        ChatAssistantMarkdownView(
-                            markdown: markdown,
-                            renderCacheNamespace: "novel:session:\(messageID)",
-                            isStreaming: true,
-                            hasEverStreamed: true
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else if kind == .discussion {
-                        // Discussion is short and often uses markdown markers; cold
-                        // plain Text would show raw `**`/`#`. Non-streaming markdown
-                        // is fine here (not multi-chapter prose).
-                        ChatAssistantMarkdownView(
-                            markdown: markdown,
-                            renderCacheNamespace: "novel:session:\(messageID)",
-                            isStreaming: false,
-                            hasEverStreamed: false
-                        )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        // History prose/polish: full body plain Text — avoids
-                        // multi-chapter CoreText cold layout on open.
-                        ChatAssistantText {
-                            Text(markdown)
-                                .foregroundStyle(AmberTheme.foreground)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
+                    ChatAssistantMarkdownView(
+                        markdown: markdown,
+                        renderCacheNamespace: "novel:session:\(messageID)",
+                        isStreaming: isStreaming,
+                        hasEverStreamed: hasEverStreamed
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 if let askUser {

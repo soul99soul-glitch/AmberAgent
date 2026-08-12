@@ -472,6 +472,35 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         ))
     }
 
+    func testSessionAssistantBodyAlwaysUsesMarkdownViewNotPlainText() throws {
+        let bubble = try source("iosApp/NovelCreation/NovelSessionBubble.swift")
+        let bodyStart = try XCTUnwrap(bubble.range(of: "private var assistantBubble"))
+        let bodyEnd = try XCTUnwrap(bubble.range(
+            of: "private var statusLine",
+            range: bodyStart.upperBound..<bubble.endIndex
+        ))
+        let body = bubble[bodyStart.lowerBound..<bodyEnd.lowerBound]
+
+        XCTAssertTrue(
+            body.contains("ChatAssistantMarkdownView"),
+            "Assistant manuscript/discussion body must render via markdown"
+        )
+        // Empty pending / muted hints may use ChatAssistantText; manuscript content must not.
+        XCTAssertFalse(
+            body.contains("History prose/polish"),
+            "Do not reintroduce the plain-text history prose shortcut"
+        )
+        XCTAssertFalse(
+            body.contains("Text(markdown)"),
+            "Manuscript body must not use unparsed Text(markdown)"
+        )
+        XCTAssertTrue(
+            body.contains("isStreaming: isStreaming")
+                && body.contains("hasEverStreamed: hasEverStreamed"),
+            "Streaming flags must match Chat: animation off when complete, sticky via hasEverStreamed"
+        )
+    }
+
     func testNovelDraftActionsCommitMarkedTextBeforeReadingState() throws {
         let support = try source("iosApp/NovelCreation/NovelPresentationSupport.swift")
         let projectList = try source("iosApp/NovelCreation/NovelProjectListView.swift")

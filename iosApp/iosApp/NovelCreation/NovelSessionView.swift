@@ -119,9 +119,10 @@ struct NovelSessionView: View {
     @State private var expandedArchiveIDs: Set<NovelMessageID> = []
     @State private var streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
     @State private var suspendedStreamingTailRow: NovelSessionRowModel?
-    /// Message IDs that streamed during this session presentation. Keeps incremental
-    /// markdown after tail retire (avoids hard cut to plain Text / height flash).
-    /// Cleared on session identity change; cold open stays plain for non-streamed rows.
+    /// Message IDs that streamed during this session presentation. Keeps the
+    /// incremental markdown renderer sticky after tail retire (avoids complete-time
+    /// height flash). Cleared on session identity change. History always still
+    /// renders markdown — this only chooses live vs cold markdown path.
     @State private var streamedMessageIDs: Set<String> = []
 
     var body: some View {
