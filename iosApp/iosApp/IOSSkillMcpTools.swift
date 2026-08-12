@@ -1,5 +1,42 @@
+import CryptoKit
 import Foundation
 import Shared
+
+struct IOSPreparedMcpImport: Equatable {
+    let skillName: String
+    let digest: String
+    let servers: [IOSMcpServerConfig]
+    let preview: McpImportPreview
+}
+
+enum IOSMcpImportError: LocalizedError, Equatable {
+    case invalidJSON
+    case emptyServers
+    case unsupportedTransport(name: String, type: String)
+    case invalidURL(name: String)
+    case duplicateCandidate(String)
+    case liveNameConflict(String)
+    case connectivityFailed(server: String, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidJSON:
+            "mcp.json 无法解析。"
+        case .emptyServers:
+            "mcp.json 不包含可导入的 MCP 服务。"
+        case .unsupportedTransport(let name, let type):
+            "MCP 服务 \(name) 使用了不支持的 transport（\(type)）。"
+        case .invalidURL(let name):
+            "MCP 服务 \(name) 缺少有效 URL。"
+        case .duplicateCandidate(let name):
+            "候选 mcp.json 内存在重复服务名：\(name)。"
+        case .liveNameConflict(let name):
+            "已存在同名 MCP 服务：\(name)。导入不会部分成功。"
+        case .connectivityFailed(let server, let message):
+            "\(server) 临时连通测试失败：\(message)"
+        }
+    }
+}
 
 enum IOSSkillFileChangeKind: String, Equatable {
     case added
@@ -85,6 +122,7 @@ struct IOSSkillMcpToolService {
     let workspaceStore: IOSWorkspaceStore
     let mcpConfigStore: IOSMcpConfigStore
     let mcpManager: IOSMcpManager
+    var ephemeralClientFactory: ((IOSMcpServerConfig) -> any IOSMcpClienting)? = nil
 
     func execute(toolName: String, arguments: String) async -> String {
         let args = ChatToolCallParsing.jsonObject(arguments) ?? [:]
@@ -517,40 +555,235 @@ struct IOSSkillMcpToolService {
     }
 
     private func mcpImportFromSkillJSON(_ args: [String: Any]) throws -> String {
+        let prepared = try prepareMcpImport(args)
+        return Self.json([
+            "ok": true,
+            "status": "preview",
+            "requires_approval": true,
+            "skill_name": prepared.skillName,
+            "digest": prepared.digest,
+            "server_count": prepared.servers.count,
+            "servers": prepared.preview.servers.map { server in
+                [
+                    "name": server.name,
+                    "transport": server.transport,
+                    "origin": server.origin,
+                    "header_names": server.headerNames,
+                    "enabled": server.enabled,
+                ] as [String: Any]
+            },
+        ])
+    }
+
+    func prepareMcpImport(arguments: String) throws -> IOSPreparedMcpImport {
+        guard let args = ChatToolCallParsing.jsonObject(arguments) else {
+            throw IOSSkillToolError.invalidArguments
+        }
+        return try prepareMcpImport(args)
+    }
+
+    func prepareMcpImport(_ args: [String: Any]) throws -> IOSPreparedMcpImport {
         let skillName = (args["skill_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !skillName.isEmpty else {
             throw IOSSkillToolError.missingArgument("skill_name")
         }
+        let prepared = try makeMcpImportPreparation(skillName: skillName)
+        try validateMcpImportConflicts(prepared.servers)
+        return prepared
+    }
+
+    func applyPreparedMcpImport(
+        _ prepared: IOSPreparedMcpImport,
+        networkAllowed: () -> Bool = { true }
+    ) async -> String {
+        let reread: IOSPreparedMcpImport
+        do {
+            reread = try makeMcpImportPreparation(skillName: prepared.skillName)
+        } catch {
+            return Self.json([
+                "ok": false,
+                "code": "stale_candidate",
+                "error": (error as? LocalizedError)?.errorDescription ?? "mcp.json 已无法读取，请重新预览。",
+            ])
+        }
+        guard reread.digest == prepared.digest else {
+            return Self.json([
+                "ok": false,
+                "code": "stale_candidate",
+                "error": "mcp.json 在批准前已变化，请重新预览。",
+            ])
+        }
+        do {
+            try validateMcpImportConflicts(reread.servers)
+        } catch {
+            return Self.json([
+                "ok": false,
+                "code": "name_conflict",
+                "error": (error as? LocalizedError)?.errorDescription ?? "MCP 名称冲突。",
+            ])
+        }
+        guard networkAllowed() else {
+            return Self.json([
+                "ok": false,
+                "code": "denied",
+                "error": "MCP 调用已关闭，未发起网络测试或写入。",
+            ])
+        }
+        do {
+            try await testEphemeralServers(reread.servers)
+        } catch {
+            return Self.json([
+                "ok": false,
+                "code": "connectivity_failed",
+                "error": (error as? LocalizedError)?.errorDescription ?? "临时连通测试失败，未写入任何 MCP 服务。",
+            ])
+        }
+        guard networkAllowed() else {
+            return Self.json([
+                "ok": false,
+                "code": "denied",
+                "error": "MCP 调用已关闭，未写入任何 MCP 服务。",
+            ])
+        }
+        do {
+            try mcpConfigStore.addBatch(reread.servers)
+        } catch {
+            return Self.json([
+                "ok": false,
+                "code": "publish_failed",
+                "error": (error as? LocalizedError)?.errorDescription ?? "写入 MCP 配置失败。",
+            ])
+        }
+        mcpManager.refreshFromCurrentSettings()
+        return Self.json([
+            "ok": true,
+            "applied": true,
+            "skill_name": reread.skillName,
+            "imported_count": reread.servers.count,
+            "digest": reread.digest,
+        ])
+    }
+
+    private func makeMcpImportPreparation(skillName: String) throws -> IOSPreparedMcpImport {
         let dirName = resolveInstalledDirName(skillName)
         let mcpURL = try skillStore.resolveSkillFile(name: dirName, relativePath: "mcp.json")
         guard FileManager.default.fileExists(atPath: mcpURL.path) else {
             throw IOSSkillToolError.skillFileMissing("mcp.json")
         }
-        let json = try String(contentsOf: mcpURL, encoding: .utf8)
-        let parsed = McpImportParserKt.parseMcpServersFromJson(json: json)
-            .compactMap(IOSMcpServerConfig.init)
-        guard !parsed.isEmpty else {
-            return Self.json(["ok": false, "error": "mcp.json does not contain valid MCP servers"])
+        let data = try Data(contentsOf: mcpURL)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw IOSSkillToolError.invalidArguments
         }
-        // Match Android: skip servers that already exist; never silently overwrite.
-        var existing = Set(mcpConfigStore.servers.map(\.name))
-        var importedCount = 0
-        var alreadyExistsCount = 0
-        for server in parsed {
-            if existing.contains(server.name) {
-                alreadyExistsCount += 1
-                continue
+        let servers = try Self.parseSupportedMcpServers(json: json)
+        guard !servers.isEmpty else {
+            throw IOSMcpImportError.emptyServers
+        }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let preview = McpImportPreview(
+            skillName: dirName,
+            digest: digest,
+            servers: servers.map { server in
+                McpImportServerPreview(
+                    name: server.name,
+                    transport: server.transportTitle,
+                    origin: Self.redactedOrigin(server.url),
+                    headerNames: server.headers.keys.sorted(),
+                    enabled: server.enabled
+                )
             }
-            mcpConfigStore.add(server)
-            existing.insert(server.name)
-            importedCount += 1
+        )
+        return IOSPreparedMcpImport(
+            skillName: dirName,
+            digest: digest,
+            servers: servers,
+            preview: preview
+        )
+    }
+
+    private func validateMcpImportConflicts(_ servers: [IOSMcpServerConfig]) throws {
+        var seen = Set<String>()
+        for server in servers {
+            if !seen.insert(server.name).inserted {
+                throw IOSMcpImportError.duplicateCandidate(server.name)
+            }
         }
-        return Self.json([
-            "success": true,
-            "skill_name": dirName,
-            "imported_count": importedCount,
-            "already_exists_count": alreadyExistsCount,
-        ])
+        let live = Set(mcpConfigStore.servers.map(\.name))
+            .union(sharedSettings.snapshot.mcpServers.compactMap { IOSMcpServerConfig($0)?.name })
+        if let conflict = servers.first(where: { live.contains($0.name) }) {
+            throw IOSMcpImportError.liveNameConflict(conflict.name)
+        }
+    }
+
+    private func testEphemeralServers(_ servers: [IOSMcpServerConfig]) async throws {
+        for server in servers {
+            let client = ephemeralClientFactory?(server) ?? IOSMcpClient()
+            do {
+                _ = try await client.connect(config: server)
+                _ = try await client.listTools()
+                client.disconnect()
+            } catch {
+                client.disconnect()
+                throw IOSMcpImportError.connectivityFailed(server: server.name, message: error.localizedDescription)
+            }
+        }
+    }
+
+    static func parseSupportedMcpServers(json: String) throws -> [IOSMcpServerConfig] {
+        guard let data = json.data(using: .utf8),
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let mcpServers = root["mcpServers"] as? [String: Any] else {
+            throw IOSMcpImportError.invalidJSON
+        }
+        var parsed: [IOSMcpServerConfig] = []
+        for (name, raw) in mcpServers.sorted(by: { $0.key < $1.key }) {
+            guard let object = raw as? [String: Any] else {
+                throw IOSMcpImportError.invalidJSON
+            }
+            let type = ((object["type"] as? String) ?? "streamable_http")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if type == "stdio" || object["command"] != nil && object["url"] == nil {
+                throw IOSMcpImportError.unsupportedTransport(name: name, type: type.isEmpty ? "stdio" : type)
+            }
+            let normalizedType: String
+            switch type {
+            case "", "streamable_http", "streamablehttp", "http":
+                normalizedType = "streamable_http"
+            case "sse":
+                normalizedType = "sse"
+            default:
+                throw IOSMcpImportError.unsupportedTransport(name: name, type: type)
+            }
+            guard let url = object["url"] as? String, !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw IOSMcpImportError.invalidURL(name: name)
+            }
+            var headers: [String: String] = [:]
+            if let rawHeaders = object["headers"] as? [String: Any] {
+                for (key, value) in rawHeaders {
+                    headers[key] = String(describing: value)
+                }
+            }
+            if normalizedType == "sse" {
+                parsed.append(.sse(name: name, url: url, headers: headers, enabled: true, tools: []))
+            } else {
+                parsed.append(.streamableHTTP(name: name, url: url, headers: headers, enabled: true, tools: []))
+            }
+        }
+        return parsed
+    }
+
+    static func redactedOrigin(_ urlString: String) -> String {
+        guard var components = URLComponents(string: urlString) else { return "invalid-url" }
+        components.user = nil
+        components.password = nil
+        components.query = nil
+        components.fragment = nil
+        if let host = components.host {
+            let scheme = components.scheme.map { "\($0)://" } ?? ""
+            let port = components.port.map { ":\($0)" } ?? ""
+            return "\(scheme)\(host)\(port)"
+        }
+        return components.string ?? "invalid-url"
     }
 
     // MARK: - Helpers

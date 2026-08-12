@@ -457,7 +457,7 @@ final class IOSToolBoundaryTests: XCTestCase {
         )
     }
 
-    /// Phase 1 验收 7（SELF_EVOLUTION_AND_HOT_RELOAD_PLAN.md）：effect class
+    /// Recipe runtime contract: effect class
     /// 标注审计结论的定点锁定。审计核对了每个标注 primitive 的真实实现——
     /// 本地只读工具标 pure（含 mcp_describe_tool：只读目录查询，实现注释明确
     /// "never touches the network and never mutates config"，与 mcp_list 同组）；
@@ -492,7 +492,7 @@ final class IOSToolBoundaryTests: XCTestCase {
             "workspace_file_write", "workspace_file_edit", "workspace_file_move",
             "workspace_artifact_delete", "ios_ish_execute", "ish_handoff",
             "wm_open", "wm_site_remove", "generate_image", "mcp_call",
-            "mcp_test", "mcp_import_from_skill", "skill_import", "skill_enable",
+            "mcp_test", "mcp_import_from_skill", "skill_import", "soul_import", "skill_enable",
             "skill_disable", "subagent_dispatch", "model_council_run",
             "spawn_agent", "interrupt_agent", "send_message", "followup_task",
             "exec", "wait",

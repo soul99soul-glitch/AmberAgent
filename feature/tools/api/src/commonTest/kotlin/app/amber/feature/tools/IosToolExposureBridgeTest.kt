@@ -42,7 +42,7 @@ class IosToolExposureBridgeTest {
         "wm_site_remove", "wm_click", "wm_tap", "wm_type", "wm_keys", "wm_scroll",
         "wm_select", "wm_find", "wm_wait",
         "mcp_call", "mcp_list", "mcp_test", "mcp_describe_tool", "mcp_import_from_skill",
-        "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable",
+        "skills_list", "use_skill", "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable",
         "subagent_dispatch", "model_council_run", "file_read_selected",
         "ish_handoff", "ios_ish_execute",
         "permissions_status", "tools_list", "subagent_report",
@@ -65,7 +65,7 @@ class IosToolExposureBridgeTest {
         "wm_stations", "wm_click", "wm_type", "wm_screenshot",
         "ish_handoff", "ios_ish_execute",
         "mcp_test", "mcp_import_from_skill",
-        "skill_validate", "skill_import", "skill_enable", "skill_disable",
+        "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable",
         "subagent_report",
     )
 
@@ -78,7 +78,7 @@ class IosToolExposureBridgeTest {
     fun fullCatalogEnablesLazyModeAndExposesOnlyResidentTools() {
         val bridge = IosToolExposureBridge(tools = fullIosTools())
 
-        assertTrue(bridge.lazyModeEnabled(), "56 declared tools must exceed the 40-tool lazy threshold")
+        assertTrue(bridge.lazyModeEnabled(), "declared tools must exceed the 40-tool lazy threshold")
 
         val visible = bridge.visibleTools().map { it.name }.toSet()
         assertEquals(iosResidentNames, visible, "first round must expose exactly the resident set (incl. tool_search)")

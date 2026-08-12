@@ -184,12 +184,8 @@ actor IOSDynamicToolRegistry {
     private var nextRevision: Int64 = 2
     /// Content hash the actor last sequenced (authoritative for bumping).
     private var sequencedContentHash: String?
-    /// §19 观测 store：revision ↔ lease 不一致哨兵（Phase 4 Wave 1）。
-    private let metrics: IOSEvolutionMetrics
-
-    init(baseDirectory: URL, metrics: IOSEvolutionMetrics = .shared) {
+    init(baseDirectory: URL) {
         self.baseDirectory = baseDirectory
-        self.metrics = metrics
     }
 
     private var store: IOSRecipeFileStore {
@@ -232,14 +228,6 @@ actor IOSDynamicToolRegistry {
                     contentHash: content.contentHash
                 )
             }
-        }
-        // §19 哨兵：catalog revision ↔ 执行 lease 不一致应恒为 0。
-        // 当前架构下 holder 只有本 actor 写入（revision 单调、随 contentHash
-        // bump），in-flight 调用经 ARC 钉住 snapshot 副本，不存在可观察的
-        // 不一致路径；这是最便宜的可观测断言点——未来若出现第二个 holder
-        // 写入方或 revision 错位（如跨进程共享），此哨兵立即报警。
-        if let published = holder.value, published.revision != nextRevision - 1 {
-            metrics.record(.catalogLeaseInconsistency)
         }
         return holder.value
     }

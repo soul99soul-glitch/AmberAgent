@@ -254,7 +254,7 @@ private fun recipeApprovalFlags(effectClass: String): Pair<Boolean, Boolean> = w
  * mirrors the real iOS declaration names from `iosToolDeclaration` in
  * ai-core/Tool.kt. Everything NOT in this set (wm_*, ish_handoff,
  * ios_ish_execute, mcp_test, mcp_import_from_skill, skill_validate,
- * skill_import, skill_enable, skill_disable, subagent_report) is deferred
+ * skill_import, soul_import, skill_enable, skill_disable, subagent_report) is deferred
  * until `tool_search` exposes it.
  */
 internal val IOS_RESIDENT_TOOL_NAMES: Set<String> = setOf(

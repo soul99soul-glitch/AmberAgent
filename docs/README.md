@@ -27,7 +27,7 @@
 | 小说实现基线 | [`NOVEL_CREATION_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_IMPLEMENTATION_PLAN.md) | 已完成架构和仍受 schema 约束的工作 |
 | Live Activity 视觉 | [`ACTIVITY_ISLAND_REDESIGN.md`](ACTIVITY_ISLAND_REDESIGN.md) | 灵动岛/锁屏视觉规范 |
 | iOS 首页 / Liquid Glass 调研建议 | [`IOS_HOME_DESIGN_RESEARCH_AND_RECOMMENDATIONS.md`](IOS_HOME_DESIGN_RESEARCH_AND_RECOMMENDATIONS.md) | 首页诊断、蓝图与参考仓库/Skills（Proposed） |
-| Amber 自进化与热重载 | [`SELF_EVOLUTION_AND_HOT_RELOAD_PLAN.md`](SELF_EVOLUTION_AND_HOT_RELOAD_PLAN.md) | Recipe 能力扩展、独立评测、下一轮热加载及经验反馈的实施背景与边界 |
+| Amber Soul / MCP 最小闭环 | [`SOUL_MCP_MINIMAL_CLOSURE_PLAN.md`](SOUL_MCP_MINIMAL_CLOSURE_PLAN.md) | 在既有 Skill 安全发布上补 Soul 自更新与 MCP 受控接入（Completed） |
 | iOS Liquid Glass 设计系统稿 | [`ios-port/IOS_LIQUID_GLASS_DESIGN_SYSTEM.md`](ios-port/IOS_LIQUID_GLASS_DESIGN_SYSTEM.md) | 玻璃/原生结构原则；与首页调研配套 |
 | iOS 终端能力 | [`ios-terminal-runtime.md`](ios-terminal-runtime.md) | iSH/终端运行时边界 |
 | Android Agent Kernel 历史基线 | [`architecture.md`](architecture.md) | 仅解释 Android 模块化背景，不代表当前 iOS 运行时 |

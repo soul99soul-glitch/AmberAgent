@@ -128,6 +128,18 @@ enum WatchTaskSnapshotBuilder {
             let decisionBody: String
             if let preview = request.skillImportPreview {
                 decisionBody = skillImportBody(preview)
+            } else if let preview = request.soulImportPreview {
+                decisionBody = body(
+                    primary: "\(String(preview.baseHash.prefix(10))) → \(String(preview.candidateHash.prefix(10)))",
+                    fallback: preview.afterSummary,
+                    chips: ["SOUL.md", "\(preview.changedLineCount) 行"]
+                )
+            } else if let preview = request.mcpImportPreview {
+                decisionBody = body(
+                    primary: "\(preview.skillName) · \(preview.servers.count) 个服务",
+                    fallback: preview.servers.map(\.name).joined(separator: "、"),
+                    chips: preview.servers.prefix(3).map(\.name)
+                )
             } else {
                 decisionBody = body(
                     primary: "\(request.serverName).\(request.toolName)",

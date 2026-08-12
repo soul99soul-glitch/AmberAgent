@@ -19,6 +19,8 @@ import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
 import app.amber.core.settings.Settings
+import app.amber.core.settings.isLegacyFactoryAgentSoul
+import app.amber.core.settings.migratedAgentSoulMarkdown
 import app.amber.core.settings.defaultReasoningLevelForModel
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
@@ -601,7 +603,9 @@ object IosSettingsMutations {
             .replace("Android System WebView", "the system WebView")
         return settings.copy(
             agentRuntime = settings.agentRuntime.copy(
-                agentSoulMarkdown = settings.agentRuntime.agentSoulMarkdown.rebranded()
+                agentSoulMarkdown = migratedAgentSoulMarkdown(
+                    settings.agentRuntime.agentSoulMarkdown
+                )
             ),
             assistants = settings.assistants.map { assistant ->
                 assistant.copy(
@@ -1107,6 +1111,17 @@ object IosSettingsMutations {
             )
         )
     }
+
+    fun setAgentSoulMarkdown(settings: Settings, markdown: String): Settings {
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                agentSoulMarkdown = markdown,
+            )
+        )
+    }
+
+    fun isLegacyFactoryAgentSoulMarkdown(value: String): Boolean =
+        isLegacyFactoryAgentSoul(value)
 
     // ---- Today Board / Deep Read settings (agentRuntime.todayBoard) ----
 

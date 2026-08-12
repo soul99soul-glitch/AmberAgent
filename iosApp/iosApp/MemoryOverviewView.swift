@@ -10,7 +10,13 @@ struct MemoryOverviewView: View {
 
     @State private var persistence = IOSMemoryPersistence.shared
     @State private var query = ""
+    @State private var selectedTab: MemorySettingsTab = .soul
+    @Namespace private var tabSelection
     @State private var scopeFilter: IOSMemoryScopeFilter = .all
+    @State private var showSoulEditor = false
+    @State private var soulDraft = ""
+    @State private var showSoulRollbackConfirmation = false
+    @State private var soulPreviousStore = IOSSoulPreviousStore()
     @State private var auditStore = IOSMemoryWriteAuditStore.shared
     @State private var pendingDeleteRecord: MemoryRecord?
     @State private var operationError: String?
@@ -28,13 +34,18 @@ struct MemoryOverviewView: View {
 
             ScrollView {
                 VStack(spacing: 0) {
-                    header
-                    intro
-                    loadStatusSection
-                    runtimeSection
-                    pollutionSection
-                    recordsSection
-                    auditSection
+                    chrome
+                    switch selectedTab {
+                    case .soul:
+                        soulSection
+                    case .memory:
+                        intro
+                        loadStatusSection
+                        runtimeSection
+                        pollutionSection
+                        recordsSection
+                        auditSection
+                    }
                 }
                 .padding(.bottom, 36)
             }
@@ -43,7 +54,7 @@ struct MemoryOverviewView: View {
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear(perform: refresh)
-        .alert("无法修改记忆", isPresented: Binding(
+        .alert("无法保存", isPresented: Binding(
             get: { operationError != nil },
             set: { if !$0 { operationError = nil } }
         )) {
@@ -83,40 +94,191 @@ struct MemoryOverviewView: View {
         }
     }
 
-    private var header: some View {
-        HStack {
-            AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回设置", size: 44, symbolSize: 20) {
-                dismiss()
+    private var chrome: some View {
+        VStack(spacing: 10) {
+            HStack {
+                AmberGlassCircleButton(systemImage: "chevron.left", accessibilityLabel: "返回设置", size: 44, symbolSize: 20) {
+                    dismiss()
+                }
+
+                Spacer()
+
+                VStack(spacing: 2) {
+                    Text("灵魂与记忆")
+                        .font(.title2.weight(.bold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(selectedTab == .soul ? "Amber 的核心指令" : "\(persistence.records.count) 条本地记忆")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                Spacer()
+
+                if selectedTab == .memory {
+                    AmberGlassIconButton(
+                        systemImage: "plus",
+                        accessibilityLabel: "新增记忆",
+                        size: 44,
+                        symbolSize: 20,
+                        tint: AmberTheme.accent,
+                        prominent: true
+                    ) {
+                        router.navigate(to: .memoryEdit(recordId: nil, text: "", scope: "核心", pinned: false))
+                    }
+                    .disabled(persistence.loadState == .unreadable)
+                } else {
+                    Color.clear.frame(width: 44, height: 44)
+                }
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
 
-            Spacer()
-
-            VStack(spacing: 2) {
-                Text("核心记忆")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(AmberTheme.foreground)
-                Text("\(persistence.records.count) 条本地记忆")
-                    .font(.caption2.weight(.medium))
-                    .foregroundStyle(AmberTheme.muted)
-            }
-
-            Spacer()
-
-            AmberGlassIconButton(
-                systemImage: "plus",
-                accessibilityLabel: "新增记忆",
-                size: 44,
-                symbolSize: 20,
-                tint: AmberTheme.accent,
-                prominent: true
-            ) {
-                router.navigate(to: .memoryEdit(recordId: nil, text: "", scope: "核心", pinned: false))
-            }
-            .disabled(persistence.loadState == .unreadable)
+            tabPicker
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 18)
+    }
+
+    private var tabPicker: some View {
+        HStack(spacing: 4) {
+            ForEach(MemorySettingsTab.allCases) { tab in
+                Button {
+                    withAnimation(.smooth(duration: 0.2)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    Text(tab.title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(selectedTab == tab ? AmberTheme.foreground : AmberTheme.foreground2)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background {
+                            if selectedTab == tab {
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .fill(AmberTheme.background.opacity(0.92))
+                                    .overlay {
+                                        RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                            .stroke(AmberTheme.borderSoft.opacity(0.9), lineWidth: 0.5)
+                                    }
+                                    .matchedGeometryEffect(id: "selection", in: tabSelection)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selectedTab == tab ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(
+            AmberTheme.surface.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+    }
+
+    private var soulSection: some View {
+        VStack(spacing: 0) {
+            Text("下次模型请求才会使用这里的正文，不会写入聊天历史。")
+                .font(.callout)
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineSpacing(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+
+            AmberSectionLabel(text: "灵魂")
+            AmberFormGroup {
+                let soul = sharedSettings.agentRuntime.agentSoulMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+                VStack(alignment: .leading, spacing: 10) {
+                    ScrollView {
+                        Text(soul.isEmpty ? "还没有核心指令。" : soul)
+                            .font(.system(.footnote, design: .monospaced))
+                            .foregroundStyle(soul.isEmpty ? AmberTheme.muted : AmberTheme.foreground)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    .frame(maxHeight: 220)
+                    Button("编辑核心指令") {
+                        soulDraft = sharedSettings.agentRuntime.agentSoulMarkdown
+                        showSoulEditor = true
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
+                    if canRollbackSoul {
+                        Button("回退上一个核心指令") {
+                            showSoulRollbackConfirmation = true
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accentAmber)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+        }
+        .sheet(isPresented: $showSoulEditor) {
+            NavigationStack {
+                TextEditor(text: $soulDraft)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .scrollContentBackground(.hidden)
+                    .background(AmberTheme.background)
+                    .padding(.horizontal, 12)
+                    .navigationTitle("编辑核心指令")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("取消") { showSoulEditor = false }
+                        }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("保存") {
+                                sharedSettings.setAgentSoulMarkdown(soulDraft)
+                                showSoulEditor = false
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+        }
+        .confirmationDialog(
+            "回退上一个核心指令？",
+            isPresented: $showSoulRollbackConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("回退", role: .destructive) {
+                rollbackSoul()
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("只有当前版本仍是上次应用版本时才会恢复。之后的手工修改不会被覆盖。")
+        }
+    }
+
+    private var canRollbackSoul: Bool {
+        _ = sharedSettings.revision
+        return IOSSoulService(
+            workspaceStore: .shared,
+            sharedSettings: sharedSettings,
+            previousStore: soulPreviousStore
+        ).canRollback
+    }
+
+    private func rollbackSoul() {
+        do {
+            try IOSSoulService(
+                workspaceStore: .shared,
+                sharedSettings: sharedSettings,
+                previousStore: soulPreviousStore
+            ).rollbackPrevious()
+        } catch {
+            operationError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     @ViewBuilder
@@ -406,6 +568,20 @@ struct MemoryOverviewView: View {
             contentPreview: IOSMemoryLibrary.preview(record.content)
         )
         refresh()
+    }
+}
+
+private enum MemorySettingsTab: String, CaseIterable, Identifiable {
+    case soul
+    case memory
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .soul: "灵魂"
+        case .memory: "记忆"
+        }
     }
 }
 

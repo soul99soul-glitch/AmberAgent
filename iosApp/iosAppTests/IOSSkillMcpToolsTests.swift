@@ -430,7 +430,7 @@ final class IOSSkillMcpToolsTests: XCTestCase {
             restore(previousHighRisk, forKey: highRiskKey, in: standardDefaults)
         }
         standardDefaults.set(true, forKey: globalKey)
-        standardDefaults.set(true, forKey: highRiskKey)
+        standardDefaults.set(false, forKey: highRiskKey)
 
         let previewResult = await runtime.execute(
             ChatPendingToolCall(kind: .advanced, toolCall: toolCall),
@@ -438,7 +438,7 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         )
         guard case .waitingForApproval(.mcp(let request)) = previewResult,
               let preview = request.skillImportPreview else {
-            return XCTFail("skill_import must pause on its explicit approval preview")
+            return XCTFail("skill_import must pause unless high-risk auto-approve is on")
         }
         XCTAssertEqual(preview.skillName, skillName)
         XCTAssertEqual(preview.mutationKind, .update)
@@ -519,6 +519,134 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         ).path))
         XCTAssertFalse(settings.isSkillEnabled(skillName))
         XCTAssertFalse(try skillStore.rollbackAvailability(name: skillName).canRollback)
+    }
+
+    func testSkillImportHighRiskAutoApproveAppliesWithoutCard() async throws {
+        let skillStore = IOSSkillFileStore(baseDirectory: tempRoot())
+        let defaults = isolatedDefaults()
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let workspace = IOSWorkspaceStore(
+            baseDirectory: tempRoot().appendingPathComponent("workspace", isDirectory: true)
+        )
+        let markdown = """
+        ---
+        name: "auto-skill"
+        description: "Use when testing high-risk auto import."
+        ---
+
+        # Auto
+        """
+        try await writeWorkspaceText(
+            markdown,
+            path: "/workspace/skills/auto-skill/SKILL.md",
+            workspace: workspace
+        )
+        let mcpStore = IOSMcpConfigStore(userDefaults: isolatedDefaults())
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(userDefaults: defaults),
+            sharedSettings: settings,
+            localToolExecutor: nil,
+            searchTransport: IOSURLSessionSearchHTTPTransport(),
+            mcpManager: IOSMcpManager(sharedSettings: settings, configStore: mcpStore),
+            skillFileStore: skillStore,
+            workspaceStore: workspace,
+            mcpConfigStore: mcpStore
+        )
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "skill-import-auto-\(UUID().uuidString)",
+            toolName: "skill_import",
+            input: #"{"workspace_path":"/workspace/skills/auto-skill"}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let pending = makeSkillImportPending(toolCall: toolCall)
+        await withAutoApproveFlags(global: false, highRisk: true) {
+            let result = await runtime.execute(
+                ChatPendingToolCall(kind: .advanced, toolCall: toolCall),
+                context: pending
+            )
+            guard case .completed = result else {
+                return XCTFail("high-risk auto-approve must apply skill_import without a card, got \(result)")
+            }
+        }
+        XCTAssertEqual(try skillStore.readSkillMarkdown(dirName: "auto-skill"), markdown)
+        XCTAssertTrue(settings.isSkillEnabled("auto-skill"))
+    }
+
+    func testBackgroundSkillImportAppliesWhenHighRiskAutoApproveEnabled() async throws {
+        let skillStore = IOSSkillFileStore(baseDirectory: tempRoot())
+        let defaults = isolatedDefaults()
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let workspace = IOSWorkspaceStore(
+            baseDirectory: tempRoot().appendingPathComponent("workspace", isDirectory: true)
+        )
+        let markdown = """
+        ---
+        name: "bg-skill"
+        description: "Use when testing background high-risk import."
+        ---
+
+        # Background
+        """
+        try await writeWorkspaceText(
+            markdown,
+            path: "/workspace/skills/bg-skill/SKILL.md",
+            workspace: workspace
+        )
+        let mcpStore = IOSMcpConfigStore(userDefaults: isolatedDefaults())
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(userDefaults: defaults),
+            sharedSettings: settings,
+            localToolExecutor: nil,
+            searchTransport: IOSURLSessionSearchHTTPTransport(),
+            mcpManager: IOSMcpManager(sharedSettings: settings, configStore: mcpStore),
+            skillFileStore: skillStore,
+            workspaceStore: workspace,
+            mcpConfigStore: mcpStore
+        )
+        let importTool = try XCTUnwrap(ToolKt.iosToolDeclaration(name: "skill_import"))
+        let pending = makeSkillImportPending(
+            toolCall: UIMessagePart.Tool(
+                toolCallId: "bg-skill-import",
+                toolName: "skill_import",
+                input: "{}",
+                output: [],
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )
+        )
+        let params = TextGenerationParams(
+            model: pending.params.model,
+            temperature: nil,
+            topP: nil,
+            maxTokens: nil,
+            tools: [importTool],
+            reasoningLevel: .off,
+            customHeaders: [],
+            customBody: []
+        )
+        let executors = runtime.backgroundToolExecutors(
+            providerSetting: pending.providerSetting,
+            params: params,
+            runId: "run-bg-skill-import"
+        )
+        let executor = try XCTUnwrap(executors["skill_import"])
+        await withAutoApproveFlags(global: false, highRisk: true) {
+            let outcome = await UncheckedSkillToolExecutorBox(executor).execute(
+                name: "skill_import",
+                arguments: #"{"workspace_path":"/workspace/skills/bg-skill"}"#,
+                isUserInitiated: false
+            )
+            guard case .filled(let output) = outcome else {
+                return XCTFail("high-risk auto-approve must apply background skill_import, got \(outcome)")
+            }
+            XCTAssertTrue(output.contains(#""success":true"#), output)
+        }
+        XCTAssertEqual(try skillStore.readSkillMarkdown(dirName: "bg-skill"), markdown)
+        XCTAssertTrue(settings.isSkillEnabled("bg-skill"))
     }
 
     func testSkillImportRejectsStaleBaseOrCandidateWithoutMutation() async throws {
@@ -626,6 +754,61 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         }
     }
 
+    func testSoulImportPrepareApplyStaleAndRollback() async throws {
+        let settings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        settings.setAgentSoulMarkdown("# old soul\nbase")
+        let workspace = IOSWorkspaceStore(
+            baseDirectory: tempRoot().appendingPathComponent("soul-ws", isDirectory: true)
+        )
+        let previous = IOSSoulPreviousStore(
+            userDefaults: isolatedDefaults(),
+            key: "soul-prev-\(UUID().uuidString)"
+        )
+        let service = IOSSoulService(
+            workspaceStore: workspace,
+            sharedSettings: settings,
+            previousStore: previous
+        )
+        try await writeWorkspaceText(
+            "# new soul\ncandidate",
+            path: "/workspace/SOUL.md",
+            workspace: workspace
+        )
+
+        let prepared = try service.prepareImport()
+        XCTAssertEqual(settings.agentRuntime.agentSoulMarkdown, "# old soul\nbase")
+        XCTAssertNil(previous.load())
+
+        try await writeWorkspaceText(
+            "# changed candidate\n",
+            path: "/workspace/SOUL.md",
+            workspace: workspace
+        )
+        let staleCandidate = try service.applyPreparedImport(prepared)
+        XCTAssertEqual(try jsonObject(staleCandidate)["code"] as? String, "stale_candidate")
+        XCTAssertEqual(settings.agentRuntime.agentSoulMarkdown, "# old soul\nbase")
+
+        try await writeWorkspaceText(
+            "# new soul\ncandidate",
+            path: "/workspace/SOUL.md",
+            workspace: workspace
+        )
+        settings.setAgentSoulMarkdown("# manual change")
+        let staleBase = try service.applyPreparedImport(prepared)
+        XCTAssertEqual(try jsonObject(staleBase)["code"] as? String, "stale_base")
+        XCTAssertEqual(settings.agentRuntime.agentSoulMarkdown, "# manual change")
+
+        settings.setAgentSoulMarkdown("# old soul\nbase")
+        let applied = try service.applyPreparedImport(prepared)
+        XCTAssertEqual(try jsonObject(applied)["ok"] as? Bool, true)
+        XCTAssertEqual(settings.agentRuntime.agentSoulMarkdown, "# new soul\ncandidate")
+        XCTAssertEqual(previous.load()?.previousMarkdown, "# old soul\nbase")
+
+        try service.rollbackPrevious()
+        XCTAssertEqual(settings.agentRuntime.agentSoulMarkdown, "# old soul\nbase")
+        XCTAssertNil(previous.load())
+    }
+
     func testMcpImportFromSkillPersistsServer() async throws {
         let root = tempRoot()
         let skillStore = IOSSkillFileStore(baseDirectory: root)
@@ -658,7 +841,8 @@ final class IOSSkillMcpToolsTests: XCTestCase {
 
         let mcpDefaults = UserDefaults(suiteName: "mcp-store-\(UUID().uuidString)")!
         let mcpStore = IOSMcpConfigStore(userDefaults: mcpDefaults)
-        let service = IOSSkillMcpToolService(
+        let counting = CountingMcpClient()
+        var service = IOSSkillMcpToolService(
             skillStore: skillStore,
             sharedSettings: settings,
             workspaceStore: IOSWorkspaceStore(
@@ -667,13 +851,92 @@ final class IOSSkillMcpToolsTests: XCTestCase {
             mcpConfigStore: mcpStore,
             mcpManager: IOSMcpManager(sharedSettings: settings, configStore: mcpStore)
         )
+        service.ephemeralClientFactory = { _ in counting }
 
-        let result = await service.execute(
+        let preview = await service.execute(
             toolName: "mcp_import_from_skill",
             arguments: #"{"skill_name":"mcp-pack"}"#
         )
-        XCTAssertTrue(result.contains(#""success":true"#), result)
-        XCTAssertTrue(mcpStore.servers.contains(where: { $0.name == "docs" }))
+        XCTAssertTrue(preview.contains(#""status":"preview"#), preview)
+        XCTAssertTrue(mcpStore.servers.isEmpty)
+        XCTAssertEqual(counting.connects, 0)
+
+        let prepared = try service.prepareMcpImport(arguments: #"{"skill_name":"mcp-pack"}"#)
+        _ = try skillStore.saveSkillFiles(files: [
+            "SKILL.md": skillMd,
+            "mcp.json": #"{"mcpServers":{"docs":{"type":"streamable_http","url":"https://example.com/changed"}}}"#,
+        ])
+        let stale = await service.applyPreparedMcpImport(prepared)
+        XCTAssertEqual(try jsonObject(stale)["code"] as? String, "stale_candidate")
+        XCTAssertTrue(mcpStore.servers.isEmpty)
+
+        _ = try skillStore.saveSkillFiles(files: [
+            "SKILL.md": skillMd,
+            "mcp.json": mcpJSON,
+        ])
+        counting.shouldFail = true
+        let failed = await service.applyPreparedMcpImport(try service.prepareMcpImport(arguments: #"{"skill_name":"mcp-pack"}"#))
+        XCTAssertEqual(try jsonObject(failed)["code"] as? String, "connectivity_failed")
+        XCTAssertTrue(mcpStore.servers.isEmpty)
+
+        counting.shouldFail = false
+        counting.connects = 0
+        counting.listCalls = 0
+        counting.disconnects = 0
+        let applied = await service.applyPreparedMcpImport(try service.prepareMcpImport(arguments: #"{"skill_name":"mcp-pack"}"#))
+        XCTAssertEqual(try jsonObject(applied)["ok"] as? Bool, true)
+        XCTAssertEqual(mcpStore.servers.map(\.name), ["docs"])
+        XCTAssertEqual(counting.connects, 1)
+        XCTAssertEqual(counting.listCalls, 1)
+        XCTAssertEqual(counting.disconnects, 1)
+    }
+
+    func testMcpImportApplyDoesNotConnectWhenNetworkDisabled() async throws {
+        let root = tempRoot()
+        let skillStore = IOSSkillFileStore(baseDirectory: root)
+        let settings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        let skillMd = """
+        ---
+        name: "mcp-off"
+        description: "Use when testing disabled MCP import."
+        ---
+
+        # Off
+        """
+        _ = try skillStore.saveSkillFiles(files: [
+            "SKILL.md": skillMd,
+            "mcp.json": """
+            {
+              "mcpServers": {
+                "docs": {
+                  "type": "streamable_http",
+                  "url": "https://example.com/mcp"
+                }
+              }
+            }
+            """,
+        ])
+        settings.setSkillEnabled(name: "mcp-off", enabled: true)
+
+        let mcpStore = IOSMcpConfigStore(userDefaults: isolatedDefaults())
+        let counting = CountingMcpClient()
+        var service = IOSSkillMcpToolService(
+            skillStore: skillStore,
+            sharedSettings: settings,
+            workspaceStore: IOSWorkspaceStore(
+                baseDirectory: tempRoot().appendingPathComponent("ws", isDirectory: true)
+            ),
+            mcpConfigStore: mcpStore,
+            mcpManager: IOSMcpManager(sharedSettings: settings, configStore: mcpStore)
+        )
+        service.ephemeralClientFactory = { _ in counting }
+
+        let prepared = try service.prepareMcpImport(arguments: #"{"skill_name":"mcp-off"}"#)
+        let denied = await service.applyPreparedMcpImport(prepared) { false }
+        XCTAssertEqual(try jsonObject(denied)["code"] as? String, "denied")
+        XCTAssertEqual(counting.connects, 0)
+        XCTAssertEqual(counting.listCalls, 0)
+        XCTAssertTrue(mcpStore.servers.isEmpty)
     }
 
     /// P0-a: the chat declares the resident skill/MCP surface up front and
@@ -698,8 +961,8 @@ final class IOSSkillMcpToolsTests: XCTestCase {
             XCTAssertTrue(names.contains(tool), "\(tool) should be declared")
         }
         for tool in [
-            "skill_validate", "skill_import", "skill_enable", "skill_disable",
-            "mcp_test", "mcp_import_from_skill",
+            "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable",
+            "mcp_test", "mcp_import_from_skill", "recipe_import",
         ] {
             XCTAssertFalse(names.contains(tool), "\(tool) should be deferred behind tool_search")
         }
@@ -707,8 +970,10 @@ final class IOSSkillMcpToolsTests: XCTestCase {
 
         // The deferred set is reachable through tool_search (next-step exposure).
         let bridge = viewModel.toolExposureBridgeForTesting()
-        let payload = bridge?.executeToolSearch(argumentsJson: #"{"query":"skill_import","limit":1}"#) ?? ""
-        XCTAssertTrue(payload.contains("skill_import"))
+        let skillPayload = bridge?.executeToolSearch(argumentsJson: #"{"query":"skill_import","limit":1}"#) ?? ""
+        XCTAssertTrue(skillPayload.contains("skill_import"))
+        let recipePayload = bridge?.executeToolSearch(argumentsJson: #"{"query":"recipe_import","limit":1}"#) ?? ""
+        XCTAssertTrue(recipePayload.contains("recipe_import"))
 
         viewModel.inputText = "帮我创建一个本地 skill，并连接 MCP 服务器"
         viewModel.sendMessage()
@@ -1224,12 +1489,12 @@ final class IOSSkillMcpToolsTests: XCTestCase {
             mcpManager: IOSMcpManager(sharedSettings: settings, configStore: mcpStore)
         )
 
-        let result = await service.execute(
-            toolName: "mcp_import_from_skill",
-            arguments: #"{"skill_name":"mcp-skip"}"#
-        )
-        XCTAssertTrue(result.contains(#""imported_count":0"#), result)
-        XCTAssertTrue(result.contains(#""already_exists_count":1"#), result)
+        do {
+            _ = try service.prepareMcpImport(arguments: #"{"skill_name":"mcp-skip"}"#)
+            XCTFail("duplicate live names must fail closed")
+        } catch let error as IOSMcpImportError {
+            XCTAssertEqual(error, .liveNameConflict("docs"))
+        }
         XCTAssertEqual(
             mcpStore.servers.first(where: { $0.name == "docs" })?.url,
             "https://example.com/old"
@@ -1362,6 +1627,25 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         }
     }
 
+    private func withAutoApproveFlags(
+        global: Bool,
+        highRisk: Bool,
+        _ body: () async throws -> Void
+    ) async rethrows {
+        let globalKey = "app.amber.ios.globalAutoApprove"
+        let highRiskKey = "app.amber.ios.highRiskAutoApprove"
+        let standardDefaults = UserDefaults.standard
+        let previousGlobal = standardDefaults.object(forKey: globalKey)
+        let previousHighRisk = standardDefaults.object(forKey: highRiskKey)
+        defer {
+            restore(previousGlobal, forKey: globalKey, in: standardDefaults)
+            restore(previousHighRisk, forKey: highRiskKey, in: standardDefaults)
+        }
+        standardDefaults.set(global, forKey: globalKey)
+        standardDefaults.set(highRisk, forKey: highRiskKey)
+        try await body()
+    }
+
     private func tempRoot() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ios-skill-mcp-\(UUID().uuidString)", isDirectory: true)
@@ -1387,4 +1671,54 @@ private final class SkillMcpFakeClient: IOSMcpClienting {
     func listTools() async throws -> [IOSMcpTool] { [] }
     func callTool(name: String, arguments: [String: Any]) async throws -> String { "" }
     func disconnect() {}
+}
+
+@MainActor
+private final class CountingMcpClient: IOSMcpClienting {
+    var connects = 0
+    var listCalls = 0
+    var calls = 0
+    var disconnects = 0
+    var shouldFail = false
+
+    func connect(config: IOSMcpServerConfig) async throws -> Bool {
+        connects += 1
+        if shouldFail { throw IOSMcpClientError.invalidResponse }
+        return true
+    }
+
+    func listTools() async throws -> [IOSMcpTool] {
+        listCalls += 1
+        if shouldFail { throw IOSMcpClientError.invalidResponse }
+        return []
+    }
+
+    func callTool(name: String, arguments: [String: Any]) async throws -> String {
+        calls += 1
+        return ""
+    }
+
+    func disconnect() {
+        disconnects += 1
+    }
+}
+
+private final class UncheckedSkillToolExecutorBox: @unchecked Sendable {
+    private let base: any IOSToolExecutor
+
+    init(_ base: any IOSToolExecutor) {
+        self.base = base
+    }
+
+    func execute(
+        name: String,
+        arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        await base.execute(
+            name: name,
+            arguments: arguments,
+            isUserInitiated: isUserInitiated
+        )
+    }
 }

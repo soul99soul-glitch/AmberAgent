@@ -19,9 +19,6 @@ struct AppShell: View {
     @State private var conversationStore: IOSConversationStore
     @State private var chatViewModel: ChatViewModel
     @State private var councilChatViewModel: CouncilChatViewModel
-    /// §14.1: 演化工作流（「分析并改进」/ T2 批准卡 / T0-T1 通知卡）。由
-    /// AppShell 持有并注入 environment，ChatView / RecipesView 直接消费。
-    @State private var evolutionWorkflow: IOSEvolutionWorkflow
     @State private var novelCreationViewModel: NovelCreationViewModel?
     @State private var novelLifecycleCoordinator: NovelWorkspaceLifecycleCoordinator
     @State private var novelCreationErrorMessage: String?
@@ -47,7 +44,14 @@ struct AppShell: View {
             workspaceStore: workspaceStore,
             systemPermissionCoordinator: systemPermissionCoordinator
         )
-        let backgroundMcpManager = IOSMcpManager(sharedSettings: sharedSettingsStore, configStore: .shared)
+        let backgroundMcpManager = IOSMcpManager(
+            sharedSettings: sharedSettingsStore,
+            configStore: .shared,
+            isNetworkAllowed: {
+                localToolExecutor.permissionsStatus().capabilities
+                    .first { $0.id == "ios.mcp.tool_call" }?.policy != IOSAgentPermissionPolicy.disabled.title
+            }
+        )
         let backgroundToolRuntime = ChatToolRuntime(
             settingsStore: settingsStore,
             sharedSettings: sharedSettingsStore,
@@ -89,15 +93,10 @@ struct AppShell: View {
         self._localToolExecutor = State(initialValue: localToolExecutor)
         self._providerRegistry = State(initialValue: providerRegistry)
         self._sharedSettings = State(initialValue: sharedSettingsStore)
-        self._mcpConfigStore = State(initialValue: IOSMcpConfigStore())
+        self._mcpConfigStore = State(initialValue: .shared)
         self._conversationStore = State(initialValue: conversationStore)
         self._chatViewModel = State(initialValue: chatViewModel)
         self._councilChatViewModel = State(initialValue: councilChatViewModel)
-        // Production wiring: real ledger/DAO/registry/settings/MCP manager +
-        // the one-shot aux-model path (see IOSEvolutionWorkflow.production).
-        self._evolutionWorkflow = State(
-            initialValue: IOSEvolutionWorkflow.production(sharedSettings: sharedSettingsStore)
-        )
         self._novelCreationViewModel = State(initialValue: novelCreationViewModel)
         self._novelLifecycleCoordinator = State(
             initialValue: NovelWorkspaceLifecycleCoordinator()
@@ -156,7 +155,6 @@ struct AppShell: View {
         .environment(chatViewModel)
         .environment(documentAccessStore)
         .environment(workspaceStore)
-        .environment(evolutionWorkflow)
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
         .onChange(of: scenePhase) { _, phase in
@@ -498,7 +496,6 @@ enum Route: Hashable {
     case skillDetail(name: String, dirName: String?)
     case recipes
     case recipeDetail(name: String)
-    case evolution
     case execution
     case providers
     case providerAdd
@@ -665,8 +662,6 @@ private extension View {
                 }
             case .execution:
                 ExecutionSettingsView(sharedSettings: sharedSettings)
-            case .evolution:
-                EvolutionSettingsView(sharedSettings: sharedSettings)
             case .providers:
                 ProvidersView(settingsStore: settingsStore, providerRegistry: providerRegistry, sharedSettings: sharedSettings)
             case .providerAdd:

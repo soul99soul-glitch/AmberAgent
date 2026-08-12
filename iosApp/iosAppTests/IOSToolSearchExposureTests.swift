@@ -34,7 +34,7 @@ final class IOSToolSearchExposureTests: XCTestCase {
         "wm_select", "wm_find", "wm_wait",
         "ish_handoff", "ios_ish_execute",
         "mcp_test", "mcp_import_from_skill",
-        "skill_validate", "skill_import", "skill_enable", "skill_disable",
+        "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable",
         "subagent_report",
     ]
 
@@ -588,7 +588,8 @@ final class IOSToolSearchExposureTests: XCTestCase {
         let staticDeclarations: Set<String> = [
             "search_web", "scrape_web", "memory_tool", "ask_user",
             "mcp_call", "mcp_list", "mcp_test", "mcp_describe_tool", "mcp_import_from_skill",
-            "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable",
+            "skills_list", "use_skill", "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable",
+            "recipe_import",
             "subagent_dispatch", "model_council_run",
             // P1-c/P1-d: 线程编排六工具追加进 iOS 声明面（非常驻；轻配置 bypass 模式
             // 下与其余声明一起全量可见——阈值内行为契约随声明面扩展而更新）。

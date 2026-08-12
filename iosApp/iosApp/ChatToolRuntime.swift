@@ -235,13 +235,11 @@ final class ChatToolRuntime {
     /// on the pre-contract behavior; the chat coordinator wires its real
     /// ledger here so user denials become durable, attributable facts.
     private let ledger: IOSAgentRunLedgering?
-    /// §19 观测 store（Phase 4 Wave 1）：recipe step 失败分布与权限拒绝分布
-    /// 的埋点落这里。默认 `.shared`（生产单例），既有调用点零改动；测试注入
-    /// 临时目录的隔离实例，不污染生产 metrics 文件。
-    private let metrics: IOSEvolutionMetrics
     /// `skill_import` 的获批应用上下文只在本次进程内、按 toolCallId 暂存。
     /// Coordinator 接住审批卡时立即取走；冷启动不会恢复或静默应用候选包。
     private var preparedSkillImportsForApproval: [String: IOSPreparedSkillImport] = [:]
+    private var preparedSoulImportsForApproval: [String: IOSPreparedSoulImport] = [:]
+    private var preparedMcpImportsForApproval: [String: IOSPreparedMcpImport] = [:]
     /// Wave B2: `recipe_import` 的获批应用上下文，与 skill_import 同生命周期
     /// （仅内存、按 toolCallId、冷启动不恢复）。
     private var preparedRecipeImportsForApproval: [String: IOSPreparedRecipeImport] = [:]
@@ -276,20 +274,26 @@ final class ChatToolRuntime {
     /// P3-c: 会话级 cell 注册表（exec cell + store/load KV 的唯一 owner，
     /// 跨 run 共享）。默认生产单例；测试注入隔离实例。
     private let jsCellRegistry: IOSJsCellRegistry
+    private let soulPreviousStore: IOSSoulPreviousStore
+    private let mcpImportClientFactory: ((IOSMcpServerConfig) -> any IOSMcpClienting)?
     private lazy var skillMcpToolService = IOSSkillMcpToolService(
         skillStore: skillFileStore,
         sharedSettings: sharedSettings,
         workspaceStore: workspaceStore,
         mcpConfigStore: mcpConfigStore,
-        mcpManager: mcpManager
+        mcpManager: mcpManager,
+        ephemeralClientFactory: mcpImportClientFactory
+    )
+    private lazy var soulService = IOSSoulService(
+        workspaceStore: workspaceStore,
+        sharedSettings: sharedSettings,
+        previousStore: soulPreviousStore
     )
     /// Wave B2: `recipe_import` 服务（preview → 批准 → CAS apply → registry
     /// refresh）。recipe store 基目录与 registry 同源（nil = documents）。
-    /// metrics 透传注入实例（其自身已可注入，默认 `.shared`）。
     private lazy var recipeToolService = IOSRecipeToolService(
         workspaceStore: workspaceStore,
-        recipeStore: IOSRecipeFileStore(baseDirectory: recipeStoreBaseDirectory ?? recipeDefaultBaseDirectory),
-        metrics: metrics
+        recipeStore: IOSRecipeFileStore(baseDirectory: recipeStoreBaseDirectory ?? recipeDefaultBaseDirectory)
     )
     /// Wave B2: checkpoint 落盘（`<base>/recipes/.checkpoints/`）。
     private lazy var recipeExecutionCheckpointStore = IOSRecipeExecutionCheckpointStore(
@@ -320,7 +324,8 @@ final class ChatToolRuntime {
         conversationStoreProvider: (() -> IOSConversationStore?)? = nil,
         ledger: IOSAgentRunLedgering? = nil,
         recipeStoreBaseDirectory: URL? = nil,
-        metrics: IOSEvolutionMetrics = .shared
+        soulPreviousStore: IOSSoulPreviousStore? = nil,
+        mcpImportClientFactory: ((IOSMcpServerConfig) -> any IOSMcpClienting)? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
@@ -336,7 +341,8 @@ final class ChatToolRuntime {
         self.conversationStoreProvider = conversationStoreProvider
         self.ledger = ledger
         self.recipeStoreBaseDirectory = recipeStoreBaseDirectory
-        self.metrics = metrics
+        self.soulPreviousStore = soulPreviousStore ?? IOSSoulPreviousStore()
+        self.mcpImportClientFactory = mcpImportClientFactory
     }
 
     /// 把只读 preview 对应的 CAS 上下文交给 Coordinator 的 pending MCP 槽。
@@ -347,6 +353,16 @@ final class ChatToolRuntime {
 
     func discardPreparedSkillImportForApproval(toolCallId: String) {
         preparedSkillImportsForApproval.removeValue(forKey: toolCallId)
+        preparedSoulImportsForApproval.removeValue(forKey: toolCallId)
+        preparedMcpImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    func takePreparedSoulImportForApproval(toolCallId: String) -> IOSPreparedSoulImport? {
+        preparedSoulImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    func takePreparedMcpImportForApproval(toolCallId: String) -> IOSPreparedMcpImport? {
+        preparedMcpImportsForApproval.removeValue(forKey: toolCallId)
     }
 
     /// Wave B2: `recipe_import` 的批准上下文（与 skill_import 同模式）。
@@ -643,14 +659,17 @@ final class ChatToolRuntime {
             }
         }
 
-        let skillMcpNames = IOSSkillToolCatalog.toolNames.union(IOSMcpManagementToolCatalog.toolNames)
+        let skillMcpNames = IOSSkillToolCatalog.toolNames
+            .union(IOSMcpManagementToolCatalog.toolNames)
+            .union([IOSSoulToolCatalog.toolName])
         for name in skillMcpNames where availableToolNames.contains(name) {
             executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
                 guard let self else { return .failed("Chat runtime is unavailable.") }
-                // skill_import 的 preview 是只读步骤，但真正应用必须经过前台的一次
-                // 显式批准；任何全局/高风险自动批准开关都不能让后台代为确认。
-                if toolName == "skill_import" {
-                    return .denied("Skill 导入需要查看候选变更并显式批准，请回到 App 内确认。")
+                if Self.isHostPublishTool(toolName) {
+                    return await self.backgroundHostPublishOutcome(
+                        toolName: toolName,
+                        arguments: arguments
+                    )
                 }
                 let mutating = IOSSkillToolCatalog.mutatingToolNames.contains(toolName)
                     || IOSMcpManagementToolCatalog.mutatingToolNames.contains(toolName)
@@ -677,12 +696,16 @@ final class ChatToolRuntime {
             }
         }
 
-        // Wave B2 (§16.2): recipe_import 与 skill_import 同级——预览与批准都
-        // 必须在前台；后台只拒绝。`recipe__*` 名字在后台桥里本就不存在（B1 的
-        // handoff 过滤），这里不注册任何 recipe 执行器，声明与执行都不进入后台。
+        // Wave B2 (§16.2): recipe_import 与 skill_import 同级。`recipe__*` 名字
+        // 在后台桥里本就不存在（B1 的 handoff 过滤）；import 仅在高风险自动批准
+        // 打开时直接 CAS 应用，否则拒绝并要求回到 App。
         if availableToolNames.contains("recipe_import") {
-            executors["recipe_import"] = IOSClosureToolExecutor { _, _, _ in
-                .denied("Recipe 导入需要查看候选变更并显式批准，请回到 App 内确认。")
+            executors["recipe_import"] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                return await self.backgroundHostPublishOutcome(
+                    toolName: toolName,
+                    arguments: arguments
+                )
             }
         }
 
@@ -1124,14 +1147,20 @@ final class ChatToolRuntime {
     func finishMcpApproval(
         pending: ChatPendingToolApproval,
         allow: Bool,
-        preparedSkillImport: IOSPreparedSkillImport? = nil
+        preparedSkillImport: IOSPreparedSkillImport? = nil,
+        preparedSoulImport: IOSPreparedSoulImport? = nil,
+        preparedMcpImport: IOSPreparedMcpImport? = nil
     ) async -> [UIMessage] {
         let audit: (capabilityId: String, actionName: String)
         if pending.toolCall.toolName == "mcp_call"
-            || ToolKt.isExpandedMcpToolName(name: pending.toolCall.toolName) {
+            || ToolKt.isExpandedMcpToolName(name: pending.toolCall.toolName)
+            || pending.toolCall.toolName == "mcp_test"
+            || pending.toolCall.toolName == "mcp_import_from_skill" {
             audit = ("ios.mcp.tool_call", "MCP tool call")
         } else if IOSMcpManagementToolCatalog.toolNames.contains(pending.toolCall.toolName) {
             audit = ("ios.mcp.management", "MCP management operation")
+        } else if pending.toolCall.toolName == IOSSoulToolCatalog.toolName {
+            audit = ("ios.skills.management", "Soul update")
         } else {
             audit = ("ios.skills.management", "local Skill operation")
         }
@@ -1165,6 +1194,48 @@ final class ChatToolRuntime {
                         status: "failed"
                     )
                 }
+            } else if pending.toolCall.toolName == IOSSoulToolCatalog.toolName {
+                if let preparedSoulImport {
+                    do {
+                        resultText = try soulService.applyPreparedImport(preparedSoulImport)
+                    } catch {
+                        resultText = ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: pending.toolCall.toolName,
+                            reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                            status: "failed"
+                        )
+                    }
+                } else {
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: "核心指令预览已失效，请重新发起导入并确认最新变更。",
+                        status: "failed"
+                    )
+                }
+            } else if pending.toolCall.toolName == "mcp_import_from_skill" {
+                if !isMcpNetworkAllowed() {
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: "MCP 调用已关闭，未发起网络测试或写入。",
+                        status: "denied"
+                    )
+                } else if let preparedMcpImport {
+                    resultText = await skillMcpToolService.applyPreparedMcpImport(preparedMcpImport) { [weak self] in
+                        self?.isMcpNetworkAllowed() ?? false
+                    }
+                } else {
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: "MCP 导入预览已失效，请重新发起导入并确认最新变更。",
+                        status: "failed"
+                    )
+                }
+            } else if isMcpNetworkTool(pending.toolCall.toolName), !isMcpNetworkAllowed() {
+                resultText = ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: pending.toolCall.toolName,
+                    reason: "MCP 调用已关闭。",
+                    status: "denied"
+                )
             } else {
                 resultText = await dispatchAdvancedToolCall(
                     pending.toolCall,
@@ -1791,6 +1862,7 @@ final class ChatToolRuntime {
     ) -> UIMessagePart.Tool? {
         var advancedNames: Set<String> = Set([
             "mcp_call", "subagent_dispatch", "model_council_run",
+            IOSSoulToolCatalog.toolName,
             // P1-c/P1-d: 线程编排工具（非常驻，tool_search 命中后与 mcp__* 同样可执行）。
             "spawn_agent", "list_agents", "interrupt_agent",
             "send_message", "followup_task", "wait_agent",
@@ -1977,9 +2049,111 @@ final class ChatToolRuntime {
             )
         }
 
-        // skill_import 与普通本机 mutation 不同：这里先做只读 preview，再无条件
-        // 暂停等待一次显式批准。此分支位于所有 auto-approve gate 之前，因此
-        // 全局和 high-risk 开关都不能把候选包静默应用。
+        if toolName == IOSSoulToolCatalog.toolName {
+            preparedSoulImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
+            do {
+                let prepared = try soulService.prepareImport()
+                guard let request = ChatToolApprovalRequestBuilder.extensionMutation(
+                    for: pending.toolCall,
+                    reason: "请核对 /workspace/SOUL.md 的核心指令变更；批准后会复核当前版本与候选 hash。",
+                    soulImportPreview: SoulImportPreview(
+                        baseHash: prepared.preview.baseHash,
+                        candidateHash: prepared.preview.candidateHash,
+                        changedLineCount: prepared.preview.changedLineCount,
+                        diffPreview: prepared.preview.diffPreview,
+                        afterSummary: prepared.preview.afterSummary
+                    )
+                ) else {
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: toolName,
+                            reason: "无法构造核心指令审批请求。",
+                            status: "failed"
+                        ),
+                        in: pending.baseMessages
+                    ))
+                }
+                if IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                    let resultText = try soulService.applyPreparedImport(prepared)
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: resultText,
+                        in: pending.baseMessages
+                    ))
+                }
+                preparedSoulImportsForApproval[pending.toolCall.toolCallId] = prepared
+                return .waitingForApproval(.mcp(request))
+            } catch {
+                return .completed(messagesByFinishingToolCall(
+                    pending.toolCall,
+                    outputText: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    ),
+                    in: pending.baseMessages
+                ))
+            }
+        }
+
+        if toolName == "mcp_import_from_skill" {
+            preparedMcpImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
+            do {
+                let prepared = try skillMcpToolService.prepareMcpImport(arguments: pending.toolCall.input)
+                guard let request = ChatToolApprovalRequestBuilder.extensionMutation(
+                    for: pending.toolCall,
+                    reason: "请核对将导入的 MCP 服务；批准后会复核 digest、临时连通测试，再一次写入。",
+                    mcpImportPreview: prepared.preview
+                ) else {
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: toolName,
+                            reason: "无法构造 MCP 导入审批请求。",
+                            status: "failed"
+                        ),
+                        in: pending.baseMessages
+                    ))
+                }
+                if IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                    let resultText = await skillMcpToolService.applyPreparedMcpImport(prepared) { [weak self] in
+                        self?.isMcpNetworkAllowed() ?? false
+                    }
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: resultText,
+                        in: pending.baseMessages,
+                        conversationId: pending.conversationId
+                    ))
+                }
+                preparedMcpImportsForApproval[pending.toolCall.toolCallId] = prepared
+                return .waitingForApproval(.mcp(request))
+            } catch {
+                return .completed(messagesByFinishingToolCall(
+                    pending.toolCall,
+                    outputText: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    ),
+                    in: pending.baseMessages
+                ))
+            }
+        }
+
+        if isMcpNetworkTool(toolName), !isMcpNetworkAllowed() {
+            return .completed(messagesByFinishingToolCall(
+                pending.toolCall,
+                outputText: ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: toolName,
+                    reason: "MCP 调用已关闭。",
+                    status: "denied"
+                ),
+                in: pending.baseMessages
+            ))
+        }
+
         if toolName == "skill_import" {
             preparedSkillImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
             do {
@@ -2001,6 +2175,14 @@ final class ChatToolRuntime {
                         in: pending.baseMessages
                     ))
                 }
+                if IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                    let resultText = try skillMcpToolService.applyPreparedSkillImport(prepared)
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: resultText,
+                        in: pending.baseMessages
+                    ))
+                }
                 preparedSkillImportsForApproval[pending.toolCall.toolCallId] = prepared
                 return .waitingForApproval(.mcp(request))
             } catch {
@@ -2016,8 +2198,6 @@ final class ChatToolRuntime {
             }
         }
 
-        // Wave B2: `recipe_import` 与 skill_import 同模式——先做只读 preview，
-        // 再无条件暂停等待显式批准（位于所有 auto-approve gate 之前）。
         if toolName == "recipe_import" {
             preparedRecipeImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
             do {
@@ -2028,6 +2208,14 @@ final class ChatToolRuntime {
                     for: pending.toolCall,
                     prepared: prepared
                 )
+                if IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                    let resultText = try await recipeToolService.applyPreparedRecipeImport(prepared)
+                    return .completed(messagesByFinishingToolCall(
+                        pending.toolCall,
+                        outputText: resultText,
+                        in: pending.baseMessages
+                    ))
+                }
                 preparedRecipeImportsForApproval[pending.toolCall.toolCallId] = prepared
                 return .waitingForApproval(.recipe(request))
             } catch {
@@ -2376,7 +2564,6 @@ final class ChatToolRuntime {
                 state.completedSteps.append(step.id)
                 state.nextStepIndex += 1
             } catch let error as IOSRecipeRunError {
-                metrics.recordRecipeStepFailure(toolId: step.tool)
                 await recordRecipeLevelFinished(
                     recipeName: state.recipeName,
                     recipeVersion: state.recipeVersion,
@@ -2401,7 +2588,6 @@ final class ChatToolRuntime {
                 let runError = IOSRecipeRunError.stepFailed(
                     stepId: step.id, tool: step.tool, message: error.localizedDescription
                 )
-                metrics.recordRecipeStepFailure(toolId: step.tool)
                 await recordRecipeLevelFinished(
                     recipeName: state.recipeName,
                     recipeVersion: state.recipeVersion,
@@ -3461,10 +3647,8 @@ final class ChatToolRuntime {
             || IOSMcpManagementToolCatalog.toolNames.contains(name):
             return await skillMcpToolService.execute(toolName: name, arguments: toolCall.input)
         case "recipe_import":
-            // Safety net: the foreground path intercepts recipe_import with a
-            // preview card BEFORE dispatch; reaching dispatch means an
-            // auto-approve/background path tried to run it — never allow a
-            // silent import.
+            // Host-publish apply lives in executeAdvancedToolCall / background
+            // host-publish; this dispatch table must not silently import.
             return ChatToolOutputFormatter.toolFailureJSON(
                 toolName: toolCall.toolName,
                 reason: "Recipe 导入需要查看候选变更并显式批准。",
@@ -3827,7 +4011,6 @@ final class ChatToolRuntime {
         reason: String,
         capabilityId: String?
     ) {
-        metrics.recordPermissionDenied(toolId: toolCall.toolName)
         guard let ledger else { return }
         Task { [ledger] in
             await ledger.recordApprovalDenied(
@@ -3912,17 +4095,71 @@ final class ChatToolRuntime {
         expandedMcpToolDeclarations(mcpManager: mcpManager)
     }
 
+    private func isMcpNetworkAllowed() -> Bool {
+        isCapabilityPolicyEnabled("ios.mcp.tool_call")
+    }
+
+    private static func isHostPublishTool(_ toolName: String) -> Bool {
+        toolName == IOSSoulToolCatalog.toolName
+            || toolName == "skill_import"
+            || toolName == "mcp_import_from_skill"
+            || toolName == "recipe_import"
+    }
+
+    /// Soul / Skill / MCP / Recipe 导入：普通自动批准仍弹卡；高风险自动批准
+    /// 走与前台相同的 prepare → CAS apply。Disabled MCP 仍由 apply 内复核拦下。
+    private func backgroundHostPublishOutcome(
+        toolName: String,
+        arguments: String
+    ) async -> IOSAgentToolOutcome {
+        guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
+            return .denied("后台生成期间需要回到 App 确认 \(toolName)。")
+        }
+        do {
+            switch toolName {
+            case IOSSoulToolCatalog.toolName:
+                return .filled(try soulService.applyPreparedImport(try soulService.prepareImport()))
+            case "skill_import":
+                return .filled(try skillMcpToolService.applyPreparedSkillImport(
+                    try skillMcpToolService.prepareSkillImport(arguments: arguments)
+                ))
+            case "mcp_import_from_skill":
+                let prepared = try skillMcpToolService.prepareMcpImport(arguments: arguments)
+                return .filled(await skillMcpToolService.applyPreparedMcpImport(prepared) { [weak self] in
+                    self?.isMcpNetworkAllowed() ?? false
+                })
+            case "recipe_import":
+                return .filled(try await recipeToolService.applyPreparedRecipeImport(
+                    try recipeToolService.prepareRecipeImport(arguments: arguments)
+                ))
+            default:
+                return .failed("未知发布工具：\(toolName)")
+            }
+        } catch {
+            return .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+        }
+    }
+
+    private func isMcpNetworkTool(_ toolName: String) -> Bool {
+        toolName == "mcp_call"
+            || toolName == "mcp_test"
+            || ToolKt.isExpandedMcpToolName(name: toolName)
+    }
+
     private func isAdvancedToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
-        case "mcp_call", "mcp_list", "mcp_test", "mcp_describe_tool", "mcp_import_from_skill":
+        case "mcp_list", "mcp_describe_tool", "mcp_import_from_skill":
             true
+        case "mcp_call", "mcp_test":
+            isMcpNetworkAllowed()
         case let name where ToolKt.isExpandedMcpToolName(name: name):
-            // P0-b: flattened MCP tools follow mcp_call's always-on gate.
+            isMcpNetworkAllowed()
+        case IOSSoulToolCatalog.toolName:
             true
         case "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
             true
         // Wave B2: recipe_import 与 skill_import 同级（恒可用，审批在
-        // executeAdvancedToolCall 内强制）；`recipe__*` 声明即执行。
+        // executeAdvancedToolCall 内按高风险自动批准决定是否跳卡）；`recipe__*` 声明即执行。
         case "recipe_import":
             true
         case let name where IOSDynamicToolRegistry.isRecipeToolName(name):

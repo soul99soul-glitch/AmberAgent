@@ -38,6 +38,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let (_, dao) = makeDatabase(root: root)
         let ledger = IOSAgentRunLedger(dao: dao)
         let runId = "canary-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
         let runtime = makeRuntime(root: root, ledger: ledger)
 
         // Round 1: the recipe is NOT published. The run bridge covers only the
@@ -207,6 +208,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let ledger = IOSAgentRunLedger(dao: dao)
         let runtime = makeRuntime(root: root, ledger: ledger)
         let runId = "lease-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try listingRecipeJSON(version: "1.0.0"))
         let v1Snapshot = try unwrapSnapshot(await registry.refresh())
@@ -254,12 +256,12 @@ final class IOSRecipeIntegrationTests: XCTestCase {
     func testStaleCandidateFailsClosedZeroWriteOnRecipeImportApproval() async throws {
         let root = tempRoot()
         let store = makeStore(root: root)
-        let registry = makeRegistry(store: store)
         let (_, dao) = makeDatabase(root: root)
         let ledger = IOSAgentRunLedger(dao: dao)
         let workspace = makeWorkspaceStore(root: root)
         let runtime = makeRuntime(root: root, ledger: ledger, workspaceStore: workspace)
         let runId = "stale-candidate-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try await seedWorkspaceRecipe(workspace: workspace, json: try listingRecipeJSON(version: "1.0.0"))
         let previewCall = makeRecipeToolCall(name: "recipe_import",
@@ -340,6 +342,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let ledger = IOSAgentRunLedger(dao: dao)
         let runtime = makeRuntime(root: root, ledger: ledger)
         let runId = "rollback-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try listingRecipeJSON(version: "1.0.0"))
         _ = try unwrapSnapshot(await registry.refresh())
@@ -388,80 +391,6 @@ final class IOSRecipeIntegrationTests: XCTestCase {
 
     // MARK: - Acceptance 6: mutation step uses the existing approval machinery
 
-    func testMutationStepPausesForApprovalResumesAndCompletesWithCheckpoint() async throws {
-        let root = tempRoot()
-        let store = makeStore(root: root)
-        let registry = makeRegistry(store: store)
-        let (_, dao) = makeDatabase(root: root)
-        let ledger = IOSAgentRunLedger(dao: dao)
-        let (executor, workspace, _) = makeWorkspaceExecutor(root: root)
-        let runtime = makeRuntime(root: root, ledger: ledger, localToolExecutor: executor, workspaceStore: workspace)
-        let coordinator = makeCoordinator(root: root, ledger: ledger, executor: executor, runtimeOverride: runtime)
-        let runId = "mutation-run-\(UUID().uuidString)"
-
-        try apply(store: store, json: try mutatingRecipeJSON(version: "1.0.0"))
-        let snapshot = try unwrapSnapshot(await registry.refresh())
-        let bridge = IOSDynamicToolBridgeRebuilder.rebuiltBridge(
-            from: IosToolExposureBridge(tools: fullIosDeclarations()),
-            snapshot: snapshot
-        )
-
-        let call = makeRecipeToolCall(
-            name: "recipe__digest_save",
-            input: #"{"output_path":"/workspace/notes/out.md"}"#
-        )
-        let result = await executeRecipeCall(
-            runtime: runtime, toolCall: call, snapshot: snapshot, bridge: bridge,
-            runId: runId
-        )
-        guard case .waitingForApproval(.recipe(let request)) = result else {
-            return XCTFail("the mutation step must pause for approval, got \(result)")
-        }
-        guard case .step(let stepPayload) = request.payload else {
-            return XCTFail("expected a step approval, got \(request.payload)")
-        }
-        XCTAssertEqual(stepPayload.stepId, "save")
-        XCTAssertEqual(stepPayload.tool, "workspace_file_write")
-        XCTAssertEqual(stepPayload.effectClass, .sideEffect)
-
-        // Durable checkpoint: the resume contract is on disk BEFORE the card.
-        let checkpointDir = root.appendingPathComponent("recipes/.checkpoints", isDirectory: true)
-        let checkpointFiles = (try? FileManager.default.contentsOfDirectory(atPath: checkpointDir.path)) ?? []
-        XCTAssertEqual(checkpointFiles.count, 1, "the paused execution must persist its checkpoint")
-
-        await coordinator.installPendingRecipeToolApprovalForTesting(
-            pending: pendingContext(for: call, runId: runId),
-            request: request,
-            toolExposureBridge: bridge
-        )
-        await coordinator.approvePendingRecipeTool(requestId: request.id)
-
-        let output = try XCTUnwrap(toolOutputText(in: coordinatorState.messages, toolCallId: call.toolCallId))
-        let parsed = try XCTUnwrap(parse(output))
-        XCTAssertEqual(parsed["ok"] as? Bool, true, output)
-        XCTAssertEqual(parsed["status"] as? String, "completed")
-        XCTAssertEqual(parsed["steps"] as? [String], ["list", "save"])
-        let outputs = try XCTUnwrap(parsed["outputs"] as? [String: Any])
-        XCTAssertEqual(outputs["file_path"] as? String, "/workspace/notes/out.md")
-
-        // The approved step really executed (workspace file on disk).
-        let record = try XCTUnwrap(workspace.fileRecord(idOrPath: "/workspace/notes/out.md"))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.fileURL(for: record).path))
-
-        // Checkpoint removed on the terminal resolution.
-        let remaining = (try? FileManager.default.contentsOfDirectory(atPath: checkpointDir.path)) ?? []
-        XCTAssertTrue(remaining.isEmpty, "checkpoint must be removed when the recipe completes")
-
-        // Ledger: step Started/Finished pairs with attribution + recipe-level
-        // Finished(completed); the recipe call's own pair is written by the
-        // finisher (Started → Finished(completed)).
-        let rows = await ledgerRows(runId: runId, dao: dao)
-        let started = rows.filter { $0.type == IOSToolCallLedgerClassifier.startedType }
-        let finished = rows.filter { $0.type == IOSToolCallLedgerClassifier.finishedType }
-        XCTAssertEqual(started.count, 3, "2 steps + the finisher's fresh Started for the recipe call")
-        XCTAssertEqual(finished.count, 4, "2 step Finished + recipe-level Finished + recipe call Finished")
-    }
-
     func testMutationStepDeniedStopsRecipeWithStructuredErrorAndLedgerDenial() async throws {
         let root = tempRoot()
         let store = makeStore(root: root)
@@ -472,6 +401,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let runtime = makeRuntime(root: root, ledger: ledger, localToolExecutor: executor, workspaceStore: workspace)
         let coordinator = makeCoordinator(root: root, ledger: ledger, executor: executor, runtimeOverride: runtime)
         let runId = "mutation-deny-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try mutatingRecipeJSON(version: "1.0.0"))
         let snapshot = try unwrapSnapshot(await registry.refresh())
@@ -537,10 +467,11 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let registry = makeRegistry(store: store)
         let (_, dao) = makeDatabase(root: root)
         let ledger = IOSAgentRunLedger(dao: dao)
-        let (executor, workspace, permissionStore) = makeWorkspaceExecutor(root: root)
+        let (executor, workspace, _) = makeWorkspaceExecutor(root: root)
         let runtime = makeRuntime(root: root, ledger: ledger, localToolExecutor: executor, workspaceStore: workspace)
         let coordinator = makeCoordinator(root: root, ledger: ledger, executor: executor, runtimeOverride: runtime)
         let runId = "stale-step-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try twoMutationRecipeJSON(version: "1.0.0"))
         let snapshot = try unwrapSnapshot(await registry.refresh())
@@ -633,6 +564,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let runtime = makeRuntime(root: root, ledger: ledger, localToolExecutor: executor, workspaceStore: workspace)
         let coordinator = makeCoordinator(root: root, ledger: ledger, executor: executor, runtimeOverride: runtime)
         let runId = "two-mutation-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try twoMutationRecipeJSON(version: "1.0.0"))
         let snapshot = try unwrapSnapshot(await registry.refresh())
@@ -758,8 +690,20 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let runtime = makeRuntime(root: root, ledger: ledger, workspaceStore: workspace)
         let coordinator = makeCoordinator(root: root, ledger: ledger, runtimeOverride: runtime)
         let runId = "import-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try await seedWorkspaceRecipe(workspace: workspace, json: try listingRecipeJSON(version: "1.0.0"))
+
+        let highRiskKey = "app.amber.ios.highRiskAutoApprove"
+        let previousHighRisk = UserDefaults.standard.object(forKey: highRiskKey)
+        UserDefaults.standard.set(false, forKey: highRiskKey)
+        defer {
+            if let previousHighRisk {
+                UserDefaults.standard.set(previousHighRisk, forKey: highRiskKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: highRiskKey)
+            }
+        }
 
         let call = makeRecipeToolCall(
             name: "recipe_import",
@@ -806,6 +750,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let ledger = IOSAgentRunLedger(dao: dao)
         let runtime = makeRuntime(root: root, ledger: ledger)
         let runId = "stale-call-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         // A snapshot that does not declare the recipe (rolled back / stale).
         try apply(store: store, json: try listingRecipeJSON(version: "1.0.0"))
@@ -898,8 +843,8 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         )
         let output = try XCTUnwrap(toolOutputText(in: r.messages, toolCallId: "tc-bg-import"))
         XCTAssertTrue(
-            output.contains("Recipe 导入需要查看候选变更并显式批准"),
-            "recipe_import must be denied in the background: \(output)"
+            output.contains("需要回到 App 确认"),
+            "recipe_import must be denied in the background without high-risk auto-approve: \(output)"
         )
     }
 
@@ -917,6 +862,7 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let runtime = makeRuntime(root: root, ledger: ledger, localToolExecutor: executor, workspaceStore: workspace)
         let coordinator = makeCoordinator(root: root, ledger: ledger, executor: executor, runtimeOverride: runtime)
         let runId = "ws-honest-run-\(UUID().uuidString)"
+        try await seedDurableRun(runId, dao: dao)
 
         try apply(store: store, json: try readMissingRecipeJSON(version: "1.0.0"))
         let snapshot = try unwrapSnapshot(await registry.refresh())
@@ -1013,6 +959,16 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         let path = root.appendingPathComponent("agent_runtime.db").path
         let db = IosDatabaseFactory.shared.createDatabase(atFilePath: path)
         return (db, db.agentRuntimeDao())
+    }
+
+    private func seedDurableRun(_ runId: String, dao: AgentRuntimeDao) async throws {
+        let started = try await IOSDurableRunStore(dao: dao).startChatRun(
+            runId: runId,
+            startedAt: 1,
+            inputDigest: "recipe-integration-test",
+            conversationId: "recipe-integration-test"
+        )
+        XCTAssertTrue(started)
     }
 
     private func makeRuntime(

@@ -3,7 +3,7 @@ import Foundation
 // MARK: - amber.recipe.v1 manifest model, canonical encoding and validator
 //
 // Declarative Recipe plugin model (§10 of
-// docs/SELF_EVOLUTION_AND_HOT_RELOAD_PLAN.md, Phase 1).
+// the iOS Recipe runtime contract).
 //
 // Wire format decision: the manifest is JSON (Codable), not YAML. §10.2 of the
 // plan shows a YAML example, but that is only a semantic illustration — a

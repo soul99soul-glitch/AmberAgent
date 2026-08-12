@@ -28,6 +28,18 @@ final class IOSMcpConfigStore {
         persist()
     }
 
+    func addBatch(_ incoming: [IOSMcpServerConfig]) throws {
+        let existing = Set(servers.map(\.name))
+        var seen = Set<String>()
+        for server in incoming {
+            if existing.contains(server.name) || !seen.insert(server.name).inserted {
+                throw IOSMcpImportError.liveNameConflict(server.name)
+            }
+        }
+        servers.append(contentsOf: incoming)
+        persist()
+    }
+
     func upsert(_ server: IOSMcpServerConfig, replacing originalName: String? = nil) {
         let replaced = servers.filter { existing in
             existing.name == server.name || (originalName != nil && existing.name == originalName)

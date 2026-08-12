@@ -3521,9 +3521,8 @@ struct SettingsHomeView: View {
 
     private var agentEntries: [SettingsHomeEntry] {
         [
-            .init(title: "核心记忆", systemImage: "cylinder.split.1x2", route: .memory),
+            .init(title: "灵魂与记忆", systemImage: "cylinder.split.1x2", route: .memory),
             .init(title: "运行环境", systemImage: "terminal", route: .execution),
-            .init(title: "自进化", systemImage: "wand.and.stars", route: .evolution),
             .init(title: "技能", systemImage: "wrench.and.screwdriver", route: .skills),
             .init(title: "权限与批准", systemImage: "shield", route: .toolPermissions)
         ]

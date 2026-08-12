@@ -156,8 +156,13 @@ final class IOSSharedSettingsStore {
         }
         // iOS identity: introduce as "Amber" and don't claim to run on Android.
         // Applied on every load (idempotent) so persisted snapshots are rebranded too.
+        let soulBeforeRebrand = self.snapshot.agentRuntime.agentSoulMarkdown
         self.snapshot = IosSettingsMutations.shared.rebrandAmberIdentity(settings: self.snapshot)
-        if migratedProviderPlaintext || migratedSearchPlaintext {
+        let soulAfterRebrand = self.snapshot.agentRuntime.agentSoulMarkdown
+        let soulMigratedFromFactory = IosSettingsMutations.shared.isLegacyFactoryAgentSoulMarkdown(
+            value: soulBeforeRebrand
+        ) && soulAfterRebrand != soulBeforeRebrand
+        if migratedProviderPlaintext || migratedSearchPlaintext || soulMigratedFromFactory {
             restoreSnapshot(self.snapshot)
         }
     }
@@ -379,6 +384,12 @@ final class IOSSharedSettingsStore {
                 enableShortTermMemory: shortTerm ?? runtime.enableShortTermMemory,
                 enableLongTermMemory: longTerm ?? runtime.enableLongTermMemory
             )
+        )
+    }
+
+    func setAgentSoulMarkdown(_ markdown: String) {
+        restoreSnapshot(
+            IosSettingsMutations.shared.setAgentSoulMarkdown(settings: snapshot, markdown: markdown)
         )
     }
 

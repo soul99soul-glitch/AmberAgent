@@ -115,9 +115,6 @@ struct ChatView: View {
     let documentStore: DocumentAccessStore?
     let workspaceStore: IOSWorkspaceStore
     let initialMessageAnchor: ChatMessageAnchor?
-    /// §14.1: 演化工作流（「分析并改进」/ T2 批准卡 / T0-T1 通知卡）。
-    /// 由 AppShell 注入 environment。
-    @Environment(IOSEvolutionWorkflow.self) private var evolutionWorkflow
     @State private var viewModel: ChatViewModel
     @State private var activeComposerPanel: ComposerPanel?
     @State private var isModelSheetPresented = false
@@ -822,41 +819,6 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // §14.1/§14.2: T2 人工批准卡（或「仅通知」档 T0/T1 人工卡）。
-            if let request = evolutionWorkflow.pendingApproval {
-                IOSEvolutionApprovalCard(
-                    model: request,
-                    onApprove: {
-                        evolutionWorkflow.approvePending()
-                    },
-                    onDeny: {
-                        evolutionWorkflow.denyPending()
-                    }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
-            // 不变量 17: T0/T1 自动发布通知卡（含一键回退）与过程通知。
-            if !evolutionWorkflow.notifications.isEmpty {
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 6) {
-                        ForEach(evolutionWorkflow.notifications) { notification in
-                            IOSEvolutionNotificationCard(
-                                model: notification,
-                                onRollback: {
-                                    evolutionWorkflow.rollback(notificationId: notification.id)
-                                },
-                                onDismiss: {
-                                    evolutionWorkflow.dismiss(notificationId: notification.id)
-                                }
-                            )
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
-                        }
-                    }
-                }
-                .frame(maxHeight: 240)
-            }
-
             if let request = viewModel.pendingMemoryApproval {
                 MemoryToolApprovalCard(
                     request: request,
@@ -1363,13 +1325,6 @@ struct ChatView: View {
         switch action {
         case let .regenerate(messageId):
             viewModel.regenerate(messageId: messageId)
-        case .analyzeAndImprove:
-            // §14.1: 对失败回答发起演化工作流。证据投影在 workflow 内按
-            // 当前会话最近失败 run 进行；无失败证据时 workflow 诚实 no-op（I-3）。
-            evolutionWorkflow.analyzeAndImprove(
-                conversationHex: viewModel.currentConversationId?.toHexDashString(),
-                userHint: "用户从失败回答选择了「分析并改进」。"
-            )
         case let .requestEdit(messageId, currentText):
             messageEditDraft = ChatMessageEditDraft(messageId: messageId, text: currentText)
         case let .edit(messageId, newText):

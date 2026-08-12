@@ -34,11 +34,15 @@ final class IOSMcpManager {
         self.clientFactory = clientFactory
     }
 
-    convenience init(sharedSettings: IOSSharedSettingsStore, configStore: IOSMcpConfigStore) {
+    convenience init(
+        sharedSettings: IOSSharedSettingsStore,
+        configStore: IOSMcpConfigStore,
+        isNetworkAllowed: @escaping () -> Bool = { true }
+    ) {
         self.init(serverProvider: {
             sharedSettings.snapshot.mcpServers.compactMap(IOSMcpServerConfig.init) + configStore.servers
         }, isEnabled: {
-            sharedSettings.isCapabilityGateEnabled(.mcp)
+            sharedSettings.isCapabilityGateEnabled(.mcp) && isNetworkAllowed()
         }, discoveredToolSink: { serverName, tools in
             configStore.mergeDiscoveredTools(named: serverName, tools: tools)
         })

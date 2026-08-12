@@ -85,6 +85,8 @@ final class IOSCapabilityRegistryTests: XCTestCase {
             "search_web",
             "scrape_web",
             "mcp_call",
+            "mcp_test",
+            "mcp_import_from_skill",
             "workspace_file_read",
             "workspace_file_list",
             "workspace_file_search",

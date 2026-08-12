@@ -202,8 +202,6 @@ struct IOSRecipeToolService {
     /// refreshed so the next model round acquires the new revision. Returns
     /// the published snapshot (its revision goes into the receipt).
     let refreshRegistry: @MainActor () async -> IOSDynamicToolCatalogSnapshot?
-    /// §19 观测：stale CAS fail-closed 计数（Phase 4 Wave 1）。
-    let metrics: IOSEvolutionMetrics
 
     init(
         workspaceStore: IOSWorkspaceStore,
@@ -211,14 +209,12 @@ struct IOSRecipeToolService {
         catalog: @escaping IOSRecipeCatalogLookup = IOSDynamicToolRegistry.primitiveCatalogEntry,
         refreshRegistry: @escaping @MainActor () async -> IOSDynamicToolCatalogSnapshot? = {
             await IOSDynamicToolRegistry.shared.refresh()
-        },
-        metrics: IOSEvolutionMetrics = .shared
+        }
     ) {
         self.workspaceStore = workspaceStore
         self.recipeStore = recipeStore
         self.catalog = catalog
         self.refreshRegistry = refreshRegistry
-        self.metrics = metrics
     }
 
     /// Read-only preview — zero writes (never creates directories).
@@ -246,7 +242,6 @@ struct IOSRecipeToolService {
         do {
             data = try readWorkspaceRecipeData(workspacePath: prepared.workspacePath)
         } catch {
-            metrics.record(.staleCASSkipped)
             return Self.importErrorJSON(
                 code: "stale_candidate",
                 message: "Workspace 候选包已无法读取，请重新生成并预览。"
@@ -256,7 +251,6 @@ struct IOSRecipeToolService {
         do {
             reread = try makeImportPreview(recipeJSON: data)
         } catch {
-            metrics.record(.staleCASSkipped)
             return Self.importErrorJSON(
                 code: "stale_candidate",
                 message: (error as? LocalizedError)?.errorDescription
@@ -264,14 +258,12 @@ struct IOSRecipeToolService {
             )
         }
         guard reread.candidateHash == prepared.preview.candidateHash else {
-            metrics.record(.staleCASSkipped)
             return Self.importErrorJSON(
                 code: "stale_candidate",
                 message: "Workspace 候选包在批准前发生变化，请重新预览。"
             )
         }
         guard reread.baseHash == prepared.preview.baseHash else {
-            metrics.record(.staleCASSkipped)
             return Self.importErrorJSON(
                 code: "stale_base",
                 message: "已安装 Recipe 在批准前发生变化，请重新预览。"
@@ -289,13 +281,11 @@ struct IOSRecipeToolService {
         } catch let error as IOSRecipeFileStoreError {
             switch error {
             case .recipePackageBaseChanged:
-                metrics.record(.staleCASSkipped)
                 return Self.importErrorJSON(
                     code: "stale_base",
                     message: error.errorDescription ?? "已安装 Recipe 在批准前发生变化，请重新预览。"
                 )
             case .recipePackageCandidateChanged:
-                metrics.record(.staleCASSkipped)
                 return Self.importErrorJSON(
                     code: "stale_candidate",
                     message: error.errorDescription ?? "Workspace 候选包在批准前发生变化，请重新预览。"

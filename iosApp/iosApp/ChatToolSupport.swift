@@ -154,6 +154,30 @@ struct McpSkillImportPreview: Codable, Equatable {
     }
 }
 
+struct SoulImportPreview: Codable, Equatable {
+    let baseHash: String
+    let candidateHash: String
+    let changedLineCount: Int
+    let diffPreview: String
+    let afterSummary: String
+}
+
+struct McpImportServerPreview: Codable, Equatable, Identifiable {
+    let name: String
+    let transport: String
+    let origin: String
+    let headerNames: [String]
+    let enabled: Bool
+
+    var id: String { name }
+}
+
+struct McpImportPreview: Codable, Equatable {
+    let skillName: String
+    let digest: String
+    let servers: [McpImportServerPreview]
+}
+
 struct McpToolApprovalRequest: Identifiable, Equatable {
     let id: String
     let serverName: String
@@ -161,6 +185,8 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     let argumentsPreview: String
     let reason: String
     let skillImportPreview: McpSkillImportPreview?
+    let soulImportPreview: SoulImportPreview?
+    let mcpImportPreview: McpImportPreview?
 
     init(
         id: String,
@@ -168,7 +194,9 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
         toolName: String,
         argumentsPreview: String,
         reason: String,
-        skillImportPreview: McpSkillImportPreview? = nil
+        skillImportPreview: McpSkillImportPreview? = nil,
+        soulImportPreview: SoulImportPreview? = nil,
+        mcpImportPreview: McpImportPreview? = nil
     ) {
         self.id = id
         self.serverName = serverName
@@ -176,10 +204,18 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
         self.argumentsPreview = argumentsPreview
         self.reason = reason
         self.skillImportPreview = skillImportPreview
+        self.soulImportPreview = soulImportPreview
+        self.mcpImportPreview = mcpImportPreview
     }
 
     var title: String {
-        if toolName.hasPrefix("skill_") || toolName == "mcp_import_from_skill" || toolName == "mcp_test" {
+        if toolName == "soul_import" {
+            "更新核心指令"
+        } else if toolName == "skill_import" {
+            "导入技能"
+        } else if toolName == "mcp_import_from_skill" {
+            "导入 MCP"
+        } else if toolName.hasPrefix("skill_") || toolName == "mcp_test" {
             "确认扩展操作"
         } else {
             "执行 MCP 工具"
@@ -507,7 +543,9 @@ enum ChatToolApprovalRequestBuilder {
     static func extensionMutation(
         for toolCall: UIMessagePart.Tool,
         reason: String,
-        skillImportPreview: McpSkillImportPreview? = nil
+        skillImportPreview: McpSkillImportPreview? = nil,
+        soulImportPreview: SoulImportPreview? = nil,
+        mcpImportPreview: McpImportPreview? = nil
     ) -> McpToolApprovalRequest? {
         let args = ChatToolCallParsing.jsonObject(toolCall.input) ?? [:]
         let target = (args["name"] as? String)
@@ -521,6 +559,10 @@ enum ChatToolApprovalRequestBuilder {
             let base = preview.baseHash.map { String($0.prefix(8)) } ?? "无"
             let candidate = String(preview.candidateHash.prefix(8))
             argumentsPreview = "\(action) \(preview.skillName) · \(preview.changedFiles.count) 个文件 · \(base)→\(candidate)"
+        } else if let preview = soulImportPreview {
+            argumentsPreview = "更新核心指令 · \(preview.changedLineCount) 行 · \(String(preview.baseHash.prefix(8)))→\(String(preview.candidateHash.prefix(8)))"
+        } else if let preview = mcpImportPreview {
+            argumentsPreview = "从 \(preview.skillName) 导入 \(preview.servers.count) 个 MCP 服务"
         } else {
             // Always pass a JSON object; bare String fails JSONSerialization.
             argumentsPreview = ChatToolCallParsing.truncatedMcpArguments(
@@ -533,7 +575,9 @@ enum ChatToolApprovalRequestBuilder {
             toolName: toolCall.toolName,
             argumentsPreview: argumentsPreview,
             reason: reason,
-            skillImportPreview: skillImportPreview
+            skillImportPreview: skillImportPreview,
+            soulImportPreview: soulImportPreview,
+            mcpImportPreview: mcpImportPreview
         )
     }
 

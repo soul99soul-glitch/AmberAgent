@@ -170,12 +170,9 @@ private struct RecipeEmptyState: View {
 
 struct RecipeDetailView: View {
     @Environment(\.dismiss) private var dismiss
-    /// §14.1: 「用最近失败生成候选」入口使用的演化工作流（AppShell 注入）。
-    @Environment(IOSEvolutionWorkflow.self) private var evolutionWorkflow
 
     let recipeName: String
     private let store: IOSRecipeFileStore
-    private let feedbackService: IOSRecipeExperienceFeedbackService
 
     @State private var manifest: IOSRecipeManifest?
     @State private var packageHash: String?
@@ -185,17 +182,11 @@ struct RecipeDetailView: View {
     )
     @State private var rollbackConfirmationPresented = false
     @State private var pendingAlert: RecipeDetailAlert?
-    @State private var feedbackAvailability: IOSRecipeExperienceFeedbackAvailability = .unavailable(
-        "正在查找这个版本的执行记录。"
-    )
-    @State private var feedbackMessage: String?
-    @State private var isSubmittingFeedback = false
 
     init(recipeName: String) {
         let baseDirectory = recipeStoreBaseDirectory()
         self.recipeName = recipeName
         self.store = IOSRecipeFileStore(baseDirectory: baseDirectory)
-        self.feedbackService = .production(baseDirectory: baseDirectory)
     }
 
     var body: some View {
@@ -210,8 +201,6 @@ struct RecipeDetailView: View {
                     stepsSection
                     envelopeSection
                     infoSection
-                    evolutionSection
-                    experienceFeedbackSection
                     rollbackSection
                 }
                 .padding(.bottom, 36)
@@ -239,10 +228,7 @@ struct RecipeDetailView: View {
         } message: {
             Text(rollbackAvailability.reason)
         }
-        .task {
-            loadSnapshot()
-            await refreshFeedbackAvailability()
-        }
+        .task { loadSnapshot() }
     }
 
     private var header: some View {
@@ -390,114 +376,6 @@ struct RecipeDetailView: View {
         }
     }
 
-    private var evolutionSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "自进化")
-            AmberFormGroup {
-                Button {
-                    // §14.1「用最近失败生成候选」：从最近 7 天失败证据出发，
-                    // 为这个 Recipe 生成修订候选。结果通过通知卡 / 批准卡展示。
-                    evolutionWorkflow.analyzeAndImprove(
-                        conversationHex: nil,
-                        userHint: "为 Recipe「\(recipeName)」生成修订候选：最近失败表明它仍不够稳定。"
-                    )
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: "wand.and.stars")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(AmberTheme.foreground2)
-                            .frame(width: 28, height: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("用最近失败生成候选")
-                                .font(.body)
-                                .foregroundStyle(AmberTheme.foreground)
-                            Text("投影最近失败 → 诊断 → 生成修订候选 → 独立评测 → 分级授权")
-                                .font(.caption)
-                                .foregroundStyle(AmberTheme.muted)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AmberTheme.muted2)
-                    }
-                    .frame(minHeight: 58)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(evolutionWorkflow.isRunning)
-                .accessibilityLabel("用最近失败生成候选")
-            }
-
-            RecipeDetailFooter("不会静默发布：T0/T1 自动发布有通知卡与一键回退，T2 始终人工批准。")
-        }
-        .padding(.top, 12)
-    }
-
-    private var experienceFeedbackSection: some View {
-        VStack(spacing: 0) {
-            AmberSectionLabel(text: "使用反馈")
-            AmberFormGroup {
-                RecipeDetailRow(
-                    title: "反馈版本",
-                    value: manifest.map { "recipe__\(recipeName)@\($0.version)" } ?? "未读取",
-                    monospace: true
-                )
-                RecipeDetailDivider()
-
-                HStack(spacing: 10) {
-                    feedbackButton(
-                        title: "这次有帮助",
-                        systemImage: "hand.thumbsup",
-                        kind: .helpful
-                    )
-                    feedbackButton(
-                        title: "没有解决",
-                        systemImage: "hand.thumbsdown",
-                        kind: .harmful
-                    )
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-            }
-
-            RecipeDetailFooter(
-                feedbackMessage
-                    ?? "\(feedbackAvailability.reason) 负反馈只记证据；达到既有阈值后仍需人工批准才能停用经验。"
-            )
-        }
-        .padding(.top, 12)
-    }
-
-    private func feedbackButton(
-        title: String,
-        systemImage: String,
-        kind: IOSRecipeExperienceFeedbackKind
-    ) -> some View {
-        Button {
-            submitFeedback(kind)
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(
-                    canSubmitFeedback ? AmberTheme.foreground2 : AmberTheme.muted2
-                )
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!canSubmitFeedback)
-    }
-
-    private var canSubmitFeedback: Bool {
-        manifest != nil && feedbackAvailability.canSubmit && !isSubmittingFeedback
-    }
-
     private var statusText: String {
         if manifest != nil {
             return "已激活 v\(manifest?.version ?? "?")"
@@ -540,54 +418,6 @@ struct RecipeDetailView: View {
         }
     }
 
-    private func refreshFeedbackAvailability() async {
-        guard let version = manifest?.version else {
-            feedbackAvailability = .unavailable("Recipe 未读取，暂不能评价。")
-            return
-        }
-        let availability = await feedbackService.availability(
-            recipeName: recipeName,
-            version: version
-        )
-        guard manifest?.version == version else { return }
-        feedbackAvailability = availability
-    }
-
-    private func submitFeedback(_ kind: IOSRecipeExperienceFeedbackKind) {
-        guard let manifest, !isSubmittingFeedback else { return }
-        let version = manifest.version
-        isSubmittingFeedback = true
-        feedbackMessage = nil
-        Task { @MainActor in
-            let outcome = await feedbackService.record(
-                kind,
-                recipeName: recipeName,
-                version: version,
-                description: manifest.description
-            )
-            guard self.manifest?.version == version else {
-                isSubmittingFeedback = false
-                return
-            }
-            isSubmittingFeedback = false
-            switch outcome {
-            case .recorded(let receipt):
-                switch receipt.kind {
-                case .helpful:
-                    feedbackMessage = "已把这次确认写入 Experience；后续匹配任务可检索这条有限规则。"
-                case .harmful:
-                    feedbackMessage = receipt.suggestion == nil
-                        ? "已记录“没有解决”；不会自动重试或停用。"
-                        : "已记录“没有解决”；经验管理中已出现待人工批准的处理建议。"
-                }
-            case .unavailable(let reason), .failed(let reason):
-                feedbackMessage = reason
-                pendingAlert = .operationFailed(reason)
-            }
-            await refreshFeedbackAvailability()
-        }
-    }
-
     private func refreshRollbackAvailability() {
         do {
             rollbackAvailability = try store.rollbackAvailability(name: recipeName)
@@ -606,14 +436,8 @@ struct RecipeDetailView: View {
             // 再验所见 manifest：store 内部会核对 live hash 与槽位，更新的
             // 导入会替换槽位 → 此处 fail closed（§13.1 / §18.1）。
             _ = try store.rollbackRecipe(name: recipeName, expectedManifest: expectedManifest)
-            // §13.4 / 不变量 17：与通知卡回退共用同一熔断/指标通道——补记
-            // §19 rollback 指标；policy state 返回 tripped 时由 workflow
-            // push 熔断通知（详情页没有自己的通知 UI，复用 workflow 的
-            // 通知卡通道，不新造 UI）。
-            evolutionWorkflow.recordRollback(artifactId: recipeName)
             loadSnapshot()
             Task { @MainActor in
-                await refreshFeedbackAvailability()
                 // 下一模型轮可见（round-boundary refresh 同源）。
                 _ = await IOSDynamicToolRegistry.shared.refresh()
             }

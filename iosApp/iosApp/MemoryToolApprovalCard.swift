@@ -519,7 +519,7 @@ struct McpToolApprovalCard: View {
                     Text(request.reason)
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
-                        .lineLimit(request.skillImportPreview == nil ? 2 : nil)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
@@ -528,6 +528,10 @@ struct McpToolApprovalCard: View {
 
             if let preview = request.skillImportPreview {
                 skillImportPreview(preview)
+            } else if let preview = request.soulImportPreview {
+                soulImportPreview(preview)
+            } else if let preview = request.mcpImportPreview {
+                mcpImportPreview(preview)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(request.serverName) / \(request.toolName)")
@@ -549,10 +553,20 @@ struct McpToolApprovalCard: View {
                 )
             }
 
-            HStack(spacing: 6) {
-                WebMountApprovalChip(systemImage: "server.rack", title: request.serverName)
-                WebMountApprovalChip(systemImage: "wrench.and.screwdriver", title: request.toolName)
-                Spacer(minLength: 0)
+            if request.soulImportPreview == nil
+                && request.mcpImportPreview == nil
+                && request.skillImportPreview == nil {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        WebMountApprovalChip(systemImage: "server.rack", title: request.serverName)
+                        WebMountApprovalChip(systemImage: "wrench.and.screwdriver", title: request.toolName)
+                        Spacer(minLength: 0)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        WebMountApprovalChip(systemImage: "server.rack", title: request.serverName)
+                        WebMountApprovalChip(systemImage: "wrench.and.screwdriver", title: request.toolName)
+                    }
+                }
             }
 
             HStack(spacing: 8) {
@@ -568,7 +582,7 @@ struct McpToolApprovalCard: View {
                 }
                 .buttonStyle(.plain)
                 .chatApprovalHitTarget()
-                .accessibilityLabel(request.skillImportPreview == nil ? "拒绝 MCP 工具" : "拒绝 Skill 导入")
+                .accessibilityLabel(approvalAccessibilityLabel(allow: false))
 
                 Button(action: onApprove) {
                     Label("批准", systemImage: "checkmark")
@@ -580,8 +594,9 @@ struct McpToolApprovalCard: View {
                 }
                 .buttonStyle(.plain)
                 .chatApprovalHitTarget()
-                .accessibilityLabel(request.skillImportPreview == nil ? "批准 MCP 工具" : "批准 Skill 导入")
+                .accessibilityLabel(approvalAccessibilityLabel(allow: true))
             }
+            .padding(.top, 2)
         }
         .padding(12)
         .amberGlass(cornerRadius: 18)
@@ -589,6 +604,71 @@ struct McpToolApprovalCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(AmberTheme.accentCyan.opacity(0.34), lineWidth: 0.7)
         }
+    }
+
+    private func approvalAccessibilityLabel(allow: Bool) -> String {
+        let verb = allow ? "批准" : "拒绝"
+        if request.soulImportPreview != nil { return "\(verb)核心指令更新" }
+        if request.mcpImportPreview != nil { return "\(verb) MCP 导入" }
+        if request.skillImportPreview != nil { return "\(verb) Skill 导入" }
+        return "\(verb) MCP 工具"
+    }
+
+    private func soulImportPreview(_ preview: SoulImportPreview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("核心指令变更")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+            Text("\(String(preview.baseHash.prefix(10))) → \(String(preview.candidateHash.prefix(10)))")
+                .font(.caption2.monospaced())
+                .foregroundStyle(AmberTheme.muted)
+            Text(preview.afterSummary)
+                .font(.caption)
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineLimit(3)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                Text(preview.diffPreview)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(AmberTheme.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 120)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AmberTheme.surface.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
+    private func mcpImportPreview(_ preview: McpImportPreview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Skill \(preview.skillName) · \(preview.servers.count) 个服务")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+            ForEach(preview.servers) { server in
+                Text("\(server.name) · \(server.transport) · \(server.origin)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(2)
+                if !server.headerNames.isEmpty {
+                    Text("headers: \(server.headerNames.joined(separator: ", "))")
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(AmberTheme.muted2)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AmberTheme.surface.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
     }
 
     private func skillImportPreview(_ preview: McpSkillImportPreview) -> some View {

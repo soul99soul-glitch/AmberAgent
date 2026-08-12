@@ -140,6 +140,123 @@ final class IOSMcpExpandedToolTests: XCTestCase {
         try await body()
     }
 
+    func testMcpDisabledBlocksNetworkEvenWithGlobalAutoApprove() async throws {
+        let permissionStore = IOSPermissionStore(userDefaults: isolatedDefaults())
+        let capability = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.mcp.tool_call" }
+        )
+        permissionStore.setPolicy(.disabled, for: capability)
+        let client = NetworkCountingMcpClient()
+        let manager = IOSMcpManager(
+            serverProvider: {
+                [
+                    .streamableHTTP(
+                        name: "docs",
+                        url: "https://example.com/mcp",
+                        tools: [IOSMcpTool(name: "search", description: "Search")]
+                    )
+                ]
+            },
+            clientFactory: { _ in client }
+        )
+        manager.refreshFromCurrentSettings()
+        let executor = IOSLocalToolExecutor(
+            permissionStore: permissionStore,
+            documentStore: DocumentAccessStore(),
+            workspaceStore: IOSWorkspaceStore(
+                baseDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            )
+        )
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: executor,
+            autoGenerateResponses: false,
+            mcpManager: manager
+        )
+        let names = Set(viewModel.currentToolDeclarationNames())
+        XCTAssertFalse(names.contains("mcp_call"))
+        XCTAssertFalse(names.contains("mcp_test"))
+        XCTAssertFalse(names.contains(where: { $0.hasPrefix("mcp__") }))
+        XCTAssertTrue(names.contains("mcp_list"))
+        let upload = viewModel.preparedUploadMessagesForTesting([
+            UIMessage.companion.user(prompt: "hello")
+        ])
+        XCTAssertFalse(
+            upload.contains { $0.toText().contains("<mcp-tools>") },
+            "Disabled must not inject leftover MCP discovery into the request"
+        )
+
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: isolatedDefaults()),
+            localToolExecutor: executor,
+            searchTransport: CountingSearchTransport(),
+            mcpManager: manager
+        )
+        try await withHighRiskAutoApprove(true) {
+            UserDefaults.standard.set(true, forKey: "app.amber.ios.globalAutoApprove")
+            defer { UserDefaults.standard.set(false, forKey: "app.amber.ios.globalAutoApprove") }
+            for toolCall in [
+                UIMessagePart.Tool(
+                    toolCallId: "call-mcp",
+                    toolName: "mcp_call",
+                    input: #"{"server":"docs","tool":"search","arguments":{}}"#,
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+                expandedToolCall(name: "mcp__docs__search", input: "{}"),
+                UIMessagePart.Tool(
+                    toolCallId: "call-test",
+                    toolName: "mcp_test",
+                    input: #"{"name":"docs"}"#,
+                    output: [],
+                    approvalState: ToolApprovalState.Auto.shared,
+                    streamIndex: nil,
+                    metadata: nil
+                ),
+            ] {
+                let result = await runtime.execute(
+                    ChatPendingToolCall(kind: .advanced, toolCall: toolCall),
+                    context: makeContext(toolCall: toolCall)
+                )
+                guard case .completed(let messages) = result else {
+                    return XCTFail("disabled MCP must fail closed, got \(result)")
+                }
+                XCTAssertTrue(toolOutputText(messages).contains("denied") || toolOutputText(messages).contains("未开启"), toolOutputText(messages))
+            }
+            XCTAssertEqual(client.connects, 0)
+            XCTAssertEqual(client.calls, 0)
+        }
+
+        permissionStore.setPolicy(.askEveryTime, for: capability)
+        UserDefaults.standard.set(false, forKey: "app.amber.ios.highRiskAutoApprove")
+        let pendingCall = UIMessagePart.Tool(
+            toolCallId: "call-after-ask",
+            toolName: "mcp_call",
+            input: #"{"server":"docs","tool":"search","arguments":{}}"#,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        let pending = makeContext(toolCall: pendingCall)
+        let preview = await runtime.execute(
+            ChatPendingToolCall(kind: .advanced, toolCall: pendingCall),
+            context: pending
+        )
+        guard case .waitingForApproval = preview else {
+            return XCTFail("Ask policy must pause, got \(preview)")
+        }
+        permissionStore.setPolicy(.disabled, for: capability)
+        let finished = await runtime.finishMcpApproval(pending: pending, allow: true)
+        XCTAssertTrue(toolOutputText(finished).contains("denied") || toolOutputText(finished).contains("已关闭"), toolOutputText(finished))
+        XCTAssertEqual(client.connects, 0)
+        XCTAssertEqual(client.calls, 0)
+    }
+
     // MARK: - Declarations: deferred by default, searchable, mcp_call stays resident
 
     func testExpandedMcpDeclarationsAreDeferredAndSearchable() throws {
@@ -579,6 +696,29 @@ private final class RecordingMcpClient: IOSMcpClienting {
         calls.append(Call(name: name, arguments: arguments))
         return #"{"ok":true,"text":"recorded"}"#
     }
+    func disconnect() {}
+}
+
+@MainActor
+private final class NetworkCountingMcpClient: IOSMcpClienting {
+    var connects = 0
+    var calls = 0
+
+    func connect(config: IOSMcpServerConfig) async throws -> Bool {
+        connects += 1
+        return true
+    }
+
+    func listTools() async throws -> [IOSMcpTool] {
+        connects += 1
+        return []
+    }
+
+    func callTool(name: String, arguments: [String: Any]) async throws -> String {
+        calls += 1
+        return ""
+    }
+
     func disconnect() {}
 }
 

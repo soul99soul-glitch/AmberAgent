@@ -643,13 +643,6 @@ final class ChatViewModel {
     /// 测试可注入隔离 DAO 的服务实例（照 mailboxStore 注入先例）；否则用默认
     /// 懒实例（共享 Room + 当前 VM 依赖）。
     @ObservationIgnored private let injectedOrchestrationToolService: IOSThreadOrchestrationToolService?
-    /// Phase 3 Wave 2: the experience curator injected into every round's
-    /// runtime-context assembly. The store default-resolves to Documents
-    /// (`IOSEvolutionExperienceStore()`); retrieval runs FRESH per round via
-    /// `ChatRuntimeContextBuilder` — no cross-round cache.
-    @ObservationIgnored private let experienceCurator = IOSEvolutionExperienceCurator(
-        store: IOSEvolutionExperienceStore()
-    )
     @ObservationIgnored private lazy var defaultOrchestrationToolService: IOSThreadOrchestrationToolService = {
         let runtimeDao = db.agentRuntimeDao()
         let mailboxDao = db.mailboxDao()
@@ -691,6 +684,9 @@ final class ChatViewModel {
             roleAssistantExists: { [weak self] assistantId in
                 guard let self else { return false }
                 return self.sharedSettings.snapshot.assistants.contains { $0.id == assistantId }
+            },
+            soulMarkdown: { [weak self] in
+                self?.sharedSettings.agentRuntime.agentSoulMarkdown ?? ""
             }
         )
     }()
@@ -766,7 +762,15 @@ final class ChatViewModel {
         // Build from the shared config store (same UserDefaults key as
         // McpServersView) so callTool reaches the same configured servers;
         // tests inject a manager with a deterministic directory instead.
-        self.mcpManager = mcpManager ?? IOSMcpManager(sharedSettings: sharedSettings, configStore: .shared)
+        self.mcpManager = mcpManager ?? IOSMcpManager(
+            sharedSettings: sharedSettings,
+            configStore: .shared,
+            isNetworkAllowed: { [localToolExecutor] in
+                guard let localToolExecutor else { return true }
+                return localToolExecutor.permissionsStatus().capabilities
+                    .first { $0.id == "ios.mcp.tool_call" }?.policy != IOSAgentPermissionPolicy.disabled.title
+            }
+        )
         self.steerQueueStore = steerQueueStore ?? IOSSteerQueueStore()
         self.mailboxStore = mailboxStore ?? IOSMailboxStore()
         self.injectedOrchestrationToolService = orchestrationToolService
@@ -2802,10 +2806,9 @@ final class ChatViewModel {
         }
         let withContext = ChatRuntimeContextBuilder(
             sharedSettings: sharedSettings,
-            mcpTools: mcpManager.tools,
+            mcpTools: isCapabilityPolicyEnabled("ios.mcp.tool_call") ? mcpManager.tools : [],
             miniAppRepository: miniAppRepository,
-            miniAppRuntimeEnabled: isMiniAppRuntimeEnabled,
-            experienceCurator: experienceCurator
+            miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
         ).injectingRuntimeContext(into: uploadableWithGuidance, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
     }
@@ -3366,17 +3369,29 @@ final class ChatViewModel {
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: Array(IOSSkillToolCatalog.toolNames).sorted()
         ))
-        // Capability gates are always-on on iOS; declare management + call together.
-        toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        toolDeclarations.append(ToolKt.createSoulImportToolDeclaration())
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
-            names: Array(IOSMcpManagementToolCatalog.toolNames).sorted()
+            names: Array(IOSRecipeToolCatalog.toolNames).sorted()
+        ))
+        let mcpNetworkEnabled = isCapabilityPolicyEnabled("ios.mcp.tool_call")
+        if mcpNetworkEnabled {
+            toolDeclarations.append(ToolKt.createMcpCallToolDeclaration())
+        }
+        var mcpManagementNames = Array(IOSMcpManagementToolCatalog.toolNames)
+        if !mcpNetworkEnabled {
+            mcpManagementNames.removeAll { $0 == "mcp_test" }
+        }
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: mcpManagementNames.sorted()
         ))
         // P0-b: flatten discovered MCP tools into `mcp__{server}__{tool}`
         // declarations. They are appended to the BRIDGE's input (never to the
         // final params — the bridge defers them behind tool_search; mcp_call
-        // stays as the always-on passthrough). MCP off / no discovered tools
-        // contributes nothing, so the P0-a baseline is unchanged.
-        toolDeclarations.append(contentsOf: expandedMcpToolDeclarations(mcpManager: mcpManager))
+        // stays as the always-on passthrough). Disabled network policy omits
+        // them so they cannot be searched or called this run.
+        if mcpNetworkEnabled {
+            toolDeclarations.append(contentsOf: expandedMcpToolDeclarations(mcpManager: mcpManager))
+        }
         // P1-c/P1-d: 线程编排六工具声明。非常驻——照 mcp__* 展开先例只进 bridge
         // 全目录（tool_search 命中后才进 params.tools），不加新设置项。
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
@@ -3575,8 +3590,10 @@ final class ChatViewModel {
 
     private func isSlice3ToolEnabled(_ toolName: String) -> Bool {
         switch toolName {
-        case "mcp_call", "mcp_list", "mcp_test", "mcp_import_from_skill",
-             "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
+        case "mcp_call", "mcp_test":
+            isCapabilityPolicyEnabled("ios.mcp.tool_call")
+        case "mcp_list", "mcp_import_from_skill",
+             "skills_list", "use_skill", "skill_validate", "skill_import", "soul_import", "skill_enable", "skill_disable":
             true
         case "subagent_dispatch":
             isCapabilityPolicyEnabled("ios.agent.subagent_dispatch")

@@ -94,7 +94,6 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
     /// Ledger event type for an explicitly denied approval card (§11.1). Its
     /// `eventId` is the stable evidence ref for the denial.
     static let approvalDeniedEventType = "approval_denied"
-    static let experienceFeedbackEventType = "experience_feedback"
 
     private let store: RoomAgentEventStore
 
@@ -230,42 +229,6 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         }
     }
 
-    func recordExperienceFeedback(
-        runId: String,
-        artifactId: String,
-        artifactVersion: String,
-        signal: String,
-        sourceExecutionEventId: String,
-        experienceId: String?
-    ) async -> String? {
-        let eventId = UUID().uuidString
-        var fields: [String: String] = [
-            "artifactId": artifactId,
-            "artifactVersion": artifactVersion,
-            "userSignal": signal,
-            "sourceExecutionEventId": sourceExecutionEventId,
-        ]
-        if let experienceId { fields["experienceId"] = experienceId }
-        let payload = Self.jsonPayload(fields)
-        let recorded = await append(
-            runId: runId,
-            event: AgentRunEvent(
-                eventId: eventId,
-                type: Self.experienceFeedbackEventType,
-                payloadType: Self.experienceFeedbackEventType,
-                payload: payload,
-                payloadSchemaVersion: 1,
-                isFinal: false,
-                ts: Self.nowMillis()
-            )
-        )
-        if !recorded {
-            print("[AmberChat] experience_feedback ledger write failed run=\(runId) artifact=\(artifactId)@\(artifactVersion)")
-            return nil
-        }
-        return eventId
-    }
-
     private func append(
         runId: String,
         event: AgentRunEvent
@@ -385,6 +348,7 @@ enum IOSToolEffectClassMapping {
             || toolName == "mcp_test"
             || toolName == "mcp_import_from_skill"
             || toolName == "skill_import"
+            || toolName == "soul_import"
             || toolName == "skill_enable"
             || toolName == "skill_disable" {
             return .sideEffect

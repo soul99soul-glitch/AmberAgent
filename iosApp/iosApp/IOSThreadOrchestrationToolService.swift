@@ -132,6 +132,7 @@ final class IOSThreadOrchestrationToolService {
     /// M4: role_assistant_id 存在性校验（生产 = 设置快照里的 assistants；
     /// 默认恒真 = 未注入校验器的调用方/测试不误伤，生产接线必须注入）。
     private let roleAssistantExists: (KotlinUuid) -> Bool
+    private let soulMarkdown: () -> String
     /// P1-d: wait_agent 超时 clamp 区间与默认值（测试注入小下限避免真实等待）。
     private let waitTimeoutMinMs: Int64
     private let waitTimeoutMaxMs: Int64
@@ -153,7 +154,8 @@ final class IOSThreadOrchestrationToolService {
         waitTimeoutMinMs: Int64 = 5_000,
         waitTimeoutMaxMs: Int64 = 300_000,
         waitTimeoutDefaultMs: Int64 = 30_000,
-        roleAssistantExists: @escaping (KotlinUuid) -> Bool = { _ in true }
+        roleAssistantExists: @escaping (KotlinUuid) -> Bool = { _ in true },
+        soulMarkdown: @escaping () -> String = { "" }
     ) {
         self.conversationStoreProvider = conversationStoreProvider
         self.mailboxDaoProvider = mailboxDaoProvider
@@ -171,6 +173,7 @@ final class IOSThreadOrchestrationToolService {
         self.waitTimeoutMaxMs = waitTimeoutMaxMs
         self.waitTimeoutDefaultMs = waitTimeoutDefaultMs
         self.roleAssistantExists = roleAssistantExists
+        self.soulMarkdown = soulMarkdown
     }
 
     // MARK: - Dispatch
@@ -477,6 +480,17 @@ final class IOSThreadOrchestrationToolService {
 
     /// 子线程首个后台 run 的编排语境（管线闭环场景 C）：子线程 upload 不经
     /// ChatViewModel 注入管线，在 handoff 组装时直接注入子线程向文案。
+    static func childUploadMessages(
+        targetMessages: [UIMessage],
+        soulMarkdown: String
+    ) -> [UIMessage] {
+        var messages = targetMessages
+        if let soul = ChatRuntimeContextBuilder.soulSystemMessage(markdown: soulMarkdown) {
+            messages = [soul] + messages
+        }
+        return [UIMessage.companion.system(prompt: childOrchestrationContextPrompt)] + messages
+    }
+
     static let childOrchestrationContextPrompt = """
     You are a child agent thread in a thread-orchestration tree.
     - Your task arrives as a `[mailbox NEW_TASK from /root/...]` message; `[mailbox MESSAGE|FINAL_ANSWER from /root/...]` are inter-agent mail, not user input.
@@ -1005,8 +1019,10 @@ final class IOSThreadOrchestrationToolService {
         }
         // 管线闭环场景 C：子线程的后台 upload 不经 ChatViewModel 注入管线，
         // 直接在 handoff 里注入子线程向编排语境（仅 upload，不进展示/持久化）。
-        let childContextMessage = UIMessage.companion.system(prompt: Self.childOrchestrationContextPrompt)
-        let uploadMessages = [childContextMessage] + targetMessages
+        let uploadMessages = Self.childUploadMessages(
+            targetMessages: targetMessages,
+            soulMarkdown: soulMarkdown()
+        )
         // M3: fullToolNames 取 run 的桥全目录（对齐 ChatGenerationCoordinator
         // handoff 的做法）——params.tools 只是当轮可见子集，子线程目录会被
         // 永久截断（未暴露的 wm_* 等永远不可 search/命中）。桥不可用回退现行为。

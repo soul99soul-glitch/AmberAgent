@@ -834,9 +834,8 @@ private fun waitAgentParameters(): InputSchema = InputSchema.Obj(
  * The declaration table behind [iosToolDeclaration]. A map (not a `when`) so
  * the full iOS tool-name list is DERIVED from the real declaration source via
  * [iosToolDeclarationNames] — nothing on the Swift side hand-mirrors these
- * keys anymore (drift regression: `IOSEvolutionSuiteProviderTests` asserts the
- * runtime catalog summary equals this list). Each entry constructs a fresh
- * `Tool` per invocation, exactly like the old `when` branches did.
+ * keys anymore. Each entry constructs a fresh `Tool` per invocation, exactly
+ * like the old `when` branches did.
  */
 private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
     "ask_user" to ::createAskUserToolDeclaration,
@@ -887,6 +886,7 @@ private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
     "use_skill" to ::createUseSkillToolDeclaration,
     "skill_validate" to ::createSkillValidateToolDeclaration,
     "skill_import" to ::createSkillImportToolDeclaration,
+    "soul_import" to ::createSoulImportToolDeclaration,
     "skill_enable" to ::createSkillEnableToolDeclaration,
     "skill_disable" to ::createSkillDisableToolDeclaration,
     "recipe_import" to ::createRecipeImportToolDeclaration,
@@ -1076,7 +1076,7 @@ fun createMcpDescribeToolDeclaration(): Tool = Tool(
 
 fun createMcpImportFromSkillToolDeclaration(): Tool = Tool(
     name = "mcp_import_from_skill",
-    description = "Import standard mcp.json from an installed Skill into the global AmberAgent MCP settings.",
+    description = "Import standard mcp.json from an installed Skill into the global AmberAgent MCP settings. The host asks once unless high-risk auto-approve is on, then rechecks the digest and connectivity before writing.",
     parameters = {
         InputSchema.Obj(
             properties = buildJsonObject {
@@ -1217,13 +1217,26 @@ fun createSkillValidateToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createSoulImportToolDeclaration(): Tool = Tool(
+    name = "soul_import",
+    description = """
+        Prepare a read-only preview of the fixed file /workspace/SOUL.md to update Amber's core
+        instructions. Call this only when the user explicitly asks to update Amber's soul or core
+        instructions. The host asks once unless high-risk auto-approve is on, then rechecks hashes
+        (CAS) before applying. No path argument is accepted.
+    """.trimIndent().replace("\n", " "),
+    parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
 fun createSkillImportToolDeclaration(): Tool = Tool(
     name = "skill_import",
     description = """
         Prepare a read-only import preview for a skill folder or SKILL.md file under /workspace.
-        The host requires one explicit user approval, then rechecks the previewed base and candidate
-        hashes (CAS) before atomically applying the package. New skills are enabled; existing skills
-        keep their current enabled state.
+        The host asks once unless high-risk auto-approve is on, then rechecks the previewed base and
+        candidate hashes (CAS) before atomically applying the package. New skills are enabled;
+        existing skills keep their current enabled state.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -1237,8 +1250,6 @@ fun createSkillImportToolDeclaration(): Tool = Tool(
         )
     },
     needsApproval = true,
-    allowsAutoApproval = false,
-    mandatoryApproval = true,
     execute = { emptyList() }
 )
 
@@ -1252,19 +1263,19 @@ fun createSkillEnableToolDeclaration(): Tool = Tool(
 
 /**
  * Wave B2: `recipe_import` declaration, mirroring `skill_import`
- * (mandatory approval; the host previews the Workspace `recipe.json`, rechecks
- * base/candidate hashes on approval, then applies and refreshes the dynamic
- * catalog so the promoted recipe is searchable via `tool_search` as
- * `recipe__<name>` from the next model round). Not in `IOS_RESIDENT_TOOL_NAMES`
- * → default-deferred (discovered via `tool_search`).
+ * (the host previews the Workspace `recipe.json`, asks once unless high-risk
+ * auto-approve is on, then rechecks base/candidate hashes before applying and
+ * refreshing the dynamic catalog so the promoted recipe is searchable via
+ * `tool_search` as `recipe__<name>` from the next model round). Not in
+ * `IOS_RESIDENT_TOOL_NAMES` → default-deferred (discovered via `tool_search`).
  */
 fun createRecipeImportToolDeclaration(): Tool = Tool(
     name = "recipe_import",
     description = """
         Prepare a read-only import preview for a recipe.json under /workspace (amber.recipe.v1 manifest).
-        The host requires one explicit user approval, then rechecks the previewed base and candidate
-        hashes (CAS) before atomically applying the recipe package. The promoted recipe becomes
-        searchable via tool_search (recipe__<name>) from the next model round.
+        The host asks once unless high-risk auto-approve is on, then rechecks the previewed base and
+        candidate hashes (CAS) before atomically applying the recipe package. The promoted recipe
+        becomes searchable via tool_search (recipe__<name>) from the next model round.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -1278,8 +1289,6 @@ fun createRecipeImportToolDeclaration(): Tool = Tool(
         )
     },
     needsApproval = true,
-    allowsAutoApproval = false,
-    mandatoryApproval = true,
     execute = { emptyList() }
 )
 

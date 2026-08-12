@@ -71,6 +71,36 @@ final class ChatViewModelGenerationParamsTests: XCTestCase {
         XCTAssertEqual(viewModel.messages.first?.role, MessageRole.user)
     }
 
+    func testSoulIsInjectedOnceInForegroundAndChildAssemblers() {
+        let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
+        sharedSettings.setAgentSoulMarkdown("SOUL_CANARY_UNIQUE")
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            autoGenerateResponses: false
+        )
+        let upload = viewModel.preparedUploadMessagesForTesting([
+            UIMessage.companion.user(prompt: "hello")
+        ])
+        let soulTexts = upload
+            .filter { $0.role == MessageRole.system }
+            .map { $0.toText() }
+            .filter { $0.contains("SOUL_CANARY_UNIQUE") }
+        XCTAssertEqual(soulTexts.count, 1)
+        XCTAssertTrue(soulTexts[0].contains("<agents_md>"))
+        XCTAssertFalse(viewModel.messages.contains { $0.toText().contains("SOUL_CANARY_UNIQUE") })
+
+        let child = IOSThreadOrchestrationToolService.childUploadMessages(
+            targetMessages: [UIMessage.companion.user(prompt: "child")],
+            soulMarkdown: "SOUL_CANARY_UNIQUE"
+        )
+        XCTAssertEqual(
+            child.filter { $0.toText().contains("SOUL_CANARY_UNIQUE") }.count,
+            1
+        )
+        XCTAssertTrue(child.contains { $0.toText().contains("child agent thread") })
+    }
+
     /// makeTextGenerationParams must succeed and produce a non-empty tool list
     /// (the tool declarations are independent of the params fix, but this guards
     /// against the real-params refactor throwing on snapshot access).

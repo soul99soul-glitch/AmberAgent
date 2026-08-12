@@ -239,7 +239,7 @@ struct IOSCapabilityRegistry {
             risk: .high,
             requestKind: .foregroundSession,
             requestEntryPoint: "Chat MCP approval",
-            modelToolNames: ["mcp_call"],
+            modelToolNames: ["mcp_call", "mcp_test", "mcp_import_from_skill"],
             defaultEnabled: true,
             gate: freshHighRiskGate
         ),

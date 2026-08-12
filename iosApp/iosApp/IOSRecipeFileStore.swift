@@ -22,8 +22,6 @@ import Foundation
 // - rollback re-validates the exact manifest the caller saw AND the live hash
 //   against the slot's promoted hash, so a newer import cannot replace the
 //   confirmed rollback target;
-// - successful apply/rollback writes an `IOSPromotionReceipt` whose `toHash`
-//   is the same hash the store just published (no re-hashing).
 
 enum IOSRecipeMutationKind: String, Codable, Equatable {
     case new
@@ -127,27 +125,19 @@ struct IOSRecipeFileStore {
         )
     }
 
-    // MARK: Apply — base/candidate CAS + atomic publish + receipt
+    // MARK: Apply — base/candidate CAS + atomic publish
 
     /// Promotes a previously previewed candidate after re-checking both sides
     /// of the CAS contract. The candidate is fully staged before the previous
     /// slot changes; synchronous publication failures restore the prior slot.
     /// A process crash mid-publish can still leave a backup or stale slot;
     /// `rollbackAvailability` fails closed there.
-    ///
-    /// `approvedBy` / `evaluationReportHash` are the receipt authorizer
-    /// (invariant 7/16: policy engine + policy version for autonomous
-    /// promotions, "user" for manual approvals) and the bound evaluation
-    /// report — both default to the historical manual path so existing
-    /// callers compile unchanged.
     @discardableResult
     func applyRecipe(
         name: String,
         recipeJSON: Data,
         expectedBaseHash: String?,
-        expectedCandidateHash: String,
-        approvedBy: String = "user",
-        evaluationReportHash: String? = nil
+        expectedCandidateHash: String
     ) throws -> IOSRecipeApplyReceipt {
         Self.mutationLock.lock()
         defer { Self.mutationLock.unlock() }
@@ -204,21 +194,6 @@ struct IOSRecipeFileStore {
         if let previousBackup {
             try? fileManager.removeItem(at: previousBackup)
         }
-        // §15 Phase 0 / §9.6: a successful promotion writes a receipt so later
-        // run outcomes can be attributed to this exact candidate hash.
-        // `candidate.hash` is the same value `stageLivePackage` wrote, so no
-        // re-hashing happens here.
-        IOSPromotionReceiptStore(baseDirectory: baseDirectory).record(
-            IOSPromotionReceipt(
-                artifactId: name,
-                fromHash: base?.hash,
-                toHash: candidate.hash,
-                evaluationReportHash: evaluationReportHash,
-                catalogRevision: nil,
-                approvedBy: approvedBy,
-                promotedAtEpochMs: Self.nowMillis()
-            )
-        )
         return IOSRecipeApplyReceipt(name: name, promotedHash: candidate.hash, outcome: .applied)
     }
 
@@ -269,28 +244,6 @@ struct IOSRecipeFileStore {
         // Live state is already complete at this point; best-effort slot
         // cleanup so a failed cleanup cannot report a failed rollback.
         try? fileManager.removeItem(at: previousSlotDirectory(name: name))
-        // A rollback is itself a versioned promotion (§9.6): record a receipt
-        // whose toHash is the restored live package hash. For an update, that
-        // is manifest.baseHash (inspectRollback verified the slot package hash
-        // equals baseHash before publishing it). A "new" rollback removes the
-        // artifact, so its receipts are cleared (no active version, §18.1).
-        let receiptStore = IOSPromotionReceiptStore(baseDirectory: baseDirectory)
-        switch manifest.kind {
-        case .update:
-            if let restoredHash = manifest.baseHash {
-                receiptStore.record(IOSPromotionReceipt(
-                    artifactId: name,
-                    fromHash: manifest.promotedHash,
-                    toHash: restoredHash,
-                    evaluationReportHash: nil,
-                    catalogRevision: nil,
-                    approvedBy: "user",
-                    promotedAtEpochMs: Self.nowMillis()
-                ))
-            }
-        case .new:
-            receiptStore.clear(artifactId: name)
-        }
         return IOSRecipeRollbackReceipt(manifest: manifest)
     }
 
@@ -311,10 +264,6 @@ struct IOSRecipeFileStore {
     }
 
     // MARK: Private
-
-    private static func nowMillis() -> Int64 {
-        Int64(Date().timeIntervalSince1970 * 1000)
-    }
 
     private static let previousManifestSchemaVersion = 1
     private static let packageHashFormatVersion = 1

@@ -57,6 +57,7 @@ import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
+import app.amber.core.settings.migratedAgentSoulMarkdown
 import app.amber.core.memory.dream.PersistedMemoryDreamPlan
 import app.amber.core.memory.model.MemoryCandidate
 import app.amber.core.memory.model.MemoryEvent
@@ -187,7 +188,7 @@ fun SettingAgentMemoryPage(
             when (subpage) {
                 MemorySettingsSubpage.Overview -> {
                     AgentSoulCard(
-                        value = settings.agentRuntime.agentSoulMarkdown,
+                        value = migratedAgentSoulMarkdown(settings.agentRuntime.agentSoulMarkdown),
                         onSave = { value ->
                             vm.updateAgentRuntime { it.copy(agentSoulMarkdown = value) }
                         },

@@ -56,6 +56,7 @@ import app.amber.feature.runtime.SpeculativeToolRunner
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.tools.ToolExposureState
 import app.amber.core.settings.Settings
+import app.amber.core.settings.migratedAgentSoulMarkdown
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveSessionDefaults
@@ -700,7 +701,8 @@ class GenerationHandler(
         loopBudgetPrompt: String,
     ): List<UIMessagePart> {
         val staticPrompt = listOf(
-            buildAgentSoulPrompt(settings.agentRuntime.agentSoulMarkdown),
+            buildAgentSoulPrompt(migratedAgentSoulMarkdown(settings.agentRuntime.agentSoulMarkdown)),
+            buildAndroidRuntimeNotes(),
             assistant.systemPrompt,
         ).filter { it.isNotBlank() }.joinToString("\n\n")
 

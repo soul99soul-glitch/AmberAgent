@@ -790,6 +790,12 @@ enum IOSGenerativeUiRequestPolicy {
 
 @MainActor
 final class ChatGenerationCoordinator {
+    private static func isMcpNetworkAllowed(executor: IOSLocalToolExecutor?) -> Bool {
+        guard let executor else { return true }
+        return executor.permissionsStatus().capabilities
+            .first { $0.id == "ios.mcp.tool_call" }?.policy != IOSAgentPermissionPolicy.disabled.title
+    }
+
     private let dependencies: ChatGenerationDependencies
     private let bindings: ChatGenerationBindings
     private let backgroundExecution: BackgroundGenerationKeepAlive
@@ -896,6 +902,8 @@ final class ChatGenerationCoordinator {
     /// skill_import 的只读 preview/CAS 上下文只活在当前 pending MCP 槽中；
     /// 不持久化，取消、拒绝、完成或冷启动都会清除。
     private var pendingPreparedSkillImport: IOSPreparedSkillImport?
+    private var pendingPreparedSoulImport: IOSPreparedSoulImport?
+    private var pendingPreparedMcpImport: IOSPreparedMcpImport?
     /// Wave B2: recipe 审批（mutation step 暂停 / recipe_import 导入）。
     private var pendingRecipeToolApproval: ChatPendingToolApproval?
     private var pendingPreparedRecipeExecution: IOSRecipeExecutionState?
@@ -1094,7 +1102,8 @@ final class ChatGenerationCoordinator {
                 )
                 return
             }
-            if self.dependencies.sharedSettings.isCapabilityGateEnabled(.mcp) {
+            if self.dependencies.sharedSettings.isCapabilityGateEnabled(.mcp),
+               Self.isMcpNetworkAllowed(executor: self.dependencies.localToolExecutor) {
                 await self.dependencies.mcpManager.syncAll()
             }
             guard self.currentRunId == runId else { return }
@@ -3660,6 +3669,12 @@ final class ChatGenerationCoordinator {
             pendingPreparedSkillImport = toolRuntime.takePreparedSkillImportForApproval(
                 toolCallId: pending.toolCall.toolCallId
             )
+            pendingPreparedSoulImport = toolRuntime.takePreparedSoulImportForApproval(
+                toolCallId: pending.toolCall.toolCallId
+            )
+            pendingPreparedMcpImport = toolRuntime.takePreparedMcpImportForApproval(
+                toolCallId: pending.toolCall.toolCallId
+            )
         case .recipe(let request):
             pendingRecipeToolApproval = pending
             pendingRecipeRequest = request
@@ -3917,12 +3932,16 @@ final class ChatGenerationCoordinator {
             return
         }
         let preparedSkillImport = pendingPreparedSkillImport
+        let preparedSoulImport = pendingPreparedSoulImport
+        let preparedMcpImport = pendingPreparedMcpImport
         clearPendingMcpApproval()
         guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishMcpApproval(
                 pending: pending,
                 allow: allow,
-                preparedSkillImport: preparedSkillImport
+                preparedSkillImport: preparedSkillImport,
+                preparedSoulImport: preparedSoulImport,
+                preparedMcpImport: preparedMcpImport
             )
         }) else { return }
         completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
@@ -4937,6 +4956,8 @@ final class ChatGenerationCoordinator {
         }
         pendingMcpToolApproval = nil
         pendingPreparedSkillImport = nil
+        pendingPreparedSoulImport = nil
+        pendingPreparedMcpImport = nil
         bindings.setPendingMcpApproval(nil)
     }
 
