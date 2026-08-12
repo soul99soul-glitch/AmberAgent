@@ -11,6 +11,7 @@ private let novelDiscussionProjectToolNames: [String] = [
     "novel_clear_upcoming_arc",
     "novel_revise_material",
     "novel_propose_chapter_plan",
+    "novel_set_chapter_title",
 ]
 
 final class NovelLiveModelAdapterTests: XCTestCase {

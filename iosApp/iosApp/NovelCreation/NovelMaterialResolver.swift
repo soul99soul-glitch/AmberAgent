@@ -93,18 +93,60 @@ enum NovelMaterialResolver {
             appliedOperations.map { ($0.operationID, $0.kind) },
             uniquingKeysWith: { first, _ in first }
         )
-        let proposalTitles = acceptedProposalTitlesByMaterialID(
+        // One shared map for all materials. Callers that resolve many materials
+        // (session identity cards) must not rebuild this per material.
+        let proposalTitlesByMaterialID = acceptedProposalTitlesByMaterialID(
             proposals: proposals,
             operations: appliedOperations,
             revisionByID: revisionByID
-        )[material.id] ?? []
+        )
         return materialResolvingIdentityAliases(
             material,
             effectiveRevision: effectiveRevision,
             revisionByID: revisionByID,
             operationKindByID: operationKindByID,
-            acceptedProposalTitles: proposalTitles
+            acceptedProposalTitles: proposalTitlesByMaterialID[material.id] ?? []
         ).aliases
+    }
+
+    /// Batch alias resolution for every character material. Avoids O(materials × ops)
+    /// when the session view builds identity resolvers on every body pass.
+    static func characterIdentities(
+        materials: [NovelMaterialRecord],
+        materialRevisions: [NovelMaterialRevisionRecord],
+        proposals: [NovelSettingProposalRecord],
+        appliedOperations: [NovelAppliedOperationRecord],
+        effectiveRevision: (NovelMaterialRecord) -> NovelMaterialRevisionRecord?
+    ) -> [NovelCharacterIdentity] {
+        let revisionByID = Dictionary(
+            materialRevisions.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let operationKindByID = Dictionary(
+            appliedOperations.map { ($0.operationID, $0.kind) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let proposalTitlesByMaterialID = acceptedProposalTitlesByMaterialID(
+            proposals: proposals,
+            operations: appliedOperations,
+            revisionByID: revisionByID
+        )
+        return materials.compactMap { material -> NovelCharacterIdentity? in
+            guard material.kind == .character,
+                  let revision = effectiveRevision(material) else { return nil }
+            let aliases = materialResolvingIdentityAliases(
+                material,
+                effectiveRevision: revision,
+                revisionByID: revisionByID,
+                operationKindByID: operationKindByID,
+                acceptedProposalTitles: proposalTitlesByMaterialID[material.id] ?? []
+            ).aliases
+            return NovelCharacterIdentity(
+                materialID: material.id,
+                canonicalName: revision.title,
+                aliases: aliases
+            )
+        }
     }
 
     private static func materialResolvingIdentityAliases(

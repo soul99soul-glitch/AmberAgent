@@ -411,9 +411,30 @@ struct NovelSessionListModel: Equatable, Sendable {
     }
 }
 
+/// Staged session open so large projects never pay transcript + long layout +
+/// identity chrome in a single main-thread turn (0x8BADF00D on 赵大来了-scale).
+enum NovelSessionLoadStage: Int, Comparable, Sendable {
+    /// Binding / snapshot not ready — avoid projecting heavy lists.
+    case idle = 0
+    /// Bound: tiny history window only (row count capped; body not truncated).
+    case coreTranscript = 1
+    /// After first layout: expand steady history window.
+    case steadyTranscript = 2
+    /// After core is on screen: identity cards and other secondary chrome.
+    case secondaryChrome = 3
+
+    static func < (lhs: Self, rhs: Self) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
 enum NovelSessionHistoryWindowPolicy {
+    /// First paint after open — latest exchange only (user + assistant).
+    static let coldOpenLimit = 2
+    /// After the first layout commits, grow to this many historical rows.
     static let initialLimit = 4
-    static let pageSize = 24
+    /// "更早的创作记录" page size.
+    static let pageSize = 12
 
     static func startIndex(totalCount: Int, limit: Int) -> Int {
         max(0, totalCount - max(0, limit))
@@ -421,6 +442,11 @@ enum NovelSessionHistoryWindowPolicy {
 
     static func expandedLimit(currentLimit: Int, totalCount: Int) -> Int {
         min(totalCount, max(0, currentLimit) + pageSize)
+    }
+
+    /// Cold open → steady window without shrinking a user-expanded history.
+    static func limitAfterColdOpenSettles(currentLimit: Int) -> Int {
+        max(currentLimit, initialLimit)
     }
 
     /// 追加新行时窗口必须吸收增量,否则 `startIndex` 前移会把**已经渲染过的**

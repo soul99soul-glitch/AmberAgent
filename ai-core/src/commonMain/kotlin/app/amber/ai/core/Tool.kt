@@ -152,6 +152,21 @@ fun createNovelProposeChapterPlanToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createNovelSetChapterTitleToolDeclaration(): Tool = Tool(
+    name = "novel_set_chapter_title",
+    description = """
+        Rename one working manuscript chapter's title without rewriting the chapter body.
+        `title` is the new chapter title (prefer a concise 1–8 character evocative title in the
+        user's language). Target the chapter with optional `chapter_ordinal` (1-based index in the
+        working manuscript order) or `chapter_id` (UUID); when both are omitted, the last (latest)
+        working chapter is renamed. Does not edit prose content. Creates a manual-edit version and
+        may mark the branch as needing plot-state sync. The change is saved into the novel project
+        document.
+    """.trimIndent(),
+    parameters = { novelSetChapterTitleParameters() },
+    execute = { emptyList() }
+)
+
 fun createMemoryToolDeclaration(): Tool = Tool(
     name = "memory_tool",
     description = """
@@ -1773,6 +1788,25 @@ private fun novelReviseMaterialParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("kind", "title", "content")
+)
+
+private fun novelSetChapterTitleParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("title", buildJsonObject {
+            put("type", "string")
+            put("description", "New chapter title; prefer a concise 1–8 character evocative title")
+        })
+        put("chapter_ordinal", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional 1-based index of the working chapter to rename; defaults to the last chapter")
+            put("minimum", 1)
+        })
+        put("chapter_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional chapter UUID; when set, overrides chapter_ordinal")
+        })
+    },
+    required = listOf("title")
 )
 
 private fun novelProposeChapterPlanParameters(): InputSchema = InputSchema.Obj(

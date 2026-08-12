@@ -662,21 +662,26 @@ enum NovelGenerationDocumentValidator {
               injection.runID == run.id else {
             return
         }
-        guard let promptText = NovelPromptCatalog.systemText(
-            for: promptKind(for: run),
-            version: injection.promptVersion
-        ) else {
-            issues.append("Run \(run.id) has an unknown Prompt version.")
-            return
-        }
-        let promptHash = NovelDocumentValidator.sha256(promptText)
+        let promptKind = promptKind(for: run)
         let promptSections = injection.sections.filter {
             if case .fixedPrompt = $0.kind { return true }
             return false
         }
-        if promptSections.map(\.contentSHA256) != [promptHash] {
-            issues.append("Run \(run.id) has invalid fixed Prompt receipt evidence.")
+        if let promptText = NovelPromptCatalog.systemText(
+            for: promptKind,
+            version: injection.promptVersion
+        ) {
+            let promptHash = NovelDocumentValidator.sha256(promptText)
+            // Only fail-closed when the version is not even accepted. Same version string
+            // with a later catalog text edit (or missing archival copy) must not brick load —
+            // that is the 2026-07-25 / 2026-08-12 corruption class of bugs.
+            if promptSections.map(\.contentSHA256) != [promptHash],
+               !NovelPromptCatalog.acceptedVersions(for: promptKind)
+                .contains(injection.promptVersion) {
+                issues.append("Run \(run.id) has invalid fixed Prompt receipt evidence.")
+            }
         }
+        // Missing historical system text: skip hash re-check only.
         let preferenceSections = injection.sections.filter {
             if case .polishPreference = $0.kind { return true }
             return false

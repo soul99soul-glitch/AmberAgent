@@ -650,8 +650,14 @@ enum NovelFactTransactionReducer {
         guard branch.lifecycle == .active else {
             throw NovelError.branchNotFound(command.branchID)
         }
-        guard branch.activeRunID == nil else {
-            throw NovelError.projectBusy(command.projectID)
+        // Discussion field-write tools run inside a live discussion run. Block only
+        // non-discussion active runs (prose/polish/regenerate/…), not the discussion
+        // agent itself — otherwise chapter-title tools self-lock.
+        if let activeRunID = branch.activeRunID {
+            let activeKind = document.activeRuns.first(where: { $0.id == activeRunID })?.kind
+            guard activeKind == .discussion else {
+                throw NovelError.projectBusy(command.projectID)
+            }
         }
         guard branch.workingRevision == command.expectedWorkingRevision else {
             throw NovelError.invalidInput(

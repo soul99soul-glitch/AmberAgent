@@ -1165,6 +1165,7 @@ private extension NovelLiveModelAdapter {
                     ToolKt.createNovelClearUpcomingArcToolDeclaration(),
                     ToolKt.createNovelReviseMaterialToolDeclaration(),
                     ToolKt.createNovelProposeChapterPlanToolDeclaration(),
+                    ToolKt.createNovelSetChapterTitleToolDeclaration(),
                 ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,

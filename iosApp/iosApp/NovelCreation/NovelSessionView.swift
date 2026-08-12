@@ -43,12 +43,15 @@ enum NovelSessionBottomProximityPolicy {
 }
 
 enum NovelSessionScrollGeometryPolicy {
+    /// - isFollowingBottom: 仍处跟随底意图（未拖离）。讨论结束后人物问答卡等晚到的
+    ///   底部插入若走 static，会先推离底部再被 viewportChanged 硬拽，造成跳变。
     static func events(
         previousContentHeight: CGFloat,
         currentContentHeight: CGFloat,
         userDragging: Bool,
         isLiveTail: Bool,
         isSettlingTerminal: Bool,
+        isFollowingBottom: Bool = false,
         previousIsAtBottom: Bool,
         currentIsAtBottom: Bool
     ) -> [NovelSessionBottomFollowEvent] {
@@ -59,6 +62,11 @@ enum NovelSessionScrollGeometryPolicy {
             }
             if isSettlingTerminal {
                 return [.measuredTerminalGrowth(isAtBottom: currentIsAtBottom)]
+            }
+            // 仅当此前贴底时，跟随底意图下的晚到高度（问答卡）才继续贴底。
+            // 勿在「略离底」时每帧 measuredStreamGrowth，否则会和布局互踢导致卡死。
+            if isFollowingBottom, previousIsAtBottom {
+                return [.measuredStreamGrowth(isAtBottom: currentIsAtBottom)]
             }
             guard previousIsAtBottom != currentIsAtBottom else { return [] }
             return [.staticContentGrowth(isAtBottom: currentIsAtBottom)]
@@ -106,18 +114,31 @@ struct NovelSessionView: View {
     @State private var pendingRecoveryAbandonTransactionIDs: [NovelPendingOperationID] = []
     @State private var recoveryAbandonTask: Task<Void, Never>?
     @State private var pendingUndo: NovelPendingCommittedUndo?
-    @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
+    /// Start with cold-open window; staged open expands to steady after first layout.
+    @State private var historyWindowLimit = NovelSessionHistoryWindowPolicy.coldOpenLimit
     @State private var expandedArchiveIDs: Set<NovelMessageID> = []
     @State private var streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
     @State private var suspendedStreamingTailRow: NovelSessionRowModel?
+    /// Message IDs that streamed during this session presentation. Keeps incremental
+    /// markdown after tail retire (avoids hard cut to plain Text / height flash).
+    /// Cleared on session identity change; cold open stays plain for non-streamed rows.
+    @State private var streamedMessageIDs: Set<String> = []
 
     var body: some View {
-        let listModel = projectedListModel()
+        // Gate list projection until bind marks coreTranscript — avoids projecting a
+        // full large session while still idle/unbound.
+        let listModel = viewModel.loadStage >= .coreTranscript ? projectedListModel() : nil
         let listSignal = makeListSignal(from: listModel)
 
         ZStack {
             AmberThemePageBackground(surface: .app)
-            transcript(listModel: listModel, listSignal: listSignal)
+            if viewModel.loadStage < .coreTranscript {
+                ProgressView("正在打开会话…")
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+            } else {
+                transcript(listModel: listModel, listSignal: listSignal)
+            }
 
             if followState.showsBottomButton, !(listModel?.rows.isEmpty ?? true) {
                 VStack {
@@ -145,7 +166,10 @@ struct NovelSessionView: View {
                         // the strip appears/disappears around stream start/finish.
                         .frame(minHeight: 28, alignment: .leading)
                 }
-                composer(listModel: listModel)
+                // Composer is usable after core; avoid building it during idle bind.
+                if viewModel.loadStage >= .coreTranscript {
+                    composer(listModel: listModel)
+                }
             }
             .background {
                 GeometryReader { proxy in
@@ -166,7 +190,7 @@ struct NovelSessionView: View {
             nativeScrollFallbackReason = nil
         }
         .task(id: bindingTaskID) {
-            await viewModel.bindToCurrentSelection()
+            await runStagedSessionOpen()
         }
         .task(id: listSignal.sessionID) {
             await Task.yield()
@@ -252,8 +276,8 @@ struct NovelSessionView: View {
                             )
                             .font(.footnote.weight(.medium))
                             .foregroundStyle(AmberTheme.muted)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -279,53 +303,11 @@ struct NovelSessionView: View {
                             }
                         }
                     }
+                }
 
-                    ForEach(viewModel.pendingCharacterIdentityMentions) { mention in
-                        let activeProposal = viewModel.activeCharacterProposal(for: mention.name)
-                        NovelCharacterIdentityQuestionCard(
-                            mention: mention,
-                            choices: viewModel.characterIdentityChoices,
-                            activeProposal: activeProposal,
-                            relatedProposalCount: viewModel.relatedCharacterProposalCount(
-                                for: mention.name
-                            ),
-                            isDisabled: viewModel.isBusy || viewModel.isRunning,
-                            onSelect: { materialID in
-                                Task { @MainActor in
-                                    _ = await viewModel.associateCharacterAlias(
-                                        mention.name,
-                                        with: materialID
-                                    )
-                                }
-                            },
-                            onIgnore: {
-                                Task { @MainActor in
-                                    _ = await viewModel.ignoreCharacterIdentityMention(mention.name)
-                                }
-                            },
-                            onClarify: { clarification in
-                                Task { @MainActor in
-                                    _ = await viewModel.clarifyCharacterIdentityMention(
-                                        mention.name,
-                                        clarification: clarification
-                                    )
-                                }
-                            },
-                            onGenerate: { guidance in
-                                Task { @MainActor in
-                                    _ = await viewModel.startCharacterProposal(
-                                        for: mention.name,
-                                        guidance: guidance
-                                    )
-                                }
-                            },
-                            onOpenProposal: {
-                                if let activeProposal {
-                                    onAcceptSettingProposal(activeProposal)
-                                }
-                            }
-                        )
-                    }
+                // Outside empty/non-empty: unresolved mentions can exist before any messages.
+                if viewModel.loadStage >= .secondaryChrome {
+                    identityCardsSection
                 }
 
                 Color.clear
@@ -429,21 +411,18 @@ struct NovelSessionView: View {
                 userDragging: userDragging,
                 isLiveTail: isLiveTailPhase(listSignal.activeTailPhase),
                 isSettlingTerminal: isSettlingTerminal,
+                isFollowingBottom: isFollowingBottom,
                 previousIsAtBottom: oldValue.isAtBottom,
                 currentIsAtBottom: newValue.isAtBottom
             )
             for event in followEvents {
                 dispatchFollowEvent(event)
             }
-            // 生成中近底被动恢复跟随（与 Chat resumeNativeBottomFollowFromGeometryIfNeeded
-            // 同语义）：driver 激活时，内容增长把视口推离底部但仍落在 driver 的
-            // resumeEpsilon(48pt) 内、用户没在拖——再发一拍 streamContentGrew，
-            // driver 的 idle+nearBottom 分支会自动接管恢复 followingBottom。
-            // browsingHistory（用户主动拖离 → driver pausedForUser）不受影响：
-            // streamContentGrew 在 pausedForUser 下是 no-op（NativeTimelineScrollCore:140-141）。
+            // 近底被动恢复跟随：仅流式尾 / 终态收口。不要在普通 followingBottom
+            // 下每帧 streamContentGrew（布局未完全贴底时会死循环，主线程卡死）。
             if isNativeScrollDriverActive, !userDragging,
                !scrollDriver.isUIKitUserInteracting,
-               isLiveTailPhase(listSignal.activeTailPhase),
+               isLiveTailPhase(listSignal.activeTailPhase) || isSettlingTerminal,
                newValue.isNearBottom, !newValue.isAtBottom {
                 scrollDriver.submit(.streamContentGrew)
             }
@@ -462,9 +441,11 @@ struct NovelSessionView: View {
         let messageID = row.id.description
         let tracksStreamingTail = row.id == activeTailID ||
             streamingTailVisibility.messageID == messageID
+        // Sticky for this presentation: still true after activeTailID clears on retire.
+        let hasEverStreamed = tracksStreamingTail || streamedMessageIDs.contains(messageID)
         let updatesSuspended = ChatSwiftUIStreamingTailRenderPolicy.shouldSuspend(
             isLastAssistant: tracksStreamingTail && row.role == .assistant,
-            hasEverStreamed: tracksStreamingTail,
+            hasEverStreamed: hasEverStreamed,
             messageID: messageID,
             visibility: streamingTailVisibility
         )
@@ -474,6 +455,8 @@ struct NovelSessionView: View {
 
         return NovelSessionRowView(
             row: renderedRow,
+            // Live tail + IDs that streamed this visit — not every assistant bubble.
+            hasEverStreamed: hasEverStreamed,
             adoptingPolishCandidateID: viewModel.adoptingPolishCandidateID,
             askUserBlocker: askUserBlocker,
             runtimeActionBlocker: NovelSessionComposerPolicy.runtimeActionBlocker(
@@ -1213,6 +1196,127 @@ struct NovelSessionView: View {
         )
     }
 
+    /// Sequenced open: bind+warm projection → tiny history → steady window → identity.
+    /// Each step yields so SwiftUI can commit layout before the next cost spike.
+    ///
+    /// `bindingTaskID` also changes when a run starts/stops — do **not** tear the
+    /// whole stage ladder down on those transitions (only on project/branch change,
+    /// which `bindToCurrentSelection` already resets to `.idle` → `.coreTranscript`).
+    @MainActor
+    private func runStagedSessionOpen() async {
+        let isFreshSessionOpen = viewModel.loadStage == .idle ||
+            viewModel.binding?.projectID != workspace.selectedProjectID ||
+            viewModel.binding?.branchID != workspace.selectedBranchID
+        if isFreshSessionOpen {
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.coldOpenLimit
+            expandedArchiveIDs.removeAll()
+            streamedMessageIDs.removeAll()
+        }
+
+        await viewModel.bindToCurrentSelection(expandedArchiveIDs: expandedArchiveIDs)
+        guard !Task.isCancelled else { return }
+        // Failed bind stays .idle; wait for bindingTaskID to change when snapshot arrives.
+        guard viewModel.binding != nil, viewModel.loadStage >= .coreTranscript else { return }
+
+        if viewModel.loadStage < .steadyTranscript {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            // Expand window may insert rows above; pin first visible row when not
+            // following bottom (bottom follow already absorbs growth).
+            let anchorID = coldOpenHistoryAnchorID(listModel: projectedListModel())
+            let pinHistoryAnchor = !isFollowingBottom && !isSettlingTerminal
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterColdOpenSettles(
+                currentLimit: historyWindowLimit
+            )
+            viewModel.advanceLoadStage(to: .steadyTranscript)
+            if pinHistoryAnchor, let anchorID {
+                await Task.yield()
+                guard !Task.isCancelled else { return }
+                var transaction = Transaction()
+                transaction.animation = nil
+                withTransaction(transaction) {
+                    scrollPosition.scrollTo(id: anchorID, anchor: .top)
+                }
+            }
+        }
+
+        // Climb remaining stages on every successful open task — covers cancel mid-ladder
+        // when the task re-runs (same binding, stage still < secondary).
+        if viewModel.loadStage < .secondaryChrome {
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            viewModel.advanceLoadStage(to: .secondaryChrome)
+        }
+    }
+
+    @ViewBuilder
+    private var identityCardsSection: some View {
+        // Hoist shared work out of ForEach: choices used to be rebuilt
+        // once per mention on every body pass (N cards × materials).
+        let identityMentions = viewModel.pendingCharacterIdentityMentions
+        let identityChoices = viewModel.characterIdentityChoices
+        let visibleIdentityMentions = Array(
+            identityMentions.prefix(NovelSessionViewModel.maxVisibleCharacterIdentityCards)
+        )
+        let hiddenIdentityCount = max(
+            0,
+            identityMentions.count - visibleIdentityMentions.count
+        )
+        ForEach(visibleIdentityMentions) { mention in
+            let activeProposal = viewModel.activeCharacterProposal(for: mention.name)
+            NovelCharacterIdentityQuestionCard(
+                mention: mention,
+                choices: identityChoices,
+                activeProposal: activeProposal,
+                relatedProposalCount: viewModel.relatedCharacterProposalCount(
+                    for: mention.name
+                ),
+                isDisabled: viewModel.isBusy || viewModel.isRunning,
+                onSelect: { materialID in
+                    Task { @MainActor in
+                        _ = await viewModel.associateCharacterAlias(
+                            mention.name,
+                            with: materialID
+                        )
+                    }
+                },
+                onIgnore: {
+                    Task { @MainActor in
+                        _ = await viewModel.ignoreCharacterIdentityMention(mention.name)
+                    }
+                },
+                onClarify: { clarification in
+                    Task { @MainActor in
+                        _ = await viewModel.clarifyCharacterIdentityMention(
+                            mention.name,
+                            clarification: clarification
+                        )
+                    }
+                },
+                onGenerate: { guidance in
+                    Task { @MainActor in
+                        _ = await viewModel.startCharacterProposal(
+                            for: mention.name,
+                            guidance: guidance
+                        )
+                    }
+                },
+                onOpenProposal: {
+                    if let activeProposal {
+                        onAcceptSettingProposal(activeProposal)
+                    }
+                }
+            )
+        }
+        if hiddenIdentityCount > 0 {
+            Text("还有 \(hiddenIdentityCount) 个未确认称谓，处理上方条目后会继续出现。")
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.muted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
+        }
+    }
+
     private func makeListSignal(
         from model: NovelSessionListModel?
     ) -> NovelSessionListSignal {
@@ -1232,6 +1336,9 @@ struct NovelSessionView: View {
 
     private var bindingTaskID: String {
         let branchID = workspace.selectedBranchID
+        // Flip nosnap→snap when load finishes so open re-runs after a failed early bind.
+        // Do not key on revision — that would re-stage on every durable write.
+        let hasSnapshot = workspace.projectSnapshot != nil && workspace.branchSnapshot != nil
         let phase: String
         if let running = workspace.projectSnapshot?.activeRuns.first(where: {
             $0.branchID == branchID && $0.status == .running
@@ -1246,6 +1353,7 @@ struct NovelSessionView: View {
         }
         return "\(workspace.selectedProjectID?.description ?? "none"):" +
             "\(branchID?.description ?? "none"):" +
+            "\(hasSnapshot ? "snap" : "nosnap"):" +
             phase
     }
 
@@ -1468,8 +1576,9 @@ struct NovelSessionView: View {
     ) {
         guard oldValue.sessionID == newValue.sessionID else {
             releaseSuspendedStreamingTail(resetIdentity: true)
-            historyWindowLimit = NovelSessionHistoryWindowPolicy.initialLimit
+            historyWindowLimit = NovelSessionHistoryWindowPolicy.coldOpenLimit
             expandedArchiveIDs.removeAll()
+            streamedMessageIDs.removeAll()
             if isNativeScrollDriverActive {
                 scrollDriver.submit(.conversationReset)
             }
@@ -1477,14 +1586,18 @@ struct NovelSessionView: View {
             dispatchFollowEvent(.initialRowsPresented(hasRows: newValue.rowCount > 0))
             return
         }
-        if let activeTailID = newValue.activeTailID,
-           streamingTailVisibility.messageID != activeTailID.description {
-            streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState(
-                messageID: activeTailID.description,
-                isVisible: nil
-            )
-            suspendedStreamingTailRow = nil
+        if let activeTailID = newValue.activeTailID {
+            streamedMessageIDs.insert(activeTailID.description)
+            if streamingTailVisibility.messageID != activeTailID.description {
+                streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState(
+                    messageID: activeTailID.description,
+                    isVisible: nil
+                )
+                suspendedStreamingTailRow = nil
+            }
         } else if newValue.activeTailID == nil, suspendedStreamingTailRow == nil {
+            // Clear live-tail visibility tracking only; hasEverStreamed stays sticky
+            // via streamedMessageIDs for the rest of this presentation.
             streamingTailVisibility = ChatSwiftUIStreamingTailVisibilityState()
         }
         // 无条件吸收:贴底与否不改变「已渲染的行不得中途被窗口踢出」这条不变量。
@@ -1741,6 +1854,13 @@ struct NovelSessionView: View {
         return false
     }
 
+    private var isFollowingBottom: Bool {
+        if case .followingBottom = followState.mode {
+            return true
+        }
+        return false
+    }
+
     private var isSettlingTerminal: Bool {
         if case .settlingTerminal = followState.mode {
             return true
@@ -1814,8 +1934,21 @@ struct NovelSessionView: View {
         .font(.caption)
         .foregroundStyle(AmberTheme.muted)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, ChatLayout.contentHorizontalInset)
+        // Match composer dock horizontal inset (16), not transcript content (22).
+        .padding(.horizontal, 16)
         .padding(.bottom, 6)
+    }
+
+    /// First visible historical row under the current cold-open window (for pin-on-expand).
+    private func coldOpenHistoryAnchorID(listModel: NovelSessionListModel?) -> NovelMessageID? {
+        guard let historicalRows = listModel?.historicalRows, !historicalRows.isEmpty else {
+            return nil
+        }
+        let startIndex = NovelSessionHistoryWindowPolicy.startIndex(
+            totalCount: historicalRows.count,
+            limit: historyWindowLimit
+        )
+        return historicalRows.dropFirst(startIndex).first?.id
     }
 }
 
@@ -1863,6 +1996,8 @@ private enum NovelSessionQuickStartRecovery {
 
 private struct NovelSessionRowView: View, Equatable {
     let row: NovelSessionRowModel
+    /// True only for the row that actually streamed in this presentation.
+    var hasEverStreamed: Bool = false
     let adoptingPolishCandidateID: NovelCandidateID?
     let askUserBlocker: NovelSessionActionBlocker?
     let runtimeActionBlocker: NovelSessionActionBlocker?
@@ -1874,6 +2009,7 @@ private struct NovelSessionRowView: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.row.id == rhs.row.id && lhs.row.digest == rhs.row.digest &&
+            lhs.hasEverStreamed == rhs.hasEverStreamed &&
             lhs.adoptingPolishCandidateID == rhs.adoptingPolishCandidateID &&
             lhs.askUserBlocker == rhs.askUserBlocker &&
             lhs.runtimeActionBlocker == rhs.runtimeActionBlocker &&
@@ -1896,7 +2032,7 @@ private struct NovelSessionRowView: View, Equatable {
                 isReasoningLive: row.isReasoningLive,
                 isStreaming: row.isStreaming,
                 transientPhase: row.transientPhase,
-                hasEverStreamed: row.role == .assistant,
+                hasEverStreamed: hasEverStreamed,
                 runStatus: row.runStatus,
                 candidateStatus: row.candidate?.status,
                 isRegeneration: row.candidate?.kind == .prose
@@ -2043,7 +2179,11 @@ private struct NovelCharacterIdentityQuestionCard: View {
                 .buttonStyle(.plain)
                 .disabled(isDisabled)
             } else if !choices.isEmpty {
-                ForEach(choices, id: \.material.id) { choice in
+                // Inline only a short roster; long character lists used to inflate
+                // the session ScrollView enough to freeze scene updates on open.
+                let inlineLimit = NovelSessionViewModel.maxInlineCharacterIdentityChoices
+                let inlineChoices = Array(choices.prefix(inlineLimit))
+                ForEach(inlineChoices, id: \.material.id) { choice in
                     Button {
                         onSelect(choice.material.id)
                     } label: {
@@ -2059,6 +2199,24 @@ private struct NovelCharacterIdentityQuestionCard: View {
                         .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
                     }
                     .buttonStyle(.plain)
+                    .disabled(isDisabled)
+                }
+                if choices.count > inlineLimit {
+                    Menu {
+                        ForEach(choices.dropFirst(inlineLimit), id: \.material.id) { choice in
+                            Button(choice.title) {
+                                onSelect(choice.material.id)
+                            }
+                        }
+                    } label: {
+                        Label(
+                            "更多角色（\(choices.count - inlineLimit)）",
+                            systemImage: "person.2"
+                        )
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                    }
                     .disabled(isDisabled)
                 }
             }

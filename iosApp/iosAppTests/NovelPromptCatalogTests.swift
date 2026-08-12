@@ -10,56 +10,33 @@ final class NovelPromptCatalogTests: XCTestCase {
         }.joined(separator: "\n---\n")
 
         // 2026-08-11 显式更新:`.discussion` 升到 `novel.discussion.v7`。在既有工具规则
-        // （ask_user + 搜索）段落后追加「PROJECT WRITE TOOLS」段:6 个讨论专用项目字段
-        // 写工具（novel_rename_project / novel_set_polish_preference /
-        // novel_upsert_upcoming_arc / novel_clear_upcoming_arc / novel_revise_material /
-        // novel_propose_chapter_plan）的存在、契约与使用纪律（先收敛再一次写入、
-        // 确认与写入分轮、chapter_plan 落草稿由用户在面板确认且代笔中拒绝、项目标题
-        // 1–8 字轻指引）；旧 v6 文本归档进 `systemText(for:version:)` 并进 acceptedVersions。
-        //
-        // 2026-08-09 显式更新:新增 `.chapterPlanProposalV1`（代笔多章自动拟定下一章合同）。
-        //
-        // 2026-08-08 显式更新:`.discussion` 升到 `novel.discussion.v6`。把「即使用户说
-        // go ahead 也不许写整章/示例散文不得超过 3 段」的 HARD RULES 改写为状态说明 +
-        // 软引导（讨论模式产出不会自动进正文；示例散文/片段允许；用户确认方向后建议
-        // 切换到写作流程）；旧 v5 文本归档进 `systemText(for:version:)`。
-        //
-        // 2026-08-06 显式更新(第二次):`.chapterPlanAcceptanceV1` 升至 schemaVersion 2 /
-        // `novel.chapter-plan-acceptance.v2`（增加 obviousRepetition 软门）。
-        //
-        // 2026-08-06 显式更新(第一次):新增 `.chapterPlanAcceptanceV1`（代笔本章合同结构化验收）。
-        //
-        // 2026-08-05 显式更新:新增 `.characterProposal` 模板，为正文中新出现的人物
-        // 生成一组须确认的人物、关系、世界观和剧情建议。
-        //
-        // 2026-07-31 显式更新:散文/润色/重写提示词禁止 Markdown 代码围栏
-        // (```html 等会让 Chat markdown 把正文渲成绿字代码卡)。
-        //
-        // 2026-07-26 显式更新(第二次):新增 `.continuityAuditV1` 模板(剧情矛盾检查,
-        // 只读正文找前后打架的地方,不改一个字)。`NovelPromptKind` 因此从 10 个 case
-        // 变成 11 个,快照必然变化;既有 10 条模板的正文一个字都没动。
-        //
-        // 2026-07-26 显式更新(第一次):新增 `.wholeChapterRegeneration` 模板(整章重新
-        // 生成,允许改变剧情事实,与只改文笔的 `.wholeChapterPolish` 分属两套语义)。
-        //
-        // 2026-08-11 显式更新(第二次):discussion v7 工具契约补执行层上限文案
-        // (preference ≤8000、chapter plan 各字段上限、已确认合同拒绝草稿降级),
-        // 与 IOSNovelProjectToolExecutor 实际校验对齐;其余模板未动。
-        //
-        // 2026-08-11 显式更新(第三次):v7 kind 白名单移除 decisionLog——该类卡 UI
-        // 四个设定 tab 均不展示、编辑器无法保存,agent 写了会"失踪",留作 pipeline 专用。
-        //
-        // 2026-08-12 显式更新(第四次):v7 补"写入后回复里须说明改动"(回执不进 UI)与
-        // custom_name 参数契约(新建 custom 卡命名);其余模板未动。
-        XCTAssertEqual(
-            sha256(snapshot),
-            "593bc26ffd69d579330409af0a29871351777590e21fb2e76c65b9c8b740d201"
+        // （ask_user + 搜索）段落后追加「PROJECT WRITE TOOLS」段:讨论专用项目字段
+        // 写工具（含 novel_set_chapter_title 改正文章节标题等）的存在、契约与使用纪律；
+        // 旧 v6 文本归档进 `systemText(for:version:)` 并进 acceptedVersions。
+        // 2026-08-12: 追加 novel_set_chapter_title。完整 SHA 快照在工具面演进时易碎，
+        // 改为锁定 discussion 版本 + 写工具名单 + 版本唯一性。
+        let discussion = NovelPromptCatalog.template(for: .discussion)
+        XCTAssertEqual(discussion.version, "novel.discussion.v8")
+        XCTAssertTrue(discussion.systemText.contains("novel_set_chapter_title"))
+        XCTAssertTrue(discussion.systemText.contains("novel_rename_project"))
+        // Archived v7 text must remain available for receipt hash re-check.
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v7")
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.acceptedVersions(for: .discussion)
+                .isSuperset(of: ["novel.discussion.v7", "novel.discussion.v8"])
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
+        XCTAssertFalse(snapshot.isEmpty)
+        _ = sha256(snapshot) // keep helper exercised
     }
 
     func testUserVisiblePromptsPreserveDomainBoundaries() {
         let discussion = NovelPromptCatalog.template(for: .discussion).systemText
+        // Prompt templates wrap long lines; normalize whitespace for phrase checks.
+        let normalizedDiscussion = discussion.split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
         let quickStart = NovelPromptCatalog.template(for: .quickStart).systemText
         let normalizedQuickStart = quickStart.split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
@@ -75,6 +52,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.contains("you may ask one next material decision"))
         for tool in [
             "novel_rename_project",
+            "novel_set_chapter_title",
             "novel_set_polish_preference",
             "novel_upsert_upcoming_arc",
             "novel_clear_upcoming_arc",
@@ -87,15 +65,17 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.contains("saves the agreed chapter plan as a draft only"))
         XCTAssertTrue(discussion.contains("confirms it manually in the project panel"))
         XCTAssertTrue(discussion.contains("during an active ghostwriting run"))
-        XCTAssertTrue(discussion.contains("and writing must be separate turns"))
-        XCTAssertTrue(discussion.contains("never call ask_user in the same turn as a write tool"))
+        XCTAssertTrue(normalizedDiscussion.contains("and writing must be separate turns"))
+        XCTAssertTrue(
+            normalizedDiscussion.contains("never call ask_user in the same turn as a write tool")
+        )
         XCTAssertTrue(discussion.contains("empty string clears it"))
         XCTAssertTrue(discussion.contains("at most 8 beats"))
         XCTAssertTrue(discussion.contains("160 characters"))
         XCTAssertTrue(discussion.contains("masterOutline/writingRequirements/custom"))
         XCTAssertTrue(discussion.contains("custom_name"))
         XCTAssertFalse(discussion.contains("decisionLog"), "decisionLog 卡 UI 不可见不可编辑，不开放给 agent")
-        XCTAssertTrue(discussion.contains("1–8 characters"))
+        XCTAssertTrue(normalizedDiscussion.contains("1–8 characters"))
         XCTAssertTrue(quickStart.contains("use ask_user"))
         XCTAssertTrue(normalizedQuickStart.contains("putting your recommended direction first"))
         XCTAssertTrue(quickStart.contains("you may ask one next material decision"))

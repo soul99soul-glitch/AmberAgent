@@ -50,6 +50,71 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         )
     }
 
+    /// Seed one working chapter via repository create of a validated document.
+    private func makeHarnessWithChapter(
+        title: String = "旧标题",
+        content: String = "第一章正文。"
+    ) async throws -> (Harness, NovelChapterID) {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        var document = try NovelTestFixtures.document()
+        let projectID = document.project.id
+        let branchID = document.branches[0].id
+        let chapterID = NovelChapterID()
+        let versionID = NovelChapterVersionID()
+        let now = document.project.updatedAt
+        document.chapters.append(NovelChapterRecord(id: chapterID, createdAt: now))
+        document.chapterVersions.append(NovelChapterVersionRecord(
+            id: versionID,
+            chapterID: chapterID,
+            kind: .collected,
+            title: title,
+            content: content,
+            factCompatibilityID: UUID(),
+            sourceCandidateID: nil,
+            createdAt: now,
+            operationID: document.appliedOperations[0].operationID
+        ))
+        let selection = NovelChapterSelection(chapterID: chapterID, versionID: versionID)
+        // Only attach manuscript to existing head checkpoint. Do not bump
+        // workingRevision without a matching applied operation (timeline check).
+        document.branches[0].workingChapterSelections = [selection]
+        if let idx = document.checkpoints.firstIndex(where: {
+            $0.id == document.branches[0].headCheckpointID
+        }) {
+            let checkpoint = document.checkpoints[idx]
+            document.checkpoints[idx] = NovelBranchCheckpointRecord(
+                id: checkpoint.id,
+                kind: checkpoint.kind,
+                createdOnBranchID: checkpoint.createdOnBranchID,
+                parentCheckpointID: checkpoint.parentCheckpointID,
+                chapterSelections: [selection],
+                stateSnapshotID: checkpoint.stateSnapshotID,
+                sessionCursor: checkpoint.sessionCursor,
+                branchOverrideRevisionIDs: checkpoint.branchOverrideRevisionIDs,
+                sourceCandidateID: checkpoint.sourceCandidateID,
+                baseHeadRevision: checkpoint.baseHeadRevision,
+                operationID: checkpoint.operationID,
+                createdAt: checkpoint.createdAt
+            )
+        }
+        try NovelDocumentValidator.validate(document)
+        _ = try await repository.createProject(document)
+        let creation = DefaultNovelCreation(repository: repository)
+        let executor = IOSNovelProjectToolExecutor(
+            projectContext: NovelProjectToolRunContext(projectID: projectID, branchID: branchID),
+            creation: creation
+        )
+        let harness = Harness(
+            root: root,
+            creation: creation,
+            projectID: projectID,
+            branchID: branchID,
+            executor: executor
+        )
+        return (harness, chapterID)
+    }
+
     private func jsonArgs(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object)
         return String(data: data, encoding: .utf8)!
@@ -178,6 +243,67 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
             $0.id == updatedMaterial.currentRevisionID
         })?.title, "魔法规则（修订）")
         XCTAssertTrue(snapshot.appliedOperations.contains { $0.kind == .reviseMaterial })
+    }
+
+    func testSetChapterTitleRenamesLatestWorkingChapterWithoutChangingBody() async throws {
+        let (harness, chapterID) = try await makeHarnessWithChapter()
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let empty = await harness.execute("novel_set_chapter_title", jsonArgs(["title": ""]))
+        guard case .failed = empty else {
+            XCTFail("空标题应失败，实际 \(empty)")
+            return
+        }
+
+        let outcome = await harness.execute(
+            "novel_set_chapter_title",
+            jsonArgs(["title": "同行"])
+        )
+        guard case .filled(let receipt) = outcome else {
+            XCTFail("Expected filled, got \(outcome)")
+            return
+        }
+        XCTAssertTrue(receipt.contains("旧标题"))
+        XCTAssertTrue(receipt.contains("同行"))
+
+        let snapshot = try await harness.snapshot()
+        let selection = try XCTUnwrap(snapshot.branches.first?.workingChapterSelections.first)
+        XCTAssertEqual(selection.chapterID, chapterID)
+        let version = try XCTUnwrap(snapshot.chapterVersions.first(where: {
+            $0.id == selection.versionID
+        }))
+        XCTAssertEqual(version.title, "同行")
+        XCTAssertEqual(version.content, "第一章正文。")
+        XCTAssertTrue(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
+        XCTAssertEqual(snapshot.branches.first?.syncStatus, .needsSync)
+    }
+
+    func testSetChapterTitleByOrdinalAndRejectsMissingManuscript() async throws {
+        let emptyHarness = try await makeHarness()
+        defer { try? FileManager.default.removeItem(at: emptyHarness.root) }
+        let missing = await emptyHarness.execute(
+            "novel_set_chapter_title",
+            jsonArgs(["title": "新名"])
+        )
+        guard case .failed(let reason) = missing else {
+            XCTFail("无正文时应失败，实际 \(missing)")
+            return
+        }
+        XCTAssertTrue(reason.contains("还没有收录正文"))
+
+        let (harness, _) = try await makeHarnessWithChapter(title: "甲", content: "A")
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+        let byOrdinal = await harness.execute(
+            "novel_set_chapter_title",
+            jsonArgs(["title": "乙", "chapter_ordinal": 1])
+        )
+        guard case .filled = byOrdinal else {
+            XCTFail("Expected filled for ordinal 1, got \(byOrdinal)")
+            return
+        }
+        let snapshot = try await harness.snapshot()
+        let versionID = try XCTUnwrap(snapshot.branches.first?.workingChapterSelections.first?.versionID)
+        XCTAssertEqual(snapshot.chapterVersions.first(where: { $0.id == versionID })?.title, "乙")
     }
 
     func testProposeChapterPlanSavesDraftAndReusesExistingPlanID() async throws {

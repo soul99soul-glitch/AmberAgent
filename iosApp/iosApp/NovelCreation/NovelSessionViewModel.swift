@@ -285,6 +285,19 @@ private struct NovelSessionProjectionCacheEntry {
     let model: NovelSessionListModel
 }
 
+private struct NovelCharacterIdentityMentionsCacheKey: Equatable {
+    let projectRevision: Int64
+    let configRevision: Int64
+    let branchID: NovelBranchID
+    let stateSnapshotID: NovelStateSnapshotID
+    let unresolvedNames: [String]
+}
+
+private struct NovelCharacterIdentityMentionsCacheEntry {
+    let key: NovelCharacterIdentityMentionsCacheKey
+    let value: [NovelCharacterIdentityMention]
+}
+
 @MainActor
 @Observable
 final class NovelSessionViewModel {
@@ -345,6 +358,12 @@ final class NovelSessionViewModel {
     /// 代笔 pipeline 自己发起整章时短暂置真，避免 `isGhostwriting` 折进 `isBusy` 挡掉自己的 start。
     @ObservationIgnored var isGhostwriteStartingRun = false
     @ObservationIgnored private var projectionCache: NovelSessionProjectionCacheEntry?
+    @ObservationIgnored private var pendingCharacterIdentityMentionsCache:
+        NovelCharacterIdentityMentionsCacheEntry?
+    @ObservationIgnored private var characterIdentityChoicesCache:
+        (projectRevision: Int64, configRevision: Int64, value: [(material: NovelMaterialRecord, title: String)])?
+    /// Session-open staging: body must not pull secondary chrome until this advances.
+    private(set) var loadStage: NovelSessionLoadStage = .idle
 #if DEBUG
     @ObservationIgnored private(set) var fullProjectionBuildCountForTesting = 0
 #endif
@@ -409,61 +428,137 @@ final class NovelSessionViewModel {
         }
     }
 
+    /// Presentation-facing list: empty until secondary chrome stage so open layout
+    /// does not pay identity resolution in the same frames as core transcript.
     var pendingCharacterIdentityMentions: [NovelCharacterIdentityMention] {
+        guard loadStage >= .secondaryChrome else { return [] }
+        return resolvedPendingCharacterIdentityMentions
+    }
+
+    /// Domain-facing list: independent of load stage. Actions/tests must use this
+    /// so closed-loop is not coupled to presentation staging.
+    var resolvedPendingCharacterIdentityMentions: [NovelCharacterIdentityMention] {
         guard snapshotMatchesBinding,
               let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot else { return [] }
         let state = branch.currentState
-        let identities = workspace.activeMaterials.compactMap { material -> NovelCharacterIdentity? in
-            guard material.kind == .character,
-                  let revision = NovelPresentation.effectiveRevision(
-                      for: material,
-                      project: project,
-                      branch: branch
-                  ) else { return nil }
-            return NovelCharacterIdentity(
-                materialID: material.id,
-                canonicalName: revision.title,
-                aliases: workspace.effectiveAliases(for: material)
-            )
+        // Cache: body re-evaluates this getter continuously; large projects hit
+        // 0x8BADF00D when this path (or the cards it drives) runs every frame.
+        let cacheKey = NovelCharacterIdentityMentionsCacheKey(
+            projectRevision: project.project.revision,
+            configRevision: project.project.configRevision,
+            branchID: branch.branch.id,
+            stateSnapshotID: state.id,
+            unresolvedNames: state.unresolvedEntityNames
+        )
+        if let cached = pendingCharacterIdentityMentionsCache, cached.key == cacheKey {
+            return cached.value
         }
-        let resolver = NovelCharacterIdentityResolver(identities: identities)
+
+        // Fast known-set only: current titles + stored aliases.
+        // Do NOT walk appliedOperations / settingProposals / revision history here —
+        // that O(ops × materials) work used to freeze session open on 赵大来了-scale
+        // projects. Missing a historical alias only risks an extra card, not data loss.
+        var knownKeys: Set<String> = []
+        knownKeys.reserveCapacity(max(16, workspace.activeMaterials.count * 2))
+        for material in workspace.activeMaterials where material.kind == .character {
+            if let revision = NovelPresentation.effectiveRevision(
+                for: material,
+                project: project,
+                branch: branch
+            ) {
+                let titleKey = NovelCharacterIdentityResolver.normalize(revision.title)
+                if !titleKey.isEmpty { knownKeys.insert(titleKey) }
+            }
+            for alias in material.aliases {
+                let aliasKey = NovelCharacterIdentityResolver.normalize(alias)
+                if !aliasKey.isEmpty { knownKeys.insert(aliasKey) }
+            }
+        }
         let clarifiedKeys = Set(
             state.characterIdentityClarifications.map {
                 NovelCharacterIdentityResolver.normalize($0.mention)
             }
         )
-        let unresolvedByKey = Dictionary(
-            state.unresolvedEntityNames.map {
-                (NovelCharacterIdentityResolver.normalize($0), $0)
-            },
-            uniquingKeysWith: { first, _ in first }
-        )
-        let eventIDs = Set(state.eventIDs)
         var namesByKey: [String: String] = [:]
-        for event in project.events where eventIDs.contains(event.id) && event.kind.hasPrefix("character.") {
-            for reference in event.entityReferences {
-                let key = NovelCharacterIdentityResolver.normalize(reference)
-                guard let unresolved = unresolvedByKey[key],
-                      !resolver.isKnown(reference),
-                      !clarifiedKeys.contains(key) else { continue }
-                namesByKey[key] = unresolved
-            }
+        for name in state.unresolvedEntityNames {
+            let key = NovelCharacterIdentityResolver.normalize(name)
+            guard !key.isEmpty,
+                  !clarifiedKeys.contains(key),
+                  !knownKeys.contains(key) else { continue }
+            namesByKey[key] = name
         }
-        return namesByKey.values.sorted().map(NovelCharacterIdentityMention.init(name:))
+        let value = namesByKey.values.sorted {
+            $0.localizedStandardCompare($1) == .orderedAscending
+        }.map(NovelCharacterIdentityMention.init(name:))
+        pendingCharacterIdentityMentionsCache = NovelCharacterIdentityMentionsCacheEntry(
+            key: cacheKey,
+            value: value
+        )
+        return value
     }
 
+    /// Cap session cards so a large unresolved set cannot paint dozens of heavy
+    /// forms in one ScrollView body (true freeze source after open).
+    static let maxVisibleCharacterIdentityCards = 3
+    /// Cap inline choice buttons; longer character rosters use a compact menu.
+    static let maxInlineCharacterIdentityChoices = 6
+
+    /// Presentation-facing choices (stage-gated). Domain/actions use
+    /// `resolvedCharacterIdentityChoices`.
     var characterIdentityChoices: [(material: NovelMaterialRecord, title: String)] {
-        guard let project = workspace.projectSnapshot else { return [] }
-        return workspace.activeMaterials.compactMap { material in
-            guard material.kind == .character,
-                  let revision = NovelPresentation.effectiveRevision(
-                      for: material,
-                      project: project,
-                      branch: workspace.branchSnapshot
-                  ) else { return nil }
-            return (material, revision.title)
-        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        guard loadStage >= .secondaryChrome else { return [] }
+        return resolvedCharacterIdentityChoices
+    }
+
+    var resolvedCharacterIdentityChoices: [(material: NovelMaterialRecord, title: String)] {
+        guard snapshotMatchesBinding,
+              let project = workspace.projectSnapshot else { return [] }
+        let rev = project.project.revision
+        let config = project.project.configRevision
+        if let cached = characterIdentityChoicesCache,
+           cached.projectRevision == rev,
+           cached.configRevision == config {
+            return cached.value
+        }
+        // Titles only — do not expand proposal/history aliases here.
+        let value: [(material: NovelMaterialRecord, title: String)] = workspace.activeMaterials
+            .compactMap { material in
+                guard material.kind == .character,
+                      let revision = NovelPresentation.effectiveRevision(
+                          for: material,
+                          project: project,
+                          branch: workspace.branchSnapshot
+                      ) else { return nil }
+                return (material, revision.title)
+            }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        characterIdentityChoicesCache = (rev, config, value)
+        return value
+    }
+
+    /// Advance open staging. Call only from the session view's sequenced open task
+    /// (or binding reset). Stages only move forward, except reset to `.idle`.
+    /// Non-idle targets require an established core bind first (no idle→secondary leap).
+    func advanceLoadStage(to stage: NovelSessionLoadStage) {
+        if stage == .idle {
+            loadStage = .idle
+            pendingCharacterIdentityMentionsCache = nil
+            characterIdentityChoicesCache = nil
+            return
+        }
+        guard stage > loadStage else { return }
+        if stage > .coreTranscript, loadStage < .coreTranscript {
+            // Cannot skip past core without a successful bind.
+            return
+        }
+        loadStage = stage
+        // Warm identity caches once when secondary chrome opens so the first body
+        // that paints cards does not pay resolution + choice sort mid-layout.
+        if stage >= .secondaryChrome {
+            _ = resolvedPendingCharacterIdentityMentions
+            _ = resolvedCharacterIdentityChoices
+        }
     }
 
     func activeCharacterProposal(
@@ -527,6 +622,40 @@ final class NovelSessionViewModel {
         ))
         projectionCache = NovelSessionProjectionCacheEntry(key: key, model: model)
         return model
+    }
+
+    /// Build the session list model off the main actor, then install the cache.
+    /// Call before advancing to `.coreTranscript` on cold open.
+    private func warmProjectionCache(
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot,
+        expandedArchiveIDs: Set<NovelMessageID>
+    ) async {
+        let key = NovelSessionProjectionCacheKey(
+            project: project,
+            branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs,
+            transientTail: transientTail
+        )
+        if let cached = projectionCache, cached.key == key {
+            return
+        }
+        let input = NovelSessionProjectionInput(
+            project: project,
+            branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs,
+            transientTail: transientTail
+        )
+        let model = await Task.detached(priority: .userInitiated) {
+            NovelSessionPresentation.project(input)
+        }.value
+        // Drop result if the user switched sessions while projecting.
+        guard binding?.projectID == project.project.id,
+              binding?.branchID == branch.branch.id else { return }
+        #if DEBUG
+        fullProjectionBuildCountForTesting += 1
+        #endif
+        projectionCache = NovelSessionProjectionCacheEntry(key: key, model: model)
     }
 
     var currentChapterVersions: [NovelChapterVersionRecord] {
@@ -678,7 +807,9 @@ final class NovelSessionViewModel {
         refreshErrorMessage != nil
     }
 
-    func bindToCurrentSelection() async {
+    func bindToCurrentSelection(
+        expandedArchiveIDs: Set<NovelMessageID> = []
+    ) async {
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
               workspace.selectedProjectID == project.project.id,
@@ -711,9 +842,26 @@ final class NovelSessionViewModel {
             refreshErrorMessage = nil
             lastFailure = nil
             granularity = project.project.lastGenerationGranularity
+            // New session: drop secondary chrome and projection until staged open advances.
+            advanceLoadStage(to: .idle)
+            projectionCache = nil
+            pendingCharacterIdentityMentionsCache = nil
+            characterIdentityChoicesCache = nil
         }
         consumerAttachmentDesired = true
         hydrateTerminalState()
+        // Project off the main actor while still at .idle so the open spinner can
+        // animate; sync project() on MainActor was freezing the scene (watchdog).
+        await warmProjectionCache(
+            project: project,
+            branch: branch,
+            expandedArchiveIDs: expandedArchiveIDs
+        )
+        guard binding == next else { return }
+        advanceLoadStage(to: .coreTranscript)
+        // Ghostwrite restore / run attach after first core frame is allowed to commit.
+        await Task.yield()
+        guard binding == next else { return }
         await restoreGhostwriteProgressIfNeeded(for: next)
         let currentActiveRun = activeRun
         if let run = currentActiveRun,
@@ -893,7 +1041,7 @@ final class NovelSessionViewModel {
     ) async -> Bool {
         let normalizedMention = mention.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedGuidance = guidance.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard pendingCharacterIdentityMentions.contains(where: {
+        guard resolvedPendingCharacterIdentityMentions.contains(where: {
             NovelCharacterIdentityResolver.normalize($0.name) ==
                 NovelCharacterIdentityResolver.normalize(normalizedMention)
         }) else {
@@ -3067,6 +3215,8 @@ private extension NovelSessionViewModel {
         currentRunDraft = nil
         lastRetryDraft = nil
         lastRetryRunID = nil
+        advanceLoadStage(to: .idle)
+        projectionCache = nil
     }
 
     func cancelPolishRetryForBindingChange(

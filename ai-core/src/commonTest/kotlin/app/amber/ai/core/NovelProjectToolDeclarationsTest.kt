@@ -121,6 +121,23 @@ class NovelProjectToolDeclarationsTest {
     }
 
     @Test
+    fun setChapterTitleDeclarationPinsTitleAndOptionalSelectors() {
+        val tool = createNovelSetChapterTitleToolDeclaration()
+        assertEquals("novel_set_chapter_title", tool.name)
+        assertFalse(tool.needsApproval)
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertEquals(listOf("title"), params.required)
+        assertTrue("chapter_ordinal" in params.properties)
+        assertTrue("chapter_id" in params.properties)
+        val description = tool.description
+        assertTrue("title" in description)
+        assertTrue("without rewriting" in description || "without rewriting the chapter body" in description)
+        assertTrue("last" in description || "latest" in description)
+    }
+
+    @Test
     fun novelDeclarationsAreNotPartOfTheIosToolCatalog() {
         val novelNames = listOf(
             "novel_rename_project",
@@ -129,6 +146,7 @@ class NovelProjectToolDeclarationsTest {
             "novel_clear_upcoming_arc",
             "novel_revise_material",
             "novel_propose_chapter_plan",
+            "novel_set_chapter_title",
         )
         val catalogNames = iosToolDeclarations(novelNames).map { it.name }
         assertTrue(catalogNames.isEmpty(), "小说写工具不得进入 iosToolDeclaration 注册表: $catalogNames")

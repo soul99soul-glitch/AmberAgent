@@ -9,15 +9,14 @@ struct NovelProjectToolRunContext: Sendable, Equatable {
     let branchID: NovelBranchID
 }
 
-/// Executes the six novel project field-write tools inside the discussion
-/// agent loop. Every tool decodes JSON arguments, validates them, translates
-/// them into an existing `NovelAction`, and runs it through
-/// `DefaultNovelCreation.perform` — the single reducer transaction path. There
-/// is no parallel write channel, and nothing here bypasses the domain layer.
+/// Executes the novel project field-write tools inside the discussion agent loop.
+/// Every tool decodes JSON arguments, validates them, translates them into an
+/// existing `NovelAction`, and runs it through `DefaultNovelCreation.perform` —
+/// the single reducer transaction path. There is no parallel write channel, and
+/// nothing here bypasses the domain layer.
 ///
-/// Guard: `novel_revise_material` and `novel_propose_chapter_plan` refuse to
-/// run while the project has a running generation or an active ghostwrite
-/// pipeline (aligned with the UI's contract-editing disable rules).
+/// Guard: material/plan/chapter-title tools refuse while ghostwrite is advancing
+/// (aligned with the UI's contract-editing disable rules).
 final class IOSNovelProjectToolExecutor: IOSToolExecutor {
     static let supportedToolNames: [String] = [
         "novel_rename_project",
@@ -26,6 +25,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         "novel_clear_upcoming_arc",
         "novel_revise_material",
         "novel_propose_chapter_plan",
+        "novel_set_chapter_title",
     ]
 
     private weak var creation: DefaultNovelCreation?
@@ -52,6 +52,8 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return await reviseMaterial(arguments)
         case "novel_propose_chapter_plan":
             return await proposeChapterPlan(arguments)
+        case "novel_set_chapter_title":
+            return await setChapterTitle(arguments)
         default:
             return .failed("未知的小说项目工具：\(name)。")
         }
@@ -312,6 +314,88 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         )
     }
 
+    private func setChapterTitle(_ arguments: String) async -> IOSAgentToolOutcome {
+        guard let args: SetChapterTitleArguments = decode(arguments) else {
+            return .failed(
+                "novel_set_chapter_title 参数无效：需要 title（可选 chapter_ordinal / chapter_id）。"
+            )
+        }
+        let title = args.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            return .failed("novel_set_chapter_title 的 title 不能为空。")
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法修改章节标题。")
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failed(reason)
+        }
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return .failed("当前分支不可用，无法修改章节标题。")
+        }
+        let selections = branch.workingChapterSelections
+        guard !selections.isEmpty else {
+            return .failed("当前分支还没有收录正文，无法修改章节标题。")
+        }
+
+        let selection: NovelChapterSelection
+        if let rawID = args.chapter_id?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rawID.isEmpty {
+            guard let uuid = UUID(uuidString: rawID) else {
+                return .failed("novel_set_chapter_title 的 chapter_id 不是合法 UUID：\(rawID)。")
+            }
+            let chapterID = NovelChapterID(uuid)
+            guard let match = selections.first(where: { $0.chapterID == chapterID }) else {
+                return .failed("找不到 chapter_id=\(rawID) 的工作章节。")
+            }
+            selection = match
+        } else if let ordinal = args.chapter_ordinal {
+            guard ordinal >= 1, ordinal <= selections.count else {
+                return .failed(
+                    "novel_set_chapter_title 的 chapter_ordinal 越界：当前共 \(selections.count) 章，收到 \(ordinal)。"
+                )
+            }
+            selection = selections[ordinal - 1]
+        } else {
+            selection = selections[selections.count - 1]
+        }
+
+        guard let version = snapshot.chapterVersions.first(where: {
+            $0.id == selection.versionID && $0.chapterID == selection.chapterID
+        }) else {
+            return .failed("目标章节版本丢失，无法修改标题。")
+        }
+        let oldTitle = version.title
+        guard oldTitle != title else {
+            return .failed("章节标题已是「\(title)」，无需修改。")
+        }
+
+        let command = NovelSaveManualEditCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: snapshot.project.revision,
+                expectedConfigRevision: snapshot.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: projectID,
+            branchID: branchID,
+            chapterID: selection.chapterID,
+            versionID: NovelChapterVersionID(),
+            title: title,
+            content: version.content,
+            factCompatibilityID: UUID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        if let failure = await perform(.saveManualEdit(command)) {
+            return .failed("章节标题保存失败：\(failure)")
+        }
+        let ordinal = (selections.firstIndex(where: { $0.chapterID == selection.chapterID }) ?? 0) + 1
+        return .filled(
+            "已将第 \(ordinal) 章标题「\(oldTitle)」→「\(title)」。"
+                + " 正文未改；分支可能需要同步剧情状态。"
+        )
+    }
+
     // MARK: - Helpers
 
     /// Returns nil on success; a human-readable failure reason otherwise.
@@ -349,7 +433,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         if let phase = progress?.phase,
            phase == .writing || phase == .accepting || phase == .collecting ||
            phase == .syncing || phase == .planning || phase == .revising {
-            return "代笔正在推进本章（阶段：\(phase.rawValue)），本章计划与设定资料暂不可修改；请先暂停代笔。"
+            return "代笔正在推进本章（阶段：\(phase.rawValue)），项目字段暂不可改；请先暂停代笔。"
         }
         return nil
     }
@@ -366,7 +450,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         )
     }
 
-    /// 白名单与 KMP schema/prompt v7 一致。decisionLog 刻意不开放：UI 四个设定
+    /// 白名单与 KMP schema/prompt discussion v8 一致。decisionLog 刻意不开放：UI 四个设定
     /// tab 均不展示该类卡、编辑器也无法保存（agent 写了会"失踪"），留作 pipeline 专用。
     private func materialKind(from raw: String) -> NovelMaterialKind? {
         switch raw {
@@ -417,4 +501,10 @@ private struct ProposeChapterPlanArguments: Decodable {
     let must_not_happen: [String]
     let ending_hook: String
     let visible_facts: [String]
+}
+
+private struct SetChapterTitleArguments: Decodable {
+    let title: String
+    let chapter_ordinal: Int?
+    let chapter_id: String?
 }

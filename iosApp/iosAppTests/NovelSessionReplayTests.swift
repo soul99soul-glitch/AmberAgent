@@ -329,6 +329,18 @@ final class NovelSessionReplayTests: XCTestCase {
     }
 
     func testLongHistoryWindowStartsAtRecentRowsAndExpandsInBoundedPages() {
+        XCTAssertEqual(NovelSessionHistoryWindowPolicy.coldOpenLimit, 2)
+        XCTAssertEqual(NovelSessionHistoryWindowPolicy.initialLimit, 4)
+        XCTAssertEqual(NovelSessionHistoryWindowPolicy.pageSize, 12)
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterColdOpenSettles(currentLimit: 2),
+            NovelSessionHistoryWindowPolicy.initialLimit
+        )
+        XCTAssertEqual(
+            NovelSessionHistoryWindowPolicy.limitAfterColdOpenSettles(currentLimit: 40),
+            40,
+            "User-expanded history must not shrink when cold open settles."
+        )
         XCTAssertEqual(
             NovelSessionHistoryWindowPolicy.startIndex(
                 totalCount: 160,
@@ -338,15 +350,23 @@ final class NovelSessionReplayTests: XCTestCase {
         )
         XCTAssertEqual(
             NovelSessionHistoryWindowPolicy.expandedLimit(currentLimit: 4, totalCount: 160),
-            28
+            16
         )
         XCTAssertEqual(
             NovelSessionHistoryWindowPolicy.expandedLimit(currentLimit: 4, totalCount: 20),
-            20
+            16
         )
         XCTAssertEqual(
             NovelSessionHistoryWindowPolicy.startIndex(totalCount: 4, limit: 4),
             0
+        )
+        XCTAssertLessThan(
+            NovelSessionLoadStage.idle,
+            NovelSessionLoadStage.coreTranscript
+        )
+        XCTAssertLessThan(
+            NovelSessionLoadStage.coreTranscript,
+            NovelSessionLoadStage.secondaryChrome
         )
     }
 
@@ -1939,6 +1959,7 @@ final class NovelSessionReplayTests: XCTestCase {
             ),
             [.measuredStreamGrowth(isAtBottom: false)]
         )
+        // 未跟随底：晚到高度只走 static，不抢滚动。
         XCTAssertEqual(
             NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: 132,
@@ -1946,10 +1967,39 @@ final class NovelSessionReplayTests: XCTestCase {
                 userDragging: false,
                 isLiveTail: false,
                 isSettlingTerminal: false,
+                isFollowingBottom: false,
                 previousIsAtBottom: true,
                 currentIsAtBottom: false
             ),
             [.staticContentGrowth(isAtBottom: false)]
+        )
+        // 跟随底且此前贴底：讨论完成后人物问答卡晚到插入应继续贴底。
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 132,
+                currentContentHeight: 148,
+                userDragging: false,
+                isLiveTail: false,
+                isSettlingTerminal: false,
+                isFollowingBottom: true,
+                previousIsAtBottom: true,
+                currentIsAtBottom: false
+            ),
+            [.measuredStreamGrowth(isAtBottom: false)]
+        )
+        // 跟随底但此前已离底：勿每帧抢滚动（会与布局互踢）。
+        XCTAssertEqual(
+            NovelSessionScrollGeometryPolicy.events(
+                previousContentHeight: 132,
+                currentContentHeight: 148,
+                userDragging: false,
+                isLiveTail: false,
+                isSettlingTerminal: false,
+                isFollowingBottom: true,
+                previousIsAtBottom: false,
+                currentIsAtBottom: false
+            ),
+            []
         )
         XCTAssertEqual(
             NovelSessionScrollGeometryPolicy.events(
@@ -1990,7 +2040,7 @@ final class NovelSessionReplayTests: XCTestCase {
     }
 
     func testStaticContentGrowthDoesNotFallThroughToViewportFollow() {
-        // 到底状态翻转时只产生按钮语义事件，不落入会触发回底的 viewportChanged。
+        // 未跟随底时：到底状态翻转只产生按钮语义，不落入会触发回底的 viewportChanged。
         XCTAssertEqual(
             NovelSessionScrollGeometryPolicy.events(
                 previousContentHeight: 120,
@@ -1998,6 +2048,7 @@ final class NovelSessionReplayTests: XCTestCase {
                 userDragging: false,
                 isLiveTail: false,
                 isSettlingTerminal: false,
+                isFollowingBottom: false,
                 previousIsAtBottom: true,
                 currentIsAtBottom: false
             ),
@@ -2011,6 +2062,7 @@ final class NovelSessionReplayTests: XCTestCase {
                 userDragging: false,
                 isLiveTail: false,
                 isSettlingTerminal: false,
+                isFollowingBottom: false,
                 previousIsAtBottom: true,
                 currentIsAtBottom: true
             ),

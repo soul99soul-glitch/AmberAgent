@@ -244,11 +244,20 @@ final class NovelSessionViewModelTests: XCTestCase {
             document: document,
             scripts: []
         )
+        // Domain list is stage-independent; presentation list stays empty until secondary.
+        XCTAssertEqual(
+            harness.session.resolvedPendingCharacterIdentityMentions.map(\.name),
+            ["瘦子"]
+        )
+        XCTAssertTrue(harness.session.pendingCharacterIdentityMentions.isEmpty)
+        harness.session.advanceLoadStage(to: .steadyTranscript)
+        harness.session.advanceLoadStage(to: .secondaryChrome)
         XCTAssertEqual(harness.session.pendingCharacterIdentityMentions.map(\.name), ["瘦子"])
 
         let ignored = await harness.session.ignoreCharacterIdentityMention("瘦子")
 
         XCTAssertTrue(ignored)
+        XCTAssertTrue(harness.session.resolvedPendingCharacterIdentityMentions.isEmpty)
         XCTAssertTrue(harness.session.pendingCharacterIdentityMentions.isEmpty)
 
         let reloadedWorkspace = NovelCreationViewModel(
@@ -257,7 +266,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         await reloadedWorkspace.loadProjects(selecting: document.project.id)
         let reloadedSession = NovelSessionViewModel(workspace: reloadedWorkspace)
         await reloadedSession.bindToCurrentSelection()
-        XCTAssertTrue(reloadedSession.pendingCharacterIdentityMentions.isEmpty)
+        XCTAssertTrue(reloadedSession.resolvedPendingCharacterIdentityMentions.isEmpty)
     }
 
     func testCustomCharacterIdentityClarificationClosesItAndPersistsTheAnswer() async throws {
@@ -276,7 +285,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
 
         XCTAssertTrue(clarified)
-        XCTAssertTrue(harness.session.pendingCharacterIdentityMentions.isEmpty)
+        XCTAssertTrue(harness.session.resolvedPendingCharacterIdentityMentions.isEmpty)
         let persisted = try await repository.loadProject(id: document.project.id).document
         let branch = try XCTUnwrap(persisted.branches.first)
         let state = try XCTUnwrap(persisted.stateSnapshots.first(where: {
