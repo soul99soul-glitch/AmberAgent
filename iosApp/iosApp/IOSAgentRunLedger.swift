@@ -13,12 +13,15 @@ import Foundation
 // in now (`IOSToolCallLedgerClassifier`).
 
 /// How safe a tool call is to blindly retry after its outcome becomes unknown
-/// (process died between Started and Finished). Three values only — amber
+/// (process died between Started and Finished). Four values only — amber
 /// runs one tool at a time per run, so it doesn't need the fuller
 /// `resourceKey`/lock model a concurrent executor would.
 ///
-/// - `pure`: no observable side effect (search, fetch, asking the user a
-///   question). Always safe to retry.
+/// - `pure`: no observable side effect and no network egress (local search,
+///   catalog listing, asking the user a question). Always safe to retry.
+/// - `networkRead`: read-only network call (search_web/scrape_web) — no local
+///   write, so replay is safe; but the request itself egresses query/URL/credentials
+///   to third parties, so promotion policy must tier it above `pure`.
 /// - `idempotent`: has a side effect, but re-running with the same arguments
 ///   converges to the same state (memory edit/delete by stable id). Safe to retry.
 /// - `sideEffect`: re-running could double-apply or double-charge (workspace
@@ -26,6 +29,7 @@ import Foundation
 ///   Never auto-retried; W3 must surface it as "outcome unknown" instead.
 public enum IOSToolEffectClass: String, Sendable, Equatable {
     case pure
+    case networkRead
     case idempotent
     case sideEffect
 }
@@ -53,6 +57,35 @@ public protocol IOSAgentRunLedgering: Sendable {
         toolCallId: String,
         outcome: String
     ) async
+
+    /// Evolution contract (§15 Phase 0): finished/terminal tool events may
+    /// carry optional artifact identity, a structured outcome and a source
+    /// reference. Kept as an OVERLOAD of the original 3-parameter method so
+    /// pre-contract call sites compile unchanged; the new keys are OPTIONAL —
+    /// rows written without them (and old rows already in the table) still
+    /// decode (acceptance 4).
+    func recordToolCallFinished(
+        runId: String,
+        toolCallId: String,
+        outcome: String,
+        artifactId: String?,
+        artifactVersion: String?,
+        outcomeKind: String?,
+        errorCode: String?,
+        sourceRef: String?
+    ) async
+
+    /// Explicit `approval_denied` ledger event (§11.1 evidence source):
+    /// a user denied an approval card for this tool call. The event's
+    /// `eventId` is the stable evidence ref.
+    func recordApprovalDenied(
+        runId: String,
+        toolCallId: String,
+        toolName: String,
+        reason: String,
+        capabilityId: String?
+    ) async
+
 }
 
 /// Room-backed production ledger. An `actor` so同一实例内的 seq 查询→插入
@@ -65,6 +98,11 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
     /// agree on who wrote them.
     static let agentDescriptorId = "chat"
     static let agentVersion = "1"
+
+    /// Ledger event type for an explicitly denied approval card (§11.1). Its
+    /// `eventId` is the stable evidence ref for the denial.
+    static let approvalDeniedEventType = "approval_denied"
+    static let experienceFeedbackEventType = "experience_feedback"
 
     private let dao: AgentRuntimeDao
 
@@ -104,15 +142,49 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         }
     }
 
+    /// Pre-contract overload: delegates to the full evolution-contract form
+    /// with every optional key nil, so old callers write exactly the payload
+    /// they always did (`{"toolCallId":…,"outcome":…}`).
     func recordToolCallFinished(
         runId: String,
         toolCallId: String,
         outcome: String
     ) async {
-        let payload = Self.jsonPayload([
+        await recordToolCallFinished(
+            runId: runId,
+            toolCallId: toolCallId,
+            outcome: outcome,
+            artifactId: nil,
+            artifactVersion: nil,
+            outcomeKind: nil,
+            errorCode: nil,
+            sourceRef: nil
+        )
+    }
+
+    func recordToolCallFinished(
+        runId: String,
+        toolCallId: String,
+        outcome: String,
+        artifactId: String? = nil,
+        artifactVersion: String? = nil,
+        outcomeKind: String? = nil,
+        errorCode: String? = nil,
+        sourceRef: String? = nil
+    ) async {
+        var fields: [String: String] = [
             "toolCallId": toolCallId,
             "outcome": outcome,
-        ])
+        ]
+        // Evolution contract keys are all optional; absent keys are omitted so
+        // old rows (and old readers like `IOSToolCallLedgerRow.decode`) keep
+        // decoding both old and new payloads.
+        if let artifactId { fields["artifactId"] = artifactId }
+        if let artifactVersion { fields["artifactVersion"] = artifactVersion }
+        if let outcomeKind { fields["outcomeKind"] = outcomeKind }
+        if let errorCode { fields["errorCode"] = errorCode }
+        if let sourceRef { fields["sourceRef"] = sourceRef }
+        let payload = Self.jsonPayload(fields)
         // The attempt either produced an outcome or was definitively stopped
         // before its side effect began. A failed write here can't change that
         // fact, so unlike Started, we only log and move on.
@@ -135,6 +207,87 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         if !ok {
             print("[AmberChat] tool_call_finished ledger write failed run=\(runId) toolCallId=\(toolCallId) outcome=\(outcome)")
         }
+    }
+
+    /// Approval-denial ledger event (§11.1 required evidence source). Written
+    /// best-effort like Finished: the user's decision is already final in the
+    /// approval UI; a failed durable write only loses attribution, not the
+    /// decision.
+    func recordApprovalDenied(
+        runId: String,
+        toolCallId: String,
+        toolName: String,
+        reason: String,
+        capabilityId: String?
+    ) async {
+        var fields: [String: String] = [
+            "toolCallId": toolCallId,
+            "toolName": toolName,
+        ]
+        if let capabilityId { fields["capabilityId"] = capabilityId }
+        // `reason` is an app-owned fixed string (e.g. "User denied network
+        // search."), never user message content; kept for provenance only.
+        fields["reason"] = reason
+        let payload = Self.jsonPayload(fields)
+        let ok = await insertWithFreshSeq(runId: runId) { seq in
+            AgentEventEntity(
+                eventId: UUID().uuidString,
+                runId: runId,
+                parentRunId: nil,
+                seq: seq,
+                type: Self.approvalDeniedEventType,
+                payloadType: Self.approvalDeniedEventType,
+                payload: payload,
+                payloadSchemaVersion: 1,
+                agentDescriptorId: Self.agentDescriptorId,
+                agentVersion: Self.agentVersion,
+                isFinal: false,
+                ts: Self.nowMillis()
+            )
+        }
+        if !ok {
+            print("[AmberChat] approval_denied ledger write failed run=\(runId) toolCallId=\(toolCallId)")
+        }
+    }
+
+    func recordExperienceFeedback(
+        runId: String,
+        artifactId: String,
+        artifactVersion: String,
+        signal: String,
+        sourceExecutionEventId: String,
+        experienceId: String?
+    ) async -> String? {
+        let eventId = UUID().uuidString
+        var fields: [String: String] = [
+            "artifactId": artifactId,
+            "artifactVersion": artifactVersion,
+            "userSignal": signal,
+            "sourceExecutionEventId": sourceExecutionEventId,
+        ]
+        if let experienceId { fields["experienceId"] = experienceId }
+        let payload = Self.jsonPayload(fields)
+        let recorded = await insertWithFreshSeq(runId: runId) { seq in
+            AgentEventEntity(
+                eventId: eventId,
+                runId: runId,
+                parentRunId: nil,
+                seq: seq,
+                type: Self.experienceFeedbackEventType,
+                payloadType: Self.experienceFeedbackEventType,
+                payload: payload,
+                payloadSchemaVersion: 1,
+                agentDescriptorId: Self.agentDescriptorId,
+                agentVersion: Self.agentVersion,
+                isFinal: false,
+                ts: Self.nowMillis()
+            )
+        }
+        if !recorded {
+            print("[AmberChat] experience_feedback ledger write failed run=\(runId) artifact=\(artifactId)@\(artifactVersion)")
+            return nil
+        }
+        return eventId
     }
 
     /// seq 分配不做内存缓存：前台协调器与后台续跑协调器各持一个账本实例、写同一
@@ -218,8 +371,9 @@ enum IOSToolEffectClassMapping {
             // Local catalog search — no effect in the world.
             .pure
         case .search:
-            // search_web / scrape_web — read-only network calls.
-            .pure
+            // search_web / scrape_web — read-only network calls: replay-safe
+            // (no local write) but they do egress query/URL to third parties.
+            .networkRead
         case .memory:
             memoryEffectClass(input: input)
         case .askUser:
@@ -246,7 +400,9 @@ enum IOSToolEffectClassMapping {
             return .pure
         }
         if IOSSearchExecutor.supportedToolNames.contains(toolName) {
-            return .pure
+            // search_web / scrape_web: replay-safe (no local write) but egress
+            // query/URL/API key to third parties — tier above pure.
+            return .networkRead
         }
         if toolName == "ask_user" {
             return .pure
@@ -271,10 +427,16 @@ enum IOSToolEffectClassMapping {
             || IOSWebMountToolCatalog.unsupportedToolNames.contains(toolName) {
             return .sideEffect
         }
+        // 本机只读查询：skills_list/use_skill/skill_validate 读本机 Skill 文件与
+        // 设置；mcp_list 只刷新内存目录（IOSMcpManager.refreshServers 是纯本地
+        // 重读，不出网）；mcp_describe_tool 是已发现工具的只读目录查询（其实现
+        // 注释明确 "never touches the network and never mutates config"，
+        // IOSSkillMcpTools.swift mcpDescribeToolJSON）——按真实行为标 pure。
         if toolName == "skills_list"
             || toolName == "use_skill"
             || toolName == "skill_validate"
-            || toolName == "mcp_list" {
+            || toolName == "mcp_list"
+            || toolName == "mcp_describe_tool" {
             return .pure
         }
         if toolName == "generate_image"
@@ -394,7 +556,7 @@ enum IOSToolCallLedgerClassifier {
         switch effectClass {
         case .sideEffect:
             return .outcomeUnknown
-        case .pure, .idempotent:
+        case .pure, .networkRead, .idempotent:
             return .retryable
         }
     }

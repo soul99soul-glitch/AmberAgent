@@ -72,6 +72,9 @@ struct MessageBubbleView: View {
     var onModifyGeneratedImage: (String, String, String) -> Void = { _, _, _ in }
     var onOpenMiniApp: (String) -> Void = { _ in }
     var onOpenMiniApps: () -> Void = {}
+    /// §14.1「分析并改进」：对失败回答发起演化工作流（evidence → 诊断 →
+    /// 候选 → 评测 → 分级授权）。默认 no-op 保证既有调用点/预览可编译。
+    var onAnalyzeAndImprove: () -> Void = {}
     var isGenerating: Bool = false
     /// Global chat busy flag (any in-flight generation), used by MiniApp modify gate.
     var isChatGenerationActive: Bool = false
@@ -269,6 +272,11 @@ struct MessageBubbleView: View {
                     onRegenerate()
                 } label: {
                     Label("重新生成", systemImage: "arrow.clockwise")
+                }
+                Button {
+                    onAnalyzeAndImprove()
+                } label: {
+                    Label("分析并改进", systemImage: "wand.and.stars")
                 }
                 if assistantArtifactText != nil {
                     Button {

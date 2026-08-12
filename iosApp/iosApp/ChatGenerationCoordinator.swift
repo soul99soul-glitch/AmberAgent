@@ -510,6 +510,8 @@ struct ChatGenerationBindings {
     let setPendingMcpApproval: (McpToolApprovalRequest?) -> Void
     let setPendingCouncilApproval: (CouncilToolApprovalRequest?) -> Void
     let setPendingAskUser: (ChatAskUserRequest?) -> Void
+    /// Wave B2: recipe 审批卡（mutation step / recipe_import）。
+    var setPendingRecipeApproval: (RecipeToolApprovalRequest?) -> Void = { _ in }
     let setContextCompactState: (ChatContextCompactState) -> Void
     let persistMessages: @MainActor (KotlinUuid?) async -> Bool
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
@@ -793,16 +795,33 @@ final class ChatGenerationCoordinator {
     private lazy var claudeProvider = ClaudeKmpProvider()
     private var grokWebStreamTask: Task<Void, Never>?
     private let streamJobBox = StreamJobBox()
-    private lazy var toolRuntime = ChatToolRuntime(
-        settingsStore: dependencies.settingsStore,
-        sharedSettings: dependencies.sharedSettings,
-        localToolExecutor: dependencies.localToolExecutor,
-        searchTransport: dependencies.searchTransport,
-        mcpManager: dependencies.mcpManager,
-        orchestrationToolService: dependencies.orchestrationToolService,
-        memoryPollutionMarker: dependencies.memoryPollutionMarker,
-        conversationStoreProvider: dependencies.conversationStoreProvider
-    )
+#if DEBUG
+    /// 测试缝：注入与测试同构的 runtime（同一 recipe store / workspace /
+    /// ledger / executor），让审批 finisher 与执行方（测试直接驱动的
+    /// `toolRuntime.execute`）共享同一实例与上下文。必须在首次访问
+    /// `toolRuntime` 之前设置。
+    var toolRuntimeOverrideForTesting: ChatToolRuntime?
+#endif
+    private lazy var toolRuntime: ChatToolRuntime = {
+#if DEBUG
+        if let override = toolRuntimeOverrideForTesting {
+            return override
+        }
+#endif
+        return ChatToolRuntime(
+            settingsStore: dependencies.settingsStore,
+            sharedSettings: dependencies.sharedSettings,
+            localToolExecutor: dependencies.localToolExecutor,
+            searchTransport: dependencies.searchTransport,
+            mcpManager: dependencies.mcpManager,
+            orchestrationToolService: dependencies.orchestrationToolService,
+            memoryPollutionMarker: dependencies.memoryPollutionMarker,
+            conversationStoreProvider: dependencies.conversationStoreProvider,
+            // §15 Phase 0: the runtime records approval denials into the same
+            // durable ledger the coordinator owns (spy in tests, Room in prod).
+            ledger: toolLedger
+        )
+    }()
     // W1 durable ledger (I-1): Started/Finished bookkeeping for every tool
     // execution on the foreground path, in the shared `agent_event` table.
     // Injectable for tests (default = Room-backed production ledger).
@@ -832,6 +851,15 @@ final class ChatGenerationCoordinator {
     /// start); all tool rounds of that run reuse it, so a `tool_search` hit
     /// becomes visible to the NEXT round. New run → new bridge.
     private var currentToolExposureBridge: IosToolExposureBridge?
+    /// Wave B1 (§13.2 round-boundary seam): the dynamic catalog revision this
+    /// run's bridge was last rebuilt for. A promotion/rollback between rounds
+    /// publishes a NEW revision → the seam rebuilds the bridge over the new
+    /// catalog while carrying the exposed tool-name set forward (§16.1).
+    private var lastRoundCatalogRevision: Int64?
+    /// Wave B2 (§16.1): the catalog snapshot the CURRENT round's declarations
+    /// came from. `recipe__*` calls resolve their manifest against THIS
+    /// snapshot (in-flight pinning, §13.3) — never the live store.
+    private var currentRoundCatalogSnapshot: IOSDynamicToolCatalogSnapshot?
     /// I-4 冻结快照(`ChatRunSnapshot`):与 `currentRunId` 一起设置、一起清空,
     /// run 内的压缩配置只从这里读,不再每轮 live 读 `dependencies.sharedSettings.snapshot`。
     private var currentRunSnapshot: ChatRunSnapshot?
@@ -866,6 +894,14 @@ final class ChatGenerationCoordinator {
     /// skill_import 的只读 preview/CAS 上下文只活在当前 pending MCP 槽中；
     /// 不持久化，取消、拒绝、完成或冷启动都会清除。
     private var pendingPreparedSkillImport: IOSPreparedSkillImport?
+    /// Wave B2: recipe 审批（mutation step 暂停 / recipe_import 导入）。
+    private var pendingRecipeToolApproval: ChatPendingToolApproval?
+    private var pendingPreparedRecipeExecution: IOSRecipeExecutionState?
+    private var pendingPreparedRecipeImport: IOSPreparedRecipeImport?
+    /// Slice B（B2）：当前 pending 的 recipe 审批 request（UI 展示的对象）。
+    /// 消费前必须核对 `expectedRequestId == pendingRecipeRequest?.id`——同一
+    /// recipe 执行的不同 step 卡 id 不同，旧卡不能消费当前暂停的 step。
+    private var pendingRecipeRequest: RecipeToolApprovalRequest?
     private var pendingCouncilToolApproval: ChatPendingToolApproval?
     private var pendingAskUserToolApproval: ChatPendingToolApproval?
     /// F8 fix: I-5's "proceed and remind" verdict is computed in
@@ -950,6 +986,7 @@ final class ChatGenerationCoordinator {
             pendingWorkspaceToolApproval != nil ||
             pendingIshHandoffToolApproval != nil ||
             pendingMcpToolApproval != nil ||
+            pendingRecipeToolApproval != nil ||
             pendingCouncilToolApproval != nil ||
             pendingAskUserToolApproval != nil
     }
@@ -987,6 +1024,13 @@ final class ChatGenerationCoordinator {
         // assembly point (or rebuild from the params tools when a caller does
         // not pass one). params.tools are already the first-round visible set.
         currentToolExposureBridge = toolExposureBridge ?? IosToolExposureBridge(tools: params.tools)
+        // Wave B1: pin the run to the catalog revision it started with; the
+        // round-boundary seam rebuilds the bridge only when this changes.
+        lastRoundCatalogRevision = IOSDynamicToolRegistry.shared.currentSnapshot?.revision
+        // Wave B2: the run-start snapshot (the one ChatViewModel's assembly
+        // used for the first round's declarations) is the recipe pinning
+        // anchor for round 1.
+        currentRoundCatalogSnapshot = IOSDynamicToolRegistry.shared.currentSnapshot
         currentStartedAt = startedAt
         currentInputDigest = inputDigest
         currentConversationIdForRun = conversationId
@@ -1496,7 +1540,12 @@ final class ChatGenerationCoordinator {
                 // P0-a Fix C: carry the FULL catalog names (not just the
                 // visible subset in params.tools) so the background job can
                 // rebuild a lazy-mode bridge that searches the whole catalog.
-                fullToolNames: currentToolExposureBridge?.fullToolDeclarations().map(\.name) ?? []
+                // Wave B1 (§16.2): `recipe__*` names are filtered out — Phase 1
+                // does not declare recipes in the background catalog (the
+                // background rebuild cannot reconstruct them anyway, so this
+                // also keeps the catalog-mismatch log honest).
+                fullToolNames: (currentToolExposureBridge?.fullToolDeclarations().map(\.name) ?? [])
+                    .filter { !IOSDynamicToolRegistry.isRecipeToolName($0) }
             )
         } else {
             backgroundHandoff = nil
@@ -1583,7 +1632,8 @@ final class ChatGenerationCoordinator {
         }
         if foregroundToolExecutionTask != nil {
             // 在途 .pure 工具（wait_agent/tool_search/tools_list/session_read 等
-            // 本地只读调用）允许交接：取消前台任务后，遗留的 pending 工具 part
+            // 本地只读调用）与 .networkRead 工具（search_web/scrape_web 出网读取、
+            // 无本地写）允许交接：取消前台任务后，遗留的 pending 工具 part
             // 原样留在消息快照里（teardown 不改 part、不标失败），后台引擎
             // `executePreExistingPendingTools` 重新执行，不会双重执行。在途
             // .sideEffect 工具（workspace 写/MCP 调用/生图/send_message 等）
@@ -1591,7 +1641,7 @@ final class ChatGenerationCoordinator {
             let effectClass = foregroundToolExecutionToolCall.map {
                 IOSToolEffectClassMapping.forToolName($0.toolName, input: $0.input)
             } ?? .sideEffect
-            guard effectClass == .pure else { return false }
+            guard effectClass == .pure || effectClass == .networkRead else { return false }
         }
         guard let handoff = backgroundHandoff,
               let conversationStore else {
@@ -1714,6 +1764,15 @@ final class ChatGenerationCoordinator {
 
     func denyPendingMcpTool(requestId: String? = nil) async {
         await finishPendingMcpToolApproval(allow: false, expectedRequestId: requestId)
+    }
+
+    /// Wave B2: recipe 审批卡（mutation step / recipe_import）。
+    func approvePendingRecipeTool(requestId: String? = nil) async {
+        await finishPendingRecipeToolApproval(allow: true, expectedRequestId: requestId)
+    }
+
+    func denyPendingRecipeTool(requestId: String? = nil) async {
+        await finishPendingRecipeToolApproval(allow: false, expectedRequestId: requestId)
     }
 
     func approvePendingCouncilTool() async {
@@ -2811,7 +2870,8 @@ final class ChatGenerationCoordinator {
             let result = await toolRuntime.execute(
                 pendingToolCall,
                 context: invalidInputPending,
-                toolExposureBridge: currentToolExposureBridge
+                toolExposureBridge: currentToolExposureBridge,
+                recipeCatalogSnapshot: currentRoundCatalogSnapshot
             )
             guard currentRunId == runId else { return }
             guard case .completed(let resolvedMessages) = result else { return }
@@ -2961,12 +3021,13 @@ final class ChatGenerationCoordinator {
         // behavior, zero trace).
         let nestedToolRunner = makeNestedExecToolRunner(parent: pending)
         let executionToken = UUID()
-        let executionTask = Task { @MainActor [toolRuntime, bridge = currentToolExposureBridge] in
+        let executionTask = Task { @MainActor [toolRuntime, bridge = currentToolExposureBridge, snapshot = currentRoundCatalogSnapshot] in
             await toolRuntime.execute(
                 pendingToolCall,
                 context: pending,
                 toolExposureBridge: bridge,
-                nestedToolRunner: nestedToolRunner
+                nestedToolRunner: nestedToolRunner,
+                recipeCatalogSnapshot: snapshot
             )
         }
         foregroundToolExecutionToken = executionToken
@@ -3011,11 +3072,13 @@ final class ChatGenerationCoordinator {
         }
 
         guard currentRunId == runId else {
-            // Runtime 可能已完成 skill_import 的只读准备，但 run 在审批卡接管前
-            // 被替换；丢弃仅存内存的候选上下文，绝不跨 run 复用。
-            toolRuntime.discardPreparedSkillImportForApproval(
-                toolCallId: pendingToolCall.toolCall.toolCallId
-            )
+            // Runtime 可能已完成 skill_import/recipe_import 的只读准备，或
+            // recipe__* 已暂停在 mutation step；run 在审批卡接管前被替换——
+            // 丢弃仅存内存的候选/执行上下文（含 checkpoint），绝不跨 run 复用。
+            let toolCallId = pendingToolCall.toolCall.toolCallId
+            toolRuntime.discardPreparedSkillImportForApproval(toolCallId: toolCallId)
+            toolRuntime.discardPreparedRecipeImportForApproval(toolCallId: toolCallId)
+            toolRuntime.discardPreparedRecipeExecution(toolCallId: toolCallId)
             return
         }
 
@@ -3302,6 +3365,28 @@ final class ChatGenerationCoordinator {
         return params.replacingTools(bridge.visibleTools())
     }
 
+    /// Wave B1 (§13.2 seam / §13.2.3 / §16.1): round-boundary hot reload.
+    /// Re-checks the dynamic registry once per tool round; a NEW revision
+    /// (recipe promotion/rollback since the last round) rebuilds the run
+    /// bridge over the new catalog while carrying the already-exposed
+    /// tool-name set forward (names that no longer exist are dropped by the
+    /// bridge, surviving tools keep visibility — the model's already-tuned
+    /// tools never disappear). No bridge (image-only runs) → nothing to
+    /// rebuild; the static catalog does not change mid-run.
+    private func refreshDynamicCatalogAtRoundBoundary() async {
+        guard currentToolExposureBridge != nil else { return }
+        guard let dynamicSnapshot = await IOSDynamicToolRegistry.shared.refresh(),
+              dynamicSnapshot.revision != lastRoundCatalogRevision else { return }
+        lastRoundCatalogRevision = dynamicSnapshot.revision
+        // Wave B2: pin the snapshot for THIS round — declarations (bridge)
+        // and execution (recipe route) come from the same revision (§16.1).
+        currentRoundCatalogSnapshot = dynamicSnapshot
+        currentToolExposureBridge = IOSDynamicToolBridgeRebuilder.rebuiltBridge(
+            from: currentToolExposureBridge,
+            snapshot: dynamicSnapshot
+        )
+    }
+
     private func continueAfterToolResult(
         _ resumedMessages: [UIMessage],
         providerSetting: ProviderSetting,
@@ -3312,6 +3397,11 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?
     ) async {
         guard currentRunId == runId else { return }
+
+        // Wave B1: dynamic catalog refresh before this round's exposure is
+        // frozen into the request params (declarations and execution
+        // availability always come from the same snapshot, §16.1).
+        await refreshDynamicCatalogAtRoundBoundary()
 
         // P0-a: each tool round re-derives the request params from the run
         // bridge's CURRENT exposure. `tool_search` execution (which exposes its
@@ -3510,6 +3600,21 @@ final class ChatGenerationCoordinator {
             pendingPreparedSkillImport = toolRuntime.takePreparedSkillImportForApproval(
                 toolCallId: pending.toolCall.toolCallId
             )
+        case .recipe(let request):
+            pendingRecipeToolApproval = pending
+            pendingRecipeRequest = request
+            switch request.payload {
+            case .step:
+                // mutation step 暂停：执行状态（含 checkpoint 镜像）在
+                // runtime 暂停前已持久化；取走内存态供 finisher 续跑。
+                pendingPreparedRecipeExecution = toolRuntime.takePreparedRecipeExecution(
+                    toolCallId: pending.toolCall.toolCallId
+                )
+            case .recipeImport:
+                pendingPreparedRecipeImport = toolRuntime.takePreparedRecipeImportForApproval(
+                    toolCallId: pending.toolCall.toolCallId
+                )
+            }
         case .council:
             pendingCouncilToolApproval = pending
         case .askUser:
@@ -3611,6 +3716,8 @@ final class ChatGenerationCoordinator {
             bindings.setPendingIshHandoffApproval(request)
         case .mcp(let request):
             bindings.setPendingMcpApproval(request)
+        case .recipe(let request):
+            bindings.setPendingRecipeApproval(request)
         case .council(let request):
             bindings.setPendingCouncilApproval(request)
         case .askUser(let request):
@@ -3750,6 +3857,152 @@ final class ChatGenerationCoordinator {
             )
         }) else { return }
         completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
+    }
+
+    /// Wave B2: recipe 审批收口（mutation step / recipe_import）。
+    ///
+    /// `.import`: 走与 MCP 审批相同的 `executeApprovedToolOrNested` 账本纪律
+    /// （本次尝试 Started→Finished；拒绝零账本对）。批准后 runtime 重读候选、
+    /// 校验 base/candidate CAS 与语义后 apply 并 refresh registry。
+    ///
+    /// `.step`: 批准后 runtime 执行该 step 并继续 recipe——后续 mutation step
+    /// 会再次暂停（`pausedForNextStep` → 重新走 durable pause，同一 tool call
+    /// 不闭合）；拒绝则 step 失败、recipe 停止并返回结构化错误 + 已完成副作用
+    /// 清单（`approval_denied` ledger 事件由 runtime 的 `recordToolApproval`
+    /// 漏斗真实写入）。账本纪律照 memory finisher：本次尝试先 Started，成功/
+    /// 再次暂停后 Finished；拒绝不写对（没有任何副作用发生）。
+    private func finishPendingRecipeToolApproval(
+        allow: Bool,
+        expectedRequestId: String?
+    ) async {
+        guard let pending = pendingRecipeToolApproval else { return }
+        guard currentRunId == pending.runId else { return }
+        // Slice B（B2）：identity 核对——UI 展示的 request id 必须等于当前
+        // pending 的 request id。不匹配（旧 step 卡 / 已被后续 pause 取代）
+        // 时零执行、零清槽，并刷新 UI 让当前卡片保持可见。
+        if let expectedRequestId {
+            guard expectedRequestId == pendingRecipeRequest?.id else {
+                bindings.setPendingRecipeApproval(pendingRecipeRequest)
+                return
+            }
+        }
+        // pause 时取走的准备上下文区分 payload 类型：有执行状态 = mutation
+        // step；有导入准备 = recipe_import。清槽时【不】动 runtime 的
+        // checkpoint——recipe 续跑（或再次暂停）由 runtime 自己持有 checkpoint
+        // 直到终态；只有取消/交接/run 终结（clearPendingApprovals）才丢弃。
+        let preparedExecution = pendingPreparedRecipeExecution
+        let preparedImport = pendingPreparedRecipeImport
+        pendingRecipeToolApproval = nil
+        pendingPreparedRecipeExecution = nil
+        pendingPreparedRecipeImport = nil
+        pendingRecipeRequest = nil
+        bindings.setPendingRecipeApproval(nil)
+
+        if let preparedImport {
+            guard let executedMessages = await executeApprovedToolOrNested(
+                pending: pending,
+                allow: allow,
+                effectClass: .sideEffect,
+                operation: {
+                    await self.toolRuntime.finishRecipeImportApproval(
+                        pending: pending,
+                        allow: allow,
+                        prepared: preparedImport
+                    )
+                }
+            ) else { return }
+            completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
+            return
+        }
+
+        guard let preparedExecution else {
+            // 冷启动或 run 替换后没有任何准备上下文：fail closed，绝不退回
+            // 普通 dispatch（那会重新 preview 或静默跳过本次审批）。
+            let failure = ChatToolOutputFormatter.toolFailureJSON(
+                toolName: pending.toolCall.toolName,
+                reason: "Recipe 执行上下文已失效，请重新发起调用。",
+                status: "failed"
+            )
+            let messages = toolRuntime.messagesByFinishingToolCall(
+                pending.toolCall,
+                outputText: failure,
+                in: pending.baseMessages
+            )
+            completeApprovedToolCall(pending: pending, executedMessages: messages)
+            return
+        }
+
+        guard allow else {
+            // 拒绝：没有任何副作用发生，不写账本对（与 executeApprovedAsyncTool
+            // 的 deny 语义一致）；runtime 写失败输出 + approval_denied 事件。
+            let result = await toolRuntime.finishRecipeStepApproval(
+                pending: pending,
+                allow: false,
+                executionContext: preparedExecution,
+                toolExposureBridge: currentToolExposureBridge
+            )
+            if case .completed(let messages) = result {
+                completeApprovedToolCall(pending: pending, executedMessages: messages)
+            }
+            return
+        }
+
+        // I-1, resumption half: a fresh Started for THIS attempt (the automatic
+        // path already wrote Started→Finished(paused_for_approval) once).
+        let didRecordStart = await toolLedger.recordToolCallStarted(
+            runId: pending.runId,
+            toolCallId: pending.toolCall.toolCallId,
+            toolName: pending.toolCall.toolName,
+            argsDigest: chatInputDigest(for: pending.toolCall.input),
+            effectClass: .sideEffect
+        )
+        guard didRecordStart else {
+            await presentStreamError(
+                rawMessage: "无法保存工具执行前状态，请检查存储空间后重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return
+        }
+        guard currentRunId == pending.runId else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_run_replaced"
+            )
+            return
+        }
+        let result = await toolRuntime.finishRecipeStepApproval(
+            pending: pending,
+            allow: true,
+            executionContext: preparedExecution,
+            toolExposureBridge: currentToolExposureBridge
+        )
+        switch result {
+        case .completed(let messages):
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "completed"
+            )
+            completeApprovedToolCall(pending: pending, executedMessages: messages)
+        case .pausedForNextStep(let request):
+            // The recipe needs ANOTHER approval (a later mutation step): close
+            // THIS attempt honestly and re-enter the durable pause with the
+            // same tool call (the checkpoint was refreshed by the runtime).
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "paused_for_approval"
+            )
+            guard currentRunId == pending.runId else { return }
+            bindings.setMessages(pending.baseMessages)
+            bindings.bumpMessageRevision(.awaitingToolApproval)
+            await pauseForApproval(.recipe(request), pending: pending)
+        }
     }
 
     private func finishPendingCouncilToolApproval(allow: Bool) async {
@@ -4299,6 +4552,7 @@ final class ChatGenerationCoordinator {
         clearPendingWorkspaceApproval()
         clearPendingIshHandoffApproval()
         clearPendingMcpApproval()
+        clearPendingRecipeToolApproval()
         clearPendingCouncilApproval()
         clearPendingAskUser()
         // F8 fix: called from all 3 `currentRunId = nil` teardown points
@@ -4353,6 +4607,21 @@ final class ChatGenerationCoordinator {
         pendingMcpToolApproval = nil
         pendingPreparedSkillImport = nil
         bindings.setPendingMcpApproval(nil)
+    }
+
+    /// Wave B2: recipe 审批槽清理——同时丢弃 runtime 内的执行状态与
+    /// checkpoint（取消/交接/终态都不允许跨 run 恢复暂停中的 recipe）。
+    private func clearPendingRecipeToolApproval() {
+        if let pendingRecipeToolApproval {
+            let toolCallId = pendingRecipeToolApproval.toolCall.toolCallId
+            toolRuntime.discardPreparedRecipeExecution(toolCallId: toolCallId)
+            toolRuntime.discardPreparedRecipeImportForApproval(toolCallId: toolCallId)
+        }
+        pendingRecipeToolApproval = nil
+        pendingPreparedRecipeExecution = nil
+        pendingPreparedRecipeImport = nil
+        pendingRecipeRequest = nil
+        bindings.setPendingRecipeApproval(nil)
     }
 
     private func clearPendingCouncilApproval() {
@@ -4487,6 +4756,27 @@ final class ChatGenerationCoordinator {
         currentInputDigest = pending.inputDigest
         currentConversationIdForRun = pending.conversationId
         await pauseForApproval(.mcp(request), pending: pending)
+    }
+
+    /// Wave B2 测试缝：与 installPendingMcpApprovalForTesting 同模式——模拟
+    /// runtime 已返回 `.waitingForApproval(.recipe(...))` 后 coordinator 的
+    /// durable pause（pauseForApproval 会从 runtime 取走准备上下文）。
+    /// `toolExposureBridge` 可选：finisher 续跑 recipe step 时需要 round 桥
+    /// （生产里由 executeToolCall 设置），测试可注入同构实例。
+    func installPendingRecipeToolApprovalForTesting(
+        pending: ChatPendingToolApproval,
+        request: RecipeToolApprovalRequest,
+        toolExposureBridge: IosToolExposureBridge? = nil
+    ) async {
+        streamJob = nil
+        currentRunId = pending.runId
+        currentStartedAt = pending.startedAt
+        currentInputDigest = pending.inputDigest
+        currentConversationIdForRun = pending.conversationId
+        if let toolExposureBridge {
+            currentToolExposureBridge = toolExposureBridge
+        }
+        await pauseForApproval(.recipe(request), pending: pending)
     }
 
     /// P3-b 测试缝：不经过 start() 建立 run 状态（currentRunId 等）后执行一次

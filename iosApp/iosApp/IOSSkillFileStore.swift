@@ -334,6 +334,22 @@ struct IOSSkillFileStore {
         if let previousBackup {
             try? fileManager.removeItem(at: previousBackup)
         }
+        // §15 Phase 0 / §9.6: a successful promotion writes a receipt so later
+        // run outcomes can be attributed to this exact candidate hash
+        // (acceptance 2: toHash == the live package hash just published).
+        // `candidate.hash` is the same value `stageLivePackage` wrote, so no
+        // re-hashing happens here.
+        IOSPromotionReceiptStore(baseDirectory: baseDirectory).record(
+            IOSPromotionReceipt(
+                artifactId: name,
+                fromHash: base?.hash,
+                toHash: candidate.hash,
+                evaluationReportHash: nil,
+                catalogRevision: nil,
+                approvedBy: "user",
+                promotedAtEpochMs: Self.nowMillis()
+            )
+        )
         return IOSSkillPackageApplyReceipt(
             name: name,
             promotedHash: candidate.hash,
@@ -387,7 +403,34 @@ struct IOSSkillFileStore {
         // avoids reporting a failed rollback after the package has changed; if
         // cleanup itself fails, the retained slot is safely classified stale.
         try? fileManager.removeItem(at: previousSlotDirectory(name: name))
+        // §15 Phase 0 / §9.6: a rollback is itself a versioned promotion —
+        // record a receipt whose toHash is the restored live package hash.
+        // For an update, the restored hash is manifest.baseHash (inspectRollback
+        // verified previousPackage.hash == baseHash before publishing it). A
+        // "new" rollback removes the artifact, so its receipts are cleared
+        // (no active version exists anymore, §18.1).
+        let receiptStore = IOSPromotionReceiptStore(baseDirectory: baseDirectory)
+        switch manifest.kind {
+        case .update:
+            if let restoredHash = manifest.baseHash {
+                receiptStore.record(IOSPromotionReceipt(
+                    artifactId: name,
+                    fromHash: manifest.promotedHash,
+                    toHash: restoredHash,
+                    evaluationReportHash: nil,
+                    catalogRevision: nil,
+                    approvedBy: "user",
+                    promotedAtEpochMs: Self.nowMillis()
+                ))
+            }
+        case .new:
+            receiptStore.clear(artifactId: name)
+        }
         return IOSSkillRollbackReceipt(manifest: manifest)
+    }
+
+    private static func nowMillis() -> Int64 {
+        Int64(Date().timeIntervalSince1970 * 1000)
     }
 
     private static let previousManifestSchemaVersion = 1

@@ -144,6 +144,8 @@ final class ChatViewModel {
     var pendingMcpApproval: McpToolApprovalRequest?
     var pendingCouncilApproval: CouncilToolApprovalRequest?
     var pendingAskUser: ChatAskUserRequest?
+    /// Wave B2: recipe 审批卡（mutation step / recipe_import）。
+    var pendingRecipeApproval: RecipeToolApprovalRequest?
 
     var configurationError: String?
     var contextCompactState: ChatContextCompactState = .idle
@@ -166,7 +168,8 @@ final class ChatViewModel {
         pendingMemoryApproval != nil || pendingSearchApproval != nil ||
             pendingWebMountApproval != nil || pendingWorkspaceApproval != nil ||
             pendingIshHandoffApproval != nil || pendingMcpApproval != nil ||
-            pendingCouncilApproval != nil || pendingAskUser != nil
+            pendingCouncilApproval != nil || pendingAskUser != nil ||
+            pendingRecipeApproval != nil
     }
 
     /// 顶部活动岛等待连接副标题（取不到则 nil，文案规则：宁缺毋滥）。
@@ -637,6 +640,13 @@ final class ChatViewModel {
     /// 测试可注入隔离 DAO 的服务实例（照 mailboxStore 注入先例）；否则用默认
     /// 懒实例（共享 Room + 当前 VM 依赖）。
     @ObservationIgnored private let injectedOrchestrationToolService: IOSThreadOrchestrationToolService?
+    /// Phase 3 Wave 2: the experience curator injected into every round's
+    /// runtime-context assembly. The store default-resolves to Documents
+    /// (`IOSEvolutionExperienceStore()`); retrieval runs FRESH per round via
+    /// `ChatRuntimeContextBuilder` — no cross-round cache.
+    @ObservationIgnored private let experienceCurator = IOSEvolutionExperienceCurator(
+        store: IOSEvolutionExperienceStore()
+    )
     @ObservationIgnored private lazy var defaultOrchestrationToolService: IOSThreadOrchestrationToolService = {
         let runtimeDao = db.agentRuntimeDao()
         let mailboxDao = db.mailboxDao()
@@ -824,6 +834,9 @@ final class ChatViewModel {
                 },
                 setPendingAskUser: { [weak self] request in
                     self?.pendingAskUser = request
+                },
+                setPendingRecipeApproval: { [weak self] request in
+                    self?.pendingRecipeApproval = request
                 },
                 setContextCompactState: { [weak self] state in
                     withAnimation(.easeOut(duration: 0.22)) {
@@ -1793,7 +1806,8 @@ final class ChatViewModel {
               pendingIshHandoffApproval == nil,
               pendingMcpApproval == nil,
               pendingCouncilApproval == nil,
-              pendingAskUser == nil else { return }
+              pendingAskUser == nil,
+              pendingRecipeApproval == nil else { return }
         guard let last = messages.last, last.role == MessageRole.assistant,
               !last.toText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -2374,6 +2388,19 @@ final class ChatViewModel {
         }
     }
 
+    /// Wave B2: recipe 审批卡（mutation step / recipe_import）。
+    func approvePendingRecipeTool(requestId: String) {
+        Task { @MainActor in
+            await generationCoordinator.approvePendingRecipeTool(requestId: requestId)
+        }
+    }
+
+    func denyPendingRecipeTool(requestId: String) {
+        Task { @MainActor in
+            await generationCoordinator.denyPendingRecipeTool(requestId: requestId)
+        }
+    }
+
     func approvePendingCouncilTool() {
         Task { @MainActor in
             await generationCoordinator.approvePendingCouncilTool()
@@ -2411,6 +2438,10 @@ final class ChatViewModel {
             await generationCoordinator.approvePendingMcpTool()
         } else if pendingCouncilApproval != nil {
             await generationCoordinator.approvePendingCouncilTool()
+        } else if let request = pendingRecipeApproval {
+            // Slice B（B2）：Watch 路径也把 UI 展示的 request id 传回，
+            // 消费前核对当前 pending request id。
+            await generationCoordinator.approvePendingRecipeTool(requestId: request.id)
         }
     }
 
@@ -2431,6 +2462,9 @@ final class ChatViewModel {
             await generationCoordinator.denyPendingCouncilTool()
         } else if pendingAskUser != nil {
             skipPendingAskUser()
+        } else if let request = pendingRecipeApproval {
+            // Slice B（B2）：Watch deny 同样传回 UI 展示的 request id。
+            await generationCoordinator.denyPendingRecipeTool(requestId: request.id)
         }
     }
 
@@ -2752,7 +2786,8 @@ final class ChatViewModel {
             sharedSettings: sharedSettings,
             mcpTools: mcpManager.tools,
             miniAppRepository: miniAppRepository,
-            miniAppRuntimeEnabled: isMiniAppRuntimeEnabled
+            miniAppRuntimeEnabled: isMiniAppRuntimeEnabled,
+            experienceCurator: experienceCurator
         ).injectingRuntimeContext(into: uploadableWithGuidance, coalesceSystemMessages: false)
         return replacingImagesForNonVisionModel(withContext)
     }
@@ -3367,13 +3402,26 @@ final class ChatViewModel {
         }
         // Standard chat can pause for a focused user decision, same tool surface as novel discussion.
         toolDeclarations.append(ToolKt.createAskUserToolDeclaration())
+        // Wave B1 (§13.2.4 run-start seam, §16.1): include recipe declarations
+        // from the dynamic registry's CURRENT snapshot. Every recipe is
+        // default-deferred — it enters the bridge's full catalog
+        // (tool_search-searchable) but never the visible set. Descriptors and
+        // search info come from ONE snapshot object, so declaration and
+        // execution availability cannot diverge by revision. No snapshot
+        // (store unreadable) → no recipe surface at all.
+        var recipeSearchInfo: [String: String] = [:]
+        if let dynamicCatalog = IOSDynamicToolRegistry.shared.currentSnapshot,
+           !dynamicCatalog.recipeTools.isEmpty {
+            toolDeclarations.append(contentsOf: dynamicCatalog.recipeDeclarations())
+            recipeSearchInfo = dynamicCatalog.searchInfoByName
+        }
         // P0-a tool discovery: wrap the full static declarations in the shared
         // KMP exposure bridge and surface only the first-round visible subset
         // (iOS resident tools + tool_search; everything deferred — wm_*, iSH,
         // skill management, … — is exposed on demand via tool_search). The
         // bridge instance is handed to the run coordinator, which owns it for
         // the whole run so hits become callable on the NEXT round.
-        let exposureBridge = IosToolExposureBridge(tools: toolDeclarations)
+        let exposureBridge = IosToolExposureBridge(tools: toolDeclarations, recipeSearchInfo: recipeSearchInfo)
         lastAssembledToolExposureBridge = exposureBridge
         // Real params: temperature/topP from Assistant, maxTokens from
         // resolveSessionDefaults (Assistant → group default), reasoningLevel

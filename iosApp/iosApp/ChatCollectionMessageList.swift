@@ -6,6 +6,8 @@ import Combine
 
 enum ChatListAction {
     case regenerate(messageId: String)
+    /// §14.1「分析并改进」：对失败回答发起演化工作流。
+    case analyzeAndImprove
     case requestEdit(messageId: String, currentText: String)
     case edit(messageId: String, newText: String)
     case delete(messageId: String)
@@ -2556,6 +2558,7 @@ private struct ChatSwiftUIMessageBubble: View, @MainActor Equatable {
             },
             onOpenMiniApp: { appId in onAction(.openMiniApp(appId: appId)) },
             onOpenMiniApps: { onAction(.openMiniApps) },
+            onAnalyzeAndImprove: { onAction(.analyzeAndImprove) },
             isGenerating: row.isLast && isGenerationActive,
             isChatGenerationActive: isGenerationActive,
             isLastMessage: row.isLast,
@@ -4136,6 +4139,7 @@ private struct ChatMessageHostedBubble: View {
             },
             onOpenMiniApp: { appId in onAction(.openMiniApp(appId: appId)) },
             onOpenMiniApps: { onAction(.openMiniApps) },
+            onAnalyzeAndImprove: { onAction(.analyzeAndImprove) },
             isGenerating: model.row.isLast && isGenerationActive,
             isChatGenerationActive: isGenerationActive,
             isLastMessage: model.row.isLast,

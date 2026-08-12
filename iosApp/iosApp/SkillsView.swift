@@ -120,6 +120,15 @@ struct SkillsView: View {
                 ) {
                     router.navigate(to: .mcpServers)
                 }
+                Divider().overlay(AmberTheme.borderSoft).padding(.leading, 14)
+                SkillUtilityRow(
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    iconColor: AmberTheme.accentAmber,
+                    title: "Recipes",
+                    subtitle: "管理本机 Recipe 组合工具：版本、步骤与回退"
+                ) {
+                    router.navigate(to: .recipes)
+                }
             }
         }
     }

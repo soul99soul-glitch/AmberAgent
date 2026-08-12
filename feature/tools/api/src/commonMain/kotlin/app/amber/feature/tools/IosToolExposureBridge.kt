@@ -1,7 +1,10 @@
 package app.amber.feature.tools
 
+import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -30,8 +33,17 @@ class IosToolExposureBridge private constructor(
     private val allTools: List<Tool>,
     private val registry: ToolRegistry,
     private val exposureState: ToolExposureState,
+    private val recipeSearchInfo: Map<String, String>,
 ) {
-    constructor(tools: List<Tool>) : this(tools, ToolRegistry.from(tools))
+    constructor(tools: List<Tool>) : this(
+        withSearchTool(tools, ToolRegistry.from(tools)),
+        ToolRegistry.from(tools),
+        ToolExposureState.from(
+            withSearchTool(tools, ToolRegistry.from(tools)),
+            residentPolicy = ::iosResidentToolPolicy,
+        ),
+        recipeSearchInfo = emptyMap(),
+    )
 
     constructor(tools: List<Tool>, registry: ToolRegistry) : this(
         withSearchTool(tools, registry),
@@ -40,6 +52,25 @@ class IosToolExposureBridge private constructor(
             withSearchTool(tools, registry),
             residentPolicy = ::iosResidentToolPolicy,
         ),
+        recipeSearchInfo = emptyMap(),
+    )
+
+    /**
+     * Wave B1 (§13.2.3): rebuild-with-recipe-search-info constructor. The
+     * Swift round-boundary seam rebuilds the bridge over a new catalog
+     * revision and seeds the previously exposed names back via
+     * [exposeToolNames]; this map (toolId → `{"version":…,
+     * "permission_summary":…, "source":"custom.recipe"}`) lets `tool_search`
+     * results carry the recipe version/permission/source fields (§16.3).
+     */
+    constructor(tools: List<Tool>, recipeSearchInfo: Map<String, String>) : this(
+        withSearchTool(tools, ToolRegistry.from(tools)),
+        ToolRegistry.from(tools),
+        ToolExposureState.from(
+            withSearchTool(tools, ToolRegistry.from(tools)),
+            residentPolicy = ::iosResidentToolPolicy,
+        ),
+        recipeSearchInfo = recipeSearchInfo,
     )
 
     /** Appends the discovery tool unless the caller already declared it (a
@@ -85,12 +116,40 @@ class IosToolExposureBridge private constructor(
             val category = input["category"]?.jsonPrimitive?.contentOrNull?.ifBlank { null }
             val limit = input["limit"]?.jsonPrimitive?.intOrNull ?: TOOL_SEARCH_DEFAULT_LIMIT
             val payload = ToolSearchIndex(registry).searchPayload(query, category, limit)
-            val expanded = payload["expanded_tools"]?.jsonArray
+            // Wave B1 (§16.3): recipe hits additionally carry version,
+            // permission summary and source=custom.recipe. The manifest body is
+            // never included — the model only gets the schema at call time.
+            val enriched = enrichRecipeSearchResults(payload)
+            val expanded = enriched["expanded_tools"]?.jsonArray
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
                 .orEmpty()
             exposureState.exposeToolNames(expanded)
-            payload.toString()
+            enriched.toString()
         }.getOrElse { toolSearchErrorPayload(it.message) }
+    }
+
+    /** Merges per-tool recipe search info into the `tools` entries of a
+     *  search payload. Never throws and never changes non-recipe entries. */
+    private fun enrichRecipeSearchResults(payload: JsonObject): JsonObject {
+        if (recipeSearchInfo.isEmpty()) return payload
+        val tools = payload["tools"] as? JsonArray ?: return payload
+        val enrichedTools = buildJsonArray {
+            tools.forEach { element ->
+                val entry = element as? JsonObject
+                val info = entry?.get("name")?.jsonPrimitive?.contentOrNull
+                    ?.let { recipeSearchInfo[it] }
+                    ?.let { raw -> runCatching { bridgeJson.parseToJsonElement(raw) as? JsonObject }.getOrNull() }
+                if (entry == null || info == null) {
+                    add(element)
+                    return@forEach
+                }
+                add(buildJsonObject {
+                    entry.forEach { (key, value) -> put(key, value) }
+                    info.forEach { (key, value) -> put(key, value) }
+                })
+            }
+        }
+        return JsonObject(payload.toMutableMap().apply { put("tools", enrichedTools) })
     }
 
     /** JSON summary of lazy mode + schema savings (same footprint algorithm as the search payload). */
@@ -132,6 +191,62 @@ class IosToolExposureBridge private constructor(
         put("status", "error")
         put("error", "tool_search failed: ${reason ?: "invalid arguments"}")
     }.toString()
+}
+
+/**
+ * Wave B1 (§13.2.4 / §16.3): one declaration for an active recipe. The Swift
+ * registry derives this from the SAME snapshot that carries the manifest
+ * (declaration and execution availability can never diverge, §16.1).
+ *
+ * Recipes are default-deferred: `recipe__*` is not in `IOS_RESIDENT_TOOL_NAMES`,
+ * so in lazy mode (production catalog) they stay hidden until `tool_search`
+ * exposes them — they never occupy the main prompt.
+ *
+ * `inputsJson` is `{"<name>":"string|number|boolean", ...}` generated by the
+ * registry from the manifest's typed inputs; `effectClass` is the recipe's
+ * conservative permission envelope (I-10) and drives the approval flags — a
+ * mutation-capable envelope is never advertised as auto-approvable
+ * (§10.3.5; per-step approval still applies at execution, next wave).
+ */
+fun createRecipeToolDeclaration(
+    recipeName: String,
+    version: String,
+    description: String,
+    inputsJson: String,
+    effectClass: String,
+): Tool {
+    val inputs = runCatching {
+        (bridgeJson.parseToJsonElement(inputsJson.ifBlank { "{}" }) as? JsonObject)
+            ?: JsonObject(emptyMap())
+    }.getOrDefault(JsonObject(emptyMap()))
+    val properties = buildJsonObject {
+        inputs.forEach { (name, typeElement) ->
+            val type = (typeElement as? JsonPrimitive)?.contentOrNull ?: "string"
+            put(name, buildJsonObject {
+                put("type", type)
+                put("description", "Recipe input `$name` for `recipe__$recipeName` (recipe v$version).")
+            })
+        }
+    }
+    val (needsApproval, allowsAutoApproval) = recipeApprovalFlags(effectClass)
+    return Tool(
+        name = "recipe__$recipeName",
+        description = description,
+        parameters = { InputSchema.Obj(properties = properties, required = inputs.keys.toList()) },
+        needsApproval = needsApproval,
+        allowsAutoApproval = allowsAutoApproval,
+        execute = { emptyList() },
+    )
+}
+
+/** §10.3.5: read-only envelopes auto-approve at the declaration level;
+ *  anything that can mutate goes through the existing approval policy. */
+private fun recipeApprovalFlags(effectClass: String): Pair<Boolean, Boolean> = when (effectClass) {
+    "pure", "networkRead" -> false to true
+    "idempotent" -> true to false
+    "sideEffect" -> true to false
+    // Fail closed: an unknown envelope is never advertised as auto-approvable.
+    else -> true to false
 }
 
 /**

@@ -830,75 +830,90 @@ private fun waitAgentParameters(): InputSchema = InputSchema.Obj(
     },
 )
 
-fun iosToolDeclaration(name: String): Tool? = when (name) {
-    "ask_user" -> createAskUserToolDeclaration()
-    "exec" -> createExecToolDeclaration()
-    "wait" -> createWaitToolDeclaration()
-    "search_web" -> createSearchWebToolDeclaration()
-    "scrape_web" -> createScrapeWebToolDeclaration()
-    "memory_tool" -> createMemoryToolDeclaration()
-    "workspace_file_read" -> createWorkspaceFileReadToolDeclaration()
-    "workspace_file_write" -> createWorkspaceFileWriteToolDeclaration()
-    "workspace_file_edit" -> createWorkspaceFileEditToolDeclaration()
-    "workspace_file_list" -> createWorkspaceFileListToolDeclaration()
-    "workspace_file_search" -> createWorkspaceFileSearchToolDeclaration()
-    "workspace_file_move" -> createWorkspaceFileMoveToolDeclaration()
-    "workspace_artifact_read" -> createWorkspaceArtifactReadToolDeclaration()
-    "workspace_artifact_delete" -> createWorkspaceArtifactDeleteToolDeclaration()
-    "generate_image" -> createImageGenToolDeclaration()
-    "wm_stations" -> createWebMountStationsToolDeclaration()
-    "wm_tab_list" -> createWebMountTabListToolDeclaration()
-    "wm_tab_new" -> createWebMountTabNewToolDeclaration()
-    "wm_tab_close" -> createWebMountTabCloseToolDeclaration()
-    "wm_open" -> createWebMountOpenToolDeclaration()
-    "wm_state" -> createWebMountStateToolDeclaration()
-    "wm_observe" -> createWebMountObserveToolDeclaration()
-    "wm_extract" -> createWebMountExtractToolDeclaration()
-    "wm_get" -> createWebMountGetToolDeclaration()
-    "wm_visual_snapshot" -> createWebMountVisualSnapshotToolDeclaration()
-    "wm_screenshot" -> createWebMountScreenshotToolDeclaration()
-    "wm_back" -> createWebMountBackToolDeclaration()
-    "wm_forward" -> createWebMountForwardToolDeclaration()
-    "wm_clear_session" -> createWebMountClearSessionToolDeclaration()
-    "wm_site_add" -> createWebMountSiteAddToolDeclaration()
-    "wm_site_remove" -> createWebMountSiteRemoveToolDeclaration()
-    "wm_click" -> createWebMountClickToolDeclaration()
-    "wm_tap" -> createWebMountTapToolDeclaration()
-    "wm_type" -> createWebMountTypeToolDeclaration()
-    "wm_keys" -> createWebMountKeysToolDeclaration()
-    "wm_scroll" -> createWebMountScrollToolDeclaration()
-    "wm_select" -> createWebMountSelectToolDeclaration()
-    "wm_find" -> createWebMountFindToolDeclaration()
-    "wm_wait" -> createWebMountWaitToolDeclaration()
-    "mcp_call" -> createMcpCallToolDeclaration()
-    "mcp_list" -> createMcpListToolDeclaration()
-    "mcp_test" -> createMcpTestToolDeclaration()
-    "mcp_describe_tool" -> createMcpDescribeToolDeclaration()
-    "mcp_import_from_skill" -> createMcpImportFromSkillToolDeclaration()
-    "skills_list" -> createSkillsListToolDeclaration()
-    "use_skill" -> createUseSkillToolDeclaration()
-    "skill_validate" -> createSkillValidateToolDeclaration()
-    "skill_import" -> createSkillImportToolDeclaration()
-    "skill_enable" -> createSkillEnableToolDeclaration()
-    "skill_disable" -> createSkillDisableToolDeclaration()
-    "subagent_dispatch" -> createSubAgentDispatchToolDeclaration()
-    "model_council_run" -> createModelCouncilRunToolDeclaration()
-    "file_read_selected" -> createSelectedFileReadToolDeclaration()
-    "ish_handoff" -> createIshHandoffToolDeclaration()
-    "ios_ish_execute" -> createIosIshExecuteToolDeclaration()
-    "permissions_status" -> createPermissionsStatusToolDeclaration()
-    "tools_list" -> createToolsListToolDeclaration()
-    "subagent_report" -> createSubAgentReportToolDeclaration()
-    "spawn_agent" -> createSpawnAgentToolDeclaration()
-    "list_agents" -> createListAgentsToolDeclaration()
-    "interrupt_agent" -> createInterruptAgentToolDeclaration()
-    "send_message" -> createSendMessageToolDeclaration()
-    "followup_task" -> createFollowupTaskToolDeclaration()
-    "wait_agent" -> createWaitAgentToolDeclaration()
-    "session_search" -> createSessionSearchToolDeclaration()
-    "session_read" -> createSessionReadToolDeclaration()
-    else -> null
-}
+/**
+ * The declaration table behind [iosToolDeclaration]. A map (not a `when`) so
+ * the full iOS tool-name list is DERIVED from the real declaration source via
+ * [iosToolDeclarationNames] — nothing on the Swift side hand-mirrors these
+ * keys anymore (drift regression: `IOSEvolutionSuiteProviderTests` asserts the
+ * runtime catalog summary equals this list). Each entry constructs a fresh
+ * `Tool` per invocation, exactly like the old `when` branches did.
+ */
+private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
+    "ask_user" to ::createAskUserToolDeclaration,
+    "exec" to ::createExecToolDeclaration,
+    "wait" to ::createWaitToolDeclaration,
+    "search_web" to ::createSearchWebToolDeclaration,
+    "scrape_web" to ::createScrapeWebToolDeclaration,
+    "memory_tool" to ::createMemoryToolDeclaration,
+    "workspace_file_read" to ::createWorkspaceFileReadToolDeclaration,
+    "workspace_file_write" to ::createWorkspaceFileWriteToolDeclaration,
+    "workspace_file_edit" to ::createWorkspaceFileEditToolDeclaration,
+    "workspace_file_list" to ::createWorkspaceFileListToolDeclaration,
+    "workspace_file_search" to ::createWorkspaceFileSearchToolDeclaration,
+    "workspace_file_move" to ::createWorkspaceFileMoveToolDeclaration,
+    "workspace_artifact_read" to ::createWorkspaceArtifactReadToolDeclaration,
+    "workspace_artifact_delete" to ::createWorkspaceArtifactDeleteToolDeclaration,
+    "generate_image" to ::createImageGenToolDeclaration,
+    "wm_stations" to ::createWebMountStationsToolDeclaration,
+    "wm_tab_list" to ::createWebMountTabListToolDeclaration,
+    "wm_tab_new" to ::createWebMountTabNewToolDeclaration,
+    "wm_tab_close" to ::createWebMountTabCloseToolDeclaration,
+    "wm_open" to ::createWebMountOpenToolDeclaration,
+    "wm_state" to ::createWebMountStateToolDeclaration,
+    "wm_observe" to ::createWebMountObserveToolDeclaration,
+    "wm_extract" to ::createWebMountExtractToolDeclaration,
+    "wm_get" to ::createWebMountGetToolDeclaration,
+    "wm_visual_snapshot" to ::createWebMountVisualSnapshotToolDeclaration,
+    "wm_screenshot" to ::createWebMountScreenshotToolDeclaration,
+    "wm_back" to ::createWebMountBackToolDeclaration,
+    "wm_forward" to ::createWebMountForwardToolDeclaration,
+    "wm_clear_session" to ::createWebMountClearSessionToolDeclaration,
+    "wm_site_add" to ::createWebMountSiteAddToolDeclaration,
+    "wm_site_remove" to ::createWebMountSiteRemoveToolDeclaration,
+    "wm_click" to ::createWebMountClickToolDeclaration,
+    "wm_tap" to ::createWebMountTapToolDeclaration,
+    "wm_type" to ::createWebMountTypeToolDeclaration,
+    "wm_keys" to ::createWebMountKeysToolDeclaration,
+    "wm_scroll" to ::createWebMountScrollToolDeclaration,
+    "wm_select" to ::createWebMountSelectToolDeclaration,
+    "wm_find" to ::createWebMountFindToolDeclaration,
+    "wm_wait" to ::createWebMountWaitToolDeclaration,
+    "mcp_call" to ::createMcpCallToolDeclaration,
+    "mcp_list" to ::createMcpListToolDeclaration,
+    "mcp_test" to ::createMcpTestToolDeclaration,
+    "mcp_describe_tool" to ::createMcpDescribeToolDeclaration,
+    "mcp_import_from_skill" to ::createMcpImportFromSkillToolDeclaration,
+    "skills_list" to ::createSkillsListToolDeclaration,
+    "use_skill" to ::createUseSkillToolDeclaration,
+    "skill_validate" to ::createSkillValidateToolDeclaration,
+    "skill_import" to ::createSkillImportToolDeclaration,
+    "skill_enable" to ::createSkillEnableToolDeclaration,
+    "skill_disable" to ::createSkillDisableToolDeclaration,
+    "recipe_import" to ::createRecipeImportToolDeclaration,
+    "subagent_dispatch" to ::createSubAgentDispatchToolDeclaration,
+    "model_council_run" to ::createModelCouncilRunToolDeclaration,
+    "file_read_selected" to ::createSelectedFileReadToolDeclaration,
+    "ish_handoff" to ::createIshHandoffToolDeclaration,
+    "ios_ish_execute" to ::createIosIshExecuteToolDeclaration,
+    "permissions_status" to ::createPermissionsStatusToolDeclaration,
+    "tools_list" to ::createToolsListToolDeclaration,
+    "subagent_report" to ::createSubAgentReportToolDeclaration,
+    "spawn_agent" to ::createSpawnAgentToolDeclaration,
+    "list_agents" to ::createListAgentsToolDeclaration,
+    "interrupt_agent" to ::createInterruptAgentToolDeclaration,
+    "send_message" to ::createSendMessageToolDeclaration,
+    "followup_task" to ::createFollowupTaskToolDeclaration,
+    "wait_agent" to ::createWaitAgentToolDeclaration,
+    "session_search" to ::createSessionSearchToolDeclaration,
+    "session_read" to ::createSessionReadToolDeclaration,
+)
+
+fun iosToolDeclaration(name: String): Tool? = IOS_TOOL_DECLARATION_PROVIDERS[name]?.invoke()
+
+/** Every tool name [iosToolDeclaration] can declare — the single declaration
+ *  list (sorted for determinism). iOS derives its runtime catalog summary
+ *  from this instead of hand-mirroring switch keys. */
+fun iosToolDeclarationNames(): List<String> = IOS_TOOL_DECLARATION_PROVIDERS.keys.sorted()
 
 fun iosToolDeclarations(names: List<String>): List<Tool> = names.distinct().mapNotNull(::iosToolDeclaration)
 
@@ -1232,6 +1247,39 @@ fun createSkillEnableToolDeclaration(): Tool = Tool(
     description = "Enable an installed skill for the current AmberAgent assistant.",
     parameters = { skillNameParameters() },
     needsApproval = true,
+    execute = { emptyList() }
+)
+
+/**
+ * Wave B2: `recipe_import` declaration, mirroring `skill_import`
+ * (mandatory approval; the host previews the Workspace `recipe.json`, rechecks
+ * base/candidate hashes on approval, then applies and refreshes the dynamic
+ * catalog so the promoted recipe is searchable via `tool_search` as
+ * `recipe__<name>` from the next model round). Not in `IOS_RESIDENT_TOOL_NAMES`
+ * → default-deferred (discovered via `tool_search`).
+ */
+fun createRecipeImportToolDeclaration(): Tool = Tool(
+    name = "recipe_import",
+    description = """
+        Prepare a read-only import preview for a recipe.json under /workspace (amber.recipe.v1 manifest).
+        The host requires one explicit user approval, then rechecks the previewed base and candidate
+        hashes (CAS) before atomically applying the recipe package. The promoted recipe becomes
+        searchable via tool_search (recipe__<name>) from the next model round.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("workspace_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Workspace path to a recipe.json manifest.")
+                })
+            },
+            required = listOf("workspace_path")
+        )
+    },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    mandatoryApproval = true,
     execute = { emptyList() }
 )
 

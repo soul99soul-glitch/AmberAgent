@@ -498,8 +498,37 @@ final class IOSAgentToolEngineTests: XCTestCase {
             true
         }
 
-        func recordToolCallFinished(runId: String, toolCallId: String, outcome: String) async {
+        func recordToolCallFinished(
+            runId: String,
+            toolCallId: String,
+            outcome: String
+        ) async {
+            await recordToolCallFinished(
+                runId: runId, toolCallId: toolCallId, outcome: outcome,
+                artifactId: nil, artifactVersion: nil, outcomeKind: nil, errorCode: nil, sourceRef: nil
+            )
+        }
+
+        func recordToolCallFinished(
+            runId: String,
+            toolCallId: String,
+            outcome: String,
+            artifactId: String? = nil,
+            artifactVersion: String? = nil,
+            outcomeKind: String? = nil,
+            errorCode: String? = nil,
+            sourceRef: String? = nil
+        ) async {
             finishedOutcomes.append(outcome)
+        }
+
+        func recordApprovalDenied(
+            runId: String,
+            toolCallId: String,
+            toolName: String,
+            reason: String,
+            capabilityId: String?
+        ) async {
         }
 
         func outcomes() -> [String] {

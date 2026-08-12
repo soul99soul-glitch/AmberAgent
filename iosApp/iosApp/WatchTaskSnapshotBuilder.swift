@@ -160,6 +160,33 @@ enum WatchTaskSnapshotBuilder {
                     options: request.options
                 )
             )
+        case .recipe(let request):
+            // Wave B2: recipe 审批（mutation step / recipe_import）。
+            let decisionBody: String
+            switch request.payload {
+            case .step(let payload):
+                decisionBody = body(
+                    primary: "步骤 \(payload.stepId) → \(payload.tool)",
+                    fallback: request.reason,
+                    chips: [request.recipeName, "v\(request.recipeVersion)"]
+                )
+            case .recipeImport(let payload):
+                decisionBody = body(
+                    primary: payload.description,
+                    fallback: request.reason,
+                    chips: [
+                        request.recipeName,
+                        "v\(request.recipeVersion)",
+                        payload.mutationKind == .new ? "新建" : "更新",
+                    ]
+                )
+            }
+            return approvalDecision(
+                id: request.id,
+                title: request.title,
+                body: decisionBody,
+                risk: .high
+            )
         }
     }
 

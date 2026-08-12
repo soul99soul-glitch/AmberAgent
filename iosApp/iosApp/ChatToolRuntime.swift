@@ -70,6 +70,92 @@ struct ChatPendingToolCall {
     let toolCall: UIMessagePart.Tool
 }
 
+// MARK: - Wave B2: recipe execution state (mutation-step approval pause)
+
+/// Outcome of one `advanceRecipeExecution` sweep.
+private enum RecipeAdvanceOutcome {
+    /// The recipe call reached a terminal (success, structured failure or
+    /// denied-stop) — the messages carry the final tool output.
+    case completed([UIMessage])
+    /// A mutation step needs user approval; the execution state is stashed
+    /// and the checkpoint persisted.
+    case needsApproval(RecipeToolApprovalRequest)
+}
+
+/// Result of the recipe step approval finisher.
+enum RecipeApprovalFinishResult {
+    /// The recipe call reached a terminal — messages carry the final output.
+    case completed([UIMessage])
+    /// The approved step ran and a LATER mutation step needs another card.
+    case pausedForNextStep(RecipeToolApprovalRequest)
+}
+
+/// Per-step approval gate verdict.
+private enum RecipeStepGate {
+    case proceed
+    case approvalRequired(reason: String)
+    case unsupported(reason: String)
+}
+
+/// Primitive execution families (mirrors `nextPendingToolCall` grouping).
+private enum IOSRecipePrimitiveRoute {
+    case workspace
+    case search
+    case ish
+    case webMount
+    case memory
+    case sessionRead
+    case discovery
+    case skill
+    case advanced
+    case recipeImport
+    case unsupported
+}
+
+/// One post-gate step execution result.
+private enum RecipePrimitiveStepResult {
+    case output(String)
+    case failure(String)
+    case needsApproval(reason: String)
+}
+
+/// In-flight execution state of one `recipe__*` call. Lives in
+/// `ChatToolRuntime.preparedRecipeExecutions` keyed by the model's toolCallId
+/// while the call is paused for a mutation-step approval; a JSON mirror is
+/// persisted to the checkpoint store BEFORE the durable pause (W1 discipline:
+/// the resume contract exists on disk before the card is shown). The manifest
+/// comes from the round's registry snapshot, so the paused execution is pinned
+/// to the version the model saw (§13.3) even if a promotion happens while the
+/// card is open.
+struct IOSRecipeExecutionState {
+    let toolCallId: String
+    let executionId: String
+    let recipeName: String
+    let recipeVersion: String
+    let catalogRevision: Int64?
+    let manifest: IOSRecipeManifest
+    let plan: IOSRecipeExecutionPlan
+    let inputs: [String: IOSRecipeJSONValue]
+    var stepOutputs: [String: String]
+    var completedSteps: [String]
+    var nextStepIndex: Int
+
+    func checkpoint() -> IOSRecipeExecutionCheckpoint {
+        IOSRecipeExecutionCheckpoint(
+            schemaVersion: IOSRecipeExecutionCheckpointStore.schemaVersion,
+            toolCallId: toolCallId,
+            recipeName: recipeName,
+            recipeVersion: recipeVersion,
+            catalogRevision: catalogRevision,
+            inputs: inputs,
+            stepOutputs: stepOutputs,
+            completedSteps: completedSteps,
+            nextStepIndex: nextStepIndex,
+            executionId: executionId
+        )
+    }
+}
+
 enum ChatToolApprovalPrompt {
     case memory(MemoryToolApprovalRequest)
     case search(SearchToolApprovalRequest)
@@ -79,6 +165,9 @@ enum ChatToolApprovalPrompt {
     case mcp(McpToolApprovalRequest)
     case council(CouncilToolApprovalRequest)
     case askUser(ChatAskUserRequest)
+    /// Wave B2: recipe surface — a mutation STEP of an in-flight
+    /// `recipe__*` call, or a `recipe_import` promotion (§10.3.5 / §13.1).
+    case recipe(RecipeToolApprovalRequest)
 
     var toolTitle: String {
         switch self {
@@ -98,6 +187,8 @@ enum ChatToolApprovalPrompt {
             request.title
         case .askUser:
             "需要你的回答"
+        case .recipe(let request):
+            request.title
         }
     }
 
@@ -113,7 +204,7 @@ enum ChatToolApprovalPrompt {
             .document
         case .ish:
             .command
-        case .mcp, .council, .askUser:
+        case .mcp, .council, .askUser, .recipe:
             .workflow
         }
     }
@@ -139,9 +230,28 @@ final class ChatToolRuntime {
     private let mcpManager: IOSMcpManager
     private let skillFileStore: IOSSkillFileStore
     private let workspaceStore: IOSWorkspaceStore
+    /// §15 Phase 0: approval-denial ledger events (§11.1 evidence source).
+    /// Optional — nil keeps every existing construction site (tests included)
+    /// on the pre-contract behavior; the chat coordinator wires its real
+    /// ledger here so user denials become durable, attributable facts.
+    private let ledger: IOSAgentRunLedgering?
+    /// §19 观测 store（Phase 4 Wave 1）：recipe step 失败分布与权限拒绝分布
+    /// 的埋点落这里。默认 `.shared`（生产单例），既有调用点零改动；测试注入
+    /// 临时目录的隔离实例，不污染生产 metrics 文件。
+    private let metrics: IOSEvolutionMetrics
     /// `skill_import` 的获批应用上下文只在本次进程内、按 toolCallId 暂存。
     /// Coordinator 接住审批卡时立即取走；冷启动不会恢复或静默应用候选包。
     private var preparedSkillImportsForApproval: [String: IOSPreparedSkillImport] = [:]
+    /// Wave B2: `recipe_import` 的获批应用上下文，与 skill_import 同生命周期
+    /// （仅内存、按 toolCallId、冷启动不恢复）。
+    private var preparedRecipeImportsForApproval: [String: IOSPreparedRecipeImport] = [:]
+    /// Wave B2: 暂停在 mutation step 审批处的 `recipe__*` 执行状态（含已
+    /// 完成 steps 的输出与下一 step 索引）。暂停前先持久化 checkpoint，恢复
+    /// 走 finisher，不经过模型循环。
+    private var preparedRecipeExecutions: [String: IOSRecipeExecutionState] = [:]
+    /// Wave B2: recipe store 的基目录（nil = documents，与 registry 同源）。
+    /// 也用于 checkpoint 落盘（`recipes/.checkpoints/`）。
+    private let recipeStoreBaseDirectory: URL?
     private let mcpConfigStore: IOSMcpConfigStore
     /// P1-c: 线程编排工具执行体（spawn_agent/list_agents/interrupt_agent）。
     /// 可选：未注入时三工具返回结构化「不可用」错误而不是静默缺失。
@@ -173,6 +283,27 @@ final class ChatToolRuntime {
         mcpConfigStore: mcpConfigStore,
         mcpManager: mcpManager
     )
+    /// Wave B2: `recipe_import` 服务（preview → 批准 → CAS apply → registry
+    /// refresh）。recipe store 基目录与 registry 同源（nil = documents）。
+    /// metrics 透传注入实例（其自身已可注入，默认 `.shared`）。
+    private lazy var recipeToolService = IOSRecipeToolService(
+        workspaceStore: workspaceStore,
+        recipeStore: IOSRecipeFileStore(baseDirectory: recipeStoreBaseDirectory ?? recipeDefaultBaseDirectory),
+        metrics: metrics
+    )
+    /// Wave B2: checkpoint 落盘（`<base>/recipes/.checkpoints/`）。
+    private lazy var recipeExecutionCheckpointStore = IOSRecipeExecutionCheckpointStore(
+        baseDirectory: recipeStoreBaseDirectory ?? recipeDefaultBaseDirectory
+    )
+
+    private var recipeDefaultBaseDirectory: URL {
+        (try? FileManager.default.url(
+            for: .documentDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? FileManager.default.temporaryDirectory
+    }
 
     init(
         settingsStore: SettingsStore,
@@ -186,7 +317,10 @@ final class ChatToolRuntime {
         orchestrationToolService: IOSThreadOrchestrationToolService? = nil,
         memoryPollutionMarker: ((KotlinUuid, String) -> Void)? = nil,
         jsCellRegistry: IOSJsCellRegistry? = nil,
-        conversationStoreProvider: (() -> IOSConversationStore?)? = nil
+        conversationStoreProvider: (() -> IOSConversationStore?)? = nil,
+        ledger: IOSAgentRunLedgering? = nil,
+        recipeStoreBaseDirectory: URL? = nil,
+        metrics: IOSEvolutionMetrics = .shared
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
@@ -200,6 +334,9 @@ final class ChatToolRuntime {
         self.memoryPollutionMarker = memoryPollutionMarker
         self.jsCellRegistry = jsCellRegistry ?? .shared
         self.conversationStoreProvider = conversationStoreProvider
+        self.ledger = ledger
+        self.recipeStoreBaseDirectory = recipeStoreBaseDirectory
+        self.metrics = metrics
     }
 
     /// 把只读 preview 对应的 CAS 上下文交给 Coordinator 的 pending MCP 槽。
@@ -210,6 +347,26 @@ final class ChatToolRuntime {
 
     func discardPreparedSkillImportForApproval(toolCallId: String) {
         preparedSkillImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    /// Wave B2: `recipe_import` 的批准上下文（与 skill_import 同模式）。
+    func takePreparedRecipeImportForApproval(toolCallId: String) -> IOSPreparedRecipeImport? {
+        preparedRecipeImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    func discardPreparedRecipeImportForApproval(toolCallId: String) {
+        preparedRecipeImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    /// Wave B2: 暂停中的 `recipe__*` 执行状态。Coordinator 接住审批卡时取走；
+    /// 冷启动/取消/run 替换都会丢弃（同时清 checkpoint），绝不跨 run 复用。
+    func takePreparedRecipeExecution(toolCallId: String) -> IOSRecipeExecutionState? {
+        preparedRecipeExecutions.removeValue(forKey: toolCallId)
+    }
+
+    func discardPreparedRecipeExecution(toolCallId: String) {
+        preparedRecipeExecutions.removeValue(forKey: toolCallId)
+        recipeExecutionCheckpointStore.remove(toolCallId: toolCallId)
     }
 
     /// Tool set for the novel discussion agent. Ask User is always available;
@@ -395,7 +552,8 @@ final class ChatToolRuntime {
                         toolCall: toolCall,
                         action: .denied,
                         reason: "Background subagent dispatch requires foreground approval.",
-                        runId: runId
+                        runId: runId,
+                        isUserDecision: false
                     )
                     return .denied("后台生成期间需要回到 App 确认子代理调度。")
                 }
@@ -516,6 +674,15 @@ final class ChatToolRuntime {
                     conversationId: conversationId
                 )
                 return .filled(result)
+            }
+        }
+
+        // Wave B2 (§16.2): recipe_import 与 skill_import 同级——预览与批准都
+        // 必须在前台；后台只拒绝。`recipe__*` 名字在后台桥里本就不存在（B1 的
+        // handoff 过滤），这里不注册任何 recipe 执行器，声明与执行都不进入后台。
+        if availableToolNames.contains("recipe_import") {
+            executors["recipe_import"] = IOSClosureToolExecutor { _, _, _ in
+                .denied("Recipe 导入需要查看候选变更并显式批准，请回到 App 内确认。")
             }
         }
 
@@ -656,7 +823,8 @@ final class ChatToolRuntime {
         _ pendingToolCall: ChatPendingToolCall,
         context: ChatPendingToolApproval,
         toolExposureBridge: IosToolExposureBridge? = nil,
-        nestedToolRunner: IosExecNestedToolRunner? = nil
+        nestedToolRunner: IosExecNestedToolRunner? = nil,
+        recipeCatalogSnapshot: IOSDynamicToolCatalogSnapshot? = nil
     ) async -> ChatToolRuntimeResult {
         // I-2 fail-closed: gate every kind on the same check before it reaches its
         // own dispatch* function, all of which read `context.toolCall.input`
@@ -703,7 +871,8 @@ final class ChatToolRuntime {
                     toolExposureBridge: toolExposureBridge,
                     nestedToolRunner: nestedToolRunner
                 ),
-                toolExposureBridge: toolExposureBridge
+                toolExposureBridge: toolExposureBridge,
+                recipeCatalogSnapshot: recipeCatalogSnapshot
             )
         }
     }
@@ -891,6 +1060,16 @@ final class ChatToolRuntime {
             let output = await workspaceToolExecutionOutput(pending.toolCall, isUserInitiated: true)
             resultText = ChatToolOutputFormatter.workspaceResultText(for: pending.toolCall, output: output)
         } else {
+            // §15 Phase 0: workspace denials do not flow through
+            // `recordToolApproval` (pre-existing gap — no permission-store
+            // record either), but the ledger denial is still a required
+            // §11.1 evidence source, so record it here.
+            recordApprovalDeniedInLedger(
+                runId: pending.runId,
+                toolCall: pending.toolCall,
+                reason: "User denied Workspace tool access.",
+                capabilityId: IOSCapabilityRegistry.capability(forToolName: pending.toolCall.toolName)?.id
+            )
             resultText = IOSWorkspaceStore.json([
                 "ok": false,
                 "tool": pending.toolCall.toolName,
@@ -1618,6 +1797,8 @@ final class ChatToolRuntime {
         ])
         .union(IOSSkillToolCatalog.toolNames)
         .union(IOSMcpManagementToolCatalog.toolNames)
+        // Wave B2: recipe_import（与 skill_import 同级，deferred 池）。
+        .union(IOSRecipeToolCatalog.toolNames)
         // P3-a: exec 仅开关开时存在执行路径；关时零痕迹——模型调用 exec 走
         // 未知名硬失败语义（与声明侧 gate 同源：settingsStore.execJavaScriptEnabled）。
         // P3-c: wait 与 exec 同开关（cell 生命周期续取，无独立设置项）。
@@ -1629,7 +1810,10 @@ final class ChatToolRuntime {
             if let toolCall = message.parts.compactMap({ $0 as? UIMessagePart.Tool })
                 .first(where: {
                     (advancedNames.contains($0.toolName)
-                        || ToolKt.isExpandedMcpToolName(name: $0.toolName))
+                        || ToolKt.isExpandedMcpToolName(name: $0.toolName)
+                        // Wave B2: `recipe__*` 通用路由——与 mcp__* 同模式，
+                        // 命中后下一轮才可执行（声明与执行同 snapshot，§16.1）。
+                        || IOSDynamicToolRegistry.isRecipeToolName($0.toolName))
                         && availableToolNames.contains($0.toolName)
                         && $0.output.isEmpty
                 }) {
@@ -1775,9 +1959,23 @@ final class ChatToolRuntime {
     private func executeAdvancedToolCall(
         _ pending: ChatPendingToolApproval,
         nestedTools: IOSJsSandboxTools? = nil,
-        toolExposureBridge: IosToolExposureBridge? = nil
+        toolExposureBridge: IosToolExposureBridge? = nil,
+        recipeCatalogSnapshot: IOSDynamicToolCatalogSnapshot? = nil
     ) async -> ChatToolRuntimeResult {
         let toolName = pending.toolCall.toolName
+
+        // Wave B2: `recipe__*` 通用前缀路由（§13.2.5 / §16.1）——镜像 mcp__*
+        // 模式，单一路由不为每个 recipe 写分支。manifest 从「当前 round 的
+        // registry snapshot」解析（in-flight pinning，不用 live store）；
+        // snapshot 无此 recipe → 结构化错误（不崩、不静默）。mutation step
+        // 走现有审批（invariant 11），在这里与 skill_import 同层拦截。
+        if IOSDynamicToolRegistry.isRecipeToolName(toolName) {
+            return await executeRecipeToolCall(
+                pending,
+                snapshot: recipeCatalogSnapshot,
+                bridge: toolExposureBridge
+            )
+        }
 
         // skill_import 与普通本机 mutation 不同：这里先做只读 preview，再无条件
         // 暂停等待一次显式批准。此分支位于所有 auto-approve gate 之前，因此
@@ -1805,6 +2003,33 @@ final class ChatToolRuntime {
                 }
                 preparedSkillImportsForApproval[pending.toolCall.toolCallId] = prepared
                 return .waitingForApproval(.mcp(request))
+            } catch {
+                return .completed(messagesByFinishingToolCall(
+                    pending.toolCall,
+                    outputText: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    ),
+                    in: pending.baseMessages
+                ))
+            }
+        }
+
+        // Wave B2: `recipe_import` 与 skill_import 同模式——先做只读 preview，
+        // 再无条件暂停等待显式批准（位于所有 auto-approve gate 之前）。
+        if toolName == "recipe_import" {
+            preparedRecipeImportsForApproval.removeValue(forKey: pending.toolCall.toolCallId)
+            do {
+                let prepared = try recipeToolService.prepareRecipeImport(
+                    arguments: pending.toolCall.input
+                )
+                let request = RecipeToolApprovalRequestBuilder.importRequest(
+                    for: pending.toolCall,
+                    prepared: prepared
+                )
+                preparedRecipeImportsForApproval[pending.toolCall.toolCallId] = prepared
+                return .waitingForApproval(.recipe(request))
             } catch {
                 return .completed(messagesByFinishingToolCall(
                     pending.toolCall,
@@ -1898,6 +2123,888 @@ final class ChatToolRuntime {
             in: pending.baseMessages,
             conversationId: pending.conversationId
         ))
+    }
+
+    // MARK: - Wave B2: `recipe__*` generic route (§13.2.5 / §16.1 / §10.3)
+
+    /// One `recipe__<name>` call, resolved against the ROUND's pinned catalog
+    /// snapshot (never the live store): the manifest for execution is the
+    /// snapshot's immutable copy, so a promotion/rollback during the call
+    /// cannot retarget it (§13.3). Steps run through the EXISTING per-tool
+    /// execution paths (no duplicated tool implementations); a mutation step
+    /// pauses the whole call at the existing approval machinery (invariant 11).
+    private func executeRecipeToolCall(
+        _ pending: ChatPendingToolApproval,
+        snapshot: IOSDynamicToolCatalogSnapshot?,
+        bridge: IosToolExposureBridge?
+    ) async -> ChatToolRuntimeResult {
+        let toolName = pending.toolCall.toolName
+        let recipeCallFailure = { (reason: String) -> ChatToolRuntimeResult in
+            .completed(self.messagesByFinishingToolCall(
+                pending.toolCall,
+                outputText: ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: toolName,
+                    reason: reason,
+                    status: "failed"
+                ),
+                in: pending.baseMessages
+            ))
+        }
+
+        // At most one recipe pause can be live per process; any checkpoint
+        // file on disk at the start of a new execution is an orphan from a
+        // crashed pause (cold-start recovery terminates approvals fail-closed,
+        // so it is never resumed — sweep instead of resurrecting).
+        recipeExecutionCheckpointStore.sweepOrphans()
+
+        // Fail closed: the round's snapshot does not declare this recipe
+        // (rolled back, or the model used a stale name). Never execute from
+        // the live store — a call the model saw must match what it saw.
+        guard let descriptor = snapshot?.recipeTools.first(where: { $0.toolId == toolName }) else {
+            return recipeCallFailure("此 Recipe 不在当前工具目录中（可能已被回退或版本已更新）。请先调用 tool_search 获取最新工具。")
+        }
+        guard preparedRecipeExecutions[pending.toolCall.toolCallId] == nil else {
+            // Continuations go through the finisher, never through a second
+            // dispatch of the same call; a re-entry is a stale round.
+            return recipeCallFailure("此 Recipe 调用已在审批中，请先在审批卡上确认。")
+        }
+
+        let inputs: [String: IOSRecipeJSONValue]
+        do {
+            let value = try JSONDecoder().decode(IOSRecipeJSONValue.self, from: Data(pending.toolCall.input.utf8))
+            guard case .object(let object) = value else {
+                return recipeCallFailure("Recipe 调用参数必须是 JSON 对象。")
+            }
+            inputs = object
+        } catch {
+            return recipeCallFailure("Recipe 调用参数不是合法的 JSON：\(error.localizedDescription)")
+        }
+
+        let runner = makeRecipeRunner(manifest: descriptor.manifest, context: pending, bridge: bridge)
+        let plan: IOSRecipeExecutionPlan
+        do {
+            plan = try runner.resolvePlan(inputs: inputs)
+        } catch let error as IOSRecipeRunError {
+            await recordRecipeLevelFinished(
+                recipeName: descriptor.recipeName,
+                recipeVersion: descriptor.version,
+                executionId: "recipe-\(UUID().uuidString)",
+                outcome: "failed", outcomeKind: "error",
+                errorCode: Self.recipeErrorCode(for: error),
+                runId: pending.runId
+            )
+            let outcome = IOSRecipeRunOutcome.failed(failedStep: nil, error: error, completedSteps: [])
+            return .completed(messagesByFinishingToolCall(
+                pending.toolCall,
+                outputText: runner.structuredErrorJSON(for: outcome)
+                    ?? ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: "Recipe 执行计划校验失败。",
+                        status: "failed"
+                    ),
+                in: pending.baseMessages
+            ))
+        } catch {
+            return recipeCallFailure("Recipe 执行计划无法解析：\(error.localizedDescription)")
+        }
+
+        var state = IOSRecipeExecutionState(
+            toolCallId: pending.toolCall.toolCallId,
+            executionId: "recipe-\(UUID().uuidString)",
+            recipeName: descriptor.recipeName,
+            recipeVersion: descriptor.version,
+            catalogRevision: snapshot?.revision,
+            manifest: descriptor.manifest,
+            plan: plan,
+            inputs: inputs,
+            stepOutputs: [:],
+            completedSteps: [],
+            nextStepIndex: 0
+        )
+        switch await advanceRecipeExecution(state: &state, context: pending, bridge: bridge) {
+        case .completed(let messages):
+            return .completed(messages)
+        case .needsApproval(let request):
+            return .waitingForApproval(.recipe(request))
+        }
+    }
+
+    /// Runs steps from `state.nextStepIndex` until the next approval-requiring
+    /// step or completion. When a step needs approval the checkpoint is
+    /// persisted and the state is stashed (keyed by toolCallId) so the
+    /// finisher can continue the recipe on approval (§10.3.5: each mutation
+    /// step pauses again). On completion/failure the checkpoint and the
+    /// stashed state are removed here.
+    ///
+    /// `skipGateForFirstStep`: the finisher's allow path resumes AT the step
+    /// the user just approved — re-gating it would pause the same step again
+    /// (an approval loop). The approved step bypasses the gate exactly like
+    /// the top-level post-approval path (`isUserInitiated: true`); every
+    /// LATER step is gated normally.
+    private func advanceRecipeExecution(
+        state: inout IOSRecipeExecutionState,
+        context: ChatPendingToolApproval,
+        bridge: IosToolExposureBridge?,
+        skipGateForFirstStep: Bool = false
+    ) async -> RecipeAdvanceOutcome {
+        let runner = makeRecipeRunner(manifest: state.manifest, context: context, bridge: bridge)
+        var skipGate = skipGateForFirstStep
+        while state.nextStepIndex < state.plan.steps.count {
+            let step = state.plan.steps[state.nextStepIndex]
+
+            // Resolve the step's arguments BEFORE the approval gate so the
+            // card can show what the step will actually call with.
+            let argsJSON: String
+            do {
+                argsJSON = try runner.resolveArguments(
+                    step: step,
+                    inputs: state.inputs,
+                    stepOutputs: state.stepOutputs
+                )
+            } catch let error as IOSRecipeRunError {
+                // Same Finished-only trace as the pre-refactor runner (the
+                // step never Started), then stop the recipe.
+                await recordRecipeStepFinishedOnly(
+                    state: state, step: step, errorCode: "argument_binding", runId: context.runId
+                )
+                await recordRecipeLevelFinished(
+                    recipeName: state.recipeName,
+                    recipeVersion: state.recipeVersion,
+                    executionId: state.executionId,
+                    outcome: "failed", outcomeKind: "error",
+                    errorCode: Self.recipeErrorCode(for: error),
+                    runId: context.runId
+                )
+                let outcome = IOSRecipeRunOutcome.failed(
+                    failedStep: step.id, error: error, completedSteps: state.completedSteps
+                )
+                return .completed(finishRecipeCall(
+                    state: state, context: context,
+                    outputText: runner.structuredErrorJSON(for: outcome)
+                        ?? ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: context.toolCall.toolName,
+                            reason: "Recipe 步骤参数解析失败。",
+                            status: "failed"
+                        )
+                ))
+            } catch {
+                let runError = IOSRecipeRunError.argumentBinding(
+                    stepId: step.id, key: "", reason: error.localizedDescription
+                )
+                await recordRecipeStepFinishedOnly(
+                    state: state, step: step, errorCode: "argument_binding", runId: context.runId
+                )
+                await recordRecipeLevelFinished(
+                    recipeName: state.recipeName,
+                    recipeVersion: state.recipeVersion,
+                    executionId: state.executionId,
+                    outcome: "failed", outcomeKind: "error",
+                    errorCode: "argument_binding",
+                    runId: context.runId
+                )
+                let outcome = IOSRecipeRunOutcome.failed(
+                    failedStep: step.id, error: runError, completedSteps: state.completedSteps
+                )
+                return .completed(finishRecipeCall(
+                    state: state, context: context,
+                    outputText: runner.structuredErrorJSON(for: outcome)
+                        ?? ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: context.toolCall.toolName,
+                            reason: "Recipe 步骤参数解析失败。",
+                            status: "failed"
+                        )
+                ))
+            }
+
+            if !skipGate {
+                switch recipeStepGate(tool: step.tool, argsJSON: argsJSON) {
+                case .unsupported(let reason):
+                    let error = IOSRecipeRunError.stepFailed(stepId: step.id, tool: step.tool, message: reason)
+                    await recordRecipeLevelFinished(
+                        recipeName: state.recipeName,
+                        recipeVersion: state.recipeVersion,
+                        executionId: state.executionId,
+                        outcome: "failed", outcomeKind: "error",
+                        errorCode: "unsupported_step",
+                        runId: context.runId
+                    )
+                    let outcome = IOSRecipeRunOutcome.failed(
+                        failedStep: step.id, error: error, completedSteps: state.completedSteps
+                    )
+                    return .completed(finishRecipeCall(
+                        state: state, context: context,
+                        outputText: runner.structuredErrorJSON(for: outcome)
+                            ?? ChatToolOutputFormatter.toolFailureJSON(
+                                toolName: context.toolCall.toolName,
+                                reason: reason,
+                                status: "failed"
+                            )
+                    ))
+                case .approvalRequired(let reason):
+                    // Durable pause: the checkpoint is on disk BEFORE the
+                    // coordinator marks the run awaiting permission.
+                    recipeExecutionCheckpointStore.save(state.checkpoint())
+                    preparedRecipeExecutions[state.toolCallId] = state
+                    let payload = RecipeStepApprovalPayload(
+                        stepId: step.id,
+                        tool: step.tool,
+                        argumentsPreview: recipeArgumentsPreview(argsJSON),
+                        effectClass: step.effectClass
+                    )
+                    return .needsApproval(RecipeToolApprovalRequestBuilder.stepRequest(
+                        for: context.toolCall,
+                        recipeName: state.recipeName,
+                        recipeVersion: state.recipeVersion,
+                        payload: payload,
+                        reason: reason,
+                        executionId: state.executionId
+                    ))
+                case .proceed:
+                    break
+                }
+            }
+            // Only the resumed (just-approved) step bypasses the gate; from
+            // here on every step is gated again.
+            skipGate = false
+
+            do {
+                let output = try await runner.runStep(
+                    plan: state.plan, step: step, executionId: state.executionId,
+                    inputs: state.inputs, stepOutputs: state.stepOutputs
+                )
+                state.stepOutputs[step.id] = output
+                state.completedSteps.append(step.id)
+                state.nextStepIndex += 1
+            } catch let error as IOSRecipeRunError {
+                metrics.recordRecipeStepFailure(toolId: step.tool)
+                await recordRecipeLevelFinished(
+                    recipeName: state.recipeName,
+                    recipeVersion: state.recipeVersion,
+                    executionId: state.executionId,
+                    outcome: "failed", outcomeKind: "error",
+                    errorCode: Self.recipeErrorCode(for: error),
+                    runId: context.runId
+                )
+                let outcome = IOSRecipeRunOutcome.failed(
+                    failedStep: step.id, error: error, completedSteps: state.completedSteps
+                )
+                return .completed(finishRecipeCall(
+                    state: state, context: context,
+                    outputText: runner.structuredErrorJSON(for: outcome)
+                        ?? ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: context.toolCall.toolName,
+                            reason: "Recipe 步骤执行失败。",
+                            status: "failed"
+                        )
+                ))
+            } catch {
+                let runError = IOSRecipeRunError.stepFailed(
+                    stepId: step.id, tool: step.tool, message: error.localizedDescription
+                )
+                metrics.recordRecipeStepFailure(toolId: step.tool)
+                await recordRecipeLevelFinished(
+                    recipeName: state.recipeName,
+                    recipeVersion: state.recipeVersion,
+                    executionId: state.executionId,
+                    outcome: "failed", outcomeKind: "error",
+                    errorCode: "step_failed",
+                    runId: context.runId
+                )
+                let outcome = IOSRecipeRunOutcome.failed(
+                    failedStep: step.id, error: runError, completedSteps: state.completedSteps
+                )
+                return .completed(finishRecipeCall(
+                    state: state, context: context,
+                    outputText: runner.structuredErrorJSON(for: outcome)
+                        ?? ChatToolOutputFormatter.toolFailureJSON(
+                            toolName: context.toolCall.toolName,
+                            reason: "Recipe 步骤执行失败。",
+                            status: "failed"
+                        )
+                ))
+            }
+        }
+
+        // All steps completed: resolve the recipe outputs (§10.3.1).
+        do {
+            let outputs = try runner.resolveOutputs(plan: state.plan, stepOutputs: state.stepOutputs)
+            await recordRecipeLevelFinished(
+                recipeName: state.recipeName,
+                recipeVersion: state.recipeVersion,
+                executionId: state.executionId,
+                outcome: "completed", outcomeKind: "success",
+                errorCode: nil,
+                runId: context.runId
+            )
+            let resultText = recipeResultJSON(outputs: outputs, completedSteps: state.completedSteps)
+            return .completed(finishRecipeCall(state: state, context: context, outputText: resultText))
+        } catch let error as IOSRecipeRunError {
+            await recordRecipeLevelFinished(
+                recipeName: state.recipeName,
+                recipeVersion: state.recipeVersion,
+                executionId: state.executionId,
+                outcome: "failed", outcomeKind: "error",
+                errorCode: Self.recipeErrorCode(for: error),
+                runId: context.runId
+            )
+            let outcome = IOSRecipeRunOutcome.failed(
+                failedStep: nil, error: error, completedSteps: state.completedSteps
+            )
+            return .completed(finishRecipeCall(
+                state: state, context: context,
+                outputText: runner.structuredErrorJSON(for: outcome)
+                    ?? ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: context.toolCall.toolName,
+                        reason: "Recipe 输出解析失败。",
+                        status: "failed"
+                    )
+            ))
+        } catch {
+            let runError = IOSRecipeRunError.outputResolution(outputName: "", reason: error.localizedDescription)
+            await recordRecipeLevelFinished(
+                recipeName: state.recipeName,
+                recipeVersion: state.recipeVersion,
+                executionId: state.executionId,
+                outcome: "failed", outcomeKind: "error",
+                errorCode: "output_resolution",
+                runId: context.runId
+            )
+            let outcome = IOSRecipeRunOutcome.failed(
+                failedStep: nil, error: runError, completedSteps: state.completedSteps
+            )
+            return .completed(finishRecipeCall(
+                state: state, context: context,
+                outputText: runner.structuredErrorJSON(for: outcome)
+                    ?? ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: context.toolCall.toolName,
+                        reason: "Recipe 输出解析失败。",
+                        status: "failed"
+                    )
+            ))
+        }
+    }
+
+    /// Finisher continuation of a paused mutation step. `allow`:
+    /// - executes the approved step (its policy gate is bypassed via
+    ///   `isUserInitiated: true`, the existing post-approval contract) and
+    ///   CONTINUES the recipe — a later mutation step pauses again;
+    /// - deny: the step fails, the recipe stops, a structured error with the
+    ///   completed-side-effects list is returned (§10.3.6) and the
+    ///   `approval_denied` ledger event is written through `recordToolApproval`
+    ///   (the Phase 0 evidence funnel).
+    func finishRecipeStepApproval(
+        pending: ChatPendingToolApproval,
+        allow: Bool,
+        executionContext: IOSRecipeExecutionState?,
+        toolExposureBridge: IosToolExposureBridge?
+    ) async -> RecipeApprovalFinishResult {
+        let toolCallId = pending.toolCall.toolCallId
+        guard var state = executionContext ?? preparedRecipeExecutions[toolCallId] else {
+            // Fail closed: the prepared execution is gone (cold start or run
+            // replaced); never fall back to a fresh preview/execution.
+            let failure = ChatToolOutputFormatter.toolFailureJSON(
+                toolName: pending.toolCall.toolName,
+                reason: "Recipe 执行上下文已失效，请重新发起调用。",
+                status: "failed"
+            )
+            return .completed(messagesByFinishingToolCall(
+                pending.toolCall,
+                outputText: failure,
+                in: pending.baseMessages
+            ))
+        }
+
+        guard !allow else {
+            recordToolApproval(
+                capabilityId: "ios.agent.recipe_execution",
+                toolCall: pending.toolCall,
+                action: .allowed,
+                reason: "User approved recipe step.",
+                runId: pending.runId
+            )
+            // The resumed step is the one the user just approved — skip its
+            // gate (the top-level post-approval contract); later steps gate
+            // normally (§10.3.5: each mutation step pauses again).
+            switch await advanceRecipeExecution(
+                state: &state, context: pending, bridge: toolExposureBridge,
+                skipGateForFirstStep: true
+            ) {
+            case .completed(let messages):
+                return .completed(messages)
+            case .needsApproval(let request):
+                return .pausedForNextStep(request)
+            }
+        }
+
+        // Denial: the approved step fails, the recipe stops (§10.3.6).
+        recordToolApproval(
+            capabilityId: "ios.agent.recipe_execution",
+            toolCall: pending.toolCall,
+            action: .denied,
+            reason: "User denied recipe step.",
+            runId: pending.runId
+        )
+        discardPreparedRecipeExecution(toolCallId: toolCallId)
+        let step = state.plan.steps[state.nextStepIndex]
+        let error = IOSRecipeRunError.stepFailed(
+            stepId: step.id, tool: step.tool, message: "用户拒绝了该步骤，Recipe 已停止。"
+        )
+        await recordRecipeLevelFinished(
+            recipeName: state.recipeName,
+            recipeVersion: state.recipeVersion,
+            executionId: state.executionId,
+            outcome: "failed", outcomeKind: "denied",
+            errorCode: "step_denied",
+            runId: pending.runId
+        )
+        let runner = makeRecipeRunner(manifest: state.manifest, context: pending, bridge: toolExposureBridge)
+        let outcome = IOSRecipeRunOutcome.failed(
+            failedStep: step.id, error: error, completedSteps: state.completedSteps
+        )
+        return .completed(messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: runner.structuredErrorJSON(for: outcome)
+                ?? ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: pending.toolCall.toolName,
+                    reason: "用户拒绝了该步骤，Recipe 已停止。",
+                    denied: true
+                ),
+            in: pending.baseMessages
+        ))
+    }
+
+    /// `recipe_import` approval resolution: re-reads the Workspace candidate,
+    /// re-validates base/candidate CAS + semantics, applies (zero writes on
+    /// any stale change) and refreshes the registry so the next model round
+    /// sees the promotion. Denial records the `approval_denied` ledger event.
+    func finishRecipeImportApproval(
+        pending: ChatPendingToolApproval,
+        allow: Bool,
+        prepared: IOSPreparedRecipeImport?
+    ) async -> [UIMessage] {
+        recordToolApproval(
+            capabilityId: "ios.agent.recipe_import",
+            toolCall: pending.toolCall,
+            action: allow ? .allowed : .denied,
+            reason: allow ? "User approved recipe import." : "User denied recipe import.",
+            runId: pending.runId
+        )
+        let resultText: String
+        if allow {
+            if let prepared {
+                do {
+                    resultText = try await recipeToolService.applyPreparedRecipeImport(prepared)
+                } catch {
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    )
+                }
+            } else {
+                // 冷启动或审批内存态丢失时 fail closed；绝不能退回普通 dispatch。
+                resultText = ChatToolOutputFormatter.toolFailureJSON(
+                    toolName: pending.toolCall.toolName,
+                    reason: "Recipe 导入预览已失效，请重新发起导入并确认最新变更。",
+                    status: "failed"
+                )
+            }
+        } else {
+            resultText = "用户拒绝导入 Recipe。"
+        }
+        return messagesByFinishingToolCall(
+            pending.toolCall,
+            outputText: resultText,
+            in: pending.baseMessages
+        )
+    }
+
+    /// Builds the production primitive executor: every step routes back to
+    /// this runtime's EXISTING per-tool execution paths (workspace/search/
+    /// iSH/webMount/memory/advanced/skill/discovery), never a duplicated
+    /// implementation. `isUserInitiated: true` is the post-approval contract
+    /// (the user already approved the step's card).
+    private func makeRecipeRunner(
+        manifest: IOSRecipeManifest,
+        context: ChatPendingToolApproval,
+        bridge: IosToolExposureBridge?
+    ) -> IOSRecipeRunner {
+        IOSRecipeRunner(
+            manifest: manifest,
+            catalog: IOSDynamicToolRegistry.primitiveCatalogEntry,
+            executePrimitive: { [weak self] tool, argsJSON in
+                guard let self else {
+                    throw IOSRecipeRunError.stepFailed(
+                        stepId: "", tool: tool, message: "Chat runtime is unavailable."
+                    )
+                }
+                switch await self.executeRecipePrimitiveStep(
+                    tool: tool,
+                    argsJSON: argsJSON,
+                    isUserInitiated: true,
+                    context: context,
+                    bridge: bridge
+                ) {
+                case .output(let text):
+                    return text
+                case .failure(let reason):
+                    throw IOSRecipeRunError.stepFailed(stepId: "", tool: tool, message: reason)
+                case .needsApproval:
+                    throw IOSRecipeRunError.stepFailed(
+                        stepId: "", tool: tool,
+                        message: "步骤需要批准但未通过审批前置检查。"
+                    )
+                }
+            },
+            ledger: ledger,
+            runId: context.runId
+        )
+    }
+
+    /// One step routed through the existing dispatcher (post-approval path).
+    /// The gate was already checked by `advanceRecipeExecution`; this only
+    /// executes and formats the output.
+    private func executeRecipePrimitiveStep(
+        tool: String,
+        argsJSON: String,
+        isUserInitiated: Bool,
+        context: ChatPendingToolApproval,
+        bridge: IosToolExposureBridge?
+    ) async -> RecipePrimitiveStepResult {
+        let toolCall = UIMessagePart.Tool(
+            toolCallId: "recipe-step-\(UUID().uuidString)",
+            toolName: tool,
+            input: argsJSON,
+            output: [],
+            approvalState: ToolApprovalState.Auto.shared,
+            streamIndex: nil,
+            metadata: nil
+        )
+        switch recipePrimitiveRoute(for: tool) {
+        case .workspace:
+            let output = await workspaceToolExecutionOutput(toolCall, isUserInitiated: isUserInitiated)
+            if case .needsUserAction(let reason) = output {
+                return .needsApproval(reason: reason)
+            }
+            let text = ChatToolOutputFormatter.workspaceResultText(for: toolCall, output: output)
+            // Slice A / §10.3.6：recipe step 是 stop-on-failure 语义，workspace
+            // 的 ok:false 必须冒泡为 step 失败（否则路径/参数错误永远不产生
+            // typed evidence，自进化诊断无从归因）。普通聊天工具路径不变——
+            // 那里 ok:false 是给模型看的正常输出。
+            if let failure = ChatToolOutputFormatter.workspaceFailureReason(inOutputJSON: text) {
+                return .failure(failure)
+            }
+            return .output(text)
+        case .search:
+            return .output(await dispatchSearchToolCall(toolCall))
+        case .memory:
+            let policy = memoryToolWritePolicy(input: argsJSON, isUserInitiated: isUserInitiated)
+            if case .needsUserAction(let reason) = policy {
+                return .needsApproval(reason: reason)
+            }
+            return .output(dispatchMemoryToolCall(toolCall, writePolicy: policy))
+        case .ish:
+            let output = await ishToolExecutionOutput(toolCall, isUserInitiated: isUserInitiated)
+            if case .needsUserAction(let reason) = output {
+                return .needsApproval(reason: reason)
+            }
+            return .output(ChatToolOutputFormatter.ishHandoffResultText(for: toolCall, output: output))
+        case .webMount:
+            let output = await webMountToolExecutionOutput(toolCall, isUserInitiated: isUserInitiated)
+            if case .needsUserAction(let reason) = output {
+                return .needsApproval(reason: reason)
+            }
+            return .output(ChatToolOutputFormatter.webMountResultText(for: toolCall, output: output))
+        case .sessionRead:
+            return .output(await dispatchSessionReadToolCall(toolCall))
+        case .discovery:
+            guard let bridge else {
+                return .failure("\(tool) 当前不可用（缺少工具目录）。")
+            }
+            let result = tool == "tools_list"
+                ? bridge.executeToolsList()
+                : bridge.executeToolSearch(argumentsJson: argsJSON)
+            return .output(result)
+        case .skill:
+            let result = await skillMcpToolService.execute(toolName: tool, arguments: argsJSON)
+            return .output(result)
+        case .advanced:
+            return .output(await dispatchAdvancedToolCall(
+                toolCall,
+                providerSetting: context.providerSetting,
+                params: context.params,
+                runId: context.runId,
+                conversationId: context.conversationId,
+                nestedTools: nil,
+                toolExposureBridge: bridge
+            ))
+        case .recipeImport, .unsupported:
+            return .failure("工具「\(tool)」不支持作为 Recipe step。")
+        }
+    }
+
+    /// Step-level approval gate, mirroring the TOP-LEVEL approval decisions
+    /// (`executeWorkspaceToolCall` / `executeSearchToolCall` /
+    /// `executeAdvancedToolCall` / the local executor's policy gates). The
+    /// execution itself is never duplicated — only the "would this need a
+    /// card" decision, so a recipe step cannot silently skip a gate.
+    private func recipeStepGate(tool: String, argsJSON: String) -> RecipeStepGate {
+        switch recipePrimitiveRoute(for: tool) {
+        case .workspace:
+            return workspaceRecipeStepGate(toolName: tool)
+        case .search:
+            let autoApprove = IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+                || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled
+            if !autoApprove,
+               ChatToolApprovalRequestBuilder.search(
+                   for: toolCall(name: tool, input: argsJSON),
+                   reason: "网络搜索和网页读取会访问外部站点，需要你确认。",
+                   settings: sharedSettings.snapshot
+               ) != nil {
+                return .approvalRequired(reason: "网络搜索和网页读取会访问外部站点，需要你确认。")
+            }
+            return .proceed
+        case .memory:
+            if case .needsUserAction(let reason) = memoryToolWritePolicy(input: argsJSON, isUserInitiated: false) {
+                return .approvalRequired(reason: reason)
+            }
+            return .proceed
+        case .ish:
+            // The iSH gates require explicit foreground approval for every
+            // non-user-initiated call (no auto-approve bypass) — mirror.
+            return .approvalRequired(reason: "iSH 执行需要显式批准。")
+        case .webMount:
+            return webMountRecipeStepGate(toolName: tool)
+        case .advanced:
+            switch tool {
+            case "mcp_call":
+                guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
+                    return .approvalRequired(reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。")
+                }
+                return .proceed
+            case let name where ToolKt.isExpandedMcpToolName(name: name):
+                guard IOSLocalToolExecutor.isHighRiskAutoApproveEnabled else {
+                    return .approvalRequired(reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。")
+                }
+                return .proceed
+            case "subagent_dispatch":
+                if requiresSubAgentApproval() {
+                    return .approvalRequired(reason: "子代理会发起独立模型请求并使用获准的只读工具，需要你确认。")
+                }
+                return .proceed
+            case "model_council_run":
+                if requiresCouncilApproval {
+                    return .approvalRequired(reason: "模型议会会发起多次模型请求，需要你确认。")
+                }
+                return .proceed
+            default:
+                // 编排工具（spawn/list/interrupt/send/followup/wait_agent）与
+                // exec/wait：顶层路径无审批卡，步骤同样直接执行。
+                return .proceed
+            }
+        case .skill:
+            let mutating = IOSSkillToolCatalog.mutatingToolNames.contains(tool)
+            if mutating, !IOSLocalToolExecutor.isGlobalAutoApproveEnabled,
+               !IOSLocalToolExecutor.isHighRiskAutoApproveEnabled {
+                return .approvalRequired(reason: "将写入本机 Skill 或 MCP 配置，需要你确认。")
+            }
+            return .proceed
+        case .sessionRead, .discovery:
+            return .proceed
+        case .recipeImport:
+            return .unsupported(reason: "recipe_import 需要单独的候选预览审批，不支持作为 Recipe step。")
+        case .unsupported:
+            return .unsupported(reason: "工具「\(tool)」不支持作为 Recipe step。")
+        }
+    }
+
+    /// Mirror of `IOSLocalToolExecutor.resolveWorkspace`'s gate: the policy
+    /// check that decides whether the workspace call needs a card. The
+    /// execution itself (when allowed) happens through the existing path.
+    private func workspaceRecipeStepGate(toolName: String) -> RecipeStepGate {
+        guard let localToolExecutor,
+              let capability = IOSCapabilityRegistry.capability(forToolName: toolName),
+              let policy = localToolExecutor.permissionPolicy(capabilityId: capability.id) else {
+            return .proceed
+        }
+        if policy == .disabled {
+            // Execution will fail with the disabled message; no card needed.
+            return .proceed
+        }
+        if policy == .autoApprove || policy == .autoApproveHighRisk {
+            return .proceed
+        }
+        if IOSWorkspaceToolCatalog.writeToolNames.contains(toolName) {
+            if IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+                && (capability.risk != .high || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled) {
+                return .proceed
+            }
+            return .approvalRequired(reason: "Workspace 写入与删除需要显式批准。")
+        }
+        if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+            if IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+                && (capability.risk != .high || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled) {
+                return .proceed
+            }
+            return .approvalRequired(reason: "Workspace 读取需要显式批准。")
+        }
+        return .proceed
+    }
+
+    /// Mirror of `IOSLocalToolExecutor.resolveWebMount`'s gate.
+    private func webMountRecipeStepGate(toolName: String) -> RecipeStepGate {
+        guard let localToolExecutor,
+              let capability = IOSCapabilityRegistry.capability(forToolName: toolName),
+              let policy = localToolExecutor.permissionPolicy(capabilityId: capability.id) else {
+            return .proceed
+        }
+        if policy == .disabled {
+            return .proceed
+        }
+        if policy == .autoApprove || policy == .autoApproveHighRisk {
+            return .proceed
+        }
+        if toolName == "wm_clear_session" {
+            return .approvalRequired(reason: "清除 WebMount cookies 需要显式批准。")
+        }
+        if IOSWebMountToolCatalog.descriptors.first(where: { $0.name == toolName })?.requiresUserAction == true {
+            return .approvalRequired(reason: "此 WebMount 操作需要显式批准。")
+        }
+        if policy == .askEveryTime || capability.gate.requiresFreshUserPresence {
+            if IOSLocalToolExecutor.isGlobalAutoApproveEnabled
+                && (capability.risk != .high || IOSLocalToolExecutor.isHighRiskAutoApproveEnabled) {
+                return .proceed
+            }
+            return .approvalRequired(reason: "WebMount 浏览器操作需要显式批准。")
+        }
+        return .proceed
+    }
+
+    /// Classification of a primitive ToolId into the existing execution
+    /// family (single source for the recipe step gate + post-approval
+    /// execution; mirrors `nextPendingToolCall`'s grouping).
+    private func recipePrimitiveRoute(for tool: String) -> IOSRecipePrimitiveRoute {
+        if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool) { return .workspace }
+        if IOSSearchExecutor.supportedToolNames.contains(tool) { return .search }
+        if IOSIshToolCatalog.supportedToolNames.union(IOSEmbeddedIshToolCatalog.supportedToolNames).contains(tool) { return .ish }
+        if IOSWebMountToolCatalog.supportedToolNames.union(IOSWebMountToolCatalog.unsupportedToolNames).contains(tool) { return .webMount }
+        if tool == "memory_tool" { return .memory }
+        if tool == "session_search" || tool == "session_read" { return .sessionRead }
+        if tool == "tool_search" || tool == "tools_list" { return .discovery }
+        if IOSSkillToolCatalog.toolNames.contains(tool) { return .skill }
+        if tool == "mcp_call" || ToolKt.isExpandedMcpToolName(name: tool)
+            || tool == "subagent_dispatch" || tool == "model_council_run"
+            || tool == "spawn_agent" || tool == "list_agents" || tool == "interrupt_agent"
+            || tool == "send_message" || tool == "followup_task" || tool == "wait_agent"
+            || tool == "exec" || tool == "wait" {
+            return .advanced
+        }
+        if tool == "recipe_import" { return .recipeImport }
+        return .unsupported
+    }
+
+    /// Recipe-level ledger record (§15 Phase 0 attribution): one Finished row
+    /// per recipe call under `recipe-level-<executionId>` carrying
+    /// artifactId/artifactVersion/outcomeKind, so evidence projection can
+    /// attribute the whole run to the exact recipe version. The per-step
+    /// Started/Finished pairs come from `IOSRecipeRunner.runStep` under
+    /// `recipe-<executionId>-<stepId>` (the distinct prefix keeps the two
+    /// namespaces unambiguous in the ledger).
+    private func recordRecipeLevelFinished(
+        recipeName: String,
+        recipeVersion: String,
+        executionId: String,
+        outcome: String,
+        outcomeKind: String,
+        errorCode: String?,
+        runId: String
+    ) async {
+        guard let ledger else { return }
+        await ledger.recordToolCallFinished(
+            runId: runId,
+            toolCallId: "recipe-level-\(executionId)",
+            outcome: outcome,
+            artifactId: "recipe__\(recipeName)",
+            artifactVersion: recipeVersion,
+            outcomeKind: outcomeKind,
+            errorCode: errorCode,
+            sourceRef: executionId
+        )
+    }
+
+    /// Finished-only trace for a step that failed before it ever Started
+    /// (argument resolution failure), matching the runner's pre-refactor
+    /// record shape so old and new ledgers read identically.
+    private func recordRecipeStepFinishedOnly(
+        state: IOSRecipeExecutionState,
+        step: IOSRecipePlanStep,
+        errorCode: String,
+        runId: String
+    ) async {
+        guard let ledger else { return }
+        await ledger.recordToolCallFinished(
+            runId: runId,
+            toolCallId: "recipe-\(state.executionId)-\(step.id)",
+            outcome: "failed",
+            artifactId: "recipe__\(state.recipeName)",
+            artifactVersion: state.recipeVersion,
+            outcomeKind: "error",
+            errorCode: errorCode,
+            sourceRef: state.executionId
+        )
+    }
+
+    /// Fills the recipe tool call's output and clears the paused state
+    /// (checkpoint + in-memory) — the terminal resolution of the call.
+    private func finishRecipeCall(
+        state: IOSRecipeExecutionState,
+        context: ChatPendingToolApproval,
+        outputText: String
+    ) -> [UIMessage] {
+        preparedRecipeExecutions.removeValue(forKey: state.toolCallId)
+        recipeExecutionCheckpointStore.remove(toolCallId: state.toolCallId)
+        return messagesByFinishingToolCall(
+            context.toolCall,
+            outputText: outputText,
+            in: context.baseMessages
+        )
+    }
+
+    private func recipeResultJSON(
+        outputs: [String: IOSRecipeJSONValue],
+        completedSteps: [String]
+    ) -> String {
+        let outputsObject: Any
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let data = try encoder.encode(outputs)
+            outputsObject = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            outputsObject = [:]
+        }
+        return IOSWorkspaceStore.json([
+            "ok": true,
+            "status": "completed",
+            "steps": completedSteps,
+            "outputs": outputsObject,
+        ])
+    }
+
+    private func recipeArgumentsPreview(_ argsJSON: String) -> String {
+        guard argsJSON.count > 360 else { return argsJSON }
+        return String(argsJSON.prefix(360)) + "…"
+    }
+
+    private static func recipeErrorCode(for error: IOSRecipeRunError) -> String {
+        switch error {
+        case .planInvalid: "plan_invalid"
+        case .inputInvalid: "input_invalid"
+        case .argumentBinding: "argument_binding"
+        case .stepFailed: "step_failed"
+        case .stepTimeout: "step_timeout"
+        case .outputResolution: "output_resolution"
+        }
     }
 
     private static func mcpSkillImportPreview(
@@ -2353,6 +3460,16 @@ final class ChatToolRuntime {
         case let name where IOSSkillToolCatalog.toolNames.contains(name)
             || IOSMcpManagementToolCatalog.toolNames.contains(name):
             return await skillMcpToolService.execute(toolName: name, arguments: toolCall.input)
+        case "recipe_import":
+            // Safety net: the foreground path intercepts recipe_import with a
+            // preview card BEFORE dispatch; reaching dispatch means an
+            // auto-approve/background path tried to run it — never allow a
+            // silent import.
+            return ChatToolOutputFormatter.toolFailureJSON(
+                toolName: toolCall.toolName,
+                reason: "Recipe 导入需要查看候选变更并显式批准。",
+                status: "failed"
+            )
         case "spawn_agent", "list_agents", "interrupt_agent", "send_message", "followup_task", "wait_agent":
             // P1-c/P1-d: 线程编排工具走独立服务（会话 fork / edge / mailbox / 子 run
             // 启动与取消全部收口在服务内；未注入时诚实报错而非静默缺失）。
@@ -2648,7 +3765,10 @@ final class ChatToolRuntime {
             toolCall: toolCall,
             action: enabled ? .allowed : .denied,
             reason: "\(toolCall.toolName) model tool call \(enabled ? "executed" : "denied").",
-            runId: runId
+            runId: runId,
+            // Policy-level denial (capability disabled), not a user card
+            // decision — must not become `approvalDenied` evidence (§11.1).
+            isUserDecision: false
         )
     }
 
@@ -2664,12 +3784,18 @@ final class ChatToolRuntime {
         )
     }
 
+    /// All user approval-card finish paths funnel their audit record here
+    /// (memory/search/webMount/ish/MCP/council). `isUserDecision` is false
+    /// only for policy-level denials (e.g. a disabled capability rejecting a
+    /// model call), which are not user signals and must not surface as
+    /// `approvalDenied` evidence.
     private func recordToolApproval(
         capabilityId: String,
         toolCall: UIMessagePart.Tool,
         action: IOSToolApprovalAction,
         reason: String,
-        runId: String
+        runId: String,
+        isUserDecision: Bool = true
     ) {
         localToolExecutor?.recordApproval(
             capabilityId: capabilityId,
@@ -2680,6 +3806,38 @@ final class ChatToolRuntime {
             scopeDigest: chatToolCallKey(toolCall),
             payloadDigest: chatInputDigest(for: toolCall.input)
         )
+        if action == .denied, isUserDecision {
+            recordApprovalDeniedInLedger(
+                runId: runId,
+                toolCall: toolCall,
+                reason: reason,
+                capabilityId: capabilityId
+            )
+        }
+    }
+
+    /// §15 Phase 0 (§11.1): a user denial of an approval card is a required
+    /// evolution evidence source. Writes the ledger's `approval_denied` event
+    /// (best-effort, same tier as Finished — the decision is already final in
+    /// the approval UI; a failed write only loses attribution). Fire-and-forget
+    /// so sync finish paths (memory) do not gain an await.
+    private func recordApprovalDeniedInLedger(
+        runId: String,
+        toolCall: UIMessagePart.Tool,
+        reason: String,
+        capabilityId: String?
+    ) {
+        metrics.recordPermissionDenied(toolId: toolCall.toolName)
+        guard let ledger else { return }
+        Task { [ledger] in
+            await ledger.recordApprovalDenied(
+                runId: runId,
+                toolCallId: toolCall.toolCallId,
+                toolName: toolCall.toolName,
+                reason: reason,
+                capabilityId: capabilityId
+            )
+        }
     }
 
     private func messagesByFinishingToolCall(
@@ -2762,6 +3920,12 @@ final class ChatToolRuntime {
             // P0-b: flattened MCP tools follow mcp_call's always-on gate.
             true
         case "skills_list", "use_skill", "skill_validate", "skill_import", "skill_enable", "skill_disable":
+            true
+        // Wave B2: recipe_import 与 skill_import 同级（恒可用，审批在
+        // executeAdvancedToolCall 内强制）；`recipe__*` 声明即执行。
+        case "recipe_import":
+            true
+        case let name where IOSDynamicToolRegistry.isRecipeToolName(name):
             true
         case "subagent_dispatch":
             isCapabilityPolicyEnabled("ios.agent.subagent_dispatch")

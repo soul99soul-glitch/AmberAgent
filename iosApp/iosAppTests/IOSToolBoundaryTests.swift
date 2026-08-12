@@ -107,6 +107,7 @@ final class IOSToolBoundaryTests: XCTestCase {
     private final class SpyLedger: IOSAgentRunLedgering, @unchecked Sendable {
         private(set) var startedCalls: [(runId: String, toolCallId: String, toolName: String, argsDigest: String, effectClass: IOSToolEffectClass)] = []
         private(set) var finishedCalls: [(runId: String, toolCallId: String, outcome: String)] = []
+        private(set) var approvalDeniedCalls: [(runId: String, toolCallId: String, toolName: String)] = []
         private let startResult: Bool
         private let log: TestEventLog?
 
@@ -127,9 +128,40 @@ final class IOSToolBoundaryTests: XCTestCase {
             return startResult
         }
 
-        func recordToolCallFinished(runId: String, toolCallId: String, outcome: String) async {
+        func recordToolCallFinished(
+            runId: String,
+            toolCallId: String,
+            outcome: String
+        ) async {
+            await recordToolCallFinished(
+                runId: runId, toolCallId: toolCallId, outcome: outcome,
+                artifactId: nil, artifactVersion: nil, outcomeKind: nil, errorCode: nil, sourceRef: nil
+            )
+        }
+
+        func recordToolCallFinished(
+            runId: String,
+            toolCallId: String,
+            outcome: String,
+            artifactId: String? = nil,
+            artifactVersion: String? = nil,
+            outcomeKind: String? = nil,
+            errorCode: String? = nil,
+            sourceRef: String? = nil
+        ) async {
             finishedCalls.append((runId, toolCallId, outcome))
             log?.record("finished:\(toolCallId):\(outcome)")
+        }
+
+        func recordApprovalDenied(
+            runId: String,
+            toolCallId: String,
+            toolName: String,
+            reason: String,
+            capabilityId: String?
+        ) async {
+            approvalDeniedCalls.append((runId, toolCallId, toolName))
+            log?.record("approvalDenied:\(toolCallId)")
         }
     }
 
@@ -396,6 +428,60 @@ final class IOSToolBoundaryTests: XCTestCase {
         XCTAssertEqual(
             IOSToolEffectClassMapping.forChatKind(.memory, input: #"{"action":"future_action"}"#),
             .sideEffect
+        )
+    }
+
+    /// Phase 1 验收 7（SELF_EVOLUTION_AND_HOT_RELOAD_PLAN.md）：effect class
+    /// 标注审计结论的定点锁定。审计核对了每个标注 primitive 的真实实现——
+    /// 本地只读工具标 pure（含 mcp_describe_tool：只读目录查询，实现注释明确
+    /// "never touches the network and never mutates config"，与 mcp_list 同组）；
+    /// search_web/scrape_web 是网络读取：无本地写、重放安全，但请求外泄
+    /// query/URL/API key，已按审计决定升一级为 networkRead（计划 §20）；
+    /// 写本地的编排/skill/MCP/exec 类必须 sideEffect；未知工具 fail-closed。
+    func testAuditedEffectClassMappingIsPinned() {
+        let pureLocalReads: [String] = [
+            "tool_search", "tools_list", "ask_user",
+            "session_search", "session_read",
+            "skills_list", "use_skill", "skill_validate",
+            "mcp_list", "mcp_describe_tool",
+            "list_agents", "wait_agent",
+        ]
+        for toolName in pureLocalReads {
+            XCTAssertEqual(
+                IOSToolEffectClassMapping.forToolName(toolName, input: "{}"),
+                .pure,
+                "\(toolName) is a local read and must stay pure"
+            )
+        }
+        // 网络读取：出网但无本地写，重放不会双重应用——networkRead（比 pure
+        // 保守一档：请求本身会把 query/URL/API key 带给第三方，晋升策略须升级）。
+        for toolName in ["search_web", "scrape_web"] {
+            XCTAssertEqual(
+                IOSToolEffectClassMapping.forToolName(toolName, input: #"{"query":"q"}"#),
+                .networkRead,
+                "\(toolName) is a network read: retry-safe but egressing, must stay networkRead"
+            )
+        }
+        let sideEffects: [String] = [
+            "workspace_file_write", "workspace_file_edit", "workspace_file_move",
+            "workspace_artifact_delete", "ios_ish_execute", "ish_handoff",
+            "wm_open", "wm_site_remove", "generate_image", "mcp_call",
+            "mcp_test", "mcp_import_from_skill", "skill_import", "skill_enable",
+            "skill_disable", "subagent_dispatch", "model_council_run",
+            "spawn_agent", "interrupt_agent", "send_message", "followup_task",
+            "exec", "wait",
+        ]
+        for toolName in sideEffects {
+            XCTAssertEqual(
+                IOSToolEffectClassMapping.forToolName(toolName, input: "{}"),
+                .sideEffect,
+                "\(toolName) mutates or egresses and must stay sideEffect"
+            )
+        }
+        XCTAssertEqual(
+            IOSToolEffectClassMapping.forToolName("not_a_real_tool", input: "{}"),
+            .sideEffect,
+            "unknown tool names must fail closed to sideEffect"
         )
     }
 

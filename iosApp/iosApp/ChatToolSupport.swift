@@ -646,6 +646,22 @@ enum ChatToolOutputFormatter {
         }
     }
 
+    /// Workspace 工具输出 JSON 的失败原因（`{"ok":false,...}`）；成功或解析
+    /// 不出 ok 键 ⇒ nil。recipe step 语义是 stop-on-failure（§10.3.6）：recipe
+    /// 路由与评测的隔离 workspace 执行都必须把 ok:false 当成 step 失败，
+    /// 而不是「步骤成功、输出恰好是失败 JSON」的 false-green（收口计划 §2.2）。
+    nonisolated static func workspaceFailureReason(inOutputJSON outputJSON: String) -> String? {
+        guard let data = outputJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ok = object["ok"] as? Bool else {
+            return nil
+        }
+        guard !ok else { return nil }
+        return (object["error"] as? String)
+            ?? (object["reason"] as? String)
+            ?? "workspace tool failed"
+    }
+
     static func workspaceResultText(
         for toolCall: UIMessagePart.Tool,
         output: IOSLocalToolExecutionOutput
