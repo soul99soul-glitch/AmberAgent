@@ -357,6 +357,28 @@ final class IOSCouncilRoomArchiveStoreTests: XCTestCase {
         XCTAssertFalse(vm.isReplay, "找不到归档时不应进入重放态(诚实失败,不伪造)")
     }
 
+    func testInterruptedRecoveryAppendsVisibleSystemMessage() {
+        let defaults = isolatedDefaults()
+        let store = tempStore()
+        let room = sampleRoom(taskId: "run-interrupted-visible")
+        CouncilTranscriptStore.save(room, defaults: defaults)
+        store.save(room)
+        let vm = CouncilChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(),
+            providerRegistry: nil,
+            permissionStore: IOSPermissionStore(),
+            transcriptDefaults: defaults,
+            archiveStore: store
+        )
+
+        vm.recoverInterruptedTasks([room.taskId])
+
+        XCTAssertEqual(vm.messages.last?.kind, .system)
+        XCTAssertEqual(vm.messages.last?.body, "上次讨论已中断，可以继续补充或重新发起。")
+        XCTAssertEqual(vm.messages.last?.status, .failed)
+    }
+
     func testStartFreshRoomExitsReplay() {
         let store = tempStore()
         store.save(sampleRoom(taskId: "hist-2"))

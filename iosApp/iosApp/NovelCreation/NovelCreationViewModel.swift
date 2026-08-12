@@ -1825,8 +1825,9 @@ final class NovelCreationViewModel {
     /// 页面订阅只是观察者；后台到期回调走同一条可持久化中断路径。
     func beginBackgroundGeneration(for request: NovelRunRequest) {
         let leaseID = novelRunBackgroundLeaseID(for: request.id)
-        // 首 token 前不挂系统进度卡：准备/等模型阶段关掉进度卡会立刻空中断。
-        // 有正文后再 `promoteSystemTaskIfNeeded`（见 generation lifecycle）。
+        // BGContinuedProcessingTaskRequest 必须由当前前台用户动作提交；如果等到
+        // 首 token 才 promote，用户已退后台时系统会拒绝这次关联，恰好丢掉最慢的
+        // 准备/等模型阶段。进度仍从 0/4 开始，正文到达后只更新展示阶段。
         BackgroundGenerationKeepAlive.shared.begin(
             leaseID,
             title: "Amber 小说创作中",
@@ -1856,7 +1857,7 @@ final class NovelCreationViewModel {
                     )
                 }
             },
-            submitSystemTask: false
+            submitSystemTask: true
         )
         BackgroundGenerationKeepAlive.shared.updateProgress(
             leaseID,

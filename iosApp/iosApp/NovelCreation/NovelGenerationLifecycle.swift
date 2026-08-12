@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+@preconcurrency import Shared
 
 struct NovelGenerationPolicy: Equatable, Sendable {
     let sidecarByteThreshold: Int
@@ -798,17 +799,25 @@ extension DefaultNovelCreation {
                             projectID: summary.id,
                             runID: run.id
                         )
+                        _ = try? await durableRunStore?.transitionFromAnyActive(
+                            runId: run.id.description,
+                            to: .interrupted,
+                            detail: NovelRunInterruptionReason.recovery.rawValue
+                        )
                     } catch {
                         frozenProjectIDs.insert(summary.id)
                         throw error
                     }
-                } else if sidecars.contains(where: {
-                    $0.projectID == summary.id && $0.runID == run.id
-                }) {
-                    try? await repository.removeRecoverySidecar(
-                        projectID: summary.id,
-                        runID: run.id
-                    )
+                } else {
+                    await settleDurableNovelRecord(run)
+                    if sidecars.contains(where: {
+                        $0.projectID == summary.id && $0.runID == run.id
+                    }) {
+                        try? await repository.removeRecoverySidecar(
+                            projectID: summary.id,
+                            runID: run.id
+                        )
+                    }
                 }
             }
         }
@@ -964,6 +973,17 @@ private extension DefaultNovelCreation {
             didAutoReconnectAfterDisconnect: false,
             terminalClaim: nil
         )
+        guard await ensureDurableNovelRun(run, projectID: document.project.id) else {
+            await failRun(
+                run.id,
+                failure: NovelFailure(
+                    code: "run_ledger_start_failed",
+                    message: "无法保存运行状态，已停止生成。",
+                    isRetryable: true
+                )
+            )
+            return true
+        }
         do {
             try await resumeDetachedRun(run.id)
             return true
@@ -1023,6 +1043,18 @@ private extension DefaultNovelCreation {
             runID: request.id
         )
 
+        guard await ensureDurableNovelRun(runRecord, projectID: request.projectID) else {
+            await failRun(
+                request.id,
+                failure: NovelFailure(
+                    code: "run_ledger_start_failed",
+                    message: "无法保存运行状态，已停止生成。",
+                    isRetryable: true
+                )
+            )
+            return run
+        }
+
         // The durable marker is in place and the provider is about to start.
         await updateBackgroundLease(
             runID: request.id,
@@ -1059,13 +1091,6 @@ private extension DefaultNovelCreation {
                 total: 4,
                 subtitle: subtitle
             )
-            // completed>=2 表示已见可见正文；此时再挂系统进度卡才安全。
-            if completed >= 2 {
-                BackgroundGenerationKeepAlive.shared.promoteSystemTaskIfNeeded(
-                    leaseID,
-                    subtitle: subtitle
-                )
-            }
         }
     }
 
@@ -1763,6 +1788,10 @@ private extension DefaultNovelCreation {
                 completed: 4,
                 subtitle: "已保存"
             )
+            await settleDurableNovelRun(
+                runID: runID,
+                intent: claim.intent
+            )
             finishRuntime(runID: runID, event: committed.event)
             await endBackgroundLease(for: runID)
             return committed
@@ -1780,9 +1809,92 @@ private extension DefaultNovelCreation {
                 generationRuntimes[runID] = current
                 broadcast(.persistenceBlocked(persistenceFailure), runID: runID)
             }
+            if let durableRunStore {
+                _ = try? await durableRunStore.transition(
+                    runId: runID.description,
+                    expected: .running,
+                    to: .recoveryPending,
+                    inputSnapshotRef: novelDurableInputRef(
+                        projectID: runtime.projectID,
+                        branchID: runtime.branchID
+                    ),
+                    detail: persistenceFailure.message
+                )
+            }
             await endBackgroundLease(for: runID)
             throw error
         }
+    }
+
+    func ensureDurableNovelRun(
+        _ run: NovelActiveRunRecord,
+        projectID: NovelProjectID
+    ) async -> Bool {
+        guard let durableRunStore else { return true }
+        do {
+            return try await durableRunStore.ensureRunning(
+                runId: run.id.description,
+                descriptorId: IOSDurableRunStore.Descriptor.novelGeneration,
+                startedAt: Int64(run.startedAt.timeIntervalSince1970 * 1_000),
+                inputDigest: run.requestPayloadSHA256,
+                inputSnapshotRef: novelDurableInputRef(
+                    projectID: projectID,
+                    branchID: run.branchID
+                )
+            )
+        } catch {
+            return false
+        }
+    }
+
+    func settleDurableNovelRun(
+        runID: NovelRunID,
+        intent: NovelRunTerminalIntent
+    ) async {
+        let status: AgentRunStatus
+        let detail: String?
+        switch intent {
+        case .completed, .awaitingUser:
+            status = .completed
+            detail = nil
+        case .interrupted(let reason, _):
+            status = .interrupted
+            detail = reason.rawValue
+        case .failed(let failure):
+            status = .failed
+            detail = failure.message
+        }
+        _ = try? await durableRunStore?.transitionFromAnyActive(
+            runId: runID.description,
+            to: status,
+            detail: detail
+        )
+    }
+
+    func settleDurableNovelRecord(_ run: NovelActiveRunRecord) async {
+        let status: AgentRunStatus
+        switch run.status {
+        case .running:
+            return
+        case .completed:
+            status = .completed
+        case .interrupted:
+            status = .interrupted
+        case .failed:
+            status = .failed
+        }
+        _ = try? await durableRunStore?.transitionFromAnyActive(
+            runId: run.id.description,
+            to: status,
+            detail: run.terminalFailure?.message ?? run.interruptionReason?.rawValue
+        )
+    }
+
+    func novelDurableInputRef(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) -> String {
+        "novel:\(projectID.description):\(branchID.description)"
     }
 
     func reduceTerminalClaim(

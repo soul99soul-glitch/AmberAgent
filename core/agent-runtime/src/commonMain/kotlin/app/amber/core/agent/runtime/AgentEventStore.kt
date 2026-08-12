@@ -3,12 +3,28 @@ package app.amber.core.agent.runtime
 import kotlinx.coroutines.flow.Flow
 
 interface AgentEventStore {
-    suspend fun appendRun(run: AgentRunRecord)
-    suspend fun appendEvent(event: AgentEventRecord)
+    @Throws(Exception::class)
+    suspend fun startRun(run: AgentRunRecord): Boolean
+    @Throws(Exception::class)
+    suspend fun getRun(runId: AgentRunId): AgentRunRecord?
+    @Throws(Exception::class)
+    suspend fun transitionRun(
+        runId: AgentRunId,
+        expectedStatus: AgentRunStatus,
+        status: AgentRunStatus,
+        inputSnapshotRef: String?,
+        detail: String?,
+        at: Long,
+    ): Boolean
+    @Throws(Exception::class)
+    suspend fun appendRunEvent(runId: AgentRunId, event: AgentRunEvent): Boolean
+    @Throws(Exception::class)
+    suspend fun listRunEvents(runId: AgentRunId): List<AgentEventRecord>
+    @Throws(Exception::class)
     suspend fun appendSpan(span: TraceSpanRecord)
     fun observeRun(runId: AgentRunId): Flow<AgentRunSnapshot>
-    suspend fun listUnfinishedRuns(): List<AgentRunRecord>
-    suspend fun markInterrupted(runId: AgentRunId, reason: String)
+    @Throws(Exception::class)
+    suspend fun listRecoverableRuns(descriptorIds: List<String>): List<AgentRunRecord>
 }
 
 data class AgentRunRecord(
@@ -20,13 +36,27 @@ data class AgentRunRecord(
     val messageNodeId: String?,
     val producesMessageId: String?,
     val assistantId: String?,
-    val status: String,
+    val status: AgentRunStatus,
     val inputDigest: String,
     val inputSnapshotRef: String?,
     val inputSchemaVersion: Int,
     val startedAt: Long,
     val finishedAt: Long?,
     val interruptedReason: String?,
+)
+
+/**
+ * Caller-owned event payload. Run identity and sequence are deliberately absent:
+ * the durable store derives them from the persisted run in the same SQL write.
+ */
+data class AgentRunEvent(
+    val eventId: String,
+    val type: String,
+    val payloadType: String,
+    val payload: String,
+    val payloadSchemaVersion: Int,
+    val isFinal: Boolean,
+    val ts: Long,
 )
 
 data class AgentEventRecord(

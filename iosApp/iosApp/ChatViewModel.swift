@@ -602,6 +602,9 @@ final class ChatViewModel {
     private let auxiliaryTextProvider: any IOSAgentTextProvider
     private let liveActivityController: AgentLiveActivityController
     @ObservationIgnored private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
+    @ObservationIgnored private let injectedAgentRuntimeDao: AgentRuntimeDao?
+    @ObservationIgnored private lazy var agentRuntimeDao = injectedAgentRuntimeDao ?? db.agentRuntimeDao()
+    @ObservationIgnored private lazy var runStore = IOSDurableRunStore(dao: agentRuntimeDao)
     @ObservationIgnored private let mcpManager: IOSMcpManager
     @ObservationIgnored private lazy var generationCoordinator = makeGenerationCoordinator()
     private var attachRequestId: UUID?
@@ -747,7 +750,8 @@ final class ChatViewModel {
         steerQueueStore: IOSSteerQueueStore? = nil,
         mailboxStore: IOSMailboxStore? = nil,
         orchestrationToolService: IOSThreadOrchestrationToolService? = nil,
-        mailboxActivityCenter: IOSMailboxActivityCenter? = nil
+        mailboxActivityCenter: IOSMailboxActivityCenter? = nil,
+        agentRuntimeDao: AgentRuntimeDao? = nil
     ) {
         self.settingsStore = settingsStore
         self.sharedSettings = sharedSettings
@@ -758,6 +762,7 @@ final class ChatViewModel {
         self.autoGenerateResponses = autoGenerateResponses
         self.auxiliaryTextProvider = auxiliaryTextProvider
         self.liveActivityController = liveActivityController ?? .shared
+        self.injectedAgentRuntimeDao = agentRuntimeDao
         // Build from the shared config store (same UserDefaults key as
         // McpServersView) so callTool reaches the same configured servers;
         // tests inject a manager with a deterministic directory instead.
@@ -863,7 +868,8 @@ final class ChatViewModel {
                     )
                 },
                 recordRun: { [weak self] runId, startedAt, status, inputDigest, conversationId in
-                    await self?.recordRun(
+                    guard let self else { return false }
+                    return await self.recordRun(
                         runId: runId,
                         startedAt: startedAt,
                         status: status,
@@ -877,6 +883,10 @@ final class ChatViewModel {
                         runId: runId,
                         toolCallId: toolCallId
                     )
+                },
+                resumeRunAfterPermission: { [weak self] runId in
+                    guard let self else { return false }
+                    return await self.resumeRunAfterPermission(runId: runId)
                 },
                 startLiveActivity: { [weak self] runId, conversationId, presentation in
                     self?.startLiveActivity(
@@ -1032,7 +1042,10 @@ final class ChatViewModel {
             guard let conversationId = conversationStore.summaries.first(where: {
                 $0.id.toHexDashString() == descriptor.conversationId
             })?.id else {
-                await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+                await IOSRunRecovery.completePendingApprovalRecovery(
+                    runId: descriptor.runId,
+                    runStore: runStore
+                )
                 continue
             }
             guard let storedMessages = await conversationStore.messages(for: conversationId) else {
@@ -1069,7 +1082,8 @@ final class ChatViewModel {
             // run's ledger has an opinion on), not just descriptor.toolCallId.
             guard let ledgerActions = await IOSRunRecovery.planToolCallRecovery(
                 runId: descriptor.runId,
-                messages: storedMessages
+                messages: storedMessages,
+                dao: agentRuntimeDao
             ) else {
                 continue
             }
@@ -1122,7 +1136,10 @@ final class ChatViewModel {
                 }
                 didUpdateCurrentConversation = didUpdateCurrentConversation || currentConversationId == conversationId
             }
-            await IOSRunRecovery.completePendingApprovalRecovery(runId: descriptor.runId)
+            await IOSRunRecovery.completePendingApprovalRecovery(
+                runId: descriptor.runId,
+                runStore: runStore
+            )
         }
 
         if didUpdateCurrentConversation {
@@ -1157,7 +1174,8 @@ final class ChatViewModel {
             guard let storedMessages = await conversationStore.messages(for: conversationId) else { continue }
             guard let actions = await IOSRunRecovery.planToolCallRecovery(
                 runId: pair.runId,
-                messages: storedMessages
+                messages: storedMessages,
+                dao: agentRuntimeDao
             ) else { continue }
             guard !actions.isEmpty else {
                 reconciledRunIds.insert(pair.runId)
@@ -3178,44 +3196,24 @@ final class ChatViewModel {
     private func recordRun(
         runId: String,
         startedAt: Int64,
-        status: String,
+        status: AgentRunStatus,
         inputDigest: String,
         conversationId: String?
-    ) async {
-        let dao = db.agentRuntimeDao()
-
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        // A "running" record is the up-front, not-yet-finished row written at
-        // start, so an interrupted mid-stream run is detectable by the recovery
-        // sweep; it carries no finishedAt. Terminal statuses finish the run and,
-        // because insertRun is OnConflict.REPLACE, overwrite the running row.
-        let finishedAtValue: KotlinLong? = status == "running" ? nil : KotlinLong(value: now)
-        let interruptedReason: String? = status == "interrupted" ? "user_cancelled" : nil
-
-        let run = AgentRunEntity(
-            runId: runId,
-            parentRunId: nil,
-            agentDescriptorId: "chat",
-            agentVersion: "1",
-            conversationId: conversationId,
-            messageNodeId: nil,
-            producesMessageId: nil,
-            assistantId: nil,
-            status: status,
-            inputDigest: inputDigest,
-            inputSnapshotRef: nil,
-            inputSchemaVersion: 1,
-            startedAt: startedAt,
-            finishedAt: finishedAtValue,
-            interruptedReason: interruptedReason
-        )
-
+    ) async -> Bool {
         do {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                dao.insertRun(run: run) { error in
-                    if let error { cont.resume(throwing: error) }
-                    else { cont.resume() }
-                }
+            if status == .running {
+                return try await runStore.startChatRun(
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId
+                )
+            } else {
+                return try await runStore.transitionFromAnyActive(
+                    runId: runId,
+                    to: status,
+                    detail: status == .interrupted ? "user_cancelled" : nil
+                )
             }
         } catch {
             // agent_run 是强杀恢复（applyToolCallLedgerRecovery）依赖的账本，
@@ -3228,19 +3226,27 @@ final class ChatViewModel {
             } else {
                 chatLedgerLogger.error("\(detail)")
             }
+            return false
         }
     }
 
     private func markRunAwaitingPermission(runId: String, toolCallId: String) async -> Bool {
-        let updated = await withCheckedContinuation { (continuation: CheckedContinuation<Int, Never>) in
-            db.agentRuntimeDao().markAwaitingPermission(
-                runId: runId,
-                inputSnapshotRef: "tool_call:\(toolCallId)"
-            ) { count, _ in
-                continuation.resume(returning: Int(count?.intValue ?? 0))
-            }
-        }
-        return updated == 1
+        (try? await runStore.transition(
+            runId: runId,
+            expected: .running,
+            to: .awaitingPermission,
+            inputSnapshotRef: "tool_call:\(toolCallId)"
+        )) == true
+    }
+
+    private func resumeRunAfterPermission(runId: String) async -> Bool {
+        (try? await runStore.transition(
+            runId: runId,
+            expected: .awaitingPermission,
+            to: .running,
+            inputSnapshotRef: nil,
+            detail: nil
+        )) == true
     }
 
     /// Resolve the provider for the current chat model, Android-style:

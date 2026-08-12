@@ -1,113 +1,24 @@
 import XCTest
+import UIKit
 @preconcurrency import Shared
 @testable import iosApp
 
 final class IOSChatBackgroundSuspensionTests: XCTestCase {
+    private struct HandoffSubmitFailure: Error {}
+
     private var directory: URL!
-    private var store: IOSChatBackgroundSuspensionStore!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
         directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("ChatBackgroundSuspensionTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        store = IOSChatBackgroundSuspensionStore(directory: directory)
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: directory)
-        store = nil
         directory = nil
         try super.tearDownWithError()
-    }
-
-    private func record(
-        requestId: String = "app.amber.ios.chat.run1",
-        runId: String = "run1",
-        partial: String = "已经流出来的正文",
-        suspendedAt: Int64 = 1_700_000_000_000,
-        resumeCount: Int = 0
-    ) -> IOSChatBackgroundSuspensionRecord {
-        IOSChatBackgroundSuspensionRecord(
-            requestId: requestId,
-            runId: runId,
-            partialAssistantText: partial,
-            suspendedAt: suspendedAt,
-            resumeCount: resumeCount
-        )
-    }
-
-    func testSaveThenLoadRoundTripsPartialText() {
-        let saved = record()
-        store.save(saved)
-
-        XCTAssertEqual(store.load(requestId: saved.requestId), saved)
-    }
-
-    func testLoadReturnsNilWhenNothingSuspended() {
-        XCTAssertNil(store.load(requestId: "app.amber.ios.chat.absent"))
-    }
-
-    func testRemoveDeletesTheRecord() {
-        let saved = record()
-        store.save(saved)
-        store.remove(requestId: saved.requestId)
-
-        XCTAssertNil(store.load(requestId: saved.requestId))
-        XCTAssertTrue(store.allRecords().isEmpty)
-    }
-
-    func testAllRecordsIsOrderedByInterruptionTime() {
-        let later = record(requestId: "app.amber.ios.chat.b", runId: "b", suspendedAt: 200)
-        let earlier = record(requestId: "app.amber.ios.chat.a", runId: "a", suspendedAt: 100)
-        store.save(later)
-        store.save(earlier)
-
-        XCTAssertEqual(store.allRecords().map(\.runId), ["a", "b"])
-    }
-
-    func testAllRecordsIgnoresThePayloadFileSittingInTheSameDirectory() throws {
-        store.save(record())
-        // payload 与挂起记录同目录，扫描必须只认 .suspended.json 后缀。
-        let payload = directory
-            .appendingPathComponent(IOSChatBackgroundJobFileNaming.sanitized("app.amber.ios.chat.run1"))
-            .appendingPathExtension("json")
-        try Data("{\"runId\":\"run1\"}".utf8).write(to: payload)
-
-        XCTAssertEqual(store.allRecords().count, 1)
-    }
-
-    func testResumeAttemptsAreCappedSoExpiryCannotLoopForever() {
-        var current = record()
-        XCTAssertTrue(current.canResume)
-
-        for _ in 0..<IOSChatBackgroundSuspensionRecord.maxResumeAttempts {
-            current = current.markingResumeAttempt()
-        }
-
-        XCTAssertEqual(current.resumeCount, IOSChatBackgroundSuspensionRecord.maxResumeAttempts)
-        XCTAssertFalse(current.canResume, "到达上限后必须停止自动重投，降级成用户可见的可重试失败")
-    }
-
-    func testResumeCountSurvivesAnotherExpiry() {
-        // 恢复后又被系统打断：计数必须继续累加，否则上限形同虚设。
-        store.save(record().markingResumeAttempt())
-        let carried = store.load(requestId: "app.amber.ios.chat.run1")?.resumeCount ?? 0
-
-        XCTAssertEqual(carried, 1)
-    }
-
-    func testSanitizedNameKeepsDotsAndDashesButDropsSeparators() {
-        let sanitized = IOSChatBackgroundJobFileNaming.sanitized("app.amber.ios.chat.a-b/c d")
-
-        XCTAssertEqual(sanitized, "app.amber.ios.chat.a-b-c-d")
-    }
-
-    func testSuspensionAndPayloadFileNamesNeverCollide() {
-        let requestId = "app.amber.ios.chat.run1"
-        let payloadName = IOSChatBackgroundJobFileNaming.sanitized(requestId) + ".json"
-
-        XCTAssertNotEqual(store.url(for: requestId).lastPathComponent, payloadName)
     }
 
     // MARK: - 交接守卫（在途工具分类：.pure 允许 / .sideEffect、生图、审批拒绝）
@@ -230,7 +141,21 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
     }
 
     @MainActor
+    private func makeHandoffKeepAlive(submitSucceeds: Bool) -> BackgroundGenerationKeepAlive {
+        BackgroundGenerationKeepAlive(
+            beginBackgroundTask: { _, _ in UIBackgroundTaskIdentifier(rawValue: 901) },
+            endBackgroundTask: { _ in },
+            submitTaskRequest: { _ in
+                if !submitSucceeds { throw HandoffSubmitFailure() }
+            },
+            cancelTaskRequest: { _ in },
+            registerLaunchHandler: { _, _ in true }
+        )
+    }
+
+    @MainActor
     private func makeHandoffCoordinator(
+        backgroundExecution: BackgroundGenerationKeepAlive = .shared,
         onStart: @escaping (IOSChatBackgroundHandoff, IOSConversationStore) -> Bool
     ) -> ChatGenerationCoordinator {
         let sharedSettings = IOSSharedSettingsStore(userDefaults: isolatedDefaults())
@@ -264,15 +189,118 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
                 persistMessages: { _ in true },
                 capturePersistMessagesBaseline: { _ in nil },
                 persistMessagesSnapshot: { _, _, _ in true },
-                recordRun: { _, _, _, _, _ in },
+                recordRun: { _, _, _, _, _ in true },
                 startLiveActivity: { _, _, _ in },
                 saveMiniAppIfPresent: { _, _ in nil },
                 messagesByInjectingRuntimeContext: { $0 },
                 userFacingGenerationError: { rawMessage, _ in rawMessage }
-            )
+            ),
+            backgroundExecution: backgroundExecution
         )
         coordinator.backgroundStartOverrideForTesting = onStart
         return coordinator
+    }
+
+    @MainActor
+    func testBackgroundTransitionSettlesUIKitOnlyRunInsideShortWindow() {
+        let keepAlive = makeHandoffKeepAlive(submitSucceeds: false)
+        var startedCount = 0
+        let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
+            startedCount += 1
+            return true
+        }
+        let runId = "handoff-ui-only-\(UUID().uuidString)"
+        coordinator.installRunSnapshotForTesting(runId: runId, snapshot: nil)
+        coordinator.installBackgroundHandoffForTesting(makeHandoff(runId: runId, pendingToolName: nil))
+        keepAlive.begin(runId, title: "t", subtitle: "s")
+
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .uiOnly)
+        let didHandoff = coordinator.handoffCurrentGenerationToBackground(
+            conversationStore: makeHandoffConversationStore(),
+            honorKeepAliveLease: true
+        )
+
+        XCTAssertFalse(didHandoff)
+        XCTAssertEqual(startedCount, 0)
+        // cancel 已同步清掉业务 owner；UIKit 短窗特意保留到异步落盘结束。
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .uiOnly)
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
+    @MainActor
+    func testBackgroundTransitionWithoutAnyExecutionCancelsForegroundRun() {
+        let keepAlive = BackgroundGenerationKeepAlive(
+            beginBackgroundTask: { _, _ in .invalid },
+            endBackgroundTask: { _ in },
+            submitTaskRequest: { _ in },
+            cancelTaskRequest: { _ in },
+            registerLaunchHandler: { _, _ in true }
+        )
+        var startedCount = 0
+        let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
+            startedCount += 1
+            return true
+        }
+        let runId = "handoff-none-\(UUID().uuidString)"
+        coordinator.installRunSnapshotForTesting(runId: runId, snapshot: nil)
+        coordinator.installBackgroundHandoffForTesting(makeHandoff(runId: runId, pendingToolName: nil))
+        keepAlive.begin(runId, title: "t", subtitle: "s", submitSystemTask: false)
+
+        let didHandoff = coordinator.handoffCurrentGenerationToBackground(
+            conversationStore: makeHandoffConversationStore(),
+            honorKeepAliveLease: true
+        )
+
+        XCTAssertFalse(didHandoff)
+        XCTAssertEqual(startedCount, 0)
+        XCTAssertFalse(coordinator.isRunning)
+    }
+
+    @MainActor
+    func testBackgroundTransitionKeepsForegroundSubmittedRequest() {
+        let keepAlive = makeHandoffKeepAlive(submitSucceeds: true)
+        var startedCount = 0
+        let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
+            startedCount += 1
+            return true
+        }
+        let runId = "handoff-submitted-\(UUID().uuidString)"
+        coordinator.installRunSnapshotForTesting(runId: runId, snapshot: nil)
+        coordinator.installBackgroundHandoffForTesting(makeHandoff(runId: runId, pendingToolName: nil))
+        keepAlive.begin(runId, title: "t", subtitle: "s")
+
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .submitted)
+        let didHandoff = coordinator.handoffCurrentGenerationToBackground(
+            conversationStore: makeHandoffConversationStore(),
+            honorKeepAliveLease: true
+        )
+
+        XCTAssertFalse(didHandoff)
+        XCTAssertEqual(startedCount, 0)
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .submitted)
+    }
+
+    @MainActor
+    func testConversationChangeTransfersSubmittedRequestToDedicatedOwner() {
+        let keepAlive = makeHandoffKeepAlive(submitSucceeds: true)
+        var startedCount = 0
+        let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
+            startedCount += 1
+            return true
+        }
+        let runId = "handoff-switch-\(UUID().uuidString)"
+        coordinator.installRunSnapshotForTesting(runId: runId, snapshot: nil)
+        coordinator.installBackgroundHandoffForTesting(makeHandoff(runId: runId, pendingToolName: nil))
+        keepAlive.begin(runId, title: "t", subtitle: "s")
+
+        let didHandoff = coordinator.handoffCurrentGenerationToBackground(
+            conversationStore: makeHandoffConversationStore(),
+            honorKeepAliveLease: false
+        )
+
+        XCTAssertTrue(didHandoff)
+        XCTAssertEqual(startedCount, 1)
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .none)
     }
 
     /// 在途 wait_agent（.pure）时交接必须成功：后台 start 被调、遗留 pending

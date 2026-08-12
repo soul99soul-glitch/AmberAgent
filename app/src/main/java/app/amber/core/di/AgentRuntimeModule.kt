@@ -2,6 +2,7 @@ package app.amber.core.di
 
 import android.content.Context
 import app.amber.core.agent.runtime.AgentRegistry
+import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
 import app.amber.core.agent.runtime.impl.InProcessAgentRunner
@@ -71,26 +72,32 @@ val agentRuntimeModule = module {
         // depends on ConversationAccess (= ChatService) which itself depends on
         // AgentRunner. Eager resolution at AgentRunner construction triggers a
         // ChatService → AgentRunner → ChatEventProjector → ChatService cycle.
+        val onLedgerError: (AgentRunId, Throwable) -> Unit = { _, error ->
+            runCatching {
+                get<app.amber.core.service.ChatService>().addError(
+                    error,
+                    conversationId = null,
+                    title = "运行状态记录失败",
+                )
+            }
+        }
         InProcessAgentRunner(
             registry = get(),
             eventStore = get<RoomAgentEventStore>(),
             // P1-e: 账本写失败不再静默吞掉——走用户可见错误通道（Android 侧
             // ChatService.addError，对齐 iOS publishUserVisibleError）。惰性 get
             // 避免 ChatService ↔ AgentRunner 构造期 DI 环（同 runScopeFactory 模式）。
-            onLedgerError = { runId, error ->
-                runCatching {
-                    get<app.amber.core.service.ChatService>().addError(
-                        error,
-                        conversationId = null,
-                        title = "运行状态记录失败",
-                    )
-                }
-            },
+            onLedgerError = onLedgerError,
             runScopeFactory = { runId, input ->
                 if (input is ChatTurnInput) {
                     val projector: ChatEventProjector = get()
                     val conversationUuid = kotlin.uuid.Uuid.parse(input.conversationId.value)
-                    val writer = ProjectingEventWriter(runId, conversationUuid, projector)
+                    val writer = ProjectingEventWriter(
+                        runId = runId,
+                        conversationId = conversationUuid,
+                        projector = projector,
+                        onLedgerError = onLedgerError,
+                    )
                     ProjectingRunScope(
                         runId = runId,
                         conversationId = input.conversationId,

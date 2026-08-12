@@ -49,6 +49,9 @@ class IosChatBackgroundPayloadJsonBridgeTest {
             params = params,
             uploadMessages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
             displayMessages = emptyList(),
+            mode = "resume_response",
+            responseId = "resp_123",
+            responseSequenceNumber = 7L,
         )
 
         assertFalse(json.contains("sk-persisted-secret"))
@@ -65,6 +68,9 @@ class IosChatBackgroundPayloadJsonBridgeTest {
         assertEquals(emptyList(), decoded.params.customBody)
         assertFalse(decoded.generativeUiRequired)
         assertFalse(decoded.generativeUiFallbackAttempted)
+        assertEquals("resume_response", decoded.mode)
+        assertEquals("resp_123", decoded.responseId)
+        assertEquals(7L, decoded.responseSequenceNumber)
     }
 
     @Test

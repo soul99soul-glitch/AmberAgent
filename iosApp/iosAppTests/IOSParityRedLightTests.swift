@@ -475,9 +475,9 @@ final class IOSParityRedLightTests: XCTestCase {
     ///
     /// A run killed mid-stream must be reclassified to an interrupted-or-
     /// resumable state — NOT silently lost or frozen as "running" forever. P5
-    /// added `IOSRunRecovery.recoverInterruptedRuns()` — a startup sweep that
-    /// reads `listUnfinished` (non-terminal rows) and calls `markInterrupted` on
-    /// each, so a killed run surfaces honestly on next launch.
+    /// added `IOSRunRecovery.recoverInterruptedRuns()` — a descriptor-scoped
+    /// startup sweep that claims non-terminal Chat rows with a CAS transition,
+    /// so a killed run surfaces honestly on next launch.
     ///
     /// This test inserts a "running" row (simulating a mid-stream kill), runs
     /// the recovery sweep, then asserts the run was reclassified to
@@ -508,7 +508,7 @@ final class IOSParityRedLightTests: XCTestCase {
             interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: runningRow) { error in
+            dao.insertRunIfAbsent(run: runningRow) { _, error in
                 if let error { cont.resume(throwing: error) }
                 else { cont.resume() }
             }
@@ -558,7 +558,7 @@ final class IOSParityRedLightTests: XCTestCase {
             interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: runningRow) { error in
+            dao.insertRunIfAbsent(run: runningRow) { _, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }
@@ -607,7 +607,7 @@ final class IOSParityRedLightTests: XCTestCase {
             interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { continuation.resume(throwing: error) }
                 else { continuation.resume() }
             }
@@ -1439,7 +1439,7 @@ final class IOSParityRedLightTests: XCTestCase {
         XCTAssertFalse(savingState.terminalWasFinalized(by: .completion))
     }
 
-    func testBackgroundGuardStoppedStatusSurvivesExpirationDuringSave() {
+    func testBackgroundGuardStoppedMapsToSharedFailedStatusDuringExpirationSave() {
         let savingState = IOSChatBackgroundRunState()
         XCTAssertTrue(savingState.reserveTerminal())
         XCTAssertEqual(savingState.expireAndReserveTerminal(), .terminateInFlightSave)
@@ -1451,7 +1451,7 @@ final class IOSParityRedLightTests: XCTestCase {
                 singleToolFailureReason: nil,
                 guardStopped: true
             ),
-            "guard_stopped"
+            "failed"
         )
         XCTAssertEqual(
             IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
@@ -1459,7 +1459,7 @@ final class IOSParityRedLightTests: XCTestCase {
                 singleToolFailureReason: "tool failed",
                 guardStopped: true
             ),
-            "guard_stopped"
+            "failed"
         )
         XCTAssertEqual(
             IOSChatBackgroundGenerationCoordinator.backgroundTerminalStatusForTesting(
@@ -1985,7 +1985,7 @@ final class IOSParityRedLightTests: XCTestCase {
             (
                 "truncated terminal", foreground,
                 "private func completeTruncatedStream(", "static func outputLimitNotice()",
-                ["Self.outputLimitNotice()", "didPersist ? \"truncated\" : \"recovery_pending\""]
+                ["Self.outputLimitNotice()", "didPersist ? .failed : .recoveryPending"]
             ),
             (
                 "foreground completion ownership", foreground, "case .complete:", "case .error(let error):",
@@ -2083,7 +2083,7 @@ final class IOSParityRedLightTests: XCTestCase {
             return XCTFail("Expected a dedicated background truncated terminal")
         }
         let truncatedBody = source[truncatedStart.lowerBound..<truncatedEnd.lowerBound]
-        XCTAssertTrue(truncatedBody.contains("status: didSave ? \"truncated\" : \"recovery_pending\""))
+        XCTAssertTrue(truncatedBody.contains("status: didSave ? .failed : .recoveryPending"))
         XCTAssertTrue(
             truncatedBody.contains("presentation: .failed()"),
             "Watch and Live Activity must not present truncated output as an unqualified success"
@@ -2113,8 +2113,16 @@ final class IOSParityRedLightTests: XCTestCase {
         }
         XCTAssertLessThan(lease.lowerBound, taskOwner.lowerBound)
         XCTAssertTrue(helper.contains("guard allow else"), "Denied approvals must not acquire async execution ownership")
-        XCTAssertTrue(source.contains("private func beginKeepAlive(for pending:"))
-        XCTAssertTrue(source.contains("BackgroundGenerationKeepAlive.shared.begin("))
+        guard let beginStart = source.range(of: "private func beginKeepAlive(for pending:"),
+              let beginEnd = source.range(
+                of: "private func resumeAfterApproval(",
+                range: beginStart.upperBound..<source.endIndex
+              ) else {
+            return XCTFail("Expected the shared approved-tool keepalive helper")
+        }
+        XCTAssertTrue(
+            source[beginStart.lowerBound..<beginEnd.lowerBound].contains("backgroundExecution.begin(")
+        )
 
         for functionName in [
             "finishPendingSearchToolApproval",
@@ -2176,7 +2184,7 @@ final class IOSParityRedLightTests: XCTestCase {
         }
         let pause = source[pauseStart.lowerBound..<pauseEnd.lowerBound]
         guard let pausePersist = pause.range(of: "await bindings.persistMessagesSnapshot("),
-              let release = pause.range(of: "BackgroundGenerationKeepAlive.shared.end("),
+              let release = pause.range(of: "backgroundExecution.end(pending.runId)"),
               let waiting = pause.range(of: "WatchTaskCoordinator.shared.publishWaitingApproval(") else {
             return XCTFail("Approval pause must durably save before release and external waiting state")
         }

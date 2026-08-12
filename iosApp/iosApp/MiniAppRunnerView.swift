@@ -736,8 +736,68 @@ struct MiniAppRunnerView: View {
 
     private var miniAppAIGenerateHandler: IOSMiniAppBridgeRuntime.AIGenerateHandler? {
         guard let sharedSettings else { return nil }
+        let appTitle = app?.title ?? "MiniApp"
         return { request in
-            try await Self.runMiniAppAI(request: request, sharedSettings: sharedSettings)
+            let runId = UUID().uuidString
+            let leaseId = "miniapp-ai-\(runId)"
+            let durableRunStore = IOSDurableRunStore()
+            let inputRef = "miniapp:\(appId)"
+            let inputDigest = IOSDurableRunStore.inputDigest(
+                "\(request.system)\n\(request.prompt)\n\(request.maxOutputChars)\n\(request.temperature ?? -1)"
+            )
+            guard try await durableRunStore.ensureRunning(
+                runId: runId,
+                descriptorId: IOSDurableRunStore.Descriptor.miniAppAI,
+                startedAt: Int64(Date().timeIntervalSince1970 * 1_000),
+                inputDigest: inputDigest,
+                inputSnapshotRef: inputRef
+            ) else {
+                throw MiniAppRunnerAIError.denied("无法保存 AI 运行状态，已停止生成。")
+            }
+            var didExpire = false
+            let operation = Task {
+                try await Self.runMiniAppAI(request: request, sharedSettings: sharedSettings)
+            }
+            BackgroundGenerationKeepAlive.shared.begin(
+                leaseId,
+                title: "\(appTitle) 正在生成",
+                subtitle: "MiniApp AI",
+                onExpire: {
+                    didExpire = true
+                    operation.cancel()
+                },
+                onSystemTaskExpiration: {
+                    didExpire = true
+                    operation.cancel()
+                }
+            )
+            defer { BackgroundGenerationKeepAlive.shared.end(leaseId) }
+            do {
+                let result = try await withTaskCancellationHandler {
+                    try await operation.value
+                } onCancel: {
+                    operation.cancel()
+                }
+                _ = try? await durableRunStore.transitionFromAnyActive(
+                    runId: runId,
+                    to: .completed
+                )
+                return result
+            } catch is CancellationError {
+                _ = try? await durableRunStore.transitionFromAnyActive(
+                    runId: runId,
+                    to: didExpire ? .interrupted : .cancelled,
+                    detail: didExpire ? "background_expiration" : "cancelled"
+                )
+                throw CancellationError()
+            } catch {
+                _ = try? await durableRunStore.transitionFromAnyActive(
+                    runId: runId,
+                    to: .failed,
+                    detail: error.localizedDescription
+                )
+                throw error
+            }
         }
     }
 
@@ -895,6 +955,12 @@ struct MiniAppRunnerView: View {
         observedAppHTMLHash = app.htmlHash
         runnerError = nil
         didInitialLoad = true
+        if actionMessage == nil,
+           let latestAudit = repository.auditLogs(appId: app.id, limit: 1).first,
+           latestAudit.method == "ai.generate",
+           latestAudit.summary == IOSMiniAppAIRunRecovery.interruptedSummary {
+            actionMessage = latestAudit.summary
+        }
         guard markRun, !didMarkRun else { return }
         do {
             try repository.markRun(id: app.id)
@@ -1015,6 +1081,36 @@ struct MiniAppRunnerView: View {
     private func dateText(_ millis: Int64) -> String {
         Date(timeIntervalSince1970: Double(millis) / 1_000)
             .formatted(date: .abbreviated, time: .shortened)
+    }
+}
+
+@MainActor
+enum IOSMiniAppAIRunRecovery {
+    static let interruptedSummary = "上次 AI 生成已中断，可重新运行。"
+
+    static func reconcile() async {
+        let durableRunStore = IOSDurableRunStore()
+        guard let runs = try? await durableRunStore.recoverableRuns(
+            descriptorIds: [IOSDurableRunStore.Descriptor.miniAppAI]
+        ) else { return }
+        for run in runs {
+            guard let inputRef = run.inputSnapshotRef,
+                  inputRef.hasPrefix("miniapp:"),
+                  !String(inputRef.dropFirst("miniapp:".count)).isEmpty else { continue }
+            let appId = String(inputRef.dropFirst("miniapp:".count))
+            guard (try? await durableRunStore.transitionFromAnyActive(
+                runId: run.runId,
+                to: .interrupted,
+                detail: "process_restarted"
+            )) == true else { continue }
+            try? IOSMiniAppRepository.shared.audit(
+                appId: appId,
+                method: "ai.generate",
+                permission: IOSMiniAppPermission.aiGenerate.rawValue,
+                summary: interruptedSummary,
+                payload: run.runId
+            )
+        }
     }
 }
 

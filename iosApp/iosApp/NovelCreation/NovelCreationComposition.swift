@@ -46,7 +46,8 @@ enum NovelCreationComposition {
             modelRunner: modelAdapter,
             defaultModelPolicy: { purpose in
                 NovelCreationModelPreferences.shared.policy(for: purpose)
-            }
+            },
+            durableRunStore: IOSDurableRunStore()
         )
         // The runtime is constructed before the creation (AppShell), so the
         // weak back-reference is filled here. It lets the discussion tool

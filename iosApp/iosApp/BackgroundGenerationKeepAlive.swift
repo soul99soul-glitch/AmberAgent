@@ -15,12 +15,20 @@ import UIKit
 /// - `BGContinuedProcessingTask`：系统调度后接管，提供长执行窗口。它的 handler
 ///   里不干活，只是挂起等 `end`——执行权借给正在跑的那条流。
 ///
-/// 两条腿互为兜底：BG 任务提交失败或系统迟迟不调度，第一条腿仍然撑住 30 秒；
+/// 两条腿互为兜底：BG 任务提交失败时，第一条腿仍然撑住有限收尾窗口；
+/// 已排队但还没 adopt 时，系统仍保有该 request，UIKit 短窗只负责提交时的空窗。
 /// BG 任务一旦接管，第一条腿立刻释放，不白占系统配额。
 /// 不适合出现在系统 continued-processing UI 的调用方可显式关闭第二条腿；短腿与
 /// 到期回调仍保持同一租约语义。
 @MainActor
 final class BackgroundGenerationKeepAlive {
+    enum ExecutionAssertion: Equatable {
+        case none
+        case uiOnly
+        case submitted
+        case adopted
+    }
+
     typealias BeginBackgroundTask = (String, @escaping () -> Void) -> UIBackgroundTaskIdentifier
     typealias EndBackgroundTask = (UIBackgroundTaskIdentifier) -> Void
     typealias SubmitTaskRequest = (BGContinuedProcessingTaskRequest) throws -> Void
@@ -33,6 +41,7 @@ final class BackgroundGenerationKeepAlive {
     private struct Lease {
         var uiTaskId: UIBackgroundTaskIdentifier
         var systemTask: BGContinuedProcessingTask?
+        let systemTaskCompletion: SystemTaskCompletion
         var title: String
         var subtitle: String
         /// Whether a system continued-processing task should be submitted.
@@ -43,10 +52,27 @@ final class BackgroundGenerationKeepAlive {
         var progressCompletedUnitCount: Int64
         /// BG handler 挂起在这里等 `end`；nil 表示系统还没调度到这一轮。
         var waiter: CheckedContinuation<Void, Never>?
-        /// UIKit 短窗口到期时通知上层；系统任务没有专用回调时也沿用它。
+        /// request 未成功提交时，UIKit 短窗到期通知上层收口。
         var onExpire: (() -> Void)?
         /// 系统 continued-processing 活动被用户取消或被系统终止时通知上层。
         var onSystemTaskExpiration: (() -> Void)?
+    }
+
+    /// `expirationHandler` 与业务终态可能紧邻到达；系统 task 只允许报一次完成。
+    private final class SystemTaskCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var didComplete = false
+
+        func complete(_ task: BGTask, success: Bool) {
+            lock.lock()
+            guard !didComplete else {
+                lock.unlock()
+                return
+            }
+            didComplete = true
+            lock.unlock()
+            task.setTaskCompleted(success: success)
+        }
     }
 
     private var leases: [String: Lease] = [:]
@@ -103,10 +129,18 @@ final class BackgroundGenerationKeepAlive {
 
     var activeLeaseIds: Set<String> { Set(leases.keys) }
 
-    /// 这一轮生成是否还握着后台执行权。握着就说明流能自己跑完，
-    /// 上层不该去砍流做交接。
+    /// 这一轮是否还有本层租约记录。这不代表系统已接管执行。
+    /// 业务交接决策必须读 `executionAssertion(for:)`，不能把这个 Bool 当执行权。
     func holdsLease(_ leaseId: String) -> Bool {
         leases[leaseId] != nil
+    }
+
+    /// 把 UIKit 短窗、已排队 request 和系统已接管明确分开。
+    func executionAssertion(for leaseId: String) -> ExecutionAssertion {
+        guard let lease = leases[leaseId] else { return .none }
+        if lease.systemTask != nil { return .adopted }
+        if lease.didSubmitSystemTask { return .submitted }
+        return lease.uiTaskId == .invalid ? .none : .uiOnly
     }
 
     /// 供生命周期日志读取：当前有几轮生成占着执行权、其中几轮已被系统接管。
@@ -119,8 +153,8 @@ final class BackgroundGenerationKeepAlive {
 
     /// 生成开始时调用。重复 begin 同一个 id 是幂等的。
     ///
-    /// - Parameter onExpire: UIKit 短窗口在系统任务接管前到期时回调。上层在这里
-    ///   做后台交接；正常跑完不会触发。
+    /// - Parameter onExpire: request 未成功提交时，UIKit 短窗到期的收口回调。
+    ///   已排队的 request 保留给系统 adopt，正常跑完也不会触发。
     /// - Parameter onSystemTaskExpiration: 系统进度活动被取消或终止时回调。
     ///   未提供时沿用 `onExpire`，保持既有非 Chat 调用方语义。
     /// - Parameter submitSystemTask: 是否提交系统 continued-processing task。
@@ -143,6 +177,7 @@ final class BackgroundGenerationKeepAlive {
         leases[leaseId] = Lease(
             uiTaskId: uiTaskId,
             systemTask: nil,
+            systemTaskCompletion: SystemTaskCompletion(),
             title: title,
             subtitle: subtitle,
             submitSystemTask: submitSystemTask,
@@ -170,7 +205,9 @@ final class BackgroundGenerationKeepAlive {
         // 放行挂起的 handler。resume 只是把它排进队列，不会在这里同步跑起来，
         // 所以和下面报完成的先后其实不影响正确性——保持这个顺序只是读起来顺。
         lease.waiter?.resume()
-        lease.systemTask?.setTaskCompleted(success: true)
+        if let systemTask = lease.systemTask {
+            lease.systemTaskCompletion.complete(systemTask, success: true)
+        }
         IOSBackgroundLifecycleLog.record("keepAliveEnd(\(leaseId))", detail: snapshotDetail)
     }
 
@@ -338,8 +375,9 @@ final class BackgroundGenerationKeepAlive {
 
         // 系统要求在到期回调里当场报完成，跳一次 actor 再报就晚了，会被判超时。
         // 所以先同步收口，清理再回主 actor 做。
-        task.expirationHandler = { [weak self] in
-            task.setTaskCompleted(success: false)
+        let systemTaskCompletion = leases[leaseId]?.systemTaskCompletion
+        task.expirationHandler = { [weak self, systemTaskCompletion] in
+            systemTaskCompletion?.complete(task, success: false)
             Task { @MainActor in self?.handleSystemExpiration(leaseId) }
         }
         leases[leaseId]?.systemTask = task
@@ -366,12 +404,20 @@ final class BackgroundGenerationKeepAlive {
         }
     }
 
-    /// 30 秒的短腿到期了。系统任务已接管的话这不算失去执行权，只还短腿；
-    /// 没接管才是真的失去执行权，得通知上层收口。
+    /// UIKit 短窗到期：已 adopt 或已排队都只还短腿；
+    /// request 从未成功提交时才通知上层耐久收口。
     private func handleUITaskExpiration(_ leaseId: String) {
         guard let lease = leases[leaseId] else { return }
         guard lease.systemTask == nil else {
             releaseUITask(leaseId)
+            return
+        }
+        if lease.didSubmitSystemTask {
+            releaseUITask(leaseId)
+            IOSBackgroundLifecycleLog.record(
+                "keepAliveWaitingForAdoption(\(leaseId))",
+                detail: snapshotDetail
+            )
             return
         }
         removeLease(leaseId)

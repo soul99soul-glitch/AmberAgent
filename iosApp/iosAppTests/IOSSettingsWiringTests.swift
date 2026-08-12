@@ -216,25 +216,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(expiration.contains("self.finish(runId: job.runId, requestId: backgroundTask.identifier)"))
         XCTAssertFalse(expiration.contains("suspendForResume("))
         XCTAssertFalse(appShell.contains("resumeSuspendedRunsIfNeeded()"))
-
-        let finalizeStart = try XCTUnwrap(
-            coordinator.range(of: "func finalizeSuspendedRunsIfNeeded()")
-        )
-        let finalizeEnd = try XCTUnwrap(
-            coordinator.range(
-                of: "private func persistExpirationFailure(",
-                range: finalizeStart.upperBound..<coordinator.endIndex
-            )
-        )
-        let finalize = coordinator[finalizeStart.lowerBound..<finalizeEnd.lowerBound]
-        let legacyFinish = try XCTUnwrap(
-            finalize.range(of: "finish(runId: job.runId, requestId: record.requestId)")
-        )
-        let persistenceTask = try XCTUnwrap(finalize.range(of: "Task { @MainActor in"))
-
-        XCTAssertTrue(finalize.contains("BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: record.requestId)"))
-        XCTAssertLessThan(legacyFinish.lowerBound, persistenceTask.lowerBound)
-        XCTAssertFalse(finalize.contains("BGTaskScheduler.shared.submit"))
+        XCTAssertFalse(coordinator.contains("finalizeSuspendedRunsIfNeeded"))
+        XCTAssertFalse(coordinator.contains("IOSChatBackgroundSuspensionStore"))
     }
 
     func testDirectImageKeepAliveExpiresWithoutStartingASecondImageRequest() throws {

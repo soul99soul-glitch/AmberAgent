@@ -443,7 +443,7 @@ final class IOSThreadMessagingTests: XCTestCase {
         XCTAssertTrue(pending.isEmpty, "bootstrap 信封只留审计记录，必须已投递")
 
         // 子 run 已记账（并发限额计数源）。
-        let runs = try await db.agentRuntimeDao().listUnfinished()
+        let runs = try await db.agentRuntimeDao().listRecoverable(descriptorIds: ["chat"])
         XCTAssertTrue(runs.contains { $0.conversationId == childHex && $0.status == "running" })
     }
 

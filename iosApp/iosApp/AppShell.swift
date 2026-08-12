@@ -66,7 +66,8 @@ struct AppShell: View {
             settingsStore: settingsStore,
             sharedSettings: sharedSettingsStore,
             providerRegistry: providerRegistry,
-            permissionStore: permissionStore
+            permissionStore: permissionStore,
+            durableRunStore: IOSDurableRunStore()
         )
         let novelCreationViewModel: NovelCreationViewModel?
         let novelCreationErrorMessage: String?
@@ -182,10 +183,14 @@ struct AppShell: View {
                 let interruptedCouncilTaskIds = IOSAdvancedTaskStore.shared.markInterruptedCouncilTasks()
                 CouncilRoomArchiveStore.shared.markInterrupted(taskIds: interruptedCouncilTaskIds)
                 councilChatViewModel.recoverInterruptedTasks(interruptedCouncilTaskIds)
+                await councilChatViewModel.reconcileDurableRuns()
+                await IOSMiniAppAIRunRecovery.reconcile()
                 let backgroundRunIds = IOSChatBackgroundGenerationCoordinator.shared.restorableRunIds
                 let recoveredPendingApprovals = await IOSRunRecovery.recoverPendingApprovalDescriptors(
                     excludingRunIds: backgroundRunIds
                 )
+                let startupRecoverableRuns = try? await IOSDurableRunStore().recoverableRuns()
+                let startupCandidateRunIds = Set(startupRecoverableRuns?.map(\.runId) ?? [])
                 await conversationStore.bootstrap()
                 IOSBuiltinSkills.installIfMissing(enableWith: sharedSettings)
                 await chatViewModel.reconcilePendingMiniAppMutationsAfterConversationBootstrap()
@@ -199,6 +204,7 @@ struct AppShell: View {
                     let pendingApprovalRunIds = Set(recoveredPendingApprovals.map(\.runId))
                     let excludedFromInterrupted = backgroundRunIds.union(pendingApprovalRunIds)
                     if let interruptedRunConversationPairs = await IOSRunRecovery.unfinishedRunConversationPairs(
+                        candidateRunIds: startupCandidateRunIds,
                         excludingRunIds: excludedFromInterrupted
                     ) {
                         let reconciledRunIds = await chatViewModel.applyToolCallLedgerRecovery(
@@ -207,6 +213,7 @@ struct AppShell: View {
                         let unreconciledRunIds = Set(interruptedRunConversationPairs.map(\.runId))
                             .subtracting(reconciledRunIds)
                         _ = await IOSRunRecovery.recoverInterruptedRuns(
+                            candidateRunIds: startupCandidateRunIds,
                             excludingRunIds: excludedFromInterrupted.union(unreconciledRunIds)
                         )
                     }
@@ -214,9 +221,7 @@ struct AppShell: View {
                 AgentLiveActivityController.shared.restoreExistingActivity(
                     ownedRunIds: backgroundRunIds
                 )
-                // 冷启动路径：收口旧版本遗留的自动恢复记录，避免用户已经停止的
-                // 系统后台活动在升级后再次启动。
-                IOSChatBackgroundGenerationCoordinator.shared.finalizeSuspendedRunsIfNeeded()
+                IOSChatBackgroundGenerationCoordinator.shared.resumeDetachedResponsesIfNeeded()
                 finalizeStaleBackgroundJobsIfNeeded()
                 if scenePhase == .active, let novelCreationViewModel {
                     await novelCreationViewModel.resumeDetachedBackgroundGeneration()
@@ -267,7 +272,7 @@ struct AppShell: View {
                     await novelCreationViewModel.resumeDetachedBackgroundGeneration()
                 }
             }
-            IOSChatBackgroundGenerationCoordinator.shared.finalizeSuspendedRunsIfNeeded()
+            IOSChatBackgroundGenerationCoordinator.shared.resumeDetachedResponsesIfNeeded()
             finalizeStaleBackgroundJobsIfNeeded()
         case .inactive:
             break

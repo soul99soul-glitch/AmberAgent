@@ -444,6 +444,7 @@ struct IOSCouncilRoomContinuation {
 }
 
 struct IOSCouncilRoomRunRequest {
+    var taskId: String? = nil
     let objective: String
     let mode: IOSCouncilRoomRunMode
     let settings: IOSCouncilRoomSettings
@@ -1065,7 +1066,7 @@ final class IOSCouncilRoomRunner {
                 "research_consent": request.researchConsent.rawValue
             ]
             task = taskStore.startTask(
-                id: continuation?.taskId,
+                id: request.taskId ?? continuation?.taskId,
                 kind: .modelCouncil,
                 title: "\(request.mode.title) · \((continuation?.originalObjective ?? objective).prefix(34))",
                 objective: continuation?.originalObjective ?? objective,

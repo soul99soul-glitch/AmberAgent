@@ -287,6 +287,8 @@ struct CouncilChatRuntimeView: View {
                     ) {
                         viewModel.showHistory()
                     }
+                    .disabled(viewModel.isRunning)
+                    .accessibilityHint(viewModel.isRunning ? "讨论结束后可查看历史议会" : "")
 
                     // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
                     // 不在顶栏再放一颗多余的停止键。
@@ -1579,6 +1581,8 @@ final class CouncilChatViewModel {
     /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
     @ObservationIgnored private var keepAliveReleaseTask: Task<Void, Never>?
     @ObservationIgnored private var activeDiscussionID: UUID?
+    @ObservationIgnored private var activeDurableRunID: String?
+    @ObservationIgnored private let durableRunStore: IOSDurableRunStore?
     private var currentObjective = ""
     private var currentFinalTopic = ""
     private var currentTaskId: String?
@@ -1605,7 +1609,8 @@ final class CouncilChatViewModel {
         runner: IOSCouncilRoomRunner? = nil,
         transcriptDefaults: UserDefaults = .standard,
         archiveStore: CouncilRoomArchiveStore = .shared,
-        visionRecognizer: CouncilVisionMaterialRecognizer = CouncilVisionMaterialRecognizer()
+        visionRecognizer: CouncilVisionMaterialRecognizer = CouncilVisionMaterialRecognizer(),
+        durableRunStore: IOSDurableRunStore? = nil
     ) {
         let restoredRoom = CouncilTranscriptStore.load(defaults: transcriptDefaults)
         self.settingsStore = settingsStore
@@ -1616,6 +1621,7 @@ final class CouncilChatViewModel {
         self.transcriptDefaults = transcriptDefaults
         self.archiveStore = archiveStore
         self.visionRecognizer = visionRecognizer
+        self.durableRunStore = durableRunStore
         self.messages = restoredRoom?.messages.map { $0.restored() } ?? []
         if let restoredRoom {
             currentTaskId = restoredRoom.taskId.trimmedNilIfBlank
@@ -1833,13 +1839,49 @@ final class CouncilChatViewModel {
             failedSpeakerIds = Set(room.failedSpeakerIds)
             messages = room.messages.map { $0.restored() }
         }
+        if currentFinalTopic.trimmedNilIfBlank == nil {
+            currentFinalTopic = currentObjective
+        }
         finishStreamingMessages(as: .failed)
         isRunning = false
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
         roomStateOverride = IOSAdvancedTaskStatus.interrupted.title
+        appendMessage(
+            kind: .system,
+            author: "议会",
+            body: "上次讨论已中断，可以继续补充或重新发起。",
+            systemImage: "pause.circle",
+            tint: AmberTheme.accentRed,
+            subtitle: IOSAdvancedTaskStatus.interrupted.title,
+            status: .failed
+        )
         persistTranscript()
         archiveCurrentRoom()
+    }
+
+    func reconcileDurableRuns() async {
+        guard let durableRunStore,
+              let runs = try? await durableRunStore.recoverableRuns(
+            descriptorIds: [IOSDurableRunStore.Descriptor.council]
+        ) else { return }
+        for run in runs where run.runId != activeDurableRunID {
+            guard let ref = run.inputSnapshotRef, ref.hasPrefix("council:") else { continue }
+            let taskId = String(ref.dropFirst("council:".count))
+            let record = runner.taskRecord(taskId: taskId)
+            let status: AgentRunStatus
+            if record?.metadata["continuation_status"] == "interrupted" ||
+                record?.metadata["interruption_reason"] == "process_terminated" {
+                status = .interrupted
+            } else {
+                status = Self.durableStatus(for: record?.status ?? .interrupted)
+            }
+            _ = try? await durableRunStore.transitionFromAnyActive(
+                runId: run.runId,
+                to: status,
+                detail: record?.compactSummary ?? "process_restarted"
+            )
+        }
     }
 
     /// 当前讨论轮次：只数真正的「第 N 轮」轮次分隔，不把开场 / 主持调研 / 席位组建 /
@@ -2068,7 +2110,11 @@ final class CouncilChatViewModel {
         )
 
         let discussionID = UUID()
+        let taskId = continuation?.taskId ?? UUID().uuidString
+        let durableRunId = "\(taskId):\(discussionID.uuidString)"
         activeDiscussionID = discussionID
+        activeDurableRunID = durableRunId
+        currentTaskId = taskId
         isRunning = true
         // 先保存用户已经提交的议题，再把 runner 交给异步任务；进程若在
         // `.taskStarted` 之前被终止，重载仍能看到这条输入。
@@ -2079,6 +2125,8 @@ final class CouncilChatViewModel {
                 objective: text,
                 researchAllowed: researchAllowed,
                 discussionID: discussionID,
+                taskId: taskId,
+                durableRunId: durableRunId,
                 continuation: continuation,
                 sourceMaterials: continuation == nil ? sourceMaterials : nil,
                 researchObjective: continuation == nil ? researchObjective : nil
@@ -2097,6 +2145,7 @@ final class CouncilChatViewModel {
             summary: "本轮议会已停止。",
             retryable: true
         )
+        settleActiveDurableRun(to: .cancelled, detail: "user_cancelled")
         stopActiveDiscussion()
         finishStreamingMessages(as: .failed)
         activeSpeakerId = nil
@@ -2131,6 +2180,7 @@ final class CouncilChatViewModel {
     }
 
     func showHistory() {
+        guard !isRunning else { return }
         activeSheet = .history
     }
 
@@ -2223,6 +2273,8 @@ final class CouncilChatViewModel {
         objective: String,
         researchAllowed: Bool,
         discussionID: UUID,
+        taskId: String,
+        durableRunId: String,
         continuation: IOSCouncilRoomContinuation?,
         sourceMaterials: String? = nil,
         researchObjective: String? = nil
@@ -2231,6 +2283,48 @@ final class CouncilChatViewModel {
         isRunning = true
         invitedSpeakerIds.removeAll()
         activeSheet = nil
+        let didStartDurably: Bool
+        if let durableRunStore {
+            didStartDurably = (try? await durableRunStore.ensureRunning(
+                runId: durableRunId,
+                descriptorId: IOSDurableRunStore.Descriptor.council,
+                startedAt: Int64(Date().timeIntervalSince1970 * 1_000),
+                inputDigest: IOSDurableRunStore.inputDigest(
+                    "\(selectedMode.rawValue)\n\(objective)"
+                ),
+                inputSnapshotRef: "council:\(taskId)"
+            )) == true
+        } else {
+            didStartDurably = true
+        }
+        guard didStartDurably else {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: "无法保存运行状态，本轮议会未启动。",
+                systemImage: "exclamationmark.triangle",
+                tint: AmberTheme.accentRed,
+                subtitle: "启动失败",
+                status: .failed
+            )
+            endBackgroundKeepAlive(for: discussionID)
+            isRunning = false
+            activeDiscussionID = nil
+            activeDurableRunID = nil
+            discussionTask = nil
+            roomStateOverride = "失败"
+            persistTranscript()
+            archiveCurrentRoom()
+            return
+        }
+        guard activeDiscussionID == discussionID, !Task.isCancelled else {
+            _ = try? await durableRunStore?.transitionFromAnyActive(
+                runId: durableRunId,
+                to: .cancelled,
+                detail: "owner_released_before_start"
+            )
+            return
+        }
         appendDivider(continuation.map { "追问 · 第 \($0.nextRound) 轮" } ?? selectedMode.openingDivider)
         roomSettingsStore.bootstrapLegacySeatsIfNeeded(
             sharedSettings.savedCouncilSeats,
@@ -2251,15 +2345,22 @@ final class CouncilChatViewModel {
                 subtitle: "配置阻塞",
                 status: .failed
             )
+            _ = try? await durableRunStore?.transitionFromAnyActive(
+                runId: durableRunId,
+                to: .failed,
+                detail: ChatConfigurationIssue.missingProvider.message
+            )
             endBackgroundKeepAlive(for: discussionID)
             isRunning = false
             activeDiscussionID = nil
             discussionTask = nil
             roomStateOverride = "失败"
+            activeDurableRunID = nil
             persistTranscript()
             return
         }
         let request = IOSCouncilRoomRunRequest(
+            taskId: taskId,
             objective: objective,
             mode: selectedMode.runMode,
             settings: roomSettingsStore.settings,
@@ -2286,6 +2387,11 @@ final class CouncilChatViewModel {
         if let finalTopic = summary.finalTopic.trimmedNilIfBlank {
             currentFinalTopic = finalTopic
         }
+        _ = try? await durableRunStore?.transitionFromAnyActive(
+            runId: durableRunId,
+            to: Self.durableStatus(for: summary.status),
+            detail: summary.failureReason
+        )
         finishStreamingMessages(as: summary.status == .completed ? .completed : .failed)
         activeSpeakerId = nil
         invitedSpeakerIds.removeAll()
@@ -2296,6 +2402,7 @@ final class CouncilChatViewModel {
         endBackgroundKeepAlive(for: discussionID)
         isRunning = false
         activeDiscussionID = nil
+        activeDurableRunID = nil
         discussionTask = nil
         roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
         updateDetail(status: roomStateOverride ?? "就绪")
@@ -2648,6 +2755,10 @@ final class CouncilChatViewModel {
                 summary: terminalMessage ?? taskStatus.title,
                 retryable: taskStatus == .interrupted || taskStatus == .cancelled
             )
+            settleActiveDurableRun(
+                to: Self.durableStatus(for: taskStatus),
+                detail: terminalMessage ?? taskStatus.title
+            )
         }
         // 到期/切换页时先把取消后的内存尾部写入快照，再释放后台执行权；系统
         // 可能在租约结束后立即终止进程，不能让 archive 落盘排在 lease 之后。
@@ -2688,7 +2799,34 @@ final class CouncilChatViewModel {
             endBackgroundKeepAlive(for: discussionID)
         }
         activeDiscussionID = nil
+        activeDurableRunID = nil
         discussionTask = nil
+    }
+
+    private func settleActiveDurableRun(to status: AgentRunStatus, detail: String?) {
+        guard let runId = activeDurableRunID, let durableRunStore else { return }
+        Task { [durableRunStore] in
+            _ = try? await durableRunStore.transitionFromAnyActive(
+                runId: runId,
+                to: status,
+                detail: detail
+            )
+        }
+    }
+
+    private static func durableStatus(for status: IOSAdvancedTaskStatus) -> AgentRunStatus {
+        switch status {
+        case .completed:
+            .completed
+        case .cancelled:
+            .cancelled
+        case .interrupted, .timedOut:
+            .interrupted
+        case .failed:
+            .failed
+        case .queued, .running, .approvalRequired:
+            .interrupted
+        }
     }
 }
 

@@ -331,7 +331,6 @@ struct ChatActivityIslandView: View {
             .padding(.horizontal, 13)
             .frame(height: 40)
             .frame(maxWidth: 268)
-            .fixedSize(horizontal: true, vertical: false)
             .background { glowUnderlay }
             .modifier(ChatActivityIslandGlass())
             .contentShape(Capsule())

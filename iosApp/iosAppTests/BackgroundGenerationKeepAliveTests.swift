@@ -74,6 +74,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         // .fail 会在系统忙时当场判死；排队才有第二次机会。
         XCTAssertEqual(request.strategy, .queue)
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .submitted)
     }
 
     func testBeginCanSkipSystemTaskWhileKeepingUIKitLease() {
@@ -91,6 +92,22 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertTrue(spy.registeredIdentifiers.isEmpty)
         XCTAssertTrue(spy.submittedRequests.isEmpty)
         XCTAssertTrue(keepAlive.holdsLease("novel-run"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "novel-run"), .uiOnly)
+    }
+
+    func testInvalidUIKitTaskWithoutSystemSubmissionOwnsNoExecution() {
+        let keepAlive = BackgroundGenerationKeepAlive(
+            beginBackgroundTask: { _, _ in .invalid },
+            endBackgroundTask: { _ in },
+            submitTaskRequest: { _ in },
+            cancelTaskRequest: { _ in },
+            registerLaunchHandler: { _, _ in true }
+        )
+
+        keepAlive.begin("run-invalid", title: "t", subtitle: "s", submitSystemTask: false)
+
+        XCTAssertTrue(keepAlive.holdsLease("run-invalid"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-invalid"), .none)
     }
 
     func testPromoteSystemTaskSubmitsAfterDeferredBegin() {
@@ -110,6 +127,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertEqual(spy.submittedRequests.count, 1)
         XCTAssertEqual(spy.submittedRequests.first?.subtitle, "正在生成正文")
         XCTAssertTrue(keepAlive.holdsLease("novel-run"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "novel-run"), .submitted)
 
         // Idempotent: do not queue a second system request for the same lease.
         keepAlive.promoteSystemTaskIfNeeded("novel-run", subtitle: "再次 promote")
@@ -153,6 +171,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertTrue(didStart)
         XCTAssertFalse(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .none)
         XCTAssertEqual(spy.events, ["begin", "submit", "end", "dedicated-submit"])
     }
 
@@ -168,6 +187,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertFalse(didStart)
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .submitted)
         XCTAssertEqual(
             spy.events,
             ["begin", "submit", "end", "dedicated-submit", "begin", "submit"]
@@ -199,6 +219,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertEqual(spy.endedTaskIds.count, 1)
         XCTAssertFalse(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .none)
     }
 
     func testEndCancelsTheSubmittedRequest() {
@@ -214,15 +235,18 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertEqual(spy.cancelledIdentifiers, [keepAlive.identifier(for: "run-1")])
     }
 
-    func testUITaskExpirationAlsoCancelsTheSubmittedRequest() {
+    func testUITaskExpirationKeepsQueuedRequestForSystemAdoption() {
         let spy = SystemSpy()
         let keepAlive = spy.makeKeepAlive()
+        var expired = 0
 
-        keepAlive.begin("run-1", title: "t", subtitle: "s")
+        keepAlive.begin("run-1", title: "t", subtitle: "s") { expired += 1 }
         spy.expirationHandlers.first?()
 
-        // 短腿到期意味着放弃这一轮，长窗口再来也没人认领了——必须一并撤掉。
-        XCTAssertEqual(spy.cancelledIdentifiers, [keepAlive.identifier(for: "run-1")])
+        XCTAssertTrue(spy.cancelledIdentifiers.isEmpty)
+        XCTAssertEqual(expired, 0)
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .submitted)
+        XCTAssertEqual(spy.endedTaskIds.count, 1)
     }
 
     func testEndIsIdempotent() {
@@ -253,6 +277,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
     func testUITaskExpirationBeforeAdoptionDropsLeaseAndNotifiesOwner() {
         let spy = SystemSpy()
+        spy.submitError = SubmitFailure()
         let keepAlive = spy.makeKeepAlive()
         var expired = 0
         var heldInsideCallback: Bool?
@@ -294,6 +319,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         // BG 任务提交失败只是退化成 30 秒，不该连短腿一起丢掉。
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .uiOnly)
         XCTAssertEqual(spy.begunNames.count, 1)
         XCTAssertTrue(spy.endedTaskIds.isEmpty)
     }
@@ -312,6 +338,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertTrue(spy.submittedRequests.isEmpty)
         // 注册被拒只丢长窗口，短腿还在，不能连租约一起丢。
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .uiOnly)
         XCTAssertEqual(spy.begunNames.count, 1)
     }
 
@@ -355,4 +382,5 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         keepAlive.end("run-1")
         XCTAssertEqual(keepAlive.snapshotDetail, "keepAlive=0 adopted=0")
     }
+
 }

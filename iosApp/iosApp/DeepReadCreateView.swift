@@ -418,6 +418,7 @@ final class IOSDeepReadBackgroundCoordinator {
 
     private var sharedSettings: IOSSharedSettingsStore?
     private let runRegistry = IOSDeepReadRunRegistry()
+    private let durableRunStore = IOSDurableRunStore()
 
     private init() {}
 
@@ -438,6 +439,7 @@ final class IOSDeepReadBackgroundCoordinator {
     ) {
         configure(sharedSettings: sharedSettings)
         guard let generationID = runRegistry.reserve(taskId: taskId) else { return }
+        let durableRunId = "\(taskId):\(generationID.uuidString)"
 
         // System continued-processing cancellation is a real ownership stop.
         // The UIKit short window is not an authoritative run-owner signal; its
@@ -452,6 +454,11 @@ final class IOSDeepReadBackgroundCoordinator {
                     IOSDeepReadStore.shared.fail(id: taskId, message: interruptMessage)
                     onStatus(interruptMessage, true)
                 }
+                _ = try? await self.durableRunStore.transitionFromAnyActive(
+                    runId: durableRunId,
+                    to: .interrupted,
+                    detail: "background_expiration"
+                )
             }
         }
         let expirationHandlers = IOSDeepReadExpirationHandlers.cancelOwnerOnlyOnSystemExpiration(
@@ -479,6 +486,27 @@ final class IOSDeepReadBackgroundCoordinator {
                     BackgroundGenerationKeepAlive.shared.end(taskId)
                 }
             }
+            let didStartDurably = (try? await self.durableRunStore.ensureRunning(
+                runId: durableRunId,
+                descriptorId: IOSDurableRunStore.Descriptor.deepRead,
+                startedAt: Int64(Date().timeIntervalSince1970 * 1_000),
+                inputDigest: IOSDurableRunStore.inputDigest(title),
+                inputSnapshotRef: "deep_read:\(taskId)"
+            )) == true
+            guard didStartDurably else {
+                let message = "无法保存运行状态，深度阅读未启动。"
+                IOSDeepReadStore.shared.fail(id: taskId, message: message)
+                onStatus(message, true)
+                return
+            }
+            guard self.runRegistry.isCurrent(taskId: taskId, generationID: generationID) else {
+                _ = try? await self.durableRunStore.transitionFromAnyActive(
+                    runId: durableRunId,
+                    to: .interrupted,
+                    detail: "background_expiration"
+                )
+                return
+            }
             _ = await IOSDeepReadLauncher.runExistingTask(
                 taskId: taskId,
                 sharedSettings: sharedSettings,
@@ -488,8 +516,44 @@ final class IOSDeepReadBackgroundCoordinator {
                     return self.runRegistry.isCurrent(taskId: taskId, generationID: generationID)
                 }
             )
+            // Expiration removes the registry owner and owns the interrupted
+            // settlement above; do not race it with a generic failed mapping.
+            guard self.runRegistry.isCurrent(taskId: taskId, generationID: generationID) else { return }
+            let taskStatus = IOSDeepReadStore.shared.task(id: taskId)?.status ?? .failed
+            _ = try? await self.durableRunStore.transitionFromAnyActive(
+                runId: durableRunId,
+                to: Self.durableStatus(for: taskStatus),
+                detail: IOSDeepReadStore.shared.task(id: taskId)?.failureMessage
+            )
         }
         runRegistry.attach(operationTask, taskId: taskId, generationID: generationID)
+    }
+
+    func reconcileDurableRuns() async {
+        guard let runs = try? await durableRunStore.recoverableRuns(
+            descriptorIds: [IOSDurableRunStore.Descriptor.deepRead]
+        ) else { return }
+        for run in runs {
+            guard let ref = run.inputSnapshotRef, ref.hasPrefix("deep_read:") else { continue }
+            let taskId = String(ref.dropFirst("deep_read:".count))
+            let task = IOSDeepReadStore.shared.task(id: taskId)
+            _ = try? await durableRunStore.transitionFromAnyActive(
+                runId: run.runId,
+                to: Self.durableStatus(for: task?.status ?? .failed),
+                detail: task?.failureMessage ?? "process_restarted"
+            )
+        }
+    }
+
+    private static func durableStatus(for status: IOSDeepReadTaskStatus) -> AgentRunStatus {
+        switch status {
+        case .succeeded:
+            .completed
+        case .failed, .unsupported:
+            .failed
+        case .queued, .running:
+            .interrupted
+        }
     }
 }
 
@@ -503,6 +567,9 @@ enum IOSDeepReadRecoveryOnce {
         IOSDeepReadStore.shared.recoverInterruptedRuns(
             excluding: IOSDeepReadBackgroundCoordinator.shared.activeTaskIds
         )
+        Task { @MainActor in
+            await IOSDeepReadBackgroundCoordinator.shared.reconcileDurableRuns()
+        }
     }
 }
 

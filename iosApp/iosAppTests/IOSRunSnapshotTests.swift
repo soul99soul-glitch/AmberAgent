@@ -273,7 +273,7 @@ final class IOSRunSnapshotTests: XCTestCase {
                 persistMessages: { _ in true },
                 capturePersistMessagesBaseline: { _ in nil },
                 persistMessagesSnapshot: { _, _, _ in true },
-                recordRun: { _, _, _, _, _ in },
+                recordRun: { _, _, _, _, _ in true },
                 startLiveActivity: { _, _, _ in },
                 saveMiniAppIfPresent: { _, _ in nil },
                 messagesByInjectingRuntimeContext: { $0 },

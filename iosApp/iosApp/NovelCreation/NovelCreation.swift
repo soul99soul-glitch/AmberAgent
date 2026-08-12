@@ -217,6 +217,7 @@ actor DefaultNovelCreation: NovelCreation {
 
     let repository: any NovelProjectPersisting
     let modelRunner: any NovelModelRunning
+    let durableRunStore: IOSDurableRunStore?
     let now: @Sendable () -> Date
     let generationPolicy: NovelGenerationPolicy
     let factRequestTimeout: TimeInterval
@@ -259,10 +260,12 @@ actor DefaultNovelCreation: NovelCreation {
         factRequestTimeout: TimeInterval = 240,
         polishAssessmentTimeout: TimeInterval = 20,
         defaultModelPolicy: @escaping @Sendable (NovelModelRole) -> NovelProjectModelPolicy = { _ in .global },
+        durableRunStore: IOSDurableRunStore? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.repository = repository
         self.modelRunner = modelRunner
+        self.durableRunStore = durableRunStore
         self.generationPolicy = generationPolicy
         self.factRequestTimeout = max(0.01, factRequestTimeout)
         self.polishAssessmentTimeout = max(0.01, polishAssessmentTimeout)

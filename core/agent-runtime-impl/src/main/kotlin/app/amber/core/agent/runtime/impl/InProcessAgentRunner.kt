@@ -13,13 +13,18 @@ import app.amber.core.agent.runtime.AgentRunStatus
 import app.amber.core.agent.runtime.AgentRunner
 import app.amber.core.agent.runtime.adapter.LegacyRunScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "AgentRunner"
@@ -65,7 +70,7 @@ class InProcessAgentRunner(
         )
         snapshots[runId] = snapshot
 
-        val job = runnerScope.launch {
+        val job = runnerScope.launch(start = CoroutineStart.UNDISPATCHED) {
             val record = AgentRunRecord(
                 runId = runId.value,
                 parentRunId = null,
@@ -75,7 +80,7 @@ class InProcessAgentRunner(
                 messageNodeId = null,
                 producesMessageId = null,
                 assistantId = null,
-                status = "running",
+                status = AgentRunStatus.RUNNING,
                 inputDigest = input.hashCode().toString(),
                 inputSnapshotRef = null,
                 inputSchemaVersion = 1,
@@ -83,63 +88,65 @@ class InProcessAgentRunner(
                 finishedAt = null,
                 interruptedReason = null,
             )
-            try {
-                eventStore.appendRun(record)
-            } catch (e: Exception) {
-                runCatching { Log.w(TAG, "Failed to persist run record", e) }
-                onLedgerError(runId, e)
+            val startError = try {
+                if (withContext(NonCancellable) { eventStore.startRun(record) }) {
+                    null
+                } else {
+                    IllegalStateException("Run ${runId.value} could not be persisted")
+                }
+            } catch (error: Exception) {
+                error
+            }
+            if (startError != null) {
+                runCatching { Log.w(TAG, "Failed to persist run record", startError) }
+                onLedgerError(runId, startError)
+                snapshot.value = snapshot.value.copy(
+                    status = AgentRunStatus.FAILED,
+                    finishedAt = System.currentTimeMillis(),
+                )
+                return@launch
             }
 
             try {
+                // Keep launch asynchronous after the durable owner exists.
+                yield()
+                coroutineContext.ensureActive()
                 @Suppress("UNCHECKED_CAST")
                 val agent = registered.factory() as app.amber.core.agent.runtime.Agent<I, *>
                 val runScope = runScopeFactory(runId, input)
                 agent.handler.handle(input, runScope)
 
                 val finishedAt = System.currentTimeMillis()
-                snapshot.value = snapshot.value.copy(
+                settleRun(
+                    runId = runId,
+                    snapshot = snapshot,
+                    record = record,
                     status = AgentRunStatus.COMPLETED,
-                    finishedAt = finishedAt,
+                    detail = null,
+                    at = finishedAt,
                 )
-                try {
-                    eventStore.appendRun(record.copy(
-                        status = "completed",
-                        finishedAt = finishedAt,
-                    ))
-                } catch (e: Exception) {
-                    runCatching { Log.w(TAG, "Failed to update run record", e) }
-                    onLedgerError(runId, e)
-                }
                 runCatching { Log.i(TAG, "Run $runId completed (${finishedAt - now}ms)") }
             } catch (e: CancellationException) {
                 val finishedAt = System.currentTimeMillis()
-                snapshot.value = snapshot.value.copy(
+                settleRun(
+                    runId = runId,
+                    snapshot = snapshot,
+                    record = record,
                     status = AgentRunStatus.CANCELLED,
-                    finishedAt = finishedAt,
+                    detail = "cancelled",
+                    at = finishedAt,
                 )
-                try {
-                    eventStore.markInterrupted(runId, "cancelled")
-                } catch (ex: Exception) {
-                    runCatching { Log.w(TAG, "Failed to mark run interrupted", ex) }
-                    onLedgerError(runId, ex)
-                }
                 throw e
             } catch (e: Exception) {
                 val finishedAt = System.currentTimeMillis()
-                snapshot.value = snapshot.value.copy(
+                settleRun(
+                    runId = runId,
+                    snapshot = snapshot,
+                    record = record,
                     status = AgentRunStatus.FAILED,
-                    finishedAt = finishedAt,
+                    detail = e.message?.take(500),
+                    at = finishedAt,
                 )
-                try {
-                    eventStore.appendRun(record.copy(
-                        status = "failed",
-                        finishedAt = finishedAt,
-                        interruptedReason = e.message?.take(500),
-                    ))
-                } catch (ex: Exception) {
-                    runCatching { Log.w(TAG, "Failed to update run record on failure", ex) }
-                    onLedgerError(runId, ex)
-                }
                 runCatching { Log.e(TAG, "Run $runId failed", e) }
             }
         }
@@ -163,17 +170,70 @@ class InProcessAgentRunner(
 
     override fun cancel(runId: AgentRunId) {
         jobs[runId]?.cancel()
-        snapshots[runId]?.let { snapshot ->
-            snapshot.value = snapshot.value.copy(
-                status = AgentRunStatus.CANCELLED,
-                finishedAt = System.currentTimeMillis(),
-            )
-        }
     }
 
     override suspend fun listUnfinishedRuns(): List<AgentRunSnapshot> {
         return snapshots.values
             .map { it.value }
-            .filter { it.status == AgentRunStatus.RUNNING || it.status == AgentRunStatus.AWAITING_PERMISSION }
+            .filter { it.status.isRecoverable }
+    }
+
+    /** Publish terminal state only after the durable CAS owns it. */
+    private suspend fun settleRun(
+        runId: AgentRunId,
+        snapshot: MutableStateFlow<AgentRunSnapshot>,
+        record: AgentRunRecord,
+        status: AgentRunStatus,
+        detail: String?,
+        at: Long,
+    ) = withContext(NonCancellable) {
+        val expectedStatuses = when (status) {
+            AgentRunStatus.COMPLETED -> listOf(AgentRunStatus.RUNNING)
+            else -> listOf(
+                AgentRunStatus.RUNNING,
+                AgentRunStatus.AWAITING_PERMISSION,
+                AgentRunStatus.RECOVERY_PENDING,
+            ).filter { it.canTransitionTo(status) }
+        }
+        var transitionError: Throwable? = null
+        for (expectedStatus in expectedStatuses) {
+            try {
+                if (eventStore.transitionRun(
+                        runId = runId,
+                        expectedStatus = expectedStatus,
+                        status = status,
+                        inputSnapshotRef = record.inputSnapshotRef,
+                        detail = detail,
+                        at = at,
+                    )
+                ) {
+                    snapshot.value = snapshot.value.copy(status = status, finishedAt = at)
+                    return@withContext
+                }
+            } catch (error: Exception) {
+                transitionError = error
+                break
+            }
+        }
+
+        val persistedResult = runCatching { eventStore.getRun(runId) }
+        val persisted = persistedResult.getOrNull()
+        if (persisted?.status?.isTerminal == true) {
+            snapshot.value.copy(status = persisted.status, finishedAt = persisted.finishedAt)
+                .also { snapshot.value = it }
+            return@withContext
+        }
+
+        val failure = transitionError
+            ?: IllegalStateException("Run ${runId.value} could not settle as ${status.wireName}")
+        runCatching { Log.w(TAG, "Failed to settle run as ${status.wireName}", failure) }
+        persistedResult.exceptionOrNull()?.let {
+            runCatching { Log.w(TAG, "Failed to reconcile run ${runId.value}", it) }
+        }
+        onLedgerError(runId, failure)
+        snapshot.value = snapshot.value.copy(
+            status = AgentRunStatus.RECOVERY_PENDING,
+            finishedAt = null,
+        )
     }
 }

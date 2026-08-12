@@ -88,26 +88,18 @@ public protocol IOSAgentRunLedgering: Sendable {
 
 }
 
-/// Room-backed production ledger. An `actor` so同一实例内的 seq 查询→插入
-/// 不会交错；跨实例（前台/后台协调器各持一个）的交错由
-/// `insertWithFreshSeq` 的现查现写 + 失败重试兜底，见该方法注释。
+/// Room-backed production ledger. Room allocates `seq` and copies run identity
+/// in one SQL insert, so foreground/background writers cannot drift or collide.
 actor IOSAgentRunLedger: IOSAgentRunLedgering {
-    /// Matches the agent_run rows chat writes today (`ChatViewModel.recordRun`,
-    /// `IOSChatBackgroundGenerationCoordinator.recordRun`) — same descriptor
-    /// space, same table, so a run's `agent_run` row and its `agent_event` rows
-    /// agree on who wrote them.
-    static let agentDescriptorId = "chat"
-    static let agentVersion = "1"
-
     /// Ledger event type for an explicitly denied approval card (§11.1). Its
     /// `eventId` is the stable evidence ref for the denial.
     static let approvalDeniedEventType = "approval_denied"
     static let experienceFeedbackEventType = "experience_feedback"
 
-    private let dao: AgentRuntimeDao
+    private let store: RoomAgentEventStore
 
     init(dao: AgentRuntimeDao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()) {
-        self.dao = dao
+        self.store = RoomAgentEventStore(dao: dao)
     }
 
     @discardableResult
@@ -124,22 +116,18 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
             "argsDigest": argsDigest,
             "effectClass": effectClass.rawValue,
         ])
-        return await insertWithFreshSeq(runId: runId) { seq in
-            AgentEventEntity(
+        return await append(
+            runId: runId,
+            event: AgentRunEvent(
                 eventId: UUID().uuidString,
-                runId: runId,
-                parentRunId: nil,
-                seq: seq,
                 type: "tool_call_started",
                 payloadType: "tool_call_started",
                 payload: payload,
                 payloadSchemaVersion: 1,
-                agentDescriptorId: Self.agentDescriptorId,
-                agentVersion: Self.agentVersion,
                 isFinal: false,
                 ts: Self.nowMillis()
             )
-        }
+        )
     }
 
     /// Pre-contract overload: delegates to the full evolution-contract form
@@ -188,22 +176,18 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         // The attempt either produced an outcome or was definitively stopped
         // before its side effect began. A failed write here can't change that
         // fact, so unlike Started, we only log and move on.
-        let ok = await insertWithFreshSeq(runId: runId) { seq in
-            AgentEventEntity(
+        let ok = await append(
+            runId: runId,
+            event: AgentRunEvent(
                 eventId: UUID().uuidString,
-                runId: runId,
-                parentRunId: nil,
-                seq: seq,
                 type: "tool_call_finished",
                 payloadType: "tool_call_finished",
                 payload: payload,
                 payloadSchemaVersion: 1,
-                agentDescriptorId: Self.agentDescriptorId,
-                agentVersion: Self.agentVersion,
                 isFinal: false,
                 ts: Self.nowMillis()
             )
-        }
+        )
         if !ok {
             print("[AmberChat] tool_call_finished ledger write failed run=\(runId) toolCallId=\(toolCallId) outcome=\(outcome)")
         }
@@ -229,22 +213,18 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         // search."), never user message content; kept for provenance only.
         fields["reason"] = reason
         let payload = Self.jsonPayload(fields)
-        let ok = await insertWithFreshSeq(runId: runId) { seq in
-            AgentEventEntity(
+        let ok = await append(
+            runId: runId,
+            event: AgentRunEvent(
                 eventId: UUID().uuidString,
-                runId: runId,
-                parentRunId: nil,
-                seq: seq,
                 type: Self.approvalDeniedEventType,
                 payloadType: Self.approvalDeniedEventType,
                 payload: payload,
                 payloadSchemaVersion: 1,
-                agentDescriptorId: Self.agentDescriptorId,
-                agentVersion: Self.agentVersion,
                 isFinal: false,
                 ts: Self.nowMillis()
             )
-        }
+        )
         if !ok {
             print("[AmberChat] approval_denied ledger write failed run=\(runId) toolCallId=\(toolCallId)")
         }
@@ -267,22 +247,18 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         ]
         if let experienceId { fields["experienceId"] = experienceId }
         let payload = Self.jsonPayload(fields)
-        let recorded = await insertWithFreshSeq(runId: runId) { seq in
-            AgentEventEntity(
+        let recorded = await append(
+            runId: runId,
+            event: AgentRunEvent(
                 eventId: eventId,
-                runId: runId,
-                parentRunId: nil,
-                seq: seq,
                 type: Self.experienceFeedbackEventType,
                 payloadType: Self.experienceFeedbackEventType,
                 payload: payload,
                 payloadSchemaVersion: 1,
-                agentDescriptorId: Self.agentDescriptorId,
-                agentVersion: Self.agentVersion,
                 isFinal: false,
                 ts: Self.nowMillis()
             )
-        }
+        )
         if !recorded {
             print("[AmberChat] experience_feedback ledger write failed run=\(runId) artifact=\(artifactId)@\(artifactVersion)")
             return nil
@@ -290,52 +266,14 @@ actor IOSAgentRunLedger: IOSAgentRunLedgering {
         return eventId
     }
 
-    /// seq 分配不做内存缓存：前台协调器与后台续跑协调器各持一个账本实例、写同一
-    /// runId（用户来回切 app 会 ping-pong），任何一侧缓存的计数器都会在对侧写入后
-    /// 过期，撞上 `(run_id, seq)` 唯一索引——那会让一次无辜的切 app 把 Started 写
-    /// 判成失败、进而杀掉整轮。所以每次写都现查 `MAX(seq)+1`（每 run 写入次数个位
-    /// 数，带索引的 MAX 查询成本可忽略），插入失败（罕见的两实例交错）就重查重试
-    /// 一次，自愈而不是把碰撞升级成轮次失败。
-    private func insertWithFreshSeq(
+    private func append(
         runId: String,
-        build: (Int64) -> AgentEventEntity
+        event: AgentRunEvent
     ) async -> Bool {
-        for _ in 0..<2 {
-            // F13 fix: a genuine query error must not be treated the same as
-            // "no rows exist yet for this run" — both used to collapse to
-            // `seq = 1` (see the old `?? 0` below), so a real DB error nearly
-            // always collided with an existing row's `(run_id, seq)` unique
-            // index instead of surfacing as a retryable failure. `nextSeq`
-            // now returns `nil` on error; skip straight to the next retry
-            // attempt without wasting an insert on a seq we know is wrong.
-            guard let seq = await nextSeq(for: runId) else { continue }
-            if await insert(build(seq)) { return true }
-        }
-        return false
-    }
-
-    private func nextSeq(for runId: String) async -> Int64? {
-        let maxSeq: Int64? = await withCheckedContinuation { continuation in
-            dao.maxEventSeq(id: runId) { result, error in
-                guard error == nil, let result else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                continuation.resume(returning: result.int64Value)
-            }
-        }
-        return maxSeq.map { $0 + 1 }
-    }
-
-    private func insert(_ event: AgentEventEntity) async -> Bool {
         await withCheckedContinuation { continuation in
-            dao.insertEvent(event: event) { error in
-                if let error {
-                    print("[AmberChat] agent_event insert failed: \(error)")
-                    continuation.resume(returning: false)
-                } else {
-                    continuation.resume(returning: true)
-                }
+            store.appendRunEvent(runId: runId, event: event) { inserted, error in
+                if let error { print("[AmberChat] agent_event insert failed: \(error)") }
+                continuation.resume(returning: error == nil && (inserted?.boolValue ?? false))
             }
         }
     }

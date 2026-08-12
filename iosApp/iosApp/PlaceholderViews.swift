@@ -1639,7 +1639,7 @@ struct HomeContinueCardModel: Equatable {
                 case .failed, .unsupported:
                     priority = .recoverable
                     state = "\(task.status.title) · 可重试"
-                    ctaTitle = "重试"
+                    ctaTitle = "查看"
                 case .succeeded:
                     return nil
                 }

@@ -1168,37 +1168,6 @@ final class IOSSharedSettingsStore {
         restoreSnapshot(merged)
     }
 
-    /// Update the current Amber Assistant's generation-prompt fields (Android
-    /// AssistantBasicPage/AssistantPromptPage parity). Any nil argument is left
-    /// unchanged; the `clear*` flags explicitly null out temperature/topP/maxTokens.
-    func updateCurrentAssistantParams(
-        systemPrompt: String? = nil,
-        messageTemplate: String? = nil,
-        temperature: Float? = nil,
-        topP: Float? = nil,
-        maxTokens: Int? = nil,
-        contextMessageSize: Int? = nil,
-        clearTemperature: Bool = false,
-        clearTopP: Bool = false,
-        clearMaxTokens: Bool = false
-    ) {
-        // Kotlin Float?/Int? bridge to KotlinFloat?/KotlinInt?; wrap the Swift
-        // optionals so the KMP helper receives the right boxed types.
-        let merged = IosSettingsMutations.shared.updateCurrentAssistantParams(
-            settings: snapshot,
-            systemPrompt: systemPrompt,
-            messageTemplate: messageTemplate,
-            temperature: temperature.map { KotlinFloat(value: $0) },
-            topP: topP.map { KotlinFloat(value: $0) },
-            maxTokens: maxTokens.map { KotlinInt(value: Int32($0)) },
-            contextMessageSize: contextMessageSize.map { KotlinInt(value: Int32($0)) },
-            clearTemperature: clearTemperature,
-            clearTopP: clearTopP,
-            clearMaxTokens: clearMaxTokens
-        )
-        restoreSnapshot(merged)
-    }
-
     /// Update the user nickname (displaySetting.userNickname). Android
     /// ChatDrawer parity — iOS AccountView was preview-only before this.
     func updateUserNickname(_ nickname: String) {

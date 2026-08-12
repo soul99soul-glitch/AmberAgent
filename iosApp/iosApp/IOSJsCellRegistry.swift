@@ -7,8 +7,7 @@ import Foundation
 /// sweep-only marker: it is produced exclusively by the cold-start sweep (a
 /// Running cell whose process died) and never by exec/wait themselves — the
 /// persisted truth must distinguish "script exception" (Failed) from "process
-/// died mid-run" (interrupted), never faking a completion. Same terminal
-/// discipline as `IOSChatBackgroundSuspensionRecord` (expiration ≠ failure).
+/// died mid-run" (interrupted), never faking a completion.
 enum IOSJsCellStatus: String, Codable, Equatable {
     case running
     case completed

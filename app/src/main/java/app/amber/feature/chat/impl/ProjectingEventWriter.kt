@@ -7,7 +7,6 @@ import app.amber.core.agent.runtime.AgentRunId
 import app.amber.feature.chat.api.ChatEventPayload
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
-import java.util.concurrent.atomic.AtomicLong
 import kotlin.uuid.Uuid
 
 private const val TAG = "ProjectingEventWriter"
@@ -16,9 +15,9 @@ class ProjectingEventWriter(
     private val runId: AgentRunId,
     private val conversationId: Uuid,
     private val projector: ChatEventProjector,
+    private val onLedgerError: (AgentRunId, Throwable) -> Unit,
 ) : AgentEventWriter {
 
-    private val seq = AtomicLong(0L)
     private val _transientFlow = MutableSharedFlow<AgentEventPayload.Transient>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -30,16 +29,16 @@ class ProjectingEventWriter(
     }
 
     override suspend fun commit(final: AgentEventPayload.Final) {
-        val seqNum = seq.incrementAndGet()
         when (final) {
             is ChatEventPayload -> {
                 try {
-                    projector.commitEvent(runId, final, seqNum)
+                    projector.commitEvent(runId, final)
                     if (final is ChatEventPayload.AssistantMessageFinalized) {
                         projector.projectFinalized(conversationId, final)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Failed to commit event $final", e)
+                    onLedgerError(runId, e)
                 }
             }
             else -> {

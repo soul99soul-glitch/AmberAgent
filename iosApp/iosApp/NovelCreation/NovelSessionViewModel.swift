@@ -4682,10 +4682,9 @@ extension NovelSessionViewModel {
                 $0.supersededCandidateIDs.insert(candidateID)
             }
         }
-        if reason != .chapterCompleted, reason != .batchCompleted,
-           reason != .planProposedForNewBatch {
-            operationErrorMessage = detail ?? reason.displayMessage
-        }
+        // 代笔中断由 ghostwrite status bar 独占呈现与恢复动作；不要再把同一
+        // 文案投到通用 error banner，后者的「重试」并不拥有整条 pipeline。
+        operationErrorMessage = nil
     }
 
     private func ghostwriteRecentHighlightCount(

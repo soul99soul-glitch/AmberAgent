@@ -9,109 +9,99 @@ struct IOSPendingApprovalRecoveryDescriptor: Equatable, Sendable {
 
 /// Startup recovery for interrupted agent runs. Pending approvals are identified
 /// by their durable tool owner and terminated explicitly; tools are never replayed.
+@MainActor
 enum IOSRunRecovery {
     static func recoverPendingApprovalDescriptors(
-        excludingRunIds: Set<String> = []
+        excludingRunIds: Set<String> = [],
+        runStore: IOSDurableRunStore = IOSDurableRunStore()
     ) async -> [IOSPendingApprovalRecoveryDescriptor]? {
-        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
-        let descriptors = await withCheckedContinuation {
-            (continuation: CheckedContinuation<[IOSPendingApprovalRecoveryDescriptor]?, Never>) in
-            dao.listAwaitingPermission { result, error in
-                guard error == nil, let result else {
-                    continuation.resume(returning: nil)
-                    return
-                }
-                let descriptors = result.compactMap { run -> IOSPendingApprovalRecoveryDescriptor? in
-                    guard !excludingRunIds.contains(run.runId),
-                          let conversationId = run.conversationId,
-                          let snapshotRef = run.inputSnapshotRef,
-                          snapshotRef.hasPrefix("tool_call:") else { return nil }
-                    let toolCallId = String(snapshotRef.dropFirst("tool_call:".count))
-                    guard !toolCallId.isEmpty else { return nil }
-                    return IOSPendingApprovalRecoveryDescriptor(
-                        runId: run.runId,
-                        conversationId: conversationId,
-                        toolCallId: toolCallId
-                    )
-                }
-                continuation.resume(returning: descriptors)
-            }
+        let runs: [IOSDurableRunStore.Snapshot]
+        do {
+            runs = try await runStore.recoverableRuns()
+        } catch {
+            return nil
         }
-        return descriptors
+        return runs.compactMap { run -> IOSPendingApprovalRecoveryDescriptor? in
+            guard run.status == .awaitingPermission,
+                  !excludingRunIds.contains(run.runId),
+                  let conversationId = run.conversationId,
+                  let snapshotRef = run.inputSnapshotRef,
+                  snapshotRef.hasPrefix("tool_call:") else { return nil }
+            let toolCallId = String(snapshotRef.dropFirst("tool_call:".count))
+            guard !toolCallId.isEmpty else { return nil }
+            return IOSPendingApprovalRecoveryDescriptor(
+                runId: run.runId,
+                conversationId: conversationId,
+                toolCallId: toolCallId
+            )
+        }
     }
 
     static func completePendingApprovalRecovery(
         runId: String,
         reason: String = "process_killed",
-        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        runStore: IOSDurableRunStore = IOSDurableRunStore()
     ) async {
-        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            dao.markInterrupted(runId: runId, reason: reason, now: now) { _ in
-                continuation.resume()
-            }
-        }
+        _ = try? await runStore.transition(
+            runId: runId,
+            expected: .awaitingPermission,
+            to: .interrupted,
+            detail: reason,
+            at: now
+        )
     }
 
     /// Reclassifies non-approval unfinished runs to "interrupted".
     @discardableResult
     static func recoverInterruptedRuns(
+        candidateRunIds: Set<String>? = nil,
         excludingRunIds: Set<String> = [],
         reason: String = "process_killed",
-        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
+        now: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        runStore: IOSDurableRunStore = IOSDurableRunStore()
     ) async -> Int {
-        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
-        // listUnfinished returns running, awaiting-permission, and recovery-pending rows.
-        // Extract only the Sendable runId strings inside the callback to avoid
-        // crossing isolation with the non-Sendable KMP [AgentRunEntity].
-        let runIds: [String] = await withCheckedContinuation { (cont: CheckedContinuation<[String], Never>) in
-            dao.listUnfinished { result, _ in
-                let ids = (result ?? []).map { $0.runId }.filter {
-                    !excludingRunIds.contains($0)
-                }
-                cont.resume(returning: ids)
+        guard let runs = try? await runStore.recoverableRuns() else { return 0 }
+        var transitioned = 0
+        for run in runs where
+            (candidateRunIds == nil || candidateRunIds?.contains(run.runId) == true) &&
+            !excludingRunIds.contains(run.runId) {
+            if (try? await runStore.transition(
+                runId: run.runId,
+                expected: run.status,
+                to: .interrupted,
+                inputSnapshotRef: run.inputSnapshotRef,
+                detail: reason,
+                at: now
+            )) == true {
+                transitioned += 1
             }
         }
-        guard !runIds.isEmpty else { return 0 }
-        // Reclassify each to "interrupted". markInterrupted is per-runId.
-        for runId in runIds {
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                dao.markInterrupted(runId: runId, reason: reason, now: now) { _ in
-                    cont.resume()
-                }
-            }
-        }
-        return runIds.count
+        return transitioned
     }
 
-    /// Snapshot of the (runId, conversationId) pairs `recoverInterruptedRuns`
-    /// is about to reclassify — read separately, rather than changing that
-    /// function's `Int`-count return type, so its existing signature/behavior
-    /// stays exactly as S1/S2 left it. This runs the same `listUnfinished()`
-    /// query a second time; AppShell's startup sweep is a strictly sequential
-    /// single-digit-row read with no concurrent writer in between, so the
-    /// extra round trip is cheap and the two reads agree.
+    /// Snapshot of the (runId, conversationId) pairs from a startup-frozen set.
+    /// AppShell captures candidate ids before bootstrapping conversations so a
+    /// new foreground run started after the UI becomes interactive can never be
+    /// mistaken for work inherited from the previous process.
     ///
     /// Runs with no `conversationId` are skipped: W3's tool-call recovery
     /// needs a conversation to write its recovery marker into, and a run
     /// without one (e.g. subagent/council-internal runs that don't map to a
     /// chat conversation) has nothing for it to do.
     static func unfinishedRunConversationPairs(
-        excludingRunIds: Set<String> = []
+        candidateRunIds: Set<String>? = nil,
+        excludingRunIds: Set<String> = [],
+        runStore: IOSDurableRunStore = IOSDurableRunStore()
     ) async -> [(runId: String, conversationId: String)]? {
-        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
-        return await withCheckedContinuation { (cont: CheckedContinuation<[(runId: String, conversationId: String)]?, Never>) in
-            dao.listUnfinished { result, error in
-                guard error == nil, let result else {
-                    cont.resume(returning: nil)
-                    return
-                }
-                let pairs = result.compactMap { run -> (runId: String, conversationId: String)? in
-                    guard !excludingRunIds.contains(run.runId), let conversationId = run.conversationId else { return nil }
-                    return (run.runId, conversationId)
-                }
-                cont.resume(returning: pairs)
+        guard let runs = try? await runStore.recoverableRuns() else { return nil }
+        return runs.compactMap { run -> (runId: String, conversationId: String)? in
+            guard (candidateRunIds == nil || candidateRunIds?.contains(run.runId) == true),
+                  !excludingRunIds.contains(run.runId),
+                  let conversationId = run.conversationId else {
+                return nil
             }
+            return (run.runId, conversationId)
         }
     }
 
@@ -131,9 +121,9 @@ enum IOSRunRecovery {
     @MainActor
     static func planToolCallRecovery(
         runId: String,
-        messages: [UIMessage]
+        messages: [UIMessage],
+        dao: AgentRuntimeDao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
     ) async -> [String: IOSToolCallRecoveryAction]? {
-        let dao = IosDatabaseFactory.shared.createDatabase().agentRuntimeDao()
         let rows: [IOSToolCallLedgerRow]? = await withCheckedContinuation { continuation in
             dao.listEventsForRun(id: runId) { result, error in
                 guard error == nil, let result else {

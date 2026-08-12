@@ -38,7 +38,7 @@ final class AgentRuntimeDaoListAllRunsTests: XCTestCase {
 
         // Insert via the same path as ChatViewModel.recordRun.
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { cont.resume(throwing: error) }
                 else { cont.resume() }
             }

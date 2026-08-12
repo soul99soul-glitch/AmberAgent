@@ -507,7 +507,7 @@ final class IOSJsCellTests: XCTestCase {
             return XCTFail("startCell must start, got \(started)")
         }
         // 进程死亡模拟：新注册表实例读同一个 sidecar → Running 一律标 interrupted，
-        // 不假 completion（照 IOSChatBackgroundSuspensionRecord 语义）。
+        // 不假 completion。
         let registryB = IOSJsCellRegistry(directory: directory)
         let outcome = await registryB.wait(cellId: "cell-cold-1", sessionKey: "sess-cold", timeoutMs: 1000, terminate: false)
         guard case .terminal(let record) = outcome else {

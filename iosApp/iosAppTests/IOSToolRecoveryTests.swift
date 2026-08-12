@@ -66,6 +66,24 @@ final class IOSToolRecoveryTests: XCTestCase {
         return String(data: data, encoding: .utf8)!
     }
 
+    @MainActor
+    private func insertRunningRun(dao: AgentRuntimeDao, runId: String) async throws {
+        let run = AgentRunEntity(
+            runId: runId, parentRunId: nil,
+            agentDescriptorId: IOSDurableRunStore.Descriptor.chat,
+            agentVersion: IOSDurableRunStore.Descriptor.chatVersion,
+            conversationId: nil, messageNodeId: nil, producesMessageId: nil, assistantId: nil,
+            status: "running", inputDigest: "digest", inputSnapshotRef: nil,
+            inputSchemaVersion: 1, startedAt: 1, finishedAt: nil, interruptedReason: nil
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            dao.insertRunIfAbsent(run: run) { _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
     // MARK: - Layer 1a: IOSToolCallLedgerRow.decode (payload parse tolerance)
 
     func testDecodeDropsRowWithMissingToolCallId() {
@@ -229,6 +247,13 @@ final class IOSToolRecoveryTests: XCTestCase {
         return IOSConversationStore(baseDirectory: baseDirectory)
     }
 
+    private func makeDatabase(_ name: String = #function) -> AgentRuntimeDatabase {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(name)-\(UUID().uuidString).db")
+            .path
+        return IosDatabaseFactory.shared.createDatabase(atFilePath: path)
+    }
+
     @MainActor
     private func makeRuntime() -> ChatToolRuntime {
         ChatToolRuntime(
@@ -242,10 +267,11 @@ final class IOSToolRecoveryTests: XCTestCase {
 
     @MainActor
     func testRecoverySweepMarksSideEffectUnknownAndBlocksNextPendingToolCall() async throws {
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let ledger = IOSAgentRunLedger(dao: dao)
         let runId = "w3-sideeffect-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
 
         // Crashed mid-execution: Started with no Finished after it.
         let started = await ledger.recordToolCallStarted(
@@ -261,7 +287,11 @@ final class IOSToolRecoveryTests: XCTestCase {
         let rawMessages = await store.messages(for: conversationId)
         let messages = try XCTUnwrap(rawMessages)
 
-        let plannedActions = await IOSRunRecovery.planToolCallRecovery(runId: runId, messages: messages)
+        let plannedActions = await IOSRunRecovery.planToolCallRecovery(
+            runId: runId,
+            messages: messages,
+            dao: dao
+        )
         let actions = try XCTUnwrap(plannedActions)
         XCTAssertEqual(actions["tc-1"], .markUnknown)
 
@@ -282,10 +312,11 @@ final class IOSToolRecoveryTests: XCTestCase {
         // anymore. The retry path is model-mediated (the model reads this
         // tool's result text and decides to call it again), not app-mediated
         // replay via an empty-output Tool part.
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let ledger = IOSAgentRunLedger(dao: dao)
         let runId = "w3-retryable-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
 
         let started = await ledger.recordToolCallStarted(
             runId: runId, toolCallId: "tc-1", toolName: "ask_user",
@@ -300,7 +331,11 @@ final class IOSToolRecoveryTests: XCTestCase {
         let rawMessages = await store.messages(for: conversationId)
         let messages = try XCTUnwrap(rawMessages)
 
-        let plannedActions = await IOSRunRecovery.planToolCallRecovery(runId: runId, messages: messages)
+        let plannedActions = await IOSRunRecovery.planToolCallRecovery(
+            runId: runId,
+            messages: messages,
+            dao: dao
+        )
         let actions = try XCTUnwrap(plannedActions)
         XCTAssertEqual(actions["tc-1"], .markRetryable)
 
@@ -321,10 +356,11 @@ final class IOSToolRecoveryTests: XCTestCase {
 
     @MainActor
     func testRecoverySweepMarksResultLostWhenCompletedButOutputNeverPersisted() async throws {
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let ledger = IOSAgentRunLedger(dao: dao)
         let runId = "w3-resultlost-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
 
         let started = await ledger.recordToolCallStarted(
             runId: runId, toolCallId: "tc-1", toolName: "workspace_write",
@@ -342,7 +378,11 @@ final class IOSToolRecoveryTests: XCTestCase {
         let rawMessages = await store.messages(for: conversationId)
         let messages = try XCTUnwrap(rawMessages)
 
-        let plannedActions = await IOSRunRecovery.planToolCallRecovery(runId: runId, messages: messages)
+        let plannedActions = await IOSRunRecovery.planToolCallRecovery(
+            runId: runId,
+            messages: messages,
+            dao: dao
+        )
         let actions = try XCTUnwrap(plannedActions)
         XCTAssertEqual(actions["tc-1"], .markResultLost)
 
@@ -375,7 +415,7 @@ final class IOSToolRecoveryTests: XCTestCase {
     // sideEffect tool — a direct I-3 violation.
     @MainActor
     func testTerminateRecoveredPendingApprovalsMarksDanglingSecondCallUnknownWithoutOverwritingTheFirst() async throws {
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let ledger = IOSAgentRunLedger(dao: dao)
         let runId = "f1-tc2-dangling-\(UUID().uuidString)"
@@ -400,7 +440,7 @@ final class IOSToolRecoveryTests: XCTestCase {
             startedAt: startedAt, finishedAt: nil, interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
@@ -413,7 +453,11 @@ final class IOSToolRecoveryTests: XCTestCase {
         )
         XCTAssertTrue(tc2Started)
 
-        let viewModel = ChatViewModel(settingsStore: SettingsStore(), autoGenerateResponses: false)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            autoGenerateResponses: false,
+            agentRuntimeDao: dao
+        )
         viewModel.conversationStore = store
 
         let descriptor = IOSPendingApprovalRecoveryDescriptor(
@@ -461,7 +505,7 @@ final class IOSToolRecoveryTests: XCTestCase {
     }
 
     func testUnfinishedRunConversationPairsExcludesRunsWithoutConversationId() async throws {
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let runId = "w3-noconv-\(UUID().uuidString)"
         let startedAt = Int64(Date().timeIntervalSince1970 * 1000)
@@ -472,17 +516,19 @@ final class IOSToolRecoveryTests: XCTestCase {
             startedAt: startedAt, finishedAt: nil, interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
-        let loadedPairs = await IOSRunRecovery.unfinishedRunConversationPairs()
+        let loadedPairs = await IOSRunRecovery.unfinishedRunConversationPairs(
+            runStore: IOSDurableRunStore(dao: dao)
+        )
         let pairs = try XCTUnwrap(loadedPairs)
         XCTAssertFalse(pairs.contains { $0.runId == runId }, "a run with no conversationId has nothing for W3 to write into and must be excluded")
     }
 
     func testRecoveryPendingRunRemainsDiscoverableUntilConversationReconciliation() async throws {
-        let db = IosDatabaseFactory.shared.createDatabase()
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let runId = "w3-recovery-pending-\(UUID().uuidString)"
         let conversationId = UUID().uuidString
@@ -493,12 +539,14 @@ final class IOSToolRecoveryTests: XCTestCase {
             startedAt: Int64(Date().timeIntervalSince1970 * 1000), finishedAt: nil, interruptedReason: nil
         )
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            dao.insertRun(run: run) { error in
+            dao.insertRunIfAbsent(run: run) { _, error in
                 if let error { cont.resume(throwing: error) } else { cont.resume() }
             }
         }
 
-        let loadedPairs = await IOSRunRecovery.unfinishedRunConversationPairs()
+        let loadedPairs = await IOSRunRecovery.unfinishedRunConversationPairs(
+            runStore: IOSDurableRunStore(dao: dao)
+        )
         let pairs = try XCTUnwrap(loadedPairs)
         XCTAssertTrue(
             pairs.contains { $0.runId == runId && $0.conversationId == conversationId },

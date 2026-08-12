@@ -1,9 +1,9 @@
 package app.amber.feature.chat.impl
 
 import android.util.Log
-import app.amber.core.agent.runtime.AgentEventRecord
 import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRunId
+import app.amber.core.agent.runtime.AgentRunEvent
 import app.amber.core.agent.runtime.AgentRunSnapshot
 import app.amber.core.agent.runtime.AgentRunStatus
 import app.amber.feature.chat.api.ChatEventPayload
@@ -64,13 +64,9 @@ class ChatEventProjector(
     suspend fun commitEvent(
         runId: AgentRunId,
         event: ChatEventPayload,
-        seq: Long,
     ) {
-        val record = AgentEventRecord(
-            eventId = "${runId.value}_$seq",
-            runId = runId.value,
-            parentRunId = null,
-            seq = seq,
+        val record = AgentRunEvent(
+            eventId = Uuid.random().toString(),
             type = event::class.simpleName ?: "unknown",
             payloadType = event::class.qualifiedName ?: "unknown",
             payload = when (event) {
@@ -83,23 +79,25 @@ class ChatEventProjector(
                 is ChatEventPayload.AssistantTextDelta -> ""
             },
             payloadSchemaVersion = 1,
-            agentDescriptorId = "chat_turn",
-            agentVersion = "1.0.0",
             isFinal = event !is ChatEventPayload.AssistantTextDelta,
             ts = System.currentTimeMillis(),
         )
-        if (record.isFinal) {
-            eventStore.appendEvent(record)
+        if (record.isFinal && !eventStore.appendRunEvent(runId, record)) {
+            error("Cannot append event ${record.eventId}: run ${runId.value} does not exist")
         }
     }
 
     suspend fun replayUnfinished() {
-        val unfinished = eventStore.listUnfinishedRuns()
+        val unfinished = eventStore.listRecoverableRuns(listOf("chat_turn"))
         for (run in unfinished) {
             Log.i(TAG, "Marking unfinished run ${run.runId} as interrupted")
-            eventStore.markInterrupted(
-                AgentRunId(run.runId),
-                reason = "process_restart",
+            eventStore.transitionRun(
+                runId = AgentRunId(run.runId),
+                expectedStatus = run.status,
+                status = AgentRunStatus.INTERRUPTED,
+                inputSnapshotRef = run.inputSnapshotRef,
+                detail = "process_restart",
+                at = System.currentTimeMillis(),
             )
         }
     }

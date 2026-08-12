@@ -955,7 +955,7 @@ struct IOSDeepReadTaskDetailView: View {
                 .padding(.top, 10)
 
             // 生成态不显示状态行 —— 骨架顶部的「正在生成阅读稿…排版中」已是唯一指示,
-            // 避免与之重复。完成/失败态仍显示(已完成·时间 / 生成失败·可重试)。
+            // 避免与之重复。完成/失败态仍显示(已完成·时间 / 生成未完成·可重试)。
             if state(for: task) != .generating {
                 statusLine(task)
                     .padding(.top, 14)
@@ -1047,6 +1047,8 @@ struct IOSDeepReadTaskDetailView: View {
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(AmberTheme.accent)
                     }
+                    .frame(minHeight: 44, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .disabled(isRetryingWorkspaceSync)
@@ -1069,7 +1071,7 @@ struct IOSDeepReadTaskDetailView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let text = (detail?.isEmpty == false)
             ? IOSDeepReadUserFacingText.sanitize(detail ?? "")
-            : "生成中断，部分内容可能不完整。点右上角重试。"
+            : "生成未完成，部分内容可能不完整。点右上角重试。"
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 15))
@@ -1133,7 +1135,7 @@ struct IOSDeepReadTaskDetailView: View {
         case .done:
             let date = Date(timeIntervalSince1970: Double(task.updatedAt) / 1000)
             return "已完成 · " + date.formatted(date: .omitted, time: .shortened)
-        case .failed: return "生成失败 · 可重试"
+        case .failed: return "生成未完成 · 可重试"
         }
     }
 
@@ -1655,7 +1657,6 @@ private struct DeepReadMagazineSkeleton: View {
     @State private var pulse = false
 
     private var stageText: String {
-        if dimmed { return "生成已中断" }
         let label = progressLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return label.isEmpty ? "正在生成阅读稿…" : label
     }
@@ -1663,25 +1664,20 @@ private struct DeepReadMagazineSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 进度行(置顶 —— 生成态唯一状态指示,紧贴标题下方)
-            HStack(spacing: 8) {
-                if dimmed {
-                    Circle()
-                        .stroke(AmberTheme.border, lineWidth: 2)
-                        .frame(width: 15, height: 15)
-                        .opacity(0.5)
-                } else {
+            if !dimmed {
+                HStack(spacing: 8) {
                     ProgressView().controlSize(.small).tint(AmberTheme.accent)
+                    Text(stageText)
+                        .font(.system(size: 14, design: .serif))
+                        .foregroundStyle(AmberTheme.muted)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Text("排版中")
+                        .font(.system(size: 10, weight: .semibold))
+                        .tracking(0.8)
+                        .textCase(.uppercase)
+                        .foregroundStyle(AmberTheme.muted2)
                 }
-                Text(stageText)
-                    .font(.system(size: 14, design: .serif))
-                    .foregroundStyle(AmberTheme.muted)
-                    .lineLimit(2)
-                Spacer(minLength: 8)
-                Text(dimmed ? "已中断" : "排版中")
-                    .font(.system(size: 10, weight: .semibold))
-                    .tracking(0.8)
-                    .textCase(.uppercase)
-                    .foregroundStyle(AmberTheme.muted2)
             }
 
             // deck(导语)
@@ -1728,7 +1724,7 @@ private struct DeepReadMagazineSkeleton: View {
         .opacity(dimmed ? 0.38 : 1)
         .allowsHitTesting(!dimmed)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(dimmed ? "生成已中断" : stageText)
+        .accessibilityLabel(dimmed ? "生成未完成" : stageText)
         .onAppear {
             guard !dimmed else { return }
             withAnimation(.easeInOut(duration: 1.15).repeatForever(autoreverses: true)) { pulse = true }

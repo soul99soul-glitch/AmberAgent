@@ -259,8 +259,8 @@ final class IOSOrchestrationToolTests: XCTestCase {
             "[mailbox NEW_TASK from /root]\n调研房价"
         )
 
-        // 子 run 已记账（listUnfinished 计数源）。
-        let runs = try await db.agentRuntimeDao().listUnfinished()
+        // 子 run 已记账，且能从 Chat descriptor 的可恢复集合查到。
+        let runs = try await db.agentRuntimeDao().listRecoverable(descriptorIds: ["chat"])
         XCTAssertTrue(runs.contains { $0.conversationId == childHex && $0.status == "running" })
     }
 
@@ -394,7 +394,7 @@ final class IOSOrchestrationToolTests: XCTestCase {
         XCTAssertEqual(unparsable["ok"] as? Bool, false)
         XCTAssertNil(scheduler.startedHandoff)
         // 没有残留 running 行（未创建子 run）。
-        let runs = try await db.agentRuntimeDao().listUnfinished()
+        let runs = try await db.agentRuntimeDao().listRecoverable(descriptorIds: ["chat"])
         XCTAssertTrue(runs.isEmpty)
     }
 
@@ -550,7 +550,7 @@ final class IOSOrchestrationToolTests: XCTestCase {
 
     /// P1-e 核心行为变化：崩溃残留的 running 行（无活跃注册）不再占用并发槽，
     /// spawn 放行。活注册表计数 = 前台 run(0/1) + 后台 activeJobs + 在途 bootstrap，
-    /// 全部与 Room `listUnfinished` 无关。
+    /// 全部与 Room 的全局可恢复行无关。
     func testSpawnAllowsWhenOnlyResidualLedgerRowsExist() async throws {
         let base = makeTempDirectory("SpawnLimit")
         defer { try? FileManager.default.removeItem(at: base) }
@@ -559,10 +559,10 @@ final class IOSOrchestrationToolTests: XCTestCase {
         let parentId = try XCTUnwrap(store.currentConversation?.id)
         let db = makeDatabase(directory: base)
         // 4 个残留 running 行（模拟崩溃/恢复扫描前的窗口期），但无前台 run、
-        // 无后台 job、无在途 bootstrap → 旧 listUnfinished 计数会误伤，新计数放行。
+        // 无后台 job、无在途 bootstrap → 旧全局账本计数会误伤，新计数放行。
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         for index in 0..<4 {
-            try await db.agentRuntimeDao().insertRun(run: AgentRunEntity(
+            _ = try await db.agentRuntimeDao().insertRunIfAbsent(run: AgentRunEntity(
                 runId: "run-\(index)",
                 parentRunId: nil,
                 agentDescriptorId: "chat",
@@ -719,13 +719,13 @@ final class IOSOrchestrationToolTests: XCTestCase {
             createdAt: now
         ))
         // 两个 run：旧 completed + 新 running → 取最新。
-        try await db.agentRuntimeDao().insertRun(run: AgentRunEntity(
+        _ = try await db.agentRuntimeDao().insertRunIfAbsent(run: AgentRunEntity(
             runId: "old", parentRunId: nil, agentDescriptorId: "chat", agentVersion: "1",
             conversationId: childHex, messageNodeId: nil, producesMessageId: nil, assistantId: nil,
             status: "completed", inputDigest: "d", inputSnapshotRef: nil, inputSchemaVersion: 1,
             startedAt: now, finishedAt: KotlinLong(value: now + 1), interruptedReason: nil
         ))
-        try await db.agentRuntimeDao().insertRun(run: AgentRunEntity(
+        _ = try await db.agentRuntimeDao().insertRunIfAbsent(run: AgentRunEntity(
             runId: "new", parentRunId: nil, agentDescriptorId: "chat", agentVersion: "1",
             conversationId: childHex, messageNodeId: nil, producesMessageId: nil, assistantId: nil,
             status: "running", inputDigest: "d", inputSnapshotRef: nil, inputSchemaVersion: 1,
@@ -1195,7 +1195,7 @@ final class IOSOrchestrationToolTests: XCTestCase {
 
         // start 失败后：不留下 running 孤儿行（并发限额计数回落），
         // 该 run 行更新为 failed（保留审计事实）。
-        let unfinished = try await db.agentRuntimeDao().listUnfinished()
+        let unfinished = try await db.agentRuntimeDao().listRecoverable(descriptorIds: ["chat"])
         XCTAssertTrue(unfinished.isEmpty, "start 失败后不得有 running 孤儿行，实际: \(unfinished.count)")
         let allRuns = try await db.agentRuntimeDao().listAllRuns()
         XCTAssertTrue(

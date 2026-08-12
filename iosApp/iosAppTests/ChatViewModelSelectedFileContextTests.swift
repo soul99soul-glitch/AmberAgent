@@ -1989,7 +1989,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         await fulfillment(of: [terminal], timeout: 2)
         XCTAssertFalse(harness.coordinator.isRunning)
         XCTAssertFalse(harness.state.isLoading)
-        XCTAssertEqual(harness.state.recordedRunStatuses.last, "interrupted")
+        XCTAssertTrue(harness.state.recordedRunStatuses.last == .interrupted)
         XCTAssertTrue(harness.state.persistenceEvents.contains("persist-snapshot"))
         XCTAssertTrue(harness.state.persistenceEvents.contains("record-run"))
     }
@@ -2009,6 +2009,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
         }
         await transport.waitUntilRequestStarted()
         XCTAssertTrue(harness.state.isLoading)
+        XCTAssertEqual(harness.state.resumedApprovalRunIds, [harness.pending.runId])
         let terminal = expectation(description: "approved search cancel terminal persisted")
         harness.state.onRecordRun = { terminal.fulfill() }
 
@@ -2024,7 +2025,7 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
 
         XCTAssertFalse(harness.coordinator.isRunning)
         XCTAssertFalse(harness.state.isLoading)
-        XCTAssertEqual(harness.state.recordedRunStatuses.last, "interrupted")
+        XCTAssertTrue(harness.state.recordedRunStatuses.last == .interrupted)
     }
 
     func testStaleTerminalCannotFinishNewForegroundRun() {
@@ -2280,20 +2281,23 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
             request: harness.request
         )
 
+        let terminal = expectation(description: "cancel durable terminal")
         harness.state.onRecordRun = { [weak state = harness.state] in
             state?.messages = [
                 UIMessage.companion.user(prompt: "different conversation after reload"),
             ]
+            terminal.fulfill()
         }
 
         harness.coordinator.cancel()
-        try await Task.sleep(nanoseconds: 50_000_000)
+        await fulfillment(of: [terminal], timeout: 2)
 
         XCTAssertEqual(
             harness.state.persistedSnapshots.last,
             ["search", ""],
             "取消收尾必须持久化 cancel 时刻的 run 快照,不能在延迟 Task 中回读当前活跃会话 messages"
         )
+        XCTAssertEqual(harness.state.recordedRunStatuses.last, .cancelled)
     }
 
     func testCancelCapturesWriteBaselineBeforeDelayedTerminalWork() async throws {
@@ -2474,7 +2478,8 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
                 orchestrationToolService: nil,
                 memoryPollutionMarker: nil
             ),
-            bindings: state.bindings()
+            bindings: state.bindings(),
+            toolLedger: ChatGenerationTestLedger()
         )
         let pending = ChatPendingToolApproval(
             toolCall: toolCall,
@@ -2549,6 +2554,43 @@ final class ChatViewModelSelectedFileContextTests: XCTestCase {
     }
 }
 
+private actor ChatGenerationTestLedger: IOSAgentRunLedgering {
+    func recordToolCallStarted(
+        runId: String,
+        toolCallId: String,
+        toolName: String,
+        argsDigest: String,
+        effectClass: IOSToolEffectClass
+    ) async -> Bool {
+        true
+    }
+
+    func recordToolCallFinished(
+        runId: String,
+        toolCallId: String,
+        outcome: String
+    ) async {}
+
+    func recordToolCallFinished(
+        runId: String,
+        toolCallId: String,
+        outcome: String,
+        artifactId: String?,
+        artifactVersion: String?,
+        outcomeKind: String?,
+        errorCode: String?,
+        sourceRef: String?
+    ) async {}
+
+    func recordApprovalDenied(
+        runId: String,
+        toolCallId: String,
+        toolName: String,
+        reason: String,
+        capabilityId: String?
+    ) async {}
+}
+
 private final class BlockingVisionProvider: IOSAgentTextProvider, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<MessageChunk, Error>?
@@ -2607,8 +2649,9 @@ private final class ChatGenerationBindingState {
     var pendingMcpApproval: McpToolApprovalRequest?
     var persistedCount = 0
     var persistedSnapshots: [[String]] = []
-    var recordedRunStatuses: [String] = []
+    var recordedRunStatuses: [AgentRunStatus] = []
     var markedApprovalToolIds: [String] = []
+    var resumedApprovalRunIds: [String] = []
     var persistenceEvents: [String] = []
     var onRecordRun: (() -> Void)?
     var onBumpMessageRevision: ((ChatMessageUpdateReason) -> Void)?
@@ -2674,10 +2717,15 @@ private final class ChatGenerationBindingState {
                     self?.persistenceEvents.append("record-run")
                     self?.onRecordRun?()
                 }
+                return true
             },
             markRunAwaitingPermission: { [weak self] _, toolCallId in
                 guard let self else { return false }
                 return await self.markRunAwaitingPermission(toolCallId: toolCallId)
+            },
+            resumeRunAfterPermission: { [weak self] runId in
+                self?.resumedApprovalRunIds.append(runId)
+                return self != nil
             },
             startLiveActivity: { _, _, _ in },
             saveMiniAppIfPresent: { _, _ in nil },

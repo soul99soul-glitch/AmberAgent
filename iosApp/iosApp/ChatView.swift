@@ -143,7 +143,6 @@ struct ChatView: View {
     @State private var messageEditDraft: ChatMessageEditDraft?
     @State private var pendingDeleteMessageId: String?
     @Environment(IOSConversationStore.self) private var conversationStore
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(
@@ -323,9 +322,6 @@ struct ChatView: View {
         .onChange(of: viewModel.messageUpdateSignal) { _, signal in
             handleMessageUpdateSignal(signal)
         }
-        .onChange(of: scenePhase) { _, phase in
-            handleScenePhaseChange(phase)
-        }
         .onChange(of: isInputFocused) { wasFocused, isFocused in
             guard !wasFocused, isFocused else { return }
             handleComposerFocusStarted()
@@ -395,13 +391,6 @@ struct ChatView: View {
             handleBackgroundContentLanded()
         default:
             break
-        }
-    }
-
-    private func handleScenePhaseChange(_ phase: ScenePhase) {
-        if phase == .background {
-            // 握着后台执行权就别交接，让正在跑的流自己跑完。
-            _ = viewModel.handoffGenerationToBackgroundIfNeeded(honorKeepAliveLease: true)
         }
     }
 
@@ -568,21 +557,23 @@ struct ChatView: View {
     }
 
     private var topBar: some View {
-        ZStack(alignment: .bottom) {
-            HStack {
-                backToolbarButton
+        AmberGlassGroup(spacing: 12) {
+            ZStack(alignment: .bottom) {
+                HStack {
+                    backToolbarButton
 
-                Spacer()
+                    Spacer()
 
-                newChatToolbarButton
+                    newChatToolbarButton
+                }
+
+                ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
+                    .padding(.horizontal, 74)
+                    .frame(maxWidth: .infinity)
+                    .allowsHitTesting(false)
+                    .onAppear { syncIslandPresentation() }
+                    .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
             }
-
-            ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
-                .padding(.horizontal, 74)
-                .frame(maxWidth: .infinity)
-                .allowsHitTesting(false)
-                .onAppear { syncIslandPresentation() }
-                .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
         }
         .padding(.horizontal, 18)
         .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)

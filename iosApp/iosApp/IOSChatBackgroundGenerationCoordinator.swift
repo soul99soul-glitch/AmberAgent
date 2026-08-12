@@ -17,6 +17,8 @@ private struct IOSChatBackgroundRuntimeJob {
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
     let mode: IOSChatBackgroundHandoffMode
+    let responseId: String?
+    let responseSequenceNumber: Int64?
     let generativeUiRequirement: IOSGenerativeUiRequirement
     let generativeUiFallbackAttempted: Bool
     let conversationStore: IOSConversationStore
@@ -55,7 +57,9 @@ struct IOSChatBackgroundHandoff {
     let params: TextGenerationParams
     let uploadMessages: [UIMessage]
     let displayMessages: [UIMessage]
-    let mode: IOSChatBackgroundHandoffMode
+    var mode: IOSChatBackgroundHandoffMode
+    var responseId: String? = nil
+    var responseSequenceNumber: Int64? = nil
     let generativeUiRequirement: IOSGenerativeUiRequirement
     let generativeUiFallbackAttempted: Bool
     /// P0-a Fix C: the FULL catalog tool names of the run (params.tools only
@@ -68,6 +72,7 @@ struct IOSChatBackgroundHandoff {
 enum IOSChatBackgroundHandoffMode: String {
     case continueModel = "continue_model"
     case singleToolOnly = "single_tool_only"
+    case resumeResponse = "resume_response"
 }
 
 struct IOSChatBackgroundProvider: IOSAgentTextProvider, IOSAgentStreamingProvider {
@@ -285,6 +290,70 @@ private final class IOSChatBackgroundMessagesSnapshot: @unchecked Sendable {
     }
 }
 
+private final class IOSChatDurableResponseAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private let accumulator: MessageStreamAccumulator
+
+    init(displayMessages: [UIMessage], model: Model) {
+        accumulator = MessageStreamAccumulator(initialMessages: displayMessages, model: model)
+    }
+
+    func append(_ chunk: MessageChunk) -> [UIMessage] {
+        lock.lock()
+        defer { lock.unlock() }
+        accumulator.append(chunk: chunk)
+        return accumulator.snapshot()
+    }
+
+    var messages: [UIMessage] {
+        lock.lock()
+        defer { lock.unlock() }
+        return accumulator.snapshot()
+    }
+}
+
+private final class IOSChatDurableResumeCompletion: @unchecked Sendable {
+    enum Outcome {
+        case completed
+        case disconnected(String)
+        case failed(String)
+    }
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Outcome, Never>?
+    private var pendingOutcome: Outcome?
+    private var isResolved = false
+
+    func install(_ continuation: CheckedContinuation<Outcome, Never>) {
+        lock.lock()
+        if let pendingOutcome {
+            self.pendingOutcome = nil
+            lock.unlock()
+            continuation.resume(returning: pendingOutcome)
+        } else {
+            self.continuation = continuation
+            lock.unlock()
+        }
+    }
+
+    func resolve(_ outcome: Outcome) {
+        lock.lock()
+        guard !isResolved else {
+            lock.unlock()
+            return
+        }
+        isResolved = true
+        if let continuation {
+            self.continuation = nil
+            lock.unlock()
+            continuation.resume(returning: outcome)
+        } else {
+            pendingOutcome = outcome
+            lock.unlock()
+        }
+    }
+}
+
 struct IOSChatBackgroundJobTerminalEvent: Equatable, Sendable {
     let conversationId: String
 }
@@ -315,18 +384,17 @@ final class IOSChatBackgroundGenerationCoordinator {
     private var activeJobs: [String: IOSChatBackgroundRuntimeJob] = [:]
     private var activeRunStates: [String: IOSChatBackgroundRunState] = [:]
     private var activeBackgroundTasks: [String: BGContinuedProcessingTask] = [:]
+    private var activeDetachedResponseTasks: [String: Task<Void, Never>] = [:]
+    private var activeDetachedResponseJobs: [String: Kotlinx_coroutines_coreJob] = [:]
+    private var activeDetachedResponseCompletions: [String: IOSChatDurableResumeCompletion] = [:]
     private lazy var db: AgentRuntimeDatabase = IosDatabaseFactory.shared.createDatabase()
+    private lazy var runStore = IOSDurableRunStore(dao: db.agentRuntimeDao())
     // W1 durable ledger (I-1): background-continued tool execution accounts
     // itself against the SAME runId the foreground run already started under
     // (see the `IOSAgentToolEngine(... ledger:ledgerRunId:)` call below).
     private lazy var toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger(dao: db.agentRuntimeDao())
 
     private init() {}
-
-    private var suspensionStore: IOSChatBackgroundSuspensionStore? {
-        guard let directory = try? jobsDirectory() else { return nil }
-        return IOSChatBackgroundSuspensionStore(directory: directory)
-    }
 
     /// 生命周期快照里属于本协调器的那一段：只读内存态，不碰磁盘。
     var lifecycleSnapshotDetail: String {
@@ -379,6 +447,17 @@ final class IOSChatBackgroundGenerationCoordinator {
         liveActivityController: AgentLiveActivityController,
         saveMiniAppIfPresent: (@MainActor ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?)? = nil
     ) -> Bool {
+        if handoff.mode == .resumeResponse {
+            guard checkpointDurableResponse(handoff) else { return false }
+            activeJobs[requestIdentifier(for: handoff.runId)] = runtimeJob(
+                handoff: handoff,
+                conversationStore: conversationStore,
+                toolRuntime: toolRuntime,
+                liveActivityController: liveActivityController,
+                saveMiniAppIfPresent: saveMiniAppIfPresent
+            )
+            return true
+        }
         configure()
 
         let requestId = requestIdentifier(for: handoff.runId)
@@ -425,6 +504,60 @@ final class IOSChatBackgroundGenerationCoordinator {
             removePayload(requestId: requestId)
             NSLog("[AmberChatBG] BGContinuedProcessingTask submit failed: \(error)")
             return false
+        }
+    }
+
+    /// Persist the first server-owned Responses cursor without submitting a
+    /// second model run. The existing payload/task map becomes the single
+    /// cold-start owner; later sequence updates stay in memory because resume
+    /// replays this response from its beginning.
+    func checkpointDurableResponse(_ handoff: IOSChatBackgroundHandoff) -> Bool {
+        guard handoff.mode == .resumeResponse,
+              handoff.responseId != nil else {
+            return false
+        }
+        let requestId = requestIdentifier(for: handoff.runId)
+        guard register(requestId: requestId) else { return false }
+        do {
+            try persist(handoff: handoff, requestId: requestId)
+        } catch {
+            NSLog("[AmberChatBG] Failed to persist durable response checkpoint: \(error)")
+            return false
+        }
+        remember(runId: handoff.runId, requestId: requestId)
+        return true
+    }
+
+    func discardDurableResponse(runId: String) {
+        let requestIds = taskMap().filter { $0.value == runId }.map(\.key)
+        for requestId in requestIds {
+            activeDetachedResponseTasks[requestId]?.cancel()
+            activeDetachedResponseJobs.removeValue(forKey: requestId)?.cancel(cause: nil)
+            activeDetachedResponseCompletions.removeValue(forKey: requestId)?
+                .resolve(.disconnected("discarded"))
+        }
+        finish(runId: runId)
+    }
+
+    /// Reattach server-owned Responses runs left by suspension or process
+    /// termination. Non-durable payloads remain owned by the existing stale
+    /// sweep and are closed as retryable failures.
+    func resumeDetachedResponsesIfNeeded() {
+        for (requestId, _) in taskMap() {
+            guard activeBackgroundTasks[requestId] == nil,
+                  activeDetachedResponseTasks[requestId] == nil,
+                  let job = job(for: requestId),
+                  job.mode == .resumeResponse,
+                  job.responseId != nil else {
+                continue
+            }
+            activeDetachedResponseTasks[requestId] = Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.resumeDetachedResponse(job: job, requestId: requestId)
+                self.activeDetachedResponseTasks.removeValue(forKey: requestId)
+                self.activeDetachedResponseJobs.removeValue(forKey: requestId)
+                self.activeDetachedResponseCompletions.removeValue(forKey: requestId)
+            }
         }
     }
 
@@ -491,6 +624,7 @@ final class IOSChatBackgroundGenerationCoordinator {
               runState.claimSystemTaskCompletion() else {
             return false
         }
+        cancelDetachedResponseTransport(requestId: requestId, job: job)
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: requestId)
         Task { @MainActor in
             let latestMessages = Self.reconciledMessages(
@@ -510,7 +644,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             }
             let didPersistTerminal: Bool
             switch job.mode {
-            case .continueModel:
+            case .continueModel, .resumeResponse:
                 didPersistTerminal = await job.conversationStore.saveBackgroundCompletion(
                     baseMessages: job.displayMessages,
                     completedMessages: cancelledMessages,
@@ -526,11 +660,13 @@ final class IOSChatBackgroundGenerationCoordinator {
             await self.recordRun(
                 job.runId,
                 startedAt: job.startedAt,
-                status: didPersistTerminal ? "interrupted" : "failed",
+                status: didPersistTerminal ? .cancelled : .recoveryPending,
                 inputDigest: job.inputDigest,
                 conversationId: job.conversationId
             )
-            self.notifyRunTerminal(job: job, runId: job.runId, finalMessages: cancelledMessages)
+            if didPersistTerminal {
+                self.notifyRunTerminal(job: job, runId: job.runId, finalMessages: cancelledMessages)
+            }
             _ = job.liveActivityController.adoptExistingActivity(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString()
@@ -546,7 +682,11 @@ final class IOSChatBackgroundGenerationCoordinator {
                 presentation: didPersistTerminal ? .cancelled() : .failed()
             )
             let backgroundTask = self.activeBackgroundTasks[requestId]
-            self.finish(runId: job.runId, requestId: requestId)
+            if didPersistTerminal {
+                self.finish(runId: job.runId, requestId: requestId)
+            } else {
+                self.releaseRuntimeOwnership(requestId: requestId)
+            }
             backgroundTask?.setTaskCompleted(success: false)
         }
         return true
@@ -647,6 +787,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             uploadMessages: handoff.uploadMessages,
             displayMessages: handoff.displayMessages,
             mode: handoff.mode,
+            responseId: handoff.responseId,
+            responseSequenceNumber: handoff.responseSequenceNumber,
             generativeUiRequirement: handoff.generativeUiRequirement,
             generativeUiFallbackAttempted: handoff.generativeUiFallbackAttempted,
             conversationStore: conversationStore,
@@ -676,6 +818,263 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
     }
 
+    private func resumeDetachedResponse(
+        job: IOSChatBackgroundRuntimeJob,
+        requestId: String,
+        reconnectAttempt: Int = 0
+    ) async {
+        guard let openAI = job.providerSetting as? ProviderSetting.OpenAI,
+              let responseId = job.responseId else {
+            return
+        }
+        do {
+            guard let snapshot = try await runStore.snapshot(runId: job.runId) else { return }
+            if snapshot.status == .awaitingPermission {
+                return
+            }
+            if snapshot.status == .recoveryPending {
+                guard try await runStore.transition(
+                    runId: job.runId,
+                    expected: .recoveryPending,
+                    to: .running
+                ) else { return }
+            } else if snapshot.status != .running {
+                finish(runId: job.runId, requestId: requestId)
+                return
+            }
+        } catch {
+            return
+        }
+        let runState = activeRunStates[requestId] ?? IOSChatBackgroundRunState()
+        activeRunStates[requestId] = runState
+        let accumulator = IOSChatDurableResponseAccumulator(
+            displayMessages: job.displayMessages,
+            model: job.params.model
+        )
+        let completion = IOSChatDurableResumeCompletion()
+        activeDetachedResponseCompletions[requestId] = completion
+        let transport = OpenAIResponsesBackgroundTransport()
+        let outcome = await withCheckedContinuation { continuation in
+            completion.install(continuation)
+            do {
+                let streamJob = try transport.resumeBackground(
+                    providerSetting: openAI,
+                    responseId: responseId,
+                    startingAfter: 0,
+                    customHeaders: job.params.customHeaders,
+                    onChunk: { chunk in
+                        job.messagesSnapshot.replace(with: accumulator.append(chunk))
+                    },
+                    onCheckpoint: { _, _ in },
+                    onComplete: {
+                        completion.resolve(.completed)
+                    },
+                    onDisconnected: { error in
+                        completion.resolve(.disconnected(error.message ?? String(describing: error)))
+                    },
+                    onFailure: { error in
+                        completion.resolve(.failed(error.message ?? String(describing: error)))
+                    }
+                )
+                activeDetachedResponseJobs[requestId] = streamJob
+            } catch {
+                completion.resolve(.failed((error as NSError).localizedDescription))
+            }
+        }
+
+        activeDetachedResponseJobs.removeValue(forKey: requestId)
+        activeDetachedResponseCompletions.removeValue(forKey: requestId)
+        guard !Task.isCancelled else { return }
+        switch outcome {
+        case .completed:
+            let messages = accumulator.messages
+            job.messagesSnapshot.replace(with: messages)
+            if job.toolRuntime.hasUnresolvedToolCall(in: messages) {
+                let generatedSuffix = Array(messages.dropFirst(job.displayMessages.count))
+                var nextHandoff = IOSChatBackgroundHandoff(
+                    runId: job.runId,
+                    startedAt: job.startedAt,
+                    inputDigest: job.inputDigest,
+                    conversationId: job.conversationId,
+                    providerId: job.providerSetting.id.toHexDashString(),
+                    providerSetting: job.providerSetting,
+                    params: job.params,
+                    uploadMessages: job.uploadMessages + generatedSuffix,
+                    displayMessages: messages,
+                    mode: .continueModel,
+                    generativeUiRequirement: job.generativeUiRequirement,
+                    generativeUiFallbackAttempted: job.generativeUiFallbackAttempted,
+                    fullToolNames: job.toolExposureBridge.fullToolDeclarations().map(\.name)
+                )
+                nextHandoff.responseId = nil
+                nextHandoff.responseSequenceNumber = nil
+                if !start(
+                    handoff: nextHandoff,
+                    conversationStore: job.conversationStore,
+                    toolRuntime: job.toolRuntime,
+                    liveActivityController: job.liveActivityController,
+                    saveMiniAppIfPresent: job.saveMiniAppIfPresent
+                ) {
+                    _ = checkpointDurableResponse(durableResponseHandoff(for: job))
+                    activeJobs[requestId] = job
+                    guard runState.reserveTerminal() else { return }
+                    let didSave = await persistExpirationFailure(
+                        job: job,
+                        requestId: requestId,
+                        rawMessage: "回复已恢复，但工具阶段未能继续，请重试。",
+                        partialAssistantText: nil
+                    )
+                    guard runState.finalizeTerminal() else { return }
+                    if didSave {
+                        finish(runId: job.runId, requestId: requestId)
+                    } else {
+                        activeRunStates[requestId] = IOSChatBackgroundRunState()
+                    }
+                }
+                return
+            }
+            guard runState.reserveTerminal() else { return }
+            await completeDetachedResponse(
+                job: job,
+                requestId: requestId,
+                messages: messages,
+                runState: runState
+            )
+        case .failed(let message):
+            guard runState.reserveTerminal() else { return }
+            let didSave = await persistExpirationFailure(
+                job: job,
+                requestId: requestId,
+                rawMessage: message,
+                partialAssistantText: nil
+            )
+            guard runState.finalizeTerminal() else { return }
+            if didSave {
+                finish(runId: job.runId, requestId: requestId)
+            } else {
+                activeRunStates[requestId] = IOSChatBackgroundRunState()
+            }
+        case .disconnected(let message):
+            if reconnectAttempt == 0 {
+                try? await Task.sleep(for: .milliseconds(400))
+                guard !Task.isCancelled else { return }
+                await resumeDetachedResponse(
+                    job: job,
+                    requestId: requestId,
+                    reconnectAttempt: 1
+                )
+                return
+            }
+            guard runState.reserveTerminal() else { return }
+            let didSave = await persistExpirationFailure(
+                job: job,
+                requestId: requestId,
+                rawMessage: message.isEmpty ? "后台回复连接中断，请重试。" : message,
+                partialAssistantText: nil
+            )
+            guard runState.finalizeTerminal() else { return }
+            if didSave {
+                cancelRemoteResponse(for: job)
+                finish(runId: job.runId, requestId: requestId)
+            } else {
+                // Keep a visible/cancellable owner. A future foreground entry
+                // may retry the same response after storage becomes writable.
+                activeRunStates[requestId] = IOSChatBackgroundRunState()
+            }
+        }
+    }
+
+    private func durableResponseHandoff(
+        for job: IOSChatBackgroundRuntimeJob
+    ) -> IOSChatBackgroundHandoff {
+        IOSChatBackgroundHandoff(
+            runId: job.runId,
+            startedAt: job.startedAt,
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId,
+            providerId: job.providerSetting.id.toHexDashString(),
+            providerSetting: job.providerSetting,
+            params: job.params,
+            uploadMessages: job.uploadMessages,
+            displayMessages: job.displayMessages,
+            mode: .resumeResponse,
+            responseId: job.responseId,
+            responseSequenceNumber: job.responseSequenceNumber,
+            generativeUiRequirement: job.generativeUiRequirement,
+            generativeUiFallbackAttempted: job.generativeUiFallbackAttempted,
+            fullToolNames: job.toolExposureBridge.fullToolDeclarations().map(\.name)
+        )
+    }
+
+    private func cancelRemoteResponse(for job: IOSChatBackgroundRuntimeJob) {
+        guard let openAI = job.providerSetting as? ProviderSetting.OpenAI,
+              let responseId = job.responseId else { return }
+        _ = try? OpenAIResponsesBackgroundTransport().cancelBackground(
+            providerSetting: openAI,
+            responseId: responseId,
+            customHeaders: job.params.customHeaders,
+            onComplete: {},
+            onError: { _ in }
+        )
+    }
+
+    private func cancelDetachedResponseTransport(
+        requestId: String,
+        job: IOSChatBackgroundRuntimeJob
+    ) {
+        activeDetachedResponseTasks[requestId]?.cancel()
+        activeDetachedResponseJobs.removeValue(forKey: requestId)?.cancel(cause: nil)
+        activeDetachedResponseCompletions.removeValue(forKey: requestId)?
+            .resolve(.disconnected("cancelled"))
+        cancelRemoteResponse(for: job)
+    }
+
+    private func completeDetachedResponse(
+        job: IOSChatBackgroundRuntimeJob,
+        requestId: String,
+        messages: [UIMessage],
+        runState: IOSChatBackgroundRunState
+    ) async {
+        let miniAppApplication = job.saveMiniAppIfPresent?(messages, job.conversationId)
+        let didSave = await job.conversationStore.saveBackgroundCompletion(
+            baseMessages: job.displayMessages,
+            completedMessages: messages,
+            to: job.conversationId
+        )
+        if didSave {
+            _ = miniAppApplication?.commit()
+        } else {
+            _ = miniAppApplication?.rollback()
+        }
+        await recordRun(
+            job.runId,
+            startedAt: job.startedAt,
+            status: didSave ? .completed : .recoveryPending,
+            inputDigest: job.inputDigest,
+            conversationId: job.conversationId
+        )
+        guard runState.finalizeTerminal() else { return }
+        if didSave {
+            notifyRunTerminal(job: job, runId: job.runId, finalMessages: messages)
+            WatchTaskCoordinator.shared.publishCompleted(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                summary: Self.backgroundSummary(from: messages)
+            )
+            await job.liveActivityController.end(runId: job.runId, presentation: .completed())
+            finish(runId: job.runId, requestId: requestId)
+        } else {
+            WatchTaskCoordinator.shared.publish(
+                runId: job.runId,
+                conversationId: job.conversationId.toHexDashString(),
+                presentation: .failed(),
+                summary: "回复已完成，但保存失败。"
+            )
+            await job.liveActivityController.end(runId: job.runId, presentation: .failed())
+            activeRunStates[requestId] = IOSChatBackgroundRunState()
+        }
+    }
+
     private func handle(_ backgroundTask: BGContinuedProcessingTask) async {
         let mappedRunId = taskMap()[backgroundTask.identifier]
         // 先标记“系统已经把这一轮交回来了”，再做 payload 解码。冷启动扫尾
@@ -699,18 +1098,6 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         let runState = activeRunStates[backgroundTask.identifier] ?? IOSChatBackgroundRunState()
         activeRunStates[backgroundTask.identifier] = runState
-        if let suspended = suspensionStore?.load(requestId: backgroundTask.identifier) {
-            suspensionStore?.remove(requestId: backgroundTask.identifier)
-            await persistExpirationFailure(
-                job: job,
-                requestId: backgroundTask.identifier,
-                rawMessage: "后台生成已停止，可以重试。",
-                partialAssistantText: suspended.partialAssistantText
-            )
-            finish(runId: job.runId, requestId: backgroundTask.identifier)
-            backgroundTask.setTaskCompleted(success: false)
-            return
-        }
         IOSBackgroundLifecycleLog.record(
             "bgTaskStarted(run=\(job.runId.prefix(8)))",
             detail: lifecycleSnapshotDetail
@@ -756,13 +1143,17 @@ final class IOSChatBackgroundGenerationCoordinator {
                 )
                 switch claim {
                 case .persistFailure:
-                    await self.persistExpirationFailure(
+                    let didSave = await self.persistExpirationFailure(
                         job: job,
                         requestId: backgroundTask.identifier,
                         rawMessage: "后台生成已停止，可以重试。",
                         partialAssistantText: assistantTextSnapshot.text
                     )
-                    self.finish(runId: job.runId, requestId: backgroundTask.identifier)
+                    if didSave {
+                        self.finish(runId: job.runId, requestId: backgroundTask.identifier)
+                    } else {
+                        self.releaseRuntimeOwnership(requestId: backgroundTask.identifier)
+                    }
                 case .terminateInFlightSave:
                     // 会话写入已经开始，无法原子取消；由保存结果决定最终呈现，避免双终态。
                     break
@@ -870,7 +1261,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         let retryCitationTracker = IOSMemoryCitationTracker()
         let operationTask = Task { () -> IOSAgentToolEngineResult in
             switch job.mode {
-            case .continueModel:
+            case .continueModel, .resumeResponse:
                 let initialResult = await engine.run(
                     providerSetting: requestProvider,
                     messages: job.uploadMessages,
@@ -1083,7 +1474,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         // `.completed()`/`publishCompleted`, so Watch/LiveActivity/`agent_run`
         // all read this as an ordinary successful finish. That is I-5 failing
         // silently specifically on the background path (the foreground
-        // sibling, `terminatePendingToolCalls`, already records "guard_stopped"
+        // sibling, `terminatePendingToolCalls`, records shared status `failed`
         // and publishes `.failed()`). Capture the notice text here so the
         // terminal-status block below can align background with foreground.
         var guardStoppedNotice: String?
@@ -1112,7 +1503,7 @@ final class IOSChatBackgroundGenerationCoordinator {
 
         let didSave: Bool
         switch job.mode {
-        case .continueModel:
+        case .continueModel, .resumeResponse:
             didSave = await job.conversationStore.saveBackgroundCompletion(
                 baseMessages: job.displayMessages,
                 completedMessages: finalMessages,
@@ -1173,7 +1564,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             guardStopped: guardStoppedNotice != nil,
             miniAppFailed: miniAppFailed
         )
-        let succeeded = runStatus == "completed"
+        let succeeded = runStatus == .completed
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
@@ -1284,7 +1675,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: didSave ? "truncated" : "recovery_pending",
+            status: didSave ? .failed : .recoveryPending,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1361,7 +1752,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                 await recordRun(
                     job.runId,
                     startedAt: job.startedAt,
-                    status: didSave ? "failed" : "recovery_pending",
+                    status: didSave ? .failed : .recoveryPending,
                     inputDigest: job.inputDigest,
                     conversationId: job.conversationId
                 )
@@ -1387,7 +1778,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: "failed",
+            status: .failed,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1403,39 +1794,6 @@ final class IOSChatBackgroundGenerationCoordinator {
             backgroundTask.setTaskCompleted(success: false)
         } else {
             removePayload(requestId: backgroundTask.identifier)
-        }
-    }
-
-    /// 旧版本可能已经留下了自动恢复记录。当前系统 API 无法区分用户 Stop 与
-    /// 系统到期，因此这些记录只落为可见的可重试终态，不再重新提交后台请求。
-    func finalizeSuspendedRunsIfNeeded() {
-        guard let store = suspensionStore else { return }
-        let records = store.allRecords()
-        guard !records.isEmpty else { return }
-        IOSBackgroundLifecycleLog.record(
-            "suspensionFinalizeSweep(pending=\(records.count))",
-            detail: lifecycleSnapshotDetail
-        )
-        for record in records {
-            store.remove(requestId: record.requestId)
-            guard let job = job(for: record.requestId) else {
-                finish(requestId: record.requestId)
-                continue
-            }
-            BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: record.requestId)
-            finish(runId: job.runId, requestId: record.requestId)
-            Task { @MainActor in
-                await self.persistExpirationFailure(
-                    job: job,
-                    requestId: record.requestId,
-                    rawMessage: "后台生成已停止，可以重试。",
-                    partialAssistantText: record.partialAssistantText
-                )
-                IOSBackgroundLifecycleLog.record(
-                    "suspensionFinalized(run=\(record.runId.prefix(8)))",
-                    detail: self.lifecycleSnapshotDetail
-                )
-            }
         }
     }
 
@@ -1456,6 +1814,14 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         for (requestId, mappedRunId) in persisted {
             guard activeBackgroundTasks[requestId] == nil else {
+                continue
+            }
+            if activeDetachedResponseTasks[requestId] != nil {
+                continue
+            }
+            if let durableJob = job(for: requestId),
+               durableJob.mode == .resumeResponse,
+               durableJob.responseId != nil {
                 continue
             }
 
@@ -1500,7 +1866,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         requestId: String,
         rawMessage: String,
         partialAssistantText: String?
-    ) async {
+    ) async -> Bool {
         let reconciledBase = Self.reconciledDisplayPrefix(
             resultMessages: job.messagesSnapshot.messages,
             uploadMessageCount: job.uploadMessages.count,
@@ -1529,7 +1895,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: didSave ? "failed" : "recovery_pending",
+            status: didSave ? .failed : .recoveryPending,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1540,6 +1906,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             presentation: .failed()
         )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
+        return didSave
     }
 
     private func resolveExpiredInFlightSave(
@@ -1558,7 +1925,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             guardStopped: guardStoppedNotice != nil,
             miniAppFailed: miniAppFailed
         )
-        let succeeded = runStatus == "completed"
+        let succeeded = runStatus.wireName == AgentRunStatus.completed.wireName
         if didSave {
             removePayload(requestId: requestId)
         }
@@ -1605,11 +1972,10 @@ final class IOSChatBackgroundGenerationCoordinator {
         backgroundTask: BGContinuedProcessingTask,
         runState: IOSChatBackgroundRunState
     ) async {
-        // 当前没有持久化 payload 的 retry owner；终态失败必须同步删除，避免孤儿文件。
         await recordRun(
             job.runId,
             startedAt: job.startedAt,
-            status: "recovery_pending",
+            status: .recoveryPending,
             inputDigest: job.inputDigest,
             conversationId: job.conversationId
         )
@@ -1620,9 +1986,17 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         await job.liveActivityController.end(runId: job.runId, presentation: .failed())
         if runState.claimSystemTaskCompletion() {
-            finish(requestId: backgroundTask.identifier)
+            releaseRuntimeOwnership(requestId: backgroundTask.identifier)
             backgroundTask.setTaskCompleted(success: false)
         }
+    }
+
+    /// Release the in-process/system-task owner while retaining the task map
+    /// and payload for the existing cold-start reconciliation pass.
+    private func releaseRuntimeOwnership(requestId: String) {
+        activeJobs.removeValue(forKey: requestId)
+        activeRunStates.removeValue(forKey: requestId)
+        activeBackgroundTasks.removeValue(forKey: requestId)
     }
 
     private func job(for requestId: String) -> IOSChatBackgroundRuntimeJob? {
@@ -1659,6 +2033,8 @@ final class IOSChatBackgroundGenerationCoordinator {
             uploadMessages: handoff.uploadMessages,
             displayMessages: handoff.displayMessages,
             mode: handoff.mode.rawValue,
+            responseId: handoff.responseId,
+            responseSequenceNumber: handoff.responseSequenceNumber.map { KotlinLong(value: $0) },
             generativeUiRequired: handoff.generativeUiRequirement.required,
             generativeUiExpectSlides: handoff.generativeUiRequirement.expectSlides,
             generativeUiExpectFullHtmlDeck: handoff.generativeUiRequirement.expectFullHtmlDeck,
@@ -1732,6 +2108,8 @@ final class IOSChatBackgroundGenerationCoordinator {
                 uploadMessages: payload.uploadMessages,
                 displayMessages: payload.displayMessages,
                 mode: IOSChatBackgroundHandoffMode(rawValue: payload.mode) ?? .continueModel,
+                responseId: payload.responseId,
+                responseSequenceNumber: payload.responseSequenceNumber?.int64Value,
                 generativeUiRequirement: IOSGenerativeUiRequirement(
                     required: payload.generativeUiRequired,
                     expectSlides: payload.generativeUiExpectSlides,
@@ -1747,8 +2125,6 @@ final class IOSChatBackgroundGenerationCoordinator {
     }
 
     private func removePayload(requestId: String) {
-        // payload 与挂起记录是一对：payload 走了，挂起态就没有恢复目标，必须一起清。
-        suspensionStore?.remove(requestId: requestId)
         do {
             let url = payloadURL(for: requestId, in: try jobsDirectory())
             try? FileManager.default.removeItem(at: url)
@@ -1774,42 +2150,30 @@ final class IOSChatBackgroundGenerationCoordinator {
     private func recordRun(
         _ runId: String,
         startedAt: Int64,
-        status: String,
+        status: AgentRunStatus,
         inputDigest: String,
         conversationId: KotlinUuid,
         interruptedReason: String? = nil
     ) async {
-        let dao = db.agentRuntimeDao()
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let finishedAtValue: KotlinLong? = status == "running" ? nil : KotlinLong(value: now)
         // 中断原因由调用方给出；历史调用点只有「用户取消」一种，保留为默认值。
-        let resolvedInterruptedReason: String? = status == "interrupted"
+        let resolvedInterruptedReason: String? = status == .interrupted
             ? (interruptedReason ?? "user_cancelled")
             : nil
-        let run = AgentRunEntity(
-            runId: runId,
-            parentRunId: nil,
-            agentDescriptorId: "chat",
-            agentVersion: "1",
-            conversationId: conversationId.toHexDashString(),
-            messageNodeId: nil,
-            producesMessageId: nil,
-            assistantId: nil,
-            status: status,
-            inputDigest: inputDigest,
-            inputSnapshotRef: nil,
-            inputSchemaVersion: 1,
-            startedAt: startedAt,
-            finishedAt: finishedAtValue,
-            interruptedReason: resolvedInterruptedReason
-        )
 
         do {
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                dao.insertRun(run: run) { error in
-                    if let error { cont.resume(throwing: error) }
-                    else { cont.resume() }
-                }
+            if status == .running {
+                _ = try await runStore.startChatRun(
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId.toHexDashString()
+                )
+            } else {
+                _ = try await runStore.transitionFromAnyActive(
+                    runId: runId,
+                    to: status,
+                    detail: resolvedInterruptedReason
+                )
             }
         } catch {
             // agent_run 是强杀恢复（applyToolCallLedgerRecovery）依赖的账本，
@@ -1826,16 +2190,11 @@ final class IOSChatBackgroundGenerationCoordinator {
     }
 
     private func markRunInterrupted(runId: String, reason: String) async {
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            db.agentRuntimeDao().markInterrupted(
-                runId: runId,
-                reason: reason,
-                now: now
-            ) { _ in
-                continuation.resume()
-            }
-        }
+        _ = try? await runStore.transitionFromAnyActive(
+            runId: runId,
+            to: .interrupted,
+            detail: reason
+        )
     }
 
     /// P1-c: 后台 job 终态回传（FINAL_ANSWER 投递由接线方——编排服务——处理；
@@ -1920,11 +2279,10 @@ final class IOSChatBackgroundGenerationCoordinator {
         singleToolFailureReason: String?,
         guardStopped: Bool,
         miniAppFailed: Bool = false
-    ) -> String {
-        guard didSave else { return "recovery_pending" }
-        if guardStopped { return "guard_stopped" }
-        if miniAppFailed { return "failed" }
-        return singleToolFailureReason == nil ? "completed" : "failed"
+    ) -> AgentRunStatus {
+        guard didSave else { return .recoveryPending }
+        if guardStopped || miniAppFailed { return .failed }
+        return singleToolFailureReason == nil ? .completed : .failed
     }
 
     private static func rehydratedParams(
@@ -2069,7 +2427,7 @@ final class IOSChatBackgroundGenerationCoordinator {
             singleToolFailureReason: singleToolFailureReason,
             guardStopped: guardStopped,
             miniAppFailed: miniAppFailed
-        )
+        ).wireName
     }
 
     static func failedMessagesForTesting(
@@ -2126,16 +2484,11 @@ final class IOSChatBackgroundGenerationCoordinator {
             }
             activeRunStates.removeValue(forKey: requestId)
             activeBackgroundTasks.removeValue(forKey: requestId)
-            // 后台这一轮真正终结了，执行权才还回去。前台交接时不能还——
-            // 那会让刚接手的后台任务立刻失去进程。
-            if let ownedRunId = map.removeValue(forKey: requestId) {
-                BackgroundGenerationKeepAlive.shared.end(ownedRunId)
-            }
+            map.removeValue(forKey: requestId)
             if shouldRemovePayload {
                 removePayload(requestId: requestId)
             }
         } else if let runId {
-            BackgroundGenerationKeepAlive.shared.end(runId)
             let matching = map.filter { $0.value == runId }.map(\.key)
             for requestId in matching {
                 if let job = activeJobs.removeValue(forKey: requestId) {

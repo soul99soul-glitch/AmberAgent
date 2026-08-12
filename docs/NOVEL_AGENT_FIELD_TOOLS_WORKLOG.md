@@ -97,6 +97,6 @@
 
 1. 主题包 agent 自创（缺 `theme_pack_import` 工具，格式已是纯 JSON）
 2. cron iOS 接线（Android `AgentCronTools` 是声明蓝本；`reconcileOnStartup` 无生产调用者待救活）
-3. persona/assistant 编辑（`updateCurrentAssistantParams` 写路径零调用者、UI 占位页）
+3. ~~persona/assistant 编辑~~（2026-08-12 用户定调：只有 amber 一个助手、不需要多助手角色，死写链已删——KMP `IosSettingsMutations.updateCurrentAssistantParams` + iOS `IOSSharedSettingsStore.updateCurrentAssistantParams` 双端移除，全仓零残留，双端编译绿）
 4. DeepRead/议会房间 agent 发起
 5. decisionLog 卡在 UI 补可见性后可重新开放进工具白名单

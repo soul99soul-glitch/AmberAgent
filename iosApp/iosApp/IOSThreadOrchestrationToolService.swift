@@ -219,7 +219,7 @@ final class IOSThreadOrchestrationToolService {
     // MARK: - spawn_agent
 
     /// P1-e: 活注册表占用槽数 = 在途 bootstrap + 前台活跃 run(0/1) + 后台活跃
-    /// job。替代 `listUnfinished` 全局账本计数：崩溃残留的 running 行不再占用
+    /// job。替代全局 recoverable 账本计数：崩溃残留的 running 行不再占用
     /// 并发槽（恢复扫描前的窗口期不误伤 spawn）。
     private var occupiedRunSlotCount: Int {
         inFlightBootstrapCount
@@ -320,7 +320,7 @@ final class IOSThreadOrchestrationToolService {
             )
         }
         // (c) 并发上限：活注册表占用（前台 run 0/1 + 后台 activeJobs + 本服务在途
-        // bootstrap 槽，含 spawner 自身——与旧 listUnfinished「含父自身」同语义）。
+        // bootstrap 槽，含 spawner 自身——与旧全局账本计数「含父自身」同语义）。
         // 检查与占槽之间无 await（三个计数源全部 MainActor 同步），并发 spawn
         // 不会双双通过；defer 在 spawn 收口（成功入后台注册表或失败回收）时释放。
         guard occupiedRunSlotCount < maxConcurrentRuns else {
@@ -994,13 +994,15 @@ final class IOSThreadOrchestrationToolService {
     ) async -> IOSChatBackgroundHandoff? {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let inputDigest = chatInputDigest(for: renderedText)
-        await Self.recordRunningRun(
+        guard await Self.recordRunningRun(
             agentRuntimeDao: agentRuntimeDaoProvider(),
             runId: runId,
             conversationId: targetHex,
             startedAt: now,
             inputDigest: inputDigest
-        )
+        ) else {
+            return nil
+        }
         // 管线闭环场景 C：子线程的后台 upload 不经 ChatViewModel 注入管线，
         // 直接在 handoff 里注入子线程向编排语境（仅 upload，不进展示/持久化）。
         let childContextMessage = UIMessage.companion.system(prompt: Self.childOrchestrationContextPrompt)
@@ -1041,15 +1043,12 @@ final class IOSThreadOrchestrationToolService {
         )
         guard didStart else {
             // P1-c 修复语义：回收 running 记账行——避免 start 失败留下 running
-            // 孤儿行计入并发限额（listUnfinished 计数源），也不把失败 run 静默抹掉。
-            let dao = agentRuntimeDaoProvider()
-            if let run = await Self.runFor(agentRuntimeDao: dao, runId: runId) {
-                await Self.markRunFailed(
-                    agentRuntimeDao: dao,
-                    run: run,
-                    now: Int64(Date().timeIntervalSince1970 * 1000)
-                )
-            }
+            // 孤儿行污染恢复账本，也不把失败 run 静默抹掉。
+            await Self.markRunFailed(
+                agentRuntimeDao: agentRuntimeDaoProvider(),
+                runId: runId,
+                now: Int64(Date().timeIntervalSince1970 * 1000)
+            )
             return nil
         }
         return handoff
@@ -1297,11 +1296,8 @@ final class IOSThreadOrchestrationToolService {
     }
 
     private static func countUnfinishedRuns(agentRuntimeDao: AgentRuntimeDao) async -> Int {
-        await withCheckedContinuation { cont in
-            agentRuntimeDao.listUnfinished() { result, _ in
-                cont.resume(returning: result?.count ?? 0)
-            }
-        }
+        let store = IOSDurableRunStore(dao: agentRuntimeDao)
+        return (try? await store.recoverableRuns().count) ?? 0
     }
 
     private static func latestRunStatusByConversation(agentRuntimeDao: AgentRuntimeDao) async -> [String: String] {
@@ -1310,7 +1306,8 @@ final class IOSThreadOrchestrationToolService {
                 let runs = result ?? []
                 var latestByConversation: [String: AgentRunEntity] = [:]
                 for run in runs {
-                    guard let conversationId = run.conversationId else { continue }
+                    guard IOSDurableRunStore.Descriptor.chatRecoveryAliases.contains(run.agentDescriptorId),
+                          let conversationId = run.conversationId else { continue }
                     if let existing = latestByConversation[conversationId], existing.startedAt > run.startedAt {
                         continue
                     }
@@ -1327,102 +1324,29 @@ final class IOSThreadOrchestrationToolService {
         conversationId: String,
         startedAt: Int64,
         inputDigest: String
-    ) async {
-        let run = AgentRunEntity(
+    ) async -> Bool {
+        let store = IOSDurableRunStore(dao: agentRuntimeDao)
+        return (try? await store.startChatRun(
             runId: runId,
-            parentRunId: nil,
-            agentDescriptorId: "chat",
-            agentVersion: "1",
-            conversationId: conversationId,
-            messageNodeId: nil,
-            producesMessageId: nil,
-            assistantId: nil,
-            status: "running",
-            inputDigest: inputDigest,
-            inputSnapshotRef: nil,
-            inputSchemaVersion: 1,
             startedAt: startedAt,
-            finishedAt: nil,
-            interruptedReason: nil
-        )
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            agentRuntimeDao.insertRun(run: run) { _ in cont.resume() }
-        }
+            inputDigest: inputDigest,
+            conversationId: conversationId
+        )) == true
     }
 
-    /// Sendable 投影：Kotlin `AgentRunEntity` 导出为非 Sendable，跨隔离边界只传
-    /// 标量字段（spawn start 失败回收用；转换在 DAO 回调内完成，照
-    /// `ThreadEdgeSnapshot` 既有模式）。
-    private struct AgentRunSnapshot: Sendable {
-        let runId: String
-        let parentRunId: String?
-        let agentDescriptorId: String
-        let agentVersion: String
-        let conversationId: String?
-        let messageNodeId: String?
-        let producesMessageId: String?
-        let assistantId: String?
-        let inputDigest: String
-        let inputSnapshotRef: String?
-        let inputSchemaVersion: Int32
-        let startedAt: Int64
-        let interruptedReason: String?
-
-        init(_ entity: AgentRunEntity) {
-            self.runId = entity.runId
-            self.parentRunId = entity.parentRunId
-            self.agentDescriptorId = entity.agentDescriptorId
-            self.agentVersion = entity.agentVersion
-            self.conversationId = entity.conversationId
-            self.messageNodeId = entity.messageNodeId
-            self.producesMessageId = entity.producesMessageId
-            self.assistantId = entity.assistantId
-            self.inputDigest = entity.inputDigest
-            self.inputSnapshotRef = entity.inputSnapshotRef
-            self.inputSchemaVersion = entity.inputSchemaVersion
-            self.startedAt = entity.startedAt
-            self.interruptedReason = entity.interruptedReason
-        }
-    }
-
-    /// 读单个 run 行（spawn start 失败回收用；既有 DAO getRun）。
-    private static func runFor(
-        agentRuntimeDao: AgentRuntimeDao,
-        runId: String
-    ) async -> AgentRunSnapshot? {
-        await withCheckedContinuation { cont in
-            agentRuntimeDao.getRun(id: runId) { result, _ in
-                cont.resume(returning: result.map(AgentRunSnapshot.init))
-            }
-        }
-    }
-
-    /// 把 run 行更新为 failed（既有 DAO updateRun；spawn start 失败回收）。
+    /// 以 CAS 把活跃 run 收口为 failed（spawn start 失败回收）。
     private static func markRunFailed(
         agentRuntimeDao: AgentRuntimeDao,
-        run: AgentRunSnapshot,
+        runId: String,
         now: Int64
     ) async {
-        let failed = AgentRunEntity(
-            runId: run.runId,
-            parentRunId: run.parentRunId,
-            agentDescriptorId: run.agentDescriptorId,
-            agentVersion: run.agentVersion,
-            conversationId: run.conversationId,
-            messageNodeId: run.messageNodeId,
-            producesMessageId: run.producesMessageId,
-            assistantId: run.assistantId,
-            status: "failed",
-            inputDigest: run.inputDigest,
-            inputSnapshotRef: run.inputSnapshotRef,
-            inputSchemaVersion: run.inputSchemaVersion,
-            startedAt: run.startedAt,
-            finishedAt: KotlinLong(value: now),
-            interruptedReason: run.interruptedReason
+        let store = IOSDurableRunStore(dao: agentRuntimeDao)
+        _ = try? await store.transition(
+            runId: runId,
+            expected: .running,
+            to: .failed,
+            at: now
         )
-        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            agentRuntimeDao.updateRun(run: failed) { _ in cont.resume() }
-        }
     }
 }
 

@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；self-evolution Slice A–C 与终审修复完成)
+Last updated: 2026-08-12 (background execution/recovery P0–P5；self-evolution Slice A–C 与终审修复完成)
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -20,10 +20,20 @@ Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；se
 
 - Repo: `/Users/arquiel/Downloads/AI/amberagent-ios`
 - Branch: `feat/ios-provider-parity-claude`
-- Tracking: `origin/feat/ios-provider-parity-claude`；本批提交完成后为 `11 ahead / 0 behind`，尚未 push。
-- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准（短 hash `fdcc4573c`）。2026-08-09 16:43 覆盖安装当前工作区 Debug 包到 iPhone Air（iPhone18,4，`94918570-0680-5B93-8E38-7E6B355D4426`，未卸载）：Team `89QRFX9548`，`codesign --verify --deep --strict` 通过，`app.amber.ios` 已 launch。装机容器 `876CE3B1-568A-4DA8-94A5-A129A7808DA2`。**含 skill-creator 2.2 + 附属文件保留修复 + Steer/主题/编排/Chat WIP**；vendor `rejectedEmphasisRepairRewriter` 改 `var` 以过真机编译。
+- Tracking: `origin/feat/ios-provider-parity-claude`；ahead/behind 以实时 `git status --short --branch` 为准。
+- Current committed HEAD: 以实时 `git rev-parse HEAD` 为准。2026-08-09 16:43 的 iPhone Air 覆盖安装仍是历史设备证据，不代表当前后台收束改动已装机。
 - Worktree: 主题/编排/Chat 等改动仍未提交；另含模型议会真问题精修 + 技能精修（未提交）。**主题 builtins 3 角色包** + **导入主题库**（审查最小修补已收口）。**Steer 闭环修补（2026-08-09 16:x）**：排队条与 dock 同宽（右对齐发送键）；≤3 条按内容高度（修 ScrollView 虚高）；成功终态自动发队列头一条，取消/失败才回填 composer。门禁：`IOSSteerQueueTests` **18/18**，已覆盖安装真机。**可选出厂 skill `visual-svg`**（diagram/illustration → `show-widget`，默认不启用）已接入。**Codex image2 垫图（2026-08-09）**：`generate_image` 声明加 `use_attached_image`/`source_image_url`；宿主在执行前把最近用户附图注入 `source_image_url`，经既有 Codex Responses `input_image` 路径垫图；路由提示 + OCR 回灌文案引导模型开开关。审查修补：后台 enrich 改用 `job.displayMessages`（不再读 live store）；`exec` 嵌套白名单排除 `generate_image`；生图卡圆角与 loading 横向条同构；生成中改图禁用并提示。未验证：真机 Codex OAuth 端到端垫图。议会 WIP 同前。以实时 `git status --short` 为准。
 - Git policy: 未经用户明确要求，不 commit、push、stash、reset、checkout、rebase 或清理工作区。
+
+## 后台执行与恢复收束（2026-08-12，六阶段完成）
+
+- **统一耐久事实**：复用 `agent_run` / `agent_event`，以 typed status、descriptor-scope query、INSERT IGNORE、CAS transition 和原子事件序列替代 iOS 前后台各自直接覆盖行；Chat 启动恢复只扫描自己的 descriptor，审批恢复先 claim 回 running，durable start 失败不再继续调用 provider/tool。
+- **单一生命周期链**：`BackgroundGenerationKeepAlive` 明确区分 uiOnly / submitted / adopted；AppShell 是 Chat scene 生命周期唯一入口；移除无生产写入者的 `IOSChatBackgroundSuspensionStore` 恢复模型。后台终态保存失败保留 payload + task map 为 `recovery_pending`，不再清掉唯一恢复 owner。
+- **普通 Chat**：官方 OpenAI API-key + Responses 路径接入 `background=true` / `store=true`、response ID + sequence checkpoint、断流续接、前台/冷启动 reconcile、显式远端取消；进入本地工具前先耐久清除旧 cursor，避免重复副作用。用户主动取消记为 `cancelled`，系统后台到期记为 `interrupted`。Claude、Grok、自定义兼容端点仍是 iOS continued-processing 窗口内的 best effort，不伪装成可强杀恢复。
+- **小说 / MiniApp / Council / DeepRead**：四类运行在调用 provider/tool effect 前都写入同一个 shared `agent_run` 外壳，并按 descriptor 独立对账 success / error / cancel / expiration / cold-start；领域文档、MiniApp audit、议会 task/archive 与 DeepRead task 仍是各自业务权威，不复制第二套业务存储。小说与议会在用户前台发起时立即提交 continued-processing request；ghostwrite 暂停只保留一个状态条和一组继续/重写 CTA；MiniApp `Amber.ai.generate` 系统到期会取消原生请求并让 JS promise 明确失败，冷恢复提示会投影回 Runner；议会早期中断仍可按原议题恢复并显示中断消息，运行中不再无提示切历史；DeepRead 在 durable start 与 expiration 竞态中也会回收 run，失败态统一为“未完成”，详情页 Workspace 重试命中区为 44pt，首页 CTA 与实际“打开详情”行为一致。
+- **最终 UI**：Chat 顶栏左右按钮与活动岛进入同一个 `GlassEffectContainer`，活动岛允许在 320pt 宽度内压缩而不挤压两侧按钮；Live Activity base（development region `en`）使用英文资源，`zh-Hans` 保留中文。
+- **验证**：KMP Room durable-run 定点测试与 iOS Shared 编译通过；iPhone 17 Pro Simulator 定点运行 `BackgroundGenerationKeepAliveTests`、`IOSDurableRunStoreTests`、`IOSCouncilRoomArchiveStoreTests` 共 **45/45**，另加 Chat 用户取消终态单例 **1/1**，均通过。`git diff --check` 与相关 Swift parse 通过。构建仍有仓库既有 warnings；未验证真机 continued-processing adopt/expiration、App Switcher 强杀、真实 OpenAI response 保留窗口、真实工具副作用 exactly-once 和 320pt 实机截图。
+- **能力边界**：continued-processing 是系统给的执行机会，不是耐久计算本体；只有拥有服务端 response/run ID 的段能在进程死亡后续接。跨 provider、跨多轮工具的完整强杀续跑仍需要服务端 durable run orchestrator，本轮没有为此再造客户端状态机。
 
 ## 编排体系借鉴计划（P0–P3 全部完成 2026-08-08，iOS 侧）
 
@@ -181,6 +191,7 @@ Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；se
 - 第三轮精准修复（2026-08-12，全部收口）：**R1+R2（刷新链路断）**——根因是 agent 写入经 executor 直接 perform、绕过 VM perform wrapper（唯一会刷新快照的路径）；修复=`NovelCreation.mutationEvents()` 领域广播（每次成功 perform 发布 {projectID, operationID}，协议默认空流、8+ 测试替身免实现），`NovelCreationViewModel` 订阅后复用 `refreshCurrentSelection`（一处同时刷项目列表+选中快照）。**回声抑制**（首轮实现引发 13 个 VM 测试竞态失败的教训）：VM 两个 perform 入口（私有 wrapper + performSessionAction）登记自有 operationID，订阅跳过回声，否则异步刷新与 VM 自身流程中间状态竞争。**R3（会话流零工具痕迹）**——prompt 级修复：v7 补"写入成功后须在回复里说明改动（旧→新），回执不进 UI"，不新建工具胶囊 UI。**D2（custom 卡同名难区分）**——`custom_name` 可选参数端到端（KMP schema/executor/prompt/测试），新建可命名、更新仍保留原名。D3（面板"旧值+预览失效"临时割裂）判为非 bug 不修：字段禁用、预览拒显假数据、终态自愈，行为自洽。
 - 验证（终态）：定点五套件 **152/152**（executor 17、VM 49 含 mutation 广播接线测试、lifecycle 53、adapter 27、catalog 6）；`:ai-core:jvmTest` 绿；回归 218 项中 14 失败全在既有基线集（syncFailed 1 例、SessionVM 1 例、wiring 3 例源码断言——断言对象是用户并发 WIP 改动的 NovelMaterialsView，本 diff 未触碰；另有用户连续性审计 WIP 8 文件非本轮范围）。
 - 未验证：真实 provider 下模型真实调用 6 工具、真机。
+- 附记（2026-08-12，persona 死链删除）：用户定调"只有 amber 一个助手，不需要多助手角色"——缺口地图中 persona/assistant 编辑项**不接线、直接删死代码**。已移除 KMP `IosSettingsMutations.updateCurrentAssistantParams`（~35 行）+ iOS `IOSSharedSettingsStore.updateCurrentAssistantParams` wrapper（~27 行，含 KotlinFloat/KotlinInt 装箱桥接），全仓 grep 零残留；`updateUserNickname` 文档里悬挂的 `[updateCurrentAssistantParams]` 引用改指 `[setSkillEnabledForCurrentAssistant]`。`:shared:compileKotlinIosSimulatorArm64` BUILD SUCCESSFUL、iOS xcodebuild BUILD SUCCEEDED。
 
 ## Novel Session Streaming Parity（2026-08-10，进行中）
 
@@ -210,7 +221,7 @@ Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；se
 - 小说创作已经具备创作 / 正文 / 设定三入口、独立创作与剧情同步模型、Quick Start、资料建议、收录、编辑、剧情同步、分支/Fork、整章润色、导入导出和中断恢复。小说项目文档是领域权威，普通 Chat/Memory/Workspace 不是小说存储。
 - 共创模式现已与规格对齐：`needsSync` 时仍可讨论，但正式正文生成、整章重写、润色和对应 retry 均失败闭锁。共创 / 代笔双模式计划见 `docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`（Active；Phase 0–3c 完成，下一刀真机验收）。
 - Chat、小说和模型议会在页面退出后由 App 级 owner 继续持有运行；iOS 本地后台仍受系统调度约束，不等于无限后台。
-- 只有官方 OpenAI Responses API 的小说正文、重新生成和单章润色已接入服务端 background response + cursor 恢复。Quick Start、讨论工具循环、Chat、模型议会及其他 provider 仍是本地 best-effort。
+- 官方 OpenAI API-key 的普通 Chat，以及小说正文、重新生成和单章润色，已接入服务端 background response + cursor 恢复。Quick Start、讨论工具循环、模型议会、MiniApp AI、DeepRead 及其他 provider 的计算仍是本地 best-effort；它们复用 shared run 外壳做诚实终态与冷启动对账，不宣称跨进程继续计算。
 - Live Activity、锁屏卡和 continued-processing task 按 `runId` 独立管理；旧 run 的完成、取消、深链和系统移除回调不得作用于新 run。
 
 ## Novel Collaboration Mode Phase 0 / 1 / 2
@@ -370,7 +381,7 @@ Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；se
 1. 先完成 Generative UI 的真机真实 provider 验收，重点看同卡片渐进 SVG、一次兜底边界、右上角“保存 SVG”导出、图片工具路由和 full_html deck 完整性。
 2. 完成当前流式实现的真机长文手感验收；若仍跳变，记录发生阶段、是否触摸屏幕、是否终态以及可见内容变化，再沿现有 owner 定位。
 3. 只在真实复现支持时继续调整 pacer、终态排空或 Native Timeline 手势判定，不加第二套状态机或 offset 补偿。
-4. 后台能力下一步优先补真实 OpenAI 账号下的 expiration / 强杀 / 冷启动恢复证据；其他 provider 不伪装成服务端 durable job。
+4. 后台能力下一步只补真机与真实 OpenAI 账号下的 submit / adopt / expiration / 强杀 / 冷启动恢复证据；其他 provider 不伪装成服务端 durable job。
 5. 小说共创 / 代笔：Phase 0–3c 已落地；下一刀真机验收（单章闭环、审稿模型、下一弧注入、看板回执）。
 6. Android 小说复刻属于 Android 主仓；本仓的 `NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md` 仅是跨仓草案。
 
@@ -383,7 +394,7 @@ Last updated: 2026-08-12 (field-write tools + ghostwrite elasticity P0–P3；se
 - 当前 Chat pacer 上限 36 与 24KB 长文门禁的 24 字要求冲突；这是与 widget 无关的既有问题，需决定恢复 24、调整发布策略或同步契约。
 - Android app 回归当前受范围外 Model Council 编译缺口阻断；不能把共享 planner 测试通过等同于 Android app 全门禁通过。
 - 长表格 display-link 性能探针在 Simulator 40ms 边界附近波动，尚无足够证据修改 renderer identity、发布 owner 或测试阈值。
-- iOS continued-processing 由系统决定调度与终止；用户从 App Switcher 强制结束后，本地 SSE 无法继续。
+- iOS continued-processing 由系统决定调度与终止；App Switcher 强制结束后，只有已持久化服务端 response/run ID 的段可恢复，其他 provider 流和本地工具阶段会诚实收为未完成。
 - 服务端恢复在首个 `response.created` cursor 落盘前遭进程终止时没有 response ID，无法恢复；还受服务端保留窗口和账户数据策略约束。
 - 历史消息行内公式 `mathInline` 仍缺已接受的渲染设计；不要用字符串替换或额外 layout 分支硬补。
 - 后台到期已覆盖单轮累计 partial，但仍缺“完成至少一轮 assistant/tool 后，下一轮 expiration”完整保留既有 suffix/tool output 的端到端契约。

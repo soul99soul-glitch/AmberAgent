@@ -516,8 +516,9 @@ struct ChatGenerationBindings {
     let persistMessages: @MainActor (KotlinUuid?) async -> Bool
     let capturePersistMessagesBaseline: (KotlinUuid?) -> IOSConversationWriteBaseline?
     let persistMessagesSnapshot: @MainActor ([UIMessage], KotlinUuid?, IOSConversationWriteBaseline?) async -> Bool
-    let recordRun: (String, Int64, String, String, String?) async -> Void
+    let recordRun: (String, Int64, AgentRunStatus, String, String?) async -> Bool
     var markRunAwaitingPermission: @MainActor (String, String) async -> Bool = { _, _ in true }
+    var resumeRunAfterPermission: @MainActor (String) async -> Bool = { _ in true }
     let startLiveActivity: (String, KotlinUuid?, AgentActivityPresentation) -> Void
     let saveMiniAppIfPresent: ([UIMessage], KotlinUuid?) -> ChatMiniAppOutputApplication?
     let messagesByInjectingRuntimeContext: ([UIMessage]) -> [UIMessage]
@@ -791,6 +792,7 @@ enum IOSGenerativeUiRequestPolicy {
 final class ChatGenerationCoordinator {
     private let dependencies: ChatGenerationDependencies
     private let bindings: ChatGenerationBindings
+    private let backgroundExecution: BackgroundGenerationKeepAlive
     private lazy var provider = OpenAIKmpProvider()
     private lazy var claudeProvider = ClaudeKmpProvider()
     private var grokWebStreamTask: Task<Void, Never>?
@@ -917,6 +919,9 @@ final class ChatGenerationCoordinator {
     /// approval-finishing call sites via `consumingPendingLoopReminder`.
     private var pendingLoopReminders: [String: String] = [:]
     private var backgroundHandoff: IOSChatBackgroundHandoff?
+    private var durableResponseCursor: (responseId: String, sequenceNumber: Int64)?
+    private var durableCheckpointPersisted = false
+    private var durableReconnectAttempted = false
     private weak var pendingBackgroundConversationStore: IOSConversationStore?
     private var foregroundToolExecutionTask: Task<ChatToolRuntimeResult, Never>?
     private var foregroundToolExecutionToken: UUID?
@@ -952,19 +957,17 @@ final class ChatGenerationCoordinator {
         currentRunId == runId && hasPendingToolApproval
     }
 
-    /// KeepAlive 短腿到期后的唯一收口：交接失败时立即走取消的持久化终态，
-    /// 不能留下仍在运行但已没有任何后台 owner 的 currentRunId。
+    /// KeepAlive 未成功提交系统 request 时，UIKit 短窗到期后的唯一收口。
+    /// 直接持久化 partial 与取消终态，不从后台临时重投。
     @discardableResult
-    private func handleKeepAliveExpiration(
-        runId: String,
-        handoff: () -> Bool
-    ) -> Bool {
+    private func handleKeepAliveExpiration(runId: String) -> Bool {
         guard currentRunId == runId,
               UIApplication.shared.applicationState != .active else {
             return false
         }
-        let didHandoff = handoff()
-        return finishKeepAliveExpiration(runId: runId, didHandoff: didHandoff)
+        // Continued-processing request 只能从用户触发的前台路径提交。
+        // UIKit 短窗已到期时不再从后台撤单重投，直接耐久收口 partial。
+        return finishKeepAliveExpiration(runId: runId, didHandoff: false)
     }
 
     @discardableResult
@@ -973,9 +976,9 @@ final class ChatGenerationCoordinator {
         // 判定交接结果，否则会把真实成功误报为 false。
         guard !didHandoff else { return true }
         guard currentRunId == runId else { return false }
-        // KeepAlive 在回调前已经摘掉短腿租约；失败时取消是这一轮唯一剩下的
+        // KeepAlive 在回调前已经摘掉短腿租约；取消是这一轮唯一剩下的
         // owner，沿用已有 cancel() 持久化 partial/终态，不引入重试状态机。
-        _ = cancel(runId: runId)
+        _ = cancel(runId: runId, cause: .backgroundInterruption)
         return false
     }
 
@@ -994,10 +997,12 @@ final class ChatGenerationCoordinator {
     init(
         dependencies: ChatGenerationDependencies,
         bindings: ChatGenerationBindings,
+        backgroundExecution: BackgroundGenerationKeepAlive = .shared,
         toolLedger: IOSAgentRunLedgering = IOSAgentRunLedger()
     ) {
         self.dependencies = dependencies
         self.bindings = bindings
+        self.backgroundExecution = backgroundExecution
         self.toolLedger = toolLedger
     }
 
@@ -1051,28 +1056,19 @@ final class ChatGenerationCoordinator {
         // 生成一开始就拿后台执行权，而不是等切后台再抢——那时进程已经在被挂起了。
         // 执行权在手期间流自己跑；短窗口在系统接管前到期才走后台交接。
         // 系统进度卡被取消或终止则收口当前 run，不允许借交接反向重启。
-        BackgroundGenerationKeepAlive.shared.begin(
+        backgroundExecution.begin(
             runId,
             title: "Amber 正在生成",
             subtitle: params.model.displayName,
             onExpire: { [weak self] in
                 guard let self, self.currentRunId == runId else { return }
-                // 只有短窗口在系统任务接管前到期才交接；系统进度卡的取消由
-                // 专用回调收口为当前 run 的取消，不能反向重启生成。
-                _ = self.handleKeepAliveExpiration(
-                    runId: runId,
-                    handoff: {
-                        self.handoffCurrentGenerationToBackground(
-                            conversationStore: self.pendingBackgroundConversationStore
-                        )
-                    }
-                )
+                _ = self.handleKeepAliveExpiration(runId: runId)
             },
             onSystemTaskExpiration: { [weak self] in
                 self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
         )
-        BackgroundGenerationKeepAlive.shared.updateProgress(
+        backgroundExecution.updateProgress(
             runId,
             completed: 0,
             total: 4,
@@ -1081,12 +1077,23 @@ final class ChatGenerationCoordinator {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // Persist a "running" run record up-front so an interrupted mid-stream
-            // run is detectable (status=running) by IOSRunRecovery's startup sweep,
-            // which marks it interrupted. The terminal recordRun (completion / cancel
-            // / error) REPLACEs this row with the final status + finishedAt
-            // (insertRun is OnConflictStrategy.REPLACE).
-            await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
+            guard await self.bindings.recordRun(
+                runId,
+                startedAt,
+                .running,
+                inputDigest,
+                conversationId?.toHexDashString()
+            ) else {
+                await self.presentStreamError(
+                    rawMessage: "无法保存任务状态，生成未开始。",
+                    modelId: params.model.modelId,
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId
+                )
+                return
+            }
             if self.dependencies.sharedSettings.isCapabilityGateEnabled(.mcp) {
                 await self.dependencies.mcpManager.syncAll()
             }
@@ -1174,7 +1181,7 @@ final class ChatGenerationCoordinator {
         // 生图也是流式生成的一部分，退后台同样要保住执行权。
         // 图是一次性 HTTP，执行中无法安全搬家；短窗口未被系统接管或系统长窗口
         // 被收走时都只取消当前 owner，不能另起一条请求造成重复扣费。
-        BackgroundGenerationKeepAlive.shared.begin(
+        backgroundExecution.begin(
             runId,
             title: "Amber 正在生成图片",
             subtitle: params?.model.displayName ?? "图片生成",
@@ -1185,7 +1192,7 @@ final class ChatGenerationCoordinator {
                 self?.cancelRunAfterSystemKeepAliveExpiration(runId)
             }
         )
-        BackgroundGenerationKeepAlive.shared.updateProgress(
+        backgroundExecution.updateProgress(
             runId,
             completed: 0,
             total: 3,
@@ -1210,7 +1217,24 @@ final class ChatGenerationCoordinator {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.bindings.recordRun(runId, startedAt, "running", inputDigest, conversationId?.toHexDashString())
+            guard await self.bindings.recordRun(
+                runId,
+                startedAt,
+                .running,
+                inputDigest,
+                conversationId?.toHexDashString()
+            ) else {
+                await self.failImageToolCallBeforeExecution(
+                    toolCall,
+                    in: snapshot,
+                    runId: runId,
+                    startedAt: startedAt,
+                    inputDigest: inputDigest,
+                    conversationId: conversationId,
+                    reason: "无法保存任务状态，图片生成未开始。"
+                )
+                return
+            }
             guard self.currentRunId == runId else { return }
 
             // F9 fix (I-1 durable boundary, "先记账，后动手"): generate_image is
@@ -1290,10 +1314,10 @@ final class ChatGenerationCoordinator {
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await self.bindings.persistMessages(conversationId)
             let succeeded = failureReason == nil && didPersist
-            let runStatus = didPersist
-                ? (failureReason == nil ? "completed" : "failed")
-                : "recovery_pending"
-            await self.bindings.recordRun(
+            let runStatus: AgentRunStatus = didPersist
+                ? (failureReason == nil ? .completed : .failed)
+                : .recoveryPending
+            _ = await self.bindings.recordRun(
                 runId,
                 startedAt,
                 runStatus,
@@ -1365,10 +1389,10 @@ final class ChatGenerationCoordinator {
         bindings.bumpMessageRevision(.toolResultAppended)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
-        await bindings.recordRun(
+        _ = await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "failed" : "recovery_pending",
+            didPersist ? .failed : .recoveryPending,
             inputDigest,
             conversationHex
         )
@@ -1383,20 +1407,33 @@ final class ChatGenerationCoordinator {
     }
 
     func cancel() {
-        _ = cancel(runId: nil)
+        _ = cancel(runId: nil, cause: .user)
     }
 
     @discardableResult
     func cancel(runId expectedRunId: String) -> Bool {
-        cancel(runId: Optional(expectedRunId))
+        cancel(runId: Optional(expectedRunId), cause: .user)
     }
 
     private func cancelRunAfterSystemKeepAliveExpiration(_ runId: String) {
-        _ = cancel(runId: runId)
+        if detachDurableResponse(runId: runId) { return }
+        _ = cancel(runId: runId, cause: .backgroundInterruption)
+    }
+
+    private enum CancellationCause {
+        case user
+        case backgroundInterruption
+
+        var durableStatus: AgentRunStatus {
+            switch self {
+            case .user: .cancelled
+            case .backgroundInterruption: .interrupted
+            }
+        }
     }
 
     @discardableResult
-    private func cancel(runId expectedRunId: String?) -> Bool {
+    private func cancel(runId expectedRunId: String?, cause: CancellationCause) -> Bool {
         guard let activeRunId = currentRunId,
               expectedRunId == nil || expectedRunId == activeRunId else {
             return false
@@ -1406,6 +1443,10 @@ final class ChatGenerationCoordinator {
         let digest = currentInputDigest
         let conversationId = currentConversationIdForRun
 
+        cancelRemoteDurableResponseIfNeeded()
+        if let runId {
+            IOSChatBackgroundGenerationCoordinator.shared.discardDurableResponse(runId: runId)
+        }
         streamJob?.cancel(cause: nil)
         streamJob = nil
         grokWebStreamTask?.cancel()
@@ -1449,6 +1490,9 @@ final class ChatGenerationCoordinator {
         currentGenerativeUiRequirement = .none
         currentGenerativeUiFallbackAttempted = false
         backgroundHandoff = nil
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
         pendingBackgroundConversationStore = nil
         clearPendingApprovals()
         bindings.setIsLoading(false)
@@ -1467,10 +1511,10 @@ final class ChatGenerationCoordinator {
                 writeBaselineAtCancellation
             )
             if let startedAt, let digest {
-                await bindings.recordRun(
+                _ = await bindings.recordRun(
                     runId,
                     startedAt,
-                    didPersist ? "interrupted" : "recovery_pending",
+                    didPersist ? cause.durableStatus : .recoveryPending,
                     digest,
                     conversationId?.toHexDashString()
                 )
@@ -1485,7 +1529,7 @@ final class ChatGenerationCoordinator {
                 runId: runId,
                 presentation: didPersist ? .cancelled() : .failed()
             )
-            BackgroundGenerationKeepAlive.shared.end(runId)
+            backgroundExecution.end(runId)
         }
         // P1-c: 取消也是 run 终态——与 finishStreaming 同款终态回传（消息用
         // cancel 终态快照）。cancel 与 finishStreaming 双触发时由服务按 runId
@@ -1612,15 +1656,20 @@ final class ChatGenerationCoordinator {
         conversationStore: IOSConversationStore?,
         honorKeepAliveLease: Bool = false
     ) -> Bool {
-        // 后台执行权还在手上：流会自己跑完，砍掉它重跑是纯粹的浪费——
-        // 既烧一遍 token，又丢掉已经流出来的正文。只有 UIKit 短窗口的
-        // `onExpire` 在系统接管前到期才需要真交接。
-        if honorKeepAliveLease,
-           let runId = currentRunId,
-           BackgroundGenerationKeepAlive.shared.holdsLease(runId) {
-            // 真交接推迟到执行权到期那一刻，那时调用方已经不在场了——
-            // 趁现在把 store 记下来，否则 onExpire 拿不到它，等于没兜底。
-            if let conversationStore {
+        // App 退后台时不再撤单重投：uiOnly 在剩余短窗内立即启动耐久收口，
+        // submitted/adopted 保留用户前台动作已提交的原流。
+        if honorKeepAliveLease, let runId = currentRunId {
+            switch backgroundExecution.executionAssertion(for: runId) {
+            case .none:
+                if !detachDurableResponse(runId: runId) {
+                    _ = cancel(runId: runId, cause: .backgroundInterruption)
+                }
+            case .uiOnly:
+                if !detachDurableResponse(runId: runId) {
+                    _ = cancel(runId: runId, cause: .backgroundInterruption)
+                }
+            case .submitted, .adopted:
+                // 保留用户前台动作已提交的原流。
                 pendingBackgroundConversationStore = conversationStore
             }
             return false
@@ -1670,8 +1719,8 @@ final class ChatGenerationCoordinator {
             )
         }
         let didStart = streamEventSink?.transitionToBackgroundIfNoTerminal {
-            BackgroundGenerationKeepAlive.shared.transfer(handoff.runId, to: startBackground)
-        } ?? BackgroundGenerationKeepAlive.shared.transfer(handoff.runId, to: startBackground)
+            backgroundExecution.transfer(handoff.runId, to: startBackground)
+        } ?? backgroundExecution.transfer(handoff.runId, to: startBackground)
         guard didStart else { return false }
 
         streamJob?.cancel(cause: nil)
@@ -1710,6 +1759,9 @@ final class ChatGenerationCoordinator {
         currentGenerativeUiRequirement = .none
         currentGenerativeUiFallbackAttempted = false
         backgroundHandoff = nil
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
         pendingBackgroundConversationStore = nil
         clearPendingApprovals()
         bindings.setContextCompactState(.idle)
@@ -2027,6 +2079,10 @@ final class ChatGenerationCoordinator {
         generativeUiFallbackAttempted: Bool = false,
         displayMessagesOverride: [UIMessage]? = nil
     ) {
+        clearDurableResponseCheckpoint(runId: runId)
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
         // P1-a: 模型轮次边界兜底消费 steer 队列（审批恢复等直接续流路径最终都经过
         // 这里；continueAfterToolResult 已消费的轮次此处为空、零成本）。补绘重试轮
         // （displayMessagesOverride 非 nil）不消费——该轮展示基线是显式快照，折入会
@@ -2041,7 +2097,7 @@ final class ChatGenerationCoordinator {
         let displayMessages = displayMessagesOverride ?? bindings.getMessages()
         currentGenerativeUiRequirement = generativeUiRequirement
         currentGenerativeUiFallbackAttempted = generativeUiFallbackAttempted
-        BackgroundGenerationKeepAlive.shared.updateProgress(
+        backgroundExecution.updateProgress(
             runId,
             completed: 1,
             total: 4,
@@ -2174,6 +2230,7 @@ final class ChatGenerationCoordinator {
             providerSetting: providerSetting,
             messages: effectiveUploadMessages,
             params: params,
+            runId: runId,
             onChunk: { chunk in
                 // P2-c: 进入 sink 前剥离 citation 隐藏标记——sink 的所有消费者
                 // （MainActor 消费、后台交接 drain）都只见到已剥离的可见文本。
@@ -2365,10 +2422,10 @@ final class ChatGenerationCoordinator {
         bindings.setMessages(updated)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
-        await bindings.recordRun(
+        _ = await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "failed" : "recovery_pending",
+            didPersist ? .failed : .recoveryPending,
             inputDigest,
             conversationHex
         )
@@ -2541,10 +2598,10 @@ final class ChatGenerationCoordinator {
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await bindings.persistMessages(conversationId)
             let succeeded = didPersist && !miniAppExpected
-            await bindings.recordRun(
+            _ = await bindings.recordRun(
                 runId,
                 startedAt,
-                didPersist ? (miniAppExpected ? "failed" : "completed") : "recovery_pending",
+                didPersist ? (miniAppExpected ? .failed : .completed) : .recoveryPending,
                 inputDigest,
                 conversationHex
             )
@@ -2610,10 +2667,10 @@ final class ChatGenerationCoordinator {
             bindings.bumpMessageRevision(.toolResultAppended)
             _ = await bindings.persistMessages(conversationId)
         }
-        await bindings.recordRun(
+        _ = await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? (miniAppFailed ? "failed" : "completed") : "recovery_pending",
+            didPersist ? (miniAppFailed ? .failed : .completed) : .recoveryPending,
             inputDigest,
             conversationHex
         )
@@ -2646,8 +2703,8 @@ final class ChatGenerationCoordinator {
         }
     }
 
-    /// 达到 max_tokens 的收尾:保留已生成正文,追加一条可见提示,并把 run 记为
-    /// `truncated` 而不是 `completed`。
+    /// 达到 max_tokens 的收尾：保留已生成正文、追加可见的不完整提示，并把共享
+    /// run lifecycle 收成 `failed`；截断原因由消息本身承载。
     private func completeTruncatedStream(
         snapshot: [UIMessage],
         runId: String,
@@ -2668,10 +2725,10 @@ final class ChatGenerationCoordinator {
 
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
-        await bindings.recordRun(
+        _ = await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? "truncated" : "recovery_pending",
+            didPersist ? .failed : .recoveryPending,
             inputDigest,
             conversationHex
         )
@@ -2687,7 +2744,7 @@ final class ChatGenerationCoordinator {
         )
         finishStreaming(
             runId: runId,
-            terminalEvent: didPersist ? .generationCompleted : .generationFailed
+            terminalEvent: .generationFailed
         )
     }
 
@@ -2771,7 +2828,7 @@ final class ChatGenerationCoordinator {
         await terminatePendingToolCalls(
             snapshot: snapshot,
             failureText: failureText,
-            runStatus: "failed",
+            runStatus: .failed,
             runId: runId,
             startedAt: startedAt,
             inputDigest: inputDigest,
@@ -2781,13 +2838,12 @@ final class ChatGenerationCoordinator {
 
     /// I-5 打转守护的 stop 分支复用同一套收尾:未解决的工具调用被写成一条
     /// 结构化失败结果、run 持久化终态记录、Watch/灵动岛收尾、结束这条流。
-    /// 与 `failPendingToolCalls` 唯一的差别是 `runStatus`——`guard_stopped` 与
-    /// `failed` 在 `agent_run.status` 里都是终态字符串；只有持久化失败时
-    /// 才保留为 `recovery_pending`，交给下次启动继续对账。
+    /// 循环守卫的具体原因保留在可见工具结果里；共享 run lifecycle 统一收成
+    /// `failed`。只有领域结果持久化失败时才进入 `recovery_pending` 对账态。
     private func terminatePendingToolCalls(
         snapshot: [UIMessage],
         failureText: String,
-        runStatus: String,
+        runStatus: AgentRunStatus,
         runId: String,
         startedAt: Int64,
         inputDigest: String,
@@ -2802,10 +2858,10 @@ final class ChatGenerationCoordinator {
         bindings.bumpMessageRevision(.toolResultAppended)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
-        await bindings.recordRun(
+        _ = await bindings.recordRun(
             runId,
             startedAt,
-            didPersist ? runStatus : "recovery_pending",
+            didPersist ? runStatus : .recoveryPending,
             inputDigest,
             conversationHex
         )
@@ -2832,7 +2888,7 @@ final class ChatGenerationCoordinator {
         conversationId: KotlinUuid?,
         baseMessages: [UIMessage]
     ) async {
-        BackgroundGenerationKeepAlive.shared.updateProgress(
+        backgroundExecution.updateProgress(
             runId,
             completed: 2,
             total: 4,
@@ -2900,7 +2956,7 @@ final class ChatGenerationCoordinator {
             await terminatePendingToolCalls(
                 snapshot: baseMessages,
                 failureText: reason,
-                runStatus: "guard_stopped",
+                runStatus: .failed,
                 runId: runId,
                 startedAt: startedAt,
                 inputDigest: inputDigest,
@@ -3013,6 +3069,10 @@ final class ChatGenerationCoordinator {
             )
             return
         }
+        // The response that produced this tool call is no longer the recovery
+        // owner once Started is durable. Keeping its cursor while the tool runs
+        // could replay the same response after a crash and execute the tool twice.
+        clearDurableResponseCheckpoint(runId: runId)
 
         // P3-b: nested exec tools runner — the whitelist is the run exposure
         // bridge's visible set minus the exec exclusions; nested calls execute
@@ -3670,9 +3730,14 @@ final class ChatGenerationCoordinator {
             return
         }
 
+        // Awaiting-permission + the visible tool call are now durable. The
+        // completed response that produced them must not remain a second owner;
+        // cold-start recovery is owned by the approval row from this point.
+        clearDurableResponseCheckpoint(runId: pending.runId)
+
         // 等人点按钮不需要后台执行权——这一轮此刻不在算，在等人。必须等可见
         // baseMessages 已经耐久保存后再还租约，避免挂起/杀进程后连待确认节点都丢失。
-        BackgroundGenerationKeepAlive.shared.end(pending.runId)
+        backgroundExecution.end(pending.runId)
         currentLiveActivityStage = .waitingForConfirmation
         await dependencies.liveActivityController.update(
             runId: pending.runId,
@@ -3757,6 +3822,10 @@ final class ChatGenerationCoordinator {
                     inputDigest: pending.inputDigest,
                     conversationId: pending.conversationId
                 )
+                return
+            }
+            if self.nestedExecApprovalWaiters[pending.toolCall.toolCallId] == nil,
+               !(await self.claimRunAfterPermission(pending)) {
                 return
             }
             // F3 fix: same window as F2 — `recordToolCallStarted` above is a
@@ -4052,6 +4121,10 @@ final class ChatGenerationCoordinator {
                 )
                 return
             }
+            if self.nestedExecApprovalWaiters[pending.toolCall.toolCallId] == nil,
+               !(await self.claimRunAfterPermission(pending)) {
+                return
+            }
             // F3 fix: same window as F2/memory above — the run may have been
             // replaced while `recordToolCallStarted` was suspended.
             guard self.currentRunId == pending.runId else {
@@ -4101,6 +4174,49 @@ final class ChatGenerationCoordinator {
             effectClass: effectClass,
             operation: operation
         )
+    }
+
+    /// A top-level approval pauses the shared run as `awaiting_permission`.
+    /// The new execution attempt must already have a durable Started event.
+    /// Claim the run back to `running` before executing any side effect or
+    /// continuing the model loop. A crash before the claim remains an honest
+    /// awaiting-permission run; a crash after it leaves a recoverable dangling
+    /// Started event. Nested exec approvals never persist awaiting-permission
+    /// and bypass this helper.
+    private func claimRunAfterPermission(_ pending: ChatPendingToolApproval) async -> Bool {
+        guard currentRunId == pending.runId else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_run_replaced"
+            )
+            return false
+        }
+        guard await bindings.resumeRunAfterPermission(pending.runId) else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_permission_claim_failed"
+            )
+            await presentStreamError(
+                rawMessage: "无法恢复待确认任务，请重试。",
+                modelId: pending.params.model.modelId,
+                runId: pending.runId,
+                startedAt: pending.startedAt,
+                inputDigest: pending.inputDigest,
+                conversationId: pending.conversationId
+            )
+            return false
+        }
+        guard currentRunId == pending.runId else {
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "not_executed_run_replaced"
+            )
+            return false
+        }
+        return true
     }
 
     /// P3-b: post-approval execution of a NESTED exec tool call. Mirrors the
@@ -4184,11 +4300,6 @@ final class ChatGenerationCoordinator {
         effectClass: IOSToolEffectClass,
         operation: @escaping @MainActor () async -> [UIMessage]
     ) async -> [UIMessage]? {
-        // A denial never reaches the tool — `operation()` here only produces a
-        // "user denied" JSON result, no side effect occurs, so there is nothing
-        // for the ledger to durably record.
-        guard allow else { return await operation() }
-
         // I-1, resumption half: this is the real (post-approval) execution of a
         // tool call the automatic path already Started→Finished(paused_for_approval)
         // once. `pauseForApproval` persisted the awaiting-approval snapshot before
@@ -4214,6 +4325,7 @@ final class ChatGenerationCoordinator {
             )
             return nil
         }
+        guard await claimRunAfterPermission(pending) else { return nil }
         // F2 fix: `recordToolCallStarted` above is this function's first
         // `await` — the run this approval belonged to may have been replaced
         // (cancel()/new start()) while it was suspended. Without this check,
@@ -4231,6 +4343,17 @@ final class ChatGenerationCoordinator {
                 outcome: "not_executed_run_replaced"
             )
             return nil
+        }
+
+        if !allow {
+            let deniedMessages = await operation()
+            await toolLedger.recordToolCallFinished(
+                runId: pending.runId,
+                toolCallId: pending.toolCall.toolCallId,
+                outcome: "denied"
+            )
+            guard currentRunId == pending.runId else { return nil }
+            return deniedMessages
         }
 
         bindings.setIsLoading(true)
@@ -4296,20 +4419,13 @@ final class ChatGenerationCoordinator {
     }
 
     private func beginKeepAlive(for pending: ChatPendingToolApproval) {
-        BackgroundGenerationKeepAlive.shared.begin(
+        backgroundExecution.begin(
             pending.runId,
             title: "Amber 正在生成",
             subtitle: pending.params.model.displayName,
             onExpire: { [weak self] in
                 guard let self, self.currentRunId == pending.runId else { return }
-                _ = self.handleKeepAliveExpiration(
-                    runId: pending.runId,
-                    handoff: {
-                        self.handoffCurrentGenerationToBackground(
-                            conversationStore: self.pendingBackgroundConversationStore
-                        )
-                    }
-                )
+                _ = self.handleKeepAliveExpiration(runId: pending.runId)
             },
             onSystemTaskExpiration: { [weak self] in
                 self?.cancelRunAfterSystemKeepAliveExpiration(pending.runId)
@@ -4328,10 +4444,10 @@ final class ChatGenerationCoordinator {
                 let didPersist = await self.bindings.persistMessages(pending.conversationId)
                 guard self.currentRunId == pending.runId else { return }
                 let conversationHex = pending.conversationId?.toHexDashString()
-                await self.bindings.recordRun(
+                _ = await self.bindings.recordRun(
                     pending.runId,
                     pending.startedAt,
-                    didPersist ? "completed" : "recovery_pending",
+                    didPersist ? .completed : .recoveryPending,
                     pending.inputDigest,
                     conversationHex
                 )
@@ -4395,6 +4511,7 @@ final class ChatGenerationCoordinator {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
+        runId: String,
         onChunk: @escaping (MessageChunk) -> Void,
         onComplete: @escaping () -> Void,
         onError: @escaping (KotlinThrowable) -> Void
@@ -4421,6 +4538,17 @@ final class ChatGenerationCoordinator {
                 }
                 return nil
             }
+            if Self.usesBackgroundResponses(openAI) {
+                return startDurableResponsesStream(
+                    providerSetting: openAI,
+                    messages: messages,
+                    params: params,
+                    runId: runId,
+                    onChunk: onChunk,
+                    onComplete: onComplete,
+                    onError: onError
+                )
+            }
             return provider.streamTextCancellable(
                 providerSetting: openAI,
                 messages: messages,
@@ -4444,6 +4572,205 @@ final class ChatGenerationCoordinator {
         return nil
     }
 
+    private static func usesBackgroundResponses(_ provider: ProviderSetting.OpenAI) -> Bool {
+        guard provider.useResponseApi,
+              provider.authMode != OpenAIAuthMode.codexOauth,
+              let url = URL(string: provider.baseUrl),
+              url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "api.openai.com",
+              url.port == nil,
+              url.user == nil,
+              url.password == nil else {
+            return false
+        }
+        return true
+    }
+
+    private func startDurableResponsesStream(
+        providerSetting: ProviderSetting.OpenAI,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        runId: String,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void
+    ) -> Kotlinx_coroutines_coreJob? {
+        let transport = OpenAIResponsesBackgroundTransport()
+        do {
+            return try transport.startBackground(
+                providerSetting: providerSetting,
+                messages: messages,
+                params: params,
+                onChunk: onChunk,
+                onCheckpoint: { [weak self] responseId, sequenceNumber in
+                    Task { @MainActor in
+                        self?.recordDurableResponseCheckpoint(
+                            runId: runId,
+                            responseId: responseId,
+                            sequenceNumber: sequenceNumber.int64Value
+                        )
+                    }
+                },
+                onComplete: onComplete,
+                onDisconnected: { [weak self] error in
+                    Task { @MainActor in
+                        self?.resumeDurableResponsesStreamAfterDisconnect(
+                            providerSetting: providerSetting,
+                            params: params,
+                            runId: runId,
+                            onChunk: onChunk,
+                            onComplete: onComplete,
+                            onError: onError,
+                            fallbackError: error
+                        )
+                    }
+                },
+                onFailure: { error in
+                    onError(KotlinThrowable(message: error.message ?? String(describing: error)))
+                }
+            )
+        } catch {
+            onError(KotlinThrowable(message: (error as NSError).localizedDescription))
+            return nil
+        }
+    }
+
+    private func resumeDurableResponsesStreamAfterDisconnect(
+        providerSetting: ProviderSetting.OpenAI,
+        params: TextGenerationParams,
+        runId: String,
+        onChunk: @escaping (MessageChunk) -> Void,
+        onComplete: @escaping () -> Void,
+        onError: @escaping (KotlinThrowable) -> Void,
+        fallbackError: KotlinThrowable
+    ) {
+        guard currentRunId == runId else { return }
+        guard let cursor = durableResponseCursor,
+              !durableReconnectAttempted else {
+            if detachDurableResponse(runId: runId) { return }
+            onError(KotlinThrowable(message: fallbackError.message ?? String(describing: fallbackError)))
+            return
+        }
+        durableReconnectAttempted = true
+        let transport = OpenAIResponsesBackgroundTransport()
+        do {
+            streamJob = try transport.resumeBackground(
+                providerSetting: providerSetting,
+                responseId: cursor.responseId,
+                startingAfter: cursor.sequenceNumber,
+                customHeaders: params.customHeaders,
+                onChunk: onChunk,
+                onCheckpoint: { [weak self] responseId, sequenceNumber in
+                    Task { @MainActor in
+                        self?.recordDurableResponseCheckpoint(
+                            runId: runId,
+                            responseId: responseId,
+                            sequenceNumber: sequenceNumber.int64Value
+                        )
+                    }
+                },
+                onComplete: onComplete,
+                onDisconnected: { [weak self] error in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        if !self.detachDurableResponse(runId: runId) {
+                            onError(KotlinThrowable(message: error.message ?? String(describing: error)))
+                        }
+                    }
+                },
+                onFailure: { error in
+                    onError(KotlinThrowable(message: error.message ?? String(describing: error)))
+                }
+            )
+        } catch {
+            if !detachDurableResponse(runId: runId) {
+                onError(KotlinThrowable(message: (error as NSError).localizedDescription))
+            }
+        }
+    }
+
+    private func recordDurableResponseCheckpoint(
+        runId: String,
+        responseId: String,
+        sequenceNumber: Int64
+    ) {
+        guard currentRunId == runId else { return }
+        durableResponseCursor = (responseId, sequenceNumber)
+        guard !durableCheckpointPersisted,
+              var handoff = backgroundHandoff else {
+            return
+        }
+        handoff.mode = .resumeResponse
+        handoff.responseId = responseId
+        handoff.responseSequenceNumber = sequenceNumber
+        guard IOSChatBackgroundGenerationCoordinator.shared.checkpointDurableResponse(handoff) else {
+            return
+        }
+        backgroundHandoff = handoff
+        durableCheckpointPersisted = true
+    }
+
+    @discardableResult
+    private func detachDurableResponse(runId: String) -> Bool {
+        guard currentRunId == runId,
+              durableCheckpointPersisted,
+              foregroundToolExecutionTask == nil,
+              foregroundImageToolExecutionTask == nil,
+              !hasPendingToolApproval else {
+            return false
+        }
+        streamJob?.cancel(cause: nil)
+        streamJob = nil
+        streamEventSink?.finish()
+        cancelStreamEventConsumer()
+        cancelPendingStreamSnapshotPublish()
+        backgroundExecution.end(runId)
+        ChatStreamRecorder.shared.finish(runId: runId)
+        currentRunId = nil
+        currentRunSnapshot = nil
+        currentToolLoopGuard = IOSToolLoopGuard()
+        currentToolExposureBridge = nil
+        currentLiveActivityStage = nil
+        currentStartedAt = nil
+        currentInputDigest = nil
+        currentConversationIdForRun = nil
+        currentToolResumeCount = 0
+        currentGenerativeUiRequirement = .none
+        currentGenerativeUiFallbackAttempted = false
+        backgroundHandoff = nil
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
+        pendingBackgroundConversationStore = nil
+        bindings.setIsLoading(false)
+        bindings.setContextCompactState(.idle)
+        bindings.bumpMessageRevision(.generationHandedOffToBackground)
+        return true
+    }
+
+    private func cancelRemoteDurableResponseIfNeeded() {
+        guard let cursor = durableResponseCursor,
+              let handoff = backgroundHandoff,
+              let openAI = handoff.providerSetting as? ProviderSetting.OpenAI else {
+            return
+        }
+        _ = try? OpenAIResponsesBackgroundTransport().cancelBackground(
+            providerSetting: openAI,
+            responseId: cursor.responseId,
+            customHeaders: handoff.params.customHeaders,
+            onComplete: {},
+            onError: { _ in }
+        )
+    }
+
+    private func clearDurableResponseCheckpoint(runId: String) {
+        guard durableCheckpointPersisted else { return }
+        IOSChatBackgroundGenerationCoordinator.shared.discardDurableResponse(runId: runId)
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
+    }
+
     @discardableResult
     private func finishStreaming(
         runId: String,
@@ -4451,10 +4778,11 @@ final class ChatGenerationCoordinator {
     ) -> Bool {
         guard currentRunId == runId else { return false }
         let runConversationId = currentConversationIdForRun
+        IOSChatBackgroundGenerationCoordinator.shared.discardDurableResponse(runId: runId)
         cancelPendingStreamSnapshotPublish()
         cancelStreamEventConsumer()
         // 前台把这一轮跑完了，执行权到此为止。
-        BackgroundGenerationKeepAlive.shared.end(runId)
+        backgroundExecution.end(runId)
         ChatStreamRecorder.shared.finish(runId: runId)
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
@@ -4471,6 +4799,9 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         clearForegroundToolExecutions()
         backgroundHandoff = nil
+        durableResponseCursor = nil
+        durableCheckpointPersisted = false
+        durableReconnectAttempted = false
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         clearPendingApprovals()

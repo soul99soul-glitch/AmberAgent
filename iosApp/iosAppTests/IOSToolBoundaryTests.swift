@@ -274,12 +274,37 @@ final class IOSToolBoundaryTests: XCTestCase {
         }
     }
 
+    private func insertRunningRun(dao: AgentRuntimeDao, runId: String) async throws {
+        let run = AgentRunEntity(
+            runId: runId, parentRunId: nil,
+            agentDescriptorId: IOSDurableRunStore.Descriptor.chat,
+            agentVersion: IOSDurableRunStore.Descriptor.chatVersion,
+            conversationId: nil, messageNodeId: nil, producesMessageId: nil, assistantId: nil,
+            status: "running", inputDigest: "digest", inputSnapshotRef: nil,
+            inputSchemaVersion: 1, startedAt: 1, finishedAt: nil, interruptedReason: nil
+        )
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            dao.insertRunIfAbsent(run: run) { _, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            }
+        }
+    }
+
+    private func makeDatabase(_ name: String = #function) -> AgentRuntimeDatabase {
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(name)-\(UUID().uuidString).db")
+            .path
+        return IosDatabaseFactory.shared.createDatabase(atFilePath: path)
+    }
+
     // MARK: - Layer 2: IOSAgentRunLedger (real Room writes)
 
-    func testSeqIsMonotonicAcrossLedgerInstancesSharingTheSameRun() async {
-        let db = IosDatabaseFactory.shared.createDatabase()
+    func testSeqIsMonotonicAcrossLedgerInstancesSharingTheSameRun() async throws {
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let runId = "w1-seq-test-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
 
         let ledgerBeforeRelaunch = IOSAgentRunLedger(dao: dao)
         let startedOk = await ledgerBeforeRelaunch.recordToolCallStarted(
@@ -294,9 +319,8 @@ final class IOSToolBoundaryTests: XCTestCase {
 
         // Simulate the app relaunching mid-run: a brand-new ledger instance
         // with no in-memory seq counter, sharing the same underlying DB (the
-        // real production scenario — IosDatabaseFactory hands back the same
-        // on-disk database regardless of how many `createDatabase()` calls
-        // happen).
+        // real production scenario — both instances share this test's same
+        // isolated on-disk database, while holding no in-memory seq state).
         let ledgerAfterRelaunch = IOSAgentRunLedger(dao: dao)
         let startedOk2 = await ledgerAfterRelaunch.recordToolCallStarted(
             runId: runId,
@@ -321,10 +345,11 @@ final class IOSToolBoundaryTests: XCTestCase {
     /// 实例交替写(ping-pong)。任何一侧缓存 seq 计数器都会在对侧写入后过期、
     /// 撞 (run_id, seq) 唯一索引,把无辜的切 app 升级成轮次失败——所以账本必须
     /// 现查现写。这个测试在缓存实现下第三轮必失败,锁死该回归。
-    func testSeqSurvivesForegroundBackgroundPingPongBetweenTwoLiveLedgerInstances() async {
-        let db = IosDatabaseFactory.shared.createDatabase()
+    func testSeqSurvivesForegroundBackgroundPingPongBetweenTwoLiveLedgerInstances() async throws {
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let runId = "w1-pingpong-test-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
 
         let foreground = IOSAgentRunLedger(dao: dao)
         let background = IOSAgentRunLedger(dao: dao)
@@ -355,10 +380,11 @@ final class IOSToolBoundaryTests: XCTestCase {
         XCTAssertEqual(seqs, [1, 2, 3, 4, 5, 6], "ping-pong writes stay gapless and collision-free")
     }
 
-    func testRealLedgerWriteRoundTripsThroughListEventsForRun() async {
-        let db = IosDatabaseFactory.shared.createDatabase()
+    func testRealLedgerWriteRoundTripsThroughListEventsForRun() async throws {
+        let db = makeDatabase()
         let dao = db.agentRuntimeDao()
         let runId = "w1-content-test-\(UUID().uuidString)"
+        try await insertRunningRun(dao: dao, runId: runId)
         let ledger = IOSAgentRunLedger(dao: dao)
 
         let started = await ledger.recordToolCallStarted(
