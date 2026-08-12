@@ -61,11 +61,11 @@ enum CouncilTranscriptFollowPolicy {
 private struct CouncilModeCapsuleGlass: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: Capsule())
+            content
+                .background(AmberTheme.glass, in: Capsule())
+                .glassEffect(.regular, in: Capsule())
         } else {
-            content.background {
-                Capsule().fill(.ultraThinMaterial)
-            }
+            content.background(.ultraThinMaterial, in: Capsule())
         }
     }
 }
@@ -258,44 +258,42 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var header: some View {
-        AmberGlassGroup(spacing: 12) {
-            ZStack(alignment: .bottom) {
-                HStack(spacing: 12) {
-                    ChatToolbarIconButton(
-                        systemImage: "chevron.left",
-                        accessibilityLabel: "返回",
-                        size: ChatTopBarLayout.toolbarButtonDiameter,
-                        symbolSize: 18
-                    ) {
-                        dismiss()
-                    }
-
-                    Spacer(minLength: 0)
-                        .allowsHitTesting(false)
-
-                    ChatToolbarIconButton(
-                        systemImage: "clock.arrow.circlepath",
-                        accessibilityLabel: "历史议会",
-                        size: ChatTopBarLayout.toolbarButtonDiameter,
-                        symbolSize: 16
-                    ) {
-                        viewModel.showHistory()
-                    }
-                    .disabled(viewModel.isRunning)
-                    .accessibilityHint(viewModel.isRunning ? "讨论结束后可查看历史议会" : "")
-
-                    ChatToolbarIconButton(
-                        systemImage: "gearshape",
-                        accessibilityLabel: "议会设置",
-                        size: ChatTopBarLayout.toolbarButtonDiameter,
-                        symbolSize: 16
-                    ) {
-                        viewModel.showSettings()
-                    }
+        ZStack(alignment: .bottom) {
+            HStack(spacing: 12) {
+                ChatToolbarIconButton(
+                    systemImage: "chevron.left",
+                    accessibilityLabel: "返回",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 18
+                ) {
+                    dismiss()
                 }
 
-                modeCapsuleButton
+                Spacer(minLength: 0)
+                    .allowsHitTesting(false)
+
+                ChatToolbarIconButton(
+                    systemImage: "clock.arrow.circlepath",
+                    accessibilityLabel: "历史议会",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 16
+                ) {
+                    viewModel.showHistory()
+                }
+                .disabled(viewModel.isRunning)
+                .accessibilityHint(viewModel.isRunning ? "讨论结束后可查看历史议会" : "")
+
+                ChatToolbarIconButton(
+                    systemImage: "gearshape",
+                    accessibilityLabel: "议会设置",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 16
+                ) {
+                    viewModel.showSettings()
+                }
             }
+
+            modeCapsuleButton
         }
         .padding(.horizontal, 18)
         .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
