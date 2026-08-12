@@ -82,6 +82,23 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertEqual(ChatTopBarLayout.softEdgeExtension, 8)
     }
 
+    func testCouncilTopBarUsesNativeSoftEdgeAndModeCapsule() throws {
+        let runtime = try source("iosApp/CouncilChatRuntimeView.swift")
+
+        XCTAssertTrue(runtime.contains(".safeAreaBar(edge: .top, spacing: 0)"))
+        XCTAssertTrue(runtime.contains("ChatTopBarLayout.softEdgeExtension"))
+        XCTAssertTrue(runtime.contains("ChatTopBarLayout.controlsHeight"))
+        XCTAssertTrue(runtime.contains("ChatToolbarIconButton("))
+        XCTAssertTrue(runtime.contains(".glassEffect(.regular.interactive(), in: Capsule())"))
+        XCTAssertTrue(runtime.contains(".scrollEdgeEffectStyle(.soft, for: .top)"))
+        XCTAssertTrue(runtime.contains("scrollView.topEdgeEffect.style = .soft"))
+        XCTAssertTrue(runtime.contains("modeCapsuleButton"))
+        XCTAssertFalse(
+            runtime.contains("header\n                if let archiveErrorMessage = viewModel.archiveErrorMessage"),
+            "Council chrome must not sit above the transcript as a clipping sibling."
+        )
+    }
+
     func testStaticMarkdownUsesTheSharedExternalURLPolicy() throws {
         let markdown = try source("iosApp/MarkdownView.swift")
 

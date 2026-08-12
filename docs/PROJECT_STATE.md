@@ -1,6 +1,6 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-13（小说会话正文一律走 Markdown；Soul/MCP 已在 iPhone Air）
+Last updated: 2026-08-13（议会顶栏接回原生 Liquid Glass soft edge）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -215,6 +215,7 @@ Last updated: 2026-08-13（小说会话正文一律走 Markdown；Soul/MCP 已�
 - Chat、小说和模型议会在页面退出后由 App 级 owner 继续持有运行；iOS 本地后台仍受系统调度约束，不等于无限后台。
 - 官方 OpenAI API-key 的普通 Chat，以及小说正文、重新生成和单章润色，已接入服务端 background response + cursor 恢复。Quick Start、讨论工具循环、模型议会、MiniApp AI、DeepRead 及其他 provider 的计算仍是本地 best-effort；它们复用 shared run 外壳做诚实终态与冷启动对账，不宣称跨进程继续计算。
 - Live Activity、锁屏卡和 continued-processing task 按 `runId` 独立管理；旧 run 的完成、取消、深链和系统移除回调不得作用于新 run。
+- 模型议会顶栏：Chat 同款 `safeAreaBar` + 模式胶囊 + `scrollEdgeEffectStyle(.soft)` / `topEdgeEffect.style = .soft`，用原生 Liquid Glass 模糊而不是通栏硬切或无模糊浮层。
 
 ## Novel Collaboration Mode Phase 0 / 1 / 2
 

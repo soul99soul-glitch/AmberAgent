@@ -58,6 +58,18 @@ enum CouncilTranscriptFollowPolicy {
     }
 }
 
+private struct CouncilModeCapsuleGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content.background {
+                Capsule().fill(.ultraThinMaterial)
+            }
+        }
+    }
+}
+
 struct CouncilChatRuntimeView: View {
     let settingsStore: SettingsStore
     let sharedSettings: IOSSharedSettingsStore
@@ -111,9 +123,10 @@ struct CouncilChatRuntimeView: View {
         ZStack {
             AmberThemePageBackground(surface: .app)
 
-            VStack(spacing: 0) {
-                header
-                if let archiveErrorMessage = viewModel.archiveErrorMessage {
+            transcript
+
+            if let archiveErrorMessage = viewModel.archiveErrorMessage {
+                VStack(spacing: 0) {
                     Label(archiveErrorMessage, systemImage: "exclamationmark.triangle")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -121,8 +134,17 @@ struct CouncilChatRuntimeView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
                         .background(AmberTheme.surface)
+                    Spacer()
                 }
-                transcript
+            }
+        }
+        .safeAreaBar(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                // 透明延伸只扩大 safeAreaBar 几何，不画自定义材质；模糊走原生 soft edge。
+                Color.clear
+                    .frame(height: ChatTopBarLayout.softEdgeExtension)
+                    .allowsHitTesting(false)
             }
         }
         .onAppear {
@@ -236,77 +258,74 @@ struct CouncilChatRuntimeView: View {
     }
 
     private var header: some View {
-        AmberGlassGroup(spacing: 0) {
-            // ZStack:标题绝对居中(以屏幕为基准),不受左 1 颗 / 右 2 颗按钮数量差影响。
-            // 之前用单 HStack + maxWidth:.infinity,标题只在「返回」和「历史」之间居中,
-            // 整体偏左。改成居中标题 + 左右按钮叠加,标题真正居中。
-            ZStack {
-                // 整个标题区(模式 + 成员·轮次)都可点击,唤起底部 sheet 切换模式 / 看席位。
-                Button {
-                    viewModel.showMembers()
-                } label: {
-                    VStack(spacing: 2) {
-                        HStack(spacing: 4) {
-                            Text(viewModel.selectedMode.title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(AmberTheme.foreground)
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(AmberTheme.muted)
-                        }
-                        Text("\(viewModel.participants.count) 位成员 · 第 \(viewModel.discussionRound) 轮")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(AmberTheme.muted)
-                            .lineLimit(1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("议会模式与席位")
-
-                HStack(spacing: 10) {
-                    AmberGlassCircleButton(
+        AmberGlassGroup(spacing: 12) {
+            ZStack(alignment: .bottom) {
+                HStack(spacing: 12) {
+                    ChatToolbarIconButton(
                         systemImage: "chevron.left",
                         accessibilityLabel: "返回",
-                        size: 44,
-                        symbolSize: 20,
-                        tint: AmberTheme.foreground
+                        size: ChatTopBarLayout.toolbarButtonDiameter,
+                        symbolSize: 18
                     ) {
                         dismiss()
                     }
 
                     Spacer(minLength: 0)
+                        .allowsHitTesting(false)
 
-                    // 历史议会入口:列出「最近讨论」,点任意一场重开成只读对话。
-                    AmberGlassCircleButton(
+                    ChatToolbarIconButton(
                         systemImage: "clock.arrow.circlepath",
                         accessibilityLabel: "历史议会",
-                        size: 44,
-                        symbolSize: 18,
-                        tint: AmberTheme.accent
+                        size: ChatTopBarLayout.toolbarButtonDiameter,
+                        symbolSize: 16
                     ) {
                         viewModel.showHistory()
                     }
                     .disabled(viewModel.isRunning)
                     .accessibilityHint(viewModel.isRunning ? "讨论结束后可查看历史议会" : "")
 
-                    // 顶栏始终是设置入口;停止由输入框那颗发送/停止键负责(与 Chat 页一致),
-                    // 不在顶栏再放一颗多余的停止键。
-                    AmberGlassCircleButton(
+                    ChatToolbarIconButton(
                         systemImage: "gearshape",
                         accessibilityLabel: "议会设置",
-                        size: 44,
-                        symbolSize: 18,
-                        tint: AmberTheme.accent
+                        size: ChatTopBarLayout.toolbarButtonDiameter,
+                        symbolSize: 16
                     ) {
                         viewModel.showSettings()
                     }
                 }
+
+                modeCapsuleButton
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 10)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 18)
+        .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
+    }
+
+    private var modeCapsuleButton: some View {
+        Button {
+            viewModel.showMembers()
+        } label: {
+            VStack(spacing: 1) {
+                HStack(spacing: 3) {
+                    Text(viewModel.selectedMode.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                Text("\(viewModel.participants.count) 位成员 · 第 \(viewModel.discussionRound) 轮")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .lightImpact))
+        .modifier(CouncilModeCapsuleGlass())
+        .accessibilityLabel("议会模式与席位")
     }
 
     private var transcript: some View {
@@ -359,6 +378,7 @@ struct CouncilChatRuntimeView: View {
         .scrollPosition($scrollPosition)
         .defaultScrollAnchor(.bottom, for: .initialOffset)
         .defaultScrollAnchor(.top, for: .alignment)
+        .scrollEdgeEffectStyle(.soft, for: .top)
         .scrollIndicators(.hidden)
         // 区分「用户主动拖动」与「程序/内容增长引起的滚动」:只有前者才允许改 followPaused。
         .onScrollPhaseChange { _, phase in
@@ -551,6 +571,7 @@ struct CouncilChatRuntimeView: View {
 
     private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
         guard isNativeScrollDriverDesired else { return }
+        scrollView.topEdgeEffect.style = .soft
         scrollDriver.setAutomaticFollowEnabled(followGeneration)
         scrollDriver.onFallback = { reason, shouldReplayBottom in
             guard nativeScrollFallbackReason == nil else { return }
