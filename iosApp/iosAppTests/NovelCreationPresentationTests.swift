@@ -129,6 +129,23 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testStateSyncFailureMessageKeepsActionableDetail() {
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: NovelError.invalidInput(
+                "The working manuscript does not form a valid manual-edit suffix."
+            )),
+            "剧情同步失败：目录结构已变（如删过章节），正在按新规则处理。请再点重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("状态不符，请重试。"),
+            "剧情同步失败：正文与检查点不一致（常见于删章后）。请点重试；仍失败再点「重新载入」。"
+        )
+        XCTAssertEqual(
+            NovelError.invalidInput("本章计划未确认。").errorDescription,
+            "本章计划未确认。"
+        )
+    }
+
     func testAskUserAlreadyAnsweredMapsToActionableCopy() {
         XCTAssertEqual(
             NovelPresentation.operationErrorMessage(NovelError.invalidInput(
@@ -187,6 +204,12 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             NovelPresentation.stateSyncFailureMessage(
+                "The model output is missing required fields: stateSummary, events."
+            ),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
                 "The fact synchronization was cancelled and can be retried."
             ),
             "剧情状态同步已取消，可以重试。"
@@ -200,6 +223,19 @@ final class NovelCreationPresentationTests: XCTestCase {
         XCTAssertEqual(
             NovelPresentation.stateSyncFailureMessage("请求失败：upstream timeout"),
             "剧情状态同步失败，请重试。"
+        )
+        // "revision accounting" must not be misread as a stale-reload guard.
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "Manual synchronization revision accounting failed."
+            ),
+            "剧情状态同步失败，请重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The working chapter revision is stale."
+            ),
+            "项目版本已更新，请点「重新载入」后再同步。"
         )
     }
 
@@ -395,7 +431,7 @@ final class NovelCreationPresentationTests: XCTestCase {
             startedAt: Date(),
             requestStartedAt: Date(),
             completedCharacters: 0,
-            totalCharacters: 100,
+            totalCharacters: 12_800,
             completedChunks: 0
         )
         let progressed = NovelStateSyncActivity(
@@ -409,10 +445,75 @@ final class NovelCreationPresentationTests: XCTestCase {
             totalCharacters: 100,
             completedChunks: 1
         )
+        let preparing = NovelStateSyncActivity.preparing(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            startedAt: Date()
+        )
 
         XCTAssertEqual(waiting.completionFraction, 0)
         XCTAssertNil(waiting.displayedCompletionFraction)
+        XCTAssertNil(waiting.displayedPercent)
+        XCTAssertEqual(waiting.estimatedTotalSegments, 2)
+        XCTAssertEqual(
+            waiting.progressDetail(elapsedSeconds: 42),
+            "正文共 12800 字 · 约 2 段 · 正在处理第 1 段 · 已等待 42 秒 · 本段完成后才会更新进度"
+        )
         XCTAssertEqual(progressed.displayedCompletionFraction, 0.4)
+        XCTAssertEqual(progressed.displayedPercent, 40)
+        XCTAssertEqual(
+            progressed.progressDetail(elapsedSeconds: 90),
+            "正文已处理 40% · 已完成 1 段 · 已等待 90 秒"
+        )
+        let multiProgressed = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 10_000,
+            totalCharacters: 25_000,
+            completedChunks: 1
+        )
+        XCTAssertEqual(
+            multiProgressed.progressDetail(elapsedSeconds: 120),
+            "正文已处理 40% · 已完成 1 段 / 约 4 段 · 已等待 120 秒"
+        )
+        XCTAssertEqual(preparing.statusTitle, "正在准备剧情状态")
+        XCTAssertEqual(
+            preparing.progressDetail(elapsedSeconds: 5),
+            "已等待 5 秒 · 正在准备请求"
+        )
+
+        let singleChunk = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 0,
+            totalCharacters: 4_000,
+            completedChunks: 0
+        )
+        XCTAssertEqual(singleChunk.estimatedTotalSegments, 1)
+        XCTAssertEqual(
+            singleChunk.progressDetail(elapsedSeconds: 12),
+            "正文共 4000 字 · 全文分析中 · 已等待 12 秒 · 模型返回后才会更新进度"
+        )
+        XCTAssertEqual(
+            NovelManualSyncChunker.estimatedSegmentCount(manuscriptCharacterCount: 25_000),
+            4
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The model returned more than one JSON object.",
+                completedChunkCount: 2
+            ),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。 已保存 2 段进度，重试从第 3 段继续。"
+        )
     }
 
     func testChapterTitleUsesTheGeneratedMarkdownHeadingInsteadOfAGenericStoredTitle() {

@@ -672,11 +672,13 @@ enum NovelStructuredOutputDecoder {
     }
 
     static func decodeStateDelta(from data: Data) throws -> NovelStateDeltaV1 {
-        let root = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validateStateDelta(root.object)
-        let value: NovelStateDeltaV1 = try decode(NovelStateDeltaV1.self, from: root.data)
-        try NovelStructuredOutputValidation.validate(value)
-        return value
+        try decodeFromObjectCandidates(data) { objectData in
+            let root = try StrictJSON.rootObject(from: objectData)
+            try StrictJSON.validateStateDelta(root.object)
+            let value: NovelStateDeltaV1 = try decode(NovelStateDeltaV1.self, from: root.data)
+            try NovelStructuredOutputValidation.validate(value)
+            return value
+        }
     }
 
     static func decodeStateRebuild(from text: String) throws -> NovelStateRebuildV1 {
@@ -684,11 +686,37 @@ enum NovelStructuredOutputDecoder {
     }
 
     static func decodeStateRebuild(from data: Data) throws -> NovelStateRebuildV1 {
-        let root = try StrictJSON.rootObject(from: data)
-        try StrictJSON.validateStateRebuild(root.object)
-        let value: NovelStateRebuildV1 = try decode(NovelStateRebuildV1.self, from: root.data)
-        try NovelStructuredOutputValidation.validate(value)
-        return value
+        // Prefer the first object that fully validates. Models sometimes emit a
+        // complete rebuild plus a trailer/duplicate object — local heal avoids
+        // re-invoking the model over the same expensive manuscript chunk.
+        try decodeFromObjectCandidates(data) { objectData in
+            let root = try StrictJSON.rootObject(from: objectData)
+            try StrictJSON.validateStateRebuild(root.object)
+            let value: NovelStateRebuildV1 = try decode(NovelStateRebuildV1.self, from: root.data)
+            try NovelStructuredOutputValidation.validate(value)
+            return value
+        }
+    }
+
+    /// Try each top-level JSON object candidate until `body` succeeds.
+    private static func decodeFromObjectCandidates<T>(
+        _ data: Data,
+        _ body: (Data) throws -> T
+    ) throws -> T {
+        let candidates = try StrictJSON.objectCandidateDataList(from: data)
+        var lastError: Error?
+        for candidate in candidates {
+            do {
+                return try body(candidate)
+            } catch {
+                lastError = error
+            }
+        }
+        throw lastError ?? NovelStructuredOutputFailure(
+            category: .malformedJSON,
+            path: "$",
+            message: "The model returned malformed JSON."
+        )
     }
 
     static func decodePolishDrift(from text: String) throws -> NovelPolishDriftV1 {
@@ -1266,6 +1294,8 @@ private enum StrictJSON {
     typealias Object = [String: Any]
 
     static func rootObject(from data: Data) throws -> (object: Object, data: Data) {
+        // Callers that already pass a single-object blob, or non-state decoders
+        // that only need "first extractable object", use the first candidate.
         let objectData = try singleObjectData(from: data)
         try JSONDuplicateKeyValidator.validate(objectData)
         let value: Any
@@ -1288,9 +1318,16 @@ private enum StrictJSON {
         return (object, objectData)
     }
 
-    private static func singleObjectData(from data: Data) throws -> Data {
-        if (try? JSONSerialization.jsonObject(with: data)) != nil {
-            return data
+    /// All complete top-level `{...}` objects found in model text, in order.
+    /// Whole-buffer JSON wins as a single candidate (do not also split nested braces).
+    static func objectCandidateDataList(from data: Data) throws -> [Data] {
+        if let value = try? JSONSerialization.jsonObject(with: data) {
+            // Valid whole-buffer JSON: object, array, or scalar.
+            // Keep as one candidate so rootObject can classify non-objects as
+            // `.expectedObject` instead of re-scanning into malformedJSON.
+            if value is Object || !(value is NSNull) {
+                return [data]
+            }
         }
 
         let bytes = Array(data)
@@ -1314,17 +1351,21 @@ private enum StrictJSON {
             }
         }
 
-        guard candidates.count == 1, let candidate = candidates.first else {
-            let message = candidates.count > 1
-                ? "The model returned more than one JSON object."
-                : "The model returned malformed JSON."
+        guard !candidates.isEmpty else {
             throw NovelStructuredOutputFailure(
                 category: .malformedJSON,
                 path: "$",
-                message: message
+                message: "The model returned malformed JSON."
             )
         }
-        return candidate
+        return candidates
+    }
+
+    private static func singleObjectData(from data: Data) throws -> Data {
+        // Prefer the first complete object when the model emits extras after it.
+        // Re-invoking the model over the same manuscript chunk is far more expensive
+        // than accepting the first well-formed object (schema still fail-closes).
+        try objectCandidateDataList(from: data)[0]
     }
 
     private static func balancedObjectEnd(

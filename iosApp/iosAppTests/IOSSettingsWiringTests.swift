@@ -82,6 +82,46 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertEqual(ChatTopBarLayout.softEdgeExtension, 8)
     }
 
+    func testChatTopBarKeepsIslandOpaqueAndWidthAdaptive() throws {
+        let chatView = try source("iosApp/ChatView.swift")
+        let island = try source("iosApp/ChatActivityIslandView.swift")
+
+        // Side chips + center island must not share GlassEffectContainer (punch-through).
+        XCTAssertFalse(
+            chatView.contains("AmberGlassGroup(spacing: 12)"),
+            "Chat top bar must not group toolbar glass with the activity island."
+        )
+        // fixedSize must precede glass so the capsule paints hug width, not bar width.
+        XCTAssertTrue(
+            island.contains(
+                """
+                .frame(height: 40)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .background { glowUnderlay }
+                            .modifier(ChatActivityIslandGlass())
+                """
+            ),
+            "Island must lock hug size before glassEffect."
+        )
+        XCTAssertTrue(island.contains("ChatTopBarLayout.islandTitleMaxWidth"))
+        XCTAssertTrue(chatView.contains("ChatTopBarLayout.islandSideGutter"))
+        XCTAssertTrue(
+            chatView.contains(
+                """
+                ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
+                                .fixedSize(horizontal: true, vertical: false)
+                                .padding(.horizontal, ChatTopBarLayout.islandSideGutter)
+                """
+            )
+        )
+        // Must not stretch the island shell to the full bar width.
+        XCTAssertFalse(
+            chatView.contains("ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))\n                .padding(.horizontal, ChatTopBarLayout.islandSideGutter)\n                .frame(maxWidth: .infinity)")
+        )
+        XCTAssertTrue(island.contains(".background(AmberTheme.glass.opacity(0.16), in: Capsule())"))
+        XCTAssertTrue(island.contains(".glassEffect(.regular, in: Capsule())"))
+    }
+
     func testCouncilTopBarUsesNativeSoftEdgeAndModeCapsule() throws {
         let runtime = try source("iosApp/CouncilChatRuntimeView.swift")
 
@@ -89,8 +129,19 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(runtime.contains("ChatTopBarLayout.softEdgeExtension"))
         XCTAssertTrue(runtime.contains("ChatTopBarLayout.controlsHeight"))
         XCTAssertTrue(runtime.contains("ChatToolbarIconButton("))
-        XCTAssertTrue(runtime.contains(".background(AmberTheme.glass, in: Capsule())"))
-        XCTAssertTrue(runtime.contains(".glassEffect(.regular, in: Capsule())"))
+        XCTAssertTrue(runtime.contains(".background(AmberTheme.glass.opacity(0.16), in: Capsule())"))
+        XCTAssertTrue(runtime.contains(".glassEffect(.regular.interactive(), in: Capsule())"))
+        // Mode capsule: fixedSize on label, then glass — not glass then fixedSize on Button.
+        XCTAssertTrue(
+            runtime.contains(
+                """
+                .frame(height: 40)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .modifier(CouncilModeCapsuleGlass())
+                """
+            ),
+            "Council mode capsule must lock hug size before glassEffect."
+        )
         XCTAssertFalse(runtime.contains("AmberGlassGroup(spacing: 12)"))
         XCTAssertTrue(runtime.contains(".scrollEdgeEffectStyle(.soft, for: .top)"))
         XCTAssertTrue(runtime.contains("scrollView.topEdgeEffect.style = .soft"))

@@ -835,7 +835,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         let list = try source("iosApp/NovelCreation/NovelProjectListView.swift")
 
         XCTAssertTrue(list.contains("viewModel.stateSyncActivity"))
-        XCTAssertTrue(list.contains("activity.displayedCompletionFraction"))
+        XCTAssertTrue(list.contains("NovelStateSyncProgressBanner("))
         XCTAssertTrue(list.contains("完成前暂不能切换项目"))
         XCTAssertTrue(list.contains("viewModel.cancelAutomaticStateSync("))
         let topInset = try XCTUnwrap(list.range(of: ".safeAreaInset(edge: .top"))
@@ -894,6 +894,35 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(session.contains("workspace.stateSyncRecoveryMessage("))
         XCTAssertTrue(workspace.contains(".disabled(!canRetryCurrentStateSync)"))
         XCTAssertTrue(reader.contains(".disabled(!canRetryCurrentStateSync)"))
+        // Session retry uses branch-scoped canRetry only (not isBusy/isRunning/global block).
+        XCTAssertTrue(
+            session.contains("!workspace.canRetryStateSync(projectID: projectID, branchID: branchID)")
+        )
+        let bannerFn = try XCTUnwrap(session.range(of: "private func automaticStateSyncFailureBanner("))
+        let bannerEnd = try XCTUnwrap(
+            session.range(
+                of: "private func polishRecoveryBanner(",
+                range: bannerFn.upperBound..<session.endIndex
+            )
+        )
+        let bannerBody = session[bannerFn.lowerBound..<bannerEnd.lowerBound]
+        XCTAssertTrue(bannerBody.contains(".disabled("))
+        XCTAssertFalse(bannerBody.contains("isBusy"))
+        XCTAssertFalse(bannerBody.contains("isRunning"))
+        XCTAssertFalse(bannerBody.contains("isProjectSelectionBlocked"))
+
+        let viewModel = try source("iosApp/NovelCreation/NovelCreationViewModel.swift")
+        // Delete chapter must schedule plot sync the same way saveManualRewrite does.
+        let deleteFn = try XCTUnwrap(viewModel.range(of: "func deleteChapterFromManuscript("))
+        let nextFn = try XCTUnwrap(
+            viewModel.range(
+                of: "func restoreChapterVersion(",
+                range: deleteFn.upperBound..<viewModel.endIndex
+            )
+        )
+        let deleteBody = viewModel[deleteFn.lowerBound..<nextFn.lowerBound]
+        XCTAssertTrue(deleteBody.contains("scheduleAutomaticStateSync("))
+        XCTAssertTrue(viewModel.contains("已排队，等待当前同步结束后自动开始"))
     }
 
     func testStateSyncActivityIsProjectScopedAndScheduledSyncKeepsBackgroundLease() throws {

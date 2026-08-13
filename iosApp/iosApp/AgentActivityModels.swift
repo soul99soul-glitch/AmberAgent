@@ -662,12 +662,13 @@ enum AgentActivityLifecyclePolicy {
         switch phase {
         case .waitingForUser:
             100
-        case .failed, .stale:
-            90
         case .reconnecting:
             80
         case .running:
             60
+        // Terminal failures should not outrank ongoing work or pin a loud surface.
+        case .failed, .stale:
+            30
         case .completed:
             20
         case .cancelled:
@@ -677,12 +678,13 @@ enum AgentActivityLifecyclePolicy {
 
     static func lockScreenDismissalDelay(for phase: AgentActivityPhase) -> TimeInterval {
         switch phase {
+        // Keep a brief terminal glance, then clear — long hangs feel like a stuck banner.
         case .failed, .stale:
-            60
+            8
         case .completed:
-            20
+            12
         case .cancelled:
-            6
+            4
         case .running, .reconnecting, .waitingForUser:
             0
         }

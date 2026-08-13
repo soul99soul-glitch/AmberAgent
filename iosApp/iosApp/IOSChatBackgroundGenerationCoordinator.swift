@@ -484,7 +484,9 @@ final class IOSChatBackgroundGenerationCoordinator {
             title: "Amber 后台生成",
             subtitle: handoff.params.model.displayName
         )
-        request.strategy = .fail
+        // Match KeepAlive: queue when the system is busy instead of failing the
+        // handoff immediately (which left only the ~30s UIKit short window).
+        request.strategy = .queue
 
         do {
             try BGTaskScheduler.shared.submit(request)

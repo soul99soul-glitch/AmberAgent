@@ -1388,10 +1388,8 @@ final class NovelCreationViewModelTests: XCTestCase {
             ),
             "项目保存失败，请稍后重试。"
         )
-        XCTAssertEqual(
-            viewModel.errorMessage,
-            "项目保存失败，请稍后重试。"
-        )
+        // Auto-sync failures must not raise the global "无法完成操作" alert.
+        XCTAssertNil(viewModel.errorMessage)
         viewModel.retryAutomaticStateSync(
             projectID: edited.project.id,
             branchID: branch.id
@@ -1885,7 +1883,8 @@ final class NovelCreationViewModelTests: XCTestCase {
             projectID: edited.project.id,
             branchID: branch.id
         ))
-        XCTAssertNotNil(viewModel.errorMessage)
+        // Banner-only recovery; modal alert would interrupt retry UX.
+        XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.count, 1)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.kind, .manualSync)
         XCTAssertEqual(viewModel.projectSnapshot?.pendingOperations.first?.status, .retryable)

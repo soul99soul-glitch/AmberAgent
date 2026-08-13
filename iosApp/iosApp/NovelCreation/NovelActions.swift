@@ -1913,7 +1913,9 @@ enum NovelError: Error, Equatable, Sendable {
 extension NovelError: LocalizedError {
     var errorDescription: String? {
         switch self {
-        case .invalidInput: "输入内容或当前状态不符合要求，请检查后重试。"
+        case .invalidInput(let detail):
+            // Prefer humanized pipeline copy; never drop the associated detail.
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(detail))
         case .projectNotFound: "找不到这个小说项目。"
         case .projectAlreadyExists: "这个小说项目已经存在。"
         case .branchNotFound: "找不到这个剧情分支。"

@@ -70,24 +70,30 @@ extension DefaultNovelCreation {
             in: loaded.document,
             now: now()
         )
-        guard prepared.pending.status == .pending else {
-            throw NovelError.invalidInput(
-                "This synchronization previously failed and must be resumed with its retry action."
+        switch prepared {
+        case .completed(let document, let outcome):
+            _ = try await commitFactDocument(document, replacing: loaded)
+            return outcome
+        case .needsModel(let document, let pending):
+            guard pending.status == .pending else {
+                throw NovelError.invalidInput(
+                    "上次同步已中断，请点「重试同步」继续。"
+                )
+            }
+            let pendingLoaded = try await commitFactDocument(
+                document,
+                replacing: loaded
+            )
+            return try await executeManualSyncTransaction(
+                projectID: command.projectID,
+                pendingID: command.pendingID,
+                retryCommand: nil,
+                replayContext: command.context,
+                replayKind: .syncManualEdits,
+                replayPayloadSHA256: payloadSHA256,
+                pendingDocument: pendingLoaded.document
             )
         }
-        let pendingLoaded = try await commitFactDocument(
-            prepared.document,
-            replacing: loaded
-        )
-        return try await executeManualSyncTransaction(
-            projectID: command.projectID,
-            pendingID: command.pendingID,
-            retryCommand: nil,
-            replayContext: command.context,
-            replayKind: .syncManualEdits,
-            replayPayloadSHA256: payloadSHA256,
-            pendingDocument: pendingLoaded.document
-        )
     }
 
     func executeRetryPending(

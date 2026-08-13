@@ -743,14 +743,40 @@ enum NovelPresentation {
 
     static func stateSyncFailureMessage(_ message: String) -> String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "The model returned malformed JSON." {
-            return "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
-        }
-        if trimmed == "The fact synchronization was cancelled and can be retried." {
-            return "剧情状态同步已取消，可以重试。"
-        }
         if trimmed.isEmpty {
             return "剧情状态同步失败，请重试。"
+        }
+        // Already humanized short/medium copy from operationErrorMessage.
+        if trimmed == "状态不符，请重试。" ||
+            trimmed == "当前操作的内容或项目状态不匹配，请重新载入后再试。" {
+            return "剧情同步失败：正文与检查点不一致（常见于删章后）。请点重试；仍失败再点「重新载入」。"
+        }
+        if trimmed == "The model returned malformed JSON." ||
+            trimmed == "The model returned more than one JSON object." ||
+            trimmed == "The model output must be one JSON object." ||
+            trimmed.localizedCaseInsensitiveContains("missing required fields") {
+            return "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        }
+        if trimmed == "The fact synchronization was cancelled and can be retried." ||
+            trimmed == "剧情状态同步已取消，可以重试。" {
+            return "剧情状态同步已取消，可以重试。"
+        }
+        if trimmed.localizedCaseInsensitiveContains("manual-edit suffix") ||
+            trimmed.localizedCaseInsensitiveContains("manual synchronization suffix") {
+            return "剧情同步失败：目录结构已变（如删过章节），正在按新规则处理。请再点重试。"
+        }
+        if trimmed.localizedCaseInsensitiveContains("no manual edits") {
+            return "没有待同步的改写。"
+        }
+        if trimmed.localizedCaseInsensitiveContains("working manuscript changed") {
+            return "同步前正文又变了，请点「重新载入」后再同步。"
+        }
+        // Only real stale-guard phrases — not every string containing "revision".
+        if trimmed.localizedCaseInsensitiveContains("is stale") {
+            return "项目版本已更新，请点「重新载入」后再同步。"
+        }
+        if trimmed.localizedCaseInsensitiveContains("No valid rebuild base") {
+            return "找不到可用的剧情基线，请点「重新载入」后再同步。"
         }
         let containsChinese = trimmed.unicodeScalars.contains {
             (0x4E00...0x9FFF).contains($0.value)
@@ -758,12 +784,140 @@ enum NovelPresentation {
         let containsASCIILetter = trimmed.unicodeScalars.contains {
             (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
         }
-        if containsChinese, !containsASCIILetter {
-            return trimmed
+        // Pure Chinese timeout copy (not mixed dumps like "请求失败：upstream timeout").
+        if containsChinese, !containsASCIILetter,
+           trimmed.contains("超时") || trimmed.localizedCaseInsensitiveContains("timeout") {
+            return "剧情同步超时，请重试；大项目可换更快的同步模型。"
         }
+        if containsChinese, !containsASCIILetter {
+            // Keep banner-friendly: one short sentence if possible.
+            if trimmed.count <= 28 { return trimmed }
+            if trimmed.hasPrefix("剧情") { return trimmed }
+            return "剧情同步失败：\(trimmed)"
+        }
+        // English / mixed technical detail — short, no false "reopen project".
         return "剧情状态同步失败，请重试。"
     }
 
+    /// When some durable chunks already landed, tell the user retry won't reburn them.
+    static func stateSyncFailureMessage(
+        _ message: String,
+        completedChunkCount: Int
+    ) -> String {
+        let base = stateSyncFailureMessage(message)
+        guard completedChunkCount > 0 else { return base }
+        return "\(base) 已保存 \(completedChunkCount) 段进度，重试从第 \(completedChunkCount + 1) 段继续。"
+    }
+
+    static func stateSyncFailureMessage(for error: Error) -> String {
+        // Prefer the raw invalidInput detail so sync-specific English can be mapped
+        // before operationErrorMessage collapses unknowns to a generic line.
+        if case .invalidInput(let detail) = error as? NovelError {
+            let mapped = stateSyncFailureMessage(detail)
+            if mapped != "剧情状态同步失败，请重试。" {
+                return mapped
+            }
+        }
+        return stateSyncFailureMessage(operationErrorMessage(error))
+    }
+}
+
+/// Shared strip for manual plot-state sync: title + optional percent bar + live detail.
+struct NovelStateSyncProgressBanner: View {
+    let title: String
+    let activity: NovelStateSyncActivity?
+    var secondaryHint: String? = nil
+    var canStop: Bool = false
+    var onStop: (() -> Void)? = nil
+    var usesBorderedStop: Bool = true
+
+    var body: some View {
+        if let activity {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                let waitingSince = activity.requestStartedAt ?? activity.startedAt
+                let elapsed = Int(max(0, context.date.timeIntervalSince(waitingSince)))
+                let progress = activity.progressDetail(elapsedSeconds: elapsed)
+                let detail: String = {
+                    guard let secondaryHint, !secondaryHint.isEmpty else { return progress }
+                    return "\(progress) · \(secondaryHint)"
+                }()
+                content(
+                    title: title,
+                    detail: detail,
+                    fraction: activity.displayedCompletionFraction,
+                    percent: activity.displayedPercent
+                )
+            }
+        } else {
+            content(title: title, detail: secondaryHint, fraction: nil, percent: nil)
+        }
+    }
+
+    @ViewBuilder
+    private func content(
+        title: String,
+        detail: String?,
+        fraction: Double?,
+        percent: Int?
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(AmberTheme.accentAmber)
+
+                Text(title)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let percent {
+                    Text("\(percent)%")
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+
+                if canStop, let onStop {
+                    Button("停止", action: onStop)
+                        .font(.footnote.weight(.semibold))
+                        .modifier(NovelStateSyncStopButtonStyle(usesBordered: usesBorderedStop))
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+            }
+
+            if let fraction {
+                ProgressView(value: fraction)
+                    .tint(AmberTheme.accentAmber)
+            }
+
+            if let detail, !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+}
+
+private struct NovelStateSyncStopButtonStyle: ViewModifier {
+    let usesBordered: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if usesBordered {
+            content.buttonStyle(.bordered).controlSize(.small)
+        } else {
+            content.buttonStyle(.plain)
+        }
+    }
+}
+
+// MARK: - NovelPresentation private helpers
+
+extension NovelPresentation {
     private static func chapterHeadingTitle(from content: String) -> String? {
         guard var line = content
             .split(whereSeparator: { $0.isNewline })

@@ -1513,6 +1513,10 @@ final class ChatGenerationCoordinator {
         }
 
         guard let runId else { return true }
+        // Pinch system continued-processing immediately so a pending submit retry
+        // cannot re-post a progress card after this run is already cancelled.
+        // Keep UIKit short window until persist finishes (end below).
+        backgroundExecution.abandonSystemAssertion(runId)
         Task { @MainActor [dependencies, bindings] in
             let didPersist = await bindings.persistMessagesSnapshot(
                 messagesAtCancellation,

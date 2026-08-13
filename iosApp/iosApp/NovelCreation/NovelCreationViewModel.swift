@@ -111,9 +111,62 @@ struct NovelStateSyncActivity: Equatable, Sendable {
         return min(1, max(0, Double(completedCharacters) / Double(totalCharacters)))
     }
 
+    /// Percent bar only after at least one durable chunk lands — first long model
+    /// call would otherwise sit at 0% and look stuck.
     var displayedCompletionFraction: Double? {
         guard completedCharacters > 0 else { return nil }
         return completionFraction
+    }
+
+    var displayedPercent: Int? {
+        displayedCompletionFraction.map { Int(($0 * 100).rounded(.down)) }
+    }
+
+    var statusTitle: String {
+        switch phase {
+        case .preparing: "正在准备剧情状态"
+        case .analyzing: "正在同步剧情状态"
+        }
+    }
+
+    /// Preferred-cap estimate so banners do not imply "segment 1 forever" on long books.
+    var estimatedTotalSegments: Int? {
+        guard let totalCharacters, totalCharacters > 0 else { return nil }
+        return NovelManualSyncChunker.estimatedSegmentCount(
+            manuscriptCharacterCount: totalCharacters
+        )
+    }
+
+    /// Secondary copy for banners: chunk, word count, elapsed — always concrete
+    /// even before the first durable percent is available.
+    func progressDetail(elapsedSeconds: Int) -> String {
+        let elapsed = max(0, elapsedSeconds)
+        switch phase {
+        case .preparing:
+            return "已等待 \(elapsed) 秒 · 正在准备请求"
+        case .analyzing:
+            let currentSegment = completedChunks + 1
+            if let percent = displayedPercent {
+                let chunkDetail = completedChunks > 0
+                    ? " · 已完成 \(completedChunks) 段"
+                    : ""
+                if let estimated = estimatedTotalSegments, estimated > 1 {
+                    return "正文已处理 \(percent)%\(chunkDetail) / 约 \(estimated) 段 · 已等待 \(elapsed) 秒"
+                }
+                return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒"
+            }
+            if let totalCharacters, totalCharacters > 0 {
+                if let estimated = estimatedTotalSegments, estimated > 1 {
+                    if completedChunks > 0 {
+                        return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 已完成 \(completedChunks) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒 · 本段完成后才会更新进度"
+                    }
+                    return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒 · 本段完成后才会更新进度"
+                }
+                // Single preferred segment: avoid "第 1 段" which sounds stuck forever.
+                return "正文共 \(totalCharacters) 字 · 全文分析中 · 已等待 \(elapsed) 秒 · 模型返回后才会更新进度"
+            }
+            return "正在分析第 \(currentSegment) 段 · 已等待 \(elapsed) 秒"
+        }
     }
 
     static func preparing(
@@ -169,6 +222,8 @@ struct NovelStateSyncActivity: Equatable, Sendable {
         )
     }
 }
+
+
 
 @MainActor
 @Observable
@@ -234,6 +289,10 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var queuedAutomaticStateSyncTarget: NovelAutomaticStateSyncTarget?
     private var automaticStateSyncPresentationTarget: NovelAutomaticStateSyncTarget?
     private var automaticStateSyncFailure: NovelAutomaticStateSyncFailure?
+    /// Last error from a state-sync `perform` (reportsError: false path). Used when
+    /// pending.lastError was not written yet so retry banners do not collapse to a
+    /// useless generic "没有完成，请重试".
+    @ObservationIgnored private var lastStateSyncOperationError: String?
     /// Targets the user explicitly stopped. Prevents cancel from looking like a no-op when
     /// `needsSync` remains true and would immediately reschedule the same work.
     private var userSuppressedStateSyncTargets: Set<NovelAutomaticStateSyncTarget> = []
@@ -427,7 +486,7 @@ final class NovelCreationViewModel {
         if let activity = stateSyncActivity,
            activity.projectID == projectID,
            activity.branchID == branchID {
-            return activity.phase == .preparing ? "正在准备剧情状态" : "正在同步剧情状态"
+            return activity.statusTitle
         }
         return "正在准备剧情状态"
     }
@@ -620,10 +679,73 @@ final class NovelCreationViewModel {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) {
-        guard canRetryStateSync(projectID: projectID, branchID: branchID) else { return }
         let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        guard selectedProjectID == projectID,
+              selectedBranchID == branchID else { return }
+
+        // Already running this branch — progress banner should be visible.
+        if manualStateSyncTarget == target ||
+            automaticStateSyncPresentationTarget == target {
+            return
+        }
+        if stateSyncStoppingTargets.contains(target) {
+            publishAutomaticStateSyncFailure(
+                target: target,
+                message: "正在停止上次同步，请稍后再点重试。"
+            )
+            return
+        }
+        guard branchSnapshot?.branch.syncStatus == .needsSync else {
+            // Nothing to do; clear stale failure strip.
+            if automaticStateSyncFailure?.target == target {
+                automaticStateSyncFailure = nil
+            }
+            return
+        }
+        if requiresReload {
+            publishAutomaticStateSyncFailure(
+                target: target,
+                message: "请先重新载入项目，再重试剧情同步。"
+            )
+            return
+        }
+        if projectSnapshot?.access != .readWrite {
+            publishAutomaticStateSyncFailure(
+                target: target,
+                message: "项目当前只读，无法同步剧情。"
+            )
+            return
+        }
+
+        // Explicit retry must always lift Stop suppress.
         userSuppressedStateSyncTargets.remove(target)
-        scheduleAutomaticStateSync(projectID: projectID, branchID: branchID)
+        lastStateSyncOperationError = nil
+        if let message = errorMessage,
+           message.contains("剧情同步") || message.contains("剧情状态") {
+            errorMessage = nil
+        }
+
+        // Force-start: do not go through scheduleAutomaticStateSync, which can
+        // silently no-op when target/task bookkeeping is stale — that cleared the
+        // failure banner first and looked like a dead button.
+        if automaticStateSyncTask == nil {
+            // Drop zombie bookkeeping so start is not skipped.
+            if automaticStateSyncTarget == target {
+                automaticStateSyncTarget = nil
+            }
+            if queuedAutomaticStateSyncTarget == target {
+                queuedAutomaticStateSyncTarget = nil
+            }
+            startAutomaticStateSync(target)
+            return
+        }
+
+        // Another sync task is live (other branch / stuck). Queue and keep feedback visible.
+        queuedAutomaticStateSyncTarget = target
+        publishAutomaticStateSyncFailure(
+            target: target,
+            message: "已排队，等待当前同步结束后自动开始"
+        )
     }
 
     func canRetryStateSync(
@@ -634,8 +756,16 @@ final class NovelCreationViewModel {
               selectedBranchID == branchID,
               branchSnapshot?.branch.syncStatus == .needsSync,
               !requiresReload,
-              !isProjectSelectionBlocked,
               projectSnapshot?.access == .readWrite else { return false }
+        let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
+        // Only block retry when THIS branch is already syncing/stopping.
+        // Do not use global isProjectSelectionBlocked — isPerforming from an
+        // unrelated action would disable the only recovery button.
+        if manualStateSyncTarget == target ||
+            automaticStateSyncPresentationTarget == target ||
+            stateSyncStoppingTargets.contains(target) {
+            return false
+        }
         return true
     }
 
@@ -653,12 +783,24 @@ final class NovelCreationViewModel {
         if let failure = automaticStateSyncFailure, failure.target == target {
             return failure.message
         }
-        if let pending = retryableManualStateSyncPending(
+        let pending = retryableManualStateSyncPending(
             projectID: projectID,
             branchID: branchID
-        ), let detail = pending.lastError?.trimmingCharacters(in: .whitespacesAndNewlines),
+        )
+        let completedChunks = pending?.manualSyncProgress?.completedChunks.count ?? 0
+        if let detail = pending?.lastError?.trimmingCharacters(in: .whitespacesAndNewlines),
            !detail.isEmpty {
-            return NovelPresentation.stateSyncFailureMessage(detail)
+            return NovelPresentation.stateSyncFailureMessage(
+                detail,
+                completedChunkCount: completedChunks
+            )
+        }
+        if let detail = lastStateSyncOperationError?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !detail.isEmpty {
+            return NovelPresentation.stateSyncFailureMessage(
+                detail,
+                completedChunkCount: completedChunks
+            )
         }
         return "剧情状态尚未同步，完成后才能继续正文操作。"
     }
@@ -1777,7 +1919,7 @@ final class NovelCreationViewModel {
             errorMessage = "这一章已经不在当前正文目录里。"
             return false
         }
-        return await perform(.deleteChapterFromManuscript(NovelDeleteChapterFromManuscriptCommand(
+        let deleted = await perform(.deleteChapterFromManuscript(NovelDeleteChapterFromManuscriptCommand(
             context: mutationContext(
                 projectRevision: project.project.revision,
                 branchHeadRevision: branch.branch.headRevision
@@ -1787,6 +1929,14 @@ final class NovelCreationViewModel {
             chapterID: chapterID,
             expectedWorkingRevision: branch.branch.workingRevision
         )))
+        if deleted {
+            // Same as saveManualRewrite: working diverged from head → kick auto plot sync.
+            scheduleAutomaticStateSync(
+                projectID: project.project.id,
+                branchID: branch.branch.id
+            )
+        }
+        return deleted
     }
 
     func restoreChapterVersion(_ targetVersionID: NovelChapterVersionID) async {
@@ -2717,10 +2867,20 @@ final class NovelCreationViewModel {
             } else if !reload {
                 await loadProjects()
             }
+            if stateSyncContext != nil {
+                // Keep the real invalidInput / model detail — errorDescription alone
+                // used to collapse everything to a useless short line.
+                lastStateSyncOperationError = NovelPresentation.stateSyncFailureMessage(
+                    for: operationError
+                )
+            }
             if reportsError { report(operationError) }
             return false
         }
 
+        if stateSyncContext != nil {
+            lastStateSyncOperationError = nil
+        }
         if reportsError { errorMessage = nil }
         guard reload else { return true }
 
@@ -2943,14 +3103,12 @@ final class NovelCreationViewModel {
             } catch {
                 guard !Task.isCancelled,
                       !userSuppressedStateSyncTargets.contains(target) else { return }
-                let message = NovelPresentation.stateSyncFailureMessage(
-                    errorDescription(error)
-                )
-                automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
+                // Banner only — do not set errorMessage (that triggers the global
+                // "无法完成操作" alert and makes Retry look like an instant failure popup).
+                publishAutomaticStateSyncFailure(
                     target: target,
-                    message: message
+                    message: NovelPresentation.stateSyncFailureMessage(for: error)
                 )
-                errorMessage = message
                 return
             }
             if selectedProjectID == target.projectID,
@@ -2965,11 +3123,22 @@ final class NovelCreationViewModel {
             let branchPending = projectSnapshot.pendingOperations.filter {
                 $0.branchID == target.branchID
             }
-            guard branchPending.isEmpty ||
-                    (branchPending.count == 1 &&
-                        branchPending[0].kind == .manualSync &&
-                        (branchPending[0].status == .pending ||
-                            branchPending[0].status == .retryable)) else {
+            let canDriveManualSync = branchPending.isEmpty ||
+                (branchPending.count == 1 &&
+                    branchPending[0].kind == .manualSync &&
+                    (branchPending[0].status == .pending ||
+                        branchPending[0].status == .retryable))
+            guard canDriveManualSync else {
+                // Previously returned silently — retry looked broken with no new banner.
+                let message: String
+                if branchPending.contains(where: { $0.kind != .manualSync }) {
+                    message = "当前还有未完成的正文操作，请先处理后再重试剧情同步。"
+                } else if branchPending.count > 1 {
+                    message = "当前有多个未完成的同步任务，请重新打开项目后再试。"
+                } else {
+                    message = "剧情同步任务状态异常，请重新打开项目后再试。"
+                }
+                publishAutomaticStateSyncFailure(target: target, message: message)
                 return
             }
             if isPerforming || branchSnapshot.branch.activeRunID != nil {
@@ -2979,6 +3148,7 @@ final class NovelCreationViewModel {
             guard !Task.isCancelled,
                   !userSuppressedStateSyncTargets.contains(target) else { return }
 
+            lastStateSyncOperationError = nil
             let succeeded: Bool
             if let pending = branchPending.first {
                 succeeded = await perform(.retryPending(NovelRetryPendingCommand(
@@ -3007,22 +3177,46 @@ final class NovelCreationViewModel {
             // lift suppress so the next edit can auto-schedule again.
             if succeeded {
                 userSuppressedStateSyncTargets.remove(target)
+                lastStateSyncOperationError = nil
                 return
             }
             if Task.isCancelled || userSuppressedStateSyncTargets.contains(target) {
                 return
             }
-            let detail = self.projectSnapshot?.pendingOperations.first(where: {
+            let pending = self.projectSnapshot?.pendingOperations.first(where: {
                 $0.branchID == target.branchID && $0.kind == .manualSync
-            })?.lastError
-            let message = detail.map(NovelPresentation.stateSyncFailureMessage)
-                ?? "自动剧情同步没有完成，请重试。"
-            automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
-                target: target,
-                message: message
+            })
+            let completedChunks = pending?.manualSyncProgress?.completedChunks.count ?? 0
+            let raw = pending?.lastError
+                ?? lastStateSyncOperationError
+                ?? "剧情同步没有完成，请点重试。大项目可能较久，请保持前台。"
+            // If durable chunks exist, say so — retry continues from next segment,
+            // it does not re-feed already completed manuscript.
+            let message = NovelPresentation.stateSyncFailureMessage(
+                raw,
+                completedChunkCount: completedChunks
             )
-            errorMessage = message
+            publishAutomaticStateSyncFailure(target: target, message: message)
             return
+        }
+    }
+
+    /// Recoverable auto-sync failures stay on the status banner. Writing
+    /// `errorMessage` would also fire `NovelCreationErrorAlertModifier`
+    /// ("无法完成操作") on the workspace — the "retry instantly pops a dialog"
+    /// bug users hit on the 正文 tab.
+    private func publishAutomaticStateSyncFailure(
+        target: NovelAutomaticStateSyncTarget,
+        message: String
+    ) {
+        automaticStateSyncFailure = NovelAutomaticStateSyncFailure(
+            target: target,
+            message: message
+        )
+        // If a previous unrelated error left a modal up with the same text, clear
+        // it so only the banner remains as the recovery surface.
+        if errorMessage == message {
+            errorMessage = nil
         }
     }
 

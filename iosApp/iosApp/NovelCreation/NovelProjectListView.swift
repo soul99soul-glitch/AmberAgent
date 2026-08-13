@@ -12,6 +12,8 @@ struct NovelCreationSettingsToolbarButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "gearshape")
+                // Chrome icons stay neutral (label/ink). Accent is for primary CTAs only.
+                .foregroundStyle(AmberTheme.foreground)
         }
         .accessibilityLabel("小说创作设置")
     }
@@ -101,6 +103,7 @@ struct NovelProjectListView: View {
                     isImportingPackage = true
                 } label: {
                     Image(systemName: "square.and.arrow.down")
+                        .foregroundStyle(AmberTheme.foreground)
                 }
                 .accessibilityLabel("导入小说项目")
                 .disabled(viewModel.isProjectSelectionBlocked || isPreparingImportPreview)
@@ -216,50 +219,29 @@ struct NovelProjectListView: View {
     }
 
     private var stateSyncSelectionBanner: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(AmberTheme.accentAmber)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stateSyncSelectionBannerTitle)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.foreground2)
-                Text(
-                    isCurrentStateSyncStopping
-                        ? "停止完成后即可切换项目。"
-                        : "完成前暂不能切换项目。"
+        NovelStateSyncProgressBanner(
+            title: stateSyncSelectionBannerTitle,
+            activity: isCurrentStateSyncStopping ? nil : viewModel.stateSyncActivity,
+            secondaryHint: isCurrentStateSyncStopping
+                ? "停止完成后即可切换项目。"
+                : "完成前暂不能切换项目。",
+            canStop: {
+                guard let projectID = viewModel.selectedProjectID,
+                      let branchID = viewModel.selectedBranchID else { return false }
+                return viewModel.canCancelAutomaticStateSync(
+                    projectID: projectID,
+                    branchID: branchID
                 )
-                    .font(.caption)
-                    .foregroundStyle(AmberTheme.muted)
+            }(),
+            onStop: {
+                guard let projectID = viewModel.selectedProjectID,
+                      let branchID = viewModel.selectedBranchID else { return }
+                viewModel.cancelAutomaticStateSync(
+                    projectID: projectID,
+                    branchID: branchID
+                )
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            if !isCurrentStateSyncStopping,
-               let activity = viewModel.stateSyncActivity,
-               let fraction = activity.displayedCompletionFraction {
-                Text("\(Int((fraction * 100).rounded(.down)))%")
-                    .font(.footnote.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(AmberTheme.foreground2)
-            }
-
-            if let projectID = viewModel.selectedProjectID,
-               let branchID = viewModel.selectedBranchID,
-               viewModel.canCancelAutomaticStateSync(
-                   projectID: projectID,
-                   branchID: branchID
-               ) {
-                Button("停止") {
-                    viewModel.cancelAutomaticStateSync(
-                        projectID: projectID,
-                        branchID: branchID
-                    )
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
-            }
-        }
+        )
         .padding(.horizontal, 16)
         .padding(.vertical, 9)
         .background(AmberTheme.surface)

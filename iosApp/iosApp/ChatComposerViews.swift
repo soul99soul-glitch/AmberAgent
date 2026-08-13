@@ -335,6 +335,8 @@ struct ChatToolbarIconButton: View {
     let accessibilityLabel: String
     var size: CGFloat
     var symbolSize: CGFloat
+    /// Top-bar chrome stays theme ink, not accent — accent is for primary CTAs.
+    var tint: Color = AmberTheme.foreground
     let action: () -> Void
 
     var body: some View {
@@ -345,7 +347,7 @@ struct ChatToolbarIconButton: View {
                 Image(systemName: systemImage)
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: symbolSize, weight: .semibold))
-                    .foregroundStyle(Color(uiColor: .label))
+                    .foregroundStyle(tint)
             }
             .frame(width: size, height: size)
             .frame(minWidth: 44, minHeight: 44)

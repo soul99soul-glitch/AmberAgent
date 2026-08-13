@@ -327,10 +327,12 @@ struct ChatActivityIslandView: View {
     }
 
     var body: some View {
+        // Lock hug width BEFORE glass. glassEffect sizes to the offered proposal;
+        // if fixedSize comes after, the capsule still paints full bar width.
         islandContent
             .padding(.horizontal, 13)
             .frame(height: 40)
-            .frame(maxWidth: 268)
+            .fixedSize(horizontal: true, vertical: false)
             .background { glowUnderlay }
             .modifier(ChatActivityIslandGlass())
             .contentShape(Capsule())
@@ -387,10 +389,14 @@ struct ChatActivityIslandView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(AmberTheme.foreground)
                 .lineLimit(1)
-                .minimumScaleFactor(0.82)
+                .truncationMode(.tail)
+                // Cap long titles only; short titles stay content-width (no min stretch).
+                .frame(maxWidth: ChatTopBarLayout.islandTitleMaxWidth, alignment: .leading)
                 .contentTransition(.opacity)
                 .modifier(IslandTitleGlint(isActive: glintActive))
         }
+        // Intrinsic HStack size = orb + title (+ spacing); parent fixedSize locks it.
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -400,7 +406,10 @@ private struct ChatActivityIslandGlass: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
+            // Light glass pad (same recipe as toolbar chips) — full AmberTheme.glass
+            // is warm paper at high alpha and reads yellow on cream pages.
             content
+                .background(AmberTheme.glass.opacity(0.16), in: Capsule())
                 .glassEffect(.regular, in: Capsule())
         } else {
             content

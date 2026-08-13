@@ -458,8 +458,8 @@ final class NovelManualEditSyncTests: XCTestCase {
         XCTAssertEqual(input.chapters[0].content, "Mara rewrote the first fact.")
         XCTAssertEqual(input.chapters[1].content, "Ivo kept the second fact.")
         XCTAssertTrue(input.manuscript.contains("# Chapter One"))
-        XCTAssertEqual(prepared.pending.baseWorkingRevision, edited.branches[0].workingRevision)
-        XCTAssertEqual(prepared.pending.rebuildBaseCheckpointID, initialCheckpoint.id)
+        XCTAssertEqual(prepared.pending!.baseWorkingRevision, edited.branches[0].workingRevision)
+        XCTAssertEqual(prepared.pending!.rebuildBaseCheckpointID, initialCheckpoint.id)
         XCTAssertEqual(prepared.document.events, oldEvents)
         XCTAssertEqual(prepared.document.stateSnapshots, oldSnapshots)
 
@@ -616,25 +616,132 @@ final class NovelManualEditSyncTests: XCTestCase {
         XCTAssertEqual(input.chapters[1].content, "Ivo rewrote the second fact.")
     }
 
-    func testManualSyncRejectsShortLongAndReorderedWorkingShapes() throws {
+    func testManualSyncAllowsTrailingDeleteViaDeleteFromManuscript() throws {
+        var document = try documentWithTwoCollectedChapters()
+        let removedChapterID = document.branches[0].workingChapterSelections.last!.chapterID
+        let deleteContext = mutationContext(document: document, operationID: NovelOperationID())
+        let deleteCommand = NovelDeleteChapterFromManuscriptCommand(
+            context: deleteContext,
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            chapterID: removedChapterID,
+            expectedWorkingRevision: document.branches[0].workingRevision
+        )
+        document = try NovelChapterDiscardReducer.deleteFromManuscript(
+            chapterID: removedChapterID,
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            expectedWorkingRevision: document.branches[0].workingRevision,
+            context: deleteContext,
+            payloadSHA256: try NovelAction.deleteChapterFromManuscript(deleteCommand)
+                .canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        ).0
+        XCTAssertEqual(document.branches[0].syncStatus, .needsSync)
+        XCTAssertEqual(document.branches[0].workingChapterSelections.count, 1)
+
+        let sync = NovelSyncManualEditsCommand(
+            context: mutationContext(document: document, operationID: NovelOperationID()),
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: document.branches[0].workingRevision
+        )
+        let prepared = try NovelFactTransactionReducer.prepareManualSync(
+            sync,
+            payloadSHA256: sync.canonicalPayloadSHA256(),
+            in: document,
+            now: now.addingTimeInterval(1)
+        )
+        // Trailing delete must not hard-fail at prepare (was the production stuck state).
+        // Collection-only history often still needs model; structural complete only when
+        // a compatible rebuild base already covers remaining working selections.
+        switch prepared {
+        case .completed(let document, _):
+            XCTAssertEqual(document.branches[0].syncStatus, .synchronized)
+            XCTAssertFalse(document.pendingOperations.contains { $0.kind == .manualSync })
+        case .needsModel(let document, let pending):
+            XCTAssertEqual(pending.kind, .manualSync)
+            XCTAssertEqual(document.branches[0].syncStatus, .needsSync)
+        }
+    }
+
+    func testManualSyncAllowsMiddleDeleteViaDeleteFromManuscript() throws {
+        // Three collected chapters, delete the middle one → working IDs are a
+        // non-prefix subsequence of head (the production middle-delete case).
+        var document = try documentWithTwoCollectedChapters()
+        document = try documentWithCandidate("Third chapter fact.", in: document)
+        document = try collectLastCandidate(
+            in: document,
+            title: "Chapter Three",
+            evidence: "Third chapter fact."
+        )
+        XCTAssertEqual(document.branches[0].workingChapterSelections.count, 3)
+        let middleChapterID = document.branches[0].workingChapterSelections[1].chapterID
+        let deleteContext = mutationContext(document: document, operationID: NovelOperationID())
+        let deleteCommand = NovelDeleteChapterFromManuscriptCommand(
+            context: deleteContext,
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            chapterID: middleChapterID,
+            expectedWorkingRevision: document.branches[0].workingRevision
+        )
+        document = try NovelChapterDiscardReducer.deleteFromManuscript(
+            chapterID: middleChapterID,
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            expectedWorkingRevision: document.branches[0].workingRevision,
+            context: deleteContext,
+            payloadSHA256: try NovelAction.deleteChapterFromManuscript(deleteCommand)
+                .canonicalPayloadSHA256(),
+            in: document,
+            now: now
+        ).0
+        XCTAssertEqual(document.branches[0].workingChapterSelections.count, 2)
+        XCTAssertEqual(document.branches[0].syncStatus, .needsSync)
+
+        let sync = NovelSyncManualEditsCommand(
+            context: mutationContext(document: document, operationID: NovelOperationID()),
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: document.branches[0].workingRevision
+        )
+        let prepared = try NovelFactTransactionReducer.prepareManualSync(
+            sync,
+            payloadSHA256: sync.canonicalPayloadSHA256(),
+            in: document,
+            now: now.addingTimeInterval(1)
+        )
+        switch prepared {
+        case .needsModel(let preparedDocument, let pending):
+            XCTAssertEqual(pending.kind, .manualSync)
+            let input = try NovelFactTransactionReducer.manualRebuildInput(
+                pendingID: pending.id,
+                in: preparedDocument
+            )
+            // Middle chapter is gone; rebuild suffix should only cover remaining prose.
+            XCTAssertFalse(input.chapters.contains(where: { $0.chapterID == middleChapterID }))
+            XCTAssertFalse(input.chapters.isEmpty)
+        case .completed:
+            break
+        }
+    }
+
+    func testManualSyncRejectsDuplicateAndReorderedWorkingShapes() throws {
         let document = try documentWithTwoCollectedChapters()
-        var variants: [NovelProjectDocumentV1] = []
-
-        var short = document
-        short.branches[0].workingChapterSelections.removeLast()
-        variants.append(short)
-
         var long = document
         long.branches[0].workingChapterSelections.append(
             document.branches[0].workingChapterSelections[0]
         )
-        variants.append(long)
-
         var reordered = document
         reordered.branches[0].workingChapterSelections.swapAt(0, 1)
-        variants.append(reordered)
-
-        for var variant in variants {
+        for var variant in [long, reordered] {
             variant.branches[0].syncStatus = .needsSync
             variant.branches[0].workingRevision += 1
             let command = NovelSyncManualEditsCommand(

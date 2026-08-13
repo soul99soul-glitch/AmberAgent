@@ -460,17 +460,33 @@ final class NovelStructuredOutputTests: XCTestCase {
         XCTAssertEqual(explained.events.map(\.id), ["event-rebuilt-1"])
     }
 
-    func testStructuredDecoderRejectsMultipleJSONObjects() throws {
-        let json = try XCTUnwrap(
-            String(data: try data(rebuildObject()), encoding: .utf8)
-        )
+    func testStructuredDecoderUsesFirstOfMultipleJSONObjects() throws {
+        var first = rebuildObject()
+        first["stateSummary"] = "First complete rebuild object."
+        var second = rebuildObject()
+        second["stateSummary"] = "Trailing duplicate the model should not win."
+        let firstJSON = try XCTUnwrap(String(data: try data(first), encoding: .utf8))
+        let secondJSON = try XCTUnwrap(String(data: try data(second), encoding: .utf8))
 
-        assertFailure(
-            category: .malformedJSON,
-            try NovelStructuredOutputDecoder.decodeStateRebuild(
-                from: "\(json)\n\(json)"
-            )
+        // Common failure mode on long manual-sync: two objects concatenated.
+        // Heal locally by taking the first complete object — do not force a
+        // second model pass over the same manuscript chunk.
+        let decoded = try NovelStructuredOutputDecoder.decodeStateRebuild(
+            from: "\(firstJSON)\n\(secondJSON)"
         )
+        XCTAssertEqual(decoded.stateSummary, "First complete rebuild object.")
+
+        // Trailing non-object prose after a complete object still works.
+        let withProse = try NovelStructuredOutputDecoder.decodeStateRebuild(
+            from: "\(firstJSON)\n以上为本次同步。"
+        )
+        XCTAssertEqual(withProse.stateSummary, "First complete rebuild object.")
+
+        // If the first top-level object fails schema, try the next candidate.
+        let junkThenValid = try NovelStructuredOutputDecoder.decodeStateRebuild(
+            from: "{\"notARebuild\":true}\n\(firstJSON)"
+        )
+        XCTAssertEqual(junkThenValid.stateSummary, "First complete rebuild object.")
     }
 
     func testWrappedPayloadStillUsesStrictSchemaValidation() throws {

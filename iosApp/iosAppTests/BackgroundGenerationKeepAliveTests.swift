@@ -23,8 +23,12 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         var nextTaskId: Int = 1
         var registrationResult = true
         var submitError: Error?
+        /// Fail the first N submit attempts, then succeed.
+        var remainingSubmitFailures: Int = 0
 
-        func makeKeepAlive() -> BackgroundGenerationKeepAlive {
+        func makeKeepAlive(
+            systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000
+        ) -> BackgroundGenerationKeepAlive {
             BackgroundGenerationKeepAlive(
                 beginBackgroundTask: { [self] name, expiration in
                     begunNames.append(name)
@@ -39,7 +43,15 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
                     events.append("end")
                 },
                 submitTaskRequest: { [self] request in
-                    if let submitError { throw submitError }
+                    if remainingSubmitFailures > 0 {
+                        remainingSubmitFailures -= 1
+                        events.append("submit-fail")
+                        throw SubmitFailure()
+                    }
+                    if let submitError {
+                        events.append("submit-fail")
+                        throw submitError
+                    }
                     events.append("submit")
                     submittedRequests.append(request)
                 },
@@ -49,7 +61,8 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
                 registerLaunchHandler: { [self] identifier, _ in
                     registeredIdentifiers.append(identifier)
                     return registrationResult
-                }
+                },
+                systemSubmitRetryDelayNanoseconds: systemSubmitRetryDelayNanoseconds
             )
         }
     }
@@ -157,6 +170,58 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertEqual(spy.begunNames.count, 1)
         XCTAssertEqual(spy.submittedRequests.count, 1)
+    }
+
+    func testSubmitFailureSchedulesOneRetryThenSucceeds() async {
+        let spy = SystemSpy()
+        spy.remainingSubmitFailures = 1
+        let keepAlive = spy.makeKeepAlive(systemSubmitRetryDelayNanoseconds: 20_000_000)
+
+        keepAlive.begin("run-1", title: "Amber 正在生成", subtitle: "GPT")
+        XCTAssertEqual(spy.events, ["begin", "submit-fail"])
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
+
+        // Allow the deferred resubmit to run.
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        XCTAssertEqual(spy.events, ["begin", "submit-fail", "submit"])
+        XCTAssertEqual(spy.submittedRequests.count, 1)
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
+    }
+
+    func testSubmitFailureRetryDoesNotLoopForever() async {
+        let spy = SystemSpy()
+        // Always fail: first submit + exactly one scheduled retry.
+        spy.submitError = SubmitFailure()
+        let keepAlive = spy.makeKeepAlive(systemSubmitRetryDelayNanoseconds: 20_000_000)
+
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
+        XCTAssertEqual(spy.begunNames.count, 1)
+        XCTAssertEqual(spy.events.filter { $0 == "submit-fail" }.count, 2)
+    }
+
+    func testAbandonSystemAssertionCancelsPendingRetryWithoutDroppingUIKitLease() async {
+        let spy = SystemSpy()
+        spy.remainingSubmitFailures = 1
+        let keepAlive = spy.makeKeepAlive(systemSubmitRetryDelayNanoseconds: 50_000_000)
+
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+        XCTAssertEqual(spy.events, ["begin", "submit-fail"])
+
+        keepAlive.abandonSystemAssertion("run-1")
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .uiOnly)
+        XCTAssertEqual(spy.cancelledIdentifiers, [keepAlive.identifier(for: "run-1")])
+
+        try? await Task.sleep(nanoseconds: 120_000_000)
+        // No second submit after abandon.
+        XCTAssertEqual(spy.events.filter { $0 == "submit" }.count, 0)
+        XCTAssertEqual(spy.events.filter { $0 == "submit-fail" }.count, 1)
     }
 
     func testTransferReleasesGenericLeaseBeforeStartingDedicatedRequest() {

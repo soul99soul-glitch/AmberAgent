@@ -297,41 +297,47 @@ struct NovelProjectWorkspaceView: View {
             currentStateSyncActivity != nil ||
             isCurrentStateSyncStopping {
             workspaceStatusStrip {
-                HStack(spacing: 10) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AmberTheme.accentAmber)
-                    Text(currentStateSyncStatusTitle)
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if canCancelCurrentAutomaticStateSync,
-                       let projectID = viewModel.selectedProjectID,
-                       let branchID = viewModel.selectedBranchID {
-                        Button("停止") {
-                            viewModel.cancelAutomaticStateSync(
-                                projectID: projectID,
-                                branchID: branchID
-                            )
-                        }
-                        .font(.footnote.weight(.semibold))
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                }
+                NovelStateSyncProgressBanner(
+                    title: currentStateSyncStatusTitle,
+                    activity: currentStateSyncActivity,
+                    secondaryHint: isCurrentStateSyncStopping
+                        ? "正在停止，完成后可继续操作。"
+                        : "分段读取正文并更新剧情状态，大项目会较久。",
+                    canStop: canCancelCurrentAutomaticStateSync,
+                    onStop: {
+                        guard let projectID = viewModel.selectedProjectID,
+                              let branchID = viewModel.selectedBranchID else { return }
+                        viewModel.cancelAutomaticStateSync(
+                            projectID: projectID,
+                            branchID: branchID
+                        )
+                    },
+                    usesBorderedStop: false
+                )
             }
         } else if section != .creation, let currentStateSyncFailure {
             workspaceStatusStrip {
-                HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     Label(currentStateSyncFailure, systemImage: "exclamationmark.triangle")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.accentRed)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Button("重试同步", action: retryCurrentStateSync)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 12) {
+                        Button("重试同步", action: retryCurrentStateSync)
+                            .font(.footnote.weight(.semibold))
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .disabled(!canRetryCurrentStateSync)
+                        Button("重新载入") {
+                            Task { @MainActor in
+                                try? await viewModel.refreshCurrentSelection()
+                            }
+                        }
                         .font(.footnote.weight(.semibold))
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
-                        .disabled(!canRetryCurrentStateSync)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
         }

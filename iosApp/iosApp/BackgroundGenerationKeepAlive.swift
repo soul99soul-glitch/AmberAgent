@@ -81,12 +81,17 @@ final class BackgroundGenerationKeepAlive {
     /// Continued Processing 每轮使用具体 identifier 注册；同一 run 在本进程内
     /// 重投时复用既有 handler，避免系统判定为重复注册并终止 App。
     private var registeredIdentifiers: Set<String> = []
+    /// One deferred resubmit per lease after a transient submit refusal (e.g. Code=1).
+    private var systemSubmitRetryScheduled: Set<String> = []
+    private var systemSubmitRetryTasks: [String: Task<Void, Never>] = [:]
 
     private let beginBackgroundTask: BeginBackgroundTask
     private let endBackgroundTask: EndBackgroundTask
     private let submitTaskRequest: SubmitTaskRequest
     private let cancelTaskRequest: CancelTaskRequest
     private let registerLaunchHandler: RegisterLaunchHandler
+    /// Delay before a single resubmit after BGTaskScheduler refuses the first submit.
+    private let systemSubmitRetryDelayNanoseconds: UInt64
 
     init(
         beginBackgroundTask: @escaping BeginBackgroundTask = { name, expiration in
@@ -103,13 +108,15 @@ final class BackgroundGenerationKeepAlive {
         },
         registerLaunchHandler: @escaping RegisterLaunchHandler = { identifier, handler in
             BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil, launchHandler: handler)
-        }
+        },
+        systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000
     ) {
         self.beginBackgroundTask = beginBackgroundTask
         self.endBackgroundTask = endBackgroundTask
         self.submitTaskRequest = submitTaskRequest
         self.cancelTaskRequest = cancelTaskRequest
         self.registerLaunchHandler = registerLaunchHandler
+        self.systemSubmitRetryDelayNanoseconds = systemSubmitRetryDelayNanoseconds
     }
 
     private var bundleIdentifier: String { Bundle.main.bundleIdentifier ?? "app.amber.ios" }
@@ -209,6 +216,32 @@ final class BackgroundGenerationKeepAlive {
             lease.systemTaskCompletion.complete(systemTask, success: true)
         }
         IOSBackgroundLifecycleLog.record("keepAliveEnd(\(leaseId))", detail: snapshotDetail)
+    }
+
+    /// Drop system continued-processing (pending retry, queued request, or adopted
+    /// task) while keeping the UIKit short window for durable persist.
+    ///
+    /// Used when business cancel ends the run asynchronously: without this, a
+    /// deferred submit retry can re-post a progress card after the run is already dead.
+    func abandonSystemAssertion(_ leaseId: String) {
+        guard var lease = leases[leaseId] else { return }
+        cancelSystemSubmitRetry(for: leaseId)
+        let taskIdentifier = identifier(for: leaseId)
+        leaseIdsByIdentifier.removeValue(forKey: taskIdentifier)
+        cancelTaskRequest(taskIdentifier)
+        if let systemTask = lease.systemTask {
+            lease.systemTaskCompletion.complete(systemTask, success: true)
+            lease.systemTask = nil
+            lease.waiter?.resume()
+            lease.waiter = nil
+        }
+        lease.didSubmitSystemTask = false
+        lease.submitSystemTask = false
+        leases[leaseId] = lease
+        IOSBackgroundLifecycleLog.record(
+            "keepAliveAbandonSystem(\(leaseId))",
+            detail: snapshotDetail
+        )
     }
 
     /// 首 token 后再提交系统 continued-processing 进度卡。
@@ -357,11 +390,44 @@ final class BackgroundGenerationKeepAlive {
         do {
             try submitTaskRequest(request)
             leases[leaseId]?.didSubmitSystemTask = true
+            cancelSystemSubmitRetry(for: leaseId)
             IOSBackgroundLifecycleLog.record("keepAliveSubmitted(\(leaseId))", detail: snapshotDetail)
         } catch {
             NSLog("[AmberKeepAlive] submit failed for \(taskIdentifier): \(error)")
             IOSBackgroundLifecycleLog.record("keepAliveSubmitFailed(\(leaseId))", detail: snapshotDetail)
+            // One resubmit while the UIKit short window is still alive — Code=1 is
+            // often transient under load; a second try can still win multi-minute
+            // adoption instead of falling through to a pure 30s lease.
+            scheduleSystemSubmitRetryIfNeeded(leaseId: leaseId, title: title, subtitle: subtitle)
         }
+    }
+
+    private func scheduleSystemSubmitRetryIfNeeded(
+        leaseId: String,
+        title: String,
+        subtitle: String
+    ) {
+        guard systemSubmitRetryScheduled.insert(leaseId).inserted else { return }
+        systemSubmitRetryTasks[leaseId]?.cancel()
+        let delay = systemSubmitRetryDelayNanoseconds
+        systemSubmitRetryTasks[leaseId] = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard let self, !Task.isCancelled else { return }
+            guard let lease = self.leases[leaseId],
+                  lease.systemTask == nil,
+                  !lease.didSubmitSystemTask else { return }
+            IOSBackgroundLifecycleLog.record(
+                "keepAliveSubmitRetry(\(leaseId))",
+                detail: self.snapshotDetail
+            )
+            self.submitContinuedTask(leaseId, title: title, subtitle: subtitle)
+        }
+    }
+
+    private func cancelSystemSubmitRetry(for leaseId: String) {
+        systemSubmitRetryTasks[leaseId]?.cancel()
+        systemSubmitRetryTasks.removeValue(forKey: leaseId)
+        systemSubmitRetryScheduled.remove(leaseId)
     }
 
     /// 系统调度到这一轮：接管执行权，然后挂起等 `end`。
@@ -452,6 +518,7 @@ final class BackgroundGenerationKeepAlive {
     /// 「正在生成」进度卡，白烧一次唤醒。已经被调度走的那些 cancel 是 no-op。
     @discardableResult
     private func removeLease(_ leaseId: String) -> Lease? {
+        cancelSystemSubmitRetry(for: leaseId)
         let taskIdentifier = identifier(for: leaseId)
         leaseIdsByIdentifier.removeValue(forKey: taskIdentifier)
         cancelTaskRequest(taskIdentifier)

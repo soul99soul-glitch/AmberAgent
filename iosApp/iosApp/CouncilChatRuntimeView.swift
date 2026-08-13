@@ -61,9 +61,12 @@ enum CouncilTranscriptFollowPolicy {
 private struct CouncilModeCapsuleGlass: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
+            // Match ChatToolbarIconButton: a light glass pad + Liquid Glass.
+            // Full AmberTheme.glass (warm paper @ ~72%) reads as a yellow blob
+            // on cream transcript; opacity 0.16 keeps the chip neutral/opaque.
             content
-                .background(AmberTheme.glass, in: Capsule())
-                .glassEffect(.regular, in: Capsule())
+                .background(AmberTheme.glass.opacity(0.16), in: Capsule())
+                .glassEffect(.regular.interactive(), in: Capsule())
         } else {
             content.background(.ultraThinMaterial, in: Capsule())
         }
@@ -293,7 +296,10 @@ struct CouncilChatRuntimeView: View {
                 }
             }
 
+            // Hug-sized capsule centered by ZStack — gutter is clearance only.
             modeCapsuleButton
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, ChatTopBarLayout.islandSideGutter)
         }
         .padding(.horizontal, 18)
         .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
@@ -303,11 +309,14 @@ struct CouncilChatRuntimeView: View {
         Button {
             viewModel.showMembers()
         } label: {
+            // Hug on the label before glass — Button + glassEffect otherwise fill
+            // the ZStack proposal and paint a full-gutter-width capsule.
             VStack(spacing: 1) {
                 HStack(spacing: 3) {
                     Text(viewModel.selectedMode.title)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(AmberTheme.muted)
@@ -319,11 +328,15 @@ struct CouncilChatRuntimeView: View {
             }
             .padding(.horizontal, 14)
             .frame(height: 40)
+            .fixedSize(horizontal: true, vertical: false)
+            .modifier(CouncilModeCapsuleGlass())
             .contentShape(Capsule())
         }
         .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .lightImpact))
-        .modifier(CouncilModeCapsuleGlass())
-        .accessibilityLabel("议会模式与席位")
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(
+            "\(viewModel.selectedMode.title)，\(viewModel.participants.count) 位成员，第 \(viewModel.discussionRound) 轮"
+        )
     }
 
     private var transcript: some View {

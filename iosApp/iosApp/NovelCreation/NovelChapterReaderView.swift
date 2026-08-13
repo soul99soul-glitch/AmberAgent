@@ -179,31 +179,28 @@ struct NovelChapterReaderView: View {
     @ViewBuilder
     private var chapterStatusBanner: some View {
         if isCurrentStateSyncRunning {
-            HStack(spacing: 9) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(AmberTheme.accentAmber)
-                Text(currentStateSyncStatusTitle)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(AmberTheme.foreground2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let projectID = viewModel.selectedProjectID,
-                   let branchID = viewModel.selectedBranchID,
-                   viewModel.canCancelAutomaticStateSync(
-                       projectID: projectID,
-                       branchID: branchID
-                   ) {
-                    Button("停止") {
-                        viewModel.cancelAutomaticStateSync(
-                            projectID: projectID,
-                            branchID: branchID
-                        )
-                    }
-                    .font(.footnote.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
-                    .contentShape(Rectangle())
-                }
-            }
+            NovelStateSyncProgressBanner(
+                title: currentStateSyncStatusTitle,
+                activity: currentStateSyncActivity,
+                secondaryHint: "分段读取正文并更新剧情状态，大项目会较久。",
+                canStop: {
+                    guard let projectID = viewModel.selectedProjectID,
+                          let branchID = viewModel.selectedBranchID else { return false }
+                    return viewModel.canCancelAutomaticStateSync(
+                        projectID: projectID,
+                        branchID: branchID
+                    )
+                }(),
+                onStop: {
+                    guard let projectID = viewModel.selectedProjectID,
+                          let branchID = viewModel.selectedBranchID else { return }
+                    viewModel.cancelAutomaticStateSync(
+                        projectID: projectID,
+                        branchID: branchID
+                    )
+                },
+                usesBorderedStop: false
+            )
             .padding(.horizontal, 20)
             .padding(.vertical, 9)
             .background(AmberTheme.accentAmber.opacity(0.10))

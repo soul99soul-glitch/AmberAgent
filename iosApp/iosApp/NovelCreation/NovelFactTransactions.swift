@@ -36,6 +36,28 @@ struct NovelFactTransactionReceiptArtifacts: Equatable, Sendable {
 typealias NovelPendingFactTransactionResult = (document: NovelProjectDocumentV1, pending: NovelPendingOperationRecord)
 typealias NovelFactTransactionResult = (document: NovelProjectDocumentV1, outcome: NovelOutcome)
 
+/// Manual-sync may finish without a model call when the working manuscript is
+/// already fully described by a compatible rebuild base (e.g. trailing chapter
+/// delete only).
+enum NovelManualSyncPreparation: Sendable {
+    case needsModel(document: NovelProjectDocumentV1, pending: NovelPendingOperationRecord)
+    case completed(document: NovelProjectDocumentV1, outcome: NovelOutcome)
+
+    /// Test / call-site convenience: document after preparation.
+    var document: NovelProjectDocumentV1 {
+        switch self {
+        case .needsModel(let document, _), .completed(let document, _):
+            document
+        }
+    }
+
+    /// Pending only when a model rebuild is still required.
+    var pending: NovelPendingOperationRecord? {
+        if case .needsModel(_, let pending) = self { return pending }
+        return nil
+    }
+}
+
 enum NovelFactTransactionReducer {
     static func replayOutcome(
         context: NovelMutationContext,
@@ -739,7 +761,7 @@ enum NovelFactTransactionReducer {
         payloadSHA256: String,
         in document: NovelProjectDocumentV1,
         now: Date = Date()
-    ) throws -> NovelPendingFactTransactionResult {
+    ) throws -> NovelManualSyncPreparation {
         try requireProject(command.projectID, in: document)
         try requirePayloadHash(payloadSHA256)
         if let existing = try matchingPending(
@@ -749,7 +771,7 @@ enum NovelFactTransactionReducer {
             payloadSHA256: payloadSHA256,
             in: document
         ) {
-            return (document, existing)
+            return .needsModel(document: document, pending: existing)
         }
         try requireUnusedOperation(command.context.operationID, in: document)
         let branchIndex = try requireBranch(command.branchID, in: document)
@@ -780,43 +802,65 @@ enum NovelFactTransactionReducer {
             in: document
         )
         let head = try checkpoint(branch.headCheckpointID, in: document)
-        guard head.chapterSelections.count == branch.workingChapterSelections.count,
-              head.chapterSelections.map(\.chapterID) ==
-                branch.workingChapterSelections.map(\.chapterID) else {
-            throw NovelError.invalidInput(
-                "The working manuscript does not form a valid manual-edit suffix."
-            )
-        }
+        let workingSelections = branch.workingChapterSelections
+        // Working may diverge from head by version edits AND by structural change
+        // (deleteFromManuscript removes a chapter from working while head still lists it).
+        // The old equal-chapterID-list guard made every post-delete sync fail instantly.
+        try validateWorkingManuscriptEvolution(
+            from: head.chapterSelections,
+            to: workingSelections
+        )
         let stateBase = try staleStateBaseCheckpoint(
             from: head,
             in: document
         )
         let affectedIndex = firstChangedChapterIndex(
             from: stateBase.chapterSelections,
-            to: branch.workingChapterSelections
+            to: workingSelections
         )
         guard let affectedIndex else {
+            // needsSync but working already matches the state base: nothing to rebuild.
             throw NovelError.invalidInput(
-                "The working manuscript does not form a valid manual-edit suffix."
+                "当前没有需要同步的正文改动。若仍提示待同步，请点「重新载入」后再试。"
             )
         }
-        let affectedChapterID = branch.workingChapterSelections[affectedIndex].chapterID
+        // Pivot chapter for rebuild-base search:
+        // - version edit / insertion: index falls inside working
+        // - trailing deletion: index equals working.count (extra chapters only on base)
+        let pivotChapterID: NovelChapterID
+        if affectedIndex < workingSelections.count {
+            pivotChapterID = workingSelections[affectedIndex].chapterID
+        } else if affectedIndex < stateBase.chapterSelections.count {
+            pivotChapterID = stateBase.chapterSelections[affectedIndex].chapterID
+        } else {
+            throw NovelError.invalidInput(
+                "无法定位需要同步的章节改动，请点「重新载入」后再试。"
+            )
+        }
         let candidateBase = try rebuildBaseCheckpoint(
-            before: affectedChapterID,
+            before: pivotChapterID,
             headCheckpointID: head.id,
             in: document
         )
         let rebuildBase = try latestCompatibleRebuildBase(
             atOrBefore: candidateBase,
-            workingSelections: branch.workingChapterSelections,
+            workingSelections: workingSelections,
             in: document
         )
         let suffixStart = firstChangedChapterIndex(
             from: rebuildBase.chapterSelections,
-            to: branch.workingChapterSelections
+            to: workingSelections
         ) ?? rebuildBase.chapterSelections.count
-        guard suffixStart < branch.workingChapterSelections.count else {
-            throw NovelError.invalidInput("The manual synchronization suffix is empty.")
+        guard suffixStart < workingSelections.count else {
+            // Trailing-only structural removal whose content is already described by
+            // rebuildBase: promote working to synchronized without a model call.
+            return try commitStructuralManualSync(
+                command,
+                payloadSHA256: payloadSHA256,
+                rebuildBase: rebuildBase,
+                in: document,
+                now: now
+            )
         }
         var chapters: [NovelManualRebuildChapter] = []
         for selection in branch.workingChapterSelections[suffixStart...] {
@@ -865,7 +909,90 @@ enum NovelFactTransactionReducer {
         next.pendingOperations.append(pending)
         advanceProjectRevision(in: &next, now: now)
         try validateTransition(from: document, to: next)
-        return (next, pending)
+        return .needsModel(document: next, pending: pending)
+    }
+
+    /// Working manuscript is already fully covered by `rebuildBase` (same chapter
+    /// versions). Typical case: a chapter was removed from the working list while
+    /// earlier content is unchanged — no model call is required to clear needsSync.
+    private static func commitStructuralManualSync(
+        _ command: NovelSyncManualEditsCommand,
+        payloadSHA256: String,
+        rebuildBase: NovelBranchCheckpointRecord,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> NovelManualSyncPreparation {
+        let branchIndex = try requireBranch(command.branchID, in: document)
+        let branch = document.branches[branchIndex]
+        guard rebuildBase.chapterSelections == branch.workingChapterSelections else {
+            throw NovelError.invalidInput(
+                "剧情同步需要重新分析正文，但未能切出有效片段。请点「重新载入」后再试。"
+            )
+        }
+        let baseState = try stateSnapshot(rebuildBase.stateSnapshotID, in: document)
+        guard let session = document.sessions.first(where: { $0.id == branch.sessionID }) else {
+            throw NovelError.sessionNotFound(branch.sessionID)
+        }
+        let cursor: NovelSessionCursor = session.messages.last.map {
+            .through(sequence: $0.sequence)
+        } ?? .empty
+        let snapshotID = command.stateSnapshotID
+        let checkpointID = command.checkpointID
+        let newSnapshot = NovelStateSnapshotRecord(
+            id: snapshotID,
+            eventIDs: baseState.eventIDs,
+            summary: baseState.summary,
+            branchOutline: baseState.branchOutline,
+            unresolvedEntityNames: baseState.unresolvedEntityNames,
+            createdAt: now,
+            settingProposalIDs: baseState.settingProposalIDs,
+            characterIdentityClarifications: baseState.characterIdentityClarifications,
+            recentWrittenHighlights: baseState.recentWrittenHighlights
+        )
+        let finalRevision = document.project.revision + 1
+        let outcome = NovelOutcome.manualSyncCommitted(
+            projectID: document.project.id,
+            branchID: branch.id,
+            checkpointID: checkpointID,
+            revision: finalRevision
+        )
+        let checkpoint = NovelBranchCheckpointRecord(
+            id: checkpointID,
+            kind: .manualSync,
+            createdOnBranchID: branch.id,
+            parentCheckpointID: branch.headCheckpointID,
+            chapterSelections: branch.workingChapterSelections,
+            stateSnapshotID: snapshotID,
+            sessionCursor: cursor,
+            branchOverrideRevisionIDs: branch.overrideRevisionIDs,
+            sourceCandidateID: nil,
+            baseHeadRevision: branch.headRevision,
+            operationID: command.context.operationID,
+            createdAt: now
+        )
+        var next = document
+        next.stateSnapshots.append(newSnapshot)
+        next.appliedOperations.append(NovelAppliedOperationRecord(
+            operationID: command.context.operationID,
+            kind: .syncManualEdits,
+            payloadSHA256: payloadSHA256,
+            outcome: outcome,
+            appliedProjectRevision: finalRevision,
+            appliedAt: now
+        ))
+        try NovelReducer.appendCheckpoint(
+            checkpoint,
+            to: &next,
+            expectedHeadRevision: branch.headRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
+        advanceProjectRevision(in: &next, now: now)
+        guard next.project.revision == finalRevision else {
+            throw NovelError.invalidInput("Manual synchronization revision accounting failed.")
+        }
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return .completed(document: next, outcome: outcome)
     }
 
     static func manualRebuildInput(
@@ -1621,6 +1748,62 @@ enum NovelFactTransactionReducer {
             return changed
         }
         return base.count == current.count ? nil : sharedCount
+    }
+
+    /// Accept version edits, order-preserving deletes (including middle), and trailing
+    /// appends. Reject reorder / duplicate chapter IDs.
+    private static func validateWorkingManuscriptEvolution(
+        from head: [NovelChapterSelection],
+        to working: [NovelChapterSelection]
+    ) throws {
+        let headIDs = head.map(\.chapterID)
+        let workingIDs = working.map(\.chapterID)
+        guard Set(workingIDs).count == workingIDs.count else {
+            throw NovelError.invalidInput(
+                "工作稿章节列表重复，无法同步。请点「重新载入」后再试。"
+            )
+        }
+        if headIDs == workingIDs { return }
+        // Any deletes (end or middle) that keep relative order of remaining chapters.
+        if isOrderPreservingSubsequence(workingIDs, of: headIDs) { return }
+        // Trailing append(s) of brand-new chapters after the previous head list.
+        if workingIDs.starts(with: headIDs) { return }
+        // Deletes + trailing appends: a prefix of working is a subsequence of head,
+        // then only brand-new chapter IDs follow.
+        let keptCount = orderPreservingSubsequenceLength(workingIDs, of: headIDs)
+        if keptCount > 0, keptCount < workingIDs.count {
+            let newTail = Array(workingIDs[keptCount...])
+            let headSet = Set(headIDs)
+            if newTail.allSatisfy({ !headSet.contains($0) }) {
+                return
+            }
+        }
+        throw NovelError.invalidInput(
+            "工作稿章节顺序与存档不一致，无法同步。请点「重新载入」后再试。"
+        )
+    }
+
+    /// Whether `needle` appears in order inside `haystack` (not necessarily contiguous).
+    private static func isOrderPreservingSubsequence(
+        _ needle: [NovelChapterID],
+        of haystack: [NovelChapterID]
+    ) -> Bool {
+        orderPreservingSubsequenceLength(needle, of: haystack) == needle.count
+    }
+
+    /// How many leading elements of `needle` form an order-preserving subsequence of
+    /// `haystack`.
+    private static func orderPreservingSubsequenceLength(
+        _ needle: [NovelChapterID],
+        of haystack: [NovelChapterID]
+    ) -> Int {
+        var i = 0
+        for id in haystack {
+            if i < needle.count, needle[i] == id {
+                i += 1
+            }
+        }
+        return i
     }
 
     private static func encodeManualPayload(

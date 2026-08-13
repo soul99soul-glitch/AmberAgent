@@ -935,7 +935,8 @@ struct AmberGlassCircleButton: View {
     let accessibilityLabel: String
     var size: CGFloat = 44
     var symbolSize: CGFloat = 17
-    var tint: Color = AmberTheme.foreground2
+    /// Top-bar chrome default: theme ink (not accent). Pass accent only for rare primary actions.
+    var tint: Color = AmberTheme.foreground
     let action: () -> Void
 
     var body: some View {

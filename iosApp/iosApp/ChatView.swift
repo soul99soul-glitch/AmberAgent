@@ -7,6 +7,12 @@ import PhotosUI
 enum ChatTopBarLayout {
     static let controlsHeight: CGFloat = 54
     static let toolbarButtonDiameter: CGFloat = 38
+    /// Side chrome gutter for the centered island/mode capsule (~one 38pt button + gap).
+    static let islandSideGutter: CGFloat = 74
+    /// Design max width for the activity / mode capsule shell.
+    static let islandMaxWidth: CGFloat = 268
+    /// Max title text width inside the island (shell − horizontal pad − optional orb).
+    static let islandTitleMaxWidth: CGFloat = 200
     /// 顶栏 `safeAreaBar` 在控件下方的透明延伸，驱动原生 soft edge 几何。
     /// 模拟器会把 soft edge 画满整段 bar（易显「模糊带偏长」）；真机 Liquid Glass 更短。
     /// 取小延伸：盖住按钮下沿即可，避免 Simulator 上大面积雾带。
@@ -554,23 +560,26 @@ struct ChatView: View {
     }
 
     private var topBar: some View {
-        AmberGlassGroup(spacing: 12) {
-            ZStack(alignment: .bottom) {
-                HStack {
-                    backToolbarButton
+        // Do not wrap side buttons + center island in AmberGlassGroup /
+        // GlassEffectContainer: sibling glass morph punches the middle capsule
+        // transparent over the transcript (same class as council 0489ad495).
+        ZStack(alignment: .bottom) {
+            HStack {
+                backToolbarButton
 
-                    Spacer()
+                Spacer()
 
-                    newChatToolbarButton
-                }
-
-                ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
-                    .padding(.horizontal, 74)
-                    .frame(maxWidth: .infinity)
-                    .allowsHitTesting(false)
-                    .onAppear { syncIslandPresentation() }
-                    .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
+                newChatToolbarButton
             }
+
+            // Island already hugs inside ChatActivityIslandView; gutter only keeps
+            // the centered capsule clear of the side chips (not a stretch frame).
+            ChatActivityIslandView(presentation: islandPresentation ?? .idle(topIslandState))
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, ChatTopBarLayout.islandSideGutter)
+                .allowsHitTesting(false)
+                .onAppear { syncIslandPresentation() }
+                .onChange(of: topIslandState) { _, _ in syncIslandPresentation() }
         }
         .padding(.horizontal, 18)
         .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)

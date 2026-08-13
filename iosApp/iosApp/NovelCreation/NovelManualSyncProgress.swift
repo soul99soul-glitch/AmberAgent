@@ -84,6 +84,13 @@ struct NovelManualSyncChunkSelection: Equatable, Sendable {
 }
 
 enum NovelManualSyncChunker {
+    /// Soft cap on manuscript characters per model call.
+    /// Budget-only packing fills the whole context window, so a long novel becomes
+    /// one multi-minute "segment 1" with no durable progress until it finishes.
+    /// ~8k keeps structured rebuild output smaller (fewer multi-JSON / truncate
+    /// failures) while still moving durable progress in reasonable steps.
+    static let preferredMaxManuscriptCharacters = 8_000
+
     private struct BaseProjectedState: Codable {
         let stateSummary: String
         let branchOutline: String
@@ -195,7 +202,29 @@ enum NovelManualSyncChunker {
             if let smallestBudgetError { throw smallestBudgetError }
             throw NovelError.invalidInput("No manual-sync manuscript chunk fits the model context.")
         }
-        if selected.end < characters.count {
+
+        // Prefer a progress-friendly size even when the budget still has room.
+        let preferredCap = min(
+            selected.end,
+            consumedCharacterCount + preferredMaxManuscriptCharacters
+        )
+        if preferredCap < selected.end {
+            let minimumPreferred = consumedCharacterCount +
+                max(1, (preferredCap - consumedCharacterCount) / 2)
+            if let boundary = preferredBoundary(
+                in: characters,
+                lowerBound: minimumPreferred,
+                upperBound: preferredCap
+            ) {
+                let chunk = String(characters[consumedCharacterCount..<boundary])
+                let input = modelInput(chunk: chunk, index: chunkIndex)
+                selected = (boundary, input, try makePlan(input))
+            } else {
+                let chunk = String(characters[consumedCharacterCount..<preferredCap])
+                let input = modelInput(chunk: chunk, index: chunkIndex)
+                selected = (preferredCap, input, try makePlan(input))
+            }
+        } else if selected.end < characters.count {
             let minimumPreferred = consumedCharacterCount +
                 max(1, (selected.end - consumedCharacterCount) / 2)
             if let boundary = preferredBoundary(
@@ -219,6 +248,16 @@ enum NovelManualSyncChunker {
             projectedStateContext: projectedStateContext,
             plan: selected.plan,
             isFinal: selected.end == characters.count
+        )
+    }
+
+    /// Rough total segment count for progress copy (preferred cap, not budget max).
+    static func estimatedSegmentCount(manuscriptCharacterCount: Int) -> Int {
+        guard manuscriptCharacterCount > 0 else { return 0 }
+        return max(
+            1,
+            (manuscriptCharacterCount + preferredMaxManuscriptCharacters - 1)
+                / preferredMaxManuscriptCharacters
         )
     }
 

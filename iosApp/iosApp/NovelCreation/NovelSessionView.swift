@@ -666,12 +666,9 @@ struct NovelSessionView: View {
             .controlSize(.small)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
+            // Same gate as workspace/reader: branch-scoped canRetry only.
             .disabled(
-                workspace.isProjectSelectionBlocked ||
-                    viewModel.isRunning ||
-                    viewModel.isBusy ||
-                    workspace.requiresReload ||
-                    viewModel.access != .readWrite
+                !workspace.canRetryStateSync(projectID: projectID, branchID: branchID)
             )
         }
     }
@@ -818,119 +815,47 @@ struct NovelSessionView: View {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) -> some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(AmberTheme.accentAmber)
-
-            Text(
-                workspace.stateSyncStatusTitle(projectID: projectID, branchID: branchID)
-                    ?? "正在准备剧情状态"
-            )
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.foreground2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if workspace.canCancelAutomaticStateSync(
+        NovelStateSyncProgressBanner(
+            title: workspace.stateSyncStatusTitle(projectID: projectID, branchID: branchID)
+                ?? "正在准备剧情状态",
+            activity: nil,
+            secondaryHint: workspace.isStateSyncStopping(
                 projectID: projectID,
                 branchID: branchID
-            ) {
-                Button("停止") {
-                    workspace.cancelAutomaticStateSync(
-                        projectID: projectID,
-                        branchID: branchID
-                    )
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(minHeight: 44)
-                .contentShape(Rectangle())
+            )
+                ? "正在停止，完成后可继续操作。"
+                : "正在准备同步请求…",
+            canStop: workspace.canCancelAutomaticStateSync(
+                projectID: projectID,
+                branchID: branchID
+            ),
+            onStop: {
+                workspace.cancelAutomaticStateSync(
+                    projectID: projectID,
+                    branchID: branchID
+                )
             }
-        }
+        )
     }
 
     private func stateSyncProgressBanner(_ activity: NovelStateSyncActivity) -> some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let fraction = activity.displayedCompletionFraction
-            let percent = fraction.map { Int(($0 * 100).rounded(.down)) }
-            let waitingSince = activity.requestStartedAt ?? activity.startedAt
-            let elapsed = Int(max(0, context.date.timeIntervalSince(waitingSince)))
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .tint(AmberTheme.accentAmber)
-
-                    Text(
-                        workspace.stateSyncStatusTitle(
-                            projectID: activity.projectID,
-                            branchID: activity.branchID
-                        )
-                            ?? (activity.phase == .preparing
-                                ? "正在准备剧情状态"
-                                : "正在同步剧情状态")
-                    )
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.foreground2)
-
-                    Spacer(minLength: 8)
-
-                    if workspace.canCancelAutomaticStateSync(
-                        projectID: activity.projectID,
-                        branchID: activity.branchID
-                    ) {
-                        Button("停止") {
-                            workspace.cancelAutomaticStateSync(
-                                projectID: activity.projectID,
-                                branchID: activity.branchID
-                            )
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-
-                    if let percent {
-                        Text("\(percent)%")
-                            .font(.footnote.weight(.semibold).monospacedDigit())
-                            .foregroundStyle(AmberTheme.foreground2)
-                    }
-                }
-
-                if let fraction {
-                    ProgressView(value: fraction)
-                        .tint(AmberTheme.accentAmber)
-                }
-
-                Text(stateSyncProgressDetail(
-                    activity: activity,
-                    percent: percent,
-                    elapsed: elapsed
-                ))
-                .font(.caption)
-                .foregroundStyle(AmberTheme.muted)
-                .monospacedDigit()
+        NovelStateSyncProgressBanner(
+            title: workspace.stateSyncStatusTitle(
+                projectID: activity.projectID,
+                branchID: activity.branchID
+            ) ?? activity.statusTitle,
+            activity: activity,
+            canStop: workspace.canCancelAutomaticStateSync(
+                projectID: activity.projectID,
+                branchID: activity.branchID
+            ),
+            onStop: {
+                workspace.cancelAutomaticStateSync(
+                    projectID: activity.projectID,
+                    branchID: activity.branchID
+                )
             }
-            }
-    }
-
-    private func stateSyncProgressDetail(
-        activity: NovelStateSyncActivity,
-        percent: Int?,
-        elapsed: Int
-    ) -> String {
-        guard let percent else {
-            if activity.phase == .analyzing {
-                return "正在分析第 \(activity.completedChunks + 1) 段 · 已等待 \(elapsed) 秒"
-            }
-            return "已等待 \(elapsed) 秒 · 正在准备请求"
-        }
-        let chunkDetail = activity.completedChunks > 0
-            ? " · 已完成 \(activity.completedChunks) 段"
-            : ""
-        return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒"
+        )
     }
 
     private func errorBanner(_ message: String) -> some View {

@@ -242,18 +242,23 @@ final class AgentActivityPresentationTests: XCTestCase {
         ))
     }
 
-    func testTerminalDismissalKeepsFailuresLongerThanCompletions() {
+    func testTerminalDismissalClearsFailuresQuicklyWithoutLingeringBanner() {
         XCTAssertEqual(
             AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .completed),
-            20
+            12
         )
         XCTAssertEqual(
             AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .failed),
-            60
+            8
         )
         XCTAssertEqual(
             AgentActivityLifecyclePolicy.lockScreenDismissalDelay(for: .cancelled),
-            6
+            4
+        )
+        // Failures should not outrank ongoing work on the system surface.
+        XCTAssertLessThan(
+            AgentActivityLifecyclePolicy.relevanceScore(for: .failed),
+            AgentActivityLifecyclePolicy.relevanceScore(for: .running)
         )
     }
 
