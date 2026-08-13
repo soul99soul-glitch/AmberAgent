@@ -1,8 +1,21 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-13（增量存储审查修补）
+Last updated: 2026-08-14（iOS 深度阅读 P0–P2 落地：规划段/分桶/quotes/门闩/references/单段重试/超时）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## iOS 深度阅读 LLM 多段管线（2026-08-14，P0–P2 完成）
+
+产品问题：深读多次只生成 overview，缺少时间轴/关键脉络/深度分析(各方立场)/扩展阅读等模块，与 Android 版深度差距明显。
+
+- **根因（代码证据）**：iOS `IOSDeepReadDraftGenerator.generateViaLLMResult` 原为 4 次独立 JSON 补全，无 Android 的 writer tool + supervisor 循环。任一阶段 throw/JSON 不可解析/缺字段即静默跳过且无日志；提示词诱导整段重发合并 JSON，超 maxTokens(3500) 截断后不可解析；全部失败仍标成功。
+- **P0（阶段鲁棒性）已落地**：每阶段失败重试 1 次（按调用失败/无法解析/缺字段注入纠正提示）；截断 JSON 栈式修复；提示词改「只输出本阶段新增字段」；每阶段 DEBUG NSLog；`GenerationResult.missingSections` → 任务持久化 → 详情页琥珀横幅 + 重新生成按钮 + 完成 toast。
+- **P1（单次调用管线补齐深度）已落地**：①规划段 `synthesizePlan`（overview_angle/narrative_slots/analysis_questions/stakeholders/risk_or_uncertainty/required_source_ids，失败走 `fallbackPlan` 本地兜底，`IOSDeepReadArticlePlan.normalized` 填空过滤）注入各段 prompt；②按段证据分桶 `stageSourcesBlock`（6/9/8/12 条 × 1000/1400/1400/700 字，required ids 优先）；③analysis quotes 字段+schema+渲染（含 `.quote` CSS）；④完成门闩：overview summary ≥24 字（Android `OVERVIEW_SUMMARY_MIN_CHARS` 对等），门闩不过不入稿；⑤扩展阅读段补 references schema + 「参考来源」渲染区块。
+- **P2（单段重试与超时）已落地**：①`generateViaLLMResult` 增 `targetStages`/`initialOutput`（用已存 structuredJSON 播种上下文），`IOSDeepReadLauncher.retry` 有缺失段时只重跑缺失段（Android runSection 对等），穿透协调器/runExistingTask；②`withTimeout`（Result 型 task group，取消子任务不顶掉胜者）+ 每段超时 90/110/150/90s、规划 120s，`stageTimeouts` 可注入；超时计入可重试失败并把原因写进重试提示。P2-c 运行摘要持久化本轮不做（DEBUG 日志够取证）。
+- **审查修补（精准）**：①琥珀横幅文案原称「重新生成会重跑全部段落」，与实际单段重试行为矛盾，改为「只重跑这些缺失段落」；②单段重试前 `prepareRetry` 会清空已生成文章，若重试因无可用模型/无可用来源/系统中断而未成功，任务会以空内容失败——新增 `IOSDeepReadPriorCompletion` 快照，失败终止路径恢复上一稿（含 missingSections 横幅），不再销毁用户内容；③无模型时不把已生成文章静默降级为离线草稿，改为如实失败+恢复。
+- **验证**：`IOSDeepReadPipelineTests` **23/23**（plan 解析/注入/兜底、分桶、quotes/references、门闩、超时→重试、targeted retry、失败重试恢复上一稿）+ `IOSDeepReadStructuredRendererTests` **9/9** + `IOSParityRedLightTests` 深读 5 项全绿；62 项中 3 项失败为**既有基线**（chat 后台/工具租约/MiniApp 域，隔离重跑同样失败，与本轮文件无交集）。`git diff --check` 干净。
+- **未验证/残余**：真实 provider 端到端多段生成、真机 DEBUG 日志取证；P3 工具型 agent loop 未引入（每段只喂预抓取来源块，按 `docs/IOS_DEEPREAD_PARITY_PLAN.md` 开门条件决定）；coverage→verification tail（当前 Android 亦未实现）不做。
+- **下一切口**：真机跑真实 provider 验收「规划+4 段全成功、分析段 ≥3 立场+引语、缺段横幅+单段重试」；若仍有段缺失且日志证明是来源不足 → 评估 P3。
 
 ## 小说项目分片增量存储（2026-08-13）
 

@@ -2,6 +2,16 @@ import SwiftUI
 import UniformTypeIdentifiers
 @preconcurrency import Shared
 
+/// Snapshot of a completed (possibly partial) article, kept across a retry so
+/// that a retry run which ends without success (no model, no usable sources,
+/// system interruption) restores the last good draft instead of leaving the
+/// task failed with empty content.
+struct IOSDeepReadPriorCompletion: Sendable {
+    let markdown: String
+    let structuredJSON: String?
+    let missingSections: [String]
+}
+
 /// Shared deep-read create+generate pipeline, used by both the hot-list tap path
 /// (BoardView) and the manual create form (DeepReadCreateView). Navigates to the
 /// task page immediately, then runs the pipeline in-process (KeepAlive holds
@@ -44,6 +54,27 @@ enum IOSDeepReadLauncher {
         onStatus: @escaping StatusHandler
     ) {
         let store = IOSDeepReadStore.shared
+        // Single-section retry (Android runSection parity): when the task completed
+        // with missing sections, only regenerate those — seeding the stored
+        // structured output so the targeted stages see the rest of the article.
+        let current = store.task(id: taskId)
+        let missing = current?.missingSections ?? []
+        // prepareRetry below wipes the article; keep the last good draft so a
+        // failed retry run can restore it instead of destroying user content.
+        let priorCompletion: IOSDeepReadPriorCompletion?
+        if let current, current.status == .succeeded, !missing.isEmpty {
+            priorCompletion = IOSDeepReadPriorCompletion(
+                markdown: current.resultMarkdown,
+                structuredJSON: current.structuredJSON,
+                missingSections: missing
+            )
+        } else {
+            priorCompletion = nil
+        }
+        let initialOutput: IOSDeepReadOutput? = current?.structuredJSON
+            .flatMap { $0.data(using: .utf8) }
+            .flatMap { try? JSONDecoder().decode(IOSDeepReadOutput.self, from: $0) }
+        let targetStages: Set<String>? = missing.isEmpty ? nil : Set(missing)
         store.prepareRetry(id: taskId)
         store.markRunning(id: taskId)
         let title = store.task(id: taskId)?.title ?? "深度阅读"
@@ -51,6 +82,9 @@ enum IOSDeepReadLauncher {
             taskId: taskId,
             title: title,
             sharedSettings: sharedSettings,
+            targetStages: targetStages,
+            initialOutput: initialOutput,
+            priorCompletion: priorCompletion,
             onStatus: onStatus
         )
     }
@@ -62,7 +96,10 @@ enum IOSDeepReadLauncher {
         store: IOSDeepReadStore = .shared,
         workspaceArtifactSaver: WorkspaceArtifactSaver = IOSDeepReadLauncher.defaultWorkspaceArtifactSaver,
         onStatus: StatusHandler? = nil,
-        isCurrentRun: @escaping @MainActor () -> Bool = { !Task.isCancelled }
+        isCurrentRun: @escaping @MainActor () -> Bool = { !Task.isCancelled },
+        targetStages: Set<String>? = nil,
+        initialOutput: IOSDeepReadOutput? = nil,
+        priorCompletion: IOSDeepReadPriorCompletion? = nil
     ) async -> Bool {
         defer {
             if isCurrentRun() {
@@ -115,25 +152,30 @@ enum IOSDeepReadLauncher {
                 taskId: taskId,
                 message: "深度阅读生成失败：没有可用来源，请检查搜索/网页抓取配置后重试。",
                 store: store,
-                onStatus: onStatus
+                onStatus: onStatus,
+                priorCompletion: priorCompletion
             )
         }
 
         let output: String
         var structuredJSON: String? = nil
+        var missingSections: [String] = []
         if let (modelId, providerSetting) = sharedSettings.resolveBoardDeepReadModel(
             boardModelId: sharedSettings.todayBoard.boardModelId
         ) {
-            updateProgress(generationBase, "正在生成概览")
+            updateProgress(generationBase, "正在生成深度阅读")
             let result = await IOSDeepReadDraftGenerator.generateViaLLMResult(
                 task: running,
                 providerSetting: providerSetting,
                 modelId: modelId,
                 onStageProgress: { label, index, _ in
                     updateProgress(generationBase + Int64(index), "正在生成\(label)")
-                }
+                },
+                initialOutput: initialOutput,
+                targetStages: targetStages
             )
             guard isCurrentRun() else { return false }
+            missingSections = result.missingSections
             switch IOSDeepReadDraftGenerator.outcome(
                 for: result,
                 offlineFallback: IOSDeepReadDraftGenerator.generate(task: running)
@@ -143,12 +185,23 @@ enum IOSDeepReadLauncher {
                     taskId: taskId,
                     message: "深度阅读生成失败：\(IOSDeepReadUserFacingText.sanitize(reason))",
                     store: store,
-                    onStatus: onStatus
+                    onStatus: onStatus,
+                    priorCompletion: priorCompletion
                 )
             case .completed(let markdown, let json):
                 output = markdown
                 structuredJSON = json
             }
+        } else if let priorCompletion {
+            // A single-section retry with no usable model must not silently
+            // replace the last good draft with a local offline draft.
+            return failRun(
+                taskId: taskId,
+                message: "深度阅读生成失败：当前未配置可用模型，无法重新生成。",
+                store: store,
+                onStatus: onStatus,
+                priorCompletion: priorCompletion
+            )
         } else {
             updateProgress(generationBase + 4, "正在生成离线草稿")
             output = IOSDeepReadDraftGenerator.generate(task: running)
@@ -158,11 +211,20 @@ enum IOSDeepReadLauncher {
         guard isCurrentRun(), store.task(id: taskId)?.status == .running else { return false }
 
         updateProgress(progressTotal, "正在保存结果")
-        store.complete(id: taskId, markdown: output, structuredJSON: structuredJSON)
+        store.complete(
+            id: taskId,
+            markdown: output,
+            structuredJSON: structuredJSON,
+            missingSections: missingSections.isEmpty ? nil : missingSections
+        )
         do {
             try workspaceArtifactSaver(running.title, output, .deepRead, "deep_read", running.id)
             store.clearWorkspaceSyncFailure(id: taskId)
-            onStatus?("已生成并保存深度阅读。", false)
+            if missingSections.isEmpty {
+                onStatus?("已生成并保存深度阅读。", false)
+            } else {
+                onStatus?("深度阅读已生成，但部分段落未完成（\(missingSections.joined(separator: "、"))），可重新生成。", true)
+            }
         } catch {
             let message = IOSDeepReadUserFacingText.fromError(error)
             store.markWorkspaceSyncFailed(id: taskId, message: message)
@@ -191,11 +253,30 @@ enum IOSDeepReadLauncher {
         taskId: String,
         message: String,
         store: IOSDeepReadStore,
-        onStatus: StatusHandler?
+        onStatus: StatusHandler?,
+        priorCompletion: IOSDeepReadPriorCompletion? = nil
     ) -> Bool {
-        store.fail(id: taskId, message: message)
+        if let priorCompletion {
+            restorePriorCompletion(priorCompletion, taskId: taskId, store: store)
+        } else {
+            store.fail(id: taskId, message: message)
+        }
         onStatus?(message, true)
         return false
+    }
+
+    /// Reinstates the article snapshot captured before a retry wiped the task.
+    static func restorePriorCompletion(
+        _ prior: IOSDeepReadPriorCompletion,
+        taskId: String,
+        store: IOSDeepReadStore
+    ) {
+        store.complete(
+            id: taskId,
+            markdown: prior.markdown,
+            structuredJSON: prior.structuredJSON,
+            missingSections: prior.missingSections
+        )
     }
 
     private static func isUsableSourceForGeneration(_ source: IOSDeepReadSource) -> Bool {
@@ -435,6 +516,9 @@ final class IOSDeepReadBackgroundCoordinator {
         taskId: String,
         title: String,
         sharedSettings: IOSSharedSettingsStore,
+        targetStages: Set<String>? = nil,
+        initialOutput: IOSDeepReadOutput? = nil,
+        priorCompletion: IOSDeepReadPriorCompletion? = nil,
         onStatus: @escaping IOSDeepReadLauncher.StatusHandler
     ) {
         configure(sharedSettings: sharedSettings)
@@ -451,7 +535,13 @@ final class IOSDeepReadBackgroundCoordinator {
                 guard let self, self.runRegistry.cancel(taskId: taskId, generationID: generationID) else { return }
                 if let task = IOSDeepReadStore.shared.task(id: taskId),
                    task.status == .running || task.status == .queued {
-                    IOSDeepReadStore.shared.fail(id: taskId, message: interruptMessage)
+                    if let priorCompletion {
+                        IOSDeepReadLauncher.restorePriorCompletion(
+                            priorCompletion, taskId: taskId, store: .shared
+                        )
+                    } else {
+                        IOSDeepReadStore.shared.fail(id: taskId, message: interruptMessage)
+                    }
                     onStatus(interruptMessage, true)
                 }
                 _ = try? await self.durableRunStore.transitionFromAnyActive(
@@ -495,7 +585,13 @@ final class IOSDeepReadBackgroundCoordinator {
             )) == true
             guard didStartDurably else {
                 let message = "无法保存运行状态，深度阅读未启动。"
-                IOSDeepReadStore.shared.fail(id: taskId, message: message)
+                if let priorCompletion {
+                    IOSDeepReadLauncher.restorePriorCompletion(
+                        priorCompletion, taskId: taskId, store: .shared
+                    )
+                } else {
+                    IOSDeepReadStore.shared.fail(id: taskId, message: message)
+                }
                 onStatus(message, true)
                 return
             }
@@ -514,7 +610,10 @@ final class IOSDeepReadBackgroundCoordinator {
                 isCurrentRun: { [weak self] in
                     guard !Task.isCancelled, let self else { return false }
                     return self.runRegistry.isCurrent(taskId: taskId, generationID: generationID)
-                }
+                },
+                targetStages: targetStages,
+                initialOutput: initialOutput,
+                priorCompletion: priorCompletion
             )
             // Expiration removes the registry owner and owns the interrupted
             // settlement above; do not race it with a generic failed mapping.

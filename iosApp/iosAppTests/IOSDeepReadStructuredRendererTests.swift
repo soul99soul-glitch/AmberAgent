@@ -119,4 +119,40 @@ final class IOSDeepReadStructuredRendererTests: XCTestCase {
         )
         XCTAssertNil(IOSDeepReadDraftGenerator.extractJSONObject("no json here"))
     }
+
+    func testQuotesAndReferencesRenderAsSections() throws {
+        let json = """
+        {
+          "summary": "这是一段足够长的摘要文本，用于支撑结构化渲染。",
+          "analysis": {
+            "core_dispute": "分歧点",
+            "perspectives": [{"viewpoint": "观点A", "holder": "甲方"}],
+            "quotes": [{"text": "这是一句引语。", "attribution": "发言人"}],
+            "implications": "影响"
+          },
+          "references": [{"title": "参考来源", "url": "https://example.org", "source": "媒体"}]
+        }
+        """
+        let output = try JSONDecoder().decode(IOSDeepReadOutput.self, from: Data(json.utf8))
+        XCTAssertEqual(output.analysis.quotes.count, 1)
+        XCTAssertEqual(output.references.count, 1)
+
+        let html = IOSDeepReadEditorialRenderer.renderHTML(
+            IOSDeepReadEditorialRenderer.Input(title: "标题", markdown: "", structured: output)
+        )
+        XCTAssertTrue(html.contains(#"class="quote""#))
+        XCTAssertTrue(html.contains(#"class="quote-attribution""#))
+        XCTAssertTrue(html.contains("发言人"))
+        XCTAssertTrue(html.contains(#"<p class="section">参考来源</p>"#))
+        XCTAssertTrue(html.contains("https://example.org"))
+    }
+
+    func testAnalysisQuotesDecodeTolerantlyWithoutQuotesKey() throws {
+        // Old persisted JSON without the quotes key decodes to an empty array.
+        let output = try JSONDecoder().decode(
+            IOSDeepReadOutput.self,
+            from: Data(#"{"analysis":{"core_dispute":"分歧"}}"#.utf8)
+        )
+        XCTAssertTrue(output.analysis.quotes.isEmpty)
+    }
 }

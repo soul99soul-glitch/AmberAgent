@@ -22,6 +22,7 @@ enum IOSDeepReadStructuredRenderer {
         if let diagram = output.diagram { b += diagramSection(diagram) }
         b += analysisSection(output.analysis)
         b += extendedReadingSection(output.extendedReading)
+        b += referencesSection(output.references)
         return b
     }
 
@@ -131,6 +132,13 @@ enum IOSDeepReadStructuredRenderer {
             b += #"<div class="perspective"><p class="holder">"# + esc(perspective.holder ?? "") + "</p>"
             b += #"<div class="markdown-body">"# + md(perspective.viewpoint) + "</div></div>"
         }
+        for quote in analysis.quotes.prefix(6) where !quote.text.isEmpty {
+            b += #"<div class="quote"><p class="quote-text">"# + esc(quote.text) + "</p>"
+            if let attribution = quote.attribution, !attribution.isEmpty {
+                b += #"<span class="quote-attribution">—— "# + esc(attribution) + "</span>"
+            }
+            b += "</div>"
+        }
         if let implications = analysis.implications, !implications.isEmpty {
             b += #"<div class="markdown-body">"# + md(implications) + "</div>"
         }
@@ -145,6 +153,17 @@ enum IOSDeepReadStructuredRenderer {
             let label = (link.source?.isEmpty == false) ? link.source! : link.url
             b += #"<a class="reading-link" href=""# + esc(link.url) + #"">"#
             b += "<p>" + esc(link.title) + "</p><small>" + esc(label) + "</small></a>"
+        }
+        return b + "</section>"
+    }
+
+    private static func referencesSection(_ links: [IOSDeepReadLink]) -> String {
+        let items = links.filter { !$0.title.isEmpty && !$0.url.isEmpty }.prefix(12)
+        guard !items.isEmpty else { return "" }
+        var b = #"<section><p class="section">参考来源</p>"#
+        for link in items {
+            b += #"<a class="reading-link" href=""# + esc(link.url) + #"">"#
+            b += "<p>" + esc(link.title) + "</p><small>" + esc(link.source ?? link.url) + "</small></a>"
         }
         return b + "</section>"
     }

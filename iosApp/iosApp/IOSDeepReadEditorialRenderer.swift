@@ -443,6 +443,9 @@ enum IOSDeepReadEditorialRenderer {
     blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid var(--deep-read-accent);}
     .perspective{margin:0 0 26px;}
     .perspective .holder{display:block;margin:0 0 13px;}
+    .quote{margin:0 0 18px;padding:0 0 0 14px;border-left:2px solid var(--deep-read-border);}
+    .quote .quote-text{font-size:15px;line-height:1.68;margin:0;color:inherit;}
+    .quote .quote-attribution{display:block;font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.06em;color:var(--deep-read-muted);margin-top:6px;}
     .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid var(--deep-read-border);padding:10px 0;text-decoration:none;color:inherit;}
     .reading span{font-family:var(--deep-read-sans);color:var(--deep-read-accent);font-size:12px;letter-spacing:.12em;}
     .reading p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}

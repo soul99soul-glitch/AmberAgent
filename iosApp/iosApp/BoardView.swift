@@ -839,6 +839,7 @@ struct IOSDeepReadTaskDetailView: View {
                     if let task {
                         masthead(task)
                         workspaceSyncBanner(task)
+                        partialSectionsBanner(task)
                         content(task)
                         sourcesSection(task)
                         Color.clear.frame(height: state(for: task) == .done ? 24 : 36)
@@ -1064,6 +1065,49 @@ struct IOSDeepReadTaskDetailView: View {
         }
     }
 
+    // 部分段落未完成的琥珀横幅:LLM 生成完成后个别阶段没有可用内容(Android 每段 FAILED
+    // 状态的 iOS 对等物),持久化在任务上,后台完成也能在详情页看到,并提供单段重试。
+    @ViewBuilder
+    private func partialSectionsBanner(_ task: IOSDeepReadTask) -> some View {
+        let missing = task.missingSections ?? []
+        if state(for: task) == .done, !missing.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(AmberTheme.accentAmber)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("部分段落未完成")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.foreground)
+                        Text("以下模块未能生成：\(missing.joined(separator: "、"))。重新生成只重跑这些缺失段落。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .lineLimit(3)
+                    }
+                }
+                Button {
+                    retry()
+                } label: {
+                    Text("重新生成")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(AmberTheme.accent)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(AmberTheme.accentAmber.opacity(0.13), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(AmberTheme.accentAmber.opacity(0.28), lineWidth: 1) }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 10)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
     // 失败 inline 琥珀横幅(非浮卡、非 modal)。优先展示真实 failureMessage。
     @ViewBuilder
     private func failBanner(_ task: IOSDeepReadTask) -> some View {
@@ -1146,7 +1190,8 @@ struct IOSDeepReadTaskDetailView: View {
     }
 
     private func retry() {
-        guard let task, task.status == .failed || task.status == .unsupported else { return }
+        let partialCompletion = task?.status == .succeeded && !(task?.missingSections ?? []).isEmpty
+        guard let task, task.status == .failed || task.status == .unsupported || partialCompletion else { return }
         guard let sharedSettings else {
             showToast("当前设置不可用，无法重试")
             return

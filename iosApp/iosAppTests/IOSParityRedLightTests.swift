@@ -250,7 +250,7 @@ final class IOSParityRedLightTests: XCTestCase {
             resolvedProvider: makeOpenAIProvider(),
             modelId: "any-model",
             task: makeDeepReadTask(),
-            provider: IOSDeepReadPipelineTests.StageProvider([#"{"summary":"ov 摘要"}"#])
+            provider: IOSDeepReadPipelineTests.StageProvider([#"{"summary":"这个 overview 摘要长度足够，可以正常通过深度阅读的门闩。"}"#])
         )
         guard case .completed(let markdown, _) = outcome else {
             return XCTFail("Successful retry must return .completed, got \(outcome)")

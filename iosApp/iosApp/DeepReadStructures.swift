@@ -137,11 +137,13 @@ struct IOSDeepReadAnalysis: Codable, Equatable {
     var coreDispute: String? = nil
     var perspectives: [IOSDeepReadPerspective] = []
     var implications: String? = nil
+    var quotes: [IOSDeepReadQuote] = []
 
     enum CodingKeys: String, CodingKey {
         case coreDispute = "core_dispute"
         case perspectives
         case implications
+        case quotes
     }
 
     init() {}
@@ -151,12 +153,32 @@ struct IOSDeepReadAnalysis: Codable, Equatable {
         coreDispute = try? c.decodeIfPresent(String.self, forKey: .coreDispute)
         perspectives = (try? c.decodeIfPresent([IOSDeepReadPerspective].self, forKey: .perspectives)) ?? []
         implications = try? c.decodeIfPresent(String.self, forKey: .implications)
+        quotes = (try? c.decodeIfPresent([IOSDeepReadQuote].self, forKey: .quotes)) ?? []
     }
 
     var hasContent: Bool {
         !(coreDispute ?? "").isEmpty
             || perspectives.contains { !$0.viewpoint.isEmpty }
             || !(implications ?? "").isEmpty
+            || quotes.contains { !$0.text.isEmpty }
+    }
+}
+
+struct IOSDeepReadQuote: Codable, Equatable {
+    var text: String
+    var attribution: String?
+
+    enum CodingKeys: String, CodingKey { case text, attribution }
+
+    init(text: String = "", attribution: String? = nil) {
+        self.text = text
+        self.attribution = attribution
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = (try? c.decodeIfPresent(String.self, forKey: .text)) ?? ""
+        attribution = try? c.decodeIfPresent(String.self, forKey: .attribution)
     }
 }
 
@@ -254,5 +276,67 @@ struct IOSDeepReadLink: Codable, Equatable {
         title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
         url = (try? c.decodeIfPresent(String.self, forKey: .url)) ?? ""
         source = try? c.decodeIfPresent(String.self, forKey: .source)
+    }
+}
+
+/// Swift mirror of Android's `DeepReadArticlePlan` (feature/board/impl
+/// `DeepReadResearchHarness.kt`): a planning LLM call decides the article angle,
+/// narrative slots, analysis questions, stakeholders and risks before the stage
+/// loop. Tolerant decode — every field defaults, and `normalized` fills the
+/// deterministic local fallback for whatever the model left blank.
+/// `requiredSourceIds` are 1-based indexes into the generation source block
+/// (Android uses "s1"-style ids; iOS uses the block's stable numbering).
+struct IOSDeepReadArticlePlan: Codable, Equatable {
+    var overviewAngle: String = ""
+    var narrativeSlots: [String] = []
+    var analysisQuestions: [String] = []
+    var stakeholders: [String] = []
+    var riskOrUncertainty: [String] = []
+    var requiredSourceIds: [Int] = []
+
+    enum CodingKeys: String, CodingKey {
+        case overviewAngle = "overview_angle"
+        case narrativeSlots = "narrative_slots"
+        case analysisQuestions = "analysis_questions"
+        case stakeholders
+        case riskOrUncertainty = "risk_or_uncertainty"
+        case requiredSourceIds = "required_source_ids"
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        overviewAngle = (try? c.decodeIfPresent(String.self, forKey: .overviewAngle)) ?? ""
+        narrativeSlots = (try? c.decodeIfPresent([String].self, forKey: .narrativeSlots)) ?? []
+        analysisQuestions = (try? c.decodeIfPresent([String].self, forKey: .analysisQuestions)) ?? []
+        stakeholders = (try? c.decodeIfPresent([String].self, forKey: .stakeholders)) ?? []
+        riskOrUncertainty = (try? c.decodeIfPresent([String].self, forKey: .riskOrUncertainty)) ?? []
+        requiredSourceIds = (try? c.decodeIfPresent([Int].self, forKey: .requiredSourceIds)) ?? []
+    }
+
+    /// Merges a parsed (possibly partial) plan with the deterministic fallback,
+    /// mirroring Android's `normalizePlan`: blank fields take the fallback,
+    /// lists are capped, source ids are filtered to the valid range.
+    func normalized(with fallback: IOSDeepReadArticlePlan, sourceCount: Int) -> IOSDeepReadArticlePlan {
+        let validRange = 1...max(sourceCount, 1)
+        var result = self
+        result.overviewAngle = overviewAngle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? fallback.overviewAngle : overviewAngle
+        result.narrativeSlots = narrativeSlots.isEmpty ? fallback.narrativeSlots : Array(narrativeSlots.prefix(6))
+        result.analysisQuestions = analysisQuestions.isEmpty ? fallback.analysisQuestions : Array(analysisQuestions.prefix(8))
+        result.stakeholders = stakeholders.isEmpty ? fallback.stakeholders : Array(stakeholders.prefix(8))
+        result.riskOrUncertainty = riskOrUncertainty.isEmpty
+            ? fallback.riskOrUncertainty : Array(riskOrUncertainty.prefix(8))
+        let ids = requiredSourceIds.filter { validRange.contains($0) }.distinctPreservingOrder()
+        result.requiredSourceIds = ids.isEmpty ? fallback.requiredSourceIds : ids
+        return result
+    }
+}
+
+private extension Array where Element == Int {
+    func distinctPreservingOrder() -> [Int] {
+        var seen = Set<Int>()
+        return filter { seen.insert($0).inserted }
     }
 }

@@ -34,6 +34,7 @@
 
 ## 仍开放但不是默认任务
 
+- [`IOS_DEEPREAD_PARITY_PLAN.md`](IOS_DEEPREAD_PARITY_PLAN.md)：iOS 深度阅读对齐 Android（P0 阶段鲁棒性、P1 规划段/证据分桶/quotes/门闩/references、P2 单段重试与超时均已完成；P3 工具型 agent loop 为决策门）；Active，实施 P3 前按文件内开门条件与实时代码复核。
 - [`superpowers/plans/2026-08-10-novel-session-streaming-parity.md`](superpowers/plans/2026-08-10-novel-session-streaming-parity.md)：小说会话流式对齐 Chat（终态排空、思考呈现、列表/滚动、污染防火墙）；Active Proposed，实施前按文件内成功标准与禁区复核实时代码。
 - [`AGENT_ORCHESTRATION_ADOPTION_PLAN.md`](AGENT_ORCHESTRATION_ADOPTION_PLAN.md)：借鉴 codex 编排体系的 P0–P3 Proposed 计划（tool_search → 线程 mailbox → 记忆 polluted/citation → code mode）；含 2026-08-08 四路代码复核事实与开工前复核清单，实施前须按清单重新核对实时代码。
 - [`IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`](IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md)：iOS 主题系统完善计划（P0–P3 Active 完成；P4 资源包/沉浸色需产品闸门）；每个 Phase 下笔前须按文件内复核清单重核实时代码。设计契约见 [`IOS_THEME_PACK_DESIGN_SPEC.md`](IOS_THEME_PACK_DESIGN_SPEC.md)。
