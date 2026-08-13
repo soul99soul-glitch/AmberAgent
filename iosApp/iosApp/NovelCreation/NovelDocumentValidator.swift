@@ -1975,6 +1975,28 @@ enum NovelDocumentValidator {
                     !document.chapters.contains(where: { $0.id == chapterID }) {
                     issues.append("Chapter restoration \(operation.operationID) has invalid outcome data.")
                 }
+            case let (
+                .deleteChapterFromManuscript,
+                .chapterRemovedFromManuscript(
+                    _, branchID, chapterID, workingRevision, revision
+                )
+            ):
+                if revision != operation.appliedProjectRevision ||
+                    workingRevision < 1 ||
+                    !document.branches.contains(where: {
+                        $0.id == branchID &&
+                            $0.workingRevision >= workingRevision &&
+                            !$0.workingChapterSelections.contains(where: {
+                                $0.chapterID == chapterID
+                            })
+                    }) ||
+                    !document.chapters.contains(where: {
+                        $0.id == chapterID && $0.discardedAt != nil
+                    }) {
+                    issues.append(
+                        "Chapter manuscript-delete \(operation.operationID) has invalid outcome data."
+                    )
+                }
             case let (.startRun, .runStarted(_, branchID, runID, receiptID, revision)):
                 if revision != operation.appliedProjectRevision ||
                     !document.activeRuns.contains(where: {
@@ -2322,14 +2344,21 @@ enum NovelDocumentValidator {
                 continue
             }
             let owners = appendedOperations.filter { operation in
-                guard case let .chapterDiscardStateChanged(
+                if case let .chapterDiscardStateChanged(
                     _, _, chapterID, outcomeIsDiscarded, _
                 ) = operation.outcome,
-                      chapterID == chapter.id,
-                      outcomeIsDiscarded == isDiscarded else {
-                    return false
+                   chapterID == chapter.id,
+                   outcomeIsDiscarded == isDiscarded {
+                    return operation.kind == (isDiscarded ? .discardChapter : .restoreChapter)
                 }
-                return operation.kind == (isDiscarded ? .discardChapter : .restoreChapter)
+                // 从正文删除可顺带把未废弃章标为废弃，算一次合法 discard 翻转。
+                if isDiscarded,
+                   case let .chapterRemovedFromManuscript(_, _, chapterID, _, _) = operation.outcome,
+                   chapterID == chapter.id,
+                   operation.kind == .deleteChapterFromManuscript {
+                    return true
+                }
+                return false
             }
             if owners.count != 1 ||
                 (isDiscarded && updated.discardedAt != owners.first?.appliedAt) {
@@ -2337,19 +2366,42 @@ enum NovelDocumentValidator {
             }
         }
         for operation in appendedOperations {
-            guard case let .chapterDiscardStateChanged(
+            if case let .chapterDiscardStateChanged(
                 _, _, chapterID, outcomeIsDiscarded, _
-            ) = operation.outcome else { continue }
-            let expectedKind: NovelOperationKind = outcomeIsDiscarded
-                ? .discardChapter
-                : .restoreChapter
-            guard operation.kind == expectedKind,
-                  let chapter = current.chapters.first(where: { $0.id == chapterID }),
-                  let updated = next.chapters.first(where: { $0.id == chapterID }),
-                  (chapter.discardedAt != nil) != (updated.discardedAt != nil),
-                  (updated.discardedAt != nil) == outcomeIsDiscarded else {
-                issues.append("A chapter discard operation has no matching state transition.")
+            ) = operation.outcome {
+                let expectedKind: NovelOperationKind = outcomeIsDiscarded
+                    ? .discardChapter
+                    : .restoreChapter
+                guard operation.kind == expectedKind,
+                      let chapter = current.chapters.first(where: { $0.id == chapterID }),
+                      let updated = next.chapters.first(where: { $0.id == chapterID }),
+                      (chapter.discardedAt != nil) != (updated.discardedAt != nil),
+                      (updated.discardedAt != nil) == outcomeIsDiscarded else {
+                    issues.append("A chapter discard operation has no matching state transition.")
+                    continue
+                }
                 continue
+            }
+            if case let .chapterRemovedFromManuscript(
+                _, branchID, chapterID, _, _
+            ) = operation.outcome {
+                guard operation.kind == .deleteChapterFromManuscript,
+                      let currentBranch = current.branches.first(where: { $0.id == branchID }),
+                      let nextBranch = next.branches.first(where: { $0.id == branchID }),
+                      currentBranch.workingChapterSelections.contains(where: {
+                          $0.chapterID == chapterID
+                      }),
+                      !nextBranch.workingChapterSelections.contains(where: {
+                          $0.chapterID == chapterID
+                      }),
+                      next.chapters.contains(where: {
+                          $0.id == chapterID && $0.discardedAt != nil
+                      }) else {
+                    issues.append(
+                        "A chapter manuscript-delete operation has no matching state transition."
+                    )
+                    continue
+                }
             }
         }
     }
@@ -2692,6 +2744,17 @@ enum NovelDocumentValidator {
                 workingRevision += 1
             }
 
+            if operation.kind == .deleteChapterFromManuscript,
+               case let .chapterRemovedFromManuscript(
+                   _, branchID, _, outcomeWorkingRevision, _
+               ) = operation.outcome,
+               branchID == branch.id {
+                if outcomeWorkingRevision != workingRevision + 1 {
+                    issues.append("Branch \(branch.id) working revision timeline is not contiguous.")
+                }
+                workingRevision += 1
+            }
+
             guard operation.kind == .undoBranchHead,
                   case let .branchHeadMoved(
                       _, branchID, fromCheckpointID, toCheckpointID, outcomeHeadRevision, _
@@ -2803,6 +2866,7 @@ extension NovelOutcome {
         case .polishTransactionAbandoned(let projectID, _, _, _, _): projectID
         case .chapterVersionRestored(let projectID, _, _, _, _): projectID
         case .chapterDiscardStateChanged(let projectID, _, _, _, _): projectID
+        case .chapterRemovedFromManuscript(let projectID, _, _, _, _): projectID
         case .runStarted(let projectID, _, _, _, _): projectID
         case .runInterrupted(let projectID, _, _, _): projectID
         case .candidateCollected(let projectID, _, _, _, _, _): projectID
@@ -2830,6 +2894,7 @@ extension NovelOutcome {
              .discussionArchived(_, let branchID, _, _, _, _, _),
              .candidateCloned(_, let branchID, _, _, _),
              .chapterDiscardStateChanged(_, let branchID, _, _, _),
+             .chapterRemovedFromManuscript(_, let branchID, _, _, _),
              .polishCandidateAdopted(_, let branchID, _, _, _, _),
              .polishCandidateRejected(_, let branchID, _, _, _),
              .polishTransactionAbandoned(_, let branchID, _, _, _),

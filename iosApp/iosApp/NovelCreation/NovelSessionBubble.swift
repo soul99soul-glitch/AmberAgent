@@ -152,8 +152,12 @@ struct NovelSessionBubble: View {
             Label("回复已生成，等待重试保存", systemImage: "externaldrive.badge.exclamationmark")
                 .foregroundStyle(AmberTheme.foreground2)
         } else if transientPhase == .terminalAwaitingRefresh {
-            Label("正在保存创作记录", systemImage: "arrow.triangle.2.circlepath")
-                .foregroundStyle(AmberTheme.muted)
+            // Prose/polish (incl. regenerate): dock strip owns this caption.
+            // Discussion and other kinds have no strip — keep the bubble cue.
+            if kind != .proseCandidate && kind != .polishCandidate {
+                Label("正在保存创作记录", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(AmberTheme.muted)
+            }
         } else if representsFailure {
             Label(
                 content.isEmpty
@@ -512,7 +516,8 @@ private struct NovelAskUserCard: View {
                     NovelTextInputCommitter.perform(fieldBank: imeBank) { submit() }
                 }
                 .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity, alignment: .trailing)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .trailing)
+                .contentShape(Rectangle())
                 .disabled(blocker != nil)
             }
         }

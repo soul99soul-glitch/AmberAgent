@@ -250,6 +250,38 @@ final class NovelDocumentValidationTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(from: discarded, to: restored))
     }
 
+    func testDeleteChapterFromManuscriptRemovesWorkingSelection() throws {
+        let current = try documentWithDiscardableChapter()
+        let chapterID = try XCTUnwrap(current.chapters.first?.id)
+        let branch = try XCTUnwrap(current.branches.first)
+        XCTAssertTrue(branch.workingChapterSelections.contains(where: { $0.chapterID == chapterID }))
+
+        let deleted = try NovelReducer.apply(.deleteChapterFromManuscript(
+            NovelDeleteChapterFromManuscriptCommand(
+                context: NovelMutationContext(
+                    operationID: NovelOperationID(),
+                    expectedProjectRevision: current.project.revision,
+                    expectedConfigRevision: nil,
+                    expectedBranchHeadRevision: branch.headRevision
+                ),
+                projectID: current.project.id,
+                branchID: branch.id,
+                chapterID: chapterID,
+                expectedWorkingRevision: branch.workingRevision
+            )
+        ), to: current, now: Date(timeIntervalSince1970: 1_700_000_030)).document
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validateTransition(from: current, to: deleted))
+        let nextBranch = try XCTUnwrap(deleted.branches.first(where: { $0.id == branch.id }))
+        XCTAssertFalse(nextBranch.workingChapterSelections.contains(where: { $0.chapterID == chapterID }))
+        XCTAssertEqual(nextBranch.syncStatus, .needsSync)
+        XCTAssertEqual(nextBranch.workingRevision, branch.workingRevision + 1)
+        // Chapter record stays for checkpoint lineage; marked discarded.
+        let chapter = try XCTUnwrap(deleted.chapters.first(where: { $0.id == chapterID }))
+        XCTAssertNotNil(chapter.discardedAt)
+        XCTAssertFalse(deleted.chapterVersions.filter { $0.chapterID == chapterID }.isEmpty)
+    }
+
     func testChapterTransitionRequiresOneLedgerOperationPerStateFlip() throws {
         let current = try documentWithDiscardableChapter()
         let chapter = try XCTUnwrap(current.chapters.first)
@@ -1159,12 +1191,13 @@ final class NovelDocumentValidationTests: XCTestCase {
     private func documentWithDiscardableChapter() throws -> NovelProjectDocumentV1 {
         var document = try NovelTestFixtures.document()
         let chapterID = NovelChapterID()
+        let versionID = NovelChapterVersionID()
         document.chapters.append(NovelChapterRecord(
             id: chapterID,
             createdAt: document.project.updatedAt
         ))
         document.chapterVersions.append(NovelChapterVersionRecord(
-            id: NovelChapterVersionID(),
+            id: versionID,
             chapterID: chapterID,
             kind: .collected,
             title: "第一章",
@@ -1174,6 +1207,31 @@ final class NovelDocumentValidationTests: XCTestCase {
             createdAt: document.project.updatedAt,
             operationID: document.appliedOperations[0].operationID
         ))
+        // 正文删除测试需要它在工作稿目录中；废弃/恢复仅翻 discardedAt，不依赖选择。
+        if let branchIndex = document.branches.indices.first {
+            let selection = NovelChapterSelection(chapterID: chapterID, versionID: versionID)
+            document.branches[branchIndex].workingChapterSelections = [selection]
+            // 与 head 选择对齐，避免 synchronized 分支「工作稿与 head 不一致」。
+            if let headIndex = document.checkpoints.firstIndex(where: {
+                $0.id == document.branches[branchIndex].headCheckpointID
+            }) {
+                let head = document.checkpoints[headIndex]
+                document.checkpoints[headIndex] = NovelBranchCheckpointRecord(
+                    id: head.id,
+                    kind: head.kind,
+                    createdOnBranchID: head.createdOnBranchID,
+                    parentCheckpointID: head.parentCheckpointID,
+                    chapterSelections: [selection],
+                    stateSnapshotID: head.stateSnapshotID,
+                    sessionCursor: head.sessionCursor,
+                    branchOverrideRevisionIDs: head.branchOverrideRevisionIDs,
+                    sourceCandidateID: head.sourceCandidateID,
+                    baseHeadRevision: head.baseHeadRevision,
+                    operationID: head.operationID,
+                    createdAt: head.createdAt
+                )
+            }
+        }
         try NovelDocumentValidator.validate(document)
         return document
     }

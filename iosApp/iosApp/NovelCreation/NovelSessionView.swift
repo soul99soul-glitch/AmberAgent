@@ -160,7 +160,8 @@ struct NovelSessionView: View {
                 if NovelSessionComposerPolicy.showsGenerationStatus(
                     isRunning: viewModel.isRunning,
                     isTerminalPresenting: viewModel.isTerminalPresenting,
-                    activeRunKind: viewModel.activeRunKind
+                    activeRunKind: viewModel.activeRunKind,
+                    hasGhostwriteProgress: viewModel.ghostwriteProgress != nil
                 ) {
                     generationStatusStrip
                         // Fixed caption slot: avoid safeArea height collapse when
@@ -639,7 +640,6 @@ struct NovelSessionView: View {
                 )
             }
         }
-        .padding(.horizontal, 4)
     }
 
     private func automaticStateSyncFailureBanner(
@@ -674,7 +674,6 @@ struct NovelSessionView: View {
                     viewModel.access != .readWrite
             )
         }
-        .padding(.horizontal, 4)
     }
 
     private func polishRecoveryBanner(
@@ -776,7 +775,6 @@ struct NovelSessionView: View {
                 }
             }
         }
-        .padding(.horizontal, 4)
     }
 
     private var recoveryAbandonConfirmationBinding: Binding<Bool> {
@@ -849,7 +847,6 @@ struct NovelSessionView: View {
                 .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, 4)
     }
 
     private func stateSyncProgressBanner(_ activity: NovelStateSyncActivity) -> some View {
@@ -916,8 +913,7 @@ struct NovelSessionView: View {
                 .foregroundStyle(AmberTheme.muted)
                 .monospacedDigit()
             }
-            .padding(.horizontal, 4)
-        }
+            }
     }
 
     private func stateSyncProgressDetail(
@@ -947,9 +943,14 @@ struct NovelSessionView: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if viewModel.hasRefreshError {
+            if viewModel.hasRefreshError
+                || message.contains("重新载入")
+                || message.contains("刷新后") {
                 Button("重新载入") {
-                    Task { @MainActor in _ = await viewModel.refresh() }
+                    Task { @MainActor in
+                        _ = await viewModel.refresh()
+                        viewModel.clearError()
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -983,7 +984,6 @@ struct NovelSessionView: View {
                 .accessibilityLabel("关闭错误提示")
             }
         }
-        .padding(.horizontal, 4)
     }
 
     /// 主界面代笔状态条：状态 + 详情 + 暂停/继续。复用会话 VM 既有入口，
@@ -1031,7 +1031,6 @@ struct NovelSessionView: View {
                 .disabled(!viewModel.canStartGhostwriteChapter)
             }
         }
-        .padding(.horizontal, 4)
         .padding(.vertical, 2)
         .accessibilityElement(children: .contain)
     }
@@ -1104,7 +1103,6 @@ struct NovelSessionView: View {
                     viewModel.access != .readWrite
             )
         }
-        .padding(.horizontal, 4)
     }
 
     private var composerMetaControls: some View {
@@ -1902,8 +1900,9 @@ struct NovelSessionView: View {
     /// 文案必须区分「重写」与「续写/整章」:重新生成的候选默认收录方式是
     /// **替换原章**,若沿用整章文案会显示「收录后成为新章」,与实际行为相反。
     private var generationStatusText: String {
+        // Same owner copy as bubble terminal chrome — do not invent a second story.
         if viewModel.isTerminalPresenting {
-            return "正在呈现全文 · 完成后可继续操作"
+            return "正在保存创作记录"
         }
         guard let kind = viewModel.activeRunKind else { return "正在生成" }
         if kind == .regenerate { return "重写本章 · 收录后替换原文" }
@@ -1915,7 +1914,7 @@ struct NovelSessionView: View {
 
     private var generationStatusIcon: String {
         if viewModel.isTerminalPresenting {
-            return "text.alignleft"
+            return "arrow.triangle.2.circlepath"
         }
         switch viewModel.activeRunKind {
         case .regenerate: return "arrow.triangle.2.circlepath"
@@ -2216,7 +2215,8 @@ private struct NovelCharacterIdentityQuestionCard: View {
                         )
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(AmberTheme.accent)
-                        .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .disabled(isDisabled)
                 }

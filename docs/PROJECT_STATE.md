@@ -1,8 +1,21 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-13（议会顶栏接回原生 Liquid Glass soft edge）
+Last updated: 2026-08-13（增量存储审查修补）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## 小说项目分片增量存储（2026-08-13）
+
+产品问题：大项目（~20MB，injectionReceipts 占大头）每次 tool write 都整文档 JSON 编码，保存卡死/闪退。
+
+- **布局**：`projects/{id}/layout.json` + `previous-layout.json` + `blobs/{sha256}.json`（layout schema v2）。
+- **编码**：`NovelProjectShardedStorage` 按 section 拆写；内容寻址 blob，未变 section 不重写文件。
+- **缓存**：仅对大体量 append-mostly section 做 fingerprint 跳过重编码（injection/generation receipts、snapshots、events、chapterVersions、materialRevisions、checkpoints、polish attempts/assessments、factAttempts、appliedOperations）。小可变 section（branches/sessions/activeRuns/…）始终重编码，避免 `activeRunID` 等字段被旧 blob 盖住。
+- **装配**：section JSON 字符串拼接成 monofile envelope 再 decode，避免 JSONSerialization 改写日期。
+- **迁移**：create/commit/replace/restore 走 sharded；成功后删除 legacy monofile；仍可读 monofile 直至下次写入迁移。
+- **验证**：`NovelProjectRepositoryTests` 23 + `NovelProjectPackageTests` 10 + `NovelDocumentValidationTests` 31 = **64/64**；含 corrupt recovery 跨项目 ownership、heavy blob 复用契约。
+- **真机**：本轮模拟器门禁绿；设备签名安装以实时 `devicectl`/签名结果为准。打开现有 ~20MB 项目后第一次 commit 会迁到 package；之后 tool write 不应再整包 20MB encode。
+- **审查修补（精准）**：commit/create 后 index 用内存 document upsert，不再全量 load；package 坏且 monofile 仍在时读 monofile；代笔中隐藏共创 generation strip；终态文案统一「正在保存创作记录」；顶栏代笔 CTA 单行缩放；Ask User/批量润色/更多角色 44pt；dock banner 去掉 +4 阶梯边距。门禁：Repository+Presentation+strip 契约 **71/71**。
 
 ## 代笔弹性 P0–P3（2026-08-12）
 

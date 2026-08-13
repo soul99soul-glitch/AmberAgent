@@ -574,6 +574,16 @@ extension NovelOutcome {
                 isDiscarded: isDiscarded,
                 revision: revision
             )
+        case .chapterRemovedFromManuscript(
+            _, let branchID, let chapterID, let workingRevision, let revision
+        ):
+            return .chapterRemovedFromManuscript(
+                projectID: projectID,
+                branchID: branchID,
+                chapterID: chapterID,
+                workingRevision: workingRevision,
+                revision: revision
+            )
         case .chapterVersionRestored(_, let branchID, let checkpointID, let chapterVersionID, let revision):
             return .chapterVersionRestored(
                 projectID: projectID,

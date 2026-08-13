@@ -32,8 +32,11 @@ enum NovelSessionComposerPolicy {
     static func showsGenerationStatus(
         isRunning: Bool,
         isTerminalPresenting: Bool = false,
-        activeRunKind: NovelRunKind?
+        activeRunKind: NovelRunKind?,
+        hasGhostwriteProgress: Bool = false
     ) -> Bool {
+        // Ghostwrite owns its own dock chrome; do not stack co-create status above it.
+        if hasGhostwriteProgress { return false }
         guard activeRunKind == .prose ||
                 activeRunKind == .regenerate ||
                 activeRunKind == .polish else { return false }
@@ -1221,12 +1224,22 @@ private extension NovelSessionPresentation {
 
     static func presentedContent(for tail: NovelSessionTransientTail) -> String {
         switch tail.phase {
-        case .failed(let failure) where tail.content.isEmpty:
-            NovelPresentation.failureMessage(failure)
-        case .persistenceBlocked(let failure) where tail.content.isEmpty:
-            NovelPresentation.failureMessage(failure)
+        case .failed(let failure):
+            // Prefer humanized failure copy when there is no draft yet, or when
+            // content accidentally carries a raw NSError/URL dump.
+            if tail.content.isEmpty
+                || NovelPresentation.looksLikeTechnicalFailureDump(tail.content) {
+                return NovelPresentation.failureMessage(failure)
+            }
+            return tail.content
+        case .persistenceBlocked(let failure):
+            if tail.content.isEmpty
+                || NovelPresentation.looksLikeTechnicalFailureDump(tail.content) {
+                return NovelPresentation.failureMessage(failure)
+            }
+            return tail.content
         default:
-            tail.content
+            return tail.content
         }
     }
 

@@ -40,6 +40,149 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(second.first?.revision, document.project.revision)
     }
 
+    func testLegacyMonofileMigratesToPackageOnFirstCommit() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let document = try NovelTestFixtures.document()
+        let projects = root.appendingPathComponent("projects", isDirectory: true)
+        try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(document).write(
+            to: primaryURL(root: root, id: document.project.id),
+            options: [.atomic]
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: layoutURL(root: root, id: document.project.id).path
+            )
+        )
+
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let loaded = try await repository.loadProject(id: document.project.id)
+        XCTAssertEqual(loaded.document, document)
+        XCTAssertEqual(loaded.access, .readWrite)
+
+        let renamed = try renamed(document, name: "Migrated Package")
+        _ = try await repository.commitProject(
+            renamed,
+            expectedRevision: document.project.revision
+        )
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: layoutURL(root: root, id: document.project.id).path
+            )
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: primaryURL(root: root, id: document.project.id).path
+            )
+        )
+        let reloaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: document.project.id)
+        XCTAssertEqual(reloaded.document.project.name, "Migrated Package")
+        XCTAssertEqual(reloaded.document.project.revision, document.project.revision + 1)
+        XCTAssertEqual(reloaded.access, .readWrite)
+    }
+
+    func testCorruptPackageFallsBackToSurvivingMonofileWhenPresent() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let document = try NovelTestFixtures.document()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        _ = try await repository.createProject(document)
+
+        // Dual-presence: keep a valid monofile next to a broken package layout.
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(document).write(
+            to: primaryURL(root: root, id: document.project.id),
+            options: [.atomic]
+        )
+        try Data("corrupt-layout".utf8).write(
+            to: layoutURL(root: root, id: document.project.id),
+            options: [.atomic]
+        )
+
+        let loaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: document.project.id)
+        XCTAssertEqual(loaded.document, document)
+        XCTAssertEqual(loaded.access, .readWrite)
+    }
+
+    func testShardedCommitsReuseUnchangedHeavySectionBlobsWithoutFullMonofile() async throws {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        let base = try NovelTestFixtures.document()
+        _ = try await repository.createProject(base)
+
+        let request = discussionRequest(document: base, userText: "Seed injection receipt")
+        let withRun = try runningDocument(base, request: request)
+        _ = try await repository.commitProject(withRun, expectedRevision: base.project.revision)
+
+        let package = packageDirectory(root: root, id: base.project.id)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: layoutURL(root: root, id: base.project.id).path
+            )
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: primaryURL(root: root, id: base.project.id).path),
+            "Successful sharded write must drop the legacy monofile."
+        )
+
+        let layoutBefore = try JSONDecoder().decode(
+            NovelProjectShardedStorage.LayoutV2.self,
+            from: Data(contentsOf: layoutURL(root: root, id: base.project.id))
+        )
+        let receiptDigestBefore = try XCTUnwrap(
+            layoutBefore.sections[NovelProjectShardedStorage.SectionKey.injectionReceipts.rawValue]?.digest
+        )
+        let receiptBlobBefore = try Data(
+            contentsOf: package
+                .appendingPathComponent("blobs", isDirectory: true)
+                .appendingPathComponent("\(receiptDigestBefore).json")
+        )
+
+        // Name-only mutation must re-encode project/session/run sections but keep
+        // the heavy injection-receipt blob byte-identical (content-addressed reuse).
+        let renamedOnly = try renamed(withRun, name: "Incremental Store")
+        _ = try await repository.commitProject(
+            renamedOnly,
+            expectedRevision: withRun.project.revision
+        )
+
+        let layoutAfter = try JSONDecoder().decode(
+            NovelProjectShardedStorage.LayoutV2.self,
+            from: Data(contentsOf: layoutURL(root: root, id: base.project.id))
+        )
+        let receiptDigestAfter = try XCTUnwrap(
+            layoutAfter.sections[NovelProjectShardedStorage.SectionKey.injectionReceipts.rawValue]?.digest
+        )
+        XCTAssertEqual(receiptDigestAfter, receiptDigestBefore)
+        let receiptBlobAfter = try Data(
+            contentsOf: package
+                .appendingPathComponent("blobs", isDirectory: true)
+                .appendingPathComponent("\(receiptDigestAfter).json")
+        )
+        XCTAssertEqual(receiptBlobAfter, receiptBlobBefore)
+
+        let reloaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: base.project.id)
+        XCTAssertEqual(reloaded.document.project.name, "Incremental Store")
+        XCTAssertEqual(reloaded.document.activeRuns.first?.status, .running)
+        XCTAssertEqual(
+            reloaded.document.branches.first?.activeRunID,
+            reloaded.document.activeRuns.first?.id
+        )
+        XCTAssertEqual(
+            reloaded.document.injectionReceipts.map(\.id),
+            withRun.injectionReceipts.map(\.id)
+        )
+    }
+
     func testSuccessfulCommitsRotateOnlyThePreviousValidatedVersion() async throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -51,7 +194,10 @@ final class NovelProjectRepositoryTests: XCTestCase {
         let third = try renamed(second, name: "Version Three")
         _ = try await repository.commitProject(third, expectedRevision: 2)
 
-        try Data("corrupt".utf8).write(to: primaryURL(root: root, id: first.project.id), options: [.atomic])
+        try Data("corrupt".utf8).write(
+            to: layoutURL(root: root, id: first.project.id),
+            options: [.atomic]
+        )
         let degraded = try await NovelFileProjectRepository(rootDirectory: root)
             .loadProject(id: first.project.id)
 
@@ -79,7 +225,9 @@ final class NovelProjectRepositoryTests: XCTestCase {
         let loaded = try await baseRepository.loadProject(id: first.project.id)
 
         XCTAssertEqual(loaded.document, first)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: previousURL(root: root, id: first.project.id).path))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: previousLayoutURL(root: root, id: first.project.id).path)
+        )
     }
 
     func testIndexFailureDoesNotRollBackProjectAndNextLaunchRebuildsIndex() async throws {
@@ -135,7 +283,10 @@ final class NovelProjectRepositoryTests: XCTestCase {
         _ = try await repository.createProject(first)
         let second = try renamed(first, name: "Second")
         _ = try await repository.commitProject(second, expectedRevision: 1)
-        try Data("broken".utf8).write(to: primaryURL(root: root, id: first.project.id), options: [.atomic])
+        try Data("broken".utf8).write(
+            to: layoutURL(root: root, id: first.project.id),
+            options: [.atomic]
+        )
 
         let degraded = try await repository.loadProject(id: first.project.id)
         XCTAssertEqual(degraded.document, first)
@@ -154,7 +305,9 @@ final class NovelProjectRepositoryTests: XCTestCase {
         )
         XCTAssertEqual(restored.document, first)
         XCTAssertEqual(restored.access, .readWrite)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: previousURL(root: root, id: first.project.id).path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: previousLayoutURL(root: root, id: first.project.id).path)
+        )
     }
 
     func testPreviousRestoreRejectsStaleExpectedHashBeforeReplacingPrimary() async throws {
@@ -165,7 +318,7 @@ final class NovelProjectRepositoryTests: XCTestCase {
         _ = try await repository.createProject(first)
         let second = try renamed(first, name: "Second")
         _ = try await repository.commitProject(second, expectedRevision: first.project.revision)
-        let primary = primaryURL(root: root, id: first.project.id)
+        let primary = layoutURL(root: root, id: first.project.id)
         let brokenBytes = Data("broken".utf8)
         try brokenBytes.write(to: primary, options: [.atomic])
 
@@ -193,7 +346,8 @@ final class NovelProjectRepositoryTests: XCTestCase {
         _ = try await repository.createProject(first)
         let second = try renamed(first, name: "Second")
         _ = try await repository.commitProject(second, expectedRevision: first.project.revision)
-        try FileManager.default.removeItem(at: primaryURL(root: root, id: first.project.id))
+        // Drop current layout so only previous-layout remains readable.
+        try FileManager.default.removeItem(at: layoutURL(root: root, id: first.project.id))
         try? FileManager.default.removeItem(at: root.appendingPathComponent("index.json"))
 
         let summaries = try await repository.listProjects()
@@ -219,11 +373,11 @@ final class NovelProjectRepositoryTests: XCTestCase {
         let second = try renamed(first, name: "Second")
         _ = try await repository.commitProject(second, expectedRevision: 1)
 
-        let url = primaryURL(root: root, id: first.project.id)
+        let url = layoutURL(root: root, id: first.project.id)
         var json = try XCTUnwrap(
             JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
         )
-        json["schemaVersion"] = 99
+        json["documentSchemaVersion"] = 99
         try JSONSerialization.data(withJSONObject: json).write(to: url, options: [.atomic])
 
         await NovelXCTAssertThrowsErrorAsync(try await repository.loadProject(id: first.project.id)) { error in
@@ -542,9 +696,11 @@ final class NovelProjectRepositoryTests: XCTestCase {
         _ = try await repository.createProject(first)
         _ = try await repository.createProject(second)
         try Data("corrupt".utf8).write(
-            to: primaryURL(root: root, id: second.project.id),
+            to: layoutURL(root: root, id: second.project.id),
             options: [.atomic]
         )
+        // Drop previous so load cannot soft-fail into degraded previous.
+        try? FileManager.default.removeItem(at: previousLayoutURL(root: root, id: second.project.id))
         let index = root.appendingPathComponent("index.json")
         try? FileManager.default.removeItem(at: index)
 
@@ -571,8 +727,11 @@ final class NovelProjectRepositoryTests: XCTestCase {
         let document = try NovelTestFixtures.document()
         _ = try await repository.createProject(document)
         try Data("corrupt".utf8).write(
-            to: primaryURL(root: root, id: document.project.id),
+            to: layoutURL(root: root, id: document.project.id),
             options: [.atomic]
+        )
+        try? FileManager.default.removeItem(
+            at: previousLayoutURL(root: root, id: document.project.id)
         )
 
         let summaries = try await repository.listProjects()
@@ -591,7 +750,7 @@ final class NovelProjectRepositoryTests: XCTestCase {
         let remainingProjects = try await restarted.listProjects()
         XCTAssertTrue(remainingProjects.isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: primaryURL(root: root, id: document.project.id).path
+            atPath: packageDirectory(root: root, id: document.project.id).path
         ))
     }
 
@@ -633,10 +792,7 @@ final class NovelProjectRepositoryTests: XCTestCase {
             atPath: tombstoneURL(root: root, id: first.project.id).path
         ))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: primaryURL(root: root, id: first.project.id).path
-        ))
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: previousURL(root: root, id: first.project.id).path
+            atPath: packageDirectory(root: root, id: first.project.id).path
         ))
         XCTAssertTrue(FileManager.default.fileExists(
             atPath: recoveryURL(root: root, projectID: first.project.id, runID: sidecar.runID).path
@@ -656,10 +812,7 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(survivingProjects, [])
 
         XCTAssertFalse(FileManager.default.fileExists(
-            atPath: primaryURL(root: root, id: first.project.id).path
-        ))
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: previousURL(root: root, id: first.project.id).path
+            atPath: packageDirectory(root: root, id: first.project.id).path
         ))
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: recoveryURL(root: root, projectID: first.project.id, runID: sidecar.runID).path
@@ -755,10 +908,10 @@ final class NovelProjectRepositoryTests: XCTestCase {
             atPath: replacementMarkerURL(root: root, id: first.project.id).path
         ))
         XCTAssertTrue(FileManager.default.fileExists(
-            atPath: previousURL(root: root, id: first.project.id).path
+            atPath: previousLayoutURL(root: root, id: first.project.id).path
         ))
         try Data("corrupt replacement".utf8).write(
-            to: primaryURL(root: root, id: first.project.id),
+            to: layoutURL(root: root, id: first.project.id),
             options: [.atomic]
         )
 
@@ -942,6 +1095,20 @@ final class NovelProjectRepositoryTests: XCTestCase {
         ).document
     }
 
+    private func packageDirectory(root: URL, id: NovelProjectID) -> URL {
+        root.appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(id.description, isDirectory: true)
+    }
+
+    private func layoutURL(root: URL, id: NovelProjectID) -> URL {
+        packageDirectory(root: root, id: id).appendingPathComponent("layout.json")
+    }
+
+    private func previousLayoutURL(root: URL, id: NovelProjectID) -> URL {
+        packageDirectory(root: root, id: id).appendingPathComponent("previous-layout.json")
+    }
+
+    /// Legacy monofile path (still used by a few lifecycle tests that write raw files).
     private func primaryURL(root: URL, id: NovelProjectID) -> URL {
         root.appendingPathComponent("projects", isDirectory: true)
             .appendingPathComponent("\(id.description).json")

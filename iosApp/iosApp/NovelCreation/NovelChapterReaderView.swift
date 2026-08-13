@@ -17,6 +17,7 @@ struct NovelChapterReaderView: View {
     @State private var activeSheet: ReaderSheet?
     @State private var failureMessage: String?
     @State private var startingAction: NovelChapterStartingAction?
+    @State private var isConfirmingDelete = false
 
     init(
         viewModel: NovelCreationViewModel,
@@ -44,6 +45,22 @@ struct NovelChapterReaderView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { readerToolbar }
+            .confirmationDialog(
+                "删除本章？",
+                isPresented: $isConfirmingDelete,
+                titleVisibility: .visible
+            ) {
+                Button("从正文目录删除", role: .destructive) {
+                    deleteChapterFromManuscript()
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(
+                    "会从当前分支的正文目录移除这一章，目录与生成都不再包含它。"
+                        + "历史检查点里可能仍保留引用，不能撤销到「从未写过」；"
+                        + "若只是暂时不想用，请用「废弃本章」。"
+                )
+            }
             .sheet(item: $activeSheet) { sheet in
                 switch sheet {
                 case .versions(let selection):
@@ -136,6 +153,14 @@ struct NovelChapterReaderView: View {
                 )
             }
             .disabled(chapterDiscardBlockReason != nil)
+
+            Button(role: .destructive) {
+                guard chapterDeleteBlockReason == nil else { return }
+                isConfirmingDelete = true
+            } label: {
+                Label(chapterDeleteMenuTitle, systemImage: "trash")
+            }
+            .disabled(chapterDeleteBlockReason != nil)
         } label: {
             Image(systemName: "ellipsis")
                 .font(.system(size: 18, weight: .semibold))
@@ -448,6 +473,15 @@ struct NovelChapterReaderView: View {
         return "\(action)（\(chapterDiscardBlockReason)）"
     }
 
+    private var chapterDeleteBlockReason: String? {
+        chapterDiscardBlockReason
+    }
+
+    private var chapterDeleteMenuTitle: String {
+        guard let chapterDeleteBlockReason else { return "删除本章" }
+        return "删除本章（\(chapterDeleteBlockReason)）"
+    }
+
     private var isProjectReadOnly: Bool {
         guard let access = viewModel.projectSnapshot?.access else { return false }
         if case .readWrite = access { return false }
@@ -526,6 +560,21 @@ struct NovelChapterReaderView: View {
             }
         }
     }
+
+    private func deleteChapterFromManuscript() {
+        guard startingAction == nil else { return }
+        startingAction = .delete
+        Task { @MainActor in
+            defer { startingAction = nil }
+            viewModel.clearError()
+            let succeeded = await viewModel.deleteChapterFromManuscript(chapterID: chapterID)
+            guard succeeded else {
+                failureMessage = viewModel.errorMessage ?? "章节没有从正文目录删除，请稍后重试。"
+                return
+            }
+            dismiss()
+        }
+    }
 }
 
 private enum NovelChapterStartingAction {
@@ -533,6 +582,7 @@ private enum NovelChapterStartingAction {
     case regenerate
     case discard
     case restore
+    case delete
 
     var progressTitle: String {
         switch self {
@@ -540,6 +590,7 @@ private enum NovelChapterStartingAction {
         case .regenerate: "正在开始整章重写"
         case .discard: "正在废弃本章"
         case .restore: "正在恢复本章"
+        case .delete: "正在从正文目录删除"
         }
     }
 }

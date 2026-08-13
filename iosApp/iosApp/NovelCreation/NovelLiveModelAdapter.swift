@@ -1007,24 +1007,54 @@ extension NovelLiveModelAdapter {
     ) -> NovelLiveTransport {
         { request, callbacks in
             let task = Task { @MainActor in
-                let engine = IOSAgentToolEngine(
-                    provider: provider,
-                    executors: executors(request.novelProjectContext),
-                    configuration: .init(maxSteps: 4, honorApprovalPause: true)
-                )
-                let stepText = DiscussionStepTextAccumulator()
-                let result = await engine.run(
-                    providerSetting: request.providerSetting,
-                    messages: request.messages,
-                    params: request.parameters,
-                    onAssistantTurnStarted: {
-                        stepText.startNewTurn()
-                    },
-                    onAssistantText: { text in
-                        callbacks.onChunk(replacementChunk(stepText.update(currentStep: text)))
+                // One automatic retry only when the first attempt dies before any
+                // assistant text (typical NSURLError -1005 on the opening request).
+                // Never retry after tools/partial text — that would double-write.
+                final class VisibleTextFlag: @unchecked Sendable {
+                    private let lock = NSLock()
+                    private var value = false
+                    func mark() {
+                        lock.lock(); value = true; lock.unlock()
                     }
-                )
-                guard !Task.isCancelled else { return }
+                    func reset() {
+                        lock.lock(); value = false; lock.unlock()
+                    }
+                    var isSet: Bool {
+                        lock.lock(); defer { lock.unlock() }
+                        return value
+                    }
+                }
+                var result: IOSAgentToolEngineResult!
+                let producedVisibleText = VisibleTextFlag()
+                for attempt in 0..<2 {
+                    let engine = IOSAgentToolEngine(
+                        provider: provider,
+                        executors: executors(request.novelProjectContext),
+                        configuration: .init(maxSteps: 4, honorApprovalPause: true)
+                    )
+                    let stepText = DiscussionStepTextAccumulator()
+                    producedVisibleText.reset()
+                    result = await engine.run(
+                        providerSetting: request.providerSetting,
+                        messages: request.messages,
+                        params: request.parameters,
+                        onAssistantTurnStarted: {
+                            stepText.startNewTurn()
+                        },
+                        onAssistantText: { text in
+                            producedVisibleText.mark()
+                            callbacks.onChunk(replacementChunk(stepText.update(currentStep: text)))
+                        }
+                    )
+                    guard !Task.isCancelled else { return }
+                    if attempt == 0,
+                       !producedVisibleText.isSet,
+                       let failureMessage = result.providerFailureMessage,
+                       NovelPresentation.looksLikeTransportFailure(failureMessage) {
+                        continue
+                    }
+                    break
+                }
                 if let failureMessage = result.providerFailureMessage {
                     callbacks.onFailure(failure(
                         code: "discussion_provider_failed",

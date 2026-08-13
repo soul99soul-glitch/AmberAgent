@@ -1131,17 +1131,45 @@ final class NovelSessionViewModel {
 
     @discardableResult
     func retryLastTerminal() async -> Bool {
-        guard let runID = lastRetryRunID else { return false }
-        return await retryGeneration(runID: runID)
+        guard let runID = lastRetryRunID else {
+            operationErrorMessage = "没有可重试的生成，请重新发送。"
+            return false
+        }
+        // One refresh clears stale revision/snapshot before exact retry — the
+        // common "状态不匹配" after a failed stream that still left UI on an old
+        // config revision.
+        if !(await refresh()) {
+            if operationErrorMessage == nil {
+                operationErrorMessage = "无法刷新项目状态，请退出后重新进入再试。"
+            }
+            return false
+        }
+        let ok = await retryGeneration(runID: runID)
+        if !ok, operationErrorMessage == nil {
+            operationErrorMessage = "暂时无法按原请求重试。请重新发送，或重新载入项目后再试。"
+        }
+        return ok
     }
 
     @discardableResult
     func retryGeneration(runID: NovelRunID) async -> Bool {
-        if terminalAwaitingRefresh, !(await refresh()) { return false }
+        // Same as retryLastTerminal: refresh first so expected revisions match
+        // disk after a failed stream left the UI on an older snapshot.
+        if !(await refresh()) {
+            if operationErrorMessage == nil {
+                operationErrorMessage = "无法刷新项目状态，请退出后重新进入再试。"
+            }
+            return false
+        }
         guard let run = workspace.projectSnapshot?.activeRuns.first(where: {
             $0.id == runID && $0.branchID == binding?.branchID &&
                 ($0.status == .failed || $0.status == .interrupted)
-        }), isEligibleForExactRetry(run) else { return false }
+        }), isEligibleForExactRetry(run) else {
+            if operationErrorMessage == nil {
+                operationErrorMessage = "这次生成已不可精确重试（分支或检查点已变化）。请重新发送。"
+            }
+            return false
+        }
         if run.kind == .quickStart {
             // 精确重试:从持久化的 user 消息取回本次请求原文(含用户填写的调整方向)
             // 原样重发。此前这里调的是无参版本,会退回默认文案、把调整方向静默丢掉,
@@ -1160,7 +1188,12 @@ final class NovelSessionViewModel {
             await bindToCurrentSelection()
             return activeRunID == retryRunID
         }
-        guard let draft = draft(for: run) else { return false }
+        guard let draft = draft(for: run) else {
+            if operationErrorMessage == nil {
+                operationErrorMessage = "找不到原请求内容，请重新发送。"
+            }
+            return false
+        }
         // Keep composer chrome aligned with the run being retried so the dock
         // does not still show "讨论" while an exact prose/polish retry starts.
         mode = draft.mode
@@ -2179,60 +2212,107 @@ private extension NovelSessionViewModel {
         kind: NovelRunKind,
         granularity: NovelGenerationGranularity? = nil
     ) -> Bool {
-        guard snapshotMatchesBinding,
-              access == .readWrite,
-              !workspace.requiresReload,
-              refreshErrorMessage == nil,
-              !terminalAwaitingRefresh,
-              (!isBusy || isBatchStartingRun),
-              !isRunning,
-              let branch = workspace.branchSnapshot?.branch,
-              branch.lifecycle == .active,
-              branch.activeRunID == nil,
-              activeRun == nil else { return false }
+        startBlockerMessage(kind: kind, granularity: granularity) == nil
+    }
+
+    /// Human-readable gate reason when generation cannot start. `nil` means open.
+    func startBlockerMessage(
+        kind: NovelRunKind,
+        granularity: NovelGenerationGranularity? = nil
+    ) -> String? {
+        guard snapshotMatchesBinding else {
+            return "项目状态尚未对齐，请先点「重新载入」。"
+        }
+        guard access == .readWrite else {
+            return "当前项目是只读状态，无法生成。"
+        }
+        if workspace.requiresReload {
+            return "项目需要重新载入后才能继续生成。"
+        }
+        if let refreshErrorMessage {
+            return refreshErrorMessage
+        }
+        if terminalAwaitingRefresh {
+            return "上一轮结果还在保存，请稍候再试或点「重新载入」。"
+        }
+        if isBusy && !isBatchStartingRun {
+            return "当前还有操作在进行，请稍候。"
+        }
+        if isRunning {
+            return "已有生成在进行中。"
+        }
+        guard let branch = workspace.branchSnapshot?.branch else {
+            return "分支尚未就绪，请重新载入项目。"
+        }
+        guard branch.lifecycle == .active else {
+            return "当前分支不可用，无法生成。"
+        }
+        if branch.activeRunID != nil || activeRun != nil {
+            return "分支上还有未结束的生成，请稍候或重新载入。"
+        }
         switch kind {
         case .discussion:
-            return true
+            return nil
         case .characterProposal:
-            return branch.syncStatus == .synchronized &&
-                branchPendingOperations.isEmpty &&
-                unresolvedBranchPolishTransactions.isEmpty
+            guard branch.syncStatus == .synchronized,
+                  branchPendingOperations.isEmpty,
+                  unresolvedBranchPolishTransactions.isEmpty else {
+                return "请先完成剧情同步或处理未完成的操作，再继续。"
+            }
+            return nil
         case .prose:
             guard branch.syncStatus == .synchronized,
                   !branchPendingOperations.contains(where: \.blocksProseGeneration) else {
-                return false
+                return "正文生成前需要先同步剧情状态。"
             }
             if isGhostwriting && !isGhostwriteStartingRun {
-                return false
+                return "代笔进行中，请先暂停或等当前章完成。"
             }
             let proseGranularity = granularity ?? self.granularity
             if workspace.projectSnapshot?.project.collaborationMode == .ghostwrite,
                proseGranularity == .wholeChapter,
                workspace.projectSnapshot?.confirmedChapterPlan(for: branch.id) == nil {
-                return false
+                return "代笔写整章需要先确认本章计划。"
             }
-            return true
+            return nil
         case .regenerate:
-            // 要把被重写章的正文原样注入,所以必须已同步且没有未落地的正文操作。
-            return branch.syncStatus == .synchronized &&
-                branchPendingOperations.isEmpty &&
-                unresolvedBranchPolishTransactions.isEmpty
+            guard branch.syncStatus == .synchronized,
+                  branchPendingOperations.isEmpty,
+                  unresolvedBranchPolishTransactions.isEmpty else {
+                return "重新生成前需要先同步剧情并完成未落地操作。"
+            }
+            return nil
         case .polish:
-            return branch.syncStatus == .synchronized &&
-                branchPendingOperations.isEmpty &&
-                unresolvedBranchPolishTransactions.isEmpty
+            guard branch.syncStatus == .synchronized,
+                  branchPendingOperations.isEmpty,
+                  unresolvedBranchPolishTransactions.isEmpty else {
+                return "润色前需要先同步剧情并完成未落地操作。"
+            }
+            return nil
         case .quickStart:
-            return false
+            return "开局建议请从项目入口发起，不能从会话直接重试。"
         }
     }
 
     @discardableResult
     func start(_ draft: NovelSessionRunDraft) async -> Bool {
-        guard !draft.userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              draft.inputBudgetTokens > 0,
-              canStart(kind: draft.kind, granularity: draft.granularity),
-              let project = workspace.projectSnapshot,
-              let branch = workspace.branchSnapshot else { return false }
+        if draft.userText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            operationErrorMessage = "请求内容为空，请重新输入后再试。"
+            return false
+        }
+        if draft.inputBudgetTokens <= 0 {
+            operationErrorMessage = "模型输入预算无效，请检查项目模型设置后重试。"
+            return false
+        }
+        if let blocker = startBlockerMessage(kind: draft.kind, granularity: draft.granularity) {
+            operationErrorMessage = blocker
+            return false
+        }
+        guard let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot else {
+            operationErrorMessage = "项目尚未就绪，请重新载入后再试。"
+            return false
+        }
         let previousTail = transientTail
         let previousRunRecord = transientRunRecord
         let previousTerminalAwaitingRefresh = terminalAwaitingRefresh
@@ -2268,6 +2348,7 @@ private extension NovelSessionViewModel {
             expectedBranchHeadRevision: branch.branch.headRevision
         )
         guard workspace.acquireSessionOperation(ownerID: request.id.rawValue) else {
+            operationErrorMessage = "当前会话正忙，请稍候再试。"
             return false
         }
         let placeholderRun = NovelActiveRunRecord(
@@ -2518,18 +2599,17 @@ private extension NovelSessionViewModel {
               }), let injection = project.injectionReceipts.first(where: {
                   $0.runID == run.id
               }) else { return nil }
+        // Exact retry must not re-apply Ask User. The failed run already durably
+        // wrote the answer interaction; replaying askUserResponse hits
+        // "already been answered" and surfaces as a generic state mismatch.
+        // Re-send the same user text as a normal follow-up turn instead.
         return NovelSessionRunDraft(
             kind: run.kind,
             mode: run.mode,
             granularity: run.granularity,
             userText: user.content,
             sourceChapterVersionID: run.sourceChapterVersionID,
-            askUserResponse: {
-                guard case .some(.askUserAnswer(let response)) = user.interaction else {
-                    return nil
-                }
-                return response
-            }(),
+            askUserResponse: nil,
             injectionOverrides: NovelInjectionOverrides(
                 forceIncludeMaterialIDs: injection.forceIncludeMaterialIDs,
                 forceExcludeMaterialIDs: injection.forceExcludeMaterialIDs

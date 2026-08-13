@@ -290,6 +290,16 @@ struct NovelRestoreChapterCommand: Equatable, Sendable {
     let chapterID: NovelChapterID
 }
 
+/// 从当前分支正文目录移除一章。不物理抹掉章节版本/检查点引用（历史可追溯），
+/// 但工作稿不再包含该章；目录与生成上下文都会消失。同时确保章被标为废弃。
+struct NovelDeleteChapterFromManuscriptCommand: Equatable, Sendable {
+    let context: NovelMutationContext
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
+    let chapterID: NovelChapterID
+    let expectedWorkingRevision: Int64
+}
+
 struct NovelRestoreChapterVersionCommand: Equatable, Sendable {
     let context: NovelMutationContext
     let projectID: NovelProjectID
@@ -427,6 +437,7 @@ enum NovelAction: Equatable, Sendable {
     case restoreChapterVersion(NovelRestoreChapterVersionCommand)
     case discardChapter(NovelDiscardChapterCommand)
     case restoreChapter(NovelRestoreChapterCommand)
+    case deleteChapterFromManuscript(NovelDeleteChapterFromManuscriptCommand)
     case cancelRun(NovelCancelRunCommand)
     case collectCandidate(NovelCollectCandidateCommand)
     case saveManualEdit(NovelSaveManualEditCommand)
@@ -465,6 +476,7 @@ enum NovelAction: Equatable, Sendable {
         case .restoreChapterVersion(let command): command.projectID
         case .discardChapter(let command): command.projectID
         case .restoreChapter(let command): command.projectID
+        case .deleteChapterFromManuscript(let command): command.projectID
         case .cancelRun(let command): command.projectID
         case .collectCandidate(let command): command.projectID
         case .saveManualEdit(let command): command.projectID
@@ -505,6 +517,7 @@ enum NovelAction: Equatable, Sendable {
         case .restoreChapterVersion(let command): command.context
         case .discardChapter(let command): command.context
         case .restoreChapter(let command): command.context
+        case .deleteChapterFromManuscript(let command): command.context
         case .cancelRun(let command): command.context
         case .collectCandidate(let command): command.context
         case .saveManualEdit(let command): command.context
@@ -545,6 +558,7 @@ enum NovelAction: Equatable, Sendable {
         case .restoreChapterVersion: .restoreChapterVersion
         case .discardChapter: .discardChapter
         case .restoreChapter: .restoreChapter
+        case .deleteChapterFromManuscript: .deleteChapterFromManuscript
         case .cancelRun: .cancelRun
         case .collectCandidate: .collectCandidate
         case .saveManualEdit: .saveManualEdit
@@ -750,6 +764,13 @@ enum NovelAction: Equatable, Sendable {
                 projectID: command.projectID,
                 branchID: command.branchID,
                 chapterID: command.chapterID
+            ))
+        case .deleteChapterFromManuscript(let command):
+            payload = .deleteChapterFromManuscript(.init(
+                projectID: command.projectID,
+                branchID: command.branchID,
+                chapterID: command.chapterID,
+                expectedWorkingRevision: command.expectedWorkingRevision
             ))
         case .abandonPolishTransaction(let command):
             payload = .abandonPolishTransaction(.init(
@@ -1045,6 +1066,13 @@ private enum NovelCanonicalActionPayload: Codable {
         let chapterID: NovelChapterID
     }
 
+    struct DeleteChapterFromManuscript: Codable {
+        let projectID: NovelProjectID
+        let branchID: NovelBranchID
+        let chapterID: NovelChapterID
+        let expectedWorkingRevision: Int64
+    }
+
     struct RestoreChapterVersion: Codable {
         let projectID: NovelProjectID
         let branchID: NovelBranchID
@@ -1187,6 +1215,7 @@ private enum NovelCanonicalActionPayload: Codable {
     case restoreChapterVersion(RestoreChapterVersion)
     case discardChapter(ChapterDiscardScope)
     case restoreChapter(ChapterDiscardScope)
+    case deleteChapterFromManuscript(DeleteChapterFromManuscript)
     case cancelRun(CancelRun)
     case collectCandidate(CollectCandidate)
     case saveManualEdit(SaveManualEdit)
@@ -1354,6 +1383,13 @@ enum NovelOutcome: Codable, Equatable, Sendable {
         branchID: NovelBranchID,
         chapterID: NovelChapterID,
         isDiscarded: Bool,
+        revision: Int64
+    )
+    case chapterRemovedFromManuscript(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID,
+        workingRevision: Int64,
         revision: Int64
     )
     case chapterVersionRestored(

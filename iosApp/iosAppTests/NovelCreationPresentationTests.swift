@@ -129,6 +129,57 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testAskUserAlreadyAnsweredMapsToActionableCopy() {
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "This Ask User prompt has already been answered."
+            )),
+            "这个问题已经回答过了。请直接发送新消息继续，或换个问法。"
+        )
+    }
+
+    func testNetworkNSURLErrorDumpIsHumanizedNotShownRaw() {
+        let dump = """
+        Exception in http request: Error Domain=NSURLErrorDomain Code=-1005 "网络连接已中断。" \
+        UserInfo={_kCFStreamErrorCodeKey=-4, NSErrorFailingURLKey=https://api.deepseek.com/v1/chat/completions}
+        """
+        XCTAssertTrue(NovelPresentation.looksLikeTechnicalFailureDump(dump))
+        XCTAssertTrue(NovelPresentation.looksLikeTransportFailure(dump))
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "provider_stream_failed",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，已保留当前回复，可以重试。若反复出现，请换一个创作模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "discussion_provider_failed",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "unknown_transport",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
+        )
+        // Short plain Chinese without dump markers still passes through.
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "custom",
+                message: "上游限流，请稍后再试。",
+                isRetryable: true
+            )),
+            "上游限流，请稍后再试。"
+        )
+    }
+
     func testMalformedPersistedStateSyncFailureHasActionableCopy() {
         XCTAssertEqual(
             NovelPresentation.stateSyncFailureMessage("The model returned malformed JSON."),
@@ -578,6 +629,14 @@ final class NovelCreationPresentationTests: XCTestCase {
             isRunning: false,
             activeRunKind: .prose
         ))
+        XCTAssertFalse(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: true,
+                activeRunKind: .prose,
+                hasGhostwriteProgress: true
+            ),
+            "Ghostwrite chrome owns the dock; co-create strip must not stack above it."
+        )
     }
 
     func testRuntimeRowActionsExposeTheirBlockingReasonInsteadOfDroppingTaps() {

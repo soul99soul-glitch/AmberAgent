@@ -72,6 +72,9 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     private let rootDirectory: URL
     private let fileManager: FileManager
     private let failingStages: Set<NovelRepositoryFailureStage>
+    /// Per-project encode cache so unchanged heavy sections (injection receipts,
+    /// snapshots, …) are not re-encoded on every small tool write.
+    private var sectionCaches: [NovelProjectID: NovelProjectShardedStorage.SectionCache] = [:]
 
     init(
         rootDirectory: URL,
@@ -127,16 +130,21 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             finishDeletionBestEffort(projectID: id)
             throw NovelError.projectNotFound(id)
         }
-        if isReplacementMarked(id),
-           !fileManager.fileExists(atPath: primaryURL(for: id).path) {
+        let package = packageURL(for: id)
+        let hasPackage = NovelProjectShardedStorage.isPackage(at: package, fileManager: fileManager)
+        let hasMonofile = fileManager.fileExists(atPath: primaryURL(for: id).path)
+        if isReplacementMarked(id), !hasPackage, !hasMonofile {
             throw NovelError.storageIndeterminate(id)
         }
-        guard fileManager.fileExists(atPath: primaryURL(for: id).path) ||
-                fileManager.fileExists(atPath: previousURL(for: id).path) else {
+        guard hasPackage || hasMonofile ||
+                fileManager.fileExists(atPath: previousURL(for: id).path) ||
+                fileManager.fileExists(
+                    atPath: NovelProjectShardedStorage.previousLayoutURL(in: package).path
+                ) else {
             throw NovelError.projectNotFound(id)
         }
         do {
-            let document = try readProjectDocument(at: primaryURL(for: id), projectID: id)
+            let document = try readInstalledProjectDocument(projectID: id)
             finishReplacementBestEffort(projectID: id)
             return NovelLoadedProject(document: document, access: .readWrite)
         } catch let error as NovelError {
@@ -161,33 +169,25 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         try ensureDirectories()
         try NovelDocumentValidator.validate(document)
         let projectID = document.project.id
-        let destination = primaryURL(for: projectID)
         let isReinstallingDeletedProject = isDeletionTombstoned(projectID)
         if isReinstallingDeletedProject {
             try cleanupProjectFiles(projectID: projectID, includingPrimary: true)
         } else if isReplacementMarked(projectID) {
             throw NovelError.storageIndeterminate(projectID)
         }
-        guard !fileManager.fileExists(atPath: destination.path) else {
+        guard !projectExistsOnDisk(projectID) else {
             throw NovelError.projectAlreadyExists(projectID)
         }
-        let staged = try stage(document)
-        defer { try? fileManager.removeItem(at: staged.url) }
-        try invalidateIndex()
         try failIfRequested(.beforePrimaryInstall)
         do {
-            try fileManager.moveItem(at: staged.url, to: destination)
+            try writeShardedProject(document)
         } catch {
-            if let installed = try? readProjectDocument(at: destination, projectID: projectID),
-               installed == document {
-                // The install completed despite Foundation reporting an error.
+            if let installed = try? readInstalledProjectDocument(projectID: projectID),
+               installed.project.revision == document.project.revision {
+                // Install completed despite a late error.
             } else {
                 throw NovelError.repositoryFailure("Could not create novel project: \(error)")
             }
-        }
-        let installed = try readProjectDocument(at: destination, projectID: projectID)
-        guard installed == document else {
-            throw NovelError.storageIndeterminate(projectID)
         }
         if isReinstallingDeletedProject {
             do {
@@ -201,8 +201,8 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         } catch {
             throw NovelError.storageIndeterminate(projectID)
         }
-        refreshIndexBestEffort()
-        return NovelLoadedProject(document: installed, access: .readWrite)
+        upsertIndexBestEffort(document: document)
+        return NovelLoadedProject(document: document, access: .readWrite)
     }
 
     func commitProject(
@@ -229,25 +229,16 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             throw NovelError.invalidDocument(["A commit must advance project revision exactly once."])
         }
         try NovelDocumentValidator.validateTransition(from: loaded.document, to: document)
-        let staged = try stage(document)
-        defer { try? fileManager.removeItem(at: staged.url) }
-        try invalidateIndex()
         try failIfRequested(.beforePrimaryInstall)
         try authorization?.claim()
 
-        let destination = primaryURL(for: projectID)
         do {
-            _ = try fileManager.replaceItemAt(
-                destination,
-                withItemAt: staged.url,
-                backupItemName: previousURL(for: projectID).lastPathComponent,
-                options: [.withoutDeletingBackupItem]
-            )
+            try writeShardedProject(document)
         } catch {
-            if let installed = try? readProjectDocument(at: destination, projectID: projectID),
-               installed == document {
-                // Treat an installed and validated next document as committed.
-            } else if let stillCurrent = try? readProjectDocument(at: destination, projectID: projectID),
+            if let installed = try? readInstalledProjectDocument(projectID: projectID),
+               installed.project.revision == document.project.revision {
+                // Treat an installed next revision as committed.
+            } else if let stillCurrent = try? readInstalledProjectDocument(projectID: projectID),
                       stillCurrent.project.revision == expectedRevision {
                 throw NovelError.repositoryFailure("Could not replace novel project: \(error)")
             } else {
@@ -260,12 +251,8 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         } catch {
             throw NovelError.storageIndeterminate(projectID)
         }
-        refreshIndexBestEffort()
-        let committed = try readProjectDocument(at: destination, projectID: projectID)
-        guard committed == document else {
-            throw NovelError.storageIndeterminate(projectID)
-        }
-        return NovelLoadedProject(document: committed, access: .readWrite)
+        upsertIndexBestEffort(document: document)
+        return NovelLoadedProject(document: document, access: .readWrite)
     }
 
     func replaceProject(
@@ -289,8 +276,6 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             throw NovelError.projectBusy(projectID)
         }
 
-        let staged = try stage(document)
-        defer { try? fileManager.removeItem(at: staged.url) }
         try failIfRequested(.beforeReplacementMarkerWrite)
         do {
             try writeLifecycleMarker(ProjectLifecycleMarkerV1(
@@ -305,29 +290,16 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             }
             throw error
         }
-        try invalidateIndex()
         try failIfRequested(.beforePrimaryInstall)
 
-        let destination = primaryURL(for: projectID)
         do {
-            if fileManager.fileExists(atPath: destination.path) {
-                _ = try fileManager.replaceItemAt(
-                    destination,
-                    withItemAt: staged.url,
-                    backupItemName: nil,
-                    options: []
-                )
-            } else {
-                try fileManager.moveItem(at: staged.url, to: destination)
-            }
+            try writeShardedProject(document)
         } catch {
-            if let installed = try? readProjectDocument(at: destination, projectID: projectID),
-               installed == document {
-                // Continue cleanup after an indeterminate Foundation result.
-            } else if let unchanged = try? readProjectDocument(
-                at: destination,
-                projectID: projectID
-            ), unchanged == loaded.document {
+            if let installed = try? readInstalledProjectDocument(projectID: projectID),
+               installed.project.revision == document.project.revision {
+                // Continue cleanup after an indeterminate result.
+            } else if let unchanged = try? readInstalledProjectDocument(projectID: projectID),
+                      unchanged.project.revision == loaded.document.project.revision {
                 do {
                     try fileManager.removeItem(at: replacementMarkerURL(for: projectID))
                 } catch {
@@ -338,10 +310,6 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
                 throw NovelError.storageIndeterminate(projectID)
             }
         }
-        let installed = try readProjectDocument(at: destination, projectID: projectID)
-        guard installed == document else {
-            throw NovelError.storageIndeterminate(projectID)
-        }
         do {
             try failIfRequested(.afterReplacementInstallBeforeCleanup)
             try cleanupProjectFiles(projectID: projectID, includingPrimary: false)
@@ -349,8 +317,8 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         } catch {
             throw NovelError.storageIndeterminate(projectID)
         }
-        refreshIndexBestEffort()
-        return NovelLoadedProject(document: installed, access: .readWrite)
+        upsertIndexBestEffort(document: document)
+        return NovelLoadedProject(document: document, access: .readWrite)
     }
 
     func deleteProject(id: NovelProjectID, expectedRevision: Int64) async throws {
@@ -559,36 +527,17 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         guard !isDeletionTombstoned(id), !isReplacementMarked(id) else {
             throw NovelError.projectNotFound(id)
         }
-        let previous = previousURL(for: id)
-        let restored = try readProjectDocument(at: previous, projectID: id)
+        let restored = try readPreviousProjectDocument(projectID: id)
         guard try NovelProjectPackageCodec.encode(restored).projectSHA256 ==
             expectedDocumentSHA256 else {
             throw NovelError.storageIndeterminate(id)
         }
-        let bytes = try readData(at: previous, projectID: id)
-        let staged = projectDirectory.appendingPathComponent(".restore-\(UUID().uuidString).tmp")
-        try bytes.write(to: staged, options: [])
-        defer { try? fileManager.removeItem(at: staged) }
-        _ = try readProjectDocument(at: staged, projectID: id)
-        try invalidateIndex()
-
-        let destination = primaryURL(for: id)
-        if fileManager.fileExists(atPath: destination.path) {
-            let corruptName = "\(id.description).corrupt-\(UUID().uuidString.lowercased()).json"
-            _ = try fileManager.replaceItemAt(
-                destination,
-                withItemAt: staged,
-                backupItemName: corruptName,
-                options: [.withoutDeletingBackupItem]
-            )
-        } else {
-            try fileManager.moveItem(at: staged, to: destination)
-        }
-        let installed = try readProjectDocument(at: destination, projectID: id)
-        guard installed == restored else {
+        try writeShardedProject(restored)
+        let installed = try readInstalledProjectDocument(projectID: id)
+        guard installed.project.revision == restored.project.revision else {
             throw NovelError.storageIndeterminate(id)
         }
-        refreshIndexBestEffort()
+        upsertIndexBestEffort(document: installed)
         return NovelLoadedProject(document: installed, access: .readWrite)
     }
 
@@ -694,9 +643,7 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         if isDeletionTombstoned(record.projectID) || isReplacementMarked(record.projectID) {
             throw NovelError.projectNotFound(record.projectID)
         }
-        guard fileManager.fileExists(atPath: primaryURL(for: record.projectID).path)
-            || fileManager.fileExists(atPath: previousURL(for: record.projectID).path)
-        else {
+        guard projectExistsOnDisk(record.projectID) else {
             throw NovelError.projectNotFound(record.projectID)
         }
         let url = ghostwriteProgressURL(
@@ -750,12 +697,36 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         rootDirectory.appendingPathComponent("index.manifest.json")
     }
 
+    /// Legacy single-file primary (still readable; migrated away on next commit).
     private func primaryURL(for projectID: NovelProjectID) -> URL {
         projectDirectory.appendingPathComponent("\(projectID.description).json")
     }
 
+    /// Legacy single-file previous snapshot.
     private func previousURL(for projectID: NovelProjectID) -> URL {
         projectDirectory.appendingPathComponent("\(projectID.description).previous.json")
+    }
+
+    /// Sharded package directory: `projects/{id}/layout.json` + content-addressed blobs.
+    private func packageURL(for projectID: NovelProjectID) -> URL {
+        NovelProjectShardedStorage.packageDirectory(
+            projectDirectory: projectDirectory,
+            projectID: projectID
+        )
+    }
+
+    private func projectExistsOnDisk(_ projectID: NovelProjectID) -> Bool {
+        fileManager.fileExists(atPath: primaryURL(for: projectID).path)
+            || NovelProjectShardedStorage.isPackage(
+                at: packageURL(for: projectID),
+                fileManager: fileManager
+            )
+            || fileManager.fileExists(atPath: previousURL(for: projectID).path)
+            || fileManager.fileExists(
+                atPath: NovelProjectShardedStorage.previousLayoutURL(
+                    in: packageURL(for: projectID)
+                ).path
+            )
     }
 
     private func tombstoneURL(for projectID: NovelProjectID) -> URL {
@@ -1000,7 +971,11 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         var urls = [previousURL(for: projectID)]
         if includingPrimary {
             urls.append(primaryURL(for: projectID))
+            urls.append(packageURL(for: projectID))
             urls.append(replacementMarkerURL(for: projectID))
+            sectionCaches[projectID] = nil
+        } else {
+            // Replacement cleanup keeps the new primary package; drop legacy previous monofile only.
         }
         let recoveryURLs = try fileManager.contentsOfDirectory(
             at: recoveryDirectory,
@@ -1015,27 +990,106 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         }
     }
 
-    private func stage(
-        _ document: NovelProjectDocumentV1
-    ) throws -> (url: URL, data: Data) {
-        let data = try makeEncoder().encode(document)
-        guard data.count <= Self.maximumProjectBytes else {
-            throw NovelError.invalidDocument(["Project exceeds the 100 MB storage limit."])
-        }
-        let url = projectDirectory.appendingPathComponent(".\(UUID().uuidString).tmp")
-        try data.write(to: url, options: [])
+    private func writeShardedProject(_ document: NovelProjectDocumentV1) throws {
         try failIfRequested(.afterTempWrite)
-        let staged = try readData(at: url, projectID: document.project.id)
-        let decoded = try decodeProject(
-            staged,
-            projectID: document.project.id,
-            normalizesLegacySyncStatus: false
+        let cache = sectionCaches[document.project.id]
+        let nextCache = try NovelProjectShardedStorage.writePackage(
+            document: document,
+            packageDirectory: packageURL(for: document.project.id),
+            encoder: makeEncoder(),
+            fileManager: fileManager,
+            cache: cache
         )
-        guard decoded == document else {
-            throw NovelError.repositoryFailure("Staged novel document changed during verification.")
-        }
         try failIfRequested(.afterTempValidation)
-        return (url, data)
+        sectionCaches[document.project.id] = nextCache
+        // Drop legacy monofiles after a successful sharded write so inventory and
+        // loads prefer the incremental package.
+        let mono = primaryURL(for: document.project.id)
+        if fileManager.fileExists(atPath: mono.path) {
+            try? fileManager.removeItem(at: mono)
+        }
+        let monoPrevious = previousURL(for: document.project.id)
+        if fileManager.fileExists(atPath: monoPrevious.path) {
+            try? fileManager.removeItem(at: monoPrevious)
+        }
+    }
+
+    private func readInstalledProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {
+        let package = packageURL(for: projectID)
+        let hasCurrentLayout = fileManager.fileExists(
+            atPath: NovelProjectShardedStorage.layoutURL(in: package).path
+        )
+        let hasPreviousLayout = fileManager.fileExists(
+            atPath: NovelProjectShardedStorage.previousLayoutURL(in: package).path
+        )
+        if hasCurrentLayout {
+            do {
+                let loaded = try NovelProjectShardedStorage.loadDocument(
+                    packageDirectory: package,
+                    projectID: projectID,
+                    decoder: makeDecoder(),
+                    fileManager: fileManager
+                )
+                sectionCaches[projectID] = loaded.cache
+                return try finalizeLoadedDocument(loaded.document, projectID: projectID)
+            } catch {
+                // Migration left a monofile when package delete failed, or layout is
+                // unreadable: prefer a still-valid monofile over falling to previous.
+                let mono = primaryURL(for: projectID)
+                if fileManager.fileExists(atPath: mono.path),
+                   let monofile = try? readProjectDocument(at: mono, projectID: projectID) {
+                    return monofile
+                }
+                throw error
+            }
+        }
+        if hasPreviousLayout {
+            // Previous-only package: surface as load via previous for degraded path.
+            throw NovelError.corruptedProject(
+                projectID: projectID,
+                details: "Current package layout is missing."
+            )
+        }
+        let mono = primaryURL(for: projectID)
+        if fileManager.fileExists(atPath: mono.path) {
+            return try readProjectDocument(at: mono, projectID: projectID)
+        }
+        throw NovelError.projectNotFound(projectID)
+    }
+
+    private func readPreviousProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {
+        let package = packageURL(for: projectID)
+        if fileManager.fileExists(
+            atPath: NovelProjectShardedStorage.previousLayoutURL(in: package).path
+        ) {
+            let loaded = try NovelProjectShardedStorage.loadDocument(
+                packageDirectory: package,
+                projectID: projectID,
+                decoder: makeDecoder(),
+                fileManager: fileManager,
+                layoutFileName: NovelProjectShardedStorage.previousLayoutFileName
+            )
+            return try finalizeLoadedDocument(loaded.document, projectID: projectID)
+        }
+        let monoPrevious = previousURL(for: projectID)
+        return try readProjectDocument(at: monoPrevious, projectID: projectID)
+    }
+
+    private func finalizeLoadedDocument(
+        _ document: NovelProjectDocumentV1,
+        projectID: NovelProjectID
+    ) throws -> NovelProjectDocumentV1 {
+        let generationNormalized = NovelGenerationReducer
+            .normalizingLegacyInterruptedProseCandidates(document)
+        let normalized = NovelBranchSemantics.normalizingDecodedSyncStatus(generationNormalized)
+        guard normalized.project.id == projectID else {
+            throw NovelError.corruptedProject(
+                projectID: projectID,
+                details: "Document project ID does not match its filename."
+            )
+        }
+        try NovelDocumentValidator.validate(normalized)
+        return normalized
     }
 
     private func readProjectDocument(
@@ -1147,6 +1201,7 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             at: projectDirectory,
             includingPropertiesForKeys: [
                 .isRegularFileKey,
+                .isDirectoryKey,
                 .contentModificationDateKey,
                 .fileSizeKey,
             ],
@@ -1156,6 +1211,17 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         var projectIDs: Set<NovelProjectID> = []
         for url in urls {
             let name = url.lastPathComponent
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
+            if values?.isDirectory == true {
+                guard let uuid = UUID(uuidString: name),
+                      NovelProjectShardedStorage.isPackage(at: url, fileManager: fileManager) else {
+                    continue
+                }
+                let projectID = NovelProjectID(uuid)
+                guard !deletedProjectIDs.contains(projectID) else { continue }
+                projectIDs.insert(projectID)
+                continue
+            }
             let rawID: String
             if name.hasSuffix(".previous.json") {
                 rawID = String(name.dropLast(".previous.json".count))
@@ -1178,6 +1244,22 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     }
 
     private func fileSignatureEntry(for projectID: NovelProjectID) -> IndexManifestV1.Entry {
+        let package = packageURL(for: projectID)
+        if NovelProjectShardedStorage.isPackage(at: package, fileManager: fileManager) {
+            let primary = fileSignature(
+                at: NovelProjectShardedStorage.layoutURL(in: package)
+            )
+            let previous = fileSignature(
+                at: NovelProjectShardedStorage.previousLayoutURL(in: package)
+            )
+            return IndexManifestV1.Entry(
+                projectID: projectID,
+                primaryByteCount: primary.byteCount,
+                primaryModifiedAt: primary.modifiedAt,
+                previousByteCount: previous.byteCount,
+                previousModifiedAt: previous.modifiedAt
+            )
+        }
         let primary = fileSignature(at: primaryURL(for: projectID))
         let previous = fileSignature(at: previousURL(for: projectID))
         return IndexManifestV1.Entry(
@@ -1226,12 +1308,16 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     }
 
     private func loadProjectSynchronously(id: NovelProjectID) throws -> NovelLoadedProject {
-        if isReplacementMarked(id),
-           !fileManager.fileExists(atPath: primaryURL(for: id).path) {
+        let hasPackage = NovelProjectShardedStorage.isPackage(
+            at: packageURL(for: id),
+            fileManager: fileManager
+        )
+        let hasMonofile = fileManager.fileExists(atPath: primaryURL(for: id).path)
+        if isReplacementMarked(id), !hasPackage, !hasMonofile {
             throw NovelError.storageIndeterminate(id)
         }
         do {
-            let document = try readProjectDocument(at: primaryURL(for: id), projectID: id)
+            let document = try readInstalledProjectDocument(projectID: id)
             finishReplacementBestEffort(projectID: id)
             return NovelLoadedProject(document: document, access: .readWrite)
         } catch let error as NovelError {
@@ -1288,6 +1374,31 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         }
     }
 
+    /// Patch one project into the lightweight index without reloading every package.
+    /// Falls back to a full scan only when no usable index exists yet.
+    private func upsertIndexBestEffort(document: NovelProjectDocumentV1) {
+        do {
+            let summary = NovelProjectSummary(document: document, isDegraded: false)
+            let deleted = deletionTombstoneProjectIDs()
+            var projects: [NovelProjectSummary]
+            if let index = try? readIndex() {
+                projects = index.projects.filter { !deleted.contains($0.id) && $0.id != summary.id }
+                projects.append(summary)
+            } else {
+                projects = try scanProjectSummaries()
+                if let idx = projects.firstIndex(where: { $0.id == summary.id }) {
+                    projects[idx] = summary
+                } else if !deleted.contains(summary.id) {
+                    projects.append(summary)
+                }
+            }
+            writeIndexBestEffort(projects)
+        } catch {
+            try? fileManager.removeItem(at: indexURL)
+            try? fileManager.removeItem(at: indexManifestURL)
+        }
+    }
+
     private func invalidateIndex() throws {
         if fileManager.fileExists(atPath: indexManifestURL.path) {
             try? fileManager.removeItem(at: indexManifestURL)
@@ -1311,7 +1422,7 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         primaryFailure: String
     ) throws -> NovelLoadedProject {
         do {
-            let previous = try readProjectDocument(at: previousURL(for: id), projectID: id)
+            let previous = try readPreviousProjectDocument(projectID: id)
             guard previous.project.id == id else {
                 throw NovelError.corruptedProject(
                     projectID: id,

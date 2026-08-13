@@ -522,6 +522,75 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.durableMessages[3].content, "那就先强化他保护家人的选择。")
     }
 
+    func testRetryAfterFailedAskUserAnswerDoesNotReplayAnswerInteraction() async throws {
+        let prompt = NovelAskUserPrompt(
+            question: "目录里哪几章要改？",
+            options: ["5-10", "全部"]
+        )
+        let transportFailure = NovelModelFailure(
+            code: "discussion_provider_failed",
+            message: #"Exception in http request: Error Domain=NSURLErrorDomain Code=-1005 "网络连接已中断。""#,
+            isRetryable: true
+        )
+        let harness = try await makeHarness(scripts: [
+            NovelModelScript(steps: [.askUser(prompt, preface: "先确认改名范围。")]),
+            NovelModelScript(steps: [.fail(transportFailure)]),
+            NovelModelScript(steps: [.replacement("按你点的那几章重排标题。"), .complete]),
+        ])
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "章节标题有问题")
+        XCTAssertTrue(didStart)
+        let didAsk = await eventually {
+            !harness.session.isRunning &&
+                harness.session.durableMessages.last?.interaction == .askUser(prompt)
+        }
+        XCTAssertTrue(didAsk)
+        let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
+
+        let didAnswer = await harness.session.answerAskUser(
+            promptMessageID: promptMessage.id,
+            answer: "5、6、8、10、15、16"
+        )
+        XCTAssertTrue(didAnswer)
+        let failed = await eventually {
+            harness.workspace.projectSnapshot?.activeRuns.last?.status == .failed
+        }
+        XCTAssertTrue(failed)
+        let failedRunID = try XCTUnwrap(harness.workspace.projectSnapshot?.activeRuns.last?.id)
+        let failedUser = try XCTUnwrap(
+            harness.workspace.branchSnapshot?.session.messages.first(where: {
+                $0.runID == failedRunID && $0.role == .user
+            })
+        )
+        guard case .some(.askUserAnswer) = failedUser.interaction else {
+            return XCTFail("Failed answer turn must keep the durable askUserAnswer interaction.")
+        }
+
+        // Bubble「重新生成」must not replay askUserResponse (already answered).
+        // It should re-send the same text as a normal discussion turn.
+        let retried = await harness.session.retryGeneration(runID: failedRunID)
+        XCTAssertTrue(
+            retried,
+            "retryGeneration failed: \(harness.session.operationErrorMessage ?? "nil")"
+        )
+        let completed = await eventually {
+            !harness.session.isRunning &&
+                harness.workspace.projectSnapshot?.activeRuns.last?.status == .completed &&
+                harness.workspace.projectSnapshot?.activeRuns.last?.id != failedRunID
+        }
+        XCTAssertTrue(completed)
+        XCTAssertEqual(
+            harness.workspace.branchSnapshot?.session.messages.last?.content,
+            "按你点的那几章重排标题。"
+        )
+        XCTAssertNil(harness.session.operationErrorMessage)
+        let userInputs = harness.workspace.branchSnapshot?.session.messages
+            .filter { $0.role == .user }
+            .map(\.content) ?? []
+        XCTAssertEqual(userInputs, ["章节标题有问题", "5、6、8、10、15、16", "5、6、8、10、15、16"])
+    }
+
     func testAskUserAnswerStartsTheNextQuickStartTurn() async throws {
         let prompt = NovelAskUserPrompt(
             question: "这座城市最核心的代价是什么？",

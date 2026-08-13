@@ -576,8 +576,21 @@ enum NovelPresentation {
         if let failure = error as? NovelStructuredModelExecutionFailure {
             return failureMessage(failure.failure)
         }
+        // NovelFailure is a value type (not Error); transport throws NovelModelFailure.
+        if let failure = error as? NovelModelFailure {
+            return failureMessage(NovelFailure(
+                code: failure.code,
+                message: failure.message,
+                isRetryable: failure.isRetryable
+            ))
+        }
         guard case .invalidInput(let detail) = error as? NovelError else {
-            return (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            let text = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+            if looksLikeTechnicalFailureDump(text) {
+                return "网络或模型连接中断，请重试。"
+            }
+            return text
         }
         if detail.contains("evidence outside the authoritative manuscript") {
             return "模型提取的事实依据与正文不一致，候选正文仍然保留，可以重新同步。"
@@ -593,8 +606,36 @@ enum NovelPresentation {
         if detail.contains("pending novel operation changed") {
             return "同步期间项目内容发生了变化，请重新载入后再试。"
         }
+        if detail.contains("no pending terminal state") {
+            return "这次生成的重试状态已失效，请重新发送请求。"
+        }
+        if detail.contains("cannot be empty") {
+            return "请求内容为空，请重新输入后再试。"
+        }
+        if detail.contains("input budget must be positive") {
+            return "模型输入预算无效，请检查项目模型设置后重试。"
+        }
+        if detail.contains("already been answered") {
+            return "这个问题已经回答过了。请直接发送新消息继续，或换个问法。"
+        }
+        if detail.contains("Ask User prompt no longer belongs") {
+            return "原来的追问已失效，请直接发送新消息继续。"
+        }
+        if detail.contains("discussion run shape is invalid") {
+            return "这次讨论请求格式无效，请直接重新发送。"
+        }
+        if detail.contains("while deleting the chapter") {
+            return "删除章节时正文已变化，请重新载入后再试。"
+        }
+        if detail.contains("not in the working manuscript") {
+            return "这一章已经不在当前正文目录里。"
+        }
+        if detail.contains("before deleting a chapter") {
+            return "请先完成当前分支未完成的正文操作，再删除章节。"
+        }
         // 代笔等链路直接抛中文 invalidInput：原样透传，不抹成「重新载入」。
-        if detail.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+        if detail.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }),
+           !looksLikeTechnicalFailureDump(detail) {
             return detail
         }
         return "当前操作的内容或项目状态不匹配，请重新载入后再试。"
@@ -617,17 +658,87 @@ enum NovelPresentation {
             return "模型没有返回内容，请重新生成。"
         case "terminal_persist_failed":
             return "内容已经生成，但保存失败，请重试保存。"
-        case "provider_stream_failed", "grok_web_stream_failed":
-            return "模型上游服务在生成过程中中断，已保留当前回复，可以重试。"
+        case "provider_stream_failed", "grok_web_stream_failed",
+             "provider_background_disconnected", "provider_background_failed",
+             "discussion_provider_failed":
+            return networkOrUpstreamFailureMessage(
+                failure.message,
+                retainedPartial: failure.code != "discussion_provider_failed"
+            )
         default:
             let message = failure.message.trimmingCharacters(in: .whitespacesAndNewlines)
-            if message.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }) {
+            // NSURLError Domain=/UserInfo= dumps often include a short Chinese phrase
+            // like「网络连接已中断」— never pass the raw dump to the bubble/banner.
+            if looksLikeTechnicalFailureDump(message) || looksLikeTransportFailure(message) {
+                return networkOrUpstreamFailureMessage(message, retainedPartial: false)
+            }
+            if message.unicodeScalars.contains(where: { (0x4E00...0x9FFF).contains($0.value) }),
+               message.count <= 120 {
                 return message
             }
             return failure.isRetryable
                 ? "生成暂时失败，请稍后重试。"
                 : "生成没有完成，请检查项目模型或输入后重试。"
         }
+    }
+
+    /// True for Foundation/NSURL stack dumps and similar non-user-facing diagnostics.
+    static func looksLikeTechnicalFailureDump(_ message: String) -> Bool {
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return false }
+        if text.count > 180 { return true }
+        return text.contains("Domain=")
+            || text.contains("UserInfo=")
+            || text.contains("NSURLError")
+            || text.contains("NSError")
+            || text.contains("kCFStreamError")
+            || text.contains("_kCFStreamError")
+            || text.contains("NSUnderlyingError")
+            || text.contains("Exception in http request")
+            || (text.contains("Code=") && text.contains("http"))
+    }
+
+    /// Connection-class failures that should be retried once at the transport edge.
+    static func looksLikeTransportFailure(_ message: String) -> Bool {
+        let text = message
+        if text.contains("Code=-1005")
+            || text.contains("Code=-1001")
+            || text.contains("Code=-1009")
+            || text.contains("Code=-1200")
+            || text.contains("NSURLErrorDomain")
+            || text.contains("网络连接已中断")
+            || text.contains("请求超时")
+            || text.contains("似乎已断开与互联网") {
+            return true
+        }
+        return looksLikeTechnicalFailureDump(text)
+    }
+
+    static func networkOrUpstreamFailureMessage(
+        _ raw: String,
+        retainedPartial: Bool
+    ) -> String {
+        let text = raw
+        if text.contains("Code=-1009") || text.contains("似乎已断开与互联网") {
+            return "设备当前无网络，请恢复网络后重试。"
+        }
+        if text.contains("Code=-1001") || text.contains("请求超时") {
+            return retainedPartial
+                ? "模型请求超时，已保留当前回复，可以重试。"
+                : "模型请求超时，请检查网络后重试。"
+        }
+        if text.contains("Code=-1200") || text.contains("SSL") {
+            return "安全连接失败，请检查网络或代理后重试。"
+        }
+        if text.contains("Code=-1005") || text.contains("网络连接已中断") {
+            return retainedPartial
+                ? "网络连接中断，已保留当前回复，可以重试。若反复出现，请换一个创作模型。"
+                : "网络连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
+        }
+        if retainedPartial {
+            return "模型上游服务在生成过程中中断，已保留当前回复，可以重试。"
+        }
+        return "网络或模型连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
     }
 
     static func stateSyncFailureMessage(_ message: String) -> String {

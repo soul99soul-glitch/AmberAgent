@@ -34,6 +34,8 @@ struct NovelChapterManagementView: View {
                             .foregroundStyle(
                                 batchPolishBlocker == nil ? AmberTheme.accent : AmberTheme.muted
                             )
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(batchPolishBlocker != nil)

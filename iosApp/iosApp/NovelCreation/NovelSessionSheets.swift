@@ -1035,16 +1035,21 @@ struct NovelWritingContextSheet: View {
                             Button("暂停") {
                                 session.pauseGhostwrite()
                             }
+                            .lineLimit(1)
                         } else if session.ghostwriteProgress?.pauseReason == .planProposedForNewBatch {
                             // 新批首章计划已自动拟定，等用户确认后连写。
                             Button("确认计划，开始写") {
                                 _ = session.continueGhostwriteChapter()
                             }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .disabled(!session.canStartGhostwriteChapter)
                         } else if shouldShowContinueGhostwrite {
                             Button(continueGhostwriteButtonTitle) {
                                 _ = session.continueGhostwriteChapter()
                             }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .disabled(!session.canStartGhostwriteChapter)
                         } else {
                             let isNextBatch = session.ghostwriteProgress?.pauseReason == .batchCompleted
@@ -1053,6 +1058,8 @@ struct NovelWritingContextSheet: View {
                                 let n = NovelGhostwriteBatch.clamp(session.ghostwriteTargetChapterCount)
                                 _ = session.startGhostwriteChapter(targetChapterCount: n)
                             }
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .disabled(!session.canStartGhostwriteChapter)
                         }
                     } else {

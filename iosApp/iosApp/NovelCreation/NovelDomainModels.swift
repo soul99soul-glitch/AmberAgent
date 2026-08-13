@@ -1470,6 +1470,7 @@ enum NovelOperationKind: String, Codable, Sendable {
     case restoreChapterVersion
     case discardChapter
     case restoreChapter
+    case deleteChapterFromManuscript
     case startRun
     case cancelRun
     case collectCandidate

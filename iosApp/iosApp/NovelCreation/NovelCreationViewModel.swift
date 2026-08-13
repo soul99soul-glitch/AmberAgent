@@ -244,6 +244,10 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var mutationEventsTask: Task<Void, Never>?
     /// 本 VM 发起的 mutation 的 operationID 集合，用于抑制广播回声；成功广播到达即移除。
     @ObservationIgnored private var ownMutationOperationIDs: Set<NovelOperationID> = []
+    /// Coalesce external mutation refreshes (discussion tools often fire many
+    /// commits in one agent turn). Serial full-project reloads freeze large novels.
+    @ObservationIgnored private var pendingExternalMutationProjectIDs: Set<NovelProjectID> = []
+    @ObservationIgnored private var externalMutationRefreshTask: Task<Void, Never>?
 
     init(creation: any NovelCreation) {
         self.creation = creation
@@ -258,7 +262,24 @@ final class NovelCreationViewModel {
                 // 自身发起的写入已在自己的流程里刷新；回声刷新会与这些流程的
                 // 中间状态竞争（分支选择/快照序列），必须按 operationID 抑制。
                 if self.ownMutationOperationIDs.remove(event.operationID) != nil { continue }
-                _ = try? await self.refreshCurrentSelection(projectID: event.projectID)
+                self.scheduleExternalMutationRefresh(projectID: event.projectID)
+            }
+        }
+    }
+
+    /// Batch tool writes into one UI refresh after a short quiet window.
+    private func scheduleExternalMutationRefresh(projectID: NovelProjectID) {
+        pendingExternalMutationProjectIDs.insert(projectID)
+        guard externalMutationRefreshTask == nil else { return }
+        externalMutationRefreshTask = Task { @MainActor [weak self] in
+            // 150ms covers typical multi-tool bursts without making title/panel lag feel stuck.
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard let self else { return }
+            let projectIDs = self.pendingExternalMutationProjectIDs
+            self.pendingExternalMutationProjectIDs = []
+            self.externalMutationRefreshTask = nil
+            for id in projectIDs {
+                _ = try? await self.refreshCurrentSelection(projectID: id)
             }
         }
     }
@@ -1738,6 +1759,33 @@ final class NovelCreationViewModel {
             projectID: project.project.id,
             branchID: branch.branch.id,
             chapterID: chapterID
+        )))
+    }
+
+    /// 从当前分支正文目录删除一章（工作稿不再包含；历史检查点仍保留引用）。
+    func deleteChapterFromManuscript(chapterID: NovelChapterID) async -> Bool {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot else {
+            errorMessage = "项目尚未就绪，请重新载入后再试。"
+            return false
+        }
+        guard project.chapters.contains(where: { $0.id == chapterID }) else {
+            errorMessage = "章节已经不存在，请重新载入项目。"
+            return false
+        }
+        guard branch.chapterSelections.contains(where: { $0.chapterID == chapterID }) else {
+            errorMessage = "这一章已经不在当前正文目录里。"
+            return false
+        }
+        return await perform(.deleteChapterFromManuscript(NovelDeleteChapterFromManuscriptCommand(
+            context: mutationContext(
+                projectRevision: project.project.revision,
+                branchHeadRevision: branch.branch.headRevision
+            ),
+            projectID: project.project.id,
+            branchID: branch.branch.id,
+            chapterID: chapterID,
+            expectedWorkingRevision: branch.branch.workingRevision
         )))
     }
 

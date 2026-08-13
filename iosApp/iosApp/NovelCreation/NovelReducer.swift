@@ -245,6 +245,17 @@ enum NovelReducer {
                 in: document,
                 now: now
             )
+        case .deleteChapterFromManuscript(let command):
+            return try NovelChapterDiscardReducer.deleteFromManuscript(
+                chapterID: command.chapterID,
+                projectID: command.projectID,
+                branchID: command.branchID,
+                expectedWorkingRevision: command.expectedWorkingRevision,
+                context: command.context,
+                payloadSHA256: payloadSHA256,
+                in: document,
+                now: now
+            )
         case .adoptPolishCandidate:
             throw NovelError.invalidInput(
                 "Polish adoption must be applied by the two-phase transaction lifecycle."
@@ -960,6 +971,84 @@ enum NovelChapterDiscardReducer {
         NovelReducer.recordApplied(
             context,
             kind: isDiscarded ? .discardChapter : .restoreChapter,
+            payloadSHA256: payloadSHA256,
+            outcome: outcome,
+            in: &next,
+            now: now
+        )
+        try NovelDocumentValidator.validate(next)
+        return (next, outcome)
+    }
+
+    /// 从当前分支工作稿移除一章：目录不再显示，生成也不再注入。
+    /// 不删除 `chapters`/`chapterVersions`（历史检查点仍引用它们）。
+    static func deleteFromManuscript(
+        chapterID: NovelChapterID,
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        expectedWorkingRevision: Int64,
+        context: NovelMutationContext,
+        payloadSHA256: String,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> (NovelProjectDocumentV1, NovelOutcome) {
+        try NovelReducer.requireProjectRevision(context, document: document)
+        var next = document
+        guard let chapterIndex = next.chapters.firstIndex(where: { $0.id == chapterID }) else {
+            throw NovelError.invalidInput("Chapter \(chapterID) does not exist.")
+        }
+        guard let branchIndex = next.branches.firstIndex(where: {
+            $0.id == branchID && $0.lifecycle == .active
+        }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        let branch = next.branches[branchIndex]
+        if let expectedHead = context.expectedBranchHeadRevision,
+           expectedHead != branch.headRevision {
+            throw NovelError.staleBranchHeadRevision(
+                expected: expectedHead,
+                actual: branch.headRevision
+            )
+        }
+        guard branch.workingRevision == expectedWorkingRevision else {
+            throw NovelError.invalidInput(
+                "The manuscript changed while deleting the chapter. Reload and try again."
+            )
+        }
+        guard branch.workingChapterSelections.contains(where: { $0.chapterID == chapterID }) else {
+            throw NovelError.invalidInput("Chapter \(chapterID) is not in the working manuscript.")
+        }
+        guard branch.activeRunID == nil else {
+            throw NovelError.projectBusy(projectID)
+        }
+        guard !next.pendingOperations.contains(where: { $0.branchID == branchID }) else {
+            throw NovelError.invalidInput("Pending manuscript work must finish before deleting a chapter.")
+        }
+
+        // Ensure discarded so restore path stays well-defined if re-attached later
+        // via checkpoint undo; and generation/export filters keep treating it as out.
+        if next.chapters[chapterIndex].discardedAt == nil {
+            next.chapters[chapterIndex].discardedAt = now
+        }
+        next.branches[branchIndex].workingChapterSelections.removeAll {
+            $0.chapterID == chapterID
+        }
+        let finalWorkingRevision = branch.workingRevision + 1
+        next.branches[branchIndex].workingRevision = finalWorkingRevision
+        next.branches[branchIndex].syncStatus = .needsSync
+        next.branches[branchIndex].updatedAt = now
+        next.project.revision += 1
+        next.project.updatedAt = now
+        let outcome = NovelOutcome.chapterRemovedFromManuscript(
+            projectID: projectID,
+            branchID: branchID,
+            chapterID: chapterID,
+            workingRevision: finalWorkingRevision,
+            revision: next.project.revision
+        )
+        NovelReducer.recordApplied(
+            context,
+            kind: .deleteChapterFromManuscript,
             payloadSHA256: payloadSHA256,
             outcome: outcome,
             in: &next,
