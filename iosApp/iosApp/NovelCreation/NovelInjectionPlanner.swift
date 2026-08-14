@@ -829,6 +829,46 @@ private extension NovelPromptKind {
     }
 }
 
+extension NovelInjectionPlanner {
+    /// 段序组装。internal（而非 private extension 成员）以便测试直接 pin 住两种顺序。
+    static func orderedSections(
+        prompt: NovelInjectionSection,
+        polishPreference: NovelInjectionSection?,
+        chapterPlan: NovelInjectionSection? = nil,
+        recentHighlights: NovelInjectionSection? = nil,
+        upcomingArc: NovelInjectionSection? = nil,
+        state: NovelInjectionSection,
+        seed: NovelInjectionSection?,
+        chapter: NovelInjectionSection?,
+        sessions: [NovelInjectionSection],
+        events: [NovelInjectionSection],
+        materials: [NovelInjectionSection],
+        user: NovelInjectionSection,
+        stateLast: Bool = false
+    ) -> [NovelInjectionSection] {
+        var result = [prompt]
+        if let polishPreference { result.append(polishPreference) }
+        if let chapterPlan { result.append(chapterPlan) }
+        if let recentHighlights { result.append(recentHighlights) }
+        if let upcomingArc { result.append(upcomingArc) }
+        // 手动同步（pendingState）的投影剧情状态每段必变；把它和按段匹配的 events 放到
+        // 稳定段（prompt/资料/归档）之后，provider 的自动前缀缓存才能命中稳定前缀。
+        // 内容与 receipt 均按段级 contentSHA256 校验，不依赖顺序。
+        if !stateLast { result.append(state) }
+        if let seed { result.append(seed) }
+        if let chapter { result.append(chapter) }
+        result.append(contentsOf: sessions.sorted(by: sessionSectionOrder))
+        if !stateLast { result.append(contentsOf: events) }
+        result.append(contentsOf: materials)
+        if stateLast {
+            result.append(contentsOf: events)
+            result.append(state)
+        }
+        result.append(user)
+        return result
+    }
+}
+
 private extension NovelInjectionPlanner {
     struct MaterialSource {
         let material: NovelMaterialRecord
@@ -1344,43 +1384,6 @@ private extension NovelInjectionPlanner {
             estimatedTokens: estimatedTokens("[\(label)]\n\(content)"),
             contentSHA256: sha256(content)
         )
-    }
-
-    static func orderedSections(
-        prompt: NovelInjectionSection,
-        polishPreference: NovelInjectionSection?,
-        chapterPlan: NovelInjectionSection? = nil,
-        recentHighlights: NovelInjectionSection? = nil,
-        upcomingArc: NovelInjectionSection? = nil,
-        state: NovelInjectionSection,
-        seed: NovelInjectionSection?,
-        chapter: NovelInjectionSection?,
-        sessions: [NovelInjectionSection],
-        events: [NovelInjectionSection],
-        materials: [NovelInjectionSection],
-        user: NovelInjectionSection,
-        stateLast: Bool = false
-    ) -> [NovelInjectionSection] {
-        var result = [prompt]
-        if let polishPreference { result.append(polishPreference) }
-        if let chapterPlan { result.append(chapterPlan) }
-        if let recentHighlights { result.append(recentHighlights) }
-        if let upcomingArc { result.append(upcomingArc) }
-        // 手动同步（pendingState）的投影剧情状态每段必变；把它和按段匹配的 events 放到
-        // 稳定段（prompt/资料/归档）之后，provider 的自动前缀缓存才能命中稳定前缀。
-        // 内容与 receipt 均按段级 contentSHA256 校验，不依赖顺序。
-        if !stateLast { result.append(state) }
-        if let seed { result.append(seed) }
-        if let chapter { result.append(chapter) }
-        result.append(contentsOf: sessions.sorted(by: sessionSectionOrder))
-        if !stateLast { result.append(contentsOf: events) }
-        result.append(contentsOf: materials)
-        if stateLast {
-            result.append(contentsOf: events)
-            result.append(state)
-        }
-        result.append(user)
-        return result
     }
 
     static func render(_ sections: [NovelInjectionSection]) -> String {

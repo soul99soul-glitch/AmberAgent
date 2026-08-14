@@ -761,6 +761,11 @@ enum NovelPresentation {
             trimmed == "剧情状态同步已取消，可以重试。" {
             return "剧情状态同步已取消，可以重试。"
         }
+        // 结构化分类文案（stateSyncStructuredFailureMessage）原样透出：其中 4 条含
+        // "JSON" 等 ASCII 术语，若落到下方的纯中文判定会被折叠回通用文案。
+        if trimmed.hasPrefix("剧情同步模型") {
+            return trimmed
+        }
         if trimmed.localizedCaseInsensitiveContains("manual-edit suffix") ||
             trimmed.localizedCaseInsensitiveContains("manual synchronization suffix") {
             return "剧情同步失败：目录结构已变（如删过章节），正在按新规则处理。请再点重试。"
@@ -899,19 +904,16 @@ struct NovelStateSyncProgressBanner: View {
                     elapsedSeconds: elapsed,
                     streamedCharacters: streamed
                 )
-                let detail: String = {
-                    guard let secondaryHint, !secondaryHint.isEmpty else { return progress }
-                    return "\(progress) · \(secondaryHint)"
-                }()
                 content(
                     title: title,
-                    detail: detail,
+                    detail: progress,
+                    hint: secondaryHint,
                     fraction: activity.displayedCompletionFraction,
                     percent: activity.displayedPercent
                 )
             }
         } else {
-            content(title: title, detail: secondaryHint, fraction: nil, percent: nil)
+            content(title: title, detail: secondaryHint, hint: nil, fraction: nil, percent: nil)
         }
     }
 
@@ -919,6 +921,7 @@ struct NovelStateSyncProgressBanner: View {
     private func content(
         title: String,
         detail: String?,
+        hint: String?,
         fraction: Double?,
         percent: Int?
     ) -> some View {
@@ -937,6 +940,8 @@ struct NovelStateSyncProgressBanner: View {
                     Text("\(percent)%")
                         .font(.footnote.weight(.semibold).monospacedDigit())
                         .foregroundStyle(AmberTheme.foreground2)
+                        // 9%→10%、99%→100% 位宽变化不推挤停止按钮。
+                        .frame(minWidth: 38, alignment: .trailing)
                 }
 
                 if canStop, let onStop {
@@ -958,6 +963,20 @@ struct NovelStateSyncProgressBanner: View {
                     .font(.caption)
                     .foregroundStyle(AmberTheme.muted)
                     .monospacedDigit()
+                    // 流式字数与失败原因让 detail 明显变长：限两行截断，
+                    // 避免每秒轮询时折行边界变化造成 banner 高度抖动。
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // hint（停止中/阻塞切换等可操作解释）独占一行，不被上方的两行截断吃掉。
+            if let hint, !hint.isEmpty {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

@@ -482,7 +482,9 @@ private extension DefaultNovelCreation {
         }) else {
             throw NovelError.invalidInput("The pending manual synchronization is unavailable.")
         }
-        // 段内流式字数是呈现层遥测：无论事务以何种终态退出都清掉，避免残留到下一次同步。
+        // 段内流式字数是呈现层遥测：入口先清掉上一次调用可能残留的值（超时/取消后
+        // 迟到的 delta 可能在 defer 清理后再写一次），退出时再清一次。
+        NovelStateSyncStreamProgress.shared.clear(pendingID: pendingID)
         defer { NovelStateSyncStreamProgress.shared.clear(pendingID: pendingID) }
         do {
             let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
@@ -635,6 +637,9 @@ private extension DefaultNovelCreation {
                 // 用「连续无输出」超时而非绝对墙钟：结构化状态同步是长生成任务，
                 // 模型积极流式输出时也可能超过 factRequestTimeout；与讨论归档/议会主持人
                 // 综合保持同一超时语义，任意有效增量都会刷新计时，只在真正卡死时才判超时。
+                // 每段请求前清零：否则段间间隔里 banner 会把上一段的最终字数
+                // 安到「正在处理第 N+1 段」头上，新段首个 delta 到达时可见回跳。
+                NovelStateSyncStreamProgress.shared.set(pendingID: pendingID, characters: 0)
                 let execution = try await executor.executePrepared(
                     invocation,
                     noOutputTimeout: factRequestTimeout,

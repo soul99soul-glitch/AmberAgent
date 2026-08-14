@@ -845,61 +845,118 @@ final class NovelInjectionPlannerTests: XCTestCase {
         })
     }
 
-    func testManualSyncPendingStateSectionMovesBehindStableSectionsForPrefixCaching() throws {
-        let document = try NovelTestFixtures.document()
-        let branchID = document.branches[0].id
+    func testManualSyncOrderingMovesVolatileStateBehindStableSectionsForPrefixCaching() throws {
+        let pendingID = NovelPendingOperationID()
+        let revisionID = NovelMaterialRevisionID()
+        let eventID = NovelEventID()
+        func stub(
+            _ kind: NovelInjectionSectionKind,
+            reason: NovelInjectionSelectionReason
+        ) -> NovelInjectionSection {
+            // reason/label/content 仅占位，断言只比较 kind 顺序。
+            NovelInjectionSection(
+                kind: kind,
+                label: "STUB",
+                content: "stub",
+                reason: reason,
+                estimatedTokens: 1,
+                contentSHA256: NovelTestFixtures.hashA
+            )
+        }
+        let prompt = stub(.fixedPrompt, reason: .requiredPrompt)
+        let state = stub(.pendingManualState(pendingID, chunkIndex: 1), reason: .requiredCurrentState)
+        let material = stub(.material(revisionID), reason: .always)
+        let event = stub(.storyEvent(eventID), reason: .branchEventHistory)
+        let user = stub(.userInput, reason: .requiredUserInput)
 
+        // 手动同步分段：每段必变的投影状态与按段匹配的 events 排在稳定段之后、
+        // user 之前，provider 自动前缀缓存才能命中 prompt/materials 稳定前缀。
+        let reordered = NovelInjectionPlanner.orderedSections(
+            prompt: prompt,
+            polishPreference: nil,
+            state: state,
+            seed: nil,
+            chapter: nil,
+            sessions: [],
+            events: [event],
+            materials: [material],
+            user: user,
+            stateLast: true
+        )
+        XCTAssertEqual(
+            reordered.map(\.kind),
+            [
+                .fixedPrompt,
+                .material(revisionID),
+                .storyEvent(eventID),
+                .pendingManualState(pendingID, chunkIndex: 1),
+                .userInput,
+            ]
+        )
+
+        // 其它路径（stateLast 缺省 false）保持原顺序：state 紧跟 prompt，events 在 materials 之前。
+        let legacy = NovelInjectionPlanner.orderedSections(
+            prompt: prompt,
+            polishPreference: nil,
+            state: state,
+            seed: nil,
+            chapter: nil,
+            sessions: [],
+            events: [event],
+            materials: [material],
+            user: user
+        )
+        XCTAssertEqual(
+            legacy.map(\.kind),
+            [
+                .fixedPrompt,
+                .pendingManualState(pendingID, chunkIndex: 1),
+                .storyEvent(eventID),
+                .material(revisionID),
+                .userInput,
+            ]
+        )
+    }
+
+    func testManualSyncPendingStatePlanWiresStateLastOrdering() throws {
+        var document = try NovelTestFixtures.document()
+        _ = addMaterial(
+            to: &document,
+            kind: .world,
+            title: "World Rule",
+            content: "Magic has a cost.",
+            tags: ["magic"],
+            mode: .always
+        )
+        let pendingID = NovelPendingOperationID()
         let plan = try NovelInjectionPlanner.plan(
             document: document,
             request: NovelInjectionPlanningRequest(
-                branchID: branchID,
+                branchID: document.branches[0].id,
                 promptKind: .manualSyncV1,
                 userText: "Rebuilt manuscript chunk.",
                 sessionCursorLimit: .empty,
                 pendingState: NovelPendingStateInjection(
-                    pendingID: NovelPendingOperationID(),
-                    chunkIndex: 1,
+                    pendingID: pendingID,
+                    chunkIndex: 0,
                     content: "Projected state accumulated from earlier chunks."
                 )
             )
         )
 
         let kinds = plan.sections.map(\.kind)
-        let stateIndex = try XCTUnwrap(kinds.firstIndex(where: {
-            if case .pendingManualState = $0 { return true }
+        let promptIndex = try XCTUnwrap(kinds.firstIndex(of: .fixedPrompt))
+        let materialIndex = try XCTUnwrap(kinds.firstIndex(where: {
+            if case .material = $0 { return true }
             return false
         }))
-        let userIndex = try XCTUnwrap(kinds.firstIndex(where: {
-            if case .userInput = $0 { return true }
-            return false
-        }))
-        // 每段必变的投影状态必须排在所有内容段之后、user 之前，
-        // 让 prompt/资料等稳定前缀可命中 provider 的自动前缀缓存。
+        let stateIndex = try XCTUnwrap(kinds.firstIndex(of: .pendingManualState(pendingID, chunkIndex: 0)))
+        let userIndex = try XCTUnwrap(kinds.firstIndex(of: .userInput))
+        // 接线 pin：pendingState != nil 时 plan 必须走 stateLast 顺序，
+        // 投影状态排在稳定段（prompt/材料）之后、user 之前。
+        XCTAssertLessThan(promptIndex, materialIndex)
+        XCTAssertLessThan(materialIndex, stateIndex)
         XCTAssertEqual(stateIndex, userIndex - 1)
-        for (index, kind) in kinds.enumerated() {
-            switch kind {
-            case .material, .storyEvent:
-                XCTAssertLessThan(index, stateIndex)
-            default:
-                break
-            }
-        }
-
-        // 无 pendingState（非分段路径）保持原顺序：state 紧跟 prompt。
-        let baseline = try NovelInjectionPlanner.plan(
-            document: document,
-            request: NovelInjectionPlanningRequest(
-                branchID: branchID,
-                promptKind: .manualSyncV1,
-                userText: "Rebuilt manuscript chunk.",
-                sessionCursorLimit: .empty
-            )
-        )
-        let baselineStateIndex = try XCTUnwrap(baseline.sections.map(\.kind).firstIndex(where: {
-            if case .currentState = $0 { return true }
-            return false
-        }))
-        XCTAssertEqual(baselineStateIndex, 1)
     }
 
     func testArchivedDiscussionReplacesOnlyRawDiscussionWithSummaryAndConfirmedDecisions() throws {
