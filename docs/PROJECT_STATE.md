@@ -1,8 +1,15 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-15（Agent 聊天生成主题包 + 试穿）
+Last updated: 2026-08-15（provider 设置审查修补）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## iOS Provider 设置审查修补（2026-08-15）
+
+- Token Plan 并进「连接」卡；Coding Plan 地址只读；默认 `opencode/1.18.18` 不再写入 header store，切回 API Key 时清掉未改过的该 UA。
+- 空 UA 不点亮 OpenCode 芯片；Grok Web / Codex 不显示请求伪装；MiMo 不显示 Token Plan。
+- OCR 与后台 `rehydratedParams` 补读 `IOSProviderRequestHeaderStore`。未铺小说 / 议会 / 深读 / MiniApp 全链路。
+- `provider_config_status` 与深读模型解析改用 `hasUsableCredential`。
 
 ## Agent 聊天生成主题包（2026-08-15，路径 A 已落地）
 
