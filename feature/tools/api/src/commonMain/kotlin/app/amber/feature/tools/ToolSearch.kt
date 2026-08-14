@@ -46,7 +46,7 @@ internal fun toolSearchDiscoveryGuidance(
         Tool discovery:
         - This run has ${registry.metadata.size} generated tools across categories: $categories.
         - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
-        - Before telling the user you cannot do something, call `$TOOL_SEARCH_TOOL_NAME` with a concrete intent first (e.g. "读取其它会话", "并行子任务", "网页操作"). Many capabilities — sub-agent threads, cross-session reading, web mount, MCP tools, script execution — stay hidden until searched; never claim inability based only on the currently visible tools.
+        - Before telling the user you cannot do something, call `$TOOL_SEARCH_TOOL_NAME` with a concrete intent first (e.g. "读取其它会话", "并行子任务", "网页操作", "配置提供商", "API Key", "默认模型"). Many capabilities — sub-agent threads, cross-session reading, web mount, MCP tools, script execution, provider/model settings tools — stay hidden until searched; never claim inability based only on the currently visible tools. Writing API keys requires user approval; never claim you can change providers without calling the provider_config tools first.
         - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
         - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
         - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
@@ -262,6 +262,14 @@ class ToolSearchIndex(
         // 错开：命中引导到跨会话读取，不引导到当前会话上下文工具。
         if (name == "session_search" || name == "session_read") {
             addAll(listOf("会话", "历史", "别的对话", "另一个会话", "session", "聊天记录", "过去的对话", "跨会话"))
+        }
+        if (name.startsWith("provider_config_") || name == "settings_set_model_slot") {
+            addAll(
+                listOf(
+                    "配置提供商", "provider", "API Key", "api key", "密钥", "模型列表",
+                    "默认模型", "chat 模型", "刷新模型", "OpenRouter", "DeepSeek", "设置模型",
+                ),
+            )
         }
         if (name.startsWith("model_council_")) {
             addAll(listOf("议会", "多模型", "council", "模型会议"))

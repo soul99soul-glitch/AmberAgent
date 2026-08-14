@@ -87,7 +87,13 @@ struct ChatToolDetailSheet: View {
                 .foregroundStyle(AmberTheme.muted)
                 .textSelection(.enabled)
         }
-        if let pretty = Self.prettyJSON(tool.input) {
+        let parametersSource: String = {
+            if IOSProviderConfigToolCatalog.toolNames.contains(tool.toolName) {
+                return IOSProviderConfigToolCatalog.redactedArgumentsJSON(tool.input)
+            }
+            return tool.input
+        }()
+        if let pretty = Self.prettyJSON(parametersSource) {
             section("参数") { codeBlock(pretty) }
         }
         section("结果") {

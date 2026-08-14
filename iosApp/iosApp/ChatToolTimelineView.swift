@@ -394,11 +394,20 @@ struct ChatToolStepModel: Identifiable {
 
         let executed = !tool.output.isEmpty
         let failureReason = ChatToolOutputFormatter.failureReason(from: tool.output)
+        let detailInput: String?
+        if IOSProviderConfigToolCatalog.toolNames.contains(tool.toolName) {
+            // Never surface raw api_key material on the tool capsule.
+            detailInput = tool.input.isEmpty
+                ? nil
+                : IOSProviderConfigToolCatalog.redactedApprovalPreview(argumentsJSON: tool.input)
+        } else {
+            detailInput = tool.input.isEmpty ? nil : tool.input
+        }
         self.init(
             id: stableID,
             visualKind: kind,
             title: Self.friendlyToolTitle(tool.toolName, executed: executed),
-            detail: failureReason ?? (tool.input.isEmpty ? nil : tool.input),
+            detail: failureReason ?? detailInput,
             state: Self.state(executed: executed, failureReason: failureReason)
         )
     }
@@ -434,7 +443,11 @@ struct ChatToolStepModel: Identifiable {
             "tools_list": "列出可用工具",
             "subagent_report": "子智能体汇报",
             "ish_handoff": "iSH 交接",
-            "read_health": "读取健康数据"
+            "read_health": "读取健康数据",
+            "provider_config_status": "查看模型配置",
+            "provider_config_apply": "应用提供商配置",
+            "provider_refresh_models": "刷新模型列表",
+            "settings_set_model_slot": "设置默认模型",
         ]
         if let mapped = known[name] { return mapped }
         // 动态工具名同样受列宽预算约束（见 combinedLine 注释），完整名在详情 sheet。

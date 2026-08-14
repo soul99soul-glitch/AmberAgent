@@ -1,8 +1,19 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-14（iOS 深度阅读 P0–P2 落地：规划段/分桶/quotes/门闩/references/单段重试/超时）
+Last updated: 2026-08-14（Agent 自配置 provider/model P0–P3 已落地）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## Agent 自配置 Provider/Model（2026-08-14，P0–P3 完成）
+
+- 产品意图：用户手配通一个 chat provider 后，可由 agent **受控**补齐其它 provider 的 key/模型/默认槽位。
+- 计划：[`docs/IOS_AGENT_PROVIDER_CONFIG_PLAN.md`](IOS_AGENT_PROVIDER_CONFIG_PLAN.md)。
+- **工具（deferred + tool_search）**：`provider_config_status`（pure 脱敏）/ `provider_config_apply`（前台强制审批卡）/ `provider_refresh_models` / `settings_set_model_slot`。
+- **实现**：`IOSProviderConfigToolService` → `IOSSharedSettingsStore`；KMP 声明 + ToolSearch 中文词条 + category `settings`；后台仅 status，写工具 denied。
+- **安全**：结果只回 `has_api_key`/`api_key_status`；审批预览与胶囊 detail 脱敏；**完成写回后 tool.input 持久化脱敏**（防后续轮重传与详情 sheet 泄漏）；recipe 步骤对 apply 亦强制审批；apply 先校验后写。
+- **P3**：可选出厂 skill `provider-setup`（默认不启用）。
+- **门禁**：`IOSProviderConfigToolTests` **13/13** + effect-class pin；KMP OrchestrationToolDeclarationsTest 含四工具。
+- **未验证**：真机端到端（贴 key → 批准 → refresh → 设 chat → 发消息）；`provider_refresh_models` 真实 listModels 网络路径无 mock 单测。
 
 ## iOS 深度阅读 LLM 多段管线（2026-08-14，P0–P2 完成）
 

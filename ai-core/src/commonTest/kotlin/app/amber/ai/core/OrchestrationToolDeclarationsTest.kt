@@ -145,8 +145,23 @@ class OrchestrationToolDeclarationsTest {
         val names = listOf(
             "exec", "wait", "spawn_agent", "list_agents", "interrupt_agent",
             "send_message", "followup_task", "wait_agent", "session_search", "session_read",
+            "provider_config_status", "provider_config_apply",
+            "provider_refresh_models", "settings_set_model_slot",
         )
         assertEquals(names, iosToolDeclarations(names).map { it.name })
+    }
+
+    @Test
+    fun providerConfigStatusIsReadOnlyAndApplyNeedsApproval() {
+        val status = createProviderConfigStatusToolDeclaration()
+        assertEquals("provider_config_status", status.name)
+        assertFalse(status.needsApproval)
+        assertTrue(status.description.contains("Never returns API keys") || status.description.contains("API key"))
+
+        val apply = createProviderConfigApplyToolDeclaration()
+        assertEquals("provider_config_apply", apply.name)
+        assertTrue(apply.needsApproval, "写入 provider 配置必须需要审批")
+        assertTrue(apply.description.contains("never echoed") || apply.description.contains("never"))
     }
 
     // MARK: - session_search / session_read（跨会话读取，与 Android 当前会话

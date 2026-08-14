@@ -63,6 +63,21 @@ enum ConversationMemoryPollutionPolicy {
     static func isPollutingToolName(_ name: String) -> Bool {
         pollutingToolNames.contains(name) || name.hasPrefix("mcp__")
     }
+
+    /// Whether a successful tool output should mark the conversation polluted.
+    /// Provider key writes are secrets entering the agent loop even when the
+    /// model never sees the key material again.
+    static func shouldMarkPolluted(toolName: String, outputText: String) -> Bool {
+        if isPollutingToolName(toolName) { return true }
+        guard toolName == "provider_config_apply" else { return false }
+        guard let data = outputText.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              obj["ok"] as? Bool == true else {
+            return false
+        }
+        let status = (obj["api_key_status"] as? String) ?? ""
+        return status == "updated" || status == "cleared"
+    }
 }
 
 struct ChatPendingToolCall {
@@ -268,6 +283,10 @@ final class ChatToolRuntime {
     private let memoryPollutionMarker: ((KotlinUuid, String) -> Void)?
     private lazy var subAgentRunner = SubAgentRunner()
     private lazy var councilRunner = CouncilRunner()
+    /// Agent 自配置 provider/model（SharedSettings 真源；密钥永不进 tool result）。
+    private lazy var providerConfigToolService = IOSProviderConfigToolService(
+        sharedSettings: sharedSettings
+    )
     /// P3-a: JavaScriptCore 沙箱引擎（exec 纯求值）。每次求值独立 context +
     /// 独立串行队列；超时 abandon 语义见 IOSJsSandboxEngine。
     private lazy var jsSandboxEngine = IOSJsSandboxEngine()
@@ -746,6 +765,21 @@ final class ChatToolRuntime {
             }
         }
 
+        // Provider/model 配置：后台仅 status（纯读）；写工具拒绝（审批卡只在前台）。
+        for name in IOSProviderConfigToolCatalog.toolNames where availableToolNames.contains(name) {
+            executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                if !IOSProviderConfigToolCatalog.backgroundAllowedToolNames.contains(toolName) {
+                    return .denied("provider 配置写入仅前台可用，请回到 App 确认后再试。")
+                }
+                let result = await self.providerConfigToolService.execute(
+                    toolName: toolName,
+                    argumentsJSON: arguments
+                )
+                return .filled(result)
+            }
+        }
+
         // P3-a: exec 求值——后台 run 也能跑（每次求值独立队列/context，与
         // 前台生命周期无关）。只注册当前轮 params 可见的名字；开关关时声明侧
         // 零痕迹（params 不会含 exec），此处双重门控避免陈旧轮次执行。
@@ -1159,6 +1193,8 @@ final class ChatToolRuntime {
             audit = ("ios.mcp.tool_call", "MCP tool call")
         } else if IOSMcpManagementToolCatalog.toolNames.contains(pending.toolCall.toolName) {
             audit = ("ios.mcp.management", "MCP management operation")
+        } else if pending.toolCall.toolName == "provider_config_apply" {
+            audit = ("ios.settings.provider_config", "Provider configuration")
         } else if pending.toolCall.toolName == IOSSoulToolCatalog.toolName {
             audit = ("ios.skills.management", "Soul update")
         } else {
@@ -1360,7 +1396,7 @@ final class ChatToolRuntime {
     ) {
         guard let conversationId,
               let marker = memoryPollutionMarker,
-              ConversationMemoryPollutionPolicy.isPollutingToolName(toolName),
+              ConversationMemoryPollutionPolicy.shouldMarkPolluted(toolName: toolName, outputText: outputText),
               ChatToolOutputFormatter.failureReason(from: [UIMessagePart.Text(text: outputText, metadata: nil)]) == nil
         else { return }
         marker(conversationId, toolName)
@@ -1869,6 +1905,7 @@ final class ChatToolRuntime {
         ])
         .union(IOSSkillToolCatalog.toolNames)
         .union(IOSMcpManagementToolCatalog.toolNames)
+        .union(IOSProviderConfigToolCatalog.toolNames)
         // Wave B2: recipe_import（与 skill_import 同级，deferred 池）。
         .union(IOSRecipeToolCatalog.toolNames)
         // P3-a: exec 仅开关开时存在执行路径；关时零痕迹——模型调用 exec 走
@@ -2140,6 +2177,22 @@ final class ChatToolRuntime {
                     in: pending.baseMessages
                 ))
             }
+        }
+
+        // Provider 配置写入：始终弹审批卡（即使 high-risk auto-approve 开着也不静默写密钥）。
+        if toolName == "provider_config_apply" {
+            let request = McpToolApprovalRequest(
+                id: ChatToolCallParsing.requestId(for: pending.toolCall),
+                serverName: "local",
+                toolName: toolName,
+                argumentsPreview: IOSProviderConfigToolCatalog.redactedApprovalPreview(
+                    argumentsJSON: pending.toolCall.input
+                ),
+                reason: IOSProviderConfigToolCatalog.approvalReason(
+                    argumentsJSON: pending.toolCall.input
+                )
+            )
+            return .waitingForApproval(.mcp(request))
         }
 
         if isMcpNetworkTool(toolName), !isMcpNetworkAllowed() {
@@ -2973,6 +3026,11 @@ final class ChatToolRuntime {
                     return .approvalRequired(reason: "MCP 工具可能访问外部服务或执行远端操作，需要你确认。")
                 }
                 return .proceed
+            case let name where IOSProviderConfigToolCatalog.highRiskToolNames.contains(name):
+                // Apply always needs a human card — even inside recipe steps.
+                return .approvalRequired(
+                    reason: IOSProviderConfigToolCatalog.approvalReason(argumentsJSON: argsJSON)
+                )
             case "subagent_dispatch":
                 if requiresSubAgentApproval() {
                     return .approvalRequired(reason: "子代理会发起独立模型请求并使用获准的只读工具，需要你确认。")
@@ -3078,6 +3136,7 @@ final class ChatToolRuntime {
         if tool == "session_search" || tool == "session_read" { return .sessionRead }
         if tool == "tool_search" || tool == "tools_list" { return .discovery }
         if IOSSkillToolCatalog.toolNames.contains(tool) { return .skill }
+        if IOSProviderConfigToolCatalog.toolNames.contains(tool) { return .advanced }
         if tool == "mcp_call" || ToolKt.isExpandedMcpToolName(name: tool)
             || tool == "subagent_dispatch" || tool == "model_council_run"
             || tool == "spawn_agent" || tool == "list_agents" || tool == "interrupt_agent"
@@ -3677,6 +3736,11 @@ final class ChatToolRuntime {
                 // 不被当轮可见子集截断）；nil 时服务回退 params.tools。
                 toolExposureBridge: toolExposureBridge
             )
+        case let name where IOSProviderConfigToolCatalog.toolNames.contains(name):
+            return await providerConfigToolService.execute(
+                toolName: name,
+                argumentsJSON: toolCall.input
+            )
         case "exec":
             // P3-b: exec 求值可带嵌套 tools 桥（白名单 + 宿主 runner 由
             // executeAdvancedToolCall 传入；nil = 纯求值，同 P3-a）。
@@ -4042,10 +4106,17 @@ final class ChatToolRuntime {
 
                 didFinishToolCall = true
                 didChangeMessage = true
+                // Provider apply 入参可能含 api_key：落盘与后续轮次重传必须脱敏。
+                let persistedInput: String
+                if IOSProviderConfigToolCatalog.toolNames.contains(toolPart.toolName) {
+                    persistedInput = IOSProviderConfigToolCatalog.redactedArgumentsJSON(toolPart.input)
+                } else {
+                    persistedInput = toolPart.input
+                }
                 return UIMessagePart.Tool(
                     toolCallId: toolPart.toolCallId,
                     toolName: toolPart.toolName,
-                    input: toolPart.input,
+                    input: persistedInput,
                     // 工具输出统一收口：总文本超上限就地截断（JSON 形态保形），
                     // 防止 Exa 全文等巨量输出被持久化进会话。
                     output: ChatToolOutputFormatter.cappedToolOutputParts(outputParts),
@@ -4171,6 +4242,9 @@ final class ChatToolRuntime {
         case "spawn_agent", "list_agents", "interrupt_agent", "send_message", "followup_task", "wait_agent":
             // P1-c/P1-d: 编排工具非常驻、不加新设置项——与 mcp 一样恒可用
             // （暴露与否由 tool_search 的 deferred 池决定）。
+            true
+        case let name where IOSProviderConfigToolCatalog.toolNames.contains(name):
+            // Provider 配置：无独立 capability 开关；写路径靠审批 + 前台限制。
             true
         case "exec":
             // P3-a: 与声明侧同源 gate。开关关时（理论上调用到不了这里，因为

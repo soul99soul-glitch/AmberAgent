@@ -471,6 +471,7 @@ final class IOSToolBoundaryTests: XCTestCase {
             "skills_list", "use_skill", "skill_validate",
             "mcp_list", "mcp_describe_tool",
             "list_agents", "wait_agent",
+            "provider_config_status",
         ]
         for toolName in pureLocalReads {
             XCTAssertEqual(
@@ -496,6 +497,7 @@ final class IOSToolBoundaryTests: XCTestCase {
             "skill_disable", "subagent_dispatch", "model_council_run",
             "spawn_agent", "interrupt_agent", "send_message", "followup_task",
             "exec", "wait",
+            "provider_config_apply", "provider_refresh_models", "settings_set_model_slot",
         ]
         for toolName in sideEffects {
             XCTAssertEqual(

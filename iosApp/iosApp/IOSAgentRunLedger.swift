@@ -312,6 +312,13 @@ enum IOSToolEffectClassMapping {
         if toolName == "session_search" || toolName == "session_read" {
             return .pure
         }
+        // Provider 配置：status 纯读；apply/refresh/set_slot 写 SharedSettings。
+        if toolName == "provider_config_status" {
+            return .pure
+        }
+        if IOSProviderConfigToolCatalog.mutatingToolNames.contains(toolName) {
+            return .sideEffect
+        }
         if toolName == "memory_tool" {
             return memoryEffectClass(input: input)
         }

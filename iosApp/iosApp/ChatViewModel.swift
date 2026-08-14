@@ -3402,6 +3402,10 @@ final class ChatViewModel {
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: ["session_search", "session_read"]
         ))
+        // Agent 自配置 provider/model：非常驻 deferred；写密钥仅前台 + 审批。
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: Array(IOSProviderConfigToolCatalog.toolNames).sorted()
+        ))
         // M5: discovery 引导（toolSearchDiscoveryGuidance）教模型用 tools_list
         // 识别精确工具名——iOS 主目录声明它（常驻；KMP IOS_RESIDENT_TOOL_NAMES
         // 与 DISCOVERY_UTILITY_TOOLS 已把它列为 resident），执行在桥本地。

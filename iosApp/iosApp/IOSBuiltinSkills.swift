@@ -9,7 +9,7 @@ enum IOSBuiltinSkills {
     static let requiredNames: [String] = ["skill-creator"]
 
     /// 可选出厂技能：装上但不自动启用，由用户在技能页打开。
-    static let optionalSeedNames: [String] = ["visual-svg"]
+    static let optionalSeedNames: [String] = ["visual-svg", "provider-setup"]
 
     /// 历史上随包 seed、现已不再内置的技能目录名。启动时从本机移除并取消启用。
     static let deprecatedSeedNames: [String] = ["会议准备", "监控文档"]
@@ -156,6 +156,7 @@ enum IOSBuiltinSkills {
     private static let contents: [String: String] = [
         "skill-creator": skillCreatorMarkdown,
         "visual-svg": visualSvgMarkdown,
+        "provider-setup": providerSetupMarkdown,
     ]
 
     private static var factorySnapshots: [String] {
@@ -164,6 +165,7 @@ enum IOSBuiltinSkills {
             legacyChineseSkillCreatorMarkdownV21,
             legacyEnglishSkillCreatorMarkdown,
             visualSvgMarkdown,
+            providerSetupMarkdown,
         ]
     }
 
@@ -612,4 +614,35 @@ description: 当用户要画 SVG、矢量图、流程图、架构图、示意图
 - [ ] diagram 清晰可读 / illustration 有光影体积
 - [ ] 无脚本、无外链、体积可控
 """#
+
+    private static let providerSetupMarkdown = #"""
+---
+name: provider-setup
+version: 1.0.0
+description: 当用户要配置 LLM 提供商、API Key、默认模型、刷新模型列表，或说「帮我把 OpenRouter/DeepSeek 也配上」时使用。先盘点再写入，密钥须用户批准。
+allowed-tools: tool_search provider_config_status provider_config_apply provider_refresh_models settings_set_model_slot ask_user
+---
+
+# 提供商配置助手（provider-setup）
+
+用户先在设置里手动配通**一个**可用 chat provider 后，可用本技能在对话里受控补齐其它 provider。
+
+## 强制流程
+
+1. `provider_config_status`（可选 `provider_name_contains`）— 看壳是否在、有无 key、chat 模型数、默认槽位是否可解析。
+2. 缺 key 时用 `ask_user` 或请用户在本轮消息里粘贴；**不要编造 key**。
+3. `provider_config_apply`（优先 `provider_id`）— 等用户审批卡；结果只有 `has_api_key` / `api_key_status`，**永不回显密钥**。
+4. 若 `chat_model_count` 为 0：`provider_refresh_models`（默认 `merge`）。
+5. `settings_set_model_slot` 设 `chat`（或 title/ocr 等）；`model_ref` 多匹配时改用 `model_id`。
+6. 再 `provider_config_status` 复核，用自然语言汇报。
+
+## 规则
+
+- **禁止**用 `workspace_file_write` 改 plist / 设置文件。
+- **禁止**跨 provider 默认复制 key，除非用户明确说「同一个 key 也用于 X」。
+- **禁止**打开 high-risk 自动批准、exec JS、沙箱 root 等高风险开关。
+- 写密钥必须等用户批准；后台 run 不能写配置。
+- 声称「无法改设置」之前先 `tool_search`「配置提供商」。
+"""#
 }
+

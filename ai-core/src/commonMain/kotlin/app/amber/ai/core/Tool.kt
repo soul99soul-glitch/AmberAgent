@@ -906,6 +906,10 @@ private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
     "wait_agent" to ::createWaitAgentToolDeclaration,
     "session_search" to ::createSessionSearchToolDeclaration,
     "session_read" to ::createSessionReadToolDeclaration,
+    "provider_config_status" to ::createProviderConfigStatusToolDeclaration,
+    "provider_config_apply" to ::createProviderConfigApplyToolDeclaration,
+    "provider_refresh_models" to ::createProviderRefreshModelsToolDeclaration,
+    "settings_set_model_slot" to ::createSettingsSetModelSlotToolDeclaration,
 )
 
 fun iosToolDeclaration(name: String): Tool? = IOS_TOOL_DECLARATION_PROVIDERS[name]?.invoke()
@@ -1089,6 +1093,152 @@ fun createMcpImportFromSkillToolDeclaration(): Tool = Tool(
         )
     },
     needsApproval = true,
+    execute = { emptyList() }
+)
+
+/**
+ * Agent provider/model configuration tools (iOS host executes; Swift dispatch).
+ * Read is pure; apply requires host approval. Keys never appear in tool results.
+ */
+fun createProviderConfigStatusToolDeclaration(): Tool = Tool(
+    name = "provider_config_status",
+    description = """
+        Redacted inventory of configured LLM providers and model slots on this device.
+        Use before claiming settings are missing: reports enabled flag, whether an API key
+        is stored (boolean only), chat model counts, and issues such as unresolved chat model.
+        Never returns API keys or tokens.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("provider_id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. Filter to one provider UUID.")
+                })
+                put("provider_name_contains", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. Case-insensitive substring filter on provider display name.")
+                })
+                put("include_models", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Optional. When true, include up to 20 chat model labels per provider. Defaults to false.")
+                })
+            },
+            required = emptyList()
+        )
+    },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+fun createProviderConfigApplyToolDeclaration(): Tool = Tool(
+    name = "provider_config_apply",
+    description = """
+        Apply configuration to one existing LLM provider (enable/name/base URL/API key).
+        The host shows an approval card before writing. API keys are stored in the secure
+        key store and are never echoed in the tool result. Prefer provider_id when known.
+        Do not clear a key unless the user explicitly asked.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("provider_id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Preferred. Provider UUID from provider_config_status.")
+                })
+                put("provider_name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Alternative unique match on display name when provider_id is omitted.")
+                })
+                put("enabled", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Optional. Enable or disable the provider.")
+                })
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. New display name.")
+                })
+                put("api_key", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. New API key. Omit to leave unchanged. Empty string clears the key (requires approval).")
+                })
+                put("base_url", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. HTTPS base URL for OpenAI-compatible endpoints.")
+                })
+                put("chat_completions_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. Chat completions path (e.g. /chat/completions).")
+                })
+                put("use_response_api", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "Optional. OpenAI Responses API flag when supported.")
+                })
+            },
+            required = emptyList()
+        )
+    },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
+fun createProviderRefreshModelsToolDeclaration(): Tool = Tool(
+    name = "provider_refresh_models",
+    description = """
+        Fetch the remote model catalog for one provider that already has credentials and
+        merge chat models into settings (does not delete manual models). Call after a
+        successful provider_config_apply when chat_model_count is zero.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("provider_id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Preferred. Provider UUID.")
+                })
+                put("provider_name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Alternative unique display-name match.")
+                })
+                put("mode", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. \"merge\" (default) keeps manual models; \"replace_chat\" replaces chat-typed models only.")
+                })
+            },
+            required = emptyList()
+        )
+    },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+fun createSettingsSetModelSlotToolDeclaration(): Tool = Tool(
+    name = "settings_set_model_slot",
+    description = """
+        Set a global model slot (chat, title, ocr, compress, suggestion, image_generation)
+        to an already-configured model by UUID or fuzzy model_ref. Fails if the reference
+        is ambiguous or the model type does not match the slot.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("slot", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Required. One of: chat, assistant_chat, title, ocr, compress, suggestion, image_generation.")
+                })
+                put("model_id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. Model UUID from settings/model lists.")
+                })
+                put("model_ref", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional. Display name or wire model id substring; must uniquely match.")
+                })
+            },
+            required = listOf("slot")
+        )
+    },
+    needsApproval = false,
     execute = { emptyList() }
 )
 
