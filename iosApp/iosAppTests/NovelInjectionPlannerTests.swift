@@ -845,6 +845,63 @@ final class NovelInjectionPlannerTests: XCTestCase {
         })
     }
 
+    func testManualSyncPendingStateSectionMovesBehindStableSectionsForPrefixCaching() throws {
+        let document = try NovelTestFixtures.document()
+        let branchID = document.branches[0].id
+
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: branchID,
+                promptKind: .manualSyncV1,
+                userText: "Rebuilt manuscript chunk.",
+                sessionCursorLimit: .empty,
+                pendingState: NovelPendingStateInjection(
+                    pendingID: NovelPendingOperationID(),
+                    chunkIndex: 1,
+                    content: "Projected state accumulated from earlier chunks."
+                )
+            )
+        )
+
+        let kinds = plan.sections.map(\.kind)
+        let stateIndex = try XCTUnwrap(kinds.firstIndex(where: {
+            if case .pendingManualState = $0 { return true }
+            return false
+        }))
+        let userIndex = try XCTUnwrap(kinds.firstIndex(where: {
+            if case .userInput = $0 { return true }
+            return false
+        }))
+        // 每段必变的投影状态必须排在所有内容段之后、user 之前，
+        // 让 prompt/资料等稳定前缀可命中 provider 的自动前缀缓存。
+        XCTAssertEqual(stateIndex, userIndex - 1)
+        for (index, kind) in kinds.enumerated() {
+            switch kind {
+            case .material, .storyEvent:
+                XCTAssertLessThan(index, stateIndex)
+            default:
+                break
+            }
+        }
+
+        // 无 pendingState（非分段路径）保持原顺序：state 紧跟 prompt。
+        let baseline = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: branchID,
+                promptKind: .manualSyncV1,
+                userText: "Rebuilt manuscript chunk.",
+                sessionCursorLimit: .empty
+            )
+        )
+        let baselineStateIndex = try XCTUnwrap(baseline.sections.map(\.kind).firstIndex(where: {
+            if case .currentState = $0 { return true }
+            return false
+        }))
+        XCTAssertEqual(baselineStateIndex, 1)
+    }
+
     func testArchivedDiscussionReplacesOnlyRawDiscussionWithSummaryAndConfirmedDecisions() throws {
         var document = try NovelTestFixtures.documentWithForkableCheckpoint()
         let branchID = document.branches[0].id

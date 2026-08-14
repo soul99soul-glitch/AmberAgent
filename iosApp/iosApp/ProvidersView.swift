@@ -128,12 +128,14 @@ struct ProvidersView: View {
             Section {
                 ForEach(Array(sharedProviders.enumerated()), id: \.offset) { _, provider in
                     let providerId = provider.id.description()
-                    let hasKey = ProviderRowModel.hasUsableKey(provider)
+                    let hasKey = ChatProviderConfiguration.hasUsableCredential(provider)
+                    let statusTitle = ChatProviderConfiguration.credentialStatusTitle(provider)
                     let isCustom = sharedSettings.canRemoveProvider(providerId: providerId)
                     RegistryProviderRow(
                         model: ProviderRowModel(preset: provider),
                         isCustom: isCustom,
-                        hasStoredKey: hasKey
+                        hasStoredKey: hasKey,
+                        statusTitle: statusTitle
                     ) {
                         router.navigate(to: .providerDetail(id: providerId))
                     }
@@ -180,6 +182,7 @@ private struct RegistryProviderRow: View {
     let model: ProviderRowModel
     let isCustom: Bool
     let hasStoredKey: Bool
+    let statusTitle: String
     let onSelect: () -> Void
 
     var body: some View {
@@ -218,7 +221,7 @@ private struct RegistryProviderRow: View {
             ProviderStatusBadge(title: "自定义", systemImage: "slider.horizontal.3", tint: AmberTheme.accent)
         } else {
             ProviderStatusBadge(
-                title: hasStoredKey ? "已配置" : "未填写",
+                title: statusTitle,
                 systemImage: hasStoredKey ? "checkmark" : "exclamationmark",
                 tint: hasStoredKey ? AmberTheme.accentGreen : AmberTheme.muted2
             )
@@ -308,15 +311,6 @@ private struct ProviderRowModel: Identifiable {
         return String(trimmed.prefix(1)).uppercased()
     }
 
-    fileprivate static func hasUsableKey(_ provider: ProviderSetting) -> Bool {
-        if let openAI = provider as? ProviderSetting.OpenAI {
-            return !openAI.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        if let claude = provider as? ProviderSetting.Claude {
-            return !claude.apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        return false
-    }
 }
 
 struct ProviderAddView: View {

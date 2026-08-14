@@ -187,6 +187,7 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
     let skillImportPreview: McpSkillImportPreview?
     let soulImportPreview: SoulImportPreview?
     let mcpImportPreview: McpImportPreview?
+    let themePackPreview: AmberThemePackDocument?
 
     init(
         id: String,
@@ -196,7 +197,8 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
         reason: String,
         skillImportPreview: McpSkillImportPreview? = nil,
         soulImportPreview: SoulImportPreview? = nil,
-        mcpImportPreview: McpImportPreview? = nil
+        mcpImportPreview: McpImportPreview? = nil,
+        themePackPreview: AmberThemePackDocument? = nil
     ) {
         self.id = id
         self.serverName = serverName
@@ -206,6 +208,7 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
         self.skillImportPreview = skillImportPreview
         self.soulImportPreview = soulImportPreview
         self.mcpImportPreview = mcpImportPreview
+        self.themePackPreview = themePackPreview
     }
 
     var title: String {
@@ -215,6 +218,8 @@ struct McpToolApprovalRequest: Identifiable, Equatable {
             "导入技能"
         } else if toolName == "mcp_import_from_skill" {
             "导入 MCP"
+        } else if toolName == "theme_pack_import" {
+            "试穿主题"
         } else if toolName.hasPrefix("skill_") || toolName == "mcp_test" {
             "确认扩展操作"
         } else {

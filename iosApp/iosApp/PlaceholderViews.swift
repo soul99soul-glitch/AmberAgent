@@ -473,49 +473,57 @@ final class AmberThemeRuntime {
         }
     }
 
-    var paper: Paper { didSet { UserDefaults.standard.set(paper.rawValue, forKey: Keys.paper) } }
-    var accentHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentHex), forKey: Keys.accent) } }
-    var accentInkHex: UInt32 { didSet { UserDefaults.standard.set(Int(accentInkHex), forKey: Keys.accentInk) } }
+    var paper: Paper { didSet { persistString(Keys.paper, paper.rawValue) } }
+    var accentHex: UInt32 { didSet { persistInt(Keys.accent, Int(accentHex)) } }
+    var accentInkHex: UInt32 { didSet { persistInt(Keys.accentInk, Int(accentInkHex)) } }
     /// Canvas texture overlay style (default `.flat` = solid color only).
     var canvasStyle: AmberCanvasStyle {
-        didSet { UserDefaults.standard.set(canvasStyle.rawValue, forKey: Keys.canvasStyle) }
+        didSet { persistString(Keys.canvasStyle, canvasStyle.rawValue) }
     }
     /// Home brand mark style (default `.systemWordmark`).
     var brandMarkStyle: AmberBrandMarkStyle {
-        didSet { UserDefaults.standard.set(brandMarkStyle.rawValue, forKey: Keys.brandMark) }
+        didSet { persistString(Keys.brandMark, brandMarkStyle.rawValue) }
     }
     /// Home shortcut icon skin (default `.phosphorFill`). Conversation list icons are independent.
     var shortcutIconStyle: AmberShortcutIconStyle {
-        didSet { UserDefaults.standard.set(shortcutIconStyle.rawValue, forKey: Keys.shortcutIconStyle) }
+        didSet { persistString(Keys.shortcutIconStyle, shortcutIconStyle.rawValue) }
     }
     /// Home chrome typeface (brand / section / shortcut labels). Never writes chat body font prefs.
     var chromeTypeface: AmberChromeTypeface {
-        didSet { UserDefaults.standard.set(chromeTypeface.rawValue, forKey: Keys.chromeTypeface) }
+        didSet { persistString(Keys.chromeTypeface, chromeTypeface.rawValue) }
     }
     var canvasScope: AmberCanvasScope {
-        didSet { UserDefaults.standard.set(canvasScope.rawValue, forKey: Keys.canvasScope) }
+        didSet { persistString(Keys.canvasScope, canvasScope.rawValue) }
     }
     var bubbleChrome: AmberBubbleChrome {
-        didSet { UserDefaults.standard.set(bubbleChrome.rawValue, forKey: Keys.bubbleChrome) }
+        didSet { persistString(Keys.bubbleChrome, bubbleChrome.rawValue) }
     }
     var glassChrome: AmberGlassChrome {
-        didSet { UserDefaults.standard.set(glassChrome.rawValue, forKey: Keys.glassChrome) }
+        didSet { persistString(Keys.glassChrome, glassChrome.rawValue) }
     }
     var emptyArt: AmberEmptyArtStyle {
-        didSet { UserDefaults.standard.set(emptyArt.rawValue, forKey: Keys.emptyArt) }
+        didSet { persistString(Keys.emptyArt, emptyArt.rawValue) }
     }
     var settingsChrome: Bool {
-        didSet { UserDefaults.standard.set(settingsChrome, forKey: Keys.settingsChrome) }
+        didSet { persistBool(Keys.settingsChrome, settingsChrome) }
     }
     var launchBrand: AmberLaunchBrandStyle {
-        didSet { UserDefaults.standard.set(launchBrand.rawValue, forKey: Keys.launchBrand) }
+        didSet { persistString(Keys.launchBrand, launchBrand.rawValue) }
     }
     var assetMode: AmberThemeAssetMode {
-        didSet { UserDefaults.standard.set(assetMode.rawValue, forKey: Keys.assetMode) }
+        didSet { persistString(Keys.assetMode, assetMode.rawValue) }
     }
     var immersivePolicy: AmberImmersivePolicy {
-        didSet { UserDefaults.standard.set(immersivePolicy.rawValue, forKey: Keys.immersivePolicy) }
+        didSet { persistString(Keys.immersivePolicy, immersivePolicy.rawValue) }
     }
+
+    /// In-memory try-on. Display tokens change; UserDefaults stay on the baseline until `commitTryOn`.
+    private(set) var tryOnSession: AmberThemeTryOnSession?
+    var isTryOnActive: Bool { tryOnSession != nil }
+    var tryOnDisplayName: String? { tryOnSession?.candidate.displayName }
+
+    /// When false, slot `didSet` skips UserDefaults. Try-on applies here.
+    private var persistEnabled = true
 
     private enum Keys {
         static let paper = "app.amber.ios.theme.paper"
@@ -565,6 +573,93 @@ final class AmberThemeRuntime {
     func apply(_ option: AmberAccentOption) {
         accentHex = option.accentHex
         accentInkHex = option.inkHex
+    }
+
+    /// Wear `candidate` on screen without writing UserDefaults. A second call
+    /// replaces the candidate but keeps the original baseline. Persistence stays
+    /// off until commit / discard / appearance takeover.
+    @MainActor
+    func beginTryOn(_ candidate: AmberThemePackDocument) throws {
+        if AmberThemePackLibrary.isBuiltinId(candidate.id) {
+            throw AmberThemeTryOnError.reservedBuiltinId(candidate.id)
+        }
+        try AmberThemePackTransfer.validate(candidate)
+        let baseline = tryOnSession?.baseline ?? AmberThemePackTransfer.document(from: self)
+        persistEnabled = false
+        do {
+            try apply(candidate)
+            tryOnSession = AmberThemeTryOnSession(baseline: baseline, candidate: candidate)
+        } catch {
+            persistEnabled = true
+            throw error
+        }
+    }
+
+    /// Persist the candidate slots. Does not write the theme library.
+    @MainActor
+    func commitTryOn() throws {
+        guard let session = tryOnSession else {
+            throw AmberThemeTryOnError.noActiveTryOn
+        }
+        persistEnabled = true
+        try apply(session.candidate)
+        tryOnSession = nil
+    }
+
+    /// Restore baseline slots in memory; UserDefaults already hold the baseline.
+    @MainActor
+    func discardTryOn() {
+        guard let session = tryOnSession else { return }
+        persistEnabled = false
+        try? apply(session.baseline)
+        persistEnabled = true
+        tryOnSession = nil
+    }
+
+    /// Drop the try-on session without restoring baseline (Appearance takeover).
+    @MainActor
+    func endTryOnWithoutRestore() {
+        persistEnabled = true
+        tryOnSession = nil
+    }
+
+    private func persistString(_ key: String, _ value: String) {
+        guard persistEnabled else { return }
+        UserDefaults.standard.set(value, forKey: key)
+    }
+
+    private func persistInt(_ key: String, _ value: Int) {
+        guard persistEnabled else { return }
+        UserDefaults.standard.set(value, forKey: key)
+    }
+
+    private func persistBool(_ key: String, _ value: Bool) {
+        guard persistEnabled else { return }
+        UserDefaults.standard.set(value, forKey: key)
+    }
+}
+
+struct AmberThemeTryOnSession: Equatable {
+    let baseline: AmberThemePackDocument
+    let candidate: AmberThemePackDocument
+}
+
+extension Notification.Name {
+    /// Appearance picked a different pack while an agent try-on was live.
+    static let amberThemeTryOnTakenOver = Notification.Name("app.amber.ios.theme.tryOnTakenOver")
+}
+
+enum AmberThemeTryOnError: LocalizedError, Equatable {
+    case reservedBuiltinId(String)
+    case noActiveTryOn
+
+    var errorDescription: String? {
+        switch self {
+        case .reservedBuiltinId(let id):
+            "id「\(id)」是内置主题，请换一个新 id。"
+        case .noActiveTryOn:
+            "当前没有试穿中的主题。"
+        }
     }
 }
 

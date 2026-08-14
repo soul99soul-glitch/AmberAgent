@@ -1188,9 +1188,11 @@ struct NovelSessionView: View {
         )
         ForEach(visibleIdentityMentions) { mention in
             let activeProposal = viewModel.activeCharacterProposal(for: mention.name)
+            let recommended = viewModel.recommendedCharacterIdentityChoice(for: mention.name)
             NovelCharacterIdentityQuestionCard(
                 mention: mention,
                 choices: identityChoices,
+                recommended: recommended,
                 activeProposal: activeProposal,
                 relatedProposalCount: viewModel.relatedCharacterProposalCount(
                     for: mention.name
@@ -2034,6 +2036,7 @@ private struct NovelDiscussionArchiveCard: View {
 private struct NovelCharacterIdentityQuestionCard: View {
     let mention: NovelCharacterIdentityMention
     let choices: [(material: NovelMaterialRecord, title: String)]
+    let recommended: (material: NovelMaterialRecord, title: String)?
     let activeProposal: NovelSettingProposalRecord?
     let relatedProposalCount: Int
     let isDisabled: Bool
@@ -2053,6 +2056,11 @@ private struct NovelCharacterIdentityQuestionCard: View {
         clarification.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var otherChoices: [(material: NovelMaterialRecord, title: String)] {
+        guard let recommended else { return choices }
+        return choices.filter { $0.material.id != recommended.material.id }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -2066,7 +2074,11 @@ private struct NovelCharacterIdentityQuestionCard: View {
                     Text("确认人物身份")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground)
-                    Text("关联已有角色，或为新人物生成建议")
+                    Text(
+                        recommended == nil
+                            ? "关联已有角色，或为新人物生成建议"
+                            : "已匹配默认角色，可一键确认或新建"
+                    )
                         .font(.caption)
                         .foregroundStyle(AmberTheme.muted)
                 }
@@ -2103,64 +2115,128 @@ private struct NovelCharacterIdentityQuestionCard: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isDisabled)
-            } else if !choices.isEmpty {
-                // Inline only a short roster; long character lists used to inflate
-                // the session ScrollView enough to freeze scene updates on open.
-                let inlineLimit = NovelSessionViewModel.maxInlineCharacterIdentityChoices
-                let inlineChoices = Array(choices.prefix(inlineLimit))
-                ForEach(inlineChoices, id: \.material.id) { choice in
-                    Button {
-                        onSelect(choice.material.id)
-                    } label: {
-                        HStack {
-                            Text(choice.title)
-                                .foregroundStyle(AmberTheme.foreground)
-                            Spacer(minLength: 0)
-                            Image(systemName: "link")
-                                .foregroundStyle(AmberTheme.accent)
-                        }
-                        .padding(.horizontal, 12)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 10))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isDisabled)
-                }
-                if choices.count > inlineLimit {
-                    Menu {
-                        ForEach(choices.dropFirst(inlineLimit), id: \.material.id) { choice in
-                            Button(choice.title) {
-                                onSelect(choice.material.id)
+            } else {
+                // Primary actions + optional menu; proposal expand sits under
+                // this block (proximity) and above secondary 忽略/补充说明.
+                Group {
+                    if let recommended {
+                        HStack(spacing: 10) {
+                            Button {
+                                onSelect(recommended.material.id)
+                            } label: {
+                                VStack(spacing: 2) {
+                                    Text("确认为")
+                                        .font(.caption2.weight(.medium))
+                                        .foregroundStyle(Color.white.opacity(0.9))
+                                    Text(recommended.title)
+                                        .font(.footnote.weight(.semibold))
+                                        .foregroundStyle(Color.white)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.85)
+                                }
+                                .padding(.horizontal, 12)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(AmberTheme.accent, in: Capsule())
                             }
-                        }
-                    } label: {
-                        Label(
-                            "更多角色（\(choices.count - inlineLimit)）",
-                            systemImage: "person.2"
-                        )
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(AmberTheme.accent)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                    }
-                    .disabled(isDisabled)
-                }
-            }
+                            .buttonStyle(.plain)
+                            .disabled(isDisabled)
+                            .accessibilityLabel("确认人物为\(recommended.title)")
 
-            if activeProposal == nil {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        isProposalFieldPresented.toggle()
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    isProposalFieldPresented.toggle()
+                                }
+                            } label: {
+                                Label("新建人物", systemImage: "person.crop.circle.badge.plus")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.accent)
+                                    .padding(.horizontal, 12)
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(AmberTheme.accent.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDisabled)
+                        }
+                    } else {
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                isProposalFieldPresented.toggle()
+                            }
+                        } label: {
+                            Label("新建人物", systemImage: "person.crop.circle.badge.plus")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(Color.white)
+                                .padding(.horizontal, 12)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .background(AmberTheme.accent, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isDisabled)
                     }
-                } label: {
-                    Label("新建人物", systemImage: "person.crop.circle.badge.plus")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(AmberTheme.accent, in: Capsule())
+
+                    if !otherChoices.isEmpty {
+                        Menu {
+                            ForEach(otherChoices, id: \.material.id) { choice in
+                                Button(choice.title) {
+                                    onSelect(choice.material.id)
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Label(
+                                    recommended == nil
+                                        ? "选择已有角色（\(otherChoices.count)）"
+                                        : "选择其他角色（\(otherChoices.count)）",
+                                    systemImage: "person.2"
+                                )
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(AmberTheme.muted)
+                            }
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(AmberTheme.accent)
+                            .padding(.horizontal, 14)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .background(AmberTheme.surface, in: Capsule())
+                            .contentShape(Capsule())
+                        }
+                        .disabled(isDisabled)
+                    }
+
+                    if isProposalFieldPresented {
+                        VStack(alignment: .trailing, spacing: 8) {
+                            NovelIMETextEditor(
+                                text: $proposalGuidance,
+                                placeholder: "可选：补充身份、关系或剧情方向",
+                                isEnabled: !isDisabled,
+                                minHeight: 72,
+                                bank: imeBank
+                            )
+                            .frame(minHeight: 72)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
+
+                            Button {
+                                NovelTextInputCommitter.perform(fieldBank: imeBank) {
+                                    onGenerate(proposalGuidance)
+                                }
+                            } label: {
+                                Label("生成建议", systemImage: "arrow.up")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(Color.white)
+                                    .frame(minHeight: 44)
+                                    .padding(.horizontal, 16)
+                                    .background(AmberTheme.accent, in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isDisabled)
+                        }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(isDisabled)
+                .opacity(isDisabled ? 0.55 : 1)
             }
 
             HStack(spacing: 10) {
@@ -2186,38 +2262,7 @@ private struct NovelCharacterIdentityQuestionCard: View {
             }
             .buttonStyle(.plain)
             .disabled(isDisabled)
-
-            if isProposalFieldPresented && activeProposal == nil {
-                VStack(alignment: .trailing, spacing: 8) {
-                    NovelIMETextEditor(
-                        text: $proposalGuidance,
-                        placeholder: "可选：补充身份、关系或剧情方向",
-                        isEnabled: !isDisabled,
-                        minHeight: 72,
-                        bank: imeBank
-                    )
-                    .frame(minHeight: 72)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12))
-
-                    Button {
-                        NovelTextInputCommitter.perform(fieldBank: imeBank) {
-                            onGenerate(proposalGuidance)
-                        }
-                    } label: {
-                        Label("生成建议", systemImage: "arrow.up")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(Color.white)
-                            .frame(minHeight: 44)
-                            .padding(.horizontal, 16)
-                            .background(AmberTheme.accent, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isDisabled)
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            .opacity(isDisabled ? 0.55 : 1)
 
             if isClarificationFieldPresented {
                 VStack(alignment: .trailing, spacing: 8) {
@@ -2246,7 +2291,7 @@ private struct NovelCharacterIdentityQuestionCard: View {
                             .background(AmberTheme.accent.opacity(0.10), in: Capsule())
                     }
                     .buttonStyle(.plain)
-                    .disabled(isDisabled)
+                    .disabled(isDisabled || normalizedClarification.isEmpty)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }

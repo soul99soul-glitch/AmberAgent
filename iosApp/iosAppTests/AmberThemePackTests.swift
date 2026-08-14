@@ -41,6 +41,7 @@ final class AmberThemePackTests: XCTestCase {
     }
 
     override func tearDown() {
+        runtime.discardTryOn()
         runtime.paper = savedPaper
         runtime.accentHex = savedAccent
         runtime.accentInkHex = savedInk
@@ -447,13 +448,16 @@ final class AmberThemePackTests: XCTestCase {
 
     func testAppearanceMiniPreviewPinsLightColorSchemeForCanvasInk() throws {
         // Light-recipe cards must not resolve overlay ink against dark Appearance traits.
-        let text = try source("iosApp/AppearanceSettingsView.swift")
-        XCTAssertTrue(text.contains("AmberDotGridOverlay()"))
-        XCTAssertTrue(text.contains("AmberPaperGrainOverlay()"))
+        let preview = try source("iosApp/AmberThemePack.swift")
+        XCTAssertTrue(preview.contains("struct AmberThemePackMiniPreview"))
+        XCTAssertTrue(preview.contains("AmberDotGridOverlay()"))
+        XCTAssertTrue(preview.contains("AmberPaperGrainOverlay()"))
         XCTAssertTrue(
-            text.contains(".environment(\\.colorScheme, .light)"),
+            preview.contains(".environment(\\.colorScheme, .light)"),
             "miniPreview canvas overlays must pin light so grain/grid stay visible in dark Appearance"
         )
+        let appearance = try source("iosApp/AppearanceSettingsView.swift")
+        XCTAssertTrue(appearance.contains("AmberThemePackMiniPreview("))
     }
 
     func testAssetModeRemainsBuiltinOnly() {
@@ -1011,6 +1015,109 @@ final class AmberThemePackTests: XCTestCase {
         ))
         XCTAssertThrowsError(try library.upsert(doc))
         XCTAssertTrue(library.installed.isEmpty, "persist failure must not leave dirty memory")
+    }
+
+    func testTryOnDoesNotPersistUntilCommit() throws {
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        let paperKey = "app.amber.ios.theme.paper"
+        let accentKey = "app.amber.ios.theme.accentHex"
+        let persistedPaper = UserDefaults.standard.string(forKey: paperKey)
+        let persistedAccent = UserDefaults.standard.object(forKey: accentKey) as? Int
+
+        let candidate = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "rain-bookstore",
+            displayName: "雨天书店",
+            paper: .paper,
+            accent: .terracotta,
+            canvasStyle: .dotGrid,
+            brandMark: .serifWordmark,
+            canvasScope: .shell
+        ))
+        try runtime.beginTryOn(candidate)
+
+        XCTAssertTrue(runtime.isTryOnActive)
+        XCTAssertEqual(runtime.tryOnDisplayName, "雨天书店")
+        XCTAssertEqual(runtime.paper, .paper)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.terracotta.accentHex)
+        XCTAssertEqual(runtime.canvasStyle, .dotGrid)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: paperKey), persistedPaper)
+        XCTAssertEqual(UserDefaults.standard.object(forKey: accentKey) as? Int, persistedAccent)
+
+        runtime.discardTryOn()
+        XCTAssertFalse(runtime.isTryOnActive)
+        XCTAssertEqual(runtime.paper, .notion)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.notionBlue.accentHex)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: paperKey), persistedPaper)
+        XCTAssertEqual(UserDefaults.standard.object(forKey: accentKey) as? Int, persistedAccent)
+    }
+
+    func testTryOnCommitPersistsAndSecondTryOnKeepsOriginalBaseline() throws {
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        let sit = AmberThemePackTransfer.document(from: AmberThemePack.builtins.first { $0.id == "sit-terracotta" }!)
+        var first = sit
+        first.id = "try-on-first"
+        first.displayName = "第一套"
+        var second = sit
+        second.id = "try-on-second"
+        second.displayName = "第二套"
+        second.accentHex = AmberThemePackTransfer.hexString(AmberAccentOption.mistBlue.accentHex)
+        second.inkHex = AmberThemePackTransfer.hexString(AmberAccentOption.mistBlue.inkHex)
+
+        try runtime.beginTryOn(first)
+        try runtime.beginTryOn(second)
+        XCTAssertEqual(runtime.tryOnDisplayName, "第二套")
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.mistBlue.accentHex)
+
+        try runtime.commitTryOn()
+        XCTAssertFalse(runtime.isTryOnActive)
+        XCTAssertEqual(runtime.paper, .paper)
+        XCTAssertEqual(runtime.accentHex, AmberAccentOption.mistBlue.accentHex)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "app.amber.ios.theme.paper"), "paper")
+        XCTAssertEqual(
+            UserDefaults.standard.object(forKey: "app.amber.ios.theme.accentHex") as? Int,
+            Int(AmberAccentOption.mistBlue.accentHex)
+        )
+    }
+
+    func testTryOnRejectsBuiltinIdAndImmersivePaper() throws {
+        let builtin = AmberThemePackTransfer.document(from: AmberThemePack.builtins[0])
+        XCTAssertThrowsError(try runtime.beginTryOn(builtin)) { error in
+            XCTAssertEqual(error as? AmberThemeTryOnError, .reservedBuiltinId("sit-terracotta"))
+        }
+        XCTAssertFalse(runtime.isTryOnActive)
+
+        var immersive = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "try-garnet",
+            displayName: "绛红",
+            paper: .neutral,
+            accent: .rose
+        ))
+        immersive.paper = "garnet"
+        XCTAssertThrowsError(try runtime.beginTryOn(immersive))
+        XCTAssertFalse(runtime.isTryOnActive)
+    }
+
+    func testEndingTryOnWithoutRestoreThenApplyPersistsVisibleTheme() throws {
+        runtime.apply(AmberThemePack.builtins.first { $0.id == "notion-blue" }!)
+        let paperKey = "app.amber.ios.theme.paper"
+        let candidate = AmberThemePackTransfer.document(from: AmberThemePack(
+            id: "rain-bookstore",
+            displayName: "雨天书店",
+            paper: .paper,
+            accent: .terracotta,
+            canvasStyle: .dotGrid,
+            brandMark: .serifWordmark,
+            canvasScope: .shell
+        ))
+        try runtime.beginTryOn(candidate)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: paperKey), "notion")
+
+        let visible = AmberThemePackTransfer.document(from: runtime)
+        runtime.endTryOnWithoutRestore()
+        try runtime.apply(visible)
+        XCTAssertFalse(runtime.isTryOnActive)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: paperKey), "paper")
+        XCTAssertEqual(runtime.paper, .paper)
     }
 
     func testAppearanceManageChromeContract() throws {

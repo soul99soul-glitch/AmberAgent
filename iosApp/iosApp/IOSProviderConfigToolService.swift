@@ -56,7 +56,7 @@ final class IOSProviderConfigToolService {
             }
             let chatModels = provider.models.filter { $0.type == ModelType.chat }
             let imageModels = provider.models.filter { $0.type == ModelType.image }
-            let hasKey = !Self.apiKey(of: provider).isEmpty
+            let hasKey = ChatProviderConfiguration.hasUsableCredential(provider)
             let host = Self.host(of: provider)
             var entry: [String: Any] = [
                 "id": id,
@@ -224,9 +224,8 @@ final class IOSProviderConfigToolService {
             return fail("provider_refresh_models", "找不到唯一匹配的 provider。")
         }
         let providerId = provider.id.description() as String
-        let key = Self.apiKey(of: provider)
-        guard !key.isEmpty else {
-            return fail("provider_refresh_models", "该 provider 没有 API Key，请先 provider_config_apply。")
+        guard hasRefreshCredential(provider) else {
+            return fail("provider_refresh_models", "该 provider 没有可用凭据。请先填写 API Key，或完成 Codex / Grok 登录。")
         }
         let mode = ((args["mode"] as? String) ?? "merge")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -234,8 +233,34 @@ final class IOSProviderConfigToolService {
 
         let models: [Model]
         do {
-            if let openAI = provider as? ProviderSetting.OpenAI {
-                models = try await OpenAIKmpProvider().listModelsOrThrow(providerSetting: openAI)
+            if IOSCodexProviderResolver.isCodexProvider(provider),
+               let openAI = provider as? ProviderSetting.OpenAI {
+                let discovered = try await IOSCodexOAuthClient(
+                    providerId: IOSCodexProviderResolver.providerKey(openAI)
+                ).fetchCodexModelsOrThrow()
+                models = discovered.map { item in
+                    Model(
+                        modelId: item.modelId,
+                        displayName: item.displayName,
+                        id: KotlinUuid.companion.random(),
+                        type: ModelType.chat,
+                        customHeaders: [],
+                        customBodies: [],
+                        inputModalities: [],
+                        outputModalities: [],
+                        abilities: [],
+                        tools: Set<BuiltInTools>(),
+                        contextWindowTokens: nil,
+                        providerOverwrite: nil
+                    )
+                }
+            } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
+                models = provider.models.filter { $0.type == ModelType.chat }
+            } else if let openAI = provider as? ProviderSetting.OpenAI {
+                models = try await OpenAIKmpProvider().listModelsWithHeadersOrThrow(
+                    providerSetting: openAI,
+                    extraHeaders: IOSProviderRequestHeaderStore.headers(for: providerId)
+                )
             } else if let claude = provider as? ProviderSetting.Claude {
                 models = try await ClaudeKmpProvider().listModelsOrThrow(providerSetting: claude)
             } else {
@@ -438,6 +463,10 @@ final class IOSProviderConfigToolService {
             "suggestion": resolve(hex(snapshot.suggestionModelId), wantImage: false),
             "image_generation": resolve(hex(snapshot.imageGenerationModelId), wantImage: true),
         ]
+    }
+
+    private func hasRefreshCredential(_ provider: ProviderSetting) -> Bool {
+        ChatProviderConfiguration.hasUsableCredential(provider)
     }
 
     private static func apiKey(of provider: ProviderSetting) -> String {

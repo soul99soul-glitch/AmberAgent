@@ -1780,7 +1780,11 @@ final class ChatViewModel {
         let assistant = snapshot.getCurrentAssistant()
         let params = Self.makeAuxiliaryTextGenerationParams(
             model: visionModel,
-            assistantHeaders: assistant.customHeaders,
+            assistantHeaders: ChatProviderConfiguration.requestHeaders(
+                for: providerSetting,
+                assistant: assistant.customHeaders,
+                model: visionModel.customHeaders
+            ),
             assistantBodies: assistant.customBodies
         )
         var results: [String: String] = [:]
@@ -1886,7 +1890,11 @@ final class ChatViewModel {
         let assistant = snapshot.getCurrentAssistant()
         let params = Self.makeAuxiliaryTextGenerationParams(
             model: model,
-            assistantHeaders: assistant.customHeaders,
+            assistantHeaders: ChatProviderConfiguration.requestHeaders(
+                for: provider,
+                assistant: assistant.customHeaders,
+                model: model.customHeaders
+            ),
             assistantBodies: assistant.customBodies
         )
         do {
@@ -1913,7 +1921,7 @@ final class ChatViewModel {
             maxTokens: nil,
             tools: [],
             reasoningLevel: ReasoningLevel.off,
-            customHeaders: assistantHeaders + model.customHeaders,
+            customHeaders: assistantHeaders,
             customBody: assistantBodies + model.customBodies
         )
     }
@@ -3319,8 +3327,16 @@ final class ChatViewModel {
         )
         let resolved = snapshot.resolveSessionDefaults(assistant: assistant, model: resolvedModel)
 
-        // Merge custom headers/bodies: Assistant's + Model's (Android merges both).
-        let mergedHeaders: [CustomHeader] = assistant.customHeaders + (currentModel?.customHeaders ?? [])
+        // Merge custom headers/bodies: provider disguise + Assistant + Model.
+        let providerHeaders: [CustomHeader] = {
+            guard let currentModel,
+                  let provider = ChatProviderConfiguration.provider(
+                    for: currentModel,
+                    providers: snapshot.providers
+                  ) else { return [] }
+            return IOSProviderRequestHeaderStore.headers(for: provider.id.description())
+        }()
+        let mergedHeaders: [CustomHeader] = providerHeaders + assistant.customHeaders + (currentModel?.customHeaders ?? [])
         let mergedBodies: [CustomBody] = assistant.customBodies + (currentModel?.customBodies ?? [])
 
         let model = Model(
@@ -3405,6 +3421,9 @@ final class ChatViewModel {
         // Agent 自配置 provider/model：非常驻 deferred；写密钥仅前台 + 审批。
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: Array(IOSProviderConfigToolCatalog.toolNames).sorted()
+        ))
+        toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
+            names: Array(IOSThemePackToolCatalog.toolNames).sorted()
         ))
         // M5: discovery 引导（toolSearchDiscoveryGuidance）教模型用 tools_list
         // 识别精确工具名——iOS 主目录声明它（常驻；KMP IOS_RESIDENT_TOOL_NAMES

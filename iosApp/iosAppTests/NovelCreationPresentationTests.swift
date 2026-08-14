@@ -460,6 +460,10 @@ final class NovelCreationPresentationTests: XCTestCase {
             waiting.progressDetail(elapsedSeconds: 42),
             "正文共 12800 字 · 约 2 段 · 正在处理第 1 段 · 已等待 42 秒 · 本段完成后才会更新进度"
         )
+        XCTAssertEqual(
+            waiting.progressDetail(elapsedSeconds: 42, streamedCharacters: 517),
+            "正文共 12800 字 · 约 2 段 · 正在处理第 1 段 · 已等待 42 秒 · 本段已生成 517 字"
+        )
         XCTAssertEqual(progressed.displayedCompletionFraction, 0.4)
         XCTAssertEqual(progressed.displayedPercent, 40)
         XCTAssertEqual(
@@ -504,6 +508,21 @@ final class NovelCreationPresentationTests: XCTestCase {
             "正文共 4000 字 · 全文分析中 · 已等待 12 秒 · 模型返回后才会更新进度"
         )
         XCTAssertEqual(
+            singleChunk.progressDetail(elapsedSeconds: 12, streamedCharacters: 88),
+            "正文共 4000 字 · 全文分析中 · 已等待 12 秒 · 本段已生成 88 字"
+        )
+        XCTAssertEqual(
+            progressed.progressDetail(elapsedSeconds: 90, streamedCharacters: 12),
+            "正文已处理 40% · 已完成 1 段 · 已等待 90 秒 · 本段已生成 12 字"
+        )
+        let streamProgress = NovelStateSyncStreamProgress()
+        let streamPendingID = NovelPendingOperationID()
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 0)
+        streamProgress.set(pendingID: streamPendingID, characters: 640)
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 640)
+        streamProgress.clear(pendingID: streamPendingID)
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 0)
+        XCTAssertEqual(
             NovelManualSyncChunker.estimatedSegmentCount(manuscriptCharacterCount: 25_000),
             4
         )
@@ -513,6 +532,68 @@ final class NovelCreationPresentationTests: XCTestCase {
                 completedChunkCount: 2
             ),
             "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。 已保存 2 段进度，重试从第 3 段继续。"
+        )
+
+        // 结构化输出失败按类别透出具体原因，不再折叠成通用文案。
+        let duplicateKeyFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model output contains a duplicate key.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .duplicateKey,
+                path: "$.events[0]",
+                message: "The model output contains a duplicate key."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: duplicateKeyFailure),
+            "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。"
+        )
+        let missingFieldFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model output is missing required field 'evidence'.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .missingField,
+                path: "$.events[0]",
+                message: "The model output is missing required field 'evidence'."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: missingFieldFailure),
+            "剧情同步模型返回的 JSON 缺少必需字段；若反复出现，请更换剧情同步模型。"
+        )
+        let malformedFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model returned malformed JSON.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .malformedJSON,
+                path: "$",
+                message: "The model returned malformed JSON."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: malformedFailure),
+            "剧情同步模型返回的 JSON 无法解析，输出可能被截断；若反复出现，请更换剧情同步模型。"
+        )
+        // 分类文案经字符串路径（durable lastError → banner）原样透出，不加双重前缀。
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。",
+                completedChunkCount: 0
+            ),
+            "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。"
+        )
+        // 无结构化详情的失败仍走原有 message 映射。
+        let plainFailure = NovelStructuredModelExecutionFailure(
+            code: "structured_no_output_timeout",
+            message: "模型持续无输出，请稍后重试。",
+            isRetryable: true
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: plainFailure),
+            "模型持续无输出，请稍后重试。"
         )
     }
 

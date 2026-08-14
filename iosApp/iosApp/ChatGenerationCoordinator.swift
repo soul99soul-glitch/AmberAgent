@@ -3653,6 +3653,9 @@ final class ChatGenerationCoordinator {
             toolRuntime.discardPreparedSkillImportForApproval(
                 toolCallId: pending.toolCall.toolCallId
             )
+            if pending.toolCall.toolName == "theme_pack_import" {
+                toolRuntime.discardPreparedThemeImport()
+            }
             return
         }
         let writeBaseline = bindings.capturePersistMessagesBaseline(pending.conversationId)
@@ -3938,7 +3941,7 @@ final class ChatGenerationCoordinator {
         let preparedSkillImport = pendingPreparedSkillImport
         let preparedSoulImport = pendingPreparedSoulImport
         let preparedMcpImport = pendingPreparedMcpImport
-        clearPendingMcpApproval()
+        clearPendingMcpApproval(discardThemeTryOn: false)
         guard let executedMessages = await executeApprovedToolOrNested(pending: pending, allow: allow, effectClass: .sideEffect, operation: {
             await self.toolRuntime.finishMcpApproval(
                 pending: pending,
@@ -3947,7 +3950,12 @@ final class ChatGenerationCoordinator {
                 preparedSoulImport: preparedSoulImport,
                 preparedMcpImport: preparedMcpImport
             )
-        }) else { return }
+        }) else {
+            if pending.toolCall.toolName == "theme_pack_import" {
+                toolRuntime.discardPreparedThemeImport()
+            }
+            return
+        }
         completeApprovedToolCall(pending: pending, executedMessages: executedMessages)
     }
 
@@ -4952,11 +4960,14 @@ final class ChatGenerationCoordinator {
         bindings.setPendingIshHandoffApproval(nil)
     }
 
-    private func clearPendingMcpApproval() {
+    private func clearPendingMcpApproval(discardThemeTryOn: Bool = true) {
         if let pendingMcpToolApproval {
             toolRuntime.discardPreparedSkillImportForApproval(
                 toolCallId: pendingMcpToolApproval.toolCall.toolCallId
             )
+            if discardThemeTryOn, pendingMcpToolApproval.toolCall.toolName == "theme_pack_import" {
+                toolRuntime.discardPreparedThemeImport()
+            }
         }
         pendingMcpToolApproval = nil
         pendingPreparedSkillImport = nil

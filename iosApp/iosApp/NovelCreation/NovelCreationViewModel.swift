@@ -139,8 +139,10 @@ struct NovelStateSyncActivity: Equatable, Sendable {
 
     /// Secondary copy for banners: chunk, word count, elapsed — always concrete
     /// even before the first durable percent is available.
-    func progressDetail(elapsedSeconds: Int) -> String {
+    /// `streamedCharacters` 是当前段已流式到达的字数（>0 时替换「完成后才更新」的静态提示）。
+    func progressDetail(elapsedSeconds: Int, streamedCharacters: Int = 0) -> String {
         let elapsed = max(0, elapsedSeconds)
+        let streamedDetail = streamedCharacters > 0 ? " · 本段已生成 \(streamedCharacters) 字" : nil
         switch phase {
         case .preparing:
             return "已等待 \(elapsed) 秒 · 正在准备请求"
@@ -152,20 +154,24 @@ struct NovelStateSyncActivity: Equatable, Sendable {
                     : ""
                 if let estimated = estimatedTotalSegments, estimated > 1 {
                     return "正文已处理 \(percent)%\(chunkDetail) / 约 \(estimated) 段 · 已等待 \(elapsed) 秒"
+                        + (streamedDetail ?? "")
                 }
                 return "正文已处理 \(percent)%\(chunkDetail) · 已等待 \(elapsed) 秒"
+                    + (streamedDetail ?? "")
             }
             if let totalCharacters, totalCharacters > 0 {
                 if let estimated = estimatedTotalSegments, estimated > 1 {
+                    let streamed = streamedDetail ?? " · 本段完成后才会更新进度"
                     if completedChunks > 0 {
-                        return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 已完成 \(completedChunks) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒 · 本段完成后才会更新进度"
+                        return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 已完成 \(completedChunks) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒" + streamed
                     }
-                    return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒 · 本段完成后才会更新进度"
+                    return "正文共 \(totalCharacters) 字 · 约 \(estimated) 段 · 正在处理第 \(currentSegment) 段 · 已等待 \(elapsed) 秒" + streamed
                 }
                 // Single preferred segment: avoid "第 1 段" which sounds stuck forever.
-                return "正文共 \(totalCharacters) 字 · 全文分析中 · 已等待 \(elapsed) 秒 · 模型返回后才会更新进度"
+                return "正文共 \(totalCharacters) 字 · 全文分析中 · 已等待 \(elapsed) 秒"
+                    + (streamedDetail ?? " · 模型返回后才会更新进度")
             }
-            return "正在分析第 \(currentSegment) 段 · 已等待 \(elapsed) 秒"
+            return "正在分析第 \(currentSegment) 段 · 已等待 \(elapsed) 秒" + (streamedDetail ?? "")
         }
     }
 

@@ -235,7 +235,7 @@ struct AppearanceSettingsView: View {
         let palette = pack.paper.lightPalette
         return Button {
             guard !isManagingThemes else { return }
-            runtime.apply(pack)
+            applyTakingOverTryOn { runtime.apply(pack) }
         } label: {
             themeCardChrome(
                 isSelected: isSel && !isManagingThemes,
@@ -246,7 +246,7 @@ struct AppearanceSettingsView: View {
                     + (isManagingThemes ? "，内置不可移除" : (isSel ? "，已选中" : "")),
                 showsLock: isManagingThemes
             ) {
-                miniPreview(
+                AmberThemePackMiniPreview(
                     palette: palette,
                     accent: Color(hex: pack.accent.accentHex),
                     canvasStyle: pack.canvasStyle,
@@ -275,10 +275,8 @@ struct AppearanceSettingsView: View {
                     selectedRemovableIds.insert(document.id)
                 }
             } else {
-                do {
+                applyTakingOverTryOn {
                     try runtime.apply(document)
-                } catch {
-                    transferError = userFacingTransferError(error)
                 }
             }
         } label: {
@@ -294,7 +292,7 @@ struct AppearanceSettingsView: View {
                 // 管理多选不用 accent，避免和「当前主题」混淆。
                 useAccentSelection: !isManagingThemes
             ) {
-                miniPreview(
+                AmberThemePackMiniPreview(
                     palette: palette,
                     accent: Color(hex: accent),
                     canvasStyle: canvas,
@@ -356,7 +354,7 @@ struct AppearanceSettingsView: View {
             ? Color(hex: AmberAccentOption.notionBlue.accentHex)
             : AmberTheme.accent
         return Button {
-            runtime.paper = paper
+            applyTakingOverTryOn { runtime.paper = paper }
         } label: {
             themeCardChrome(
                 isSelected: isSel,
@@ -365,10 +363,33 @@ struct AppearanceSettingsView: View {
                 footerForeground: Color(hex: palette.foreground),
                 accessibilityLabel: "背景色：\(name)" + (isSel ? "，已选中" : "")
             ) {
-                miniPreview(palette: palette, accent: previewAccent)
+                AmberThemePackMiniPreview(palette: palette, accent: previewAccent)
             }
         }
         .buttonStyle(.plain)
+    }
+
+    /// Agent try-on yields to an explicit Appearance pick. Persist the currently
+    /// visible slots first so a paper/accent tweak does not leave a mixed
+    /// baseline, then apply the user's change. Deny of the pending import is a
+    /// no-op because the session is already gone.
+    private func applyTakingOverTryOn(_ apply: () throws -> Void) {
+        if runtime.isTryOnActive {
+            let visible = AmberThemePackTransfer.document(from: runtime)
+            runtime.endTryOnWithoutRestore()
+            NotificationCenter.default.post(name: .amberThemeTryOnTakenOver, object: nil)
+            do {
+                try runtime.apply(visible)
+            } catch {
+                transferError = userFacingTransferError(error)
+                return
+            }
+        }
+        do {
+            try apply()
+        } catch {
+            transferError = userFacingTransferError(error)
+        }
     }
 
     // Shared card shell for pack + background grids (same padding / chrome rhythm).
@@ -420,74 +441,6 @@ struct AppearanceSettingsView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    /// Mini preview: canvas/accent injected from pack (not live runtime — avoids preview bleed).
-    /// Brand cues: paint = chunky bars; serif = italic word; default = plain capsule.
-    private func miniPreview(
-        palette p: AmberPalette,
-        accent: Color,
-        canvasStyle: AmberCanvasStyle = .flat,
-        paintBrandHint: Bool = false,
-        serifBrandHint: Bool = false
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(accent)
-                    .frame(width: 15, height: 15)
-                VStack(alignment: .leading, spacing: 6) {
-                    if paintBrandHint {
-                        // Chunky AMBER-like bar cluster (pixel/paint mark cue).
-                        HStack(spacing: 2) {
-                            ForEach(0..<5, id: \.self) { i in
-                                RoundedRectangle(cornerRadius: 1, style: .continuous)
-                                    .fill(Color(hex: p.foreground))
-                                    .frame(width: i == 1 || i == 3 ? 7 : 9, height: 8)
-                                    .offset(y: CGFloat([0, 1, -1, 1, 0][i]))
-                            }
-                        }
-                    } else if serifBrandHint {
-                        Text("Amber")
-                            .font(.system(size: 12, weight: .regular, design: .serif).italic())
-                            .foregroundStyle(Color(hex: p.foreground))
-                            .lineLimit(1)
-                    } else {
-                        Capsule().fill(Color(hex: p.foreground2)).frame(width: 58, height: 6)
-                    }
-                    Capsule().fill(Color(hex: p.muted)).frame(width: 34, height: 6)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(hex: p.surface), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
-
-            Capsule().fill(Color(hex: p.surface2)).frame(height: 7).frame(maxWidth: .infinity)
-            Capsule().fill(Color(hex: p.surface2)).frame(width: 92, height: 7)
-            Spacer(minLength: 0)
-        }
-        .padding(13)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background {
-            ZStack {
-                Color(hex: p.background)
-                switch canvasStyle {
-                case .flat:
-                    EmptyView()
-                case .dotGrid:
-                    AmberDotGridOverlay()
-                case .lineGrid:
-                    AmberLineGridOverlay()
-                case .paperGrain:
-                    AmberPaperGrainOverlay()
-                }
-            }
-            // Pack/background cards always paint the light recipe; overlays resolve ink via
-            // UIColor traits, so pin light here or dark Appearance washes out grain/grid.
-            .environment(\.colorScheme, .light)
-        }
-        .clipped()
-    }
-
     private func selectionIndicator(
         _ isSel: Bool,
         mark: Color = AmberTheme.accent,
@@ -513,7 +466,7 @@ struct AppearanceSettingsView: View {
             ForEach(AmberAccentOption.allCases) { option in
                 let isSel = runtime.accentHex == option.accentHex
                 Button {
-                    runtime.apply(option)
+                    applyTakingOverTryOn { runtime.apply(option) }
                 } label: {
                     ZStack {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -613,8 +566,12 @@ struct AppearanceSettingsView: View {
                     throw AmberThemePackTransferError.fileTooLarge
                 }
                 let document = try AmberThemePackTransfer.decode(data)
-                let outcome = try library.upsert(document)
-                try runtime.apply(document)
+                var outcome: AmberThemePackLibrary.UpsertOutcome = .installed
+                applyTakingOverTryOn {
+                    outcome = try library.upsert(document)
+                    try runtime.apply(document)
+                }
+                if transferError != nil { return }
                 switch outcome {
                 case .installed:
                     transferBanner = "已导入并加入主题库：\(document.displayName)"
@@ -647,6 +604,8 @@ struct AppearanceSettingsView: View {
             return "配方颜色无效"
         case .insufficientContrast:
             return e.localizedDescription
+        case .missingField:
+            return "配方字段不完整"
         }
     }
 }

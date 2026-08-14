@@ -2300,7 +2300,10 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         guard let configuredModel else { return nil }
 
-        let runtimeHeaders = assistantHeaders + configuredModel.customHeaders
+        let storedHeaders = IOSProviderRequestHeaderStore.headers(
+            for: providerSetting.id.description()
+        )
+        let runtimeHeaders = storedHeaders + assistantHeaders + configuredModel.customHeaders
         let runtimeBodies = assistantBodies + configuredModel.customBodies
         let runtimeModel = Model(
             modelId: configuredModel.modelId,

@@ -809,7 +809,44 @@ enum NovelPresentation {
         return "\(base) 已保存 \(completedChunkCount) 段进度，重试从第 \(completedChunkCount + 1) 段继续。"
     }
 
+    /// 结构化输出失败分类 → banner 可直接展示的中文原因。
+    /// 此前这类英文技术细节一律折叠成「剧情状态同步失败，请重试」，
+    /// 模型的 schema/指令遵循问题（换快模后最常见）完全不可诊断。
+    /// 文案以「剧情」开头，经 `stateSyncFailureMessage(_:)` 字符串路径原样透出。
+    static func stateSyncStructuredFailureMessage(
+        _ failure: NovelStructuredOutputFailure
+    ) -> String {
+        let retryHint = "若反复出现，请更换剧情同步模型。"
+        switch failure.category {
+        case .malformedJSON:
+            return "剧情同步模型返回的 JSON 无法解析，输出可能被截断；\(retryHint)"
+        case .expectedObject:
+            return "剧情同步模型返回的不是 JSON 对象；\(retryHint)"
+        case .missingField:
+            return "剧情同步模型返回的 JSON 缺少必需字段；\(retryHint)"
+        case .unknownField:
+            return "剧情同步模型返回了契约之外的字段；\(retryHint)"
+        case .duplicateKey:
+            return "剧情同步模型返回的 JSON 存在重复字段；\(retryHint)"
+        case .typeMismatch:
+            return "剧情同步模型返回的字段类型不符合契约；\(retryHint)"
+        case .unsupportedVersion:
+            return "剧情同步模型返回了不支持的数据版本；\(retryHint)"
+        case .invalidValue:
+            return "剧情同步模型返回了不符合契约的取值；\(retryHint)"
+        case .duplicateIdentifier:
+            return "剧情同步模型返回了重复的标识符；\(retryHint)"
+        case .invalidReference:
+            return "剧情同步模型引用了不存在的条目；\(retryHint)"
+        }
+    }
+
     static func stateSyncFailureMessage(for error: Error) -> String {
+        // 结构化输出失败优先按类别给出具体原因，不要落到通用文案。
+        if let failure = error as? NovelStructuredModelExecutionFailure,
+           let outputFailure = failure.structuredOutputFailure {
+            return stateSyncStructuredFailureMessage(outputFailure)
+        }
         // Prefer the raw invalidInput detail so sync-specific English can be mapped
         // before operationErrorMessage collapses unknowns to a generic line.
         if case .invalidInput(let detail) = error as? NovelError {
@@ -819,6 +856,27 @@ enum NovelPresentation {
             }
         }
         return stateSyncFailureMessage(operationErrorMessage(error))
+    }
+}
+
+/// 段内流式进度计数：模型流回调在任意线程写入，banner 每秒轮询读取。
+/// 纯呈现层遥测，不进入项目文档、receipt 或任何 durable 状态。
+final class NovelStateSyncStreamProgress: @unchecked Sendable {
+    static let shared = NovelStateSyncStreamProgress()
+
+    private let lock = NSLock()
+    private var streamedCharacters: [NovelPendingOperationID: Int] = [:]
+
+    func set(pendingID: NovelPendingOperationID, characters: Int) {
+        lock.withLock { streamedCharacters[pendingID] = characters }
+    }
+
+    func count(pendingID: NovelPendingOperationID) -> Int {
+        lock.withLock { streamedCharacters[pendingID] ?? 0 }
+    }
+
+    func clear(pendingID: NovelPendingOperationID) {
+        lock.withLock { streamedCharacters.removeValue(forKey: pendingID) }
     }
 }
 
@@ -836,7 +894,11 @@ struct NovelStateSyncProgressBanner: View {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 let waitingSince = activity.requestStartedAt ?? activity.startedAt
                 let elapsed = Int(max(0, context.date.timeIntervalSince(waitingSince)))
-                let progress = activity.progressDetail(elapsedSeconds: elapsed)
+                let streamed = NovelStateSyncStreamProgress.shared.count(pendingID: activity.pendingID)
+                let progress = activity.progressDetail(
+                    elapsedSeconds: elapsed,
+                    streamedCharacters: streamed
+                )
                 let detail: String = {
                     guard let secondaryHint, !secondaryHint.isEmpty else { return progress }
                     return "\(progress) · \(secondaryHint)"

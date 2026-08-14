@@ -287,6 +287,7 @@ final class ChatToolRuntime {
     private lazy var providerConfigToolService = IOSProviderConfigToolService(
         sharedSettings: sharedSettings
     )
+    private lazy var themePackToolService = IOSThemePackToolService()
     /// P3-a: JavaScriptCore 沙箱引擎（exec 纯求值）。每次求值独立 context +
     /// 独立串行队列；超时 abandon 语义见 IOSJsSandboxEngine。
     private lazy var jsSandboxEngine = IOSJsSandboxEngine()
@@ -374,6 +375,10 @@ final class ChatToolRuntime {
         preparedSkillImportsForApproval.removeValue(forKey: toolCallId)
         preparedSoulImportsForApproval.removeValue(forKey: toolCallId)
         preparedMcpImportsForApproval.removeValue(forKey: toolCallId)
+    }
+
+    func discardPreparedThemeImport() {
+        themePackToolService.discardPreparedImport()
     }
 
     func takePreparedSoulImportForApproval(toolCallId: String) -> IOSPreparedSoulImport? {
@@ -780,6 +785,21 @@ final class ChatToolRuntime {
             }
         }
 
+        // Theme pack: background only status (pure read); import needs the try-on card.
+        for name in IOSThemePackToolCatalog.toolNames where availableToolNames.contains(name) {
+            executors[name] = IOSClosureToolExecutor { [weak self] toolName, arguments, _ in
+                guard let self else { return .failed("Chat runtime is unavailable.") }
+                if !IOSThemePackToolCatalog.backgroundAllowedToolNames.contains(toolName) {
+                    return .denied("主题试穿仅前台可用，请回到 App 确认后再试。")
+                }
+                let result = self.themePackToolService.execute(
+                    toolName: toolName,
+                    argumentsJSON: arguments
+                )
+                return .filled(result)
+            }
+        }
+
         // P3-a: exec 求值——后台 run 也能跑（每次求值独立队列/context，与
         // 前台生命周期无关）。只注册当前轮 params 可见的名字；开关关时声明侧
         // 零痕迹（params 不会含 exec），此处双重门控避免陈旧轮次执行。
@@ -946,6 +966,7 @@ final class ChatToolRuntime {
         // Nested exec only sees a synthetic assistant message — pad-image enrich
         // cannot resolve user attachments, and image gen is a paid side effect.
         "generate_image",
+        "theme_pack_import",
     ]
 
     /// P3-b: whitelist for one evaluation's `tools` object = the current
@@ -1195,6 +1216,8 @@ final class ChatToolRuntime {
             audit = ("ios.mcp.management", "MCP management operation")
         } else if pending.toolCall.toolName == "provider_config_apply" {
             audit = ("ios.settings.provider_config", "Provider configuration")
+        } else if pending.toolCall.toolName == "theme_pack_import" {
+            audit = ("ios.settings.theme_pack", "Theme pack try-on")
         } else if pending.toolCall.toolName == IOSSoulToolCatalog.toolName {
             audit = ("ios.skills.management", "Soul update")
         } else {
@@ -1266,6 +1289,16 @@ final class ChatToolRuntime {
                         status: "failed"
                     )
                 }
+            } else if pending.toolCall.toolName == "theme_pack_import" {
+                do {
+                    resultText = try themePackToolService.commitPreparedImport()
+                } catch {
+                    resultText = ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: pending.toolCall.toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    )
+                }
             } else if isMcpNetworkTool(pending.toolCall.toolName), !isMcpNetworkAllowed() {
                 resultText = ChatToolOutputFormatter.toolFailureJSON(
                     toolName: pending.toolCall.toolName,
@@ -1281,6 +1314,14 @@ final class ChatToolRuntime {
                     conversationId: pending.conversationId
                 )
             }
+        } else if pending.toolCall.toolName == "theme_pack_import" {
+            themePackToolService.discardPreparedImport()
+            resultText = ChatToolOutputFormatter.toolFailureJSON(
+                toolName: pending.toolCall.toolName,
+                reason: "用户还原了试穿，主题未保存。",
+                denied: true,
+                status: "denied"
+            )
         } else {
             resultText = "用户拒绝执行 \(pending.toolCall.toolName)。"
         }
@@ -1906,6 +1947,7 @@ final class ChatToolRuntime {
         .union(IOSSkillToolCatalog.toolNames)
         .union(IOSMcpManagementToolCatalog.toolNames)
         .union(IOSProviderConfigToolCatalog.toolNames)
+        .union(IOSThemePackToolCatalog.toolNames)
         // Wave B2: recipe_import（与 skill_import 同级，deferred 池）。
         .union(IOSRecipeToolCatalog.toolNames)
         // P3-a: exec 仅开关开时存在执行路径；关时零痕迹——模型调用 exec 走
@@ -2193,6 +2235,35 @@ final class ChatToolRuntime {
                 )
             )
             return .waitingForApproval(.mcp(request))
+        }
+
+        // Theme pack import: try-on immediately, always show 套用/还原 (never skip the card).
+        if toolName == "theme_pack_import" {
+            do {
+                let document = try themePackToolService.prepareImport(
+                    argumentsJSON: pending.toolCall.input
+                )
+                let request = McpToolApprovalRequest(
+                    id: ChatToolCallParsing.requestId(for: pending.toolCall),
+                    serverName: "local",
+                    toolName: toolName,
+                    argumentsPreview: IOSThemePackToolCatalog.argumentsPreview(for: document),
+                    reason: IOSThemePackToolCatalog.approvalReason(displayName: document.displayName),
+                    themePackPreview: document
+                )
+                return .waitingForApproval(.mcp(request))
+            } catch {
+                themePackToolService.discardPreparedImport()
+                return .completed(messagesByFinishingToolCall(
+                    pending.toolCall,
+                    outputText: ChatToolOutputFormatter.toolFailureJSON(
+                        toolName: toolName,
+                        reason: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                        status: "failed"
+                    ),
+                    in: pending.baseMessages
+                ))
+            }
         }
 
         if isMcpNetworkTool(toolName), !isMcpNetworkAllowed() {
@@ -3031,6 +3102,10 @@ final class ChatToolRuntime {
                 return .approvalRequired(
                     reason: IOSProviderConfigToolCatalog.approvalReason(argumentsJSON: argsJSON)
                 )
+            case let name where IOSThemePackToolCatalog.highRiskToolNames.contains(name):
+                return .approvalRequired(
+                    reason: "主题试穿会立刻换皮，需要你确认套用或还原。"
+                )
             case "subagent_dispatch":
                 if requiresSubAgentApproval() {
                     return .approvalRequired(reason: "子代理会发起独立模型请求并使用获准的只读工具，需要你确认。")
@@ -3137,6 +3212,7 @@ final class ChatToolRuntime {
         if tool == "tool_search" || tool == "tools_list" { return .discovery }
         if IOSSkillToolCatalog.toolNames.contains(tool) { return .skill }
         if IOSProviderConfigToolCatalog.toolNames.contains(tool) { return .advanced }
+        if IOSThemePackToolCatalog.toolNames.contains(tool) { return .advanced }
         if tool == "mcp_call" || ToolKt.isExpandedMcpToolName(name: tool)
             || tool == "subagent_dispatch" || tool == "model_council_run"
             || tool == "spawn_agent" || tool == "list_agents" || tool == "interrupt_agent"
@@ -3741,6 +3817,11 @@ final class ChatToolRuntime {
                 toolName: name,
                 argumentsJSON: toolCall.input
             )
+        case let name where IOSThemePackToolCatalog.toolNames.contains(name):
+            return themePackToolService.execute(
+                toolName: name,
+                argumentsJSON: toolCall.input
+            )
         case "exec":
             // P3-b: exec 求值可带嵌套 tools 桥（白名单 + 宿主 runner 由
             // executeAdvancedToolCall 传入；nil = 纯求值，同 P3-a）。
@@ -4245,6 +4326,8 @@ final class ChatToolRuntime {
             true
         case let name where IOSProviderConfigToolCatalog.toolNames.contains(name):
             // Provider 配置：无独立 capability 开关；写路径靠审批 + 前台限制。
+            true
+        case let name where IOSThemePackToolCatalog.toolNames.contains(name):
             true
         case "exec":
             // P3-a: 与声明侧同源 gate。开关关时（理论上调用到不了这里，因为

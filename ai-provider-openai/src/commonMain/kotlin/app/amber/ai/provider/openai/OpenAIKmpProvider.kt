@@ -6,6 +6,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.BuiltInTools
 import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
@@ -14,6 +15,7 @@ import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.resolveOpenAIRequestHeaders
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.registry.ModelRegistry
@@ -96,9 +98,17 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     /** Swift-facing model listing for explicit connection tests. */
     @Throws(Throwable::class)
     suspend fun listModelsOrThrow(providerSetting: ProviderSetting.OpenAI): List<Model> {
+        return listModelsWithHeadersOrThrow(providerSetting, emptyList())
+    }
+
+    @Throws(Throwable::class)
+    suspend fun listModelsWithHeadersOrThrow(
+        providerSetting: ProviderSetting.OpenAI,
+        extraHeaders: List<CustomHeader>,
+    ): List<Model> {
         val url = "${providerSetting.baseUrl}/models"
         val response = httpClient.get(url) {
-            header("Authorization", "Bearer ${providerSetting.apiKey}")
+            configureAuth(providerSetting, extraHeaders)
         }
         val body = response.bodyAsText()
         if (!response.status.isSuccess()) {
@@ -261,7 +271,14 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             put("stream_options", buildJsonObject { put("include_usage", true) })
         }
 
-        if (params.model.abilities.contains(ModelAbility.REASONING)) {
+        // 已知支持 thinking 开关的模型（SiliconFlow 混合思考模型白名单），即使用户没给模型
+        // 勾 reasoning 能力，reasoningLevel == OFF 时也必须显式下发关闭字段：否则服务端默认
+        // 开思考，小说剧情同步等结构化任务会慢数倍。仅在 OFF 时放开，不替未声明能力的模型
+        // 强行开启思考。
+        val forceDisableThinking = params.reasoningLevel == ReasoningLevel.OFF &&
+            host == "api.siliconflow.cn" &&
+            params.model.modelId in siliconFlowThinkingModels
+        if (params.model.abilities.contains(ModelAbility.REASONING) || forceDisableThinking) {
             val level = params.reasoningLevel
             when {
                 isMiMo -> {
@@ -607,10 +624,26 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
     private fun HttpRequestBuilder.configureAuth(
         providerSetting: ProviderSetting.OpenAI,
+        extraHeaders: List<CustomHeader> = emptyList(),
+    ) {
+        val token = providerSetting.apiKey
+        val host = hostOf(providerSetting.baseUrl)
+        val usesMimoApiKey = providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
+            (host.startsWith("token-plan-") && host.endsWith("xiaomimimo.com"))
+        if (usesMimoApiKey) {
+            header("api-key", token)
+        } else {
+            header("Authorization", "Bearer $token")
+        }
+        resolveOpenAIRequestHeaders(providerSetting.authMode, extraHeaders)
+            .forEach { header(it.name, it.value) }
+    }
+
+    private fun HttpRequestBuilder.configureAuth(
+        providerSetting: ProviderSetting.OpenAI,
         params: TextGenerationParams,
     ) {
-        header("Authorization", "Bearer ${providerSetting.apiKey}")
-        params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+        configureAuth(providerSetting, params.customHeaders)
     }
 
     // ---- safe JsonElement accessors (avoid a dependency on :common helpers) ----
@@ -646,8 +679,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         val url = "${providerSetting.baseUrl}/responses"
         val response = httpClient.post(url) {
             contentType(ContentType.Application.Json)
-            header("Authorization", "Bearer ${providerSetting.apiKey}")
-            params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+            configureAuth(providerSetting, params)
             setBody(json.encodeToString(requestBody))
         }
         if (!response.status.isSuccess()) {
@@ -668,8 +700,7 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         val events = sseClient.sseFlow(url) {
             method = HttpMethod.Post
             contentType(ContentType.Application.Json)
-            header("Authorization", "Bearer ${providerSetting.apiKey}")
-            params.customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+            configureAuth(providerSetting, params)
             setBody(json.encodeToString(requestBody))
         }
         return flow {

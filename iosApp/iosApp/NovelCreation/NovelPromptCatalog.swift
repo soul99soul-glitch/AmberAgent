@@ -273,7 +273,7 @@ enum NovelPromptCatalog {
         case .stateDeltaV1:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.state-delta.v2",
+                version: "novel.state-delta.v3",
                 systemText: """
                 Extract only story-state changes caused by the newly collected manuscript.
                 Do not infer unsupported facts. Project-setting changes must be proposals, never direct mutations.
@@ -281,6 +281,11 @@ enum NovelPromptCatalog {
                 unresolvedEntityNames must describe the complete current branch after applying those changes to
                 the supplied base state. branchOutlinePatch is null when unchanged; otherwise it is the complete
                 replacement branch outline, not a fragment.
+                unresolvedEntityNames is ONLY for recurring **named persons** that still need author
+                confirmation (new speakers, aliases of known characters). Never list places,
+                institutions, armies, objects, abstract terms (澶州, 汴京), pure office/job titles
+                (军需官, 县令, 店小二), or one-off crowd roles without a personal name. Those may
+                appear in event entityReferences when useful, but not as unresolved identities.
 
                 \(evidenceIntegrityConstraint)
 
@@ -291,7 +296,7 @@ enum NovelPromptCatalog {
         case .manualSyncV1:
             NovelPromptTemplate(
                 kind: kind,
-                version: "novel.manual-sync.v3",
+                version: "novel.manual-sync.v4",
                 systemText: """
                 Rebuild derived branch state from a deterministic ordered manuscript chunk. The compact projected
                 state is authoritative for all prior completed chunks. stateSummary, branchOutline, and
@@ -300,6 +305,8 @@ enum NovelPromptCatalog {
                 facts whose evidence occurs in the current manuscript chunk; never repeat prior-chunk facts.
                 Removed or rewritten manuscript facts must not survive merely because they existed in older
                 derived state. Do not modify shared project settings.
+                unresolvedEntityNames is ONLY for recurring named persons needing author confirmation.
+                Never put places, institutions, pure job titles (军需官, 县令), or one-off nameless roles.
 
                 \(evidenceIntegrityConstraint)
 
@@ -952,6 +959,8 @@ private extension NovelPromptCatalog {
         }
         branchOutlinePatch is either null or a non-empty string. All IDs are unique across every object array,
         contain no whitespace, and are at most 128 characters. Entity-name arrays contain unique non-empty strings.
+        unresolvedEntityNames: recurring personal names only (speakers/aliases needing identity cards).
+        Forbidden: places (澶州), institutions, pure job titles (军需官, 县令), nameless one-off roles.
         """
 
     static let stateRebuildJSONContract = """
@@ -970,6 +979,7 @@ private extension NovelPromptCatalog {
           "unresolvedEntityNames": [],
           "settingProposals": []
         }
+        unresolvedEntityNames: recurring personal names only. Never places or pure titles (澶州, 军需官).
         Array item shapes:
         events: {
           "id":"stable-id", "kind":"non-empty string", "summary":"non-empty string",

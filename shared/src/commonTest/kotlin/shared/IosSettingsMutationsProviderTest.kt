@@ -4,6 +4,7 @@ import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.model.Assistant
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
@@ -92,6 +93,49 @@ class IosSettingsMutationsProviderTest {
         assertEquals("https://proxy.example/v1", updated.baseUrl)
         assertEquals("/custom/chat", updated.chatCompletionsPath)
         assertFalse(updated.useResponseApi)
+    }
+
+    @Test
+    fun zhipuTokenPlanPinsOfficialCodingBaseUrlAndRestoresBrandDefault() {
+        val provider = ProviderSetting.OpenAI(
+            baseUrl = "https://open.bigmodel.cn/api/paas/v4",
+            brand = OpenAIBrand.ZHIPU,
+        )
+        val settings = Settings(providers = listOf(provider))
+
+        val planned = IosSettingsMutations.setOpenAIAuthMode(
+            settings = settings,
+            providerId = provider.id.toString(),
+            authMode = OpenAIAuthMode.ZHIPU_CODING_PLAN,
+        ).providers.single() as ProviderSetting.OpenAI
+        assertEquals(OpenAIAuthMode.ZHIPU_CODING_PLAN, planned.authMode)
+        assertEquals("https://open.bigmodel.cn/api/coding/paas/v4", planned.baseUrl)
+
+        val restored = IosSettingsMutations.setOpenAIAuthMode(
+            settings = Settings(providers = listOf(planned)),
+            providerId = provider.id.toString(),
+            authMode = OpenAIAuthMode.API_KEY,
+        ).providers.single() as ProviderSetting.OpenAI
+        assertEquals(OpenAIAuthMode.API_KEY, restored.authMode)
+        assertEquals("https://open.bigmodel.cn/api/paas/v4", restored.baseUrl)
+    }
+
+    @Test
+    fun leavingTokenPlanKeepsACustomProxyBaseUrl() {
+        val provider = ProviderSetting.OpenAI(
+            baseUrl = "https://proxy.example/glm-coding/v4",
+            authMode = OpenAIAuthMode.ZHIPU_CODING_PLAN,
+            brand = OpenAIBrand.ZHIPU,
+        )
+
+        val updated = IosSettingsMutations.setOpenAIAuthMode(
+            settings = Settings(providers = listOf(provider)),
+            providerId = provider.id.toString(),
+            authMode = OpenAIAuthMode.API_KEY,
+        ).providers.single() as ProviderSetting.OpenAI
+
+        assertEquals(OpenAIAuthMode.API_KEY, updated.authMode)
+        assertEquals("https://proxy.example/glm-coding/v4", updated.baseUrl)
     }
 
     @Test

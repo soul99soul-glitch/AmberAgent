@@ -466,6 +466,7 @@ enum AmberThemePackTransferError: LocalizedError, Equatable {
     case unknownChromeTypeface(String)
     case unknownOptionalSlot(String)
     case invalidHex(String)
+    case missingField(String)
     /// Accent vs on-accent ink contrast below `AmberColorContrast.minimumAccentInkRatio`.
     case insufficientContrast(Double)
 
@@ -495,6 +496,8 @@ enum AmberThemePackTransferError: LocalizedError, Equatable {
             "未知可选槽：\(value)"
         case .invalidHex(let value):
             "无效颜色：\(value)"
+        case .missingField(let name):
+            "缺少字段：\(name)"
         case .insufficientContrast(let ratio):
             String(
                 format: "强调色与上墨色对比度不足（%.2f:1，至少 %.1f:1）",
@@ -580,6 +583,46 @@ enum AmberThemePackTransfer {
             launchBrand: pack.launchBrand.rawValue,
             assetMode: pack.assetMode.rawValue,
             immersivePolicy: pack.immersivePolicy.rawValue
+        )
+    }
+
+    /// Agent tool arguments use snake_case. Host fills format/version/asset defaults.
+    static func document(fromToolArguments args: [String: Any]) throws -> AmberThemePackDocument {
+        func required(_ key: String) throws -> String {
+            guard let raw = args[key] as? String else {
+                throw AmberThemePackTransferError.missingField(key)
+            }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw AmberThemePackTransferError.missingField(key)
+            }
+            return trimmed
+        }
+        func optional(_ key: String) -> String? {
+            guard let raw = args[key] as? String else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return AmberThemePackDocument(
+            format: AmberThemePackDocument.formatID,
+            version: AmberThemePackDocument.currentVersion,
+            id: try required("id"),
+            displayName: try required("display_name"),
+            paper: try required("paper"),
+            accentHex: try required("accent_hex"),
+            inkHex: try required("ink_hex"),
+            canvasStyle: try required("canvas_style"),
+            brandMark: try required("brand_mark"),
+            shortcutIconStyle: try required("shortcut_icon_style"),
+            chromeTypeface: try required("chrome_typeface"),
+            canvasScope: optional("canvas_scope") ?? AmberCanvasScope.shell.rawValue,
+            bubbleChrome: optional("bubble_chrome"),
+            glassChrome: optional("glass_chrome"),
+            emptyArt: optional("empty_art"),
+            settingsChrome: args["settings_chrome"] as? Bool,
+            launchBrand: optional("launch_brand"),
+            assetMode: AmberThemeAssetMode.builtinOnly.rawValue,
+            immersivePolicy: AmberImmersivePolicy.hidden.rawValue
         )
     }
 
@@ -732,6 +775,75 @@ enum AmberThemePackTransfer {
 }
 
 // MARK: - Canvas
+
+/// Mini preview: canvas/accent injected from pack (not live runtime — avoids preview bleed).
+/// Brand cues: paint = chunky bars; serif = italic word; default = plain capsule.
+struct AmberThemePackMiniPreview: View {
+    let palette: AmberPalette
+    let accent: Color
+    var canvasStyle: AmberCanvasStyle = .flat
+    var paintBrandHint: Bool = false
+    var serifBrandHint: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 9) {
+                Circle()
+                    .fill(accent)
+                    .frame(width: 15, height: 15)
+                VStack(alignment: .leading, spacing: 6) {
+                    if paintBrandHint {
+                        HStack(spacing: 2) {
+                            ForEach(0..<5, id: \.self) { i in
+                                RoundedRectangle(cornerRadius: 1, style: .continuous)
+                                    .fill(Color(hex: palette.foreground))
+                                    .frame(width: i == 1 || i == 3 ? 7 : 9, height: 8)
+                                    .offset(y: CGFloat([0, 1, -1, 1, 0][i]))
+                            }
+                        }
+                    } else if serifBrandHint {
+                        Text("Amber")
+                            .font(.system(size: 12, weight: .regular, design: .serif).italic())
+                            .foregroundStyle(Color(hex: palette.foreground))
+                            .lineLimit(1)
+                    } else {
+                        Capsule().fill(Color(hex: palette.foreground2)).frame(width: 58, height: 6)
+                    }
+                    Capsule().fill(Color(hex: palette.muted)).frame(width: 34, height: 6)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(hex: palette.surface), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+
+            Capsule().fill(Color(hex: palette.surface2)).frame(height: 7).frame(maxWidth: .infinity)
+            Capsule().fill(Color(hex: palette.surface2)).frame(width: 92, height: 7)
+            Spacer(minLength: 0)
+        }
+        .padding(13)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            ZStack {
+                Color(hex: palette.background)
+                switch canvasStyle {
+                case .flat:
+                    EmptyView()
+                case .dotGrid:
+                    AmberDotGridOverlay()
+                case .lineGrid:
+                    AmberLineGridOverlay()
+                case .paperGrain:
+                    AmberPaperGrainOverlay()
+                }
+            }
+            // Pack/background cards always paint the light recipe; overlays resolve ink via
+            // UIColor traits, so pin light here or dark Appearance washes out grain/grid.
+            .environment(\.colorScheme, .light)
+        }
+        .clipped()
+    }
+}
 
 /// Full-bleed canvas: paper color + optional texture overlay (always draws; ignores scope).
 struct AmberCanvasBackground: View {

@@ -448,6 +448,8 @@ struct ChatToolStepModel: Identifiable {
             "provider_config_apply": "应用提供商配置",
             "provider_refresh_models": "刷新模型列表",
             "settings_set_model_slot": "设置默认模型",
+            "theme_pack_status": "查看主题",
+            "theme_pack_import": "试穿主题",
         ]
         if let mapped = known[name] { return mapped }
         // 动态工具名同样受列宽预算约束（见 combinedLine 注释），完整名在详情 sheet。

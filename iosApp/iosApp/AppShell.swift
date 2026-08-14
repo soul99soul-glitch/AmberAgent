@@ -27,6 +27,7 @@ struct AppShell: View {
     @State private var didBootstrapConversations = false
     @State private var didRunStartupRecovery = false
     @State private var didFinalizeStaleBackgroundJobs = false
+    @State private var isResolvingThemeTryOn = false
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(IOSAppearancePreferenceKeys.mode) private var appearanceMode = IOSAppearanceMode.system.rawValue
 
@@ -157,6 +158,29 @@ struct AppShell: View {
         .environment(workspaceStore)
         .tint(AmberTheme.accent)
         .preferredColorScheme(preferredColorScheme)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if shouldShowThemeTryOnBar {
+                AmberThemeTryOnBar(
+                    displayName: AmberThemeRuntime.shared.tryOnDisplayName ?? "新主题",
+                    onCommit: commitThemeTryOnFromShell,
+                    onRevert: revertThemeTryOnFromShell
+                )
+                .disabled(isResolvingThemeTryOn)
+                .opacity(isResolvingThemeTryOn ? 0.55 : 1)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+                .padding(.bottom, 12)
+            }
+        }
+        .onChange(of: AmberThemeRuntime.shared.isTryOnActive) { _, active in
+            if !active { isResolvingThemeTryOn = false }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .amberThemeTryOnTakenOver)) { _ in
+            if let request = chatViewModel.pendingMcpApproval,
+               request.toolName == "theme_pack_import" {
+                chatViewModel.denyPendingMcpTool(requestId: request.id)
+            }
+        }
         .onChange(of: scenePhase) { _, phase in
             handleScenePhaseChange(phase)
         }
@@ -238,6 +262,48 @@ struct AppShell: View {
         .onOpenURL { url in
             enqueueAgentActivityURL(url)
         }
+    }
+
+    private var shouldShowThemeTryOnBar: Bool {
+        guard AmberThemeRuntime.shared.isTryOnActive else { return false }
+        guard let last = rootRouter.path.last else { return true }
+        switch last {
+        case .chat, .chatMessage(anchor: _):
+            return chatViewModel.pendingMcpApproval?.toolName != "theme_pack_import"
+        default:
+            return true
+        }
+    }
+
+    private func commitThemeTryOnFromShell() {
+        guard !isResolvingThemeTryOn else { return }
+        if let request = chatViewModel.pendingMcpApproval, request.toolName == "theme_pack_import" {
+            isResolvingThemeTryOn = true
+            chatViewModel.approvePendingMcpTool(requestId: request.id)
+            return
+        }
+        isResolvingThemeTryOn = true
+        let candidate = AmberThemeRuntime.shared.tryOnSession?.candidate
+        do {
+            if let candidate {
+                try AmberThemePackLibrary.shared.upsert(candidate)
+            }
+            try AmberThemeRuntime.shared.commitTryOn()
+        } catch {
+            // Orphan try-on without a pending card: still drop the overlay.
+            AmberThemeRuntime.shared.discardTryOn()
+        }
+        isResolvingThemeTryOn = false
+    }
+
+    private func revertThemeTryOnFromShell() {
+        guard !isResolvingThemeTryOn else { return }
+        if let request = chatViewModel.pendingMcpApproval, request.toolName == "theme_pack_import" {
+            isResolvingThemeTryOn = true
+            chatViewModel.denyPendingMcpTool(requestId: request.id)
+            return
+        }
+        AmberThemeRuntime.shared.discardTryOn()
     }
 
     private var preferredColorScheme: ColorScheme? {

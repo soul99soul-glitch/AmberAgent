@@ -483,7 +483,10 @@ final class NovelSessionViewModel {
         var namesByKey: [String: String] = [:]
         for name in state.unresolvedEntityNames {
             let key = NovelCharacterIdentityResolver.normalize(name)
+            // Immediate presentation filter: stale place names already stored
+            // in unresolvedEntityNames must not open as 「确认人物身份」 cards.
             guard !key.isEmpty,
+                  NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate(name),
                   !clarifiedKeys.contains(key),
                   !knownKeys.contains(key) else { continue }
             namesByKey[key] = name
@@ -535,6 +538,29 @@ final class NovelSessionViewModel {
             .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
         characterIdentityChoicesCache = (rev, config, value)
         return value
+    }
+
+    /// Best existing character for a pending mention (deterministic, offline).
+    /// Used for the one-tap 「确认为…」 primary action on identity cards.
+    func recommendedCharacterIdentityChoice(
+        for mention: String
+    ) -> (material: NovelMaterialRecord, title: String)? {
+        let choices = resolvedCharacterIdentityChoices
+        guard !choices.isEmpty else { return nil }
+        let candidates = choices.map { choice in
+            (
+                id: choice.material.id.description,
+                title: choice.title,
+                aliases: choice.material.aliases
+            )
+        }
+        guard let match = NovelCharacterIdentityResolver.recommendedIdentityMatch(
+            mention: mention,
+            candidates: candidates
+        ) else { return nil }
+        return choices.first {
+            $0.material.id.description == match.id
+        }
     }
 
     /// Advance open staging. Call only from the session view's sequenced open task

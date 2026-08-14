@@ -599,7 +599,8 @@ enum NovelInjectionPlanner {
                 sessions: archiveSections + selectedSessionSections + [section],
                 events: [],
                 materials: protectedSections,
-                user: userSection
+                user: userSection,
+                stateLast: request.pendingState != nil
             )
             if estimatedTokens(render(proposed)) <= request.budget.maxEstimatedInputTokens {
                 selectedSessionSections.append(section)
@@ -626,7 +627,8 @@ enum NovelInjectionPlanner {
                 sessions: archiveSections + selectedSessionSections,
                 events: proposedEvents,
                 materials: protectedSections,
-                user: userSection
+                user: userSection,
+                stateLast: request.pendingState != nil
             )
             if estimatedTokens(render(proposed)) <= request.budget.maxEstimatedInputTokens {
                 selectedEvents.append(candidate)
@@ -653,7 +655,8 @@ enum NovelInjectionPlanner {
                 sessions: archiveSections + selectedSessionSections,
                 events: eventSections,
                 materials: protectedSections + proposedSmart.map(makeMaterialSection),
-                user: userSection
+                user: userSection,
+                stateLast: request.pendingState != nil
             )
             if estimatedTokens(render(proposed)) <= request.budget.maxEstimatedInputTokens {
                 selectedSmart.append(candidate)
@@ -679,7 +682,8 @@ enum NovelInjectionPlanner {
                 sessions: archiveSections + selectedSessionSections,
                 events: proposedEvents,
                 materials: materialSections,
-                user: userSection
+                user: userSection,
+                stateLast: request.pendingState != nil
             )
             if estimatedTokens(render(proposed)) <= request.budget.maxEstimatedInputTokens {
                 selectedEvents.append(candidate)
@@ -700,7 +704,8 @@ enum NovelInjectionPlanner {
             sessions: archiveSections + selectedSessionSections,
             events: finalEventSections,
             materials: materialSections,
-            user: userSection
+            user: userSection,
+            stateLast: request.pendingState != nil
         )
         let canonicalInput = render(sections)
         let contextSections = sections.filter {
@@ -875,7 +880,8 @@ private extension NovelInjectionPlanner {
             }
         )
         let effectiveUnresolved = state.unresolvedEntityNames.filter {
-            !identityResolver.isKnown($0) &&
+            NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate($0) &&
+                !identityResolver.isKnown($0) &&
                 !clarifiedKeys.contains(NovelCharacterIdentityResolver.normalize($0))
         }
         let unresolved = effectiveUnresolved.isEmpty
@@ -1352,19 +1358,27 @@ private extension NovelInjectionPlanner {
         sessions: [NovelInjectionSection],
         events: [NovelInjectionSection],
         materials: [NovelInjectionSection],
-        user: NovelInjectionSection
+        user: NovelInjectionSection,
+        stateLast: Bool = false
     ) -> [NovelInjectionSection] {
         var result = [prompt]
         if let polishPreference { result.append(polishPreference) }
         if let chapterPlan { result.append(chapterPlan) }
         if let recentHighlights { result.append(recentHighlights) }
         if let upcomingArc { result.append(upcomingArc) }
-        result.append(state)
+        // 手动同步（pendingState）的投影剧情状态每段必变；把它和按段匹配的 events 放到
+        // 稳定段（prompt/资料/归档）之后，provider 的自动前缀缓存才能命中稳定前缀。
+        // 内容与 receipt 均按段级 contentSHA256 校验，不依赖顺序。
+        if !stateLast { result.append(state) }
         if let seed { result.append(seed) }
         if let chapter { result.append(chapter) }
         result.append(contentsOf: sessions.sorted(by: sessionSectionOrder))
-        result.append(contentsOf: events)
+        if !stateLast { result.append(contentsOf: events) }
         result.append(contentsOf: materials)
+        if stateLast {
+            result.append(contentsOf: events)
+            result.append(state)
+        }
         result.append(user)
         return result
     }

@@ -1,8 +1,43 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-14（Agent 自配置 provider/model P0–P3 已落地）
+Last updated: 2026-08-15（Agent 聊天生成主题包 + 试穿）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## Agent 聊天生成主题包（2026-08-15，路径 A 已落地）
+
+产品意图：聊天里说一句风格（如「雨天书店」），agent 出配方，用户批准后套上。不是外观页独立生成按钮，也不是 agent 静默换皮。宿主只校验、试穿、审批、写入；不另调一层生图模型。
+
+- **工具（deferred + tool_search）**：`theme_pack_status`（pure，后台可跑）/ `theme_pack_import`（前台强制审批卡，高风险自动批准也不能跳卡）。
+- **试穿 overlay**：`AmberThemeRuntime.beginTryOn` 关 `persistEnabled` 后 `apply`；杀进程回来是旧主题。`commitTryOn` 才落 UserDefaults；`discardTryOn` 套回 baseline。外观页点选其它主题走 `endTryOnWithoutRestore` + `amberThemeTryOnTakenOver`。
+- **审批**：卡上按钮是 **套用 / 还原**；回首页时聊天卡离屏，App 壳挂「正在试穿」条，同一件事。批准清 MCP 槽不得先 discard overlay（`clearPendingMcpApproval(discardThemeTryOn: false)`）。
+- **约束**：禁止沉浸色/`garnet`；id 不能是三内置；缺 `canvas_scope` 默认 `shell`；对比度 ≥ 3。
+- **工程**：`xcodegen generate` 纳入 `IOSThemePackToolService` / `IOSThemePackToolTests` / 邻接 `IOSProviderRequestHeaders`。
+- **验证**：KMP `OrchestrationToolDeclarationsTest` 已绿。iOS 定点 `AmberThemePackTests` 62 + `IOSThemePackToolTests` 10 + effect-class pin = **73/73**。模拟器 iPhone 17 Pro（iOS 26.5）已覆盖安装。
+- **审查修补（2026-08-15）**：外观纸色/强调色/JSON 导入走 `applyTakingOverTryOn`（先落当前可见槽再改）；壳条防连点、孤儿套用先 `upsert` 再 `commitTryOn`；审批 claim 失败 `discardPreparedThemeImport`；试穿条 44pt 热区；审批卡主题预览去套卡、180×120 贴片、调色盘图标。
+- **未验证**：真机端到端「雨天书店 → 立刻换皮 → 杀进程仍是旧主题 → 套用入库」；首页试穿条与设置双顶栏的实机间距。
+- **刻意不做**：zip 资源包、沉浸色、皮肤商城、`generate_theme` 第二层 LLM、试穿落盘、跳审批卡。
+
+## iOS Provider 设置收口（2026-08-15）
+
+产品问题：列表把 Codex/Grok 登录当成「未填写」；保存/设当前狂弹 Alert；智谱/Kimi 没有 Token Plan 专用 URL；没有方便的 header 伪装。
+
+- **凭据徽章**：`ChatProviderConfiguration.hasUsableCredential` / `credentialStatusTitle` 认 Codex OAuth 与 Grok Web 登录，不再只看 `apiKey`。
+- **成功态**：保存、设当前、导入旧 key 改为页内 notice；删除/非法 URL 仍用 Alert。
+- **Token Plan**：`IosSettingsMutations.setOpenAIAuthMode` 对智谱/Kimi/MiMo/MiniMax 钉官方 Coding Plan URL；切回 API Key 仅在当前仍是钉死地址时恢复品牌默认，自定义代理保留。Codex 仍不改持久化 endpoint。
+- **默认 UA**：Coding Plan 请求层注入 `opencode/1.18.18`（OpenCode 2026-08-13 稳定版）。用户可在详情页改 OpenCode / Claude Code / Cursor / Cline / 自定义；预设存在 `IOSProviderRequestHeaderStore`。显式 User-Agent 覆盖默认。
+- **拉模型**：UI 与 `provider_refresh_models` 带同一套 header；Codex/Grok 不再要求 API Key。
+- **门禁**：`OpenAIRequestHeaderPolicyTest`、`IosSettingsMutationsProviderTest` 新增 Token Plan 用例、`ProviderCredentialAndHeaderTests`、`IOSSettingsWiringTests` 源码断言。真机未验证。
+
+## 剧情状态同步无损加速（2026-08-14，代码已落地）
+
+- 背景：手动同步剧情状态 16766 字 3 段串行、单段约 300 秒（deepseek-v4-flash）。取证结论：流一直在吐字，慢在 provider 端吞吐 + 「关闭思考」未真正下发。
+- **#1 thinking 关闭下发**（`ai-provider-openai/.../OpenAIKmpProvider.kt`）：SiliconFlow 白名单模型（含 `deepseek-ai/DeepSeek-V4-Flash`）即使模型配置未勾 reasoning 能力，`reasoningLevel == OFF` 时也显式发 `enable_thinking: false`；只在 OFF 时放开，不替未声明能力的模型强开思考。测试：`OpenAIKmpProviderRequestTest` 新增 2 例，`:ai-provider-openai:jvmTest` 全绿。
+- **#2 注入段序重排**（`NovelInjectionPlanner.orderedSections`）：仅 `pendingState != nil`（手动同步分段）时，每段必变的投影状态段移到稳定内容之后、user 之前，让 provider 自动前缀缓存命中 prompt/资料/归档稳定前缀；其它模式顺序不变。receipt 校验按段级 contentSHA256，不依赖顺序。测试：`NovelInjectionPlannerTests.testManualSyncPendingStateSectionMovesBehindStableSectionsForPrefixCaching`。
+- **#4 段内流式进度**：`NovelStructuredModelExecutor.executePrepared(_:noOutputTimeout:onStreamedText:)` 透出当前段累计字数 → `NovelStateSyncStreamProgress`（NSLock，按 pendingID，纯呈现遥测）→ banner 每秒轮询显示「本段已生成 N 字」。测试：`NovelCreationPresentationTests` 新增断言。
+- **#5 同步失败原因透出**（`NovelPresentation.stateSyncStructuredFailureMessage`）：10 类结构化输出失败（malformed JSON/缺字段/重复 key/类型不符等）映射为具体中文文案 + 「若反复出现，请更换剧情同步模型」后缀；接入 `stateSyncFailureMessage(for:)` 与 `factFailureMessage`（durable lastError）。此前英文技术细节一律折叠成通用文案，MiMo 等快模失败无法诊断。测试：`NovelCreationPresentationTests` 新增 5 断言。
+- **未验证**：iOS 定点门禁（NovelInjectionPlannerTests/NovelManualEditSyncTests/NovelFactTransactionLifecycleTests/NovelStructuredModelExecutorTests/NovelCreationPresentationTests）两次运行均遇 DerivedData build.db 锁（用户侧有并发构建），独立 DerivedData 重跑未获执行；真机同步加速效果未验证。
+- **未做（待裁决）**：段软上限 8000 调大（近似无损，分段边界变化）；段内失败 partial salvage（复杂）；段间并行（非无损，排除）。
 
 ## Agent 自配置 Provider/Model（2026-08-14，P0–P3 完成）
 
@@ -441,7 +476,7 @@ Last updated: 2026-08-14（Agent 自配置 provider/model P0–P3 已落地）
 - 小说实现基线：`docs/NOVEL_CREATION_IMPLEMENTATION_PLAN.md`
 - 共创 / 代笔计划：`docs/NOVEL_COCREATION_GHOSTWRITE_PLAN.md`
 - 模型自主性护栏拆除计划（Draft，待裁决）：`docs/MODEL_AUTONOMY_GUARDRAILS_PLAN.md`
-- iOS 主题系统完善计划（Active；P0–P3 已落地并 review 收口：MiniApp host CSS 注入消 FOUC、theme 热更新不重建 WebView、跨端字段差写入生成 prompt；Widget 静态回退已文档化；Appearance `miniPreview` 在深色系统下固定 light 纹理墨色。下一刀 **P4 需产品闸门**）：`docs/IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`；设计契约：`docs/IOS_THEME_PACK_DESIGN_SPEC.md`
+- iOS 主题系统完善计划（Active；P0–P3 已落地。**聊天生成主题包路径 A 已落地**：`theme_pack_status`/`theme_pack_import` + 试穿 overlay + 套用/还原卡。下一刀仍是 **P4 需产品闸门**，以及真机端到端试穿）：`docs/IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`；设计契约：`docs/IOS_THEME_PACK_DESIGN_SPEC.md`
 - 首页「新对话」胶囊 trailing：16→28（相对会话卡 16 内缩 12pt，消相切）；原型 `docs/HOME_NEW_CHAT_FAB_PROTOTYPE.html`。视觉层级：新对话 accent 混色玻璃 / Continue 浅强调色黑字；已装机试看。
 - 点阵 · Pi：`canvasScope` appWide→shell；chat/工作页只留奶油纸色，方格仅首页/外观。冷启动迁移 legacy `pi+lineGrid+appWide`。
 - 核心记忆页用户面精修：去掉「召回解释」与「本次候选/#id」控制台语义；搜索并入记忆库工具条；四范围标签等分铺开。库内 `recallExplanation` 仍保留给测试。

@@ -1,6 +1,7 @@
 package app.amber.ai.provider.openai
 
 import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
@@ -43,6 +44,42 @@ class OpenAIKmpProviderRequestTest {
         )
 
         assertFalse(body.getValue("parallel_tool_calls").jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun siliconFlowThinkingModelWithoutAbilityStillReceivesDisableThinking() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting.copy(baseUrl = "https://api.siliconflow.cn/v1"),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("sync")))),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "deepseek-ai/DeepSeek-V4-Flash",
+                    displayName = "DeepSeek V4 Flash",
+                ),
+                reasoningLevel = ReasoningLevel.OFF,
+            ),
+            stream = false,
+        )
+
+        assertFalse(body.getValue("enable_thinking").jsonPrimitive.boolean)
+    }
+
+    @Test
+    fun siliconFlowThinkingModelWithoutAbilityDoesNotForceEnableThinking() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting.copy(baseUrl = "https://api.siliconflow.cn/v1"),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("chat")))),
+            params = TextGenerationParams(
+                model = Model(
+                    modelId = "deepseek-ai/DeepSeek-V4-Flash",
+                    displayName = "DeepSeek V4 Flash",
+                ),
+                reasoningLevel = ReasoningLevel.AUTO,
+            ),
+            stream = false,
+        )
+
+        assertFalse("enable_thinking" in body)
     }
 
     private fun toolModel(): Model = Model(

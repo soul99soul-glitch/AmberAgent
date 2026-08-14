@@ -329,9 +329,17 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(detail.contains("IOSGrokWebConstants.webBaseUrl"))
         XCTAssertTrue(detail.contains("updateProviderChatModels"))
         XCTAssertTrue(detail.contains("grokSection"))
+        XCTAssertTrue(detail.contains("tokenPlanSection"))
+        XCTAssertTrue(detail.contains("headerDisguiseSection"))
+        XCTAssertTrue(detail.contains("OpenAICompatUserAgents.shared.OPENCODE"))
+        XCTAssertTrue(detail.contains("notice = \"服务商配置已保存。\""))
+        XCTAssertFalse(detail.contains("alert = .saved"))
+        XCTAssertFalse(detail.contains("alert = .currentModelSet"))
 
         XCTAssertTrue(configuration.contains("IOSGrokWebProviderResolver.isGrokWebProvider(provider)"))
         XCTAssertTrue(configuration.contains(".grokNotSignedIn"))
+        XCTAssertTrue(configuration.contains("hasUsableCredential"))
+        XCTAssertTrue(configuration.contains("credentialStatusTitle"))
 
         XCTAssertTrue(coordinator.contains("IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)"))
         XCTAssertTrue(coordinator.contains("IOSGrokWebClient(providerId: providerId).streamText"))

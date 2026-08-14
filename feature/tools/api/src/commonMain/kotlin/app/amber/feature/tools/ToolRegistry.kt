@@ -448,7 +448,7 @@ internal fun Tool.category(): String = when {
     name.startsWith("cron_task_") -> "cron"
     name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
     name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
-    name.startsWith("provider_config_") || name == "settings_set_model_slot" -> "settings"
+    name.startsWith("provider_config_") || name.startsWith("theme_pack_") || name == "settings_set_model_slot" -> "settings"
     name.startsWith("subagent_") ||
         name in setOf("spawn_agent", "list_agents", "interrupt_agent", "wait_agent", "send_message", "followup_task") -> "subagent"
     name.startsWith("model_council_") -> "model_council"
@@ -481,7 +481,8 @@ private fun Tool.mutatesState(): Boolean {
         name.startsWith("skill_disable") ||
         name == "provider_config_apply" ||
         name == "provider_refresh_models" ||
-        name == "settings_set_model_slot"
+        name == "settings_set_model_slot" ||
+        name == "theme_pack_import"
 }
 
 private fun String.hasToken(token: String): Boolean =

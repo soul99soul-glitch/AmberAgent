@@ -1,6 +1,7 @@
 package app.amber.ai.core
 
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
@@ -147,8 +148,30 @@ class OrchestrationToolDeclarationsTest {
             "send_message", "followup_task", "wait_agent", "session_search", "session_read",
             "provider_config_status", "provider_config_apply",
             "provider_refresh_models", "settings_set_model_slot",
+            "theme_pack_status", "theme_pack_import",
         )
         assertEquals(names, iosToolDeclarations(names).map { it.name })
+    }
+
+    @Test
+    fun themePackStatusIsReadOnlyAndImportNeedsApproval() {
+        val status = createThemePackStatusToolDeclaration()
+        assertEquals("theme_pack_status", status.name)
+        assertFalse(status.needsApproval)
+        assertTrue(status.description.contains("theme_pack_import"))
+
+        val import = createThemePackImportToolDeclaration()
+        assertEquals("theme_pack_import", import.name)
+        assertTrue(import.needsApproval, "试穿主题必须需要审批")
+        val params = import.parameters()
+        assertIs<InputSchema.Obj>(params)
+        val required = params.required.orEmpty()
+        assertTrue("id" in required)
+        assertTrue("accent_hex" in required)
+        val paper = params.properties["paper"]!!.jsonObject
+        val paperEnum = paper["enum"]!!.jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("paper", "neutral", "white", "pi", "notion"), paperEnum)
+        assertFalse("garnet" in paperEnum)
     }
 
     @Test

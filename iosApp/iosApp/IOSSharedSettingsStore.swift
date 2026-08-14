@@ -594,8 +594,9 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
-    /// Sets the OpenAI auth mode (API key ↔ Codex OAuth) for a provider. Codex
-    /// pins the codex backend baseUrl + Responses API. Persists to snapshot.
+    /// Sets the OpenAI auth mode. Coding Plan modes pin the official coding
+    /// base URL. Codex OAuth only flips authMode; the request path still
+    /// overrides endpoint at call time.
     @discardableResult
     func setOpenAIAuthMode(providerId: String, authMode: OpenAIAuthMode) -> ProviderSetting? {
         let merged = IosSettingsMutations.shared.setOpenAIAuthMode(
@@ -838,7 +839,7 @@ final class IOSSharedSettingsStore {
         }
         guard let model,
               let provider = model.findProvider(providers: snapshot.providers, checkOverwrite: true),
-              !Self.apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              ChatProviderConfiguration.hasUsableCredential(provider),
               !model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }

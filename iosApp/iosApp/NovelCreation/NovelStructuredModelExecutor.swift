@@ -272,7 +272,8 @@ struct NovelStructuredModelExecutor: Sendable {
 
     private func executePrepared(
         _ invocation: NovelStructuredModelInvocation,
-        onTextOutput: (@Sendable () -> Void)?
+        onTextOutput: (@Sendable () -> Void)?,
+        onStreamedText: (@Sendable (Int) -> Void)? = nil
     ) async throws -> NovelStructuredModelExecutionEvidence {
         let request = invocation.executionRequest
         let modelRequest = invocation.modelRequest
@@ -296,7 +297,11 @@ struct NovelStructuredModelExecutor: Sendable {
         let text: String
         do {
             text = try await withTaskCancellationHandler {
-                try await consume(stream, onTextOutput: onTextOutput)
+                try await consume(
+                    stream,
+                    onTextOutput: onTextOutput,
+                    onStreamedText: onStreamedText
+                )
             } onCancel: {
                 Task { await modelRunner.cancel(runID: request.runID) }
             }
@@ -343,7 +348,8 @@ struct NovelStructuredModelExecutor: Sendable {
 
     func executePrepared(
         _ invocation: NovelStructuredModelInvocation,
-        noOutputTimeout: TimeInterval
+        noOutputTimeout: TimeInterval,
+        onStreamedText: (@Sendable (Int) -> Void)? = nil
     ) async throws -> NovelStructuredModelExecutionEvidence {
         let timeout = max(0.01, noOutputTimeout)
         let heartbeat = NovelStructuredModelNoOutputHeartbeat()
@@ -352,7 +358,8 @@ struct NovelStructuredModelExecutor: Sendable {
             do {
                 latch.resolve(.succeeded(try await executePrepared(
                     invocation,
-                    onTextOutput: { heartbeat.recordOutput() }
+                    onTextOutput: { heartbeat.recordOutput() },
+                    onStreamedText: onStreamedText
                 )))
             } catch let failure as NovelStructuredModelExecutionFailure {
                 latch.resolve(.failed(failure))
@@ -522,7 +529,8 @@ struct NovelStructuredModelExecutor: Sendable {
 
     private func consume(
         _ stream: AsyncStream<NovelModelEvent>,
-        onTextOutput: (@Sendable () -> Void)? = nil
+        onTextOutput: (@Sendable () -> Void)? = nil,
+        onStreamedText: (@Sendable (Int) -> Void)? = nil
     ) async throws -> String {
         var text = ""
         var terminal: NovelModelEvent?
@@ -545,9 +553,11 @@ struct NovelStructuredModelExecutor: Sendable {
             case .textDelta(let delta):
                 if !delta.isEmpty { onTextOutput?() }
                 text += delta
+                if !delta.isEmpty { onStreamedText?(text.count) }
             case .textReplacement(let replacement):
                 if !replacement.isEmpty { onTextOutput?() }
                 text = replacement
+                if !replacement.isEmpty { onStreamedText?(text.count) }
             case .usage:
                 break
             case .responseFrame(let frame):
@@ -560,9 +570,11 @@ struct NovelStructuredModelExecutor: Sendable {
                     case .textDelta(let delta):
                         if !delta.isEmpty { onTextOutput?() }
                         text += delta
+                        if !delta.isEmpty { onStreamedText?(text.count) }
                     case .textReplacement(let replacement):
                         if !replacement.isEmpty { onTextOutput?() }
                         text = replacement
+                        if !replacement.isEmpty { onStreamedText?(text.count) }
                     case .usage:
                         break
                     }

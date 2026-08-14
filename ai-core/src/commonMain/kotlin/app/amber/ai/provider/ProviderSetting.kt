@@ -136,6 +136,69 @@ fun OpenAIAuthMode.fixedBaseUrl(): String? = when (this) {
     OpenAIAuthMode.MINIMAX_TOKEN_PLAN -> "https://api.minimaxi.com/v1"
 }
 
+fun OpenAIAuthMode.isCodingPlan(): Boolean = this == OpenAIAuthMode.ZHIPU_CODING_PLAN ||
+    this == OpenAIAuthMode.KIMI_CODING_PLAN ||
+    this == OpenAIAuthMode.MIMO_CODING_PLAN ||
+    this == OpenAIAuthMode.MINIMAX_TOKEN_PLAN
+
+fun OpenAIBrand.tokenPlanAuthMode(): OpenAIAuthMode? = when (this) {
+    OpenAIBrand.ZHIPU -> OpenAIAuthMode.ZHIPU_CODING_PLAN
+    OpenAIBrand.KIMI -> OpenAIAuthMode.KIMI_CODING_PLAN
+    OpenAIBrand.MIMO -> OpenAIAuthMode.MIMO_CODING_PLAN
+    OpenAIBrand.MINIMAX -> OpenAIAuthMode.MINIMAX_TOKEN_PLAN
+    OpenAIBrand.GENERIC,
+    OpenAIBrand.OPENAI,
+    OpenAIBrand.DEEPSEEK -> null
+}
+
+fun OpenAIBrand.defaultApiBaseUrl(): String = when (this) {
+    OpenAIBrand.GENERIC,
+    OpenAIBrand.OPENAI -> "https://api.openai.com/v1"
+    OpenAIBrand.DEEPSEEK -> "https://api.deepseek.com/v1"
+    OpenAIBrand.ZHIPU -> "https://open.bigmodel.cn/api/paas/v4"
+    OpenAIBrand.KIMI -> "https://api.moonshot.cn/v1"
+    OpenAIBrand.MIMO -> "https://api.xiaomi.com/v1"
+    OpenAIBrand.MINIMAX -> "https://api.minimaxi.com/v1"
+}
+
+/**
+ * Versioned client User-Agents used as Coding Plan header disguises.
+ * OpenCode's live header is `opencode/<version>`; 1.18.18 is the latest stable
+ * release as of 2026-08-13. GLM / Kimi coding endpoints reject a bare name.
+ */
+object OpenAICompatUserAgents {
+    const val OPENCODE = "opencode/1.18.18"
+    const val CLAUDE_CODE = "claude-cli/1.0.85"
+    const val CURSOR = "Cursor/1.7.52"
+    const val CLINE = "cline/3.18.0"
+}
+
+/**
+ * Merge request headers for OpenAI-compatible calls.
+ * Coding Plan modes inject the OpenCode UA unless [extraHeaders] already set User-Agent.
+ */
+fun resolveOpenAIRequestHeaders(
+    authMode: OpenAIAuthMode,
+    extraHeaders: List<CustomHeader> = emptyList(),
+): List<CustomHeader> {
+    val merged = linkedMapOf<String, Pair<String, String>>()
+    fun put(name: String, value: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        merged[trimmed.lowercase()] = trimmed to value
+    }
+    if (authMode.isCodingPlan()) {
+        put("User-Agent", OpenAICompatUserAgents.OPENCODE)
+    }
+    extraHeaders.forEach { put(it.name, it.value) }
+    return merged.values.map { (name, value) ->
+        CustomHeader(
+            name = if (name.equals("User-Agent", ignoreCase = true)) "User-Agent" else name,
+            value = value,
+        )
+    }
+}
+
 @Serializable
 sealed class ProviderSetting {
     abstract val id: Uuid

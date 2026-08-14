@@ -503,13 +503,15 @@ struct McpToolApprovalCard: View {
     @State private var showsFullSkillChanges = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let isThemeTryOn = request.themePackPreview != nil
+        let chrome = isThemeTryOn ? AmberTheme.accent : AmberTheme.accentCyan
+        return VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
+                Image(systemName: isThemeTryOn ? "swatchpalette" : "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(AmberTheme.accentCyan)
+                    .foregroundStyle(chrome)
                     .frame(width: 30, height: 30)
-                    .background(AmberTheme.accentCyan.opacity(0.12), in: Circle())
+                    .background(chrome.opacity(0.12), in: Circle())
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text(request.title)
@@ -532,6 +534,8 @@ struct McpToolApprovalCard: View {
                 soulImportPreview(preview)
             } else if let preview = request.mcpImportPreview {
                 mcpImportPreview(preview)
+            } else if let preview = request.themePackPreview {
+                themePackPreview(preview)
             } else {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(request.serverName) / \(request.toolName)")
@@ -555,7 +559,8 @@ struct McpToolApprovalCard: View {
 
             if request.soulImportPreview == nil
                 && request.mcpImportPreview == nil
-                && request.skillImportPreview == nil {
+                && request.skillImportPreview == nil
+                && request.themePackPreview == nil {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) {
                         WebMountApprovalChip(systemImage: "server.rack", title: request.serverName)
@@ -573,7 +578,10 @@ struct McpToolApprovalCard: View {
                 Spacer()
 
                 Button(action: onDeny) {
-                    Label("拒绝", systemImage: "xmark")
+                    Label(
+                        request.themePackPreview == nil ? "拒绝" : "还原",
+                        systemImage: request.themePackPreview == nil ? "xmark" : "arrow.uturn.backward"
+                    )
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AmberTheme.foreground2)
                         .padding(.horizontal, 12)
@@ -585,7 +593,7 @@ struct McpToolApprovalCard: View {
                 .accessibilityLabel(approvalAccessibilityLabel(allow: false))
 
                 Button(action: onApprove) {
-                    Label("批准", systemImage: "checkmark")
+                    Label(request.themePackPreview == nil ? "批准" : "套用", systemImage: "checkmark")
                         .font(.caption.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 13)
@@ -602,16 +610,43 @@ struct McpToolApprovalCard: View {
         .amberGlass(cornerRadius: 18)
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(AmberTheme.accentCyan.opacity(0.34), lineWidth: 0.7)
+                .stroke(chrome.opacity(0.34), lineWidth: 0.7)
         }
     }
 
     private func approvalAccessibilityLabel(allow: Bool) -> String {
+        if request.themePackPreview != nil {
+            return allow ? "套用主题" : "还原主题"
+        }
         let verb = allow ? "批准" : "拒绝"
         if request.soulImportPreview != nil { return "\(verb)核心指令更新" }
         if request.mcpImportPreview != nil { return "\(verb) MCP 导入" }
         if request.skillImportPreview != nil { return "\(verb) Skill 导入" }
         return "\(verb) MCP 工具"
+    }
+
+    private func themePackPreview(_ document: AmberThemePackDocument) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(document.displayName)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+            AmberThemePackMiniPreview(
+                palette: (AmberThemeRuntime.Paper(rawValue: document.paper) ?? .neutral).lightPalette,
+                accent: Color(hex: (try? AmberThemePackTransfer.parseHex(document.accentHex)) ?? AmberAccentOption.amberGold.accentHex),
+                canvasStyle: AmberCanvasStyle(rawValue: document.canvasStyle) ?? .flat,
+                paintBrandHint: document.brandMark == AmberBrandMarkStyle.paintAMBER.rawValue,
+                serifBrandHint: document.brandMark == AmberBrandMarkStyle.serifWordmark.rawValue
+            )
+            .frame(width: 180, height: 120)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(AmberTheme.borderSoft, lineWidth: 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func soulImportPreview(_ preview: SoulImportPreview) -> some View {
@@ -784,6 +819,58 @@ struct McpToolApprovalCard: View {
         case .added: "新增"
         case .modified: "修改"
         case .removed: "删除"
+        }
+    }
+}
+
+/// App-shell strip when a theme try-on is live but the chat approval card is off screen.
+struct AmberThemeTryOnBar: View {
+    let displayName: String
+    let onCommit: () -> Void
+    let onRevert: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("正在试穿")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted)
+                Text(displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 8)
+            Button(action: onRevert) {
+                Text("还原")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(AmberTheme.surface2.opacity(0.86), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .chatApprovalHitTarget()
+            .accessibilityLabel("还原主题")
+            Button(action: onCommit) {
+                Text("套用")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 13)
+                    .frame(height: 32)
+                    .background(AmberTheme.accent, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .chatApprovalHitTarget()
+            .accessibilityLabel("套用主题")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .amberGlass(cornerRadius: 16)
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.28), lineWidth: 0.7)
         }
     }
 }

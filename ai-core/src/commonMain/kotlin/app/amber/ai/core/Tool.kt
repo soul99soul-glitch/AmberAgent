@@ -910,6 +910,8 @@ private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
     "provider_config_apply" to ::createProviderConfigApplyToolDeclaration,
     "provider_refresh_models" to ::createProviderRefreshModelsToolDeclaration,
     "settings_set_model_slot" to ::createSettingsSetModelSlotToolDeclaration,
+    "theme_pack_status" to ::createThemePackStatusToolDeclaration,
+    "theme_pack_import" to ::createThemePackImportToolDeclaration,
 )
 
 fun iosToolDeclaration(name: String): Tool? = IOS_TOOL_DECLARATION_PROVIDERS[name]?.invoke()
@@ -1239,6 +1241,130 @@ fun createSettingsSetModelSlotToolDeclaration(): Tool = Tool(
         )
     },
     needsApproval = false,
+    execute = { emptyList() }
+)
+
+/**
+ * Theme pack tools (iOS host executes). Status is a pure catalog; import
+ * try-on + persist requires a foreground approval card. Packs change color /
+ * texture / brand slots only — never list layout, appearance mode, or chat fonts.
+ */
+fun createThemePackStatusToolDeclaration(): Tool = Tool(
+    name = "theme_pack_status",
+    description = """
+        Read the current Amber theme recipe, any in-progress try-on, installed pack ids,
+        and allowed slot enums. Call this before theme_pack_import. Does not change the UI.
+        Builtin ids sit-terracotta, pi-steel, notion-blue are reserved.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {},
+            required = emptyList()
+        )
+    },
+    needsApproval = false,
+    execute = { emptyList() }
+)
+
+fun createThemePackImportToolDeclaration(): Tool = Tool(
+    name = "theme_pack_import",
+    description = """
+        Propose an Amber theme pack. The host immediately try-on the recipe on the real UI
+        without saving; the user taps 套用 to persist or 还原 to revert. Allowed paper:
+        paper, neutral, white, pi, notion (no immersive). Default canvas_scope to shell so
+        chat stays untextured. High-luminance accent_hex needs a dark ink_hex; contrast
+        must be at least 3.0. id must be a new slug, not a builtin. Never claim you changed
+        the theme until the user confirms 套用.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("id", buildJsonObject {
+                    put("type", "string")
+                    put("description", "New stable slug, e.g. rain-bookstore. Must not be a builtin id.")
+                })
+                put("display_name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Human title shown on the theme card, e.g. 雨天书店.")
+                })
+                put("paper", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Canvas palette.")
+                    put("enum", buildJsonArray {
+                        add("paper"); add("neutral"); add("white"); add("pi"); add("notion")
+                    })
+                })
+                put("accent_hex", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Accent color as #RRGGBB or 0xRRGGBB.")
+                })
+                put("ink_hex", buildJsonObject {
+                    put("type", "string")
+                    put("description", "On-accent ink. Dark ink for bright accents; white/cream for dark accents.")
+                })
+                put("canvas_style", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Texture overlay.")
+                    put("enum", buildJsonArray {
+                        add("flat"); add("dotGrid"); add("lineGrid"); add("paperGrain")
+                    })
+                })
+                put("brand_mark", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Home wordmark treatment.")
+                    put("enum", buildJsonArray {
+                        add("systemWordmark"); add("paintAMBER"); add("serifWordmark")
+                    })
+                })
+                put("shortcut_icon_style", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Home shortcut glyph skin.")
+                    put("enum", buildJsonArray {
+                        add("phosphorFill"); add("pixelSit")
+                    })
+                })
+                put("chrome_typeface", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Home chrome typeface. Does not change chat body fonts.")
+                    put("enum", buildJsonArray {
+                        add("system"); add("rounded"); add("serif"); add("monospace")
+                    })
+                })
+                put("canvas_scope", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Where texture paints. Prefer shell. Default shell.")
+                    put("enum", buildJsonArray {
+                        add("homeOnly"); add("shell"); add("appWide")
+                    })
+                })
+                put("bubble_chrome", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray { add("standard"); add("soft"); add("crisp") })
+                })
+                put("glass_chrome", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray { add("standard"); add("quieter"); add("solid") })
+                })
+                put("empty_art", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray { add("none"); add("character") })
+                })
+                put("settings_chrome", buildJsonObject {
+                    put("type", "boolean")
+                    put("description", "When true, Appearance labels follow chrome_typeface.")
+                })
+                put("launch_brand", buildJsonObject {
+                    put("type", "string")
+                    put("enum", buildJsonArray { add("none"); add("matchBrand") })
+                })
+            },
+            required = listOf(
+                "id", "display_name", "paper", "accent_hex", "ink_hex",
+                "canvas_style", "brand_mark", "shortcut_icon_style", "chrome_typeface",
+            )
+        )
+    },
+    needsApproval = true,
     execute = { emptyList() }
 )
 

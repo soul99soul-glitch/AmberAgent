@@ -8,6 +8,8 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.defaultApiBaseUrl
+import app.amber.ai.provider.fixedBaseUrl
 import app.amber.ai.provider.coerceToReasoningOptions
 import app.amber.ai.provider.reasoningOptions
 import app.amber.core.model.reasoningLevelForModel
@@ -242,9 +244,15 @@ object IosSettingsMutations {
     }
 
     /**
-     * Sets only the persisted auth mode for provider [providerId]. Request-time
-     * Codex endpoint/Responses overrides belong to IOSCodexProviderResolver, so
+     * Sets the persisted auth mode for provider [providerId].
+     *
+     * Codex OAuth still only flips [ProviderSetting.OpenAI.authMode]: request-time
+     * endpoint/Responses overrides belong to IOSCodexProviderResolver, so
      * login/logout never destroys the user's API-key endpoint configuration.
+     *
+     * Coding Plan / Token Plan modes pin the brand's official coding base URL.
+     * Switching back to API_KEY restores the brand default only when the current
+     * URL is still that pinned coding URL, so a user proxy is kept.
      */
     @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
     fun setOpenAIAuthMode(
@@ -258,10 +266,31 @@ object IosSettingsMutations {
                 if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
                     provider
                 } else {
-                    provider.copy(authMode = authMode)
+                    provider.copy(
+                        authMode = authMode,
+                        baseUrl = resolvedBaseUrlForAuthMode(provider, authMode),
+                    )
                 }
             }
         )
+    }
+
+    private fun resolvedBaseUrlForAuthMode(
+        provider: ProviderSetting.OpenAI,
+        mode: OpenAIAuthMode,
+    ): String {
+        if (mode == OpenAIAuthMode.CODEX_OAUTH) {
+            return provider.baseUrl
+        }
+        val pinned = mode.fixedBaseUrl()
+        if (pinned != null) {
+            return pinned
+        }
+        val previousPinned = provider.authMode.fixedBaseUrl()
+        if (previousPinned != null && provider.baseUrl == previousPinned) {
+            return provider.brand.defaultApiBaseUrl()
+        }
+        return provider.baseUrl
     }
 
     /**

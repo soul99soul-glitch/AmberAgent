@@ -671,7 +671,10 @@ extension NovelFactTransactionReducer {
         var unresolvedKeys: Set<String> = []
         for name in base + referenced {
             let key = normalizedEntity(name)
+            // Places/orgs may appear in event entityReferences; they must not
+            // become character-identity clarification cards.
             guard !key.isEmpty,
+                  NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate(name),
                   !known.contains(key),
                   !clarified.contains(key),
                   unresolvedKeys.insert(key).inserted else { continue }
@@ -706,12 +709,26 @@ extension NovelFactTransactionReducer {
             normalizedEntity($0.mention)
         })
         let resolved = known.union(clarified)
-        let unresolvedKeys = Set(unresolved.map(normalizedEntity))
-        let baseUnresolvedKeys = Set(baseUnresolved.map(normalizedEntity))
+        // Identity-card contract is person-only; toponyms never enter this set
+        // after sanitization, and stale place names in base may drop freely.
+        let unresolvedKeys = Set(
+            unresolved
+                .filter(NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate)
+                .map(normalizedEntity)
+        )
+        let baseUnresolvedKeys = Set(
+            baseUnresolved
+                .filter(NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate)
+                .map(normalizedEntity)
+        )
         let referenced = eventReferences + characterNames + relationshipNames
-        let referencedKeys = Set(referenced.map(normalizedEntity))
+        let personReferencedKeys = Set(
+            referenced
+                .filter(NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate)
+                .map(normalizedEntity)
+        )
         let newlyUnresolved = unresolvedKeys.subtracting(baseUnresolvedKeys)
-        guard newlyUnresolved.isSubset(of: referencedKeys) else {
+        guard newlyUnresolved.isSubset(of: personReferencedKeys) else {
             throw NovelError.invalidInput(
                 "A newly unresolved entity is not referenced by an evidence-backed fact."
             )
@@ -727,6 +744,11 @@ extension NovelFactTransactionReducer {
             )
         }
         for name in referenced {
+            // Non-person mentions (places, institutions) may appear in event
+            // references without entering the character-identity unresolved list.
+            guard NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate(name) else {
+                continue
+            }
             let key = normalizedEntity(name)
             guard resolved.contains(key) || unresolvedKeys.contains(key) else {
                 throw NovelError.invalidInput(

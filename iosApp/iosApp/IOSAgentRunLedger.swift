@@ -316,7 +316,13 @@ enum IOSToolEffectClassMapping {
         if toolName == "provider_config_status" {
             return .pure
         }
+        if toolName == "theme_pack_status" {
+            return .pure
+        }
         if IOSProviderConfigToolCatalog.mutatingToolNames.contains(toolName) {
+            return .sideEffect
+        }
+        if IOSThemePackToolCatalog.mutatingToolNames.contains(toolName) {
             return .sideEffect
         }
         if toolName == "memory_tool" {

@@ -46,7 +46,7 @@ internal fun toolSearchDiscoveryGuidance(
         Tool discovery:
         - This run has ${registry.metadata.size} generated tools across categories: $categories.
         - If the needed tool is not currently visible, call `$TOOL_SEARCH_TOOL_NAME` with a concrete query. It exposes the best matching schemas for the next generation step.
-        - Before telling the user you cannot do something, call `$TOOL_SEARCH_TOOL_NAME` with a concrete intent first (e.g. "读取其它会话", "并行子任务", "网页操作", "配置提供商", "API Key", "默认模型"). Many capabilities — sub-agent threads, cross-session reading, web mount, MCP tools, script execution, provider/model settings tools — stay hidden until searched; never claim inability based only on the currently visible tools. Writing API keys requires user approval; never claim you can change providers without calling the provider_config tools first.
+        - Before telling the user you cannot do something, call `$TOOL_SEARCH_TOOL_NAME` with a concrete intent first (e.g. "读取其它会话", "并行子任务", "网页操作", "配置提供商", "API Key", "默认模型", "生成主题", "换肤"). Many capabilities — sub-agent threads, cross-session reading, web mount, MCP tools, script execution, provider/model settings tools, theme packs — stay hidden until searched; never claim inability based only on the currently visible tools. Writing API keys requires user approval; never claim you can change providers without calling the provider_config tools first. Generating or applying a theme requires theme_pack_status then theme_pack_import; never claim you changed the theme until the user confirms 套用.
         - `tools_list` is only a debug/catalog view. A hidden tool listed by `tools_list` is not callable until `$TOOL_SEARCH_TOOL_NAME` exposes it.
         - If you used `tools_list` to identify a tool name, call `$TOOL_SEARCH_TOOL_NAME` again with that exact tool name, then execute a name from `expanded_tools` on the next step.
         - Resident tools currently stay visible without search: $residentCount core tools plus discovered tools.
@@ -63,7 +63,7 @@ fun createToolSearchTool(
         InputSchema.Obj(
             properties = buildJsonObject {
                 put("query", stringProp("Required. What capability you need, e.g. \"read PDF\", \"call Feishu MCP\", \"webview click\", \"截图\", or an exact tool name from tools_list."))
-                put("category", stringProp("Optional category filter, e.g. workspace, terminal, web, webview, webmount, screen, system, memory, context, subagent, model_council, mcp, office, skill."))
+                put("category", stringProp("Optional category filter, e.g. workspace, terminal, web, webview, webmount, screen, system, memory, context, subagent, model_council, mcp, office, skill, settings."))
                 put("limit", buildJsonObject {
                     put("type", "integer")
                     put("description", "Maximum tools to expose. Defaults to 5; capped at 20.")
@@ -268,6 +268,14 @@ class ToolSearchIndex(
                 listOf(
                     "配置提供商", "provider", "API Key", "api key", "密钥", "模型列表",
                     "默认模型", "chat 模型", "刷新模型", "OpenRouter", "DeepSeek", "设置模型",
+                ),
+            )
+        }
+        if (name.startsWith("theme_pack_")) {
+            addAll(
+                listOf(
+                    "主题", "换肤", "外观", "试穿", "生成主题", "主题包", "雨天书店",
+                    "theme", "theme pack", "accent",
                 ),
             )
         }

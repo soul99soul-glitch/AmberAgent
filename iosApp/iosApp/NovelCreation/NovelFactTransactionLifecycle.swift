@@ -482,6 +482,8 @@ private extension DefaultNovelCreation {
         }) else {
             throw NovelError.invalidInput("The pending manual synchronization is unavailable.")
         }
+        // 段内流式字数是呈现层遥测：无论事务以何种终态退出都清掉，避免残留到下一次同步。
+        defer { NovelStateSyncStreamProgress.shared.clear(pendingID: pendingID) }
         do {
             let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
             let attempt = try NovelFactTransactionAttempt(
@@ -635,7 +637,13 @@ private extension DefaultNovelCreation {
                 // 综合保持同一超时语义，任意有效增量都会刷新计时，只在真正卡死时才判超时。
                 let execution = try await executor.executePrepared(
                     invocation,
-                    noOutputTimeout: factRequestTimeout
+                    noOutputTimeout: factRequestTimeout,
+                    onStreamedText: { characters in
+                        NovelStateSyncStreamProgress.shared.set(
+                            pendingID: pendingID,
+                            characters: characters
+                        )
+                    }
                 )
                 guard case .stateRebuild(let rebuild) = execution.output else {
                     throw NovelError.invalidInput(
@@ -876,6 +884,11 @@ private extension DefaultNovelCreation {
         if let failure = error as? NovelStructuredModelExecutionFailure {
             if failure.failure.code == "cancelled" {
                 return cancellationMessage
+            }
+            // 结构化输出失败落具体中文原因：英文技术细节进 banner 会被折叠成
+            // 通用文案，模型的 schema/指令遵循问题将无从诊断。
+            if let outputFailure = failure.structuredOutputFailure {
+                return NovelPresentation.stateSyncStructuredFailureMessage(outputFailure)
             }
             return failure.failure.message
         }

@@ -24,6 +24,10 @@ struct ProviderDetailView: View {
     @State private var draftChatPath = "/chat/completions"
     @State private var draftUseResponseAPI = false
     @State private var draftPromptCaching = false
+    @State private var draftUserAgent = ""
+    @State private var draftExtraHeaders: [ProviderHeaderDraft] = []
+    @State private var selectedUserAgentPreset: ProviderUserAgentPreset?
+    @State private var notice: String?
     @State private var showCodexLogin = false
     @State private var showGrokLogin = false
 
@@ -227,6 +231,11 @@ struct ProviderDetailView: View {
 
                 AmberSectionLabel(text: "连接")
                 AmberFormGroup {
+                    if let openAI = provider as? ProviderSetting.OpenAI,
+                       tokenPlanMode(for: openAI.brand) != nil {
+                        tokenPlanSection
+                        ProviderDetailDivider()
+                    }
                     ProviderEditableTextFieldRow(
                         title: "API Key",
                         text: $draftApiKey,
@@ -235,12 +244,16 @@ struct ProviderDetailView: View {
                         monospace: true
                     )
                     ProviderDetailDivider()
-                    ProviderEditableTextFieldRow(
-                        title: "API 地址",
-                        text: $draftBaseURL,
-                        placeholder: protocolOption?.defaultBaseURL ?? "https://api.openai.com/v1",
-                        monospace: true
-                    )
+                    if let openAI = provider as? ProviderSetting.OpenAI, isCodingPlan(openAI.authMode) {
+                        ProviderStaticRow(title: "API 地址", subtitle: "", value: draftBaseURL, valueStyle: .mono)
+                    } else {
+                        ProviderEditableTextFieldRow(
+                            title: "API 地址",
+                            text: $draftBaseURL,
+                            placeholder: protocolOption?.defaultBaseURL ?? "https://api.openai.com/v1",
+                            monospace: true
+                        )
+                    }
                     if provider is ProviderSetting.OpenAI {
                         ProviderDetailDivider()
                         ProviderEditableTextFieldRow(
@@ -250,6 +263,9 @@ struct ProviderDetailView: View {
                             monospace: true
                         )
                     }
+                }
+                if let openAI = provider as? ProviderSetting.OpenAI, isCodingPlan(openAI.authMode) {
+                    ProviderDetailFooter("已钉到该品牌官方 Coding Plan 地址。")
                 }
 
                 legacyKeyImportSection
@@ -261,6 +277,12 @@ struct ProviderDetailView: View {
                     AmberFormGroup {
                         ProviderToggleRow(title: "Prompt Caching", isOn: $draftPromptCaching)
                     }
+                }
+
+                headerDisguiseSection
+
+                if let notice {
+                    ProviderDetailFooter(notice)
                 }
 
                 configActions
@@ -294,6 +316,115 @@ struct ProviderDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(!(provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude))
+    }
+
+    @ViewBuilder
+    private var tokenPlanSection: some View {
+        if let openAI = provider as? ProviderSetting.OpenAI,
+           let tokenPlan = tokenPlanMode(for: openAI.brand) {
+            HStack(spacing: 0) {
+                tokenPlanModeButton("API Key", selected: openAI.authMode == OpenAIAuthMode.apiKey) {
+                    switchAuthMode(to: OpenAIAuthMode.apiKey)
+                }
+                tokenPlanModeButton("Token Plan", selected: openAI.authMode == tokenPlan) {
+                    switchAuthMode(to: tokenPlan)
+                }
+            }
+            .padding(3)
+            .background(
+                AmberTheme.surface2.opacity(0.88),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func tokenPlanModeButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? AmberTheme.foreground : AmberTheme.muted)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+                .background(
+                    selected ? AmberTheme.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var headerDisguiseSection: some View {
+        if let current = provider as? ProviderSetting.OpenAI,
+           !IOSCodexProviderResolver.isCodexProvider(current),
+           !IOSGrokWebProviderResolver.isGrokWebProvider(current) {
+            AmberSectionLabel(text: "请求伪装")
+            AmberFormGroup {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ProviderUserAgentPreset.allCases) { preset in
+                            Button {
+                                applyUserAgentPreset(preset)
+                            } label: {
+                                Text(preset.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(
+                                        selectedUserAgentPreset == preset
+                                            ? AmberTheme.foreground
+                                            : AmberTheme.foreground2
+                                    )
+                                    .padding(.horizontal, 12)
+                                    .frame(minHeight: 44)
+                                    .background(
+                                        selectedUserAgentPreset == preset
+                                            ? AmberTheme.background.opacity(0.92)
+                                            : AmberTheme.surface2.opacity(0.7),
+                                        in: Capsule()
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                ProviderDetailDivider()
+                ProviderEditableTextFieldRow(
+                    title: "User-Agent",
+                    text: $draftUserAgent,
+                    placeholder: OpenAICompatUserAgents.shared.OPENCODE,
+                    monospace: true
+                )
+                .onChange(of: draftUserAgent) { _, value in
+                    selectedUserAgentPreset = ProviderUserAgentPreset.matching(userAgent: value)
+                }
+                ForEach($draftExtraHeaders) { $header in
+                    ProviderDetailDivider()
+                    ProviderEditableTextFieldRow(
+                        title: "名称",
+                        text: $header.name,
+                        placeholder: "Header name",
+                        monospace: true
+                    )
+                    ProviderEditableTextFieldRow(
+                        title: "值",
+                        text: $header.value,
+                        placeholder: "Header value",
+                        monospace: true
+                    )
+                }
+            }
+            Button {
+                draftExtraHeaders.append(ProviderHeaderDraft(name: "", value: ""))
+            } label: {
+                ProviderActionRow(systemImage: "plus.circle", title: "添加 Header", tint: AmberTheme.accent)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+        }
     }
 
     /// Codex (ChatGPT account) sign-in entry, shown for the official OpenAI brand
@@ -392,7 +523,7 @@ struct ProviderDetailView: View {
             Button {
                 draftApiKey = oldKey
                 saveConfig(showSuccess: false)
-                alert = .legacyKeyImported
+                notice = "旧 API Key 已写入当前服务商。"
             } label: {
                 ProviderRowContent(
                     title: "导入旧 API Key",
@@ -599,6 +730,10 @@ struct ProviderDetailView: View {
             draftChatPath = openAI.chatCompletionsPath
             draftUseResponseAPI = openAI.useResponseApi
             draftPromptCaching = false
+            let stored = IOSProviderRequestHeaderStore.record(for: providerId)
+            draftUserAgent = stored.userAgent ?? ""
+            draftExtraHeaders = stored.extra.map { ProviderHeaderDraft(name: $0.name, value: $0.value) }
+            selectedUserAgentPreset = ProviderUserAgentPreset.matching(userAgent: stored.userAgent)
         } else if let claude = provider as? ProviderSetting.Claude {
             draftApiKey = claude.apiKey
             draftBaseURL = claude.baseUrl
@@ -637,13 +772,69 @@ struct ProviderDetailView: View {
             useResponseApi: draftUseResponseAPI,
             promptCaching: draftPromptCaching
         )
+        persistRequestHeaders()
         if isCurrentProvider {
             sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
         }
         if showSuccess {
-            alert = .saved
+            notice = "服务商配置已保存。"
         }
         return true
+    }
+
+    private func persistRequestHeaders() {
+        guard provider is ProviderSetting.OpenAI else { return }
+        let extra = draftExtraHeaders.map {
+            IOSProviderRequestHeaderStore.Item(name: $0.name, value: $0.value)
+        }
+        IOSProviderRequestHeaderStore.save(
+            providerId: providerId,
+            userAgent: draftUserAgent,
+            extra: extra
+        )
+    }
+
+    private func applyUserAgentPreset(_ preset: ProviderUserAgentPreset) {
+        selectedUserAgentPreset = preset
+        if let value = preset.userAgent {
+            draftUserAgent = value
+        }
+    }
+
+    private func tokenPlanMode(for brand: OpenAIBrand?) -> OpenAIAuthMode? {
+        guard let brand else { return nil }
+        if brand == OpenAIBrand.zhipu { return .zhipuCodingPlan }
+        if brand == OpenAIBrand.kimi { return .kimiCodingPlan }
+        if brand == OpenAIBrand.minimax { return .minimaxTokenPlan }
+        return nil
+    }
+
+    private func switchAuthMode(to mode: OpenAIAuthMode) {
+        guard saveConfig(showSuccess: false) else { return }
+        _ = sharedSettings.setOpenAIAuthMode(providerId: providerId, authMode: mode)
+        if !isCodingPlan(mode) {
+            let stored = IOSProviderRequestHeaderStore.record(for: providerId)
+            if stored.userAgent == OpenAICompatUserAgents.shared.OPENCODE {
+                IOSProviderRequestHeaderStore.save(
+                    providerId: providerId,
+                    userAgent: nil,
+                    extra: stored.extra
+                )
+            }
+        }
+        if isCurrentProvider {
+            sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+        }
+        connectionStatus = .idle
+        loadDraft()
+        notice = isCodingPlan(mode) ? "已切换到 Token Plan。" : "已切回 API Key 模式。"
+    }
+
+    private func isCodingPlan(_ mode: OpenAIAuthMode) -> Bool {
+        mode == .zhipuCodingPlan
+            || mode == .kimiCodingPlan
+            || mode == .mimoCodingPlan
+            || mode == .minimaxTokenPlan
     }
 
     private func commitPendingTextInput(then action: @escaping () -> Void) {
@@ -678,6 +869,7 @@ struct ProviderDetailView: View {
         revealModels: Bool = false,
         reportsConnectionStatus: Bool = false
     ) {
+        notice = nil
         if saveBeforeFetch {
             guard saveConfig(showSuccess: false) else { return }
         }
@@ -731,7 +923,10 @@ struct ProviderDetailView: View {
                     models = provider.models.filter { $0.type == ModelType.chat }
                     successMessage = "Grok Web 登录凭据已就绪；服务器可用性会在发送消息时验证。"
                 } else if let openAI = provider as? ProviderSetting.OpenAI {
-                    models = try await OpenAIKmpProvider().listModelsOrThrow(providerSetting: openAI)
+                    models = try await OpenAIKmpProvider().listModelsWithHeadersOrThrow(
+                        providerSetting: openAI,
+                        extraHeaders: IOSProviderRequestHeaderStore.headers(for: providerId)
+                    )
                     successMessage = nil
                 } else if let claude = provider as? ProviderSetting.Claude {
                     models = try await ClaudeKmpProvider().listModelsOrThrow(providerSetting: claude)
@@ -807,7 +1002,7 @@ struct ProviderDetailView: View {
         sharedSettings.setCurrentChatModelId(model.id.description())
         sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
         if showAlert {
-            alert = .currentModelSet(model.modelId)
+            notice = "新的聊天会默认使用 \(model.modelId)。"
         }
     }
 
@@ -819,6 +1014,7 @@ struct ProviderDetailView: View {
     }
 
     private func testConnection() {
+        notice = nil
         guard saveConfig(showSuccess: false) else { return }
         guard let provider else { return }
         guard ChatProviderConfiguration.supportsChatStreaming(provider) else {

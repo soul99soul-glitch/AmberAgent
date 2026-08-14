@@ -3,6 +3,7 @@ package app.amber.ai.provider.openai
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.resolveOpenAIRequestHeaders
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
 import io.ktor.client.HttpClient
@@ -205,7 +206,8 @@ class OpenAIResponsesBackgroundTransport {
         customHeaders: List<CustomHeader>,
     ) {
         header("Authorization", "Bearer ${providerSetting.apiKey}")
-        customHeaders.filter { it.name.isNotBlank() }.forEach { header(it.name, it.value) }
+        resolveOpenAIRequestHeaders(providerSetting.authMode, customHeaders)
+            .forEach { header(it.name, it.value) }
     }
 
     private fun buildBackgroundRequestBody(

@@ -159,6 +159,38 @@ enum ChatProviderConfiguration {
         return ""
     }
 
+    /// List-row / chat-ready credential: API key, or a signed-in OAuth/Web session.
+    static func hasUsableCredential(_ provider: ProviderSetting) -> Bool {
+        if IOSCodexProviderResolver.isCodexProvider(provider) {
+            return IOSCodexProviderResolver.isSignedIn(provider)
+        }
+        if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
+            return IOSGrokWebProviderResolver.isSignedIn(provider)
+        }
+        return !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func credentialStatusTitle(_ provider: ProviderSetting) -> String {
+        if IOSCodexProviderResolver.isCodexProvider(provider),
+           IOSCodexProviderResolver.isSignedIn(provider) {
+            return "已登录"
+        }
+        if IOSGrokWebProviderResolver.isGrokWebProvider(provider),
+           IOSGrokWebProviderResolver.isSignedIn(provider) {
+            return "已登录"
+        }
+        return hasUsableCredential(provider) ? "已配置" : "未填写"
+    }
+
+    static func requestHeaders(
+        for provider: ProviderSetting,
+        assistant: [CustomHeader] = [],
+        model: [CustomHeader] = []
+    ) -> [CustomHeader] {
+        let providerId = provider.id.description() as String
+        return IOSProviderRequestHeaderStore.headers(for: providerId) + assistant + model
+    }
+
     static func baseURL(of provider: ProviderSetting) -> String {
         if let openAI = provider as? ProviderSetting.OpenAI { return openAI.baseUrl }
         if let claude = provider as? ProviderSetting.Claude { return claude.baseUrl }
