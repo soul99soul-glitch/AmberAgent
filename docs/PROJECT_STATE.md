@@ -41,6 +41,16 @@ Last updated: 2026-08-15（思考档位官网对齐 + 完成后排版重排七�
 - **双代理终审（逻辑链路 + UI 细节）**：链路代理亲自重跑 201 例（唯一失败=既有抖动 perf 探针，4 次复跑 p95 39.5–119.5ms 波动，非本轮方向）；七问全闭环（取消/失败/后台交接/工具循环/键盘/开关的 allowance 残留、Novel/Council/回放路径逐位一致、三签名全仓无遗漏）。UI 代理：几何/边距/visualConfigHash 零误触、按钮状态与 LOD 解冻路径一致。三处修复已落地：①磁吸加 Reduce Motion 门控；②终态贴齐限 snapFinishRemainingBudget=8pt（防 dt≈0 同帧双发时任意大 remaining 单帧贴齐）；③思考框尾段淡入与正文同构缩放（tailFadeDuration）。磁吸无生成态门控定为 by design。修复后 core/replay/projection 复跑全绿。
 - 未验证/后续：真机完成手感逐帧验收、whoosh 速率淡入性能取证、VO/Switch Control 模拟器冒烟。Novel 侧 lagAllowance 透传已完成（见「完成后排版重排七项修复」④），完成跳变已按 Chat 同构连续收口。
 
+## 完成重排消除·checker 终审与两处修补（2026-08-15 晚，ab7b1d321 之后工作区未提交）
+
+- checker 独立复核（亲自重跑 249 例：248 过 + 1 例既有 perf 探针抖动 maxGap 85.89>80，复跑 5 次 p95 全 ≤40，判基线非回归）：parseTable ragged row 行为矩阵推演全通、visualConfigHash 枚举核对、删除纯度全仓零残留、新契约测试走真实组装链、Gemini WIP 零触碰。
+- **MAJOR 已修**：Novel 排空期被动恢复提交（NovelSessionView 近底恢复分支）默认 allowance=1 会把同拍先发的收紧值逐拍打回（滞后 40–96pt 带内 τ_eff 恒为 τ）——改为携带 `activeTailLagAllowance`。
+- **MINOR 已修**：`visualConfigHash` 补 `tableStyle.textFonts`（UIFont 跨实例哈希稳定；当前与 paragraphStyle 同源故无实害，防未来单独改表格字体静默复用旧 renderable）。
+- 记录不修（无差分危害）：无前导管道表的部分行补空后仍被 GFM 解析为 1 单元格（能力边界，两侧一致不可见）；含 `\|` 转义且列数不足的部分行流式期重组丢转义（完成态自愈）。
+- 提交卫生备注：ab7b1d321 混入了 archive 白名单与 Gemini 尾巴（NovelLiveModelAdapter 拒用 Google provider）两个工作流的 hunks。
+- 门禁：两处修补后 NovelSessionReplay/ChatMessageProjection 全绿；ChatSwiftUIStreamReplay 单独复跑绿（全套件负载下 testEveryGenerationTerminalReleases 和 perf 探针偶发时序敏感，隔离重跑均过）。
+- 未验证：真机完成手感（重点：表格末行流式期可见、完成零重排）。
+
 ## iOS Gemini provider + Antigravity OAuth（2026-08-15）
 
 - 产品意图：iOS 上 Gemini 可直接聊天，两种认证：API Key（Generative Language API）与 **Antigravity OAuth**（Antigravity 是 Google 的 Gemini 产品，与 Gemini CLI 同一条 Google OAuth + cloudcode-pa 通道）。

@@ -427,11 +427,15 @@ struct NovelSessionView: View {
             }
             // 近底被动恢复跟随：仅流式尾 / 终态收口。不要在普通 followingBottom
             // 下每帧 streamContentGrew（布局未完全贴底时会死循环，主线程卡死）。
+            // 排空期必须携带当前 allowance：默认 1 会把同一拍先发的收紧值
+            // 逐拍打回，τ_eff 恒为 τ（滞后 40–96pt 带内最明显）。
             if isNativeScrollDriverActive, !userDragging,
                !scrollDriver.isUIKitUserInteracting,
                isLiveTailPhase(listSignal.activeTailPhase) || isSettlingTerminal,
                newValue.isNearBottom, !newValue.isAtBottom {
-                scrollDriver.submit(.streamContentGrew())
+                scrollDriver.submit(.streamContentGrew(
+                    lagAllowance: activeTailLagAllowance
+                ))
             }
         }
         .transaction(value: listSignal.activeTailDigest) { transaction in

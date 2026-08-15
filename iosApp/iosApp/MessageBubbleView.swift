@@ -2229,6 +2229,9 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         hasher.combine(config.collapsesSoftBreaks)
         hasher.combine(config.coalescesAdjacentTextBlocks)
         hasher.combine(config.paragraphStyle.textFonts)
+        // 字体跨实例相等且哈希稳定（UIFont 语义）。漏掉 tableStyle.textFonts
+        // 会在未来 builder 单独改表格字体时静默复用旧 renderable。
+        hasher.combine(config.tableStyle.textFonts)
         hasher.combine(config.blockQuoteStyle.textFonts)
         hasher.combine(config.orderedListStyle.textFonts)
         hasher.combine(config.headingStyle.h1Font)
