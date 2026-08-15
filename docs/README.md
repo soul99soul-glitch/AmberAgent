@@ -2,6 +2,8 @@
 
 这是一张入口地图，不是第二份项目状态。接手任务时先读仓库根 `AGENTS.md` 和 `PROJECT_STATE.md`，再按主题选择下列最少文档。
 
+- [`STREAMING_PRESENTATION_PLAYBOOK.md`](STREAMING_PRESENTATION_PLAYBOOK.md) — 流式生成呈现的需求定义/分层架构/15 个踩坑/跨平台(Android)同源映射，做同类功能先读。
+
 ## 权威顺序
 
 1. 真实代码、测试、Git 状态和运行证据

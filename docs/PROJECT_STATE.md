@@ -1,6 +1,30 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-15（思考档位官网对齐 + 完成后排版重排七项）
+Last updated: 2026-08-15（搜索工具胶囊生命周期宽度恒定修复）
+
+## 搜索工具胶囊执行期间撑宽、完成缩回（2026-08-15，工作区未提交）
+
+- 真机 bug：Chat 调用 search_web 期间胶囊宽度变化，搜索完成后缩回。属「Chat 流式生成五项修复轮」第②项同机制残留——胶囊文案两态换词，理想宽随状态跳变。
+- 根因：`iosApp/iosApp/ChatToolTimelineView.swift` search_web 分支标题 `combinedLine(executed ? "已搜索" : "正在搜索", query)` 状态动词随 executed 换词（正在搜索 8 单位 vs 已搜索 6 单位，CJK=2/ASCII=1），叠加尾部状态图标尺寸差（ProgressView mini ≈16.33 vs 对勾 ≈16.0）。实测胶囊理想宽 toolCallStarted=314.0 → toolResultAppended=301.0（13pt）。
+- 修复（最小改动，无新分档）：①search_web 标题状态动词恒定「搜索 \<query>」——进行中/完成由尾部转圈/对勾表达，与 friendlyToolTitle 同款约定；②`trailingStatus` 固定 18×18 占位（转圈/对勾/叹号同槽居中），状态图标不再参与胶囊宽度。
+- 红测试：`ChatToolTimelineWidthOverflowTests.testSearchCapsuleIdealWidthConstantAcrossLifecyclePhases`（20+ 字中文查询、同一 toolCallId 构造 toolCallStarted/执行中/toolResultAppended 三阶段，无界提案测理想宽 exact equality）——修复前 314.0 vs 301.0 红；修复后绿。
+- 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix4）：三套件 108 例，唯一失败 = 既有 perf 探针负载抖动（testPerfGrowingTableStreamingKeepsDisplayLinkResponsive：全套件 83.69>80 红、隔离复跑 42.85/111.33 红、再复跑 p95 16.67 过/max 95.86 单尖峰红——幅度波动=既有基线，阈值未放宽，探针路径无工具胶囊不达本轮改动）；ToolTimelineWidth 5/5 + Glyph 4/4 绿。
+- 残余（记录未改）：同机制残留于 mcp_call（差 2 单位）、memory_tool（1 单位）、workspace 系列（5 单位）等换词工具，不在本次真机报告范围；scrape_web/generate_image/webMount 动词等长无宽度差。
+- 未验证：真机搜索胶囊观感（宽度恒定已由无界提案契约锁死，逐帧复核留待用户）。
+
+## 完成切换原子性·未渲染原文闪帧修复（2026-08-15，工作区未提交）
+
+- 真机 bug：Chat 流式生成完成瞬间气泡正文整段退回未渲染 markdown 原文（字面 `**`、`-`、结构标记可见），随后解析落地重新渲染、排版跳变（用户录像截帧铁证）。排空减速（terminalTextAdvance 收尾）不解决此问题。
+- 根因：`ChatStableStreamingMarkdownController.resolution` 的 stale-prefix 服务路径要求 `renderedSignature == signature` 且 `signature.speculative`。完成瞬间 speculative 翻转（流式 true→完成 false），解析落后的块（表格尾块按 0.12s liveParseInterval 节流，全文最后一拍的流式解析在完成瞬间必然在飞行中）三条服务路径全落空——实例 stale-prefix、identity 缓存前缀、静态缓存前缀都带 speculative 门槛 → `ChatStableStreamingMarkdownView` 落到 `RenderableDocument(plainText:)` 兜底（原文纯文本），直到终态首次异步解析落地才重新渲染。`renderedMarkdownSnapshot`（L741）只服务于流式中 LOD 冻结态，非本病灶。
+- 修复（纸面隐喻：不换纸）：三处服务路径门槛统一改为只比较 `visualConfigHash`（跨 speculative 稳定）——流式渲染产物在终态权威解析落地前持续上屏，替换发生在终态 renderable 就绪的同一帧。流式期行为逐分支等价（两侧 speculative 同为 true 时 visualHash 相等 ⟺ 全签名相等），无完成前性能回退，缓存命中只增不减。
+- 红测试：`ChatSwiftUIStreamReplayTests.testCompletionSwitchNeverShowsUnrenderedMarkdownRawText`（新探针判据 `rawMarkdownVisible`：段落含字面 `**`/`## `/行首 `- `/表格管道行即未渲染原文）。修复前 **rawFrames=3/61 红**；修复后绿。
+- 契约更新（带理由，不静默放宽）：`ChatMessageProjectionTests` 两条缓存契约从「完成态拒绝 speculative 条目/前缀」改为「完成态复用」（旧契约即闪帧根因）；`NovelSessionReplayTests.testTerminalDrainWhooshesLargeBacklogWithinBoundedRealtime` 的 ≤16 拍/0.5s 是排空减速轮（工作区未提交）漏改的重复断言，按 `IOSParityRedLightTests` 同款契约更新为 ≤64 拍/0.6s 护栏（实际 52 拍）。
+- 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix3）：四套件 **202/202 全绿**（Replay 30、Projection 73、ScrollCore 53、NovelReplay 46）；邻接 CJK/ViewportPolicy/ToolTimelineWidth 15/15 绿。perf 探针按基线记录：全套件 41.0/85.2 红、隔离 41.7/50.0 红、全套件复跑绿——幅度波动 = 既有负载基线，流式热路径逐分支等价未触碰，阈值未放宽。IOSParityRedLightTests 未跑（既有 3 例基线）。
+- 未验证：真机完成手感（闪帧形态已由回放契约锁死，真机逐帧复核留待用户）。
+
+## 完成态弯引号粗体露星号（2026-08-15，工作区未提交）
+
+真机截图 `掀起了**“大宋风雅”热潮**：` 星号原样露出。流式 swift-markdown 路径已能修；完成态走 pulldown-cmark，会把未配对的 `**` 拆成四个单独 `*` Text 节点，原先逐节点正则看不见成对定界符。修复：`AmberMarkdownView.buildInlineAttrString` 先拼接相邻 Text 再 `repairRejectedStrong`。`ChatMarkdownCJKEmphasisTests` 全绿（含弯/直/直角引号）。
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
 
@@ -50,6 +74,12 @@ Last updated: 2026-08-15（思考档位官网对齐 + 完成后排版重排七�
 - 提交卫生备注：ab7b1d321 混入了 archive 白名单与 Gemini 尾巴（NovelLiveModelAdapter 拒用 Google provider）两个工作流的 hunks。
 - 门禁：两处修补后 NovelSessionReplay/ChatMessageProjection 全绿；ChatSwiftUIStreamReplay 单独复跑绿（全套件负载下 testEveryGenerationTerminalReleases 和 perf 探针偶发时序敏感，隔离重跑均过）。
 - 未验证：真机完成手感（重点：表格末行流式期可见、完成零重排）。
+
+## 排空收尾优雅减速（2026-08-15 晚，工作区未提交）
+
+- 用户契约：「最后一个字必须优雅地逐字淡入结束，排空时间设置长一些」。真机反馈：大积压排空末段仍以 whoosh 速度砸到底，字没逐字出来就成批冒出（并伴随未渲染 markdown 闪现——末拍大块发布快于块解析节奏，疑似同根）。
+- 修复：`terminalTextAdvance` 每拍随剩余积压连续收敛 `min(锚速, max(12, 剩余/8))`（gracefulTailDivisor=8，无分档）——中段 whoosh 不变、末段连续减速、最后 ~96 字回到 12 字/拍×48ms 打字节奏；配合按拍缩放的淡入，末拍自动恢复完整 0.5s 淡入。排空循环拍间隔逐拍重算（8ms 连续放宽到 48ms）。24k 口径：~52 拍/≈1s（原恒速 16 拍/0.13s），parity 断言按契约变更更新（拍数 ≤64、锚速间隔护栏 0.6s）。
+- 门禁：parity 三个排空契约 + 回放零跳变 + 核心套件全绿。**未验证：真机收尾手感、以及若减速后仍闪未渲染 markdown，需用户提供当次回复的内容形态（代码块/表格/列表）另立回放取证。**
 
 ## iOS Gemini provider + Antigravity OAuth（2026-08-15）
 
