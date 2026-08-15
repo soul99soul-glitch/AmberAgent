@@ -145,6 +145,11 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             /// 已在流式期显示的直接证据（完成时成批出现 = 高度增长一行）。
             let tableHeight: CGFloat?
             let tableIdentity: ObjectIdentifier?
+            /// 本帧是否出现「未渲染的 markdown 原文」：正文段落里可见字面
+            /// `**`/`## `、或以 `| … |` 表格管道行形式存在的纯文本。流式渲染
+            /// 产物永远不会携带这些字面标记；出现即证明渲染管线切到了
+            /// `RenderableDocument(plainText:)` 兜底（完成切换空窗闪帧）。
+            let rawMarkdownVisible: Bool?
         }
 
         private weak var scrollView: UIScrollView?
@@ -215,8 +220,30 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 paragraphUsesTextKit1: paragraph?.usesTextKit1,
                 paragraphIdentity: paragraph.map(ObjectIdentifier.init),
                 tableHeight: table?.frame.height,
-                tableIdentity: table.map(ObjectIdentifier.init)
+                tableIdentity: table.map(ObjectIdentifier.init),
+                rawMarkdownVisible: rootView.map(Self.hasRawMarkdown(in:))
             ))
+        }
+
+        /// 「未渲染 markdown 原文」判定：正文段落里出现字面结构标记。
+        /// - `**`：粗体定界符原样显示（流式/终态解析渲染后不可能保留）。
+        /// - `## `：标题井号原样显示。
+        /// - `| … | … |`：整行表格管道文本（vendor 表格渲染后不可能出现）。
+        /// - 行首 `- `/`* `：列表标记原样显示。
+        static func hasRawMarkdown(in view: UIView) -> Bool {
+            if let textView = view as? ParagraphUIView,
+               let text = textView.text {
+                if text.contains("**") || text.contains("## ") { return true }
+                if text.contains(" | ") && text.contains("|") { return true }
+                for line in text.split(separator: "\n") {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") { return true }
+                }
+            }
+            for subview in view.subviews {
+                if hasRawMarkdown(in: subview) { return true }
+            }
+            return false
         }
 
         static func streamingParagraph(in view: UIView) -> ParagraphUIView? {
@@ -1808,6 +1835,104 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             maximumTableShift,
             0.5,
             "表格最后一行必须在流式期已显示——completion 后表格高度不得再增长：\(maximumTableShift)"
+        )
+    }
+
+    /// 完成切换原子性契约（真机 bug：完成瞬间整段正文退回未渲染 markdown 原文）：
+    /// 流式到全文落位后立即 `.assistantStreamClosed` + `.generationCompleted`
+    /// （生产顺序：drain 最后一拍 → stream-closed → completed，无静默收敛窗）。
+    /// 完成切换期间**任何一帧**都不得出现字面 `**`/`## `/`- `/`| … |` 表格管道行
+    /// 的纯文本——`ChatStableStreamingMarkdownController.resolution` 在
+    /// speculative 翻转（流式→完成）瞬间若丢失 stale-prefix 缓存路径，`renderable`
+    /// 回落到 `RenderableDocument(plainText:)` 兜底，整段正文以未解析原文上屏，
+    /// 直到终态异步解析落地才重新渲染（真机录屏截帧实证的闪帧形态）。
+    /// 大表格放大完成态解析窗：流式期表格尾块按 0.12s liveParseInterval 节流，
+    /// 全文最后一拍的解析在完成瞬间必然在飞行中 → 修复前稳定复现空窗。
+    func testCompletionSwitchNeverShowsUnrenderedMarkdownRawText() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 8)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请给出对比表格。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        // 开头必须含 ScrollFrameProbe.streamingMarker，探针按它定位段落视图。
+        // 表格放大完成态解析窗（80 行 ≈3.4KB：终态首次解析+整表布局 ≥2 帧），
+        // 最后一行完成时不带结尾换行——「尾行」判定的生产形态。
+        let rows = (0..<80).map { row in
+            "| \(row) | 用于放大完成切换解析窗的流式表格行内容，行号 \(row) 便于取证 | 采纳 |"
+        }
+        let finalText = """
+        连续正文开始。**（重点）** 这里必须保留粗体强调。
+
+        ## 对比方案
+
+        - 列表项一：保持流式连续。
+        - 列表项二：完成不重排。
+
+        | 方案 | 机制 | 结论 |
+        | --- | --- | --- |
+        """ + "\n" + rows.joined(separator: "\n")
+        let target = fixture.model.messages + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: false
+        )]
+        var presented = fixture.model.messages
+        while true {
+            let step = ChatStreamPresentationPacer.step(current: presented, target: target)
+            presented = step.snapshot
+            fixture.model.messages = presented
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        // 基线：流式期最后一拍的渲染必须是「已格式化」——没有任何字面结构标记
+        // （表格尾块按 0.12s 节流，最后一拍全文解析仍在飞行中，基线只要求
+        // 已上屏的流式前缀已格式化，不要求全文解析落地）。
+        XCTAssertFalse(
+            ScrollFrameProbe.hasRawMarkdown(in: fixture.host.view),
+            "流式期任何一帧都不得出现未渲染的 markdown 原文（字面 **、##、-、表格管道行）"
+        )
+
+        // 生产顺序：最后一拍后立即 stream-closed + 完成，无静默收敛窗。
+        // 完成瞬间表格尾块的终态首次解析必然在飞行中——修复前空窗退回原文。
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected the native scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        fixture.model.messages = fixture.model.messages.dropLast() + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: true
+        )]
+        fixture.model.send(.assistantStreamClosed)
+        fixture.model.isGenerationActive = false
+        fixture.model.send(.generationCompleted)
+        pump(seconds: 1.2)
+        probe.stop()
+
+        XCTAssertFalse(probe.samples.isEmpty, "完成窗口必须真实采到帧")
+        let rawFrames = probe.samples.filter { $0.rawMarkdownVisible == true }
+        XCTAssertTrue(
+            rawFrames.isEmpty,
+            "完成切换的任何一帧都不得把已流式渲染的正文退回未渲染的 markdown 原文"
+                + "（字面 **、##、-、表格管道行）：rawFrames=\(rawFrames.count)/\(probe.samples.count)"
+        )
+        // 完成窗口内格式化正文必须持续可见（探针始终能定位到已渲染的 marker 段落）。
+        XCTAssertFalse(
+            probe.samples.compactMap(\.paragraphIdentity).isEmpty,
+            "完成切换期间已流式渲染的正文段落必须持续在屏"
         )
     }
 

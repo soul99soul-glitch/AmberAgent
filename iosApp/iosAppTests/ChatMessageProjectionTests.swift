@@ -533,7 +533,14 @@ final class ChatMessageProjectionTests: XCTestCase {
         )
     }
 
-    func testCompletedMarkdownRenderableCacheDoesNotReuseSpeculativeStreamingEntry() {
+    /// 完成切换原子性契约：流式（speculative）条目在完成（非 speculative）
+    /// 配置下必须可复用——visualConfigHash 相同即视觉等价，完成态继续显示
+    /// 流式渲染产物，直到终态权威解析落地再原子替换（「不换纸」）。
+    /// 旧契约（完成态拒绝 speculative 条目）正是真机完成瞬间退回未渲染
+    /// markdown 原文闪帧的根因：解析落后的块在 speculative 翻转时无任何
+    /// 可服务的格式化 renderable，`ChatStableStreamingMarkdownView` 落到
+    /// `RenderableDocument(plainText:)` 兜底。
+    func testCompletedMarkdownRenderableCacheReusesSpeculativeStreamingEntry() {
         ChatStableStreamingMarkdownCacheTestSupport.reset()
         let markdown = """
         | 层次 | 说明 |
@@ -543,12 +550,16 @@ final class ChatMessageProjectionTests: XCTestCase {
 
         ChatStableStreamingMarkdownCacheTestSupport.store(text: markdown, animate: true)
 
-        XCTAssertFalse(
-            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: markdown, animate: false)
+        XCTAssertTrue(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: markdown, animate: false),
+            "完成切换瞬间必须能复用流式期已格式化的同一文本渲染产物（原子替换前不退回原文）"
         )
     }
 
-    func testCompletedMarkdownRenderableCacheDoesNotUsePrefixFallback() {
+    /// 完成切换原子性契约（前缀形态）：完成配置下必须继续复用已格式化的
+    /// 前缀渲染，直到终态权威解析落地——否则完成瞬间解析落后的块退回
+    /// 未渲染原文闪帧。流式期（animate=true）前缀复用保持原语义。
+    func testCompletedMarkdownRenderableCacheUsesPrefixFallbackAcrossSpeculativeFlip() {
         ChatStableStreamingMarkdownCacheTestSupport.reset()
         let prefix = "第一段已经解析"
         let completedText = "\(prefix)\n第二段完成态新增内容"
@@ -558,8 +569,10 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertTrue(
             ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: true)
         )
-        XCTAssertFalse(
-            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: false)
+        XCTAssertTrue(
+            ChatStableStreamingMarkdownCacheTestSupport.hasCachedRenderable(text: completedText, animate: false),
+            "完成切换瞬间必须持续显示已格式化的前缀渲染（stale-prefix 跨 speculative 翻转），"
+                + "不能退回未渲染的 markdown 原文"
         )
     }
 

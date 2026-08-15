@@ -1938,12 +1938,20 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         // 之前用严格相等导致高速 delta 下 renderedText 永远落后于 text,
         // 恒返回 nil → 退回纯文本 fallback(用户看不到表格/代码块等格式)。
         //
+        // 完成切换的原子性:比较只用 visualConfigHash(跨 speculative 稳定),
+        // 不要求 speculative 相同——流式(speculative)解析的格式化前缀在完成
+        // (非 speculative)解析落地前继续上屏,替换延迟到终态 renderable 就绪
+        // 的同一帧(「不换纸」)。若此处收紧,完成瞬间 speculative 翻转会把
+        // 解析落后的块打进 `RenderableDocument(plainText:)` 兜底——整段正文
+        // 退回未渲染的 markdown 原文,直到终态首次异步解析落地才重新渲染
+        // (真机完成瞬间闪原文的根因)。
+        //
         // 顺序说明:本实例的 stale-prefix 命中放在静态缓存之前——流式期几乎
         // 每次都命中这条,静态缓存查询(全文 Hasher + 最多 12 次 hasPrefix,
         // 32KB 实测 ~0.2ms)只留给实例重建/LOD 翻转等冷路径。追加式流式下
         // 静态缓存不可能持有比本实例更新的精确条目(旧条目都是当前文本的前缀)。
-        if renderedSignature == signature,
-           signature.speculative,
+        if let renderedSignature,
+           renderedSignature.visualConfigHash == signature.visualConfigHash,
            let renderedText,
            !renderedText.isEmpty,
            text.utf16.count >= renderedText.utf16.count,
@@ -2129,9 +2137,13 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
             }
             return exact
         }
-        guard signature.speculative else { return nil }
+        // 前缀命中的 speculative 门槛只为「完成切换原子性」而开:流式期存入的
+        // speculative 条目在完成(非 speculative)解析落地前同样可复用——否则
+        // 完成瞬间冷路径(行重建/LOD 解冻)会退回纯文本兜底闪原文。visualConfigHash
+        // 相同即视觉等价,渲染差异只来自 speculativeRewrite 对未闭合标记的降级,
+        // 由随后落地的权威解析原子替换。
         return renderableCacheOrder.reversed().lazy.compactMap { key -> SwiftStreamingMarkdown.RenderableDocument? in
-            guard key.signature == signature,
+            guard key.signature.visualConfigHash == signature.visualConfigHash,
                   text.hasPrefix(key.text),
                   !key.text.isEmpty else { return nil }
             return renderableCache[key]
@@ -2167,8 +2179,9 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
         if entry.text.utf16.count == text.utf16.count, entry.text == text {
             return entry.renderable
         }
-        guard signature.speculative,
-              !entry.text.isEmpty,
+        // 与 cachedRenderable 同理由:前缀命中不设 speculative 门槛,保证完成
+        // 切换/解冻的冷路径持续复用已格式化的前缀渲染,直到权威解析落地。
+        guard !entry.text.isEmpty,
               text.utf16.count >= entry.text.utf16.count,
               text.hasPrefix(entry.text) else {
             return nil
