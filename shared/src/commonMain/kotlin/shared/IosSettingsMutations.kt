@@ -7,10 +7,13 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.GOOGLE_API_KEY_DEFAULT_BASE_URL
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.defaultApiBaseUrl
 import app.amber.ai.provider.fixedBaseUrl
 import app.amber.ai.provider.coerceToReasoningOptions
+import app.amber.ai.provider.defaultReasoningLevel
 import app.amber.ai.provider.reasoningOptions
 import app.amber.core.model.reasoningLevelForModel
 import app.amber.core.model.withChatModelReasoningMemory
@@ -294,6 +297,54 @@ object IosSettingsMutations {
     }
 
     /**
+     * Sets the persisted auth mode for a Google [providerId].
+     *
+     * OAuth modes (Antigravity / Code Assist) pin the cloudcode-pa base URL
+     * (token-managed, apiKey unused at request time). Switching back to
+     * API_KEY restores the brand default generative-language base URL only
+     * when the current URL is still the pinned OAuth URL. Note: the URL the
+     * user had *before* entering OAuth mode is not retained — a custom
+     * pre-OAuth proxy is lost on the way back (a proxy edited while in OAuth
+     * mode is kept, but the settings UI renders that row read-only). Mirrors
+     * [setOpenAIAuthMode]'s non-destructive endpoint policy.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun setGoogleAuthMode(
+        settings: Settings,
+        providerId: String,
+        authMode: GoogleAuthMode,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.Google) {
+                    provider
+                } else {
+                    provider.copy(
+                        authMode = authMode,
+                        baseUrl = resolvedBaseUrlForGoogleAuthMode(provider, authMode),
+                    )
+                }
+            }
+        )
+    }
+
+    private fun resolvedBaseUrlForGoogleAuthMode(
+        provider: ProviderSetting.Google,
+        mode: GoogleAuthMode,
+    ): String {
+        val pinned = mode.fixedBaseUrl()
+        if (pinned != null) {
+            return pinned
+        }
+        val previousPinned = provider.authMode.fixedBaseUrl()
+        if (previousPinned != null && provider.baseUrl == previousPinned) {
+            return GOOGLE_API_KEY_DEFAULT_BASE_URL
+        }
+        return provider.baseUrl
+    }
+
+    /**
      * Construct an Anthropic Claude [ProviderSetting.Claude] with a single model.
      * iOS counterpart of [buildOpenAIProvider] for the Anthropic protocol.
      */
@@ -333,6 +384,52 @@ object IosSettingsMutations {
             baseUrl = baseUrl,
             models = emptyList(),
             builtIn = false,
+        )
+    }
+
+    /**
+     * Construct a Gemini [ProviderSetting.Google] with a single chat model.
+     * iOS counterpart of [buildOpenAIProvider] / [buildClaudeProvider] for the
+     * Gemini protocol (Generative Language API, API_KEY auth mode).
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun buildGoogleProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+        modelName: String,
+        modelId: String,
+    ): ProviderSetting.Google {
+        val model = Model(
+            modelId = modelId,
+            displayName = modelName,
+            id = kotlin.uuid.Uuid.random(),
+            type = ModelType.CHAT,
+        )
+        return ProviderSetting.Google(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            builtIn = false,
+            authMode = GoogleAuthMode.API_KEY,
+        )
+    }
+
+    fun buildBlankGoogleProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.Google {
+        return ProviderSetting.Google(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+            authMode = GoogleAuthMode.API_KEY,
         )
     }
 
@@ -599,7 +696,10 @@ object IosSettingsMutations {
         val provider = model.findProvider(settings.providers)
         val defaultLevel = settings.defaultReasoningLevelForModel(model)
         val level = settings.getCurrentAssistant().reasoningLevelForModel(model.id, defaultLevel)
-        return level.coerceToReasoningOptions(model.reasoningOptions(provider))
+        return level.coerceToReasoningOptions(
+            model.reasoningOptions(provider),
+            model.defaultReasoningLevel(provider),
+        )
     }
 
     fun updateCurrentAssistantReasoningLevel(
@@ -609,7 +709,10 @@ object IosSettingsMutations {
         val model = settings.getCurrentChatModel()
         val provider = model?.findProvider(settings.providers)
         val options = model.reasoningOptions(provider)
-        val coerced = reasoningLevel.coerceToReasoningOptions(options)
+        val coerced = reasoningLevel.coerceToReasoningOptions(
+            options,
+            model?.defaultReasoningLevel(provider),
+        )
         val currentAssistant = settings.getCurrentAssistant()
         val updatedAssistant = currentAssistant.withReasoningLevelForModel(model?.id, coerced)
         return settings.copy(

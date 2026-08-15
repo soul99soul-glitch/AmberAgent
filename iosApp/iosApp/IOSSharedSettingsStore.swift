@@ -608,6 +608,20 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    /// Sets the Google auth mode. Antigravity OAuth pins the cloudcode-pa base
+    /// URL; switching back to API_KEY restores the generative-language default
+    /// only when the URL is still the pinned OAuth URL.
+    @discardableResult
+    func setGoogleAuthMode(providerId: String, authMode: GoogleAuthMode) -> ProviderSetting? {
+        let merged = IosSettingsMutations.shared.setGoogleAuthMode(
+            settings: snapshot,
+            providerId: providerId,
+            authMode: authMode
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Replace the chat-typed models on provider [providerId]. Each entry is
     /// (modelId, displayName). Non-chat models are preserved. Persists to snapshot.
     @discardableResult
@@ -794,6 +808,7 @@ final class IOSSharedSettingsStore {
         }
 
         IOSCredentialSideTable.delete(key: IOSCredentialSideTable.providerApiKey(providerId: providerId))
+        IOSAntigravityOAuthClients.logout(providerId: providerId)
         genericCredentialRefs.forEach { IOSCredentialSideTable.delete(key: $0) }
         savedCustomModels.removeAll { $0["providerId"] == providerId }
         restoreSnapshot(merged)
@@ -893,6 +908,11 @@ final class IOSSharedSettingsStore {
         } else if let claude = provider as? ProviderSetting.Claude {
             settingsStore.baseUrl = claude.baseUrl
             settingsStore.apiKey = claude.apiKey
+        } else if let google = provider as? ProviderSetting.Google {
+            settingsStore.baseUrl = google.baseUrl
+            // Antigravity OAuth carries no apiKey — legacy readers must use the
+            // ChatProviderConfiguration credential gate, not this projection.
+            settingsStore.apiKey = google.apiKey
         }
     }
 

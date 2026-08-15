@@ -225,7 +225,7 @@ final class IOSProviderConfigToolService {
         }
         let providerId = provider.id.description() as String
         guard hasRefreshCredential(provider) else {
-            return fail("provider_refresh_models", "该 provider 没有可用凭据。请先填写 API Key，或完成 Codex / Grok 登录。")
+            return fail("provider_refresh_models", "该 provider 没有可用凭据。请先填写 API Key，或完成 Codex / Grok / Antigravity 登录。")
         }
         let mode = ((args["mode"] as? String) ?? "merge")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -256,6 +256,8 @@ final class IOSProviderConfigToolService {
                 }
             } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
                 models = provider.models.filter { $0.type == ModelType.chat }
+            } else if let google = provider as? ProviderSetting.Google {
+                models = try await IOSGeminiClient(provider: google).listModelsOrThrow()
             } else if let openAI = provider as? ProviderSetting.OpenAI {
                 models = try await OpenAIKmpProvider().listModelsWithHeadersOrThrow(
                     providerSetting: openAI,

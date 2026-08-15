@@ -34,6 +34,7 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.geminiThinkingConfig
 import app.amber.ai.provider.providers.google.CloudCodeAssistRequest
 import app.amber.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import app.amber.ai.registry.ModelRegistry
@@ -464,43 +465,16 @@ class GoogleProvider(context: Context? = null) : Provider<ProviderSetting.Google
                 })
             }
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
+                val thinking = geminiThinkingConfig(params.model.modelId, params.reasoningLevel)
                 put("thinkingConfig", buildJsonObject {
-                    put("includeThoughts", true)
-
-                    val isGeminiPro =
-                        params.model.modelId.contains(Regex("2\\.5.*pro", RegexOption.IGNORE_CASE))
-
-                    when (params.reasoningLevel) {
-                        ReasoningLevel.AUTO -> {} // 自动模式，不设置参数
-
-                        ReasoningLevel.OFF -> {
-                            if (ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
-                                // cloudcode-pa / Gemini Code Assist OAuth currently rejects
-                                // `thinkingLevel=MINIMAL` for some 3.x preview models (notably
-                                // gemini-3.1-pro-preview). Treat OFF as "do not force a thinking
-                                // override" on that transport so lightweight tool/council calls
-                                // can still run instead of failing before the model sees the task.
-                                if (!isCodeAssistOAuth) {
-                                    put("thinkingLevel", "minimal")
-                                }
-                            } else if (!isGeminiPro) {
-                                put("thinkingBudget", 0)
-                                put("includeThoughts", false)
-                            }
-                        }
-
-                        else -> {
-                            if (ModelRegistry.GEMINI_3_SERIES.match(modelId = params.model.modelId)) {
-                                when (params.reasoningLevel) {
-                                    ReasoningLevel.LOW -> put("thinkingLevel", "low")
-                                    ReasoningLevel.MEDIUM -> put("thinkingLevel", "medium")
-                                    else -> put("thinkingLevel", "high") // HIGH, XHIGH, MAX
-                                }
-                            } else {
-                                put("thinkingBudget", params.reasoningLevel.budgetTokens)
-                            }
-                        }
+                    put("includeThoughts", thinking.includeThoughts)
+                    // cloudcode-pa / Gemini Code Assist OAuth currently rejects
+                    // `thinkingLevel=MINIMAL` for some 3.x preview models.
+                    val level = thinking.thinkingLevel
+                    if (level != null && !(isCodeAssistOAuth && level == "minimal")) {
+                        put("thinkingLevel", level)
                     }
+                    thinking.thinkingBudget?.let { put("thinkingBudget", it) }
                 })
             }
         })

@@ -146,8 +146,9 @@ final class ProviderRegistryStore {
     }
 
     /// Whether this provider can be faithfully used by the current iOS chat chain.
-    /// OpenAI-compatible/Responses API and Claude have KMP executors; Google needs
-    /// its own executor, and MiMo's bundled base is a placeholder.
+    /// OpenAI-compatible/Responses API and Claude have KMP executors; Gemini has a
+    /// native Swift executor (API Key / Antigravity OAuth); MiMo's bundled base is
+    /// a placeholder.
     func canActivate(_ provider: ProviderSetting) -> Bool {
         if let openAI = provider as? ProviderSetting.OpenAI {
             if openAI.brand === OpenAIBrand.mimo { return false }
@@ -156,14 +157,26 @@ final class ProviderRegistryStore {
         if provider is ProviderSetting.Claude {
             return true
         }
+        if let google = provider as? ProviderSetting.Google {
+            return IOSGeminiProviderResolver.supportsChat(google)
+        }
         return false
     }
 
     /// A provider can become the active chat provider only when it is both
-    /// representable by today's chat chain and has a stored key.
+    /// representable by today's chat chain and has a stored key (or a signed-in
+    /// Antigravity session for Gemini OAuth).
     /// This prevents a key-less preset tap from silently clearing the working chat key.
     func canSelect(_ provider: ProviderSetting) -> Bool {
-        canActivate(provider) && hasStoredKey(provider)
+        canActivate(provider) && hasUsableCredential(provider)
+    }
+
+    private func hasUsableCredential(_ provider: ProviderSetting) -> Bool {
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+            return IOSGeminiProviderResolver.isSignedIn(provider)
+        }
+        return hasStoredKey(provider)
     }
 
     /// Select a provider as the active chat provider and project it into SettingsStore.

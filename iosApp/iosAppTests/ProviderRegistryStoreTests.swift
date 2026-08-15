@@ -320,9 +320,30 @@ final class ProviderRegistryStoreTests: XCTestCase {
         XCTAssertEqual(viewModel.configurationError, ChatConfigurationIssue.providerDisabled.message)
     }
 
-    func testUnsupportedSharedProviderIsReportedBeforeSending() {
+    func testGeminiApiKeyProviderIsSupportedForSending() {
+        // Contract update (Gemini iOS executor landed 2026-08-15): a Gemini
+        // provider with an API key + chat model is no longer "unsupported".
         let settings = makeSettings(apiKey: "sk-legacy-test", modelId: "legacy-model")
         let sharedSettings = makeSharedSettingsWithGoogleChatProvider(apiKey: "AIza-test")
+        let viewModel = ChatViewModel(settingsStore: settings, sharedSettings: sharedSettings)
+        viewModel.inputText = "Hello"
+
+        XCTAssertNil(viewModel.configurationIssue)
+
+        viewModel.sendMessage()
+
+        XCTAssertFalse(viewModel.messages.isEmpty)
+    }
+
+    func testUnsupportedSharedProviderIsReportedBeforeSending() {
+        // The Android-only Gemini Code Assist OAuth mode has no iOS chat
+        // executor yet, so it must still be reported before sending.
+        let settings = makeSettings(apiKey: "sk-legacy-test", modelId: "legacy-model")
+        let sharedSettings = makeSharedSettingsWithGoogleChatProvider(apiKey: "")
+        _ = sharedSettings.setGoogleAuthMode(
+            providerId: sharedSettings.snapshot.providers.first { $0 is ProviderSetting.Google }!.id.description(),
+            authMode: GoogleAuthMode.geminiCodeAssistOauth
+        )
         let viewModel = ChatViewModel(settingsStore: settings, sharedSettings: sharedSettings)
         viewModel.inputText = "Hello"
 

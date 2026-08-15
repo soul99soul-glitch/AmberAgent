@@ -14,6 +14,7 @@ import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.shouldDisableClaudeThinking
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
 import app.amber.ai.ui.ImageGenerationResult
@@ -369,7 +370,15 @@ class ClaudeKmpProvider : Provider<ProviderSetting.Claude> {
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 when (params.reasoningLevel) {
                     ReasoningLevel.OFF -> {
-                        put("thinking", buildJsonObject { put("type", "disabled") })
+                        if (shouldDisableClaudeThinking(params.model.modelId, params.reasoningLevel)) {
+                            put("thinking", buildJsonObject { put("type", "disabled") })
+                        } else {
+                            put("thinking", buildJsonObject {
+                                put("type", "adaptive")
+                                put("display", "summarized")
+                            })
+                            put("output_config", buildJsonObject { put("effort", "low") })
+                        }
                     }
 
                     ReasoningLevel.AUTO -> {

@@ -15,6 +15,9 @@ import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.Provider
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
+import app.amber.ai.provider.openAIResponsesReasoningEffort
+import app.amber.ai.provider.planOpenAICompatibleThinking
+import app.amber.ai.provider.putOpenAICompatibleThinking
 import app.amber.ai.provider.resolveOpenAIRequestHeaders
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
@@ -279,69 +282,19 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             host == "api.siliconflow.cn" &&
             params.model.modelId in siliconFlowThinkingModels
         if (params.model.abilities.contains(ModelAbility.REASONING) || forceDisableThinking) {
-            val level = params.reasoningLevel
-            when {
-                isMiMo -> {
-                    put("thinking", buildJsonObject {
-                        put("type", if (level.isEnabled) "enabled" else "disabled")
-                    })
+            if (host == "api.siliconflow.cn") {
+                if (params.model.modelId in siliconFlowThinkingModels || forceDisableThinking) {
+                    put("enable_thinking", params.reasoningLevel.isEnabled)
                 }
-
-                host == "openrouter.ai" -> {
-                    put("reasoning", buildJsonObject {
-                        when (level) {
-                            ReasoningLevel.OFF -> put("effort", "none")
-                            ReasoningLevel.AUTO -> put("enabled", true)
-                            else -> put("effort", level.effort)
-                        }
-                    })
-                }
-
-                host == "dashscope.aliyuncs.com" -> {
-                    put("enable_thinking", level.isEnabled)
-                    if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
-                }
-
-                host == "ark.cn-beijing.volces.com" -> {
-                    put("thinking", buildJsonObject {
-                        put("type", if (level.isEnabled) "enabled" else "disabled")
-                    })
-                }
-
-                host == "api.mistral.ai" -> {
-                    // Mistral does not accept an OpenAI-style reasoning field.
-                }
-
-                host == "chat.intern-ai.org.cn" -> {
-                    put("thinking_mode", level.isEnabled)
-                }
-
-                host == "api.siliconflow.cn" -> {
-                    if (params.model.modelId in siliconFlowThinkingModels) {
-                        put("enable_thinking", level.isEnabled)
-                    }
-                }
-
-                host == "open.bigmodel.cn" || host == "api.moonshot.cn" -> {
-                    put("thinking", buildJsonObject {
-                        put("type", if (level.isEnabled) "enabled" else "disabled")
-                    })
-                }
-
-                host == "api.deepseek.com" -> {
-                    put("thinking", buildJsonObject {
-                        put("type", if (level.isEnabled) "enabled" else "disabled")
-                    })
-                    if (level.isEnabled && level != ReasoningLevel.AUTO) {
-                        put("reasoning_effort", level.effort)
-                    }
-                }
-
-                else -> {
-                    if (level != ReasoningLevel.AUTO) {
-                        put("reasoning_effort", openAIChatCompletionsReasoningEffort(level))
-                    }
-                }
+            } else {
+                putOpenAICompatibleThinking(
+                    planOpenAICompatibleThinking(
+                        host = host,
+                        brand = providerSetting.brand,
+                        modelId = params.model.modelId,
+                        level = params.reasoningLevel,
+                    ),
+                )
             }
         }
 
@@ -814,19 +767,18 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             put("input", buildResponsesMessages(messages))
 
             // reasoning
-            if (params.model.abilities.contains(ModelAbility.REASONING) &&
-                params.reasoningLevel != ReasoningLevel.OFF
-            ) {
-                put("reasoning", buildJsonObject {
-                    if (capabilities.supportsReasoningSummary) {
-                        put("summary", "auto")
+            if (params.model.abilities.contains(ModelAbility.REASONING)) {
+                val effort = openAIResponsesReasoningEffort(params.reasoningLevel)
+                if (effort != null || params.reasoningLevel == ReasoningLevel.AUTO) {
+                    put("reasoning", buildJsonObject {
+                        if (capabilities.supportsReasoningSummary && params.reasoningLevel.isEnabled) {
+                            put("summary", "auto")
+                        }
+                        effort?.let { put("effort", it) }
+                    })
+                    if (capabilities.supportEncryptedContent && params.reasoningLevel.isEnabled) {
+                        put("include", buildJsonArray { add("reasoning.encrypted_content") })
                     }
-                    openAIResponsesReasoningEffort(params.reasoningLevel)?.let { effort ->
-                        put("effort", effort)
-                    }
-                })
-                if (capabilities.supportEncryptedContent) {
-                    put("include", buildJsonArray { add("reasoning.encrypted_content") })
                 }
             }
 
@@ -1369,22 +1321,6 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
             providerSetting.authMode == OpenAIAuthMode.MIMO_CODING_PLAN ||
             host.endsWith("xiaomimimo.com") ||
             lowerModelId.contains("mimo")
-    }
-
-    private fun openAIChatCompletionsReasoningEffort(level: ReasoningLevel): String = when (level) {
-        ReasoningLevel.OFF, ReasoningLevel.LOW -> "low"
-        ReasoningLevel.MEDIUM -> "medium"
-        ReasoningLevel.AUTO,
-        ReasoningLevel.HIGH,
-        ReasoningLevel.XHIGH,
-        ReasoningLevel.MAX -> "high"
-    }
-
-    private fun openAIResponsesReasoningEffort(level: ReasoningLevel): String? = when (level) {
-        ReasoningLevel.AUTO -> null
-        ReasoningLevel.OFF, ReasoningLevel.LOW -> "low"
-        ReasoningLevel.MEDIUM -> "medium"
-        ReasoningLevel.HIGH, ReasoningLevel.XHIGH, ReasoningLevel.MAX -> "high"
     }
 
     private data class ResponseProviderCapabilities(

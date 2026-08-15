@@ -175,7 +175,7 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
         throw NSError(
             domain: "AmberAgent.AgentToolEngine",
             code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "当前服务商类型暂不支持子代理"]
+            userInfo: [NSLocalizedDescriptionKey: Self.unsupportedProviderMessage(providerSetting)]
         )
     }
 
@@ -215,8 +215,15 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
                 onChunk: onChunk, onComplete: onComplete, onError: onError
             )
         }
-        onError(KotlinThrowable(message: "当前服务商类型暂不支持子代理"))
+        onError(KotlinThrowable(message: Self.unsupportedProviderMessage(providerSetting)))
         return nil
+    }
+
+    private static func unsupportedProviderMessage(_ provider: ProviderSetting) -> String {
+        if provider is ProviderSetting.Google {
+            return "Gemini 还不能用于子代理和 Council，请换用 OpenAI 或 Claude。"
+        }
+        return "当前服务商类型暂不支持子代理"
     }
 
     private static func generateGrokText(

@@ -810,6 +810,7 @@ final class ChatGenerationCoordinator {
     private lazy var provider = OpenAIKmpProvider()
     private lazy var claudeProvider = ClaudeKmpProvider()
     private var grokWebStreamTask: Task<Void, Never>?
+    private var geminiStreamTask: Task<Void, Never>?
     private let streamJobBox = StreamJobBox()
 #if DEBUG
     /// 测试缝：注入与测试同构的 runtime（同一 recipe store / workspace /
@@ -1468,6 +1469,8 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
+        geminiStreamTask?.cancel()
+        geminiStreamTask = nil
         streamEventSink?.finish()
         drainPendingStreamChunksIntoAccumulator()
         let pendingStreamSnapshotAtCancellation = latestPendingStreamSnapshot()
@@ -1723,6 +1726,11 @@ final class ChatGenerationCoordinator {
         guard !IOSGrokWebProviderResolver.isGrokWebProvider(handoff.providerSetting) else {
             return false
         }
+        // Gemini 的 iOS 传输是原生 Swift 流（无服务端 durable cursor），与 Grok
+        // Web 同一档：不进后台交接，仅前台 best-effort。
+        guard !(handoff.providerSetting is ProviderSetting.Google) else {
+            return false
+        }
         let startBackground = { [self] in
 #if DEBUG
             if let override = backgroundStartOverrideForTesting {
@@ -1748,6 +1756,8 @@ final class ChatGenerationCoordinator {
         streamJob = nil
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
+        geminiStreamTask?.cancel()
+        geminiStreamTask = nil
         drainPendingStreamChunksIntoAccumulator()
         let citationFlushedSnapshot = activeStreamSession.map {
             flushingCitationTracker(of: $0, messages: $0.accumulator.snapshot())
@@ -4623,6 +4633,27 @@ final class ChatGenerationCoordinator {
                 onError: onError
             )
         }
+        if let google = providerSetting as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.supportsChat(google) {
+            geminiStreamTask?.cancel()
+            geminiStreamTask = Task { @MainActor in
+                do {
+                    try await IOSGeminiClient(provider: google).streamText(
+                        messages: messages,
+                        params: params,
+                        onChunk: onChunk
+                    )
+                    guard !Task.isCancelled else { return }
+                    onComplete()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    onError(KotlinThrowable(message: (error as NSError).localizedDescription))
+                }
+            }
+            return nil
+        }
         onError(KotlinThrowable(message: "当前服务商类型暂不支持聊天"))
         return nil
     }
@@ -4841,6 +4872,8 @@ final class ChatGenerationCoordinator {
         ChatStreamRecorder.shared.finish(runId: runId)
         grokWebStreamTask?.cancel()
         grokWebStreamTask = nil
+        geminiStreamTask?.cancel()
+        geminiStreamTask = nil
         currentRunId = nil
         currentRunSnapshot = nil
         currentToolLoopGuard = IOSToolLoopGuard()

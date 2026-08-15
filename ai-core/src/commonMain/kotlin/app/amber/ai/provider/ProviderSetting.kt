@@ -31,6 +31,13 @@ data class BalanceOption(
  *                            Token lives in GoogleGeminiAuthStore, baseUrl is pinned
  *                            via [fixedBaseUrl]; apiKey / vertexAI / service-account
  *                            fields are hidden by the editor and scrubbed on mode entry.
+ *                            Android implements this route; iOS does not.
+ *  - ANTIGRAVITY_OAUTH : "Sign in with Google" via Antigravity (Google's agentic
+ *                            IDE, antigravity.google). Same cloudcode-pa backend and
+ *                            OAuth token endpoint as the Antigravity/Gemini CLI flow
+ *                            (PKCE, loopback redirect), but with Antigravity origin
+ *                            headers. Implemented on iOS (`IOSAntigravityOAuthClient`
+ *                            / `IOSGeminiProvider`); Android does not.
  */
 @Serializable
 enum class GoogleAuthMode {
@@ -39,7 +46,18 @@ enum class GoogleAuthMode {
 
     @SerialName("gemini_code_assist_oauth")
     GEMINI_CODE_ASSIST_OAUTH,
+
+    @SerialName("antigravity_oauth")
+    ANTIGRAVITY_OAUTH,
 }
+
+/**
+ * Brand default base URL for API-key Google providers (Generative Language API).
+ * Single source for [ProviderSetting.Google.baseUrl]'s default and the iOS
+ * settings mutation that restores it when leaving an OAuth-pinned mode, so the
+ * two literals cannot drift apart.
+ */
+const val GOOGLE_API_KEY_DEFAULT_BASE_URL: String = "https://generativelanguage.googleapis.com/v1beta"
 
 /**
  * Fixed base URL for OAuth-managed Google auth modes. Returns null for API_KEY (where
@@ -52,7 +70,9 @@ fun GoogleAuthMode.fixedBaseUrl(): String? = when (this) {
     // gemini-cli reaches its free-tier endpoint at this base; the actual paths are
     // v1internal:loadCodeAssist / v1internal:onboardUser / v1internal:streamGenerateContent
     // — the provider layer appends those when it knows it's running in OAuth mode.
-    GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> "https://cloudcode-pa.googleapis.com"
+    // Antigravity OAuth hits the same backend, only with antigravity origin headers.
+    GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH,
+    GoogleAuthMode.ANTIGRAVITY_OAUTH -> "https://cloudcode-pa.googleapis.com"
 }
 
 @Serializable
@@ -308,7 +328,7 @@ sealed class ProviderSetting {
         @Transient override val descriptionText: String? = null,
         @Transient override val shortDescriptionText: String? = null,
         var apiKey: String = "",
-        var baseUrl: String = "https://generativelanguage.googleapis.com/v1beta",
+        var baseUrl: String = GOOGLE_API_KEY_DEFAULT_BASE_URL,
         var vertexAI: Boolean = false,
         var useServiceAccount: Boolean = false,
         var privateKey: String = "", // only for vertex AI service account
@@ -447,6 +467,11 @@ sealed class ProviderSetting {
  * 之前住在 UI 层 ModelList.kt:1054 — Codex review 指出 data 层 fallback 漏掉
  * 这条 check 会把 seed 的 gpt-image-2 暴露给没配 key 的用户, 401 fail. 提到 ai
  * 模块同包, 两层共用.
+ *
+ * 注意：Google 的 GEMINI_CODE_ASSIST_OAUTH / ANTIGRAVITY_OAUTH 模式只表示
+ * 「已选择该模式」——共享层拿不到平台侧 token，无法校验 token 是否真的存在，
+ * 所以一律乐观返回 true；实际可用性由平台层把关（iOS IOSGeminiProviderResolver /
+ * Android GoogleGeminiAuthStore），勿只凭本函数放行请求。
  */
 fun ProviderSetting.hasUsableAuth(): Boolean {
     if (!enabled) return false
@@ -457,7 +482,8 @@ fun ProviderSetting.hasUsableAuth(): Boolean {
             else -> apiKey.isNotBlank()
         }
         is ProviderSetting.Google -> when (authMode) {
-            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH -> true
+            GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH,
+            GoogleAuthMode.ANTIGRAVITY_OAUTH -> true
             GoogleAuthMode.API_KEY -> when {
                 apiKey.isNotBlank() -> true
                 // Vertex AI + service account 用 privateKey blob 而非 apiKey

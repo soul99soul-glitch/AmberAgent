@@ -10,14 +10,17 @@ enum ProviderRouteKind: String, Hashable {
 
     /// A preset provider whose protocol can actually run in the iOS chat chain
     /// today, so its API Key is worth editing and it can be set as current.
-    /// OpenAI-compatible/Responses API (non-MiMo-placeholder) and Claude qualify.
-    /// Gemini / MiMo-placeholder do not.
+    /// OpenAI-compatible/Responses API (non-MiMo-placeholder), Claude, and
+    /// Gemini (API Key or Antigravity OAuth) qualify. MiMo-placeholder does not.
     static func isEditablePreset(_ preset: ProviderSetting) -> Bool {
         if let openAI = preset as? ProviderSetting.OpenAI {
             if openAI.brand === OpenAIBrand.mimo { return false }
             return true
         }
         if preset is ProviderSetting.Claude { return true }
+        if let google = preset as? ProviderSetting.Google {
+            return IOSGeminiProviderResolver.supportsChat(google)
+        }
         return false
     }
 }
@@ -452,7 +455,7 @@ struct ProviderAddView: View {
                 ProviderDraftTextFieldRow(
                     title: "模型 ID",
                     text: $modelId,
-                    placeholder: protocolOption == .anthropic ? "claude-sonnet-4-5" : "deepseek-chat",
+                    placeholder: modelIdPlaceholder,
                     monospace: true
                 )
                 ProviderDivider()
@@ -472,11 +475,27 @@ struct ProviderAddView: View {
                 ProviderDraftTextFieldRow(
                     title: "API Key",
                     text: $apiKey,
-                    placeholder: protocolOption == .anthropic ? "sk-ant-..." : "sk-...",
+                    placeholder: apiKeyPlaceholder,
                     isSecure: true,
                     monospace: true
                 )
             }
+        }
+    }
+
+    private var modelIdPlaceholder: String {
+        switch protocolOption {
+        case .anthropic: "claude-sonnet-4-5"
+        case .google: "gemini-3.7-flash"
+        default: "deepseek-chat"
+        }
+    }
+
+    private var apiKeyPlaceholder: String {
+        switch protocolOption {
+        case .anthropic: "sk-ant-..."
+        case .google: "AIza..."
+        default: "sk-..."
         }
     }
 
@@ -533,6 +552,22 @@ struct ProviderAddView: View {
                 )
             } else {
                 provider = IosSettingsMutations.shared.buildClaudeProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase,
+                    modelName: trimmedModelName.isEmpty ? trimmedModelId : trimmedModelName,
+                    modelId: trimmedModelId
+                )
+            }
+        case .google:
+            if trimmedModelId.isEmpty {
+                provider = IosSettingsMutations.shared.buildBlankGoogleProvider(
+                    name: finalName,
+                    apiKey: trimmedKey,
+                    baseUrl: normalizedBase
+                )
+            } else {
+                provider = IosSettingsMutations.shared.buildGoogleProvider(
                     name: finalName,
                     apiKey: trimmedKey,
                     baseUrl: normalizedBase,
@@ -653,10 +688,9 @@ enum ProviderProtocolOption: String, CaseIterable, Identifiable {
     }
 
     /// Protocols the "add provider" flow can actually create and run in the iOS
-    /// chat chain today. Gemini/Custom stay out of the picker until they get a
-    /// KMP executor bridge.
+    /// chat chain today. Custom stays out of the picker.
     static var addableCases: [ProviderProtocolOption] {
-        [.openAI, .anthropic]
+        [.openAI, .anthropic, .google]
     }
 
     static var switchableCases: [ProviderProtocolOption] {

@@ -37,6 +37,7 @@ enum ChatConfigurationIssue: Equatable {
     case unsupportedProvider
     case codexNotSignedIn
     case grokNotSignedIn
+    case geminiNotSignedIn
 
     var title: String {
         switch self {
@@ -56,6 +57,8 @@ enum ChatConfigurationIssue: Equatable {
             "还没有登录 Codex"
         case .grokNotSignedIn:
             "还没有登录 Grok"
+        case .geminiNotSignedIn:
+            "还没有登录 Antigravity"
         }
     }
 
@@ -77,6 +80,8 @@ enum ChatConfigurationIssue: Equatable {
             "请先在服务商设置里用 ChatGPT 账号登录 Codex，再发送消息。"
         case .grokNotSignedIn:
             "请先在 xAI 服务商设置里登录 grok.com，再发送消息。"
+        case .geminiNotSignedIn:
+            "请先在 Gemini 服务商设置里用 Google 账号登录 Antigravity，再发送消息。"
         }
     }
 }
@@ -113,6 +118,12 @@ enum ChatProviderConfiguration {
             if model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
             return nil
         }
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+            if !IOSGeminiProviderResolver.isSignedIn(provider) { return .geminiNotSignedIn }
+            if model.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .missingModel }
+            return nil
+        }
         return issue(
             baseUrl: baseURL(of: provider),
             apiKey: apiKey(of: provider),
@@ -145,6 +156,12 @@ enum ChatProviderConfiguration {
             if openAI.brand === OpenAIBrand.mimo { return false }
             return true
         }
+        if let google = provider as? ProviderSetting.Google {
+            // Native Swift Gemini transport: API Key (non-Vertex) or Antigravity
+            // OAuth. Vertex/service-account and the Android-only Code Assist
+            // OAuth mode are not implemented on iOS.
+            return IOSGeminiProviderResolver.supportsChat(google)
+        }
         return provider is ProviderSetting.Claude
     }
 
@@ -167,6 +184,10 @@ enum ChatProviderConfiguration {
         if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
             return IOSGrokWebProviderResolver.isSignedIn(provider)
         }
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+            return IOSGeminiProviderResolver.isSignedIn(provider)
+        }
         return !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -177,6 +198,11 @@ enum ChatProviderConfiguration {
         }
         if IOSGrokWebProviderResolver.isGrokWebProvider(provider),
            IOSGrokWebProviderResolver.isSignedIn(provider) {
+            return "已登录"
+        }
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google),
+           IOSGeminiProviderResolver.isSignedIn(provider) {
             return "已登录"
         }
         return hasUsableCredential(provider) ? "已配置" : "未填写"

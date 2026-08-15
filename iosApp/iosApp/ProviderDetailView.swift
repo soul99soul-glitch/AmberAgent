@@ -30,6 +30,7 @@ struct ProviderDetailView: View {
     @State private var notice: String?
     @State private var showCodexLogin = false
     @State private var showGrokLogin = false
+    @State private var showAntigravityLogin = false
 
     var body: some View {
         ZStack {
@@ -121,6 +122,37 @@ struct ProviderDetailView: View {
                             promptCaching: false
                         )
                     }
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                    loadDraft()
+                }
+            )
+        }
+        .sheet(isPresented: $showAntigravityLogin) {
+            AntigravityLoginView(
+                providerId: providerId,
+                onAuthModeChange: { mode in
+                    _ = sharedSettings.setGoogleAuthMode(providerId: providerId, authMode: mode)
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                    loadDraft()
+                },
+                onSignedIn: {
+                    let shouldSeedModels = provider?.models.contains { $0.type == ModelType.chat } != true
+                    if shouldSeedModels {
+                        _ = sharedSettings.updateProviderChatModels(
+                            providerId: providerId,
+                            models: IOSGeminiConstants.fallbackModels
+                        )
+                    }
+                    if isCurrentProvider {
+                        sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+                    }
+                    loadDraft()
+                },
+                onLoggedOut: {
                     if isCurrentProvider {
                         sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
                     }
@@ -236,15 +268,23 @@ struct ProviderDetailView: View {
                         tokenPlanSection
                         ProviderDetailDivider()
                     }
-                    ProviderEditableTextFieldRow(
-                        title: "API Key",
-                        text: $draftApiKey,
-                        placeholder: protocolOption == .anthropic ? "sk-ant-..." : "sk-...",
-                        isSecure: true,
-                        monospace: true
-                    )
-                    ProviderDetailDivider()
+                    if provider is ProviderSetting.Google {
+                        geminiAuthModeSection
+                        ProviderDetailDivider()
+                    }
+                    if !isGeminiOAuth {
+                        ProviderEditableTextFieldRow(
+                            title: "API Key",
+                            text: $draftApiKey,
+                            placeholder: apiKeyPlaceholder,
+                            isSecure: true,
+                            monospace: true
+                        )
+                        ProviderDetailDivider()
+                    }
                     if let openAI = provider as? ProviderSetting.OpenAI, isCodingPlan(openAI.authMode) {
+                        ProviderStaticRow(title: "API 地址", subtitle: "", value: draftBaseURL, valueStyle: .mono)
+                    } else if isGeminiOAuth {
                         ProviderStaticRow(title: "API 地址", subtitle: "", value: draftBaseURL, valueStyle: .mono)
                     } else {
                         ProviderEditableTextFieldRow(
@@ -266,11 +306,15 @@ struct ProviderDetailView: View {
                 }
                 if let openAI = provider as? ProviderSetting.OpenAI, isCodingPlan(openAI.authMode) {
                     ProviderDetailFooter("已钉到该品牌官方 Coding Plan 地址。")
+                } else if isGeminiOAuth {
+                    ProviderDetailFooter("已钉到 Antigravity Gemini 官方地址。")
                 }
 
                 legacyKeyImportSection
 
                 codexSection
+
+                antigravitySection
 
                 if provider is ProviderSetting.Claude {
                     AmberSectionLabel(text: "选项")
@@ -292,7 +336,11 @@ struct ProviderDetailView: View {
         .scrollIndicators(.hidden)
     }
 
+    @ViewBuilder
     private var protocolRow: some View {
+        if provider is ProviderSetting.Google {
+            ProviderStaticRow(title: "接口协议", subtitle: "", value: "Gemini")
+        } else {
         Menu {
             ForEach(ProviderProtocolOption.switchableCases, id: \.self) { option in
                 Button {
@@ -316,6 +364,7 @@ struct ProviderDetailView: View {
         }
         .buttonStyle(.plain)
         .disabled(!(provider is ProviderSetting.OpenAI || provider is ProviderSetting.Claude))
+        }
     }
 
     @ViewBuilder
@@ -353,6 +402,107 @@ struct ProviderDetailView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    private var apiKeyPlaceholder: String {
+        if protocolOption == .anthropic { return "sk-ant-..." }
+        if protocolOption == .google { return "AIza..." }
+        return "sk-..."
+    }
+
+    /// Gemini auth-mode switch: API Key vs Antigravity (Google account) OAuth.
+    @ViewBuilder
+    private var geminiAuthModeSection: some View {
+        if let google = provider as? ProviderSetting.Google {
+            HStack(spacing: 0) {
+                geminiAuthModeButton("API Key", selected: google.authMode == GoogleAuthMode.apiKey) {
+                    switchGoogleAuthMode(to: GoogleAuthMode.apiKey)
+                }
+                geminiAuthModeButton("Antigravity", selected: google.authMode == GoogleAuthMode.antigravityOauth) {
+                    switchGoogleAuthMode(to: GoogleAuthMode.antigravityOauth)
+                }
+            }
+            .padding(3)
+            .background(
+                AmberTheme.surface2.opacity(0.88),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+        }
+    }
+
+    private func geminiAuthModeButton(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(selected ? .semibold : .regular))
+                .foregroundStyle(selected ? AmberTheme.foreground : AmberTheme.muted)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 44)
+                .background(
+                    selected ? AmberTheme.surface : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func switchGoogleAuthMode(to mode: GoogleAuthMode) {
+        guard saveConfig(showSuccess: false) else { return }
+        _ = sharedSettings.setGoogleAuthMode(providerId: providerId, authMode: mode)
+        if isCurrentProvider {
+            sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
+        }
+        connectionStatus = .idle
+        loadDraft()
+        notice = mode == GoogleAuthMode.antigravityOauth ? "已切换到 Antigravity 登录模式。" : "已切回 API Key 模式。"
+    }
+
+    /// Antigravity (Google account) sign-in entry for the Gemini provider in
+    /// OAuth mode.
+    @ViewBuilder
+    private var antigravitySection: some View {
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+            AmberSectionLabel(text: "Antigravity 登录 (Gemini)")
+            AmberFormGroup {
+                Button {
+                    commitPendingTextInput {
+                        guard saveConfig(showSuccess: false) else { return }
+                        showAntigravityLogin = true
+                    }
+                } label: {
+                    ProviderRowContent(
+                        title: antigravitySignedIn ? "已登录 Antigravity" : "用 Google 账号登录",
+                        subtitle: antigravitySubtitle,
+                        value: antigravitySignedIn ? "管理" : "登录",
+                        valueStyle: .accent,
+                        showsChevron: true
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var isGeminiOAuth: Bool {
+        (provider as? ProviderSetting.Google).map {
+            IOSGeminiProviderResolver.isAntigravityOAuth($0)
+        } == true
+    }
+
+    private var antigravitySignedIn: Bool {
+        _ = sharedSettings.revision
+        return IOSAntigravityAuthStore.load(providerId: providerId) != nil
+    }
+
+    private var antigravitySubtitle: String {
+        if let tokens = IOSAntigravityAuthStore.load(providerId: providerId) {
+            let email = tokens.email ?? ""
+            let tier = tokens.onboardedTier.map { " · \($0)" } ?? ""
+            return email.isEmpty ? "已登录\(tier)" : "\(email)\(tier)"
+        }
+        return "Antigravity 是 Google 的 Gemini 产品，无需 API Key"
     }
 
     @ViewBuilder
@@ -519,7 +669,7 @@ struct ProviderDetailView: View {
     private var legacyKeyImportSection: some View {
         let oldKey = settingsStore.currentApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let providerKey = apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !oldKey.isEmpty, providerKey.isEmpty {
+        if !oldKey.isEmpty, providerKey.isEmpty, !isGeminiOAuth {
             Button {
                 draftApiKey = oldKey
                 saveConfig(showSuccess: false)
@@ -922,6 +1072,14 @@ struct ProviderDetailView: View {
                 } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
                     models = provider.models.filter { $0.type == ModelType.chat }
                     successMessage = "Grok Web 登录凭据已就绪；服务器可用性会在发送消息时验证。"
+                } else if let google = provider as? ProviderSetting.Google {
+                    if IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+                        models = try await IOSGeminiClient(provider: google).listModelsOrThrow()
+                        successMessage = "已载入官方常用模型。"
+                    } else {
+                        models = try await IOSGeminiClient(provider: google).listModelsOrThrow()
+                        successMessage = nil
+                    }
                 } else if let openAI = provider as? ProviderSetting.OpenAI {
                     models = try await OpenAIKmpProvider().listModelsWithHeadersOrThrow(
                         providerSetting: openAI,
@@ -1062,12 +1220,18 @@ struct ProviderDetailView: View {
         if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
             return IOSGrokWebProviderResolver.isSignedIn(provider)
         }
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) {
+            return IOSGeminiProviderResolver.isSignedIn(provider)
+        }
         return !apiKey(of: provider).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func connectionCredentialIssue(_ provider: ProviderSetting) -> ChatConfigurationIssue {
         if IOSCodexProviderResolver.isCodexProvider(provider) { return .codexNotSignedIn }
         if IOSGrokWebProviderResolver.isGrokWebProvider(provider) { return .grokNotSignedIn }
+        if let google = provider as? ProviderSetting.Google,
+           IOSGeminiProviderResolver.isAntigravityOAuth(google) { return .geminiNotSignedIn }
         return .missingAPIKey
     }
 

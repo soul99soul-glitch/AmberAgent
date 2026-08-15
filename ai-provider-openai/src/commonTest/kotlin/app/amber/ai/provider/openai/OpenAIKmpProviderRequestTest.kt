@@ -5,14 +5,17 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 
 class OpenAIKmpProviderRequestTest {
@@ -81,6 +84,80 @@ class OpenAIKmpProviderRequestTest {
 
         assertFalse("enable_thinking" in body)
     }
+
+    @Test
+    fun kimiK3SendsReasoningEffortWithoutThinkingObject() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting.copy(
+                brand = OpenAIBrand.KIMI,
+                baseUrl = "https://api.kimi.com/coding/v1",
+            ),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
+            params = TextGenerationParams(
+                model = reasoningModel("kimi-k3"),
+                reasoningLevel = ReasoningLevel.HIGH,
+            ),
+            stream = false,
+        )
+        assertFalse("thinking" in body)
+        assertEquals("high", body.getValue("reasoning_effort").jsonPrimitive.content)
+    }
+
+    @Test
+    fun deepSeekV4SendsLowEffort() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting.copy(
+                brand = OpenAIBrand.DEEPSEEK,
+                baseUrl = "https://api.deepseek.com/v1",
+            ),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
+            params = TextGenerationParams(
+                model = reasoningModel("deepseek-v4-pro"),
+                reasoningLevel = ReasoningLevel.LOW,
+            ),
+            stream = false,
+        )
+        assertEquals("enabled", body.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals("low", body.getValue("reasoning_effort").jsonPrimitive.content)
+    }
+
+    @Test
+    fun glm53NeverSendsDisabledThinking() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting.copy(
+                brand = OpenAIBrand.ZHIPU,
+                baseUrl = "https://open.bigmodel.cn/api/paas/v4",
+            ),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
+            params = TextGenerationParams(
+                model = reasoningModel("glm-5.3"),
+                reasoningLevel = ReasoningLevel.OFF,
+            ),
+            stream = false,
+        )
+        assertEquals("enabled", body.getValue("thinking").jsonObject.getValue("type").jsonPrimitive.content)
+        assertEquals("low", body.getValue("reasoning_effort").jsonPrimitive.content)
+    }
+
+    @Test
+    fun openAiChatCompletionsKeepsXhigh() {
+        val body = provider.buildChatCompletionRequest(
+            providerSetting = setting,
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
+            params = TextGenerationParams(
+                model = reasoningModel("gpt-5.6"),
+                reasoningLevel = ReasoningLevel.XHIGH,
+            ),
+            stream = false,
+        )
+        assertEquals("xhigh", body.getValue("reasoning_effort").jsonPrimitive.content)
+    }
+
+    private fun reasoningModel(modelId: String): Model = Model(
+        modelId = modelId,
+        displayName = modelId,
+        abilities = listOf(ModelAbility.REASONING),
+    )
 
     private fun toolModel(): Model = Model(
         modelId = "gpt-5",

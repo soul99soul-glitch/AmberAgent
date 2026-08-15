@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 import UIKit
 @preconcurrency import Shared
 import UniformTypeIdentifiers
@@ -805,8 +806,14 @@ enum AmberHapticEvent {
 }
 
 enum AmberHaptics {
+    /// 取证 canary：真机连 Mac 时用
+    /// `idevicesyslog | grep amber-haptic` 可裁决「振感是否来自本 app」
+    /// （用户曾报告完成时物理振动与代码振源不对应的未结之谜）。
+    private static let logger = os.Logger(subsystem: "app.amber.ios", category: "amber-haptic")
+
     @MainActor
     static func trigger(_ event: AmberHapticEvent) {
+        logger.info("haptic \(String(describing: event), privacy: .public)")
         switch event {
         case .lightImpact:
             UIImpactFeedbackGenerator(style: .light).impactOccurred()

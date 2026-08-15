@@ -1087,12 +1087,7 @@ private fun ProviderSetting.isHiddenCodexOAuthModel(model: Model): Boolean {
 /**
  * 按模型推断 reasoning level 段集。
  *
- * 来源：
- *  - DeepSeek: off/high/max (https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)
- *  - OpenAI gpt-5: low/medium/high/xhigh
- *  - Anthropic claude: low/medium/high/xhigh/max
- *  - Kimi / GLM: off/auto (2 段)
- *  - 默认: off/auto/low/med/high/max (6 段)
+ * 来源见 `ReasoningPolicy`：按官网模型档位动态裁菜单。
  */
 internal fun reasoningLevelsForModel(model: Model): List<Pair<app.amber.ai.core.ReasoningLevel, String>> {
     return app.amber.ai.provider.reasoningLevelsForModel(model)

@@ -4,6 +4,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.defaultReasoningLevel
 import app.amber.ai.provider.hasUsableAuth
 import app.amber.ai.registry.ModelRegistry
 import app.amber.core.ai.GenerationRetrySetting
@@ -426,17 +427,6 @@ fun Settings.defaultReasoningLevelForModel(model: Model): ReasoningLevel {
         groupDefault
     } else {
         model.defaultReasoningLevel()
-    }
-}
-
-fun Model.defaultReasoningLevel(): ReasoningLevel {
-    val id = modelId.lowercase()
-    return when {
-        id.contains("gpt") ||
-            id.contains("codex") ||
-            Regex("\\bo\\d+").containsMatchIn(id) -> ReasoningLevel.MEDIUM
-        id.contains("deepseek") -> ReasoningLevel.HIGH
-        else -> ReasoningLevel.AUTO
     }
 }
 

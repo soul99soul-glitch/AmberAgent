@@ -1197,6 +1197,8 @@ struct ChatView: View {
             "先登录 Codex"
         case .some(.grokNotSignedIn):
             "先登录 Grok"
+        case .some(.geminiNotSignedIn):
+            "先登录 Antigravity"
         case .some(.providerDisabled):
             "先启用服务商"
         case .none:
@@ -1372,7 +1374,7 @@ struct ChatView: View {
             openModelDefaults()
         case .some(.missingAPIKey), .some(.invalidBaseURL), .some(.missingProvider),
              .some(.unsupportedProvider), .some(.codexNotSignedIn), .some(.grokNotSignedIn),
-             .some(.providerDisabled), .none:
+             .some(.geminiNotSignedIn), .some(.providerDisabled), .none:
             router.navigate(to: .providers)
         }
     }

@@ -30,6 +30,8 @@ import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.planOpenAICompatibleThinking
+import app.amber.ai.provider.putOpenAICompatibleThinking
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.PartGroup
 import app.amber.ai.provider.providers.groupPartsByToolBoundary
@@ -327,113 +329,46 @@ class ChatCompletionsAPI(
             }
 
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                val level = params.reasoningLevel
-                when {
-                    isMiMo -> {
-                        // MiMo thinking mode uses the OpenAI-compatible extra_body field `thinking`.
-                        put("thinking", buildJsonObject {
-                            put("type", if (level.isEnabled) "enabled" else "disabled")
-                        })
+                if (host == "api.siliconflow.cn") {
+                    val siliconflowThinkingModels = setOf(
+                        "Pro/moonshotai/Kimi-K2.5",
+                        "Pro/zai-org/GLM-5",
+                        "Pro/zai-org/GLM-5.1",
+                        "Pro/zai-org/GLM-4.7",
+                        "deepseek-ai/DeepSeek-V3.2",
+                        "Pro/deepseek-ai/DeepSeek-V3.2",
+                        "Qwen/Qwen3.5-397B-A17B",
+                        "Qwen/Qwen3.5-122B-A10B",
+                        "Qwen/Qwen3.5-35B-A3B",
+                        "Qwen/Qwen3.5-27B",
+                        "Qwen/Qwen3.5-9B",
+                        "Qwen/Qwen3.5-4B",
+                        "zai-org/GLM-4.6",
+                        "Qwen/Qwen3-8B",
+                        "Qwen/Qwen3-14B",
+                        "Qwen/Qwen3-32B",
+                        "Qwen/Qwen3-30B-A3B",
+                        "tencent/Hunyuan-A13B-Instruct",
+                        "zai-org/GLM-4.5V",
+                        "deepseek-ai/DeepSeek-V3.1-Terminus",
+                        "Pro/deepseek-ai/DeepSeek-V3.1-Terminus",
+                        "deepseek-ai/DeepSeek-V4-Flash",
+                        "Pro/deepseek-ai/DeepSeek-V4-Flash",
+                        "deepseek-ai/DeepSeek-V4-Pro",
+                        "Pro/deepseek-ai/DeepSeek-V4-Pro",
+                    )
+                    if (params.model.modelId in siliconflowThinkingModels) {
+                        put("enable_thinking", params.reasoningLevel.isEnabled)
                     }
-
-                    host == "openrouter.ai" -> {
-                        // https://openrouter.ai/docs/use-cases/reasoning-tokens
-                        put("reasoning", buildJsonObject {
-                            when (level) {
-                                ReasoningLevel.OFF -> put("effort", "none")
-                                ReasoningLevel.AUTO -> put("enabled", true)
-                                else -> put("effort", level.effort)
-                            }
-                        })
-                    }
-
-                    host == "dashscope.aliyuncs.com" -> {
-                        // 阿里云百炼
-                        // https://bailian.console.aliyun.com/console?tab=doc#/doc/?type=model&url=https%3A%2F%2Fhelp.aliyun.com%2Fdocument_detail%2F2870973.html&renderType=iframe
-                        put("enable_thinking", level.isEnabled)
-                        if (level != ReasoningLevel.AUTO) put("thinking_budget", level.budgetTokens)
-                    }
-
-                    host == "ark.cn-beijing.volces.com" -> {
-                        // 豆包 (火山)
-                        put("thinking", buildJsonObject {
-                            put("type", if (!level.isEnabled) "disabled" else "enabled")
-                        })
-                    }
-
-                    host == "api.mistral.ai" -> {
-                        // Mistral 不支持
-                    }
-
-                    host == "chat.intern-ai.org.cn" -> {
-                        // 书生
-                        // https://internlm.intern-ai.org.cn/api/document?lang=zh
-                        put("thinking_mode", level.isEnabled)
-                    }
-
-                    host == "api.siliconflow.cn" -> {
-                        // https://docs.siliconflow.cn/cn/userguide/capabilities/reasoning#3-1-api-%E5%8F%82%E6%95%B0
-                        val modelId = params.model.modelId
-                        val siliconflowThinkingModels = setOf(
-                            "Pro/moonshotai/Kimi-K2.5",
-                            "Pro/zai-org/GLM-5",
-                            "Pro/zai-org/GLM-5.1",
-                            "Pro/zai-org/GLM-4.7",
-                            "deepseek-ai/DeepSeek-V3.2",
-                            "Pro/deepseek-ai/DeepSeek-V3.2",
-                            "Qwen/Qwen3.5-397B-A17B",
-                            "Qwen/Qwen3.5-122B-A10B",
-                            "Qwen/Qwen3.5-35B-A3B",
-                            "Qwen/Qwen3.5-27B",
-                            "Qwen/Qwen3.5-9B",
-                            "Qwen/Qwen3.5-4B",
-                            "zai-org/GLM-4.6",
-                            "Qwen/Qwen3-8B",
-                            "Qwen/Qwen3-14B",
-                            "Qwen/Qwen3-32B",
-                            "Qwen/Qwen3-30B-A3B",
-                            "tencent/Hunyuan-A13B-Instruct",
-                            "zai-org/GLM-4.5V",
-                            "deepseek-ai/DeepSeek-V3.1-Terminus",
-                            "Pro/deepseek-ai/DeepSeek-V3.1-Terminus",
-                            "deepseek-ai/DeepSeek-V4-Flash",
-                            "Pro/deepseek-ai/DeepSeek-V4-Flash",
-                            "deepseek-ai/DeepSeek-V4-Pro",
-                            "Pro/deepseek-ai/DeepSeek-V4-Pro",
-                        )
-                        if (modelId in siliconflowThinkingModels) {
-                            put("enable_thinking", level.isEnabled)
-                        }
-                    }
-
-                    host == "open.bigmodel.cn" -> {
-                        put("thinking", buildJsonObject {
-                            put("type", if (!level.isEnabled) "disabled" else "enabled")
-                        })
-                    }
-
-                    host == "api.moonshot.cn" -> {
-                        put("thinking", buildJsonObject {
-                            put("type", if (!level.isEnabled) "disabled" else "enabled")
-                        })
-                    }
-
-                    host == "api.deepseek.com" -> {
-                        put("thinking", buildJsonObject {
-                            put("type", if (!level.isEnabled) "disabled" else "enabled")
-                        })
-                        if (level.isEnabled && level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", level.effort)
-                        }
-                    }
-
-                    else -> {
-                        // OpenAI 官方
-                        // 文档中，completions API 只支持 "low", "medium", "high"
-                        if (level != ReasoningLevel.AUTO) {
-                            put("reasoning_effort", if (level.effort == "none") "low" else level.effort)
-                        }
-                    }
+                } else {
+                    putOpenAICompatibleThinking(
+                        planOpenAICompatibleThinking(
+                            host = host,
+                            brand = providerSetting.brand,
+                            modelId = params.model.modelId,
+                            level = params.reasoningLevel,
+                        ),
+                    )
                 }
             }
 

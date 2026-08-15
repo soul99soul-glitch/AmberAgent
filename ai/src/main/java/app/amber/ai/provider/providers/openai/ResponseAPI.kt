@@ -352,20 +352,21 @@ class ResponseAPI(
             put("input", buildMessages(messages))
 
             // reasoning
-            if (params.model.abilities.contains(ModelAbility.REASONING) && params.reasoningLevel != ReasoningLevel.OFF) {
+            if (params.model.abilities.contains(ModelAbility.REASONING)) {
                 val level = params.reasoningLevel
-                put("reasoning", buildJsonObject {
-                    if (capabilities.supportsReasoningSummary) {
-                        put("summary", "auto")
-                    }
-                    openAIResponsesReasoningEffort(level)?.let { effort ->
-                        put("effort", effort)
-                    }
-                })
-                if (capabilities.supportEncryptedContent) {
-                    put("include", buildJsonArray {
-                        add("reasoning.encrypted_content")
+                val effort = openAIResponsesReasoningEffort(level)
+                if (effort != null || level == ReasoningLevel.AUTO) {
+                    put("reasoning", buildJsonObject {
+                        if (capabilities.supportsReasoningSummary && level.isEnabled) {
+                            put("summary", "auto")
+                        }
+                        effort?.let { put("effort", it) }
                     })
+                    if (capabilities.supportEncryptedContent && level.isEnabled) {
+                        put("include", buildJsonArray {
+                            add("reasoning.encrypted_content")
+                        })
+                    }
                 }
             }
 
@@ -995,15 +996,8 @@ private fun isModelAllowTemperature(model: Model): Boolean {
         !modelId.contains("codex")
 }
 
-private fun openAIResponsesReasoningEffort(level: ReasoningLevel): String? = when (level) {
-    ReasoningLevel.AUTO -> null
-    ReasoningLevel.OFF -> "low"
-    ReasoningLevel.LOW -> "low"
-    ReasoningLevel.MEDIUM -> "medium"
-    ReasoningLevel.HIGH,
-    ReasoningLevel.XHIGH,
-    ReasoningLevel.MAX -> "high"
-}
+private fun openAIResponsesReasoningEffort(level: ReasoningLevel): String? =
+    app.amber.ai.provider.openAIResponsesReasoningEffort(level)
 
 private fun List<UIMessagePart>.isOnlyTextPart(): Boolean {
     val gonnaSend = filter { it is UIMessagePart.Text || it is UIMessagePart.Image }.size

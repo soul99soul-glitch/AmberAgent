@@ -1,11 +1,13 @@
 package shared
 
 import app.amber.ai.provider.CustomHeader
+import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.hasUsableAuth
 import app.amber.core.model.Assistant
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.Settings
@@ -93,6 +95,61 @@ class IosSettingsMutationsProviderTest {
         assertEquals("https://proxy.example/v1", updated.baseUrl)
         assertEquals("/custom/chat", updated.chatCompletionsPath)
         assertFalse(updated.useResponseApi)
+    }
+
+    @Test
+    fun antigravityAuthModePinsCloudcodePaAndRestoresGenerativeLanguageDefault() {
+        val provider = ProviderSetting.Google(
+            baseUrl = "https://generativelanguage.googleapis.com/v1beta",
+        )
+        val settings = Settings(providers = listOf(provider))
+
+        val oauth = IosSettingsMutations.setGoogleAuthMode(
+            settings = settings,
+            providerId = provider.id.toString(),
+            authMode = GoogleAuthMode.ANTIGRAVITY_OAUTH,
+        ).providers.single() as ProviderSetting.Google
+        assertEquals(GoogleAuthMode.ANTIGRAVITY_OAUTH, oauth.authMode)
+        assertEquals("https://cloudcode-pa.googleapis.com", oauth.baseUrl)
+        assertTrue(oauth.hasUsableAuth())
+
+        val restored = IosSettingsMutations.setGoogleAuthMode(
+            settings = Settings(providers = listOf(oauth)),
+            providerId = provider.id.toString(),
+            authMode = GoogleAuthMode.API_KEY,
+        ).providers.single() as ProviderSetting.Google
+        assertEquals(GoogleAuthMode.API_KEY, restored.authMode)
+        assertEquals("https://generativelanguage.googleapis.com/v1beta", restored.baseUrl)
+        assertFalse(restored.hasUsableAuth())
+    }
+
+    @Test
+    fun leavingAntigravityKeepsACustomProxyBaseUrl() {
+        val provider = ProviderSetting.Google(
+            baseUrl = "https://proxy.example/gemini",
+            authMode = GoogleAuthMode.ANTIGRAVITY_OAUTH,
+        )
+
+        val updated = IosSettingsMutations.setGoogleAuthMode(
+            settings = Settings(providers = listOf(provider)),
+            providerId = provider.id.toString(),
+            authMode = GoogleAuthMode.API_KEY,
+        ).providers.single() as ProviderSetting.Google
+
+        assertEquals(GoogleAuthMode.API_KEY, updated.authMode)
+        assertEquals("https://proxy.example/gemini", updated.baseUrl)
+    }
+
+    @Test
+    fun setGoogleAuthModeIgnoresNonGoogleProviders() {
+        val provider = ProviderSetting.OpenAI(baseUrl = "https://api.openai.com/v1")
+        val updated = IosSettingsMutations.setGoogleAuthMode(
+            settings = Settings(providers = listOf(provider)),
+            providerId = provider.id.toString(),
+            authMode = GoogleAuthMode.ANTIGRAVITY_OAUTH,
+        ).providers.single()
+
+        assertTrue(updated is ProviderSetting.OpenAI)
     }
 
     @Test
