@@ -559,6 +559,12 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
                 message: issue.message
             )
         }
+        if provider is ProviderSetting.Google {
+            throw Self.failure(
+                code: Self.configurationCode(.unsupportedProvider),
+                message: "小说创作暂不支持 Gemini，请换用 OpenAI 或 Claude 模型。"
+            )
+        }
 
         let wireModelID = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         let displayName = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1402,6 +1408,7 @@ private extension NovelLiveModelAdapter {
         case .unsupportedProvider: "configuration_unsupported_provider"
         case .codexNotSignedIn: "configuration_codex_not_signed_in"
         case .grokNotSignedIn: "configuration_grok_not_signed_in"
+        case .geminiNotSignedIn: "configuration_gemini_not_signed_in"
         }
     }
 

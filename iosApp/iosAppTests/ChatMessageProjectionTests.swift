@@ -362,7 +362,9 @@ final class ChatMessageProjectionTests: XCTestCase {
 
         XCTAssertEqual(blocks.count, 1)
         XCTAssertEqual(blocks.first?.kind, "table")
-        XCTAssertEqual(blocks.first?.rows, [["初觉", "雷感"]])
+        // 行为契约变更（2026-08-15）：含管道的尾行流式期立即渲染为部分行，
+        // 不再「只消费不渲染」——完成瞬间尾行成批出现即「完成后排版重排」。
+        XCTAssertEqual(blocks.first?.rows, [["初觉", "雷感"], ["一劫雷", "掌心"]])
         XCTAssertFalse(blocks.contains { $0.kind == "text" && $0.text.contains("|") })
     }
 
@@ -381,7 +383,9 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertEqual(blocks.count, 1)
         XCTAssertEqual(blocks.first?.kind, "table")
         XCTAssertEqual(blocks.first?.headers, ["层次", "说明"])
-        XCTAssertEqual(blocks.first?.rows, [])
+        // 行为契约变更（2026-08-15）：含管道的尾行流式期立即渲染为部分行，
+        // 不再「只消费不渲染」——完成瞬间尾行成批出现即「完成后排版重排」。
+        XCTAssertEqual(blocks.first?.rows, [["人间界", "现代都市"]])
         XCTAssertFalse(blocks.contains { $0.kind == "text" && $0.text.contains("|") })
     }
 

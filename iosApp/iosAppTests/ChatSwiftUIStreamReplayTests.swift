@@ -141,6 +141,10 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             let paragraphLength: Int?
             let paragraphUsesTextKit1: Bool?
             let paragraphIdentity: ObjectIdentifier?
+            /// vendor TableView 内层横向 ScrollView 的高度：表格最后一行是否
+            /// 已在流式期显示的直接证据（完成时成批出现 = 高度增长一行）。
+            let tableHeight: CGFloat?
+            let tableIdentity: ObjectIdentifier?
         }
 
         private weak var scrollView: UIScrollView?
@@ -200,6 +204,7 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             let paragraph = rootView.flatMap(Self.streamingParagraph(in:))
             let visibleBottom = scrollView.contentOffset.y + scrollView.bounds.height
                 - scrollView.adjustedContentInset.bottom
+            let table = rootView.flatMap { Self.tableScrollView(in: $0, excluding: scrollView) }
             samples.append(Sample(
                 contentHeight: scrollView.contentSize.height,
                 distanceToBottom: max(0, scrollView.contentSize.height - visibleBottom),
@@ -208,7 +213,9 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
                 paragraphHeight: paragraph?.frame.height,
                 paragraphLength: paragraph.flatMap(Self.streamingTextLength(in:)),
                 paragraphUsesTextKit1: paragraph?.usesTextKit1,
-                paragraphIdentity: paragraph.map(ObjectIdentifier.init)
+                paragraphIdentity: paragraph.map(ObjectIdentifier.init),
+                tableHeight: table?.frame.height,
+                tableIdentity: table.map(ObjectIdentifier.init)
             ))
         }
 
@@ -240,6 +247,27 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             for subview in view.subviews {
                 if let paragraph = paragraph(in: subview, withPrefix: prefix) {
                     return paragraph
+                }
+            }
+            return nil
+        }
+
+        /// vendor TableView 的内层横向 ScrollView（fixture 无代码块/LaTeX，非主列表的
+        /// 小高度 UIScrollView 只有表格一个；ParagraphUIView 的 UITextView 排除）。
+        static func tableScrollView(
+            in view: UIView,
+            excluding mainScrollView: UIScrollView
+        ) -> UIScrollView? {
+            if let scrollView = view as? UIScrollView,
+               !(scrollView is UITextView),
+               scrollView !== mainScrollView,
+               scrollView.contentSize.height > 0,
+               scrollView.contentSize.height < 800 {
+                return scrollView
+            }
+            for subview in view.subviews {
+                if let found = tableScrollView(in: subview, excluding: mainScrollView) {
+                    return found
                 }
             }
             return nil
@@ -379,6 +407,50 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
     }
 
     // MARK: - Pumping
+
+    /// 视觉 config 哈希的跨实例稳定契约：生产 config 的色板是动态
+    /// UIColor(AmberTheme.*)，每次构建都是新实例，UIColor.hashValue 是实例
+    /// 身份哈希（实测同主题三实例三值）。流式与完成各走一次 config 构建，
+    /// 若 visualConfigHash 在实例间漂移，完成瞬间前缀/identity 缓存全部落空
+    /// → 已显示块退回 placeholder 闪帧（「完成后排版重排」的载体）。
+    func testVisualConfigHashStableAcrossConfigInstances() {
+        func build(animate: Bool) -> SwiftStreamingMarkdown.MarkdownRenderConfig {
+            let bodyFonts = SwiftStreamingMarkdown.MarkdownRenderConfig.default.paragraphStyle.textFonts
+            let paragraphStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTextStyle(
+                textFonts: bodyFonts,
+                textColor: UIColor(AmberTheme.foreground)
+            )
+            let tableStyle = SwiftStreamingMarkdown.MarkdownRenderConfig.MarkdownTableTextStyle(
+                textFonts: bodyFonts,
+                headerTextColor: UIColor(AmberTheme.foreground),
+                regularTextColor: UIColor(AmberTheme.foreground),
+                headerBackgroundColor: UIColor(AmberTheme.surface2),
+                borderColor: UIColor(AmberTheme.border),
+                actionButtonColor: UIColor(AmberTheme.accent)
+            )
+            return SwiftStreamingMarkdown.MarkdownRenderConfig.default
+                .withShouldAnimateText(value: animate)
+                .withAnimatesAppendedTailAsUnit(value: animate)
+                .withParagraphStyle(value: paragraphStyle)
+                .withTableStyle(value: tableStyle)
+        }
+        let streaming = build(animate: true)
+        let completed = build(animate: false)
+        // 注：config 的原始 hashValue 跨实例不稳定（动态 UIColor 实例身份哈希，
+        // 实测同主题三实例三值）——这正是 visualConfigHash 必须自行稳定哈希的原因。
+        XCTAssertEqual(
+            ChatStableStreamingMarkdownControllerTestSupport.visualConfigHash(for: streaming),
+            ChatStableStreamingMarkdownControllerTestSupport.visualConfigHash(for: completed),
+            "visualConfigHash 必须跨流式/完成两次 config 构建稳定（动态 UIColor 实例哈希漂移会打穿前缀缓存）"
+        )
+        // 真实视觉变化仍必须改变 visualConfigHash（字体/度量任一变化 → 不复用旧 renderable）。
+        let differentSpacing = completed.withParagraphLineSpacing(value: 9)
+        XCTAssertNotEqual(
+            ChatStableStreamingMarkdownControllerTestSupport.visualConfigHash(for: completed),
+            ChatStableStreamingMarkdownControllerTestSupport.visualConfigHash(for: differentSpacing),
+            "真实排版变化必须反映在 visualConfigHash 上"
+        )
+    }
 
     private func pump(seconds: TimeInterval, onTick: (() -> Void)? = nil) {
         let deadline = Date().addingTimeInterval(seconds)
@@ -1613,6 +1685,235 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             maximumOffsetShift,
             0.5,
             "最后一个字已稳定后，completion 不能再次移动视口：\(maximumOffsetShift)"
+        )
+    }
+
+    /// 结构化回复（标题 + CJK 强调段落 + 表格 + 列表）的完成零重排契约：
+    /// 流式到全文落位后，completion 序列不得重建任何已显示块、不得改变任何块高度。
+    /// 表格最后一行必须在流式期就已经显示（修复前：尾行「只消费不渲染」，完成时
+    /// 成批出现 → 表格高度增长一整行 ≈44pt，即「完成后排版重排」）。
+    func testStreamingTableTailRowVisibleBeforeCompletionWithoutRelayout() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 8)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请给出对比表格。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        // 开头必须含 ScrollFrameProbe.streamingMarker，探针按它定位段落视图。
+        // 最后一行完成时不带结尾换行——正是「尾行」判定的生产形态。
+        let finalText = """
+        连续正文开始。**（重点）** 这里必须保留粗体强调。
+
+        ## 对比方案
+
+        - 列表项一：保持流式连续。
+        - 列表项二：完成不重排。
+
+        | 方案 | 机制 | 结论 |
+        | --- | --- | --- |
+        | 一 | 几何驱动到点补偿的机制描述 | 采纳 |
+        | 二 | 连续节奏曲线的机制描述 | 不采纳 |
+        | 三 | 尾段整体淡入的机制描述 | 再议 |
+        | 四 | 完成零跳变的机制描述 | 待定
+        """
+        let target = fixture.model.messages + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: false
+        )]
+        var presented = fixture.model.messages
+        while true {
+            let step = ChatStreamPresentationPacer.step(current: presented, target: target)
+            presented = step.snapshot
+            fixture.model.messages = presented
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        // 等流式解析落地（表格 live parse 0.12s + 块发布限频 0.09s 之上留余量），
+        // 再取基线。基线必须在 completion 之前，否则采样不到「完成差」。
+        pump(seconds: 0.8)
+
+        guard let scrollView = fixture.scrollView,
+              let markerParagraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view),
+              let baselineTable = ScrollFrameProbe.tableScrollView(
+                in: fixture.host.view,
+                excluding: scrollView
+              ) else {
+            return XCTFail("Expected the fully rendered streaming table and marker paragraph")
+        }
+        let baselineContentHeight = scrollView.contentSize.height
+        let baselineParagraphHeight = markerParagraph.frame.height
+        let baselineParagraphIdentity = ObjectIdentifier(markerParagraph)
+        let baselineTableHeight = baselineTable.frame.height
+        let baselineTableIdentity = ObjectIdentifier(baselineTable)
+
+        // 生产顺序：最后一拍后立即 stream-closed + 完成，无静默收敛窗。
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+        fixture.model.messages = fixture.model.messages.dropLast() + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: true
+        )]
+        fixture.model.send(.assistantStreamClosed)
+        fixture.model.isGenerationActive = false
+        fixture.model.send(.generationCompleted)
+        pump(seconds: 1.2)
+        probe.stop()
+
+        XCTAssertFalse(probe.samples.isEmpty, "完成窗口必须真实采到帧")
+        XCTAssertTrue(
+            probe.samples.allSatisfy { $0.paragraphIdentity == baselineParagraphIdentity },
+            "完成态不能重建已经显示的 ParagraphUIView"
+        )
+        XCTAssertTrue(
+            probe.samples.compactMap(\.tableIdentity).allSatisfy { $0 == baselineTableIdentity },
+            "完成态不能重建表格视图"
+        )
+        XCTAssertFalse(
+            probe.samples.compactMap(\.tableHeight).isEmpty,
+            "表格视图必须持续在屏"
+        )
+        let maximumParagraphShift = probe.samples.compactMap(\.paragraphHeight)
+            .map { abs($0 - baselineParagraphHeight) }
+            .max() ?? 0
+        let maximumContentShift = probe.samples.map {
+            abs($0.contentHeight - baselineContentHeight)
+        }.max() ?? 0
+        let maximumTableShift = probe.samples.compactMap(\.tableHeight)
+            .map { abs($0 - baselineTableHeight) }
+            .max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumParagraphShift,
+            0.5,
+            "相同最终正文不能在 completion 后再次改变段落高度：\(maximumParagraphShift)"
+        )
+        XCTAssertLessThanOrEqual(
+            maximumContentShift,
+            0.5,
+            "表格最后一行必须在流式期已显示——completion 后列表高度不得再增长：\(maximumContentShift)"
+        )
+        XCTAssertLessThanOrEqual(
+            maximumTableShift,
+            0.5,
+            "表格最后一行必须在流式期已显示——completion 后表格高度不得再增长：\(maximumTableShift)"
+        )
+    }
+
+    /// LOD 冻结/解冻契约：流式尾行滚离视口后模型发布暂停（liveRenderingFarFromBottom），
+    /// 滚回底部解冻后，已显示块的 identity 必须逐位不变（eager 树 + 解冻路径复用
+    /// 冻结前 renderable，不得重建淡入）。本套件无法合成真实拖拽相位（真机专属），
+    /// 改走生产 messageAnchor 锚点滚动让 driver 进入 pausedForUser（与既有
+    /// image-anchor 用例同一机制），再以真实程序化滚动驱动几何回调完成冻结/解冻。
+    func testScrolledAwayLiveTailUnfreezesKeepingBlockIdentity() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 12)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("请生成长回复。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        let finalText = "连续正文开始。" + String(
+            repeating: "流式尾行离屏时模型发布必须暂停，回到视口后同一块继续增长而不重建。",
+            count: 24
+        )
+        let target = fixture.model.messages + [makeAssistantMessage(
+            id: assistantID,
+            text: finalText,
+            finished: false
+        )]
+        var presented = fixture.model.messages
+        while true {
+            let step = ChatStreamPresentationPacer.step(current: presented, target: target)
+            presented = step.snapshot
+            fixture.model.messages = presented
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+        pump(seconds: 0.6)
+
+        guard let scrollView = fixture.scrollView,
+              let markerParagraph = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+            return XCTFail("Expected the fully rendered streaming paragraph")
+        }
+        let baselineIdentity = ObjectIdentifier(markerParagraph)
+
+        // 冻结：messageAnchor 指向历史消息 → 锚点滚动路径提交 .userDragBegan，
+        // driver 进入 pausedForUser（followPaused=true），随后滚离底部即触发
+        // liveRenderingFarFromBottom 冻结。
+        let conversationID = "lod-conversation"
+        fixture.model.currentConversationID = conversationID
+        let anchorMessage = fixture.model.messages[3]
+        let anchorMessageID = ChatMessageProjector.messageId(for: anchorMessage)
+        fixture.model.messageAnchor = ChatMessageAnchor(
+            conversationID: conversationID,
+            messageID: anchorMessageID
+        )
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.followPaused &&
+                !fixture.model.latestViewport.isAtBottom &&
+                fixture.model.latestViewport.liveRenderingFarFromBottom
+        })
+
+        // 离屏期间消息继续增长（生产形态：尾部仍在下发）。
+        let grownText = finalText + "\n\n离屏期间追加的段落。"
+        fixture.model.messages = fixture.model.messages.dropLast() + [makeAssistantMessage(
+            id: assistantID,
+            text: grownText,
+            finished: false
+        )]
+        fixture.model.send(.streamDelta)
+        pump(seconds: 0.5)
+        XCTAssertTrue(
+            fixture.model.latestViewport.liveRenderingFarFromBottom,
+            "冻结期间视口必须保持远离底部"
+        )
+
+        // 解冻：滚回底部 → 近底几何恢复（unfreezeVisibleLiveTailIfNeeded +
+        // streamContentGrew），driver 恢复跟随。
+        let bottomOffset = max(
+            0,
+            scrollView.contentSize.height - scrollView.bounds.height
+                + scrollView.adjustedContentInset.bottom
+        )
+        scrollView.setContentOffset(CGPoint(x: 0, y: bottomOffset), animated: false)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom &&
+                !fixture.model.latestViewport.liveRenderingFarFromBottom
+        })
+        pump(seconds: 0.8)
+
+        guard let unfrozen = ScrollFrameProbe.streamingParagraph(in: fixture.host.view) else {
+            return XCTFail("Expected the live tail paragraph after unfreeze")
+        }
+        XCTAssertEqual(
+            ObjectIdentifier(unfrozen),
+            baselineIdentity,
+            "LOD 解冻必须复用冻结前的同一块渲染结果，不能重建淡入"
+        )
+        XCTAssertTrue(
+            ScrollFrameProbe.streamingTextLength(in: unfrozen) ?? 0 > finalText.utf16.count,
+            "离屏期间下发的追加内容必须在回到视口后可见"
         )
     }
 

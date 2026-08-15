@@ -1326,6 +1326,7 @@ private enum ChatStreamingMarkdownBlockParser {
         }
 
         var rows: [[String]] = []
+        var renderedLines: [String] = [lines[start], lines[start + 1]]
         var index = start + 2
         var renderedEndIndex = start + 2
         let headerUsesLeadingPipe = lines[start]
@@ -1343,9 +1344,26 @@ private enum ChatStreamingMarkdownBlockParser {
                   !isDelimiterLine(line, expectedCount: headers.count) else {
                 break
             }
-            // 流式尾行尚未闭合时只消费、不解析、不渲染。这样带/不带前导 pipe 的
-            // 表格都不会先冒出半行普通文本，再瞬间重组为 table row。
+            // 含管道的尾行流式期立即渲染为部分行（缺的单元格补空渲染），消除
+            // 完成瞬间「最后一行成批出现」的排版重排。无管道尾行保持只消费不
+            // 渲染（防「文本↔表格行」中途互变——guard 的
+            // `line.contains("|") || canBeNoLeadingPipePartialRow` 已做形状判别）。
             if isTrailingPartialLine {
+                if line.contains("|") {
+                    if includeParsedTableCells {
+                        let cells = ChatStreamingMarkdownTableRowCache.shared.cells(
+                            for: line,
+                            expectedCount: headers.count
+                        ) {
+                            normalizedRow(splitTableCells(line), count: headers.count)
+                        }
+                        rows.append(cells)
+                    }
+                    renderedLines.append(
+                        renderedRowLine(line, columnCount: headers.count, leadingPipe: headerUsesLeadingPipe)
+                    )
+                    renderedEndIndex = index + 1
+                }
                 index += 1
                 break
             }
@@ -1358,6 +1376,9 @@ private enum ChatStreamingMarkdownBlockParser {
                 }
                 rows.append(cells)
             }
+            renderedLines.append(
+                renderedRowLine(line, columnCount: headers.count, leadingPipe: headerUsesLeadingPipe)
+            )
             renderedEndIndex = index + 1
             index += 1
         }
@@ -1366,12 +1387,28 @@ private enum ChatStreamingMarkdownBlockParser {
         return ChatStreamingMarkdownParsedTable(
             table: ChatStreamingMarkdownTable(
                 id: "table-\(start)",
-                markdown: lines[start..<renderedEndIndex].joined(separator: "\n"),
+                markdown: renderedLines.joined(separator: "\n"),
                 headers: includeParsedTableCells ? normalizedRow(headers, count: headers.count) : [],
                 rows: rows
             ),
             consumedLineCount: consumedLineCount
         )
+    }
+
+    /// 行单元格数与表头一致时保留原始行文本（转义管道 `\|` 不能被重组吞掉，
+    /// 复制表格用 rawMarkdown 还原）；不足时补空单元格到表头列数后重组——
+    /// vendor 的 `Table+.swift` 会过滤「列数 ≠ 表头列数」的行，不补空则流式期
+    /// 渲染出的部分行会在完成时被静默丢弃，形成「行消失」差分。
+    private static func renderedRowLine(
+        _ line: String,
+        columnCount: Int,
+        leadingPipe: Bool
+    ) -> String {
+        let cells = splitTableCells(line)
+        guard cells.count != columnCount else { return line }
+        let padded = normalizedRow(cells, count: columnCount)
+        let body = padded.joined(separator: " | ")
+        return leadingPipe ? "| \(body) |" : body
     }
 
     private static func splitTableCells(_ line: String) -> [String] {
@@ -2169,10 +2206,73 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
     private static func visualConfigHash(for config: SwiftStreamingMarkdown.MarkdownRenderConfig) -> Int {
         // 动画类 flag 全部归一：visual hash 只反映非动画视觉，
         // 与「同 key 同渲染」的缓存契约对称。
-        config
-            .withShouldAnimateText(value: false)
-            .withAnimatesAppendedTailAsUnit(value: false)
-            .hashValue
+        //
+        // 不能直接哈希 config：生产 config 的色板是动态 UIColor(AmberTheme.*)，
+        // 每次构建都是新实例，UIColor 的 hashValue 是实例身份哈希（实测同一
+        // 主题构建三份实例得到三个不同的 hashValue）。流式与完成各走一次
+        // config 构建（detection 的 configCache 按 key 各存一份实例），直接
+        // 哈希会让 visualConfigHash 在完成瞬间失配 → 前缀/identity 缓存全部
+        // 落空 → 已显示块退回 placeholder 闪帧（「完成后排版重排」的载体）。
+        // 改为逐项枚举视觉输入并稳定哈希：颜色按固定 trait 解析后的分量哈希
+        // （同一主题任意构建实例同值），字体/度量直接哈希。textContextMenu /
+        // citationConfig 未被生产 builder 覆盖，始终是 default 的共享实例，
+        // 跨实例稳定，无需枚举。
+        var hasher = Hasher()
+        hasher.combine(config.blockSpacing)
+        hasher.combine(config.paragraphLineSpacing)
+        hasher.combine(config.headingLineSpacing)
+        hasher.combine(config.tableCellHorizontalPadding)
+        hasher.combine(config.tableCellVerticalPadding)
+        hasher.combine(config.listItemSpacing)
+        hasher.combine(config.tableMaxColumnWidth)
+        hasher.combine(config.unorderedListBulletWidth)
+        hasher.combine(config.collapsesSoftBreaks)
+        hasher.combine(config.coalescesAdjacentTextBlocks)
+        hasher.combine(config.paragraphStyle.textFonts)
+        hasher.combine(config.blockQuoteStyle.textFonts)
+        hasher.combine(config.orderedListStyle.textFonts)
+        hasher.combine(config.headingStyle.h1Font)
+        hasher.combine(config.headingStyle.h2Font)
+        hasher.combine(config.headingStyle.h3Font)
+        hasher.combine(config.headingStyle.h4Font)
+        hasher.combine(config.headingStyle.h5Font)
+        hasher.combine(config.headingStyle.h6Font)
+        hasher.combine(config.inlineStyle.linkTextFont)
+        hasher.combine(config.inlineStyle.codeTextFont)
+        combineResolvedColor(config.paragraphStyle.textColor, into: &hasher)
+        combineResolvedColor(config.blockQuoteStyle.textColor, into: &hasher)
+        combineResolvedColor(config.headingStyle.textColor, into: &hasher)
+        combineResolvedColor(config.orderedListStyle.textColor, into: &hasher)
+        combineResolvedColor(config.tableStyle.headerTextColor, into: &hasher)
+        combineResolvedColor(config.tableStyle.regularTextColor, into: &hasher)
+        combineResolvedColor(config.tableStyle.headerBackgroundColor, into: &hasher)
+        combineResolvedColor(config.tableStyle.borderColor, into: &hasher)
+        combineResolvedColor(config.tableStyle.actionButtonColor, into: &hasher)
+        combineResolvedColor(config.inlineStyle.boldTextColor, into: &hasher)
+        combineResolvedColor(config.inlineStyle.linkTextColor, into: &hasher)
+        combineResolvedColor(config.inlineStyle.codeTextColor, into: &hasher)
+        combineResolvedColor(config.inlineStyle.codeBackgroundColor, into: &hasher)
+        combineResolvedColor(config.inlineStyle.codeUnderlineColor, into: &hasher)
+        return hasher.finalize()
+    }
+
+    /// 动态色按固定 trait 解析为静态色后哈希 RGBA 分量：同一主题任意构建
+    /// 实例得到同一值（动态 UIColor 的 hashValue 是实例身份哈希，跨实例不稳）。
+    private static func combineResolvedColor(_ color: UIColor, into hasher: inout Hasher) {
+        let resolved = color.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        if resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha) {
+            hasher.combine(red)
+            hasher.combine(green)
+            hasher.combine(blue)
+            hasher.combine(alpha)
+        } else {
+            // 非 RGB（如系统占位色）：静态色实例之间哈希稳定，直接兜底。
+            hasher.combine(resolved.hashValue)
+        }
     }
 
 #if DEBUG
@@ -2249,6 +2349,12 @@ private final class ChatStableStreamingMarkdownController: ObservableObject {
             signature: renderSignature(for: config)
         ) != nil
     }
+
+    static func visualConfigHashForTesting(
+        config: SwiftStreamingMarkdown.MarkdownRenderConfig
+    ) -> Int {
+        visualConfigHash(for: config)
+    }
 #endif
 }
 
@@ -2303,6 +2409,10 @@ enum ChatStreamingMarkdownThrottleTestSupport {
 
 @MainActor
 enum ChatStableStreamingMarkdownControllerTestSupport {
+    static func visualConfigHash(for config: SwiftStreamingMarkdown.MarkdownRenderConfig) -> Int {
+        ChatStableStreamingMarkdownController.visualConfigHashForTesting(config: config)
+    }
+
     static func renderedTextAfterNonAnimatedThenAnimatedParse() async -> String? {
         let controller = ChatStableStreamingMarkdownController()
         let initialText = "initial completed text"

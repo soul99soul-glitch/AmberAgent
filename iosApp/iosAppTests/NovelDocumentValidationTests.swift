@@ -596,6 +596,23 @@ final class NovelDocumentValidationTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validate(mutated))
     }
 
+    func testFactInjectionReceiptAcceptsStateDeltaV2PromptVersion() throws {
+        let (document, injectionIndex, generationIndex) =
+            try documentWithReservedStateDeltaFactReceipt()
+        var mutated = document
+        let historicalVersion = "novel.state-delta.v2"
+        mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
+            mutated.injectionReceipts[injectionIndex],
+            to: historicalVersion
+        )
+        mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
+            mutated.generationReceipts[generationIndex],
+            to: historicalVersion
+        )
+
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(mutated))
+    }
+
     func testFactInjectionReceiptRejectsNeverPublishedPromptVersion() throws {
         let (document, injectionIndex, generationIndex) =
             try documentWithReservedStateDeltaFactReceipt()

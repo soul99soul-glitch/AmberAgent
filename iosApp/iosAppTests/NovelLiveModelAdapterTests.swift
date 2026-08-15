@@ -33,6 +33,49 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         XCTAssertEqual(fixed, global)
     }
 
+    func testGeminiProviderIsRejectedBeforeKmpTransport() async {
+        let model = makeModel(modelID: "gemini-3-pro-preview")
+        let provider = ProviderSetting.Google(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: "Gemini",
+            models: [model],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "AIza-test",
+            baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+            vertexAI: false,
+            useServiceAccount: false,
+            privateKey: "",
+            serviceAccountEmail: "",
+            location: "us-central1",
+            projectId: "",
+            authMode: GoogleAuthMode.apiKey
+        )
+        XCTAssertNil(ChatProviderConfiguration.issue(for: model, provider: provider))
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: {
+                NovelLiveModelCatalog(currentModel: model, providers: [provider])
+            },
+            kmpTransport: { _, callbacks in
+                XCTFail("Gemini must not reach the KMP OpenAI adapter.")
+                callbacks.onComplete()
+                return nil
+            }
+        )
+
+        do {
+            _ = try await adapter.resolveModel(for: .global)
+            XCTFail("Gemini should be rejected at novel resolve.")
+        } catch let failure as NovelModelFailure {
+            XCTAssertEqual(failure.code, "configuration_unsupported_provider")
+        } catch {
+            XCTFail("unexpected error \(error)")
+        }
+    }
+
     func testMissingFixedModelDoesNotFallBackToGlobalModel() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let adapter = makeAdapter(fixture: fixture)

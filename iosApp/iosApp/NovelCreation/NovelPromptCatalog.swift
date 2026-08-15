@@ -40,9 +40,17 @@ enum NovelPromptCatalog {
         var versions: Set<String> = [template(for: kind).version]
         switch kind {
         case .stateDeltaV1:
-            versions.insert("novel.state-delta.v1")
+            // v2 shipped before the 2026-08-15 identity-card person-only constraint (v3).
+            versions.formUnion([
+                "novel.state-delta.v1",
+                "novel.state-delta.v2",
+            ])
         case .manualSyncV1:
-            versions.insert("novel.manual-sync.v2")
+            // v3 shipped before the 2026-08-15 identity-card person-only constraint (v4).
+            versions.formUnion([
+                "novel.manual-sync.v2",
+                "novel.manual-sync.v3",
+            ])
         case .quickStart:
             versions.formUnion([
                 "novel.quick-start.v2",

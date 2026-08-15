@@ -983,6 +983,38 @@ final class NovelProjectRepositoryTests: XCTestCase {
         XCTAssertEqual(reloaded.access, .readWrite)
     }
 
+    func testDeviceZhaodalaiPackageLoadsAndValidates() async throws {
+        let source = URL(fileURLWithPath: "/tmp/amber-novel-device/project")
+        let layout = source.appendingPathComponent("layout.json")
+        guard FileManager.default.fileExists(atPath: layout.path) else {
+            throw XCTSkip("Device package is not copied at \(source.path)")
+        }
+        let root = try NovelTestFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let projectID = NovelProjectID(
+            rawValue: try XCTUnwrap(UUID(uuidString: "AE60366A-C41A-4117-B39E-A69678F165D9"))
+        )
+        let destination = root
+            .appendingPathComponent("projects", isDirectory: true)
+            .appendingPathComponent(projectID.description, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.copyItem(at: source, to: destination)
+
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        do {
+            let loaded = try await repository.loadProject(id: projectID)
+            XCTAssertEqual(loaded.document.project.name, "赵大来了")
+            XCTAssertEqual(loaded.document.project.revision, 854)
+            XCTAssertEqual(loaded.access, .readWrite)
+        } catch {
+            XCTFail("Device novel package failed to load: \(error)")
+            throw error
+        }
+    }
+
     private func renamed(
         _ document: NovelProjectDocumentV1,
         name: String

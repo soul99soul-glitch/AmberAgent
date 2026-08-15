@@ -32,6 +32,37 @@ final class NovelPromptCatalogTests: XCTestCase {
         _ = sha256(snapshot) // keep helper exercised
     }
 
+    func testFactPromptAcceptedVersionsKeepPreviousShippedReleases() {
+        // 2026-08-15: bumping current to state-delta.v3 / manual-sync.v4 without
+        // keeping the immediately previous shipped versions made every persisted
+        // fact receipt fail load validation (「无法读取小说项目」). Same class as
+        // the 2026-07-25 incident documented on acceptedVersions.
+        XCTAssertEqual(
+            NovelPromptCatalog.template(for: .stateDeltaV1).version,
+            "novel.state-delta.v3"
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.acceptedVersions(for: .stateDeltaV1)
+                .isSuperset(of: [
+                    "novel.state-delta.v1",
+                    "novel.state-delta.v2",
+                    "novel.state-delta.v3",
+                ])
+        )
+        XCTAssertEqual(
+            NovelPromptCatalog.template(for: .manualSyncV1).version,
+            "novel.manual-sync.v4"
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.acceptedVersions(for: .manualSyncV1)
+                .isSuperset(of: [
+                    "novel.manual-sync.v2",
+                    "novel.manual-sync.v3",
+                    "novel.manual-sync.v4",
+                ])
+        )
+    }
+
     func testUserVisiblePromptsPreserveDomainBoundaries() {
         let discussion = NovelPromptCatalog.template(for: .discussion).systemText
         // Prompt templates wrap long lines; normalize whitespace for phrase checks.

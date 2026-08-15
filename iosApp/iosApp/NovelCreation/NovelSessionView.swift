@@ -124,6 +124,11 @@ struct NovelSessionView: View {
     /// height flash). Cleared on session identity change. History always still
     /// renders markdown — this only chooses live vs cold markdown path.
     @State private var streamedMessageIDs: Set<String> = []
+    /// 活动尾行最近一拍透出的跟随滞后允许度（流式 1 → 终态排空连续衰减到 0），
+    /// 由 listSignalDidChange 维护、executeFollowCommand 消费。用 @State 是因为
+    /// 两个回调跨越不同的 body 求值，普通 struct 字段的写入会在下一次 body 重建
+    /// 时丢失。
+    @State private var activeTailLagAllowance: Double = 1
 
     var body: some View {
         // Gate list projection until bind marks coreTranscript — avoids projecting a
@@ -1256,7 +1261,8 @@ struct NovelSessionView: View {
             activeTailDigest: tail?.digest,
             activeTailPhase: tail?.transientPhase,
             activeRunRowCount: model?.activeRunRows.count ?? 0,
-            lastRowDigest: model?.rows.last?.digest
+            lastRowDigest: model?.rows.last?.digest,
+            activeTailLagAllowance: tail?.lagAllowance ?? 1
         )
     }
 
@@ -1500,6 +1506,7 @@ struct NovelSessionView: View {
         from oldValue: NovelSessionListSignal,
         to newValue: NovelSessionListSignal
     ) {
+        activeTailLagAllowance = newValue.activeTailLagAllowance
         guard oldValue.sessionID == newValue.sessionID else {
             releaseSuspendedStreamingTail(resetIdentity: true)
             historyWindowLimit = NovelSessionHistoryWindowPolicy.coldOpenLimit
@@ -1654,8 +1661,12 @@ struct NovelSessionView: View {
                     // + frame driver 连续追底（与 Chat 同构）。旧实现用一次性
                     // explicitBottom(.streamGrowth) snap，回调间隔内的增长欠账
                     // 无人追 → 滑不到底。streamContentGrew 在用户交互时由 driver
-                    // 自动 paused，无需视图层守卫。
-                    scrollDriver.submit(.streamContentGrew())
+                    // 自动 paused，无需视图层守卫。终态排空期间携带 lagAllowance
+                    //（随剩余积压连续衰减）：driver 收紧跟随时间常数，最后一拍
+                    // 前视口已贴回底部，完成瞬间的钉底零跳变（与 Chat 同源）。
+                    scrollDriver.submit(.streamContentGrew(
+                        lagAllowance: activeTailLagAllowance
+                    ))
                 }
                 return
             }
@@ -1677,6 +1688,11 @@ struct NovelSessionView: View {
         case .setBottomButton:
             break
         case .scheduleTerminalQuietSettle(let token, let delay):
+            // driver 激活时不再 arm 视图层 0.4s 定时器：driver 的
+            // generationTerminated 自带 settle + 静默交还 + idle 近底重锚，
+            // 视图层定时器再触发一次 quietSettle 只会造成双定时器竞争。
+            // fallback 模式（driver 未激活）保留原定时 settle。
+            guard !isNativeScrollDriverActive else { break }
             terminalSettleTask?.cancel()
             terminalSettleTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(delay))
@@ -1892,6 +1908,9 @@ private struct NovelSessionListSignal: Equatable {
     let activeTailPhase: NovelSessionTransientTailPhase?
     let activeRunRowCount: Int
     let lastRowDigest: NovelSessionRowDigest?
+    /// 活动尾行的跟随滞后允许度（流式 1 → 终态排空连续衰减到 0），
+    /// streamContentGrew(lagAllowance:) 的透传载体（与 Chat 同源）。
+    let activeTailLagAllowance: Double
 }
 
 private struct NovelSessionScrollGeometrySignal: Equatable {

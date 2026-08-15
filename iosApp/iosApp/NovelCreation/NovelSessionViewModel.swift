@@ -3091,6 +3091,10 @@ private extension NovelSessionViewModel {
         // 已领先可见文本很多拍。不能绕过 pacer 一次发布全部积压，否则正文高度会在
         // 单帧暴涨，滚动驱动只能随后追赶。先按 Chat 同源终态连续曲线逐拍追平，
         // 再切终态和刷新 durable（完成时积压一次定锚，不逐拍衰减回慢节拍）。
+        // 每拍随剩余积压透出 lagAllowance（1→0 连续衰减）：driver 据此收紧跟随
+        // 时间常数（τ_eff = τ × allowance），最后一拍前视口已贴回底部——完成瞬间
+        // 的钉底不再需要一次性清掉跟随滞后（与 Chat 的 ChatMessageUpdateSignal.
+        // lagAllowance 同源，复用 StreamPresentationPacingPolicy.lagAllowance）。
         let initialBase = NovelSessionPresentationPacer.terminalPacingBase(
             displayedContent: current.content,
             targetContent: targetContent,
@@ -3125,7 +3129,12 @@ private extension NovelSessionViewModel {
                 didPublishTerminal = true
                 return true
             }
-            updateTail(content: step.content, phase: .streaming)
+            let remainingBacklog = max(0, targetContent.count - step.content.count)
+            let allowance = StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: remainingBacklog,
+                drainStartBacklog: initialBacklog
+            )
+            updateTail(content: step.content, phase: .streaming, lagAllowance: allowance)
             do {
                 try await Task.sleep(nanoseconds: drainDelayNanos)
             } catch {
@@ -3169,12 +3178,14 @@ private extension NovelSessionViewModel {
 
     func updateTail(
         content: String? = nil,
-        phase: NovelSessionTransientTailPhase? = nil
+        phase: NovelSessionTransientTailPhase? = nil,
+        lagAllowance: Double? = nil
     ) {
         guard let current = transientTail else { return }
         transientTail = current.updating(
             content: content ?? current.content,
-            phase: phase ?? current.phase
+            phase: phase ?? current.phase,
+            lagAllowance: lagAllowance
         )
     }
 

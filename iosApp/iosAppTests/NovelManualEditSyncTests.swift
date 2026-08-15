@@ -1004,18 +1004,21 @@ final class NovelManualEditSyncTests: XCTestCase {
         let generationIndex = try XCTUnwrap(reserved.generationReceipts.firstIndex {
             $0.id == artifacts.generationReceipt.id
         })
-        var mutated = reserved
-        let historicalVersion = "novel.manual-sync.v2"
-        mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
-            mutated.injectionReceipts[injectionIndex],
-            to: historicalVersion
-        )
-        mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
-            mutated.generationReceipts[generationIndex],
-            to: historicalVersion
-        )
-
-        XCTAssertNoThrow(try NovelDocumentValidator.validate(mutated))
+        for historicalVersion in ["novel.manual-sync.v2", "novel.manual-sync.v3"] {
+            var mutated = reserved
+            mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
+                mutated.injectionReceipts[injectionIndex],
+                to: historicalVersion
+            )
+            mutated.generationReceipts[generationIndex] = try receiptChangingPromptVersion(
+                mutated.generationReceipts[generationIndex],
+                to: historicalVersion
+            )
+            XCTAssertNoThrow(
+                try NovelDocumentValidator.validate(mutated),
+                "historical \(historicalVersion) must remain loadable"
+            )
+        }
     }
 
     private func receiptChangingPromptVersion<T: Codable>(

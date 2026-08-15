@@ -85,6 +85,10 @@ struct NovelSessionTransientTail: Equatable, Sendable {
     let renderRevision: UInt64
     let startedAt: Date
     let phase: NovelSessionTransientTailPhase
+    /// 滚动跟随的滞后允许度（与 Chat 同源）：1=流式期；终态排空期间随剩余积压
+    /// 连续衰减到 0，driver 据此连续收紧跟随时间常数（τ_eff = τ × allowance），
+    /// 排空最后一拍前视口已贴回底部——完成瞬间无需一次性清掉跟随滞后。
+    let lagAllowance: Double
 
     init(
         run: NovelActiveRunRecord,
@@ -93,7 +97,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         startingUserContent: String? = nil,
         phase: NovelSessionTransientTailPhase,
         reasoningContent: String = "",
-        isReasoningLive: Bool = false
+        isReasoningLive: Bool = false,
+        lagAllowance: Double = 1
     ) {
         branchID = run.branchID
         sessionID = run.sessionID
@@ -115,6 +120,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         self.renderRevision = renderRevision
         startedAt = run.startedAt
         self.phase = phase
+        self.lagAllowance = lagAllowance
     }
 
     func updating(
@@ -122,7 +128,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         renderRevision: UInt64,
         phase: NovelSessionTransientTailPhase,
         reasoningContent: String? = nil,
-        isReasoningLive: Bool? = nil
+        isReasoningLive: Bool? = nil,
+        lagAllowance: Double? = nil
     ) -> NovelSessionTransientTail {
         NovelSessionTransientTail(
             branchID: branchID,
@@ -140,18 +147,21 @@ struct NovelSessionTransientTail: Equatable, Sendable {
             isReasoningLive: isReasoningLive ?? self.isReasoningLive,
             renderRevision: renderRevision,
             startedAt: startedAt,
-            phase: phase
+            phase: phase,
+            lagAllowance: lagAllowance ?? self.lagAllowance
         )
     }
 
     func updating(
         content: String,
-        phase: NovelSessionTransientTailPhase
+        phase: NovelSessionTransientTailPhase,
+        lagAllowance: Double? = nil
     ) -> NovelSessionTransientTail {
         updating(
             content: content,
             renderRevision: renderRevision &+ 1,
-            phase: phase
+            phase: phase,
+            lagAllowance: lagAllowance
         )
     }
 
@@ -184,7 +194,8 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         isReasoningLive: Bool,
         renderRevision: UInt64,
         startedAt: Date,
-        phase: NovelSessionTransientTailPhase
+        phase: NovelSessionTransientTailPhase,
+        lagAllowance: Double
     ) {
         self.branchID = branchID
         self.sessionID = sessionID
@@ -202,6 +213,7 @@ struct NovelSessionTransientTail: Equatable, Sendable {
         self.renderRevision = renderRevision
         self.startedAt = startedAt
         self.phase = phase
+        self.lagAllowance = lagAllowance
     }
 }
 
@@ -340,6 +352,9 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
     let transientPhase: NovelSessionTransientTailPhase?
     let actions: [NovelSessionRowActionAvailability]
     let digest: NovelSessionRowDigest
+    /// 活动尾行的跟随滞后允许度（流式 1 → 终态排空连续衰减到 0），视图层透传
+    /// 给 streamContentGrew(lagAllowance:)。非活动行恒为 1。
+    let lagAllowance: Double
 
     var isTransient: Bool { transientPhase != nil }
 
@@ -369,7 +384,8 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
         archive: NovelDiscussionArchivePresentation?,
         transientPhase: NovelSessionTransientTailPhase?,
         actions: [NovelSessionRowActionAvailability],
-        digest: NovelSessionRowDigest
+        digest: NovelSessionRowDigest,
+        lagAllowance: Double = 1
     ) {
         self.id = id
         self.sequence = sequence
@@ -390,6 +406,7 @@ struct NovelSessionRowModel: Identifiable, Equatable, Sendable {
         self.transientPhase = transientPhase
         self.actions = actions
         self.digest = digest
+        self.lagAllowance = lagAllowance
     }
 }
 
@@ -697,7 +714,8 @@ enum NovelSessionPresentation {
                 committedChange: current.committedChange,
                 askUser: current.askUser,
                 actions: current.actions
-            )
+            ),
+            lagAllowance: tail.lagAllowance
         )
         return NovelSessionListModel(
             sessionID: model.sessionID,

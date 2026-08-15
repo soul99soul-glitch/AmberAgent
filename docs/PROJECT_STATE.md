@@ -1,8 +1,64 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-15（provider 设置审查修补）
+Last updated: 2026-08-15（思考档位官网对齐 + 完成后排版重排七项）
 
 本文件只记录当前可操作事实。开始任务时仍需核对真实 Git、代码、测试和设备状态；历史过程从 Git 追溯，不在这里追加会话日记。
+
+## 思考档位官网对齐（2026-08-15）
+
+产品问题：思考菜单和发信停在上一代协议。Kimi K3 / DeepSeek V4 / GLM-5.3 已是 low/high/max，菜单却仍是开关或缺档；OpenAI 的 xhigh 会被压成 high。
+
+- **菜单**（`ReasoningPolicy`）：按模型 ID 分家族。K3 / GLM-5.3 = 低/高/最大（无「关」）；DeepSeek V4 = 关/低/高/最大；GLM-5.2 = 关/高/最大；Qwen 3.8-max = 关/低/中/极高；OpenAI 5.x = 关/低/中/高/极高/最大；Gemini 按模型（3.7 Flash 低/中/高，3 Pro 低/高）；Claude Fable/Mythos 不能关；Grok Web 不走 API effort 菜单。
+- **发信**（`ReasoningWire`）：K3 只发 `reasoning_effort`、不发 `thinking`；DeepSeek V4 / GLM 按官网映射；Qwen 3.8-max 发 effort 不发 budget；OpenAI 原样发 `none/xhigh/max`。iOS Gemini API Key 补 `thinkingConfig`；Antigravity 仍用模型后缀、不叠 thinkingConfig。
+- **验证**：`:ai-core:jvmTest`、`:ai-provider-openai:jvmTest`、`:ai-provider-claude:jvmTest`、`:shared:jvmTest` 绿；`IOSGeminiProviderTests` 模拟器绿。Android `app` 单测因本机无 SDK 未跑。含本改动的包已覆盖安装到 iPhone Air（`app.amber.ios`，容器 `298832B8-4C5A-41B0-9E17-A39F2685EA3F`）并拉起；菜单需重选模型后验收。
+
+## Chat 完成后排版重排七项修复（2026-08-15）
+
+背景：流式呈现四项连续化（lagAllowance/方向性收锚/淡入缩放/磁吸）落地后，完成瞬间仍有「排版重排」：结构化回复（标题+表格+列表）在 completion 时最后一行表格成批出现、非表格块闪 placeholder 帧。本轮按「先立红测试再修」推进，红证据来自新增回放契约。
+
+- **①表格尾行流式渲染（核心）**：`MessageBubbleView.swift` 的 `ChatStreamingMarkdownBlockParser.parseTable` 对**含 `|` 的尾行**从「只消费不渲染」改为流式期立即渲染为部分行（缺的单元格补空渲染，`renderedRowLine` 只在列数不足时补空，满列行保留原文本以保全 `\|` 转义）；**无管道尾行**保持消费不渲染（防「文本↔表格行」中途互变，guard 的形状判别保留）。补空原因：vendor `Table+.swift` 过滤「列数 ≠ 表头列数」的行，不补空则流式期渲染出的部分行会在完成时被静默丢弃（行消失差分）。`includeTrailingPartialTableRow: !liveStreaming` 三处调用点语义不变（新行为全部收在 parseTable 内部）。红证据：修复前完成时表格高度 +36.33pt、表格视图重建；修复后三回放断言（段落 identity/表格 identity/高度 ≤0.5pt）全绿。
+- **②视觉 config 哈希稳定化（非表格块闪帧的根因）**：`ChatStableStreamingMarkdownController.visualConfigHash` 原直接哈希 config——生产 config 的色板是动态 `UIColor(AmberTheme.*)`，每次构建是新实例，UIColor 的 hashValue 是实例身份哈希（实测同主题三实例三值）。流式与完成各走一次 config 构建，hash 在完成瞬间失配 → 前缀/identity 缓存全部落空 → 已显示块退回 placeholder 闪帧。改为逐项枚举视觉输入并稳定哈希：颜色按固定 trait（light）解析后的 RGBA 分量哈希，字体/度量直接哈希（textContextMenu/citationConfig 未被生产 builder 覆盖、共享 default 实例，无需枚举）。新增契约测试 `testVisualConfigHashStableAcrossConfigInstances`（跨实例稳定 + 真实排版变化仍区分）。同机制顺带修复 Novel/Council 完成边界的前缀缓存复用。
+- **③强调修复时点核查**：`parseNow` 的 `MarkdownParseOption` 在流式与完成态同为 `repairsRejectedStrongEmphasis: true`（speculativeRewrite 才随 animate 开关），无差分；新回放用例的 `**（重点）**` 段落完成时高度稳定为证（ChatMarkdownCJKEmphasisTests 6/6 绿）。
+- **④Novel lagAllowance 透传**：`NovelSessionPresentationPacer` 排空循环（`publishTerminalPresentation`）每拍按 `StreamPresentationPacingPolicy.lagAllowance(remaining:drainStart:)` 计算 allowance，经 `NovelSessionTransientTail.lagAllowance` → `NovelSessionRowModel.lagAllowance` → `NovelSessionListSignal.activeTailLagAllowance`（视图层 @State `activeTailLagAllowance` 跨 body 携带）→ `streamContentGrew(lagAllowance:)`；被动几何恢复（L429 附近）保持默认 1。
+- **⑤Novel 双定时器收口**：`executeFollowCommand(.scheduleTerminalQuietSettle)` 加 `guard !isNativeScrollDriverActive else { break }`——driver 激活时不再 arm 视图层 0.4s 定时器（driver 自带 settle+交还+重锚），fallback 模式保留。
+- **⑥LOD 解冻契约**：新用例 `testScrolledAwayLiveTailUnfreezesKeepingBlockIdentity`（messageAnchor 驱动 pausedForUser → 真实滚动冻结 → 离屏增长 → 滚回解冻）绿，eager 树 + 解冻路径复用冻结前 renderable 无需修改。
+- **⑦死引擎纯删**：`ChatCollectionMessageList.swift` 删 `ChatCollectionMessageList`(representable 壳)、`ChatCollectionViewController`+两 delegate extension、`ChatMessageCollectionViewCell`、`ChatCollectionConfiguration/UpdateKey`、`ChatListHostedItemView`、`ChatListRenderModel`、`ChatLiveTailLayoutDisplayLinkTarget`、`ChatListBuildResult`、`ChatListSnapshotBuilder.build`（保留被 native 路径使用的 `renderIdentityForRow`）、`ChatListItem/Kind`、`ChatListControllerStore`（4892→3125 行）；整删 `ChatScrollArbiter.swift`/`ChatScrollArbiterCore.swift`（xcodegen 目录 glob 自动纳入）；`ChatViewportCoordinator.swift` 删 `ChatTimelineFollowMode/Command/State/Policy` + `ChatTimelineGenerationEndEffectPlan/SettlePolicy`（rg 全仓确认零引用；`ChatViewportReducer/ChatViewportPolicy` 经核实被 alive 的 NativeChatTimelineView/ChatSwiftUIMessageList 使用，**未删**）。删除后各 alive 块与 HEAD 逐字节一致（脚本核验）。ChatSwiftUIMessageList（perf 回放）保留。
+- 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix2、xcodegen 重新生成）：六套件 249/249 绿（NativeTimelineScrollCore 53、ChatSwiftUIStreamReplay 29、ChatMessageProjection 73、ChatViewportPolicy 3、NovelSessionReplay 46、NovelCreationPresentation 45）；另跑 CJK/宽度/哈希/接线 53/53 绿。一次全量运行出现 11 例负载性抖动（含既有 perf 探针 p95 40.72>40、prose-growth 回放 97pt 单拍），同源复跑 249/249 全绿——perf 探针按基线记录不修、不放宽阈值。IOSParityRedLightTests 未跑（既有 3 例基线）。
+- 既有断言按行为契约变更更新（带理由）：`ChatMessageProjectionTests` 两条流式表格尾行用例 rows 断言从「尾行隐藏」改为「尾行渲染」（行为契约变更注明）；`ChatMessageProjectionTests` 原「配置未变跨实例缓存命中」语义未受影响。
+- 未尽事项：真机完成手感验收；prose-growth/perf 探针的负载敏感复现未单独取证（记录为基线）；ChatViewModel 注释仍提及已删的 `ChatCollectionUpdateKey`（记录未动，非本轮范围）。
+
+## Chat 流式呈现四项连续化修复（2026-08-15）
+
+产品目标：完成瞬间零跳变（「写完最后一个字纸不动」）、跟随/淡入/限频全程连续无分档。四项修复全部是「把离散特判换成连续函数」：
+
+- **①完成零跳变（双机制）**：(a) `StreamPresentationPacingPolicy.lagAllowance(remaining:drainStart:)` 随排空剩余积压连续衰减 1→0，经 `ChatMessageUpdateSignal.lagAllowance` 透传到 `streamContentGrew` 关联值，`followingBottom` 状态携带、tick 用 τ_eff = τ×clamp(allowance, 1/16, 1) 连续收紧——跟随滞后在最后一拍前归零，完成钉底不再是「一帧清掉 10–35pt 欠账」；(b) `settlingAfterTerminal` tick 改方向性：晚到**增长**（最后一拍文本布局延迟落地，实测 49.3pt 单帧）以基础 τ 指数缓动追入 + 步长 < arrivalEpsilon 贴齐（防容差边界极限环——曾致静默交还被无限推迟）；**收缩**（推理卡收起）保持瞬时钉底（防「再滑一段」复发）。红证明：修复前新回放契约实测单帧 49.33pt，修复后全窗帧间位移 ≤14pt 且收敛贴底。
+- **②淡入时长连续缩放**：vendor `ParagraphUIView.unitFadeDuration(forAppendedLength:)` = clamp(0.5×12/N, 1/30, 0.5)——常速拍保持 0.5s，whoosh 大拍数帧完成；并发淡入段数 ≈ 时长/拍间隔变为速率无关，24k 排空不再堆积 ~62 条 0.5s 渐变（速率上限取证留待真机）。
+- **③轻点误伤恢复 + 磁吸回底**：`.tracking` 记录按下时是否在跟随、`.interacting` 记录真拖拽，`.idle` 时纯轻点（快速生成把距底推出 96pt 也）恢复跟随；`.decelerating` 瞬间 `NativeTimelineMagneticBottomPolicy`（pan 速度 × 0.25s 预测落点 ≤48pt 即 explicitBottom 动画接管）——快速生成时甩一次即可回底（Messages 同款手感）。
+- **④表格尾块限频四档改连续**：`publishInterval` = 0.09 + 0.13×(1−e^(−L/4000))，锚点与旧四档偏差 <12ms、无档位边界；`ChatMessageProjectionTests` 断言按行为契约变更更新并补连续性断言（旧档位边界两侧差 <1ms）。
+- 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData）：NativeTimelineScrollCoreTests 全绿（新增 6 例：allowance 携带/τ 公式/钳制/提前收敛/方向性收锚/磁吸与轻点策略）；ChatSwiftUIStreamReplayTests 全绿（新增完成零跳变回放 + 淡入公式两例，perf 探针本轮通过）；ChatMessageProjectionTests、NovelSessionReplayTests、ChatViewportPolicyTests 全绿；IOSParityRedLightTests 仅 3 例既有基线失败（chat 后台/工具租约/MiniApp，与本轮无交集）。
+- 顺带（用户 Gemini 并发会话的编译阻塞，最小修补）：`ChatView` 两处 `geminiNotSignedIn` 穷举补全、`NovelLiveModelAdapter.configurationCode` 同例、`IOSGeminiProvider` KotlinInt 装箱 + Gemini Task `@MainActor`、xcodegen 重新纳入未跟踪的 `IOSGeminiProvider.swift`。
+- checker 复核（静态）：抓出 1 个 MAJOR——`nativeDragPhaseOccurredDuringTouch` 只置位从不重置（首次真实拖拽后轻点恢复永久失效），已修（新触摸开始时重置）并复跑两套件全绿；lagAllowance 全链路携带、工具循环跨段不保持收紧、磁吸守卫、fade 除零、sleep 溢出等 8 项重点核对无问题。
+- **双代理终审（逻辑链路 + UI 细节）**：链路代理亲自重跑 201 例（唯一失败=既有抖动 perf 探针，4 次复跑 p95 39.5–119.5ms 波动，非本轮方向）；七问全闭环（取消/失败/后台交接/工具循环/键盘/开关的 allowance 残留、Novel/Council/回放路径逐位一致、三签名全仓无遗漏）。UI 代理：几何/边距/visualConfigHash 零误触、按钮状态与 LOD 解冻路径一致。三处修复已落地：①磁吸加 Reduce Motion 门控；②终态贴齐限 snapFinishRemainingBudget=8pt（防 dt≈0 同帧双发时任意大 remaining 单帧贴齐）；③思考框尾段淡入与正文同构缩放（tailFadeDuration）。磁吸无生成态门控定为 by design。修复后 core/replay/projection 复跑全绿。
+- 未验证/后续：真机完成手感逐帧验收、whoosh 速率淡入性能取证、VO/Switch Control 模拟器冒烟。Novel 侧 lagAllowance 透传已完成（见「完成后排版重排七项修复」④），完成跳变已按 Chat 同构连续收口。
+
+## iOS Gemini provider + Antigravity OAuth（2026-08-15）
+
+- 产品意图：iOS 上 Gemini 可直接聊天，两种认证：API Key（Generative Language API）与 **Antigravity OAuth**（Antigravity 是 Google 的 Gemini 产品，与 Gemini CLI 同一条 Google OAuth + cloudcode-pa 通道）。
+- **KMP**：`GoogleAuthMode.ANTIGRAVITY_OAUTH`（`fixedBaseUrl` → cloudcode-pa）；`hasUsableAuth` 认该模式；`IosSettingsMutations.setGoogleAuthMode`（切回 API_KEY 仅在仍是钉死地址时恢复品牌默认）；`GeminiWireToolMapper.functionDeclarationsJson`（InputSchema → Gemini object schema，Swift 无法桥接 kotlinx JsonObject 故由 KMP 产出 JSON 字符串）；`buildGoogleProvider/buildBlankGoogleProvider`。
+- **iOS 原生执行器**：`IOSGeminiClient`（URLSession SSE；OAuth 走官方 `agy` 1.1.13 指纹：`https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent`，UA `antigravity/1.1.13 (darwin; arm64)`，`Client-Metadata ideType=ANTIGRAVITY,platform=DARWIN_ARM64,pluginType=CLOUD_CODE`，body `{userAgent:antigravity,requestType:agent,requestId,sessionId}`。上一包误用 Hub UA + 生产 cloudcode-pa + Gemini-CLI metadata，真机仍 429 RESOURCE_EXHAUSTED）。HTTP 失败带正文。Vertex/服务账号与 Android-only Code Assist OAuth 不在 iOS 支持范围。
+- **OAuth**：`IOSAntigravityOAuthClient`（PKCE + ASWebAuthenticationSession，loopback 回调 `http://localhost:8085/oauth/callback`，Antigravity CLI client `1071006060591-…`，access_type=offline+prompt=consent）；token 存 Keychain side-table（`antigravity.<providerId>.tokens`）；登录后 `loadCodeAssist`/`onboardUser`+LRO poll 解析 ghost projectId（幂等、失败不毁登录，聊天时重试）。actor 串行化刷新。
+- **接线**：`ChatProviderConfiguration`（supportsChatStreaming/issue(`geminiNotSignedIn`)/hasUsableCredential/credentialStatusTitle）；`ChatGenerationCoordinator.dispatchStream` Gemini 分支（`geminiStreamTask` 三处 teardown 取消）；后台交接与 Grok 同档拒绝（无服务端 durable cursor）；`ProviderRegistryStore.canActivate/canSelect`；`IOSSharedSettingsStore.setGoogleAuthMode` + 遗留投影；`IOSProviderConfigToolService.provider_refresh_models`。
+- **UI**：ProviderDetailView Gemini 认证分段（API Key / Antigravity 登录）+ 登录管理行 + 模型获取；`AntigravityLoginView`（ASWebAuthenticationSession 登录 sheet）；ProvidersView 添加流程默认模型 `gemini-3.7-flash`。
+- **模型**：Antigravity `fetchAvailableModels` 里 `-high/-medium/-low/-tiered/-preview` 都是同一基座的档位或通道（`tiered`=服务端自动选思考档）。刷新后只展示干净名字（`Gemini 3.7 Flash`）；发送时按思考等级选回真实 id。`flash-lite` 仍单独一行；`-agent` / `*-latest` 不进列表。
+- **验证**：`IOSGeminiProviderTests` 在 iPhone 17 Pro 模拟器、独立 DerivedData `/tmp/AmberAgent-GeminiFix` 全绿（含 agent 包裹、429 正文、`fetchAvailableModels` 解析 3.7 flash）。新包已装到 iPhone Air（`app.amber.ios`，2026-08-15 17:13）并拉起。真机「刷新模型看到 3.7 flash」和「同一账号再发一条不再 429」还没走完。
+- **刻意不做**：Vertex AI/服务账号（JWT 签名）、GEMINI_CODE_ASSIST_OAUTH 的 iOS 实现、图像 inlineData、Android 侧 Antigravity 路线。
+
+## 小说项目无法读取（2026-08-15）
+
+- 真机《赵大来了》包完整（rev 854，~32MB），不是文件损坏。
+- 根因：身份卡提交把 `state-delta` 升到 v3、`manual-sync` 升到 v4，但 `acceptedVersions` 只保留了更早的 v1 / v2。存档里 13 条 `state-delta.v2`、59 条 `manual-sync.v3` 在加载校验时报 “wrong fact Prompt version”，工作区显示「无法读取小说项目」。与 2026-07-25 同类事故。
+- 修复：白名单补回 `novel.state-delta.v2`、`novel.manual-sync.v3`。数据不用迁移。
+- 真机需重装本修复后才能打开；未装新包前列表可能仍显示项目名（走缓存索引）。
 
 ## iOS Provider 设置审查修补（2026-08-15）
 
