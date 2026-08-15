@@ -411,10 +411,19 @@ private struct ChatReasoningBodyTextView: UIViewRepresentable {
 private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
     private struct WordFade {
         let startTime: CFTimeInterval
+        let duration: CFTimeInterval
         let range: NSRange
     }
 
     private static let wordFadeDuration: CFTimeInterval = 0.5
+
+    /// 尾段淡入时长与正文 ParagraphUIView.unitFadeDuration 同构（0.5×12/N，
+    /// 地板 1/30s）：快流/排空期正文墨迹快干时，思考框尾段不再独自拖 0.5s
+    /// 渐隐——两处「墨量×时长 ≈ 6 字·秒」恒定，观感同速收干。
+    private static func tailFadeDuration(forAppendedLength length: Int) -> CFTimeInterval {
+        guard length > 12 else { return wordFadeDuration }
+        return max(1.0 / 30.0, wordFadeDuration * 12.0 / CFTimeInterval(length))
+    }
     private static let bottomTolerance: CGFloat = 8
     private static let followSpeed: CGFloat = 540
     private static let followSettleDuration: CFTimeInterval = 0.12
@@ -584,6 +593,7 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         guard range.length > 0 else { return }
         activeWordFades.append(WordFade(
             startTime: CACurrentMediaTime(),
+            duration: Self.tailFadeDuration(forAppendedLength: range.length),
             range: range
         ))
         updateWordFades(at: CACurrentMediaTime())
@@ -613,7 +623,7 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         textStorage.beginEditing()
         for fade in activeWordFades where NSMaxRange(fade.range) <= textStorage.length {
             let elapsed = currentTime - fade.startTime
-            let progress = min(max(elapsed / Self.wordFadeDuration, 0), 1)
+            let progress = min(max(elapsed / max(fade.duration, 0.001), 0), 1)
             let eased = Self.easeOut(CGFloat(progress))
             textStorage.addAttribute(
                 .foregroundColor,
@@ -623,7 +633,7 @@ private final class ChatReasoningTextView: UITextView, UITextViewDelegate {
         }
         textStorage.endEditing()
         activeWordFades.removeAll {
-            currentTime - $0.startTime >= Self.wordFadeDuration
+            currentTime - $0.startTime >= $0.duration
         }
     }
 

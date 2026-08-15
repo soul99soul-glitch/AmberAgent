@@ -41,8 +41,12 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
             viewportHistory.append(state)
         }
 
-        func send(_ reason: ChatMessageUpdateReason) {
-            signal = ChatMessageUpdateSignal(revision: signal.revision + 1, reason: reason)
+        func send(_ reason: ChatMessageUpdateReason, lagAllowance: CGFloat = 1) {
+            signal = ChatMessageUpdateSignal(
+                revision: signal.revision + 1,
+                reason: reason,
+                lagAllowance: lagAllowance
+            )
         }
     }
 
@@ -1755,6 +1759,156 @@ final class ChatSwiftUIStreamReplayTests: XCTestCase {
         XCTAssertTrue(
             fixture.model.latestViewport.isAtBottom,
             "终态收敛后必须贴底"
+        )
+    }
+
+    /// 生产完成序列的零跳变契约：最大速率流式 → 保留 ~576 字积压 → 排空
+    /// （lagAllowance 随剩余积压连续衰减）→ 立即完成，不给跟随器静默收敛窗。
+    /// 修复前：排空期跟随器保持流式 τ 的稳态滞后（≈0.8×每拍增量，约 30pt），
+    /// generationTerminated 的瞬时钉底把这份滞后在单帧内清掉——完成那一下的跳变。
+    func testTerminalDrainLagAllowanceLandsViewportWithoutCompletionHop() {
+        let fixture = makeFixture()
+        defer { fixture.tearDown() }
+
+        fixture.model.messages = longConversation(turns: 6)
+        fixture.model.isGenerationActive = true
+        fixture.model.send(.initialLoad)
+        XCTAssertTrue(pumpUntil(timeout: 4.0) {
+            fixture.model.latestViewport.isAtBottom && fixture.model.latestViewport.isContentScrollable
+        })
+
+        fixture.model.messages.append(makeUserMessage("给我一个长回答。"))
+        fixture.model.send(.userAppend)
+        pump(seconds: 0.3)
+
+        let assistantID = KotlinUuid.companion.random()
+        // 开头必须含 ScrollFrameProbe.streamingMarker，探针按它定位段落视图。
+        let finalText = "连续正文开始。" + String(
+            repeating: "终态排空收尾时视口必须无跳变地停在底部。",
+            count: 80
+        )
+        func assistantMessage(text: String) -> UIMessage {
+            UIMessage(
+                id: assistantID,
+                role: MessageRole.assistant,
+                parts: [UIMessagePart.Text(text: text, metadata: nil)],
+                annotations: [],
+                createdAt: chatNowLocalDateTime(),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+        }
+        let target = fixture.model.messages + [assistantMessage(text: finalText)]
+
+        // 流式段： allowance=1（行为与生产流式一致），留 ~576 字给排空段。
+        while true {
+            let remaining = ChatStreamPresentationPacer.terminalDrainBacklog(
+                current: fixture.model.messages,
+                target: target
+            )
+            if remaining <= 576 { break }
+            let step = ChatStreamPresentationPacer.step(
+                current: fixture.model.messages,
+                target: target
+            )
+            fixture.model.messages = step.snapshot
+            fixture.model.send(.streamDelta)
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        let drainStartBacklog = ChatStreamPresentationPacer.terminalDrainBacklog(
+            current: fixture.model.messages,
+            target: target
+        )
+        XCTAssertGreaterThan(drainStartBacklog, 0, "排空段必须有真实积压")
+        let drainAdvance = ChatStreamPresentationPacer.terminalDrainAdvance(
+            backlogCount: drainStartBacklog
+        )
+
+        guard let scrollView = fixture.scrollView else {
+            return XCTFail("Expected an attached scroll view")
+        }
+        let probe = ScrollFrameProbe(scrollView: scrollView, rootView: fixture.host.view)
+        probe.start()
+
+        // 排空段：与生产同构——固定节奏锚 + allowance 随剩余积压连续衰减。
+        while true {
+            let step = ChatStreamPresentationPacer.step(
+                current: fixture.model.messages,
+                target: target,
+                mode: .terminalDrain,
+                fixedTerminalAdvance: drainAdvance
+            )
+            fixture.model.messages = step.snapshot
+            let remainingAfter = ChatStreamPresentationPacer.terminalDrainBacklog(
+                current: step.snapshot,
+                target: target
+            )
+            fixture.model.send(.streamDelta, lagAllowance: StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: remainingAfter,
+                drainStartBacklog: drainStartBacklog
+            ))
+            if step.isCaughtUp { break }
+            pump(seconds: 0.048)
+        }
+
+        // 生产顺序：最后一拍后立即 stream-closed + 完成，无静默收敛窗。
+        fixture.model.send(.assistantStreamClosed)
+        fixture.model.isGenerationActive = false
+        fixture.model.send(.generationCompleted)
+        pump(seconds: 0.8)
+        probe.stop()
+
+        let terminalSamples = probe.samples.filter {
+            $0.paragraphLength == finalText.utf16.count
+        }
+        XCTAssertFalse(terminalSamples.isEmpty, "终态门禁必须真实采到最终正文")
+
+        let offsets = terminalSamples.map(\.contentOffsetY)
+        // 晚到布局（最后一拍文本的解析/排版延迟落地）由终态收锚以基础 τ 缓动
+        // 追入——速度连续、无单帧瞬移。60Hz 首帧闭合 24.3%，14pt 上限同时
+        // 远低于旧病（瞬时钉底一帧清 30–50pt）并给采样抖动留余量。
+        let maximumFrameShift = zip(offsets.dropFirst(), offsets)
+            .map { abs($1 - $0) }
+            .max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumFrameShift,
+            14.0,
+            "完成序列的帧间位移必须连续（缓动追入），不允许单帧瞬移：\(maximumFrameShift)"
+        )
+        // 完成态终排允许 ≤14pt 的合法微收紧（连续性包络对称覆盖两个方向）。
+        if let last = terminalSamples.last {
+            XCTAssertLessThanOrEqual(
+                last.distanceToBottom,
+                2.0,
+                "完成序列必须收敛贴底：\(last.distanceToBottom)"
+            )
+        }
+    }
+
+    /// 尾段整体淡入的时长随本拍追加字数连续缩放：常速拍（12–36 字）保持
+    /// 0.5s 轻盈淡入；whoosh 大拍（数百字/追加）在数帧内完成。并发淡入段数
+    /// ≈ 时长/拍间隔，因此与生成速率解耦——大积压排空不再堆积几十条 0.5s 渐变。
+    func testUnitFadeDurationScalesContinuouslyWithAppendedBeatSize() {
+        XCTAssertEqual(ParagraphUIView.unitFadeDuration(forAppendedLength: 0), 0.5)
+        XCTAssertEqual(ParagraphUIView.unitFadeDuration(forAppendedLength: 12), 0.5)
+        XCTAssertEqual(
+            ParagraphUIView.unitFadeDuration(forAppendedLength: 36),
+            0.5 * 12.0 / 36.0,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            ParagraphUIView.unitFadeDuration(forAppendedLength: 600),
+            1.0 / 30.0,
+            "600 字大拍已触地板（0.5×12/600 < 1/30）"
+        )
+        XCTAssertEqual(
+            ParagraphUIView.unitFadeDuration(forAppendedLength: 1_536),
+            1.0 / 30.0,
+            "超大拍淡入时长钳制在一帧级别，不拖长渐变尾巴"
         )
     }
 

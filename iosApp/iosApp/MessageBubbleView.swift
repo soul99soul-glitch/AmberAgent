@@ -1109,20 +1109,12 @@ private final class ChatStreamingMarkdownBlockController: ObservableObject {
         return Self.publishInterval(utf16Length: text.utf16.count, isTableTail: isTableTail)
     }
 
-    /// 表格尾块发布档位(P1-5 止血):<12K 保持原档位,超大表格(≥12K utf16)
-    /// 降到 0.22s,减少整表布局频率。
+    /// 表格尾块发布间隔：连续于表长（无分档）——小表贴近 0.09s，大表渐近
+    /// 0.22s（0.09 + 0.13 × (1 − e^(−L/4000))）。锚点值与旧四档
+    /// （0.09/0.12/0.16/0.22 @ 0/1.2k/4k/12k）偏差 <12ms，行为等价但无档位边界。
     static func publishInterval(utf16Length length: Int, isTableTail: Bool) -> TimeInterval {
         guard isTableTail else { return 0 }
-        if length < 1_200 {
-            return 0.09
-        }
-        if length < 4_000 {
-            return 0.12
-        }
-        if length < 12_000 {
-            return 0.16
-        }
-        return 0.22
+        return 0.09 + 0.13 * (1 - exp(-Double(length) / 4_000))
     }
 
     func scheduleParse(text: String, includeTrailingPartialTableRow: Bool) {

@@ -28,6 +28,23 @@ class ParagraphUIView: UITextView {
   private static let jsonEncoder = JSONEncoder()
   static let animationDuration: CFTimeInterval = 0.5 // Animation duration for each word
 
+  // Vendored addition (AmberAgent): the tail-as-unit fade duration scales
+  // continuously with the appended beat size. Streaming beats (~12 chars) keep
+  // the full 0.5s fade; terminal-drain beats (hundreds of chars per append)
+  // fade within a couple of frames. This keeps the fade system's load
+  // rate-independent — concurrent animations ≈ duration / beat interval stays
+  // constant — and stops a 0.5s ink gradient from dragging behind a whoosh.
+  static let minimumUnitFadeDuration: CFTimeInterval = 1.0 / 30.0
+  static let unitFadeReferenceLength = 12
+
+  static func unitFadeDuration(forAppendedLength length: Int) -> CFTimeInterval {
+    guard length > unitFadeReferenceLength else { return animationDuration }
+    return max(
+      minimumUnitFadeDuration,
+      animationDuration * CFTimeInterval(unitFadeReferenceLength) / CFTimeInterval(length)
+    )
+  }
+
   private(set) var paragraphContents: NSMutableAttributedString = NSMutableAttributedString()
   private(set) var lineSpacing: CGFloat?
   // `private(set)` (rather than fully private) so the vendored regression tests
@@ -412,9 +429,12 @@ class ParagraphUIView: UITextView {
       // one display-link animation entry instead of one per word (each entry
       // rewrites foreground-color alpha across its range every frame — the
       // per-word fan-out dominated main-thread time during fast streams).
+      // The duration itself scales with the beat size (see
+      // unitFadeDuration(forAppendedLength:)) so drain-rate appends cannot
+      // pile up dozens of concurrent 0.5s fades.
       activeAnimations.append(FadeAnimationData(
         startTime: baseStartTime,
-        duration: Self.animationDuration,
+        duration: Self.unitFadeDuration(forAppendedLength: newContentRange.length),
         range: newContentRange
       ))
     } else {

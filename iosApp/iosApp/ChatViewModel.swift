@@ -811,8 +811,8 @@ final class ChatViewModel {
                 setMessages: { [weak self] messages in
                     self?.messages = messages
                 },
-                bumpMessageRevision: { [weak self] reason in
-                    self?.bumpMessageRevision(reason: reason)
+                bumpMessageRevision: { [weak self] reason, lagAllowance in
+                    self?.bumpMessageRevision(reason: reason, lagAllowance: lagAllowance)
                 },
                 shouldPaceStreamPresentation: { [weak self] in
                     self?.streamPresentationPacingEnabled ?? false
@@ -953,9 +953,13 @@ final class ChatViewModel {
     /// 不变量:任何对 `messages` 的写入都必须紧跟一次本方法调用。
     /// chat 列表的 ChatCollectionUpdateKey 以 signal(revision+reason)判断是否重建快照,
     /// 漏掉 bump 会静默漏刷新(key 不变 → apply 被跳过 → 列表停在旧内容),无编译期提示。
-    func bumpMessageRevision(reason: ChatMessageUpdateReason) {
+    func bumpMessageRevision(reason: ChatMessageUpdateReason, lagAllowance: CGFloat = 1) {
         messageRevision &+= 1
-        messageUpdateSignal = ChatMessageUpdateSignal(revision: messageRevision, reason: reason)
+        messageUpdateSignal = ChatMessageUpdateSignal(
+            revision: messageRevision,
+            reason: reason,
+            lagAllowance: lagAllowance
+        )
         // token usage 只在结构性事件后变化；streamDelta/toolDelta 不改 usage。
         switch reason {
         case .streamDelta, .toolDelta:

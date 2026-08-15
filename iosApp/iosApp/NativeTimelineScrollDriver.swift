@@ -91,6 +91,21 @@ final class NativeTimelineScrollDriver: NSObject {
         return distance <= NativeTimelineScrollCore.resumeEpsilon
     }
 
+    /// 拖拽释放（进入惯性）瞬间的磁吸回底：预测落点命中底部容差时，用既有
+    /// explicitBottom 动画接管惯性（allowUserInteraction + beginFromCurrentState
+    /// 的 0.18s easeOut，Messages 同款手感）。只在用户拖拽后的暂停态生效。
+    func attemptMagneticBottomSnapAfterDragRelease() {
+        guard fallbackReason == nil, automaticFollowEnabled else { return }
+        guard let scrollView else { return }
+        guard isPausedForUser else { return }
+        let velocityY = scrollView.panGestureRecognizer.velocity(in: nil).y
+        guard NativeTimelineMagneticBottomPolicy.shouldSnap(
+            releaseVelocityY: velocityY,
+            distanceToBottom: distanceToBottom(in: scrollView)
+        ) else { return }
+        submit(.explicitBottom(source: .streamGrowth, animated: true, keyboardToken: nil))
+    }
+
     func distanceToBottomNow() -> CGFloat? {
         guard let scrollView else { return nil }
         return distanceToBottom(in: scrollView)

@@ -249,6 +249,14 @@ enum StreamPresentationPacingPolicy {
         let adaptive = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
         return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
     }
+
+    /// 滚动跟随的滞后允许度（1=流式期，→0=排空收尾）。排空期间它随剩余积压
+    /// 连续衰减，跟随器的时间常数随之收紧（τ_eff = τ × allowance），视口在
+    /// 最后一拍落定前贴回底部——完成瞬间的钉底不再需要一次性清掉跟随滞后。
+    static func lagAllowance(remainingBacklog: Int, drainStartBacklog: Int) -> CGFloat {
+        guard drainStartBacklog > 0, remainingBacklog > 0 else { return 0 }
+        return CGFloat(min(1, Double(remainingBacklog) / Double(drainStartBacklog)))
+    }
 }
 
 enum ChatStreamPresentationPacer {
@@ -499,7 +507,7 @@ struct ChatMiniAppWorkspaceSyncFailure {
 struct ChatGenerationBindings {
     let getMessages: () -> [UIMessage]
     let setMessages: ([UIMessage]) -> Void
-    let bumpMessageRevision: (ChatMessageUpdateReason) -> Void
+    let bumpMessageRevision: (ChatMessageUpdateReason, CGFloat) -> Void
     let shouldPaceStreamPresentation: () -> Bool
     let setIsLoading: (Bool) -> Void
     let setPendingMemoryApproval: (MemoryToolApprovalRequest?) -> Void
@@ -1222,7 +1230,7 @@ final class ChatGenerationCoordinator {
             translation: nil
         ))
         bindings.setMessages(snapshot)
-        bindings.bumpMessageRevision(.toolCallStarted)
+        bindings.bumpMessageRevision(.toolCallStarted, 1)
 
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -1318,7 +1326,7 @@ final class ChatGenerationCoordinator {
             )
             guard self.currentRunId == runId else { return }
             self.bindings.setMessages(resumed)
-            self.bindings.bumpMessageRevision(.toolResultAppended)
+            self.bindings.bumpMessageRevision(.toolResultAppended, 1)
             let failureReason = ChatToolOutputFormatter.imageFailureReason(in: resumed, matching: toolCall)
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await self.bindings.persistMessages(conversationId)
@@ -1395,7 +1403,7 @@ final class ChatGenerationCoordinator {
             in: snapshot
         )
         bindings.setMessages(failedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
+        bindings.bumpMessageRevision(.toolResultAppended, 1)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
         _ = await bindings.recordRun(
@@ -1509,7 +1517,7 @@ final class ChatGenerationCoordinator {
         // P1-a: 取消也是 run 终态——队列 leftover 恢复进 composer（可见、不静默丢）。
         bindings.restoreSteerQueueLeftover(conversationId)
         if runId != nil {
-            bindings.bumpMessageRevision(.generationCancelled)
+            bindings.bumpMessageRevision(.generationCancelled, 1)
         }
 
         guard let runId else { return true }
@@ -1753,7 +1761,7 @@ final class ChatGenerationCoordinator {
                 ChatStreamRecorder.shared.record(runId: runId, snapshot: pendingStreamSnapshot)
             }
             bindings.setMessages(pendingStreamSnapshot)
-            bindings.bumpMessageRevision(.streamDelta)
+            bindings.bumpMessageRevision(.streamDelta, 1)
         }
         cancelStreamEventConsumer()
         cancelPendingStreamSnapshotPublish()
@@ -1779,7 +1787,7 @@ final class ChatGenerationCoordinator {
         clearPendingApprovals()
         bindings.setContextCompactState(.idle)
         bindings.setIsLoading(false)
-        bindings.bumpMessageRevision(.generationHandedOffToBackground)
+        bindings.bumpMessageRevision(.generationHandedOffToBackground, 1)
         return true
     }
 
@@ -2224,7 +2232,7 @@ final class ChatGenerationCoordinator {
                         return
                     }
                     self.bindings.setMessages(snapshot)
-                    self.bindings.bumpMessageRevision(.assistantStreamClosed)
+                    self.bindings.bumpMessageRevision(.assistantStreamClosed, 1)
                     await self.presentStreamError(
                         rawMessage: error.message ?? String(describing: error),
                         modelId: params.model.modelId,
@@ -2303,7 +2311,8 @@ final class ChatGenerationCoordinator {
         _ target: [UIMessage],
         runId: String,
         mode: ChatStreamPresentationPacer.Mode = .streaming,
-        fixedTerminalAdvance: Int? = nil
+        fixedTerminalAdvance: Int? = nil,
+        drainStartBacklog: Int? = nil
     ) -> Bool {
         let step = bindings.shouldPaceStreamPresentation()
             ? ChatStreamPresentationPacer.step(
@@ -2314,8 +2323,20 @@ final class ChatGenerationCoordinator {
             )
             : ChatStreamPresentationStep(snapshot: target, isCaughtUp: true)
         ChatStreamRecorder.shared.record(runId: runId, snapshot: step.snapshot)
+        let lagAllowance: CGFloat
+        if mode == .terminalDrain, let drainStartBacklog {
+            lagAllowance = StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: ChatStreamPresentationPacer.terminalDrainBacklog(
+                    current: step.snapshot,
+                    target: target
+                ),
+                drainStartBacklog: drainStartBacklog
+            )
+        } else {
+            lagAllowance = 1
+        }
         bindings.setMessages(step.snapshot)
-        bindings.bumpMessageRevision(.streamDelta)
+        bindings.bumpMessageRevision(.streamDelta, lagAllowance)
         return step.isCaughtUp
     }
 
@@ -2325,12 +2346,14 @@ final class ChatGenerationCoordinator {
         // full provider result rather than the currently visible prefix.
         pendingStreamSnapshot = target
         // 整轮节奏锚：完成时积压一次决定拍大小与拍间隔（连续曲线，无分档），
-        // 见 ChatStreamPresentationPacer.terminalDrainAdvance 注释。
+        // 见 ChatStreamPresentationPacer.terminalDrainAdvance 注释。同一份
+        // 起始积压也驱动 lagAllowance 的连续衰减。
+        let drainStartBacklog = ChatStreamPresentationPacer.terminalDrainBacklog(
+            current: bindings.getMessages(),
+            target: target
+        )
         let drainAdvance = ChatStreamPresentationPacer.terminalDrainAdvance(
-            backlogCount: ChatStreamPresentationPacer.terminalDrainBacklog(
-                current: bindings.getMessages(),
-                target: target
-            )
+            backlogCount: drainStartBacklog
         )
         let drainDelayNanos = ChatStreamPresentationPacer.terminalDrainDelayNanos(
             advance: drainAdvance
@@ -2340,7 +2363,8 @@ final class ChatGenerationCoordinator {
                 target,
                 runId: runId,
                 mode: .terminalDrain,
-                fixedTerminalAdvance: drainAdvance
+                fixedTerminalAdvance: drainAdvance,
+                drainStartBacklog: drainStartBacklog
             ) {
                 pendingStreamSnapshot = nil
                 return true
@@ -2471,7 +2495,7 @@ final class ChatGenerationCoordinator {
     ) async {
         guard currentRunId == runId else { return }
         bindings.setMessages(snapshot)
-        bindings.bumpMessageRevision(.assistantStreamClosed)
+        bindings.bumpMessageRevision(.assistantStreamClosed, 1)
 
         if !generativeUiFallbackAttempted,
            !toolRuntime.hasUnresolvedToolCall(in: snapshot),
@@ -2488,7 +2512,7 @@ final class ChatGenerationCoordinator {
             )
             let retryParams = IOSGenerativeUiRequestPolicy.retryParams(params)
             bindings.setMessages(retryBase)
-            bindings.bumpMessageRevision(.assistantStreamClosed)
+            bindings.bumpMessageRevision(.assistantStreamClosed, 1)
             streamJob = nil
             await prepareAndStartStreaming(
                 providerSetting: backgroundProviderSetting ?? providerSetting,
@@ -2522,7 +2546,7 @@ final class ChatGenerationCoordinator {
                 afterDisplayMessageCount: displayMessages.count
             )
             bindings.setMessages(completedSnapshot)
-            bindings.bumpMessageRevision(.assistantStreamClosed)
+            bindings.bumpMessageRevision(.assistantStreamClosed, 1)
         }
 
         // 输出上限截断:正文有效但不完整。必须先于工具分支返回——截断点可能
@@ -2558,7 +2582,7 @@ final class ChatGenerationCoordinator {
             }
 
             currentToolResumeCount += 1
-            bindings.bumpMessageRevision(.toolCallStarted)
+            bindings.bumpMessageRevision(.toolCallStarted, 1)
             streamJob = nil
             await executeToolCall(
                 pendingToolCall,
@@ -2607,7 +2631,7 @@ final class ChatGenerationCoordinator {
             var emptySnapshot = completedSnapshot
             emptySnapshot.append(miniAppExpected ? Self.emptyMiniAppResponseNotice() : Self.emptyResponseNotice())
             bindings.setMessages(emptySnapshot)
-            bindings.bumpMessageRevision(.toolResultAppended)
+            bindings.bumpMessageRevision(.toolResultAppended, 1)
             let conversationHex = conversationId?.toHexDashString()
             let didPersist = await bindings.persistMessages(conversationId)
             let succeeded = didPersist && !miniAppExpected
@@ -2653,7 +2677,7 @@ final class ChatGenerationCoordinator {
         if let miniAppApplication {
             finalSnapshot = miniAppApplication.messages
             bindings.setMessages(finalSnapshot)
-            bindings.bumpMessageRevision(.toolResultAppended)
+            bindings.bumpMessageRevision(.toolResultAppended, 1)
         }
 
         let conversationHex = conversationId?.toHexDashString()
@@ -2663,7 +2687,7 @@ final class ChatGenerationCoordinator {
         if !didPersist, let miniAppApplication {
             if miniAppApplication.rollback() {
                 bindings.setMessages(miniAppApplication.rollbackMessages)
-                bindings.bumpMessageRevision(.toolResultAppended)
+                bindings.bumpMessageRevision(.toolResultAppended, 1)
             } else {
                 NSLog("[AmberChat] MiniApp rollback skipped because its persisted state changed")
             }
@@ -2677,7 +2701,7 @@ final class ChatGenerationCoordinator {
            let workspaceFailure = miniAppApplication?.syncWorkspaceAfterConversationPersistence() {
             finalSnapshot = workspaceFailure.messages
             bindings.setMessages(finalSnapshot)
-            bindings.bumpMessageRevision(.toolResultAppended)
+            bindings.bumpMessageRevision(.toolResultAppended, 1)
             _ = await bindings.persistMessages(conversationId)
         }
         _ = await bindings.recordRun(
@@ -2734,7 +2758,7 @@ final class ChatGenerationCoordinator {
         }
         finalSnapshot.append(Self.outputLimitNotice())
         bindings.setMessages(finalSnapshot)
-        bindings.bumpMessageRevision(.toolResultAppended)
+        bindings.bumpMessageRevision(.toolResultAppended, 1)
 
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessages(conversationId)
@@ -2868,7 +2892,7 @@ final class ChatGenerationCoordinator {
             failureReason: failureText
         )
         bindings.setMessages(finalSnapshot)
-        bindings.bumpMessageRevision(.toolResultAppended)
+        bindings.bumpMessageRevision(.toolResultAppended, 1)
         let conversationHex = conversationId?.toHexDashString()
         let didPersist = await bindings.persistMessagesSnapshot(finalSnapshot, conversationId, writeBaseline)
         _ = await bindings.recordRun(
@@ -2945,7 +2969,7 @@ final class ChatGenerationCoordinator {
             guard currentRunId == runId else { return }
             guard case .completed(let resolvedMessages) = result else { return }
             bindings.setMessages(resolvedMessages)
-            bindings.bumpMessageRevision(.toolResultAppended)
+            bindings.bumpMessageRevision(.toolResultAppended, 1)
             await continueAfterToolResult(
                 resolvedMessages,
                 providerSetting: providerSetting,
@@ -3170,7 +3194,7 @@ final class ChatGenerationCoordinator {
                 resumedMessages = executedMessages
             }
             bindings.setMessages(resumedMessages)
-            bindings.bumpMessageRevision(.toolResultAppended)
+            bindings.bumpMessageRevision(.toolResultAppended, 1)
             await continueAfterToolResult(
                 resumedMessages,
                 providerSetting: providerSetting,
@@ -3411,7 +3435,7 @@ final class ChatGenerationCoordinator {
         }
         currentToolResumeCount += 1
         bindings.setMessages(guided.messages)
-        bindings.bumpMessageRevision(.toolResultAppended)
+        bindings.bumpMessageRevision(.toolResultAppended, 1)
         // 软失败账本语义：工具从未真正执行，不记 Started；只记
         // Finished(failed) 留痕，供 W3 分类时区分「未执行」与「执行后失败」。
         await toolLedger.recordToolCallFinished(
@@ -3500,7 +3524,7 @@ final class ChatGenerationCoordinator {
             }
 
             currentToolResumeCount += 1
-            bindings.bumpMessageRevision(.toolCallStarted)
+            bindings.bumpMessageRevision(.toolCallStarted, 1)
             streamJob = nil
             await executeToolCall(
                 pendingToolCall,
@@ -3715,7 +3739,7 @@ final class ChatGenerationCoordinator {
             return
         }
         bindings.setMessages(pending.baseMessages)
-        bindings.bumpMessageRevision(.awaitingToolApproval)
+        bindings.bumpMessageRevision(.awaitingToolApproval, 1)
         let didPersistApprovalOwner = await bindings.markRunAwaitingPermission(
             pending.runId,
             pending.toolCall.toolCallId
@@ -4100,7 +4124,7 @@ final class ChatGenerationCoordinator {
             )
             guard currentRunId == pending.runId else { return }
             bindings.setMessages(pending.baseMessages)
-            bindings.bumpMessageRevision(.awaitingToolApproval)
+            bindings.bumpMessageRevision(.awaitingToolApproval, 1)
             await pauseForApproval(.recipe(request), pending: pending)
         }
     }
@@ -4321,7 +4345,7 @@ final class ChatGenerationCoordinator {
             return
         }
         bindings.setMessages(resumedMessages)
-        bindings.bumpMessageRevision(.toolResultAppended)
+        bindings.bumpMessageRevision(.toolResultAppended, 1)
         resumeAfterApproval(pending: pending, resumedMessages: resumedMessages)
     }
 
@@ -4775,7 +4799,7 @@ final class ChatGenerationCoordinator {
         pendingBackgroundConversationStore = nil
         bindings.setIsLoading(false)
         bindings.setContextCompactState(.idle)
-        bindings.bumpMessageRevision(.generationHandedOffToBackground)
+        bindings.bumpMessageRevision(.generationHandedOffToBackground, 1)
         return true
     }
 
@@ -4837,7 +4861,7 @@ final class ChatGenerationCoordinator {
         bindings.setIsLoading(false)
         clearPendingApprovals()
         if let terminalEvent {
-            bindings.bumpMessageRevision(terminalEvent)
+            bindings.bumpMessageRevision(terminalEvent, 1)
         }
         // P1-a: 成功收尾 → 自动发队列下一条；取消/失败 → 回填 composer。
         bindings.handleSteerQueueAtTerminal(

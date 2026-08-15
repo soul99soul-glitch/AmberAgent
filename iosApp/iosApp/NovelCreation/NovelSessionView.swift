@@ -426,7 +426,7 @@ struct NovelSessionView: View {
                !scrollDriver.isUIKitUserInteracting,
                isLiveTailPhase(listSignal.activeTailPhase) || isSettlingTerminal,
                newValue.isNearBottom, !newValue.isAtBottom {
-                scrollDriver.submit(.streamContentGrew)
+                scrollDriver.submit(.streamContentGrew())
             }
         }
         .transaction(value: listSignal.activeTailDigest) { transaction in
@@ -1655,7 +1655,7 @@ struct NovelSessionView: View {
                     // explicitBottom(.streamGrowth) snap，回调间隔内的增长欠账
                     // 无人追 → 滑不到底。streamContentGrew 在用户交互时由 driver
                     // 自动 paused，无需视图层守卫。
-                    scrollDriver.submit(.streamContentGrew)
+                    scrollDriver.submit(.streamContentGrew())
                 }
                 return
             }

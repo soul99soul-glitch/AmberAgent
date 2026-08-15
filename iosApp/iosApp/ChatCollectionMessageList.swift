@@ -275,6 +275,8 @@ struct NativeChatTimelineView: View {
     @State private var projectionCache = NativeTimelineProjectionCache()
     @State private var scrollDriver = NativeTimelineScrollDriver()
     @State private var nativeUserScrollActive = false
+    @State private var nativeTouchStartedWhileFollowing = false
+    @State private var nativeDragPhaseOccurredDuringTouch = false
     @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
     @State private var nativeScrollFallbackShouldReplayBottom = false
     @State private var nativeScrollFallbackReplayToken: UInt64 = 0
@@ -374,13 +376,37 @@ struct NativeChatTimelineView: View {
                     phase: phase,
                     isUIKitUserInteracting: scrollDriver.isUIKitUserInteracting
                 ) else { return }
+                if !nativeUserScrollActive {
+                    // 新触摸开始：重置「本次触摸内是否出现过拖拽」。只在此处
+                    // 重置（interacting 会在一次拖拽中反复触发，不能在分支里
+                    // 无条件清零），否则首次真实拖拽后轻点恢复永久失效。
+                    nativeDragPhaseOccurredDuringTouch = false
+                }
+                if phase == .interacting {
+                    // SwiftUI 把「移动已开始的主动拖拽」归入 interacting；
+                    // tracking 只是手指落下。轻点（tracking→idle）与拖拽
+                    // （tracking→interacting→…→idle）由此区分。
+                    nativeDragPhaseOccurredDuringTouch = true
+                }
                 nativeUserScrollActive = true
+                nativeTouchStartedWhileFollowing = scrollDriver.isFollowingBottomOrKeyboardFocus
                 onDismissKeyboard()
                 scrollDriver.submit(.userDragBegan)
             case .idle:
                 let endedUserScroll = nativeUserScrollActive
                 nativeUserScrollActive = false
-                if endedUserScroll {
+                // 轻点（从未进入拖拽相位）不该终止跟随：按下期间快速增长可能把
+                // 距底推过恢复阈值，但用户从未表达离开意图——恢复原跟随语义。
+                let accidentalTapRestore = endedUserScroll && followGeneration && Self
+                    .shouldRestoreFollowAfterAccidentalTap(
+                        wasFollowingAtTouchDown: nativeTouchStartedWhileFollowing,
+                        dragPhaseOccurred: nativeDragPhaseOccurredDuringTouch,
+                        generationActive: isGenerationActive || isLoading
+                    )
+                if accidentalTapRestore {
+                    scrollDriver.submit(.userDragEnded(isAtBottom: true))
+                    resumeNativeBottomFollowAfterUserReturn()
+                } else if endedUserScroll {
                     let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
                         liveDistanceToBottom: scrollDriver.distanceToBottomNow(),
                         cachedNearBottom: viewportState.isAtBottom,
@@ -394,7 +420,14 @@ struct NativeChatTimelineView: View {
             case .animating:
                 break
             case .decelerating:
-                break
+                // 甩向底部的惯性不等静止再判定：快速生成时底部在跑，静止时
+                // 往往已移出恢复窗口（用户被迫甩第二次）。释放瞬间用 pan 速度
+                // 预测落点，命中容差即磁吸接管。Reduce Motion 下不插入程序
+                // 缓动：让自然减速走完，由 .idle 相位的 returnedToBottom 判定
+                // 收口（该路径无动画）。
+                if !reduceMotion {
+                    scrollDriver.attemptMagneticBottomSnapAfterDragRelease()
+                }
             @unknown default:
                 break
             }
@@ -448,7 +481,7 @@ struct NativeChatTimelineView: View {
         }
         .onChange(of: signal) { _, newSignal in
             updateRendererMemory(event: newSignal.event, messages: messagesProvider())
-            submitNativeScrollIntent(for: newSignal.event)
+            submitNativeScrollIntent(for: newSignal.event, lagAllowance: newSignal.lagAllowance)
             scrollToMessageAnchorIfAvailable()
         }
         .onChange(of: messageAnchor) { _, _ in
@@ -499,6 +532,18 @@ struct NativeChatTimelineView: View {
         @unknown default:
             return false
         }
+    }
+
+    /// 轻点误伤恢复：触碰（.tracking）即暂停跟随防打架是有意的所有权设计，
+    /// 但「按下→从未拖拽→抬起」是误触——按下期间的快速增长可能把距底推过
+    /// 恢复阈值，静止判定会漏恢复。仅当按下时确在跟随、期间无拖拽相位、
+    /// 生成仍在进行时恢复跟随。
+    static func shouldRestoreFollowAfterAccidentalTap(
+        wasFollowingAtTouchDown: Bool,
+        dragPhaseOccurred: Bool,
+        generationActive: Bool
+    ) -> Bool {
+        wasFollowingAtTouchDown && !dragPhaseOccurred && generationActive
     }
 
     private var isNativeScrollDriverDesired: Bool {
@@ -903,7 +948,7 @@ struct NativeChatTimelineView: View {
         else { return }
         scrollDriver.submit(.userDragEnded(isAtBottom: true))
         unfreezeVisibleLiveTailIfNeeded(messages: messages, viewportState: viewportState)
-        scrollDriver.submit(.streamContentGrew)
+        scrollDriver.submit(.streamContentGrew())
     }
 
     private func resumeNativeBottomFollowAfterUserReturn() {
@@ -918,7 +963,7 @@ struct NativeChatTimelineView: View {
         publishViewportState(next)
         unfreezeVisibleLiveTailIfNeeded(messages: messages, viewportState: next)
         if isGenerationActive || isLoading {
-            scrollDriver.submit(.streamContentGrew)
+            scrollDriver.submit(.streamContentGrew())
         }
     }
 
@@ -963,7 +1008,7 @@ struct NativeChatTimelineView: View {
         }
     }
 
-    private func submitNativeScrollIntent(for event: ChatEvent) {
+    private func submitNativeScrollIntent(for event: ChatEvent, lagAllowance: CGFloat = 1) {
         guard isNativeScrollDriverActive else {
             submitNativeSwiftUIFallbackScrollIntent(for: event)
             return
@@ -978,12 +1023,12 @@ struct NativeChatTimelineView: View {
             scrollDriver.submit(.explicitBottom(source: .button, animated: false, keyboardToken: nil))
         case .assistantStreamDelta:
             guard followGeneration else { return }
-            scrollDriver.submit(.streamContentGrew)
+            scrollDriver.submit(.streamContentGrew(lagAllowance: lagAllowance))
         case .assistantStreamClosed, .toolCallStarted, .toolResultAppended,
              .awaitingToolApproval:
             if followGeneration,
                viewportState.isAtBottom || scrollDriver.isFollowingBottomOrKeyboardFocus || scrollDriver.isAtBottomNow() {
-                scrollDriver.submit(.streamContentGrew)
+                scrollDriver.submit(.streamContentGrew())
             }
         case .generationCompleted, .generationFailed, .generationCancelled,
              .generationHandedOffToBackground:

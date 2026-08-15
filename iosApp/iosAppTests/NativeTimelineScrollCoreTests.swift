@@ -136,7 +136,9 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         driver.handleLayoutMetricsChanged()
         XCTAssertTrue(driver.isFollowingBottomOrKeyboardFocus)
 
-        try? await Task.sleep(for: .milliseconds(450))
+        // 晚到增长改为基础 τ 缓动追入后，收敛需要 ~5τ（≈0.3s）+ 观察器
+        // 唤醒延迟；旧瞬时钉底一帧收敛故曾是 450ms。交还契约不变，仅放宽等待。
+        try? await Task.sleep(for: .milliseconds(900))
         XCTAssertEqual(scrollView.contentOffset.y, 900, accuracy: 2)
         XCTAssertFalse(
             driver.isFollowingBottomOrKeyboardFocus,
@@ -536,7 +538,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
         driver.attach(scrollView)
 
         driver.submit(.explicitBottom(source: .composerFocus, animated: false, keyboardToken: nil))
-        driver.submit(.streamContentGrew)
+        driver.submit(.streamContentGrew())
         scrollView.contentOffset = CGPoint(x: 0, y: 260)
 
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -668,7 +670,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
     func testStreamGrowthIsIgnoredWhilePausedForUser() {
         let result = NativeTimelineScrollCore.reduce(
             state: .pausedForUser,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 200, distanceToBottom: 500),
             now: 2
         )
@@ -680,7 +682,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
     func testStreamGrowthAtBottomStartsFollowingDriverFromIdle() {
         let result = NativeTimelineScrollCore.reduce(
             state: .idle,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 520, distanceToBottom: 0),
             now: 2
         )
@@ -695,7 +697,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
     func testStreamGrowthNearBottomStartsFollowingDriverFromIdle() {
         let result = NativeTimelineScrollCore.reduce(
             state: .idle,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 500, distanceToBottom: NativeTimelineScrollCore.resumeEpsilon - 1),
             now: 2
         )
@@ -716,7 +718,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
 
         let dipped = NativeTimelineScrollCore.reduce(
             state: following,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 500, contentHeight: 1_000),
             now: 2
         )
@@ -727,7 +729,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
 
         let grown = NativeTimelineScrollCore.reduce(
             state: dipped.state,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 500, contentHeight: 1_600),
             now: 3
         )
@@ -921,7 +923,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
             dt: 1.0 / 120.0
         )
 
-        guard case let .followingBottom(virtualOffset, target, _) = result.state else {
+        guard case let .followingBottom(virtualOffset, target, _, _) = result.state else {
             return XCTFail("expected followingBottom")
         }
         XCTAssertEqual(target, 800)
@@ -962,7 +964,7 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
 
         let result = NativeTimelineScrollCore.reduce(
             state: following,
-            intent: .streamContentGrew,
+            intent: .streamContentGrew(),
             geometry: geometry(offsetY: 520, contentHeight: 1_360, distanceToBottom: 40),
             now: 3
         )
@@ -972,5 +974,224 @@ final class NativeTimelineScrollCoreTests: XCTestCase {
             .followingBottom(virtualOffset: 520, target: 680, lastFollowRequestAt: 3)
         )
         XCTAssertEqual(result.actions, [.startFrameDriver])
+    }
+
+    // MARK: - 终态排空滞后允许度（lagAllowance）
+
+    /// 流式拍携带的 allowance 进入跟随状态，供 tick 连续收紧时间常数。
+    func testStreamGrowthCarriesLagAllowanceIntoFollowingState() {
+        let following = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 500,
+            target: 700,
+            lastFollowRequestAt: 1
+        )
+
+        let result = NativeTimelineScrollCore.reduce(
+            state: following,
+            intent: .streamContentGrew(lagAllowance: 0.25),
+            geometry: geometry(offsetY: 500, contentHeight: 1_600),
+            now: 2
+        )
+
+        XCTAssertEqual(
+            result.state,
+            .followingBottom(virtualOffset: 500, target: 920, lastFollowRequestAt: 2, lagAllowance: 0.25)
+        )
+    }
+
+    /// τ_eff = τ × allowance：同一帧的闭合比例按公式连续缩放，无离散跳变。
+    func testLagAllowanceTightensTauContinuously() {
+        let following = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 500,
+            target: 800,
+            lastFollowRequestAt: 1,
+            lagAllowance: 0.25
+        )
+        let dt = 1.0 / 120.0
+
+        let result = NativeTimelineScrollCore.tick(
+            state: following,
+            geometry: geometry(offsetY: 500, contentHeight: 1_480),
+            now: 2,
+            dt: dt
+        )
+
+        guard case let .writeOffsetY(offsetY) = result.actions.first else {
+            return XCTFail("expected writeOffsetY")
+        }
+        let tauEff = NativeTimelineScrollCore.tau * 0.25
+        let expected = 500 + 300 * (1 - exp(-dt / tauEff))
+        XCTAssertEqual(offsetY, expected, accuracy: 0.5)
+    }
+
+    /// allowance 越界读数钳制：≤0 用下限（保持严格小于 1 的每帧闭合率），
+    /// ≥1 与流式期完全一致。
+    func testLagAllowanceClampedToMinimumAndOne() {
+        let dt = 1.0 / 120.0
+        func tickedVirtual(_ allowance: CGFloat) -> CGFloat {
+            let result = NativeTimelineScrollCore.tick(
+                state: .followingBottom(
+                    virtualOffset: 500,
+                    target: 800,
+                    lastFollowRequestAt: 1,
+                    lagAllowance: allowance
+                ),
+                geometry: geometry(offsetY: 500, contentHeight: 1_480),
+                now: 2,
+                dt: dt
+            )
+            guard case let .writeOffsetY(offsetY) = result.actions.first else {
+                XCTFail("expected writeOffsetY")
+                return 0
+            }
+            return offsetY
+        }
+
+        XCTAssertEqual(
+            tickedVirtual(0),
+            tickedVirtual(NativeTimelineScrollCore.minimumLagAllowance),
+            accuracy: 0.001
+        )
+        XCTAssertEqual(tickedVirtual(5), tickedVirtual(1), accuracy: 0.001)
+        // 下限 τ_eff 仍保持指数形态：单帧不瞬时贴底，残余交给终态钉底收口。
+        XCTAssertLessThan(tickedVirtual(NativeTimelineScrollCore.minimumLagAllowance), 799)
+    }
+
+    /// 端到端时序契约：排空尾拍 allowance 收紧后，滞后在流式段内清零，
+    /// generationTerminated 的钉底不再产生任何位移写入——完成零跳变。
+    func testTightenedAllowanceConvergesBeforeTerminalPin() {
+        let almostThere = NativeTimelineScrollState.followingBottom(
+            virtualOffset: 500,
+            target: 520,
+            lastFollowRequestAt: 1,
+            lagAllowance: NativeTimelineScrollCore.minimumLagAllowance
+        )
+
+        let ticked = NativeTimelineScrollCore.tick(
+            state: almostThere,
+            geometry: geometry(offsetY: 500, contentHeight: 1_200),
+            now: 2,
+            dt: 1.0 / 60.0
+        )
+        guard case let .followingBottom(virtualOffset, _, _, _) = ticked.state else {
+            return XCTFail("expected followingBottom")
+        }
+        XCTAssertLessThan(520 - virtualOffset, NativeTimelineScrollCore.arrivalEpsilon)
+
+        let terminal = NativeTimelineScrollCore.reduce(
+            state: ticked.state,
+            intent: .generationTerminated,
+            geometry: geometry(offsetY: virtualOffset, contentHeight: 1_200, distanceToBottom: 0),
+            now: 3
+        )
+        let settledTick = NativeTimelineScrollCore.tick(
+            state: terminal.state,
+            geometry: geometry(offsetY: virtualOffset, contentHeight: 1_200, distanceToBottom: 0),
+            now: 3 + 1.0 / 120.0,
+            dt: 1.0 / 120.0
+        )
+        let writeActions = settledTick.actions.filter {
+            if case .writeOffsetY = $0 { return true }
+            return false
+        }
+        XCTAssertTrue(
+            writeActions.isEmpty,
+            "滞后已在排空期清零，终态收锚首拍不得再写入位移：\(settledTick.actions)"
+        )
+    }
+
+    /// 终态收锚的方向语义：晚到的「增长」（最后一拍文本布局延迟落地）以基础
+    /// τ 缓动追入（书写的延续，非跳变）；「收缩」（推理卡收起）保持瞬时钉底
+    /// （既有契约，防"再滑一段"复发）。
+    func testTerminalSettleEasesLateGrowthButSnapsShrink() {
+        let settling = NativeTimelineScrollState.settlingAfterTerminal(
+            virtualOffset: 520,
+            target: 520,
+            lastLayoutAt: 2
+        )
+        let dt = 1.0 / 120.0
+
+        // 晚到增长：底部 520 → 570（contentHeight 1_250）。
+        let grown = NativeTimelineScrollCore.tick(
+            state: settling,
+            geometry: geometry(offsetY: 520, contentHeight: 1_250, distanceToBottom: 50),
+            now: 2 + dt,
+            dt: dt
+        )
+        guard case let .writeOffsetY(grownOffset) = grown.actions.first else {
+            return XCTFail("expected writeOffsetY for late growth")
+        }
+        let alpha = 1 - exp(-dt / NativeTimelineScrollCore.tau)
+        XCTAssertEqual(
+            grownOffset,
+            520 + 50 * alpha,
+            accuracy: 0.5,
+            "晚到增长必须按基础 τ 的指数闭合追入，不得一帧钉死"
+        )
+
+        // 收缩：底部 520 → 320（contentHeight 1_000），瞬时钉底。
+        let shrunk = NativeTimelineScrollCore.tick(
+            state: settling,
+            geometry: geometry(offsetY: 520, contentHeight: 1_000, distanceToBottom: 200),
+            now: 2 + dt,
+            dt: dt
+        )
+        XCTAssertEqual(
+            shrunk.actions,
+            [.writeOffsetY(320)],
+            "收缩方向保持瞬时钉底（推理卡收起 ramp 已是连续高度源）"
+        )
+    }
+
+    // MARK: - 轻点误伤恢复 & 磁吸回底
+
+    @MainActor
+    func testAccidentalTapRestoresFollowOnlyForTrueTapsDuringGeneration() {
+        XCTAssertTrue(NativeChatTimelineView.shouldRestoreFollowAfterAccidentalTap(
+            wasFollowingAtTouchDown: true,
+            dragPhaseOccurred: false,
+            generationActive: true
+        ))
+        XCTAssertFalse(NativeChatTimelineView.shouldRestoreFollowAfterAccidentalTap(
+            wasFollowingAtTouchDown: true,
+            dragPhaseOccurred: true,
+            generationActive: true
+        ), "真实拖拽（出现过 dragging 相位）交给静止判定，不在此恢复"
+        )
+        XCTAssertFalse(NativeChatTimelineView.shouldRestoreFollowAfterAccidentalTap(
+            wasFollowingAtTouchDown: false,
+            dragPhaseOccurred: false,
+            generationActive: true
+        ), "按下前本就在读历史（非跟随），轻点不得改变语义"
+        )
+        XCTAssertFalse(NativeChatTimelineView.shouldRestoreFollowAfterAccidentalTap(
+            wasFollowingAtTouchDown: true,
+            dragPhaseOccurred: false,
+            generationActive: false
+        ), "生成已结束无跟随可恢复"
+        )
+    }
+
+    func testMagneticSnapPredictsLandingPointContinuously() {
+        XCTAssertTrue(NativeTimelineMagneticBottomPolicy.shouldSnap(
+            releaseVelocityY: -800,
+            distanceToBottom: 200
+        ), "预测行程 200pt 恰好落底，命中容差"
+        )
+        XCTAssertFalse(NativeTimelineMagneticBottomPolicy.shouldSnap(
+            releaseVelocityY: -200,
+            distanceToBottom: 200
+        ), "弱甩预测落点距底 150pt，等静止判定"
+        )
+        XCTAssertFalse(NativeTimelineMagneticBottomPolicy.shouldSnap(
+            releaseVelocityY: 300,
+            distanceToBottom: 10
+        ), "向下甩（远离底部）不吸"
+        )
+        XCTAssertTrue(NativeTimelineMagneticBottomPolicy.shouldSnap(
+            releaseVelocityY: -400,
+            distanceToBottom: 30
+        ), "近底轻甩预测过冲，直接接管"
+        )
     }
 }

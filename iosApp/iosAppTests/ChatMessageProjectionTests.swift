@@ -219,7 +219,9 @@ final class ChatMessageProjectionTests: XCTestCase {
     }
 
     func testTableStreamingThrottleTiersOnlySlowDownHugeTables() {
-        // <12K 档位保持历史值;超大表格(≥12K utf16)降频,减少整表布局卡顿(P1-5 止血)。
+        // 直播解析限频档位不变（对大表降频止血）；表格尾块发布间隔改为
+        // 连续曲线（0.09 + 0.13×(1−e^(−L/4000))，2026-08-15 取代四档）：
+        // 锚点行为等价（与旧档偏差 <12ms），但无档位边界断点。
         let live = ChatStreamingMarkdownThrottleTestSupport.liveParseInterval
         XCTAssertEqual(live(800, true), 0.12)
         XCTAssertEqual(live(3_000, true), 0.20)
@@ -228,11 +230,15 @@ final class ChatMessageProjectionTests: XCTestCase {
         XCTAssertEqual(live(24_000, false), 0, "普通文本不在此加独立定时门")
 
         let publish = ChatStreamingMarkdownThrottleTestSupport.blockPublishInterval
-        XCTAssertEqual(publish(800, true), 0.09)
-        XCTAssertEqual(publish(3_000, true), 0.12)
-        XCTAssertEqual(publish(10_000, true), 0.16)
-        XCTAssertEqual(publish(24_000, true), 0.22)
+        XCTAssertEqual(publish(800, true), 0.09 + 0.13 * (1 - exp(-800.0 / 4_000)), accuracy: 0.0005)
+        XCTAssertEqual(publish(3_000, true), 0.09 + 0.13 * (1 - exp(-3_000.0 / 4_000)), accuracy: 0.0005)
+        XCTAssertEqual(publish(10_000, true), 0.09 + 0.13 * (1 - exp(-10_000.0 / 4_000)), accuracy: 0.0005)
+        XCTAssertEqual(publish(24_000, true), 0.09 + 0.13 * (1 - exp(-24_000.0 / 4_000)), accuracy: 0.0005)
         XCTAssertEqual(publish(24_000, false), 0)
+        // 连续性契约：旧档位边界（1.2k/4k/12k）两侧的间隔差 <1ms，无档位跳变。
+        let belowBoundary = publish(1_200, true)
+        let aboveBoundary = publish(1_201, true)
+        XCTAssertLessThan(abs(belowBoundary - aboveBoundary), 0.001)
     }
 
     func testStreamingMarkdownConfigCacheKeyTracksPaperAndAccent() throws {

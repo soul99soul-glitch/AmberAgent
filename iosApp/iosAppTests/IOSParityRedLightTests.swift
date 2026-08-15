@@ -1881,6 +1881,45 @@ final class IOSParityRedLightTests: XCTestCase {
         )
     }
 
+    /// 排空期间滞后允许度随剩余积压连续衰减（1→0 无分档断点）：
+    /// 滚动跟随器据此连续收紧 τ_eff，让视口在最后一拍前贴回底部。
+    func testTerminalDrainLagAllowanceDecaysContinuously() {
+        let drainStart = 24 * 1_024
+        XCTAssertEqual(
+            StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: drainStart,
+                drainStartBacklog: drainStart
+            ),
+            1,
+            "排空起始的 allowance 必须是 1（与流式期行为无缝衔接）"
+        )
+        XCTAssertEqual(
+            StreamPresentationPacingPolicy.lagAllowance(remainingBacklog: 0, drainStartBacklog: drainStart),
+            0,
+            "最后一拍落定后 allowance 必须归零"
+        )
+        XCTAssertEqual(
+            StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: drainStart / 2,
+                drainStartBacklog: drainStart
+            ),
+            0.5,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: drainStart * 2,
+                drainStartBacklog: drainStart
+            ),
+            1,
+            "超过起始积压的读数钳制在 1"
+        )
+        XCTAssertEqual(
+            StreamPresentationPacingPolicy.lagAllowance(remainingBacklog: 100, drainStartBacklog: 0),
+            0
+        )
+    }
+
     /// 收尾小积压必须按流式节拍排空，而不是快排一拍抛完。
     ///
     /// 真机录像：模型略快于显示，收尾积压几十字；旧快排公式一拍倒 36+ 字

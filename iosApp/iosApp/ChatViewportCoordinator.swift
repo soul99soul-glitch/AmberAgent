@@ -249,6 +249,10 @@ enum ChatMessageUpdateReason: Equatable {
 struct ChatMessageUpdateSignal: Equatable {
     var revision: Int = 0
     var reason: ChatMessageUpdateReason = .initialLoad
+    /// 流式跟随的滞后允许度：1=流式期（跟随行为不变）；终态排空期间随剩余
+    /// 积压连续衰减到 0，滚动核心据此连续收紧跟随时间常数，使完成瞬间的
+    /// 钉底零跳变。非 streamDelta reason 不消费该字段。
+    var lagAllowance: CGFloat = 1
 
     var event: ChatEvent {
         reason.event

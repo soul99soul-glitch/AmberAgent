@@ -1581,7 +1581,7 @@ private final class RecipeBindingState {
         ChatGenerationBindings(
             getMessages: { self.messages },
             setMessages: { self.messages = $0 },
-            bumpMessageRevision: { self.revisions.append($0) },
+            bumpMessageRevision: { reason, _ in self.revisions.append(reason) },
             shouldPaceStreamPresentation: { true },
             setIsLoading: { self.isLoading = $0 },
             setPendingMemoryApproval: { _ in },

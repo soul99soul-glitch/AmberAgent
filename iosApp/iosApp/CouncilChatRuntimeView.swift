@@ -489,7 +489,7 @@ struct CouncilChatRuntimeView: View {
     private func scheduleMeasuredGrowthFollowToBottom() {
         guard followGeneration, !followPaused, !userDragging else { return }
         if isNativeScrollDriverActive {
-            scrollDriver.submit(.streamContentGrew)
+            scrollDriver.submit(.streamContentGrew())
             return
         }
         // A 48ms text presentation flush can be followed by multiple asynchronous

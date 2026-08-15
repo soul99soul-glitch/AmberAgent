@@ -174,7 +174,7 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
             bindings: ChatGenerationBindings(
                 getMessages: { [] },
                 setMessages: { _ in },
-                bumpMessageRevision: { _ in },
+                bumpMessageRevision: { _, _ in },
                 shouldPaceStreamPresentation: { true },
                 setIsLoading: { _ in },
                 setPendingMemoryApproval: { _ in },

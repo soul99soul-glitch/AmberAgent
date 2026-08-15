@@ -2673,7 +2673,7 @@ private final class ChatGenerationBindingState {
             setMessages: { [weak self] messages in
                 self?.messages = messages
             },
-            bumpMessageRevision: { [weak self] reason in
+            bumpMessageRevision: { [weak self] reason, _ in
                 self?.messageRevision += 1
                 self?.onBumpMessageRevision?(reason)
             },
