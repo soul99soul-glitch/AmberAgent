@@ -72,13 +72,14 @@ fun createAskUserToolDeclaration(): Tool = Tool(
 
 // MARK: - Novel discussion project tools
 //
-// Novel-session-only write tools. They are declared here but deliberately NOT
+// Novel-session-only tools. They are declared here but deliberately NOT
 // registered in the `iosToolDeclaration` catalog or ToolSearch: the discussion
 // agent assembles them only inside the novel discussion transport
 // (`NovelLiveModelAdapter.makeParameters`), so they never leak into ordinary
 // Chat/subagent tool sets. Execution lives in `IOSNovelProjectToolExecutor`,
-// which routes every call through `DefaultNovelCreation.perform` (the single
-// reducer transaction path).
+// which routes every mutation through `DefaultNovelCreation.perform` (the
+// single reducer transaction path). `novel_revise_chapter` is approval-gated:
+// the host shows an approval card and writes only after the author confirms.
 
 fun createNovelRenameProjectToolDeclaration(): Tool = Tool(
     name = "novel_rename_project",
@@ -164,6 +165,51 @@ fun createNovelSetChapterTitleToolDeclaration(): Tool = Tool(
         document.
     """.trimIndent(),
     parameters = { novelSetChapterTitleParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelListChaptersToolDeclaration(): Tool = Tool(
+    name = "novel_list_chapters",
+    description = """
+        List working manuscript chapters on the current branch (ordinal, title, character count,
+        paragraph count, chapter_id). Discarded chapters are omitted. Use this before reading or
+        revising a chapter that is not the latest one. This is read-only and does not change the
+        project.
+    """.trimIndent(),
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelReadChapterToolDeclaration(): Tool = Tool(
+    name = "novel_read_chapter",
+    description = """
+        Read one working manuscript chapter as numbered paragraphs. Target with optional
+        `chapter_ordinal` (1-based working order) or `chapter_id` (UUID); when both are omitted,
+        the latest working chapter is read. Optional `start_paragraph` and `end_paragraph` are
+        1-based inclusive paragraph numbers from this tool's numbering. Use this when the injected
+        manuscript tail is not enough (earlier chapters, earlier paragraphs, or exact paragraph
+        numbers for novel_revise_chapter). This is read-only and does not change the project.
+    """.trimIndent(),
+    parameters = { novelReadChapterParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelReviseChapterToolDeclaration(): Tool = Tool(
+    name = "novel_revise_chapter",
+    description = """
+        Propose a paragraph-range replacement in an already collected working chapter. The host
+        shows an approval card with the old and new text; the manuscript is written only after
+        the author approves. `start_paragraph` and `end_paragraph` are 1-based inclusive indexes
+        from novel_read_chapter. `new_text` replaces that range (it may be one or more paragraphs).
+        Target with optional `chapter_ordinal` or `chapter_id`; omit both to revise the latest
+        chapter. `reason` is an optional short note shown on the card. Never claim you cannot
+        edit collected manuscript — call this after the author agrees on the change. Do not use
+        ask_user to ask whether to apply. Creates a manual-edit version and marks the branch as
+        needing plot-state sync when approved.
+    """.trimIndent(),
+    parameters = { novelReviseChapterParameters() },
+    needsApproval = true,
+    allowsAutoApproval = false,
     execute = { emptyList() }
 )
 
@@ -2140,6 +2186,63 @@ private fun novelSetChapterTitleParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("title")
+)
+
+private fun novelReadChapterParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("chapter_ordinal", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional 1-based index of the working chapter to read; defaults to the last chapter")
+            put("minimum", 1)
+        })
+        put("chapter_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional chapter UUID; when set, overrides chapter_ordinal")
+        })
+        put("start_paragraph", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional 1-based first paragraph to include")
+            put("minimum", 1)
+        })
+        put("end_paragraph", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional 1-based last paragraph to include (inclusive)")
+            put("minimum", 1)
+        })
+    }
+)
+
+private fun novelReviseChapterParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("chapter_ordinal", buildJsonObject {
+            put("type", "integer")
+            put("description", "Optional 1-based index of the working chapter to revise; defaults to the last chapter")
+            put("minimum", 1)
+        })
+        put("chapter_id", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional chapter UUID; when set, overrides chapter_ordinal")
+        })
+        put("start_paragraph", buildJsonObject {
+            put("type", "integer")
+            put("description", "1-based first paragraph to replace")
+            put("minimum", 1)
+        })
+        put("end_paragraph", buildJsonObject {
+            put("type", "integer")
+            put("description", "1-based last paragraph to replace (inclusive)")
+            put("minimum", 1)
+        })
+        put("new_text", buildJsonObject {
+            put("type", "string")
+            put("description", "Replacement prose for the selected paragraph range")
+        })
+        put("reason", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional short note shown on the approval card")
+        })
+    },
+    required = listOf("start_paragraph", "end_paragraph", "new_text")
 )
 
 private fun novelProposeChapterPlanParameters(): InputSchema = InputSchema.Obj(

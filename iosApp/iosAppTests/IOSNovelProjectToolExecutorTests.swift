@@ -55,30 +55,42 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         title: String = "旧标题",
         content: String = "第一章正文。"
     ) async throws -> (Harness, NovelChapterID) {
+        let (harness, ids) = try await makeHarnessWithChapters([(title, content)])
+        return (harness, ids[0])
+    }
+
+    private func makeHarnessWithChapters(
+        _ chapters: [(title: String, content: String)]
+    ) async throws -> (Harness, [NovelChapterID]) {
         let root = try NovelTestFixtures.temporaryDirectory()
         let repository = NovelFileProjectRepository(rootDirectory: root)
         var document = try NovelTestFixtures.document()
         let projectID = document.project.id
         let branchID = document.branches[0].id
-        let chapterID = NovelChapterID()
-        let versionID = NovelChapterVersionID()
         let now = document.project.updatedAt
-        document.chapters.append(NovelChapterRecord(id: chapterID, createdAt: now))
-        document.chapterVersions.append(NovelChapterVersionRecord(
-            id: versionID,
-            chapterID: chapterID,
-            kind: .collected,
-            title: title,
-            content: content,
-            factCompatibilityID: UUID(),
-            sourceCandidateID: nil,
-            createdAt: now,
-            operationID: document.appliedOperations[0].operationID
-        ))
-        let selection = NovelChapterSelection(chapterID: chapterID, versionID: versionID)
+        var ids: [NovelChapterID] = []
+        var selections: [NovelChapterSelection] = []
+        for chapter in chapters {
+            let chapterID = NovelChapterID()
+            let versionID = NovelChapterVersionID()
+            document.chapters.append(NovelChapterRecord(id: chapterID, createdAt: now))
+            document.chapterVersions.append(NovelChapterVersionRecord(
+                id: versionID,
+                chapterID: chapterID,
+                kind: .collected,
+                title: chapter.title,
+                content: chapter.content,
+                factCompatibilityID: UUID(),
+                sourceCandidateID: nil,
+                createdAt: now,
+                operationID: document.appliedOperations[0].operationID
+            ))
+            ids.append(chapterID)
+            selections.append(NovelChapterSelection(chapterID: chapterID, versionID: versionID))
+        }
         // Only attach manuscript to existing head checkpoint. Do not bump
         // workingRevision without a matching applied operation (timeline check).
-        document.branches[0].workingChapterSelections = [selection]
+        document.branches[0].workingChapterSelections = selections
         if let idx = document.checkpoints.firstIndex(where: {
             $0.id == document.branches[0].headCheckpointID
         }) {
@@ -88,7 +100,7 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
                 kind: checkpoint.kind,
                 createdOnBranchID: checkpoint.createdOnBranchID,
                 parentCheckpointID: checkpoint.parentCheckpointID,
-                chapterSelections: [selection],
+                chapterSelections: selections,
                 stateSnapshotID: checkpoint.stateSnapshotID,
                 sessionCursor: checkpoint.sessionCursor,
                 branchOverrideRevisionIDs: checkpoint.branchOverrideRevisionIDs,
@@ -112,7 +124,7 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
             branchID: branchID,
             executor: executor
         )
-        return (harness, chapterID)
+        return (harness, ids)
     }
 
     private func jsonArgs(_ object: [String: Any]) -> String {
@@ -306,6 +318,128 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         XCTAssertEqual(snapshot.chapterVersions.first(where: { $0.id == versionID })?.title, "乙")
     }
 
+    func testListAndReadChapterReturnNumberedWorkingManuscript() async throws {
+        let (harness, chapterIDs) = try await makeHarnessWithChapters([
+            ("旧章", "第一段。\n\n第二段。"),
+            ("新章", "后章第一段。\n\n后章第二段。\n\n后章第三段。"),
+        ])
+        let firstID = chapterIDs[0]
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let listed = await harness.execute("novel_list_chapters", "{}")
+        guard case .filled(let listText) = listed else {
+            XCTFail("列章应成功，实际 \(listed)")
+            return
+        }
+        XCTAssertTrue(listText.contains("工作章节 2 章"))
+        XCTAssertTrue(listText.contains("《旧章》"))
+        XCTAssertTrue(listText.contains("《新章》"))
+        XCTAssertTrue(listText.contains("3 段"))
+
+        let latest = await harness.execute("novel_read_chapter", "{}")
+        guard case .filled(let latestText) = latest else {
+            XCTFail("读最新章应成功，实际 \(latest)")
+            return
+        }
+        XCTAssertTrue(latestText.contains("第 2 章 《新章》"))
+        XCTAssertTrue(latestText.contains("[1] 后章第一段。"))
+        XCTAssertTrue(latestText.contains("[3] 后章第三段。"))
+
+        let ranged = await harness.execute(
+            "novel_read_chapter",
+            jsonArgs([
+                "chapter_id": firstID.description,
+                "start_paragraph": 2,
+                "end_paragraph": 2,
+            ])
+        )
+        guard case .filled(let rangedText) = ranged else {
+            XCTFail("按 id 读段应成功，实际 \(ranged)")
+            return
+        }
+        XCTAssertTrue(rangedText.contains("第 1 章 《旧章》"))
+        XCTAssertTrue(rangedText.contains("[2] 第二段。"))
+        XCTAssertFalse(rangedText.contains("[1] 第一段。"))
+    }
+
+    func testReviseChapterPausesForApprovalThenWritesOnUserInitiation() async throws {
+        let (harness, chapterID) = try await makeHarnessWithChapter(
+            title: "旧标题",
+            content: "第一段。\n\n第二段有矛盾。\n\n第三段。"
+        )
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let arguments = jsonArgs([
+            "start_paragraph": 2,
+            "end_paragraph": 2,
+            "new_text": "第二段已经改掉了那个矛盾。",
+            "reason": "事实自相矛盾",
+        ])
+        let paused = await harness.execute("novel_revise_chapter", arguments)
+        guard case .needsApproval(let reason) = paused else {
+            XCTFail("模型发起改正文应停在审批卡，实际 \(paused)")
+            return
+        }
+        XCTAssertTrue(reason.contains("确认"))
+
+        var snapshot = try await harness.snapshot()
+        var versionID = try XCTUnwrap(snapshot.branches.first?.workingChapterSelections.first?.versionID)
+        XCTAssertEqual(
+            snapshot.chapterVersions.first(where: { $0.id == versionID })?.content,
+            "第一段。\n\n第二段有矛盾。\n\n第三段。",
+            "审批前不得改写正文"
+        )
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
+
+        let prompt = try await harness.executor.revisionApprovalPrompt(from: arguments).get()
+        XCTAssertEqual(prompt.options, NovelChapterRevisionApproval.options)
+        XCTAssertEqual(prompt.chapterRevision?.chapterID, chapterID)
+        XCTAssertEqual(prompt.chapterRevision?.oldText, "第二段有矛盾。")
+        XCTAssertEqual(prompt.chapterRevision?.newText, "第二段已经改掉了那个矛盾。")
+
+        let written = await harness.executor.execute(
+            name: "novel_revise_chapter",
+            arguments: arguments,
+            isUserInitiated: true
+        )
+        guard case .filled(let receipt) = written else {
+            XCTFail("作者确认后应写入正文，实际 \(written)")
+            return
+        }
+        XCTAssertTrue(receipt.contains("已写入"))
+        XCTAssertTrue(receipt.contains("第 2 段"))
+
+        snapshot = try await harness.snapshot()
+        versionID = try XCTUnwrap(snapshot.branches.first?.workingChapterSelections.first?.versionID)
+        XCTAssertEqual(
+            snapshot.chapterVersions.first(where: { $0.id == versionID })?.content,
+            "第一段。\n\n第二段已经改掉了那个矛盾。\n\n第三段。"
+        )
+        XCTAssertTrue(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
+        XCTAssertEqual(snapshot.branches.first?.syncStatus, .needsSync)
+    }
+
+    func testReviseChapterRejectsInvalidRangeWithoutWriting() async throws {
+        let (harness, _) = try await makeHarnessWithChapter(content: "只有一段。")
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_revise_chapter",
+            jsonArgs([
+                "start_paragraph": 2,
+                "end_paragraph": 3,
+                "new_text": "不该写进去",
+            ])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("越界改正文应失败，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("out of bounds") || message.contains("段落"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
+    }
+
     func testProposeChapterPlanSavesDraftAndReusesExistingPlanID() async throws {
         let harness = try await makeHarness()
         defer { try? FileManager.default.removeItem(at: harness.root) }
@@ -366,6 +500,10 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
             ("novel_propose_chapter_plan", jsonArgs([
                 "outline_placement": "x", "goal_and_conflict": "   ", "must_happen": [],
                 "must_not_happen": [], "ending_hook": "", "visible_facts": [],
+            ]), "不能为空"),
+            ("novel_revise_chapter", "{}", "start_paragraph"),
+            ("novel_revise_chapter", jsonArgs([
+                "start_paragraph": 1, "end_paragraph": 1, "new_text": "   ",
             ]), "不能为空"),
         ]
         for (name, arguments, expectedFragment) in cases {
@@ -538,6 +676,55 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         XCTAssertTrue(snapshot.materials.isEmpty, "被拒的资料不得落盘")
         XCTAssertEqual(snapshot.project.name, "代笔中也可改名")
         XCTAssertEqual(snapshot.upcomingArc(for: harness.branchID)?.beats, ["照常记录"])
+    }
+
+    func testGhostwriteBlocksChapterRevision() async throws {
+        let (harness, _) = try await makeHarnessWithChapter()
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try await harness.creation.saveGhostwriteBatchProgress(NovelGhostwriteBatchProgressRecord(
+            schemaVersion: NovelGhostwriteBatchProgressRecord.currentSchemaVersion,
+            projectID: harness.projectID,
+            branchID: harness.branchID,
+            phase: .writing,
+            pauseReason: nil,
+            detailMessage: nil,
+            candidateID: nil,
+            chapterPlanDigest: nil,
+            autoCollectedCandidateIDs: [],
+            startedAt: startedAt,
+            updatedAt: startedAt,
+            targetChapterCount: 1,
+            completedChapterCount: 0,
+            currentChapterIndex: 1,
+            lastCompletedPlanSummary: nil,
+            pendingSyncChapterCredit: false,
+            qualityAttemptIndex: 0,
+            maxQualityAttempts: 3,
+            lastFailureReceipt: nil,
+            supersededCandidateIDs: [],
+            recentFailureFingerprints: [],
+            revisionBriefOverride: nil,
+            didThinContractAmendThisChapter: false,
+            contractAmendments: []
+        ))
+
+        let outcome = await harness.execute(
+            "novel_revise_chapter",
+            jsonArgs([
+                "start_paragraph": 1,
+                "end_paragraph": 1,
+                "new_text": "代笔中不该改",
+            ])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("代笔中改正文应被拒绝，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("代笔正在推进本章"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
     }
 
     func testPausedGhostwriteAllowsPlanDraft() async throws {

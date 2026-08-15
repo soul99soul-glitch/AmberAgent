@@ -482,6 +482,18 @@ private struct NovelAskUserCard: View {
     @State private var imeBank = NovelIMEFieldBank()
 
     var body: some View {
+        if presentation.prompt.chapterRevision != nil {
+            NovelChapterRevisionCard(
+                presentation: presentation,
+                blocker: blocker,
+                onSubmit: onSubmit
+            )
+        } else {
+            askUserBody
+        }
+    }
+
+    private var askUserBody: some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(
                 presentation.isAnswered ? "已回答" : "需要你决定",
@@ -613,6 +625,132 @@ private struct NovelAskUserCard: View {
                     validationMessage = nil
                 }
             }
+        )
+    }
+}
+
+private struct NovelChapterRevisionCard: View {
+    let presentation: NovelAskUserPresentation
+    let blocker: NovelSessionActionBlocker?
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(statusTitle, systemImage: statusSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor)
+
+            if let revision = presentation.prompt.chapterRevision {
+                Text(rangeCaption(revision))
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let reason = revision.reason, !reason.isEmpty {
+                    Text(reason)
+                        .font(.subheadline)
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                revisionBlock(title: "原文", text: revision.oldText)
+                revisionBlock(title: "改为", text: revision.newText)
+            }
+
+            if let response = presentation.response,
+               response.answer != NovelChapterRevisionApproval.approveOption,
+               response.answer != NovelChapterRevisionApproval.rejectOption {
+                Text(response.answer)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground2)
+            }
+
+            if presentation.response == nil {
+                if let blocker {
+                    Text(blocker.displayName)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+                HStack(spacing: 10) {
+                    Button {
+                        onSubmit(NovelChapterRevisionApproval.rejectOption)
+                    } label: {
+                        Text(NovelChapterRevisionApproval.rejectOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .contentShape(Rectangle())
+
+                    Button {
+                        onSubmit(NovelChapterRevisionApproval.approveOption)
+                    } label: {
+                        Text(NovelChapterRevisionApproval.approveOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .contentShape(Rectangle())
+                }
+                .disabled(blocker != nil)
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var statusTitle: String {
+        guard let answer = presentation.response?.answer else { return "改正文审批" }
+        if answer == NovelChapterRevisionApproval.approveOption { return "已写入正文" }
+        if answer == NovelChapterRevisionApproval.rejectOption { return "已拒绝这次修改" }
+        return "已回答"
+    }
+
+    private var statusSymbol: String {
+        switch presentation.response?.answer {
+        case NovelChapterRevisionApproval.approveOption: "checkmark.circle.fill"
+        case NovelChapterRevisionApproval.rejectOption: "xmark.circle.fill"
+        default: "square.and.pencil"
+        }
+    }
+
+    private var statusColor: Color {
+        switch presentation.response?.answer {
+        case NovelChapterRevisionApproval.approveOption: AmberTheme.accentGreen
+        case NovelChapterRevisionApproval.rejectOption: AmberTheme.foreground2
+        default: AmberTheme.accent
+        }
+    }
+
+    private func rangeCaption(_ revision: NovelChapterRevisionProposal) -> String {
+        let range = revision.startParagraph == revision.endParagraph
+            ? "第 \(revision.startParagraph) 段"
+            : "第 \(revision.startParagraph)–\(revision.endParagraph) 段"
+        return "第 \(revision.chapterOrdinal) 章 · \(revision.chapterTitle) · \(range)"
+    }
+
+    private func revisionBlock(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.foreground2)
+            ScrollView {
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 180)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AmberTheme.surface.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
     }
 }

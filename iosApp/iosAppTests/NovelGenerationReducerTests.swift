@@ -161,6 +161,46 @@ final class NovelGenerationReducerTests: XCTestCase {
         XCTAssertEqual(resumed.branches[0].activeRunID, answerRun.id)
     }
 
+    func testChapterRevisionApprovalPersistsAsAskUserInteraction() throws {
+        let original = try NovelTestFixtures.document()
+        let questionRun = makeRequest(document: original, kind: .discussion)
+        let started = try begin(questionRun, in: original)
+        let prompt = NovelAskUserPrompt(
+            question: "将第 1 章《旧标题》第 2 段写入正文？",
+            options: NovelChapterRevisionApproval.options,
+            chapterRevision: NovelChapterRevisionProposal(
+                chapterID: NovelChapterID(),
+                chapterOrdinal: 1,
+                chapterTitle: "旧标题",
+                startParagraph: 2,
+                endParagraph: 2,
+                oldText: "第二段有矛盾。",
+                newText: "第二段已经改掉了那个矛盾。",
+                reason: "事实自相矛盾"
+            )
+        )
+
+        let awaiting = try NovelGenerationReducer.completeAwaitingUser(
+            runID: questionRun.id,
+            prompt: prompt,
+            preface: "这段和前面的设定对不上。",
+            in: started,
+            now: terminalTime
+        )
+        XCTAssertEqual(awaiting.message?.message.interaction, .askUser(prompt))
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(awaiting.document))
+
+        XCTAssertThrowsError(
+            try NovelGenerationReducer.validateAskUserPrompt(
+                NovelAskUserPrompt(
+                    question: "将第 1 章写入正文？",
+                    options: ["好", "不好"],
+                    chapterRevision: prompt.chapterRevision
+                )
+            )
+        )
+    }
+
     func testAskUserQuestionAndAnswerCanContinueAcrossQuickStartRuns() throws {
         let original = try quickStartDocument()
         let questionRun = makeRequest(document: original, kind: .quickStart)
@@ -1031,7 +1071,9 @@ final class NovelGenerationReducerTests: XCTestCase {
             receipts[0]["sections"] = sections
             object["injectionReceipts"] = receipts
         }
-        assertInvalid(changedPrompt, containing: "fixed Prompt receipt evidence")
+        // Accepted prompt versions must not brick load when catalog text later
+        // diverges from a stored receipt hash (2026-07-25 / 2026-08-12).
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(changedPrompt))
     }
 
     func testValidatorAcceptsHistoricalDiscussionPromptEvidence() throws {

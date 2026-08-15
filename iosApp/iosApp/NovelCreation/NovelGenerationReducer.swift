@@ -786,6 +786,21 @@ extension NovelGenerationReducer {
         guard !prompt.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NovelError.invalidInput("Ask User requires question text.")
         }
+        if let revision = prompt.chapterRevision {
+            guard prompt.options == NovelChapterRevisionApproval.options else {
+                throw NovelError.invalidInput("Chapter revision approval must use the fixed confirm/reject options.")
+            }
+            guard revision.chapterOrdinal >= 1,
+                  revision.startParagraph >= 1,
+                  revision.endParagraph >= revision.startParagraph else {
+                throw NovelError.invalidInput("Chapter revision approval has an invalid paragraph range.")
+            }
+            guard !revision.oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !revision.newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NovelError.invalidInput("Chapter revision approval is missing old or new text.")
+            }
+            return
+        }
         let options = NovelCharacterIdentityResolver.normalizedAliases(prompt.options)
         guard options.count == prompt.options.count else {
             throw NovelError.invalidInput("Ask User options must be unique and non-empty.")

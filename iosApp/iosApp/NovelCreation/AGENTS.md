@@ -6,7 +6,7 @@
 
 - 小说项目文档是人物、关系、世界观、剧情状态、章节、分支和运行记录的唯一权威来源；普通 Chat conversation、Memory、Lorebook、Workspace 和 UI cache 都不能覆盖它。
 - `DefaultNovelCreation` actor 与 repository/reducer 链负责领域 mutation 和持久化。View/ViewModel 负责意图与呈现，不得绕过领域层直接伪造成功状态。
-- 候选稿不是正式正文。只有 collect/replace/polish 等既有事务成功提交后，内容和派生剧情状态才可进入当前分支。
+- 候选稿不是正式正文。只有 collect/replace/polish 等既有事务成功提交后，内容和派生剧情状态才可进入当前分支。讨论里的 `novel_revise_chapter` 必须先出审批卡，作者确认后再走既有 `saveManualEdit`，不得另开写通道。
 - 手动编辑资料后，下一次 prompt/injection 必须读取已持久化的当前项目快照；不得继续使用生成建议、旧 ViewModel snapshot 或历史分支的缓存。
 - receipt、输入证据与提交校验必须复用同一个 canonical projected-state 构造，不能在不同阶段各自拼装近似内容。
 

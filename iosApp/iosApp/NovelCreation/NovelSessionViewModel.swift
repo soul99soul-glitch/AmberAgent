@@ -336,6 +336,7 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var transientRunRecord: NovelActiveRunRecord?
     @ObservationIgnored private var terminalAwaitingRefresh = false
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
+    @ObservationIgnored private var answeringAskUserMessageID: NovelMessageID?
     @ObservationIgnored private var sessionActionOwnerID: UUID?
     @ObservationIgnored private var polishRetryTask: Task<Void, Never>?
     @ObservationIgnored private var polishRetryTaskBinding: NovelSessionBinding?
@@ -970,11 +971,23 @@ final class NovelSessionViewModel {
         promptMessageID: NovelMessageID,
         answer: String
     ) async -> Bool {
+        guard answeringAskUserMessageID != promptMessageID else { return false }
         guard let promptMessage = durableMessages.first(where: {
             $0.id == promptMessageID && $0.role == .assistant
-        }), case .some(.askUser) = promptMessage.interaction else {
+        }), case .some(.askUser(let prompt)) = promptMessage.interaction else {
             operationErrorMessage = "这个问题已经失效，请重新发起讨论。"
             return false
+        }
+        answeringAskUserMessageID = promptMessageID
+        defer { answeringAskUserMessageID = nil }
+        if let revision = prompt.chapterRevision {
+            let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == NovelChapterRevisionApproval.approveOption {
+                guard await applyChapterRevision(revision) else { return false }
+            } else if trimmed != NovelChapterRevisionApproval.rejectOption {
+                operationErrorMessage = "请选择写入正文或拒绝这次修改。"
+                return false
+            }
         }
         let response = NovelAskUserResponse(
             promptMessageID: promptMessageID,
@@ -1004,6 +1017,51 @@ final class NovelSessionViewModel {
             inputBudgetTokens: 16_000
         )
         return await start(draft)
+    }
+
+    private func applyChapterRevision(_ proposal: NovelChapterRevisionProposal) async -> Bool {
+        if isGhostwriting {
+            operationErrorMessage = "代笔正在推进本章，暂时不能改正文。"
+            return false
+        }
+        guard let binding,
+              let snapshot = workspace.projectSnapshot,
+              let branch = snapshot.branches.first(where: { $0.id == binding.branchID }),
+              let selection = branch.workingChapterSelections.first(where: {
+                  $0.chapterID == proposal.chapterID
+              }),
+              let version = snapshot.chapterVersions.first(where: {
+                  $0.id == selection.versionID && $0.chapterID == proposal.chapterID
+              }) else {
+            operationErrorMessage = "目标章节已经不在工作正文里，无法写入。"
+            return false
+        }
+        let replaced: (oldText: String, newContent: String)
+        do {
+            replaced = try NovelParagraphParser.replacingParagraphs(
+                in: version.content,
+                start: proposal.startParagraph,
+                end: proposal.endParagraph,
+                with: proposal.newText
+            )
+        } catch {
+            operationErrorMessage = "改正文失败：\(error.localizedDescription)"
+            return false
+        }
+        guard replaced.oldText == proposal.oldText else {
+            operationErrorMessage = "正文已变化，请重新读取后再改。"
+            return false
+        }
+        let saved = await workspace.saveManualRewrite(
+            chapterID: proposal.chapterID,
+            title: version.title,
+            content: replaced.newContent
+        )
+        if !saved {
+            operationErrorMessage = workspace.errorMessage ?? "改正文保存失败，请重试。"
+            return false
+        }
+        return true
     }
 
     @discardableResult

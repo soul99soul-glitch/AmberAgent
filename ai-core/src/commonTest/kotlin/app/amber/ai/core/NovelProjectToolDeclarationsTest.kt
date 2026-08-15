@@ -138,6 +138,53 @@ class NovelProjectToolDeclarationsTest {
     }
 
     @Test
+    fun listChaptersDeclarationIsReadOnlyWithNoArguments() {
+        val tool = createNovelListChaptersToolDeclaration()
+        assertEquals("novel_list_chapters", tool.name)
+        assertFalse(tool.needsApproval, "列章只读，不设审批门")
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertTrue(params.properties.isEmpty(), "列章无参数")
+        assertTrue(params.required.isNullOrEmpty())
+        assertTrue("read-only" in tool.description || "does not change" in tool.description)
+    }
+
+    @Test
+    fun readChapterDeclarationPinsOptionalSelectorsAndRange() {
+        val tool = createNovelReadChapterToolDeclaration()
+        assertEquals("novel_read_chapter", tool.name)
+        assertFalse(tool.needsApproval, "读章只读，不设审批门")
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertTrue(params.required.isNullOrEmpty(), "选择器和段落区间都是可选")
+        for (key in listOf("chapter_ordinal", "chapter_id", "start_paragraph", "end_paragraph")) {
+            assertTrue(key in params.properties, "读章必须声明 $key")
+        }
+        assertTrue("paragraph" in tool.description)
+        assertTrue("read-only" in tool.description || "does not change" in tool.description)
+    }
+
+    @Test
+    fun reviseChapterDeclarationRequiresRangeAndApprovalCard() {
+        val tool = createNovelReviseChapterToolDeclaration()
+        assertEquals("novel_revise_chapter", tool.name)
+        assertTrue(tool.needsApproval, "改正文必须走审批卡")
+        assertFalse(tool.allowsAutoApproval, "改正文不得自动批准")
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertEquals(listOf("start_paragraph", "end_paragraph", "new_text"), params.required)
+        assertTrue("chapter_ordinal" in params.properties)
+        assertTrue("chapter_id" in params.properties)
+        assertTrue("reason" in params.properties)
+        val description = tool.description
+        assertTrue("approval" in description, "描述必须写明审批卡")
+        assertTrue("author" in description || "approve" in description)
+    }
+
+    @Test
     fun novelDeclarationsAreNotPartOfTheIosToolCatalog() {
         val novelNames = listOf(
             "novel_rename_project",
@@ -147,6 +194,9 @@ class NovelProjectToolDeclarationsTest {
             "novel_revise_material",
             "novel_propose_chapter_plan",
             "novel_set_chapter_title",
+            "novel_list_chapters",
+            "novel_read_chapter",
+            "novel_revise_chapter",
         )
         val catalogNames = iosToolDeclarations(novelNames).map { it.name }
         assertTrue(catalogNames.isEmpty(), "小说写工具不得进入 iosToolDeclaration 注册表: $catalogNames")

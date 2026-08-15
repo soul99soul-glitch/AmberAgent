@@ -9,6 +9,11 @@ struct NovelProjectToolRunContext: Sendable, Equatable {
     let branchID: NovelBranchID
 }
 
+struct NovelProjectToolIssue: Error, Equatable {
+    let message: String
+    init(_ message: String) { self.message = message }
+}
+
 /// Executes the novel project field-write tools inside the discussion agent loop.
 /// Every tool decodes JSON arguments, validates them, translates them into an
 /// existing `NovelAction`, and runs it through `DefaultNovelCreation.perform` —
@@ -26,7 +31,13 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         "novel_revise_material",
         "novel_propose_chapter_plan",
         "novel_set_chapter_title",
+        "novel_list_chapters",
+        "novel_read_chapter",
+        "novel_revise_chapter",
     ]
+
+    static let readOutputCharacterLimit = 24_000
+    static let reviseNewTextCharacterLimit = 32_000
 
     private weak var creation: DefaultNovelCreation?
     private let projectID: NovelProjectID
@@ -54,6 +65,12 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return await proposeChapterPlan(arguments)
         case "novel_set_chapter_title":
             return await setChapterTitle(arguments)
+        case "novel_list_chapters":
+            return await listChapters()
+        case "novel_read_chapter":
+            return await readChapter(arguments)
+        case "novel_revise_chapter":
+            return await reviseChapter(arguments, isUserInitiated: isUserInitiated)
         default:
             return .failed("未知的小说项目工具：\(name)。")
         }
@@ -330,44 +347,24 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
             return .failed(reason)
         }
-        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
-            return .failed("当前分支不可用，无法修改章节标题。")
+        let chapter: WorkingChapter
+        switch resolveWorkingChapter(
+            snapshot: snapshot,
+            chapterID: args.chapter_id,
+            chapterOrdinal: args.chapter_ordinal,
+            toolName: "novel_set_chapter_title"
+        ) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let resolved):
+            chapter = resolved
         }
-        let selections = branch.workingChapterSelections
-        guard !selections.isEmpty else {
-            return .failed("当前分支还没有收录正文，无法修改章节标题。")
-        }
-
-        let selection: NovelChapterSelection
-        if let rawID = args.chapter_id?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !rawID.isEmpty {
-            guard let uuid = UUID(uuidString: rawID) else {
-                return .failed("novel_set_chapter_title 的 chapter_id 不是合法 UUID：\(rawID)。")
-            }
-            let chapterID = NovelChapterID(uuid)
-            guard let match = selections.first(where: { $0.chapterID == chapterID }) else {
-                return .failed("找不到 chapter_id=\(rawID) 的工作章节。")
-            }
-            selection = match
-        } else if let ordinal = args.chapter_ordinal {
-            guard ordinal >= 1, ordinal <= selections.count else {
-                return .failed(
-                    "novel_set_chapter_title 的 chapter_ordinal 越界：当前共 \(selections.count) 章，收到 \(ordinal)。"
-                )
-            }
-            selection = selections[ordinal - 1]
-        } else {
-            selection = selections[selections.count - 1]
-        }
-
-        guard let version = snapshot.chapterVersions.first(where: {
-            $0.id == selection.versionID && $0.chapterID == selection.chapterID
-        }) else {
-            return .failed("目标章节版本丢失，无法修改标题。")
-        }
-        let oldTitle = version.title
+        let oldTitle = chapter.version.title
         guard oldTitle != title else {
             return .failed("章节标题已是「\(title)」，无需修改。")
+        }
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return .failed("当前分支不可用，无法修改章节标题。")
         }
 
         let command = NovelSaveManualEditCommand(
@@ -379,21 +376,161 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             ),
             projectID: projectID,
             branchID: branchID,
-            chapterID: selection.chapterID,
+            chapterID: chapter.chapterID,
             versionID: NovelChapterVersionID(),
             title: title,
-            content: version.content,
+            content: chapter.version.content,
             factCompatibilityID: UUID(),
             expectedWorkingRevision: branch.workingRevision
         )
         if let failure = await perform(.saveManualEdit(command)) {
             return .failed("章节标题保存失败：\(failure)")
         }
-        let ordinal = (selections.firstIndex(where: { $0.chapterID == selection.chapterID }) ?? 0) + 1
         return .filled(
-            "已将第 \(ordinal) 章标题「\(oldTitle)」→「\(title)」。"
+            "已将第 \(chapter.ordinal) 章标题「\(oldTitle)」→「\(title)」。"
                 + " 正文未改；分支可能需要同步剧情状态。"
         )
+    }
+
+    private func listChapters() async -> IOSAgentToolOutcome {
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法列出章节。")
+        }
+        let chapters = workingChapters(in: snapshot)
+        guard !chapters.isEmpty else {
+            return .filled("当前分支还没有收录正文。")
+        }
+        let lines = chapters.map { chapter in
+            let paragraphs = NovelParagraphParser.paragraphs(in: chapter.version.content)
+            return "\(chapter.ordinal). 《\(chapter.version.title)》 \(chapter.version.content.count) 字 / \(paragraphs.count) 段 (id: \(chapter.chapterID))"
+        }
+        return .filled("工作章节 \(chapters.count) 章：\n" + lines.joined(separator: "\n"))
+    }
+
+    private func readChapter(_ arguments: String) async -> IOSAgentToolOutcome {
+        let args: ReadChapterArguments = decode(arguments) ?? ReadChapterArguments(
+            chapter_ordinal: nil,
+            chapter_id: nil,
+            start_paragraph: nil,
+            end_paragraph: nil
+        )
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法读取正文。")
+        }
+        let chapter: WorkingChapter
+        switch resolveWorkingChapter(
+            snapshot: snapshot,
+            chapterID: args.chapter_id,
+            chapterOrdinal: args.chapter_ordinal,
+            toolName: "novel_read_chapter"
+        ) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let resolved):
+            chapter = resolved
+        }
+        let excerpt: (total: Int, text: String)
+        do {
+            excerpt = try NovelParagraphParser.numberedExcerpt(
+                in: chapter.version.content,
+                start: args.start_paragraph,
+                end: args.end_paragraph
+            )
+        } catch {
+            return .failed("novel_read_chapter 无法读取段落：\(error.localizedDescription)")
+        }
+        let header = "第 \(chapter.ordinal) 章 《\(chapter.version.title)》(id: \(chapter.chapterID)) 共 \(excerpt.total) 段 / \(chapter.version.content.count) 字"
+        var body = header + "\n---\n" + excerpt.text
+        if body.count > Self.readOutputCharacterLimit {
+            let prefix = String(body.prefix(Self.readOutputCharacterLimit))
+            body = prefix
+                + "\n\n… 正文已截断。请用 start_paragraph / end_paragraph 分段读取。"
+        }
+        return .filled(body)
+    }
+
+    private func reviseChapter(
+        _ arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        switch await revisionApprovalPrompt(from: arguments) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let prompt):
+            if isUserInitiated {
+                return await applyRevision(prompt.chapterRevision)
+            }
+            return .needsApproval("等待作者确认改正文")
+        }
+    }
+
+    func revisionApprovalPrompt(from arguments: String) async -> Result<NovelAskUserPrompt, NovelProjectToolIssue> {
+        guard let args: ReviseChapterArguments = decode(arguments) else {
+            return .failure(.init(
+                "novel_revise_chapter 参数无效：需要 start_paragraph、end_paragraph、new_text。"
+            ))
+        }
+        let newText = args.new_text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !newText.isEmpty else {
+            return .failure(.init("novel_revise_chapter 的 new_text 不能为空。"))
+        }
+        guard newText.count <= Self.reviseNewTextCharacterLimit else {
+            return .failure(.init(
+                "novel_revise_chapter 的 new_text 过长（最多 \(Self.reviseNewTextCharacterLimit) 字）。"
+            ))
+        }
+        guard args.start_paragraph >= 1, args.end_paragraph >= args.start_paragraph else {
+            return .failure(.init("novel_revise_chapter 的段落区间无效。"))
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failure(.init("当前小说项目不可用，无法改正文。"))
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failure(.init(reason))
+        }
+        let chapter: WorkingChapter
+        switch resolveWorkingChapter(
+            snapshot: snapshot,
+            chapterID: args.chapter_id,
+            chapterOrdinal: args.chapter_ordinal,
+            toolName: "novel_revise_chapter"
+        ) {
+        case .failure(let issue):
+            return .failure(issue)
+        case .success(let resolved):
+            chapter = resolved
+        }
+        let replaced: (oldText: String, newContent: String)
+        do {
+            replaced = try NovelParagraphParser.replacingParagraphs(
+                in: chapter.version.content,
+                start: args.start_paragraph,
+                end: args.end_paragraph,
+                with: newText
+            )
+        } catch {
+            return .failure(.init("novel_revise_chapter 无法替换段落：\(error.localizedDescription)"))
+        }
+        let reason = args.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let proposal = NovelChapterRevisionProposal(
+            chapterID: chapter.chapterID,
+            chapterOrdinal: chapter.ordinal,
+            chapterTitle: chapter.version.title,
+            startParagraph: args.start_paragraph,
+            endParagraph: args.end_paragraph,
+            oldText: replaced.oldText,
+            newText: newText,
+            reason: reason?.isEmpty == true ? nil : reason
+        )
+        let rangeLabel = args.start_paragraph == args.end_paragraph
+            ? "第 \(args.start_paragraph) 段"
+            : "第 \(args.start_paragraph)–\(args.end_paragraph) 段"
+        let prompt = NovelAskUserPrompt(
+            question: "将第 \(chapter.ordinal) 章《\(chapter.version.title)》\(rangeLabel)写入正文？",
+            options: NovelChapterRevisionApproval.options,
+            chapterRevision: proposal
+        )
+        return .success(prompt)
     }
 
     // MARK: - Helpers
@@ -419,6 +556,128 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return nil
         }
         return snapshot
+    }
+
+    private struct WorkingChapter {
+        let ordinal: Int
+        let chapterID: NovelChapterID
+        let version: NovelChapterVersionRecord
+    }
+
+    private func workingChapters(in snapshot: NovelProjectSnapshot) -> [WorkingChapter] {
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return []
+        }
+        let discarded = Set(
+            snapshot.chapters.compactMap { chapter -> NovelChapterID? in
+                chapter.discardedAt == nil ? nil : chapter.id
+            }
+        )
+        return branch.workingChapterSelections.enumerated().compactMap { index, selection in
+            guard !discarded.contains(selection.chapterID),
+                  let version = snapshot.chapterVersions.first(where: {
+                      $0.id == selection.versionID && $0.chapterID == selection.chapterID
+                  }) else {
+                return nil
+            }
+            return WorkingChapter(
+                ordinal: index + 1,
+                chapterID: selection.chapterID,
+                version: version
+            )
+        }
+    }
+
+    private func resolveWorkingChapter(
+        snapshot: NovelProjectSnapshot,
+        chapterID: String?,
+        chapterOrdinal: Int?,
+        toolName: String
+    ) -> Result<WorkingChapter, NovelProjectToolIssue> {
+        let chapters = workingChapters(in: snapshot)
+        guard !chapters.isEmpty else {
+            return .failure(.init("当前分支还没有收录正文，无法使用 \(toolName)。"))
+        }
+        if let rawID = chapterID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !rawID.isEmpty {
+            guard let uuid = UUID(uuidString: rawID) else {
+                return .failure(.init("\(toolName) 的 chapter_id 不是合法 UUID：\(rawID)。"))
+            }
+            let id = NovelChapterID(uuid)
+            guard let match = chapters.first(where: { $0.chapterID == id }) else {
+                return .failure(.init("找不到 chapter_id=\(rawID) 的工作章节。"))
+            }
+            return .success(match)
+        }
+        if let ordinal = chapterOrdinal {
+            guard let match = chapters.first(where: { $0.ordinal == ordinal }) else {
+                return .failure(.init(
+                    "\(toolName) 的 chapter_ordinal 越界：当前共 \(chapters.count) 章，收到 \(ordinal)。"
+                ))
+            }
+            return .success(match)
+        }
+        return .success(chapters[chapters.count - 1])
+    }
+
+    private func applyRevision(_ proposal: NovelChapterRevisionProposal?) async -> IOSAgentToolOutcome {
+        guard let proposal else {
+            return .failed("改正文审批缺少替换内容。")
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法写入正文。")
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failed(reason)
+        }
+        guard let chapter = workingChapters(in: snapshot).first(where: {
+            $0.chapterID == proposal.chapterID
+        }) else {
+            return .failed("目标章节已不在工作正文里，无法写入。")
+        }
+        let replaced: (oldText: String, newContent: String)
+        do {
+            replaced = try NovelParagraphParser.replacingParagraphs(
+                in: chapter.version.content,
+                start: proposal.startParagraph,
+                end: proposal.endParagraph,
+                with: proposal.newText
+            )
+        } catch {
+            return .failed("改正文写入失败：\(error.localizedDescription)")
+        }
+        guard replaced.oldText == proposal.oldText else {
+            return .failed("正文已变化，请重新读取后再改。")
+        }
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return .failed("当前分支不可用，无法写入正文。")
+        }
+        let command = NovelSaveManualEditCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: snapshot.project.revision,
+                expectedConfigRevision: snapshot.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: projectID,
+            branchID: branchID,
+            chapterID: proposal.chapterID,
+            versionID: NovelChapterVersionID(),
+            title: chapter.version.title,
+            content: replaced.newContent,
+            factCompatibilityID: UUID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        if let failure = await perform(.saveManualEdit(command)) {
+            return .failed("改正文保存失败：\(failure)")
+        }
+        let rangeLabel = proposal.startParagraph == proposal.endParagraph
+            ? "第 \(proposal.startParagraph) 段"
+            : "第 \(proposal.startParagraph)–\(proposal.endParagraph) 段"
+        return .filled(
+            "已写入第 \(proposal.chapterOrdinal) 章《\(proposal.chapterTitle)》\(rangeLabel)。"
+                + " 分支需要同步剧情状态。"
+        )
     }
 
     /// 代笔运行中禁止改写合同/资料——对齐 UI 禁用合同编辑的既有判定
@@ -507,4 +766,20 @@ private struct SetChapterTitleArguments: Decodable {
     let title: String
     let chapter_ordinal: Int?
     let chapter_id: String?
+}
+
+private struct ReadChapterArguments: Decodable {
+    let chapter_ordinal: Int?
+    let chapter_id: String?
+    let start_paragraph: Int?
+    let end_paragraph: Int?
+}
+
+private struct ReviseChapterArguments: Decodable {
+    let chapter_ordinal: Int?
+    let chapter_id: String?
+    let start_paragraph: Int
+    let end_paragraph: Int
+    let new_text: String
+    let reason: String?
 }

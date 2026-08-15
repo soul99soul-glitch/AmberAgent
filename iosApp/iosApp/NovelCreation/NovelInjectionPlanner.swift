@@ -1304,7 +1304,17 @@ private extension NovelInjectionPlanner {
         let interaction: String
         switch message.interaction {
         case .askUser(let prompt):
-            interaction = "Question: \(prompt.question)"
+            if let revision = prompt.chapterRevision {
+                let range = revision.startParagraph == revision.endParagraph
+                    ? "paragraph \(revision.startParagraph)"
+                    : "paragraphs \(revision.startParagraph)-\(revision.endParagraph)"
+                interaction = "Question: \(prompt.question)\n" +
+                    "Chapter revision proposal: chapter \(revision.chapterOrdinal) 《\(revision.chapterTitle)》 \(range)\n" +
+                    "Previous text:\n\(revision.oldText)\n" +
+                    "Proposed text:\n\(revision.newText)"
+            } else {
+                interaction = "Question: \(prompt.question)"
+            }
         case .askUserAnswer(let response):
             interaction = "Answer: \(response.answer)"
         case nil:

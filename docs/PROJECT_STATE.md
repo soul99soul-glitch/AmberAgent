@@ -1,6 +1,24 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-15（搜索工具胶囊生命周期宽度恒定修复）
+Last updated: 2026-08-15（讨论改正文审批卡）
+
+## 改正文审批卡复核修补（2026-08-15）
+
+审查后只改已坐实的问题：原文/改为限高 180 滚动；拒绝不再用成功绿勾；按钮 label 拉满 44pt + `contentShape`；去掉与范围行重复的问句和选项回显；inset 改 `surface.opacity(0.72)`。ViewModel 对同一 prompt 加回答闩，确认时复用 `isGhostwriting` 再挡一次。刻意不改：composer 锁、ask_user 夹带、Grok Web 工具未挂载、写入与开讨论合成一笔。
+
+## 讨论可读写已收录正文，写入走审批卡（2026-08-15）
+
+产品缺口：章已收录后，讨论能改资料/标题/计划，但读不到完整正文、也不能把谈拢的段级修改写回正史；模型还会说「讨论模式什么都改不了」。
+
+- **读**：`novel_list_chapters` / `novel_read_chapter`（任意工作章、带段落号；注入仍只带最新章 6000 字尾巴）。
+- **写**：`novel_revise_chapter` 需要审批、禁止自动批准。模型调用后停在审批卡（原文/改为 + 写入正文/拒绝）；确认后走既有 `saveManualEdit`，分支 `needsSync` 并自动开剧情同步。拒绝不写。代笔推进中拒绝。
+- **提示词**：`novel.discussion.v9`。明确禁止再说「讨论改不了已收录正文」；v8 进 `acceptedVersions`。
+- **验证**：`:ai-core:jvmTest` `NovelProjectToolDeclarationsTest` 绿；iOS 定点 `IOSNovelProjectToolExecutorTests` / `NovelPromptCatalogTests` / `NovelLiveModelAdapterTests` / `NovelGenerationReducerTests` 绿（iPhone 17 Pro，`/tmp/amber-dd-novel-ms`）。
+- **未验证**：真机讨论里点审批卡写入长章、跨章矛盾后再同步的手感。
+
+## Gemini Antigravity 404（2026-08-15，工作区未提交）
+
+真机发 `gemini-3.7-flash` 得 HTTP 404 NOT_FOUND。Antigravity 真实 id 带 `-high/-tiered`；刷新结果只活在内存，重启后按思考档硬拼 `*-medium/*-tiered` 或光秃 GA 名，cloudcode-pa 都 404。修复：变体表落 UserDefaults；发送前缺目录就重拉；没有目录时不发明后缀；错误带上实际 wire model。`IOSGeminiProviderTests` 全绿。已装到 iPhone Air。
 
 ## 搜索工具胶囊执行期间撑宽、完成缩回（2026-08-15，工作区未提交）
 

@@ -1032,10 +1032,12 @@ extension NovelLiveModelAdapter {
                 }
                 var result: IOSAgentToolEngineResult!
                 let producedVisibleText = VisibleTextFlag()
+                var executorMap: [String: any IOSToolExecutor] = [:]
                 for attempt in 0..<2 {
+                    executorMap = executors(request.novelProjectContext)
                     let engine = IOSAgentToolEngine(
                         provider: provider,
-                        executors: executors(request.novelProjectContext),
+                        executors: executorMap,
                         configuration: .init(maxSteps: 4, honorApprovalPause: true)
                     )
                     let stepText = DiscussionStepTextAccumulator()
@@ -1096,6 +1098,29 @@ extension NovelLiveModelAdapter {
                         callbacks.onFailure(failure(
                             code: "discussion_ask_user_invalid",
                             message: "模型提出的问题格式无法读取，请重试。",
+                            isRetryable: true
+                        ))
+                    }
+                    return
+                }
+                if let approval = result.pendingApproval,
+                   approval.toolName == "novel_revise_chapter" {
+                    guard let projectExecutor = executorMap["novel_revise_chapter"]
+                            as? IOSNovelProjectToolExecutor else {
+                        callbacks.onFailure(failure(
+                            code: "discussion_chapter_revision_unavailable",
+                            message: "当前讨论无法准备改正文审批，请重试。",
+                            isRetryable: true
+                        ))
+                        return
+                    }
+                    switch await projectExecutor.revisionApprovalPrompt(from: approval.arguments) {
+                    case .success(let prompt):
+                        callbacks.onAskUser(prompt, joinedAssistantText(in: result.messages))
+                    case .failure(let issue):
+                        callbacks.onFailure(failure(
+                            code: "discussion_chapter_revision_invalid",
+                            message: issue.message,
                             isRetryable: true
                         ))
                     }
@@ -1202,6 +1227,9 @@ private extension NovelLiveModelAdapter {
                     ToolKt.createNovelReviseMaterialToolDeclaration(),
                     ToolKt.createNovelProposeChapterPlanToolDeclaration(),
                     ToolKt.createNovelSetChapterTitleToolDeclaration(),
+                    ToolKt.createNovelListChaptersToolDeclaration(),
+                    ToolKt.createNovelReadChapterToolDeclaration(),
+                    ToolKt.createNovelReviseChapterToolDeclaration(),
                 ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,

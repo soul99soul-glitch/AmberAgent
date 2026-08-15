@@ -406,6 +406,36 @@ enum NovelSessionMessageKind: String, Codable, Sendable {
 struct NovelAskUserPrompt: Codable, Equatable, Sendable {
     let question: String
     let options: [String]
+    /// Present only for `novel_revise_chapter` approval cards. Ordinary Ask User
+    /// prompts leave this nil so historical documents keep decoding.
+    let chapterRevision: NovelChapterRevisionProposal?
+
+    init(
+        question: String,
+        options: [String],
+        chapterRevision: NovelChapterRevisionProposal? = nil
+    ) {
+        self.question = question
+        self.options = options
+        self.chapterRevision = chapterRevision
+    }
+}
+
+enum NovelChapterRevisionApproval {
+    static let approveOption = "写入正文"
+    static let rejectOption = "拒绝这次修改"
+    static let options = [approveOption, rejectOption]
+}
+
+struct NovelChapterRevisionProposal: Codable, Equatable, Sendable {
+    let chapterID: NovelChapterID
+    let chapterOrdinal: Int
+    let chapterTitle: String
+    let startParagraph: Int
+    let endParagraph: Int
+    let oldText: String
+    let newText: String
+    let reason: String?
 }
 
 struct NovelAskUserResponse: Codable, Equatable, Sendable {

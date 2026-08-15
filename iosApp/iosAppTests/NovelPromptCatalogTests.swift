@@ -13,19 +13,23 @@ final class NovelPromptCatalogTests: XCTestCase {
         // （ask_user + 搜索）段落后追加「PROJECT WRITE TOOLS」段:讨论专用项目字段
         // 写工具（含 novel_set_chapter_title 改正文章节标题等）的存在、契约与使用纪律；
         // 旧 v6 文本归档进 `systemText(for:version:)` 并进 acceptedVersions。
-        // 2026-08-12: 追加 novel_set_chapter_title。完整 SHA 快照在工具面演进时易碎，
-        // 改为锁定 discussion 版本 + 写工具名单 + 版本唯一性。
+        // 2026-08-15: 追加正文读/改正文 + 审批卡，discussion 升到 v9。
         let discussion = NovelPromptCatalog.template(for: .discussion)
-        XCTAssertEqual(discussion.version, "novel.discussion.v8")
+        XCTAssertEqual(discussion.version, "novel.discussion.v9")
         XCTAssertTrue(discussion.systemText.contains("novel_set_chapter_title"))
         XCTAssertTrue(discussion.systemText.contains("novel_rename_project"))
-        // Archived v7 text must remain available for receipt hash re-check.
+        XCTAssertTrue(discussion.systemText.contains("novel_read_chapter"))
+        XCTAssertTrue(discussion.systemText.contains("novel_revise_chapter"))
         XCTAssertNotNil(
-            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v7")
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v8")
         )
         XCTAssertTrue(
             NovelPromptCatalog.acceptedVersions(for: .discussion)
-                .isSuperset(of: ["novel.discussion.v7", "novel.discussion.v8"])
+                .isSuperset(of: [
+                    "novel.discussion.v7",
+                    "novel.discussion.v8",
+                    "novel.discussion.v9",
+                ])
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
         XCTAssertFalse(snapshot.isEmpty)
@@ -75,7 +79,8 @@ final class NovelPromptCatalogTests: XCTestCase {
         let wholeChapter = NovelPromptCatalog.template(for: .proseWholeChapter).systemText
         let polish = NovelPromptCatalog.template(for: .wholeChapterPolish).systemText
 
-        XCTAssertTrue(discussion.contains("Do not write canonical manuscript"))
+        XCTAssertTrue(normalizedDiscussion.contains("approval card"))
+        XCTAssertTrue(normalizedDiscussion.contains("Never say you cannot edit collected manuscript"))
         XCTAssertTrue(discussion.contains("call ask_user"))
         XCTAssertTrue(discussion.contains("Ask one focused decision"))
         XCTAssertTrue(discussion.contains("recommended direction first"))
@@ -89,6 +94,9 @@ final class NovelPromptCatalogTests: XCTestCase {
             "novel_clear_upcoming_arc",
             "novel_revise_material",
             "novel_propose_chapter_plan",
+            "novel_list_chapters",
+            "novel_read_chapter",
+            "novel_revise_chapter",
         ] {
             XCTAssertTrue(discussion.contains(tool), "Discussion prompt is missing \(tool)")
         }
@@ -215,6 +223,10 @@ final class NovelPromptCatalogTests: XCTestCase {
             version: "novel.discussion.v6"
         ))
         XCTAssertTrue(NovelPromptCatalog.acceptedVersions(for: .discussion).contains("novel.discussion.v6"))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v8"
+        ))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,
             version: "novel.prose-continuation.v1"
