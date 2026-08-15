@@ -248,7 +248,11 @@ struct ChatToolStepModel: Identifiable {
             self.init(
                 id: stableID,
                 visualKind: .search,
-                title: Self.combinedLine(executed ? "已搜索" : "正在搜索", query),
+                // 状态动词在生命周期内恒定（"搜索 <query>"，进行中/完成由尾部转圈/对勾表达，
+                // 与 friendlyToolTitle 同款约定）：若随 executed 换词（正在搜索→已搜索），
+                // 胶囊理想宽在 toolCallStarted/toolResultAppended 间跳变——执行期间撑宽、
+                // 完成缩回（本轮真机 bug）。
+                title: Self.combinedLine("搜索", query),
                 detail: executed ? (failureReason ?? Self.searchResultSummary(from: tool.output)) : query.map { "关键词：\($0)" },
                 state: Self.state(executed: executed, failureReason: failureReason)
             )
@@ -924,21 +928,26 @@ struct ChatToolTimeline: View {
 
     @ViewBuilder
     private func trailingStatus(for state: ChatToolStepState) -> some View {
-        switch state {
-        case .done:
-            Image(systemName: "checkmark")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(AmberTheme.accentGreen)
-                .contentTransition(.symbolEffect(.replace.downUp))
-        case .active:
-            ProgressView()
-                .controlSize(.mini)
-                .tint(AmberTheme.accent)
-        case .failed:
-            Image(systemName: "exclamationmark")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(AmberTheme.accentRed)
-                .contentTransition(.symbolEffect(.replace.downUp))
+        Group {
+            switch state {
+            case .done:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AmberTheme.accentGreen)
+                    .contentTransition(.symbolEffect(.replace.downUp))
+            case .active:
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(AmberTheme.accent)
+            case .failed:
+                Image(systemName: "exclamationmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(AmberTheme.accentRed)
+                    .contentTransition(.symbolEffect(.replace.downUp))
+            }
         }
+        // 状态指示器固定占位（转圈/对勾/叹号同槽居中）：胶囊宽度在
+        // toolCallStarted → toolResultAppended 生命周期内不随状态图标尺寸变化。
+        .frame(width: 18, height: 18)
     }
 }

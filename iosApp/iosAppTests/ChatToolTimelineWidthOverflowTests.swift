@@ -92,6 +92,49 @@ final class ChatToolTimelineWidthOverflowTests: XCTestCase {
         }
     }
 
+    /// 搜索胶囊生命周期三阶段宽度恒定契约（本轮真机 bug 的红测试）：
+    /// 同一 tool call 的胶囊理想宽不得随「正在搜索 → 已搜索」换词或状态图标
+    /// （转圈 → 对勾）变化——否则执行期间撑宽、完成缩回，胶囊/列宽随
+    /// toolCallStarted / toolResultAppended 跳变。
+    func testSearchCapsuleIdealWidthConstantAcrossLifecyclePhases() {
+        // 真实形态：20+ 字中文查询（超过 subject 截断预算，三阶段共用同一截断后宽度）。
+        let query = "苹果公司2026年秋季新品发布会时间安排和产品阵容一览表"
+        XCTAssertGreaterThanOrEqual(query.count, 20, "用例前置：查询词应 ≥20 字")
+        let input = #"{"query":"\#(query)"}"#
+
+        func capsuleIdealWidth(output: [UIMessagePart]) -> CGFloat {
+            let tool = UIMessagePart.Tool(
+                toolCallId: "call_search_lifecycle",
+                toolName: "search_web",
+                input: input,
+                output: output,
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )
+            let host = UIHostingController(rootView: ChatToolTimeline(steps: [ChatToolStepModel(tool: tool)]))
+            return host.sizeThatFits(in: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: UIView.layoutFittingExpandedSize.height
+            )).width
+        }
+
+        let started = capsuleIdealWidth(output: [])
+        let executing = capsuleIdealWidth(output: [])
+        let completed = capsuleIdealWidth(output: [
+            UIMessagePart.Text(text: #"{"results":[{"title":"苹果秋季发布会 2026"}]}"#, metadata: nil)
+        ])
+
+        XCTAssertEqual(
+            executing, started,
+            "toolCallStarted 与执行中阶段胶囊理想宽不一致：started=\(started) executing=\(executing)"
+        )
+        XCTAssertEqual(
+            completed, started,
+            "toolResultAppended 换词（正在搜索→已搜索）后胶囊理想宽变化（执行期间撑宽、完成缩回）：started=\(started) completed=\(completed)"
+        )
+    }
+
     func testLongWebMountToolTitleFitsWhenColumnWidthIsProposed() {
         let input = """
         {"display_name":"GitHub","homepage_url":"https://github.com/openai/codex","site_id":"user_github","timeout_ms":15000}
