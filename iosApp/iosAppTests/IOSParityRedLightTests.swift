@@ -1872,12 +1872,18 @@ final class IOSParityRedLightTests: XCTestCase {
 
         XCTAssertTrue(caughtUp)
         XCTAssertEqual(current.last?.toText(), targetAssistant.toText())
-        XCTAssertLessThanOrEqual(ticks, 16, "终态 2.4 万字积压应在 16 拍内排空")
+        // 2026-08-15 契约变更（用户拍板）：排空收尾必须连续减速到打字节奏、
+        // 末拍以完整淡入落定（「最后一个字优雅地逐字淡入结束」）。拍速
+        // = min(锚速, max(12, 剩余/8))：中段 whoosh 不变，末段多拍减速——
+        // 拍数与耗时上限随之放宽（恒速口径的 16 拍/0.5s 不再是耗时代理）。
+        XCTAssertLessThanOrEqual(ticks, 64, "减速收尾下 2.4 万字积压应在 ~52 拍内排空")
+        // 恒速 delayNanos 只代表锚速拍间隔；真实耗时按逐拍间隔积分远小于此
+        // 上限，此处仍用它做量级护栏。
         let realtimeSeconds = Double(ticks) * Double(delayNanos) / 1_000_000_000
         XCTAssertLessThanOrEqual(
             realtimeSeconds,
-            0.5,
-            "大积压 whoosh 排空真实耗时不得超过 0.5s，实际 \(realtimeSeconds)s"
+            0.6,
+            "锚速拍间隔护栏：\(realtimeSeconds)s"
         )
     }
 

@@ -240,14 +240,23 @@ enum StreamPresentationPacingPolicy {
         return UInt64(intervalMs * 1_000_000)
     }
 
-    /// 终态单拍推进量；`fixedAdvance` 为完成时定锚的整轮节奏。
+    /// 收尾减速的除数：末段拍速 = max(12, 剩余/8)，与锚速取小。
+    /// 大积压中段保持 whoosh，最后 ~锚速×8 字连续减速，末拍回到打字节奏
+    /// （12 字/拍 × 48ms），配合按拍缩放的淡入自动恢复完整 0.5s——
+    /// 「最后一个字优雅地逐字淡入结束」的产品契约。
+    static let gracefulTailDivisor = 8
+
+    /// 终态单拍推进量；`fixedAdvance` 为完成时定锚的整轮节奏上限，
+    /// 实际每拍随剩余积压连续收敛（graceful tail），不再整轮恒速。
     static func terminalTextAdvance(
         backlogCount: Int,
         fixedAdvance: Int? = nil
     ) -> Int {
         guard backlogCount > 0 else { return 0 }
-        let adaptive = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
-        return min(terminalMaximumTextAdvance, max(minimumTextAdvance, adaptive))
+        let anchor = fixedAdvance ?? (backlogCount + preferredDrainTicks - 1) / preferredDrainTicks
+        let anchorClamped = min(terminalMaximumTextAdvance, max(minimumTextAdvance, anchor))
+        let gracefulTail = max(minimumTextAdvance, (backlogCount + gracefulTailDivisor - 1) / gracefulTailDivisor)
+        return min(anchorClamped, gracefulTail)
     }
 
     /// 滚动跟随的滞后允许度（1=流式期，→0=排空收尾）。排空期间它随剩余积压
@@ -2365,10 +2374,11 @@ final class ChatGenerationCoordinator {
         let drainAdvance = ChatStreamPresentationPacer.terminalDrainAdvance(
             backlogCount: drainStartBacklog
         )
-        let drainDelayNanos = ChatStreamPresentationPacer.terminalDrainDelayNanos(
-            advance: drainAdvance
-        )
         while currentRunId == runId, !Task.isCancelled {
+            let remainingBefore = ChatStreamPresentationPacer.terminalDrainBacklog(
+                current: bindings.getMessages(),
+                target: target
+            )
             if publishPacedStreamSnapshot(
                 target,
                 runId: runId,
@@ -2379,8 +2389,15 @@ final class ChatGenerationCoordinator {
                 pendingStreamSnapshot = nil
                 return true
             }
+            // 拍间隔跟随减速后的实际拍速逐拍重算（收尾从 8ms 连续放宽到 48ms）。
+            let beatAdvance = StreamPresentationPacingPolicy.terminalTextAdvance(
+                backlogCount: remainingBefore,
+                fixedAdvance: drainAdvance
+            )
             do {
-                try await Task.sleep(nanoseconds: drainDelayNanos)
+                try await Task.sleep(
+                    nanoseconds: ChatStreamPresentationPacer.terminalDrainDelayNanos(advance: beatAdvance)
+                )
             } catch {
                 return false
             }
