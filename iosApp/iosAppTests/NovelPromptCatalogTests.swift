@@ -13,15 +13,30 @@ final class NovelPromptCatalogTests: XCTestCase {
         // （ask_user + 搜索）段落后追加「PROJECT WRITE TOOLS」段:讨论专用项目字段
         // 写工具（含 novel_set_chapter_title 改正文章节标题等）的存在、契约与使用纪律；
         // 旧 v6 文本归档进 `systemText(for:version:)` 并进 acceptedVersions。
-        // 2026-08-15: 追加正文读/改正文 + 审批卡，discussion 升到 v9。
+        // 2026-08-16: 追加最近 N 章回退 + 审批卡，discussion 升到 v10。
+        // 2026-08-16: 讨论可列出/一次拒绝设定建议，discussion 升到 v11。
+        // 2026-08-17: 代笔中设定卡只许拒绝、不许 revise_material，升到 v12。
         let discussion = NovelPromptCatalog.template(for: .discussion)
-        XCTAssertEqual(discussion.version, "novel.discussion.v9")
+        XCTAssertEqual(discussion.version, "novel.discussion.v12")
+        let normalizedDiscussion = discussion.systemText.split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+        XCTAssertTrue(normalizedDiscussion.contains("While ghostwriting is advancing"))
+        XCTAssertTrue(normalizedDiscussion.contains("do not call novel_revise_material"))
         XCTAssertTrue(discussion.systemText.contains("novel_set_chapter_title"))
         XCTAssertTrue(discussion.systemText.contains("novel_rename_project"))
         XCTAssertTrue(discussion.systemText.contains("novel_read_chapter"))
         XCTAssertTrue(discussion.systemText.contains("novel_revise_chapter"))
+        XCTAssertTrue(discussion.systemText.contains("novel_revert_recent_chapters"))
+        XCTAssertTrue(discussion.systemText.contains("novel_list_setting_proposals"))
+        XCTAssertTrue(discussion.systemText.contains("novel_reject_setting_proposals"))
         XCTAssertNotNil(
-            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v8")
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v9")
+        )
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v10")
+        )
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v11")
         )
         XCTAssertTrue(
             NovelPromptCatalog.acceptedVersions(for: .discussion)
@@ -29,6 +44,9 @@ final class NovelPromptCatalogTests: XCTestCase {
                     "novel.discussion.v7",
                     "novel.discussion.v8",
                     "novel.discussion.v9",
+                    "novel.discussion.v10",
+                    "novel.discussion.v11",
+                    "novel.discussion.v12",
                 ])
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
@@ -37,13 +55,19 @@ final class NovelPromptCatalogTests: XCTestCase {
     }
 
     func testFactPromptAcceptedVersionsKeepPreviousShippedReleases() {
-        // 2026-08-15: bumping current to state-delta.v3 / manual-sync.v4 without
-        // keeping the immediately previous shipped versions made every persisted
-        // fact receipt fail load validation (「无法读取小说项目」). Same class as
+        // 2026-08-16: bumping current to state-delta.v4 / manual-sync.v5 without
+        // keeping the immediately previous shipped versions would make persisted
+        // fact receipts fail load validation (「无法读取小说项目」). Same class as
         // the 2026-07-25 incident documented on acceptedVersions.
         XCTAssertEqual(
             NovelPromptCatalog.template(for: .stateDeltaV1).version,
-            "novel.state-delta.v3"
+            "novel.state-delta.v4"
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.template(for: .stateDeltaV1).systemText.contains("契丹")
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.template(for: .stateDeltaV1).systemText.contains("粮仓")
         )
         XCTAssertTrue(
             NovelPromptCatalog.acceptedVersions(for: .stateDeltaV1)
@@ -51,11 +75,21 @@ final class NovelPromptCatalogTests: XCTestCase {
                     "novel.state-delta.v1",
                     "novel.state-delta.v2",
                     "novel.state-delta.v3",
+                    "novel.state-delta.v4",
                 ])
+        )
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .stateDeltaV1, version: "novel.state-delta.v3")
         )
         XCTAssertEqual(
             NovelPromptCatalog.template(for: .manualSyncV1).version,
-            "novel.manual-sync.v4"
+            "novel.manual-sync.v5"
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.template(for: .manualSyncV1).systemText.contains("北汉")
+        )
+        XCTAssertTrue(
+            NovelPromptCatalog.template(for: .manualSyncV1).systemText.contains("谁家后院")
         )
         XCTAssertTrue(
             NovelPromptCatalog.acceptedVersions(for: .manualSyncV1)
@@ -63,7 +97,11 @@ final class NovelPromptCatalogTests: XCTestCase {
                     "novel.manual-sync.v2",
                     "novel.manual-sync.v3",
                     "novel.manual-sync.v4",
+                    "novel.manual-sync.v5",
                 ])
+        )
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .manualSyncV1, version: "novel.manual-sync.v4")
         )
     }
 
@@ -97,6 +135,9 @@ final class NovelPromptCatalogTests: XCTestCase {
             "novel_list_chapters",
             "novel_read_chapter",
             "novel_revise_chapter",
+            "novel_revert_recent_chapters",
+            "novel_list_setting_proposals",
+            "novel_reject_setting_proposals",
         ] {
             XCTAssertTrue(discussion.contains(tool), "Discussion prompt is missing \(tool)")
         }
@@ -226,6 +267,10 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .discussion,
             version: "novel.discussion.v8"
+        ))
+        XCTAssertNotNil(NovelPromptCatalog.systemText(
+            for: .discussion,
+            version: "novel.discussion.v10"
         ))
         XCTAssertNotNil(NovelPromptCatalog.systemText(
             for: .proseContinuation,

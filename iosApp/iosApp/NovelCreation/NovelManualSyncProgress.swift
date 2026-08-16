@@ -84,6 +84,10 @@ struct NovelManualSyncChunkSelection: Equatable, Sendable {
 }
 
 enum NovelManualSyncChunker {
+    /// Same-chunk repairs of the last model output (complete / fix JSON).
+    static let maxOutputRepairAttempts = 2
+    private static let maxRepairOutputCharacters = 16_000
+
     /// Soft cap on manuscript characters per model call.
     /// Budget-only packing fills the whole context window, so a long novel becomes
     /// one multi-minute "segment 1" with no durable progress until it finishes.
@@ -154,8 +158,12 @@ enum NovelManualSyncChunker {
         return result
     }
 
-    static func modelInput(chunk: String, index: Int) -> String {
-        """
+    static func modelInput(
+        chunk: String,
+        index: Int,
+        previousError: String? = nil
+    ) -> String {
+        var text = """
         MANUAL SYNC CHUNK \(index + 1)
         Update stateSummary, branchOutline, and unresolvedEntityNames cumulatively from the projected state.
         Return events, characterStates, relationships, foreshadowing, and settingProposals only for facts whose
@@ -164,6 +172,62 @@ enum NovelManualSyncChunker {
         CURRENT MANUSCRIPT CHUNK
         \(chunk)
         """
+        if let hint = correctionHint(previousError) {
+            text += """
+
+
+            PREVIOUS ATTEMPT FAILURE
+            Fix this mistake in the JSON. Quote evidence verbatim from CURRENT MANUSCRIPT CHUNK.
+            \(hint)
+            """
+        }
+        return text
+    }
+
+    /// Retryable lastError is for the current uncommitted chunk only. Completed
+    /// chunk hashes must keep calling `modelInput` without this suffix.
+    static func correctionHint(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let collapsed = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard !collapsed.isEmpty else { return nil }
+        if collapsed.count <= 240 { return collapsed }
+        let end = collapsed.index(collapsed.startIndex, offsetBy: 240)
+        return String(collapsed[..<end])
+    }
+
+    /// Feed the rejected output back so the model can complete or rewrite it.
+    /// Not part of durable `modelInput` hashes.
+    static func repairManuscript(
+        chunk: String,
+        index: Int,
+        previousOutput: String,
+        error: String
+    ) -> String {
+        let clipped = clipRepairOutput(previousOutput)
+        let hint = correctionHint(error) ?? "The previous JSON was rejected."
+        return """
+        MANUAL SYNC CHUNK \(index + 1) REPAIR
+        The previous JSON was rejected. Return exactly one complete JSON object that satisfies the
+        rebuild contract. Quote evidence verbatim from CURRENT MANUSCRIPT CHUNK. Complete truncated
+        JSON or rewrite invalid facts; do not invent evidence.
+
+        CURRENT MANUSCRIPT CHUNK
+        \(chunk)
+
+        PREVIOUS OUTPUT
+        \(clipped)
+
+        FAILURE
+        \(hint)
+        """
+    }
+
+    static func clipRepairOutput(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxRepairOutputCharacters else { return trimmed }
+        return String(trimmed.prefix(maxRepairOutputCharacters))
     }
 
     static func selectNext(
@@ -433,21 +497,37 @@ enum NovelManualSyncProgressReducer {
             }
         }
 
-        let decoded = try strictRebuild(rebuild)
-        let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
-            decoded,
-            evidenceSource: selection.manuscript,
-            accumulated: existingProgress?.accumulatedRebuild,
-            baseState: input.baseStateSnapshot,
-            branchID: pending.branchID,
-            in: document
+        let emptyBaseSummary = existingProgress?.accumulatedRebuild.stateSummary
+            ?? input.baseStateSnapshot.summary
+        let emptyBaseOutline = existingProgress?.accumulatedRebuild.branchOutline
+            ?? input.baseStateSnapshot.branchOutline
+        let isHostAcceptedEmpty = NovelFactTransactionReducer.preservesBaseWithoutFacts(
+            rebuild,
+            summary: emptyBaseSummary,
+            outline: emptyBaseOutline
         )
+        let validated: NovelStateRebuildV1
+        if isHostAcceptedEmpty {
+            validated = rebuild
+        } else {
+            let decoded = try strictRebuild(rebuild)
+            validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+                decoded,
+                evidenceSource: selection.manuscript,
+                accumulated: existingProgress?.accumulatedRebuild,
+                baseState: input.baseStateSnapshot,
+                branchID: pending.branchID,
+                in: document
+            )
+        }
         let accumulated = merge(
             validated,
             into: existingProgress?.accumulatedRebuild,
             chunkIndex: selection.index
         )
-        _ = try strictRebuild(accumulated)
+        if !isHostAcceptedEmpty {
+            _ = try strictRebuild(accumulated)
+        }
         if !selection.isFinal {
             try validateNextChunkCanFit(
                 accumulated: accumulated,
@@ -811,14 +891,22 @@ enum NovelManualSyncProgressValidator {
                 issues.append("Pending manual synchronization \(pending.id) has invalid chunk evidence.")
             }
             do {
-                _ = try NovelFactTransactionReducer.validateManualChunkOutput(
+                let emptyBaseSummary = accumulated?.stateSummary ?? input.baseStateSnapshot.summary
+                let emptyBaseOutline = accumulated?.branchOutline ?? input.baseStateSnapshot.branchOutline
+                if !NovelFactTransactionReducer.preservesBaseWithoutFacts(
                     chunk.rebuild,
-                    evidenceSource: manuscript,
-                    accumulated: accumulated,
-                    baseState: input.baseStateSnapshot,
-                    branchID: pending.branchID,
-                    in: document
-                )
+                    summary: emptyBaseSummary,
+                    outline: emptyBaseOutline
+                ) {
+                    _ = try NovelFactTransactionReducer.validateManualChunkOutput(
+                        chunk.rebuild,
+                        evidenceSource: manuscript,
+                        accumulated: accumulated,
+                        baseState: input.baseStateSnapshot,
+                        branchID: pending.branchID,
+                        in: document
+                    )
+                }
             } catch {
                 issues.append("Pending manual synchronization \(pending.id) contains an invalid chunk result.")
             }

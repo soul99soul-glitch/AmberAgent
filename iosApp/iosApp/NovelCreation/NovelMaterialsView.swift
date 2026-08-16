@@ -94,6 +94,10 @@ struct NovelMaterialsView: View {
     private var proposalsSection: some View {
         if let proposals = viewModel.branchSnapshot?.activeSettingProposals, !proposals.isEmpty {
             Section("设定建议") {
+                Button("拒绝全部待确认", role: .destructive) {
+                    Task { await viewModel.rejectActiveSettingProposals() }
+                }
+                .disabled(!viewModel.canMutate)
                 ForEach(proposals, id: \.id) { proposal in
                     VStack(alignment: .leading, spacing: 10) {
                         Text(proposal.title)

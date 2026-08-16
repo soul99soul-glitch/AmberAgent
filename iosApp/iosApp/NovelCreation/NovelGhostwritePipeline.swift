@@ -5,6 +5,57 @@ enum NovelGhostwriteCandidateOwnership {
         candidate.ghostwritePlanID == plan.id
             && candidate.chapterPlanDigest == plan.contentDigest
     }
+
+    /// 继续代笔时能否拿这篇稿去自动收录。
+    /// 合同仍匹配但书稿头已离开候选 base 时不能复用——再收只会抛 stale。
+    static func canReuseForAutomaticCollect(
+        _ candidate: NovelCandidateRecord,
+        plan: NovelChapterPlanRecord,
+        branchHeadCheckpointID: NovelCheckpointID,
+        branchHeadRevision: Int64,
+        checkpoints: [NovelBranchCheckpointRecord],
+        sourceMessage: NovelSessionMessageRecord?,
+        superseded: Set<NovelCandidateID>,
+        alreadyCollected: Set<NovelCandidateID>
+    ) -> Bool {
+        guard candidate.status == .available else { return false }
+        guard belongs(candidate, to: plan) else { return false }
+        guard !superseded.contains(candidate.id) else { return false }
+        guard !alreadyCollected.contains(candidate.id) else { return false }
+        return NovelCandidateSemantics.collectionBaseMatches(
+            candidate,
+            targetCheckpointID: branchHeadCheckpointID,
+            targetHeadRevision: branchHeadRevision,
+            checkpoints: checkpoints,
+            sourceMessage: sourceMessage
+        )
+    }
+}
+
+enum NovelGhostwriteCollectFailure {
+    static func pauseReason(
+        candidate: NovelCandidateRecord?,
+        branchHeadCheckpointID: NovelCheckpointID?,
+        branchHeadRevision: Int64?,
+        checkpoints: [NovelBranchCheckpointRecord],
+        sourceMessage: NovelSessionMessageRecord?
+    ) -> NovelGhostwritePauseReason {
+        guard let candidate,
+              let branchHeadCheckpointID,
+              let branchHeadRevision else {
+            return .collectFailed
+        }
+        if NovelCandidateSemantics.collectionBaseMatches(
+            candidate,
+            targetCheckpointID: branchHeadCheckpointID,
+            targetHeadRevision: branchHeadRevision,
+            checkpoints: checkpoints,
+            sourceMessage: sourceMessage
+        ) {
+            return .collectFailed
+        }
+        return .collectBaseStale
+    }
 }
 
 enum NovelGhostwriteBatch {
@@ -69,6 +120,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     case blockingContinuity
     case continuityAuditIncomplete
     case collectFailed
+    /// 候选仍绑着当前合同，但书稿头已离开它的 base，不能再收录。
+    case collectBaseStale
     case syncFailed
     case incompleteCandidate
     case planMismatch
@@ -96,6 +149,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
             // 基建未扫完,不是剧情硬伤;继续会对同一已验收候选再检。
             "连续性检查还没跑稳，已暂停自动收录。继续将再检查同一篇稿，不会重写。"
         case .collectFailed: "自动收录失败，已暂停代笔。"
+        case .collectBaseStale:
+            "书稿在写完这章后已改过，这份旧稿不能直接收录。继续将按当前正文重写本章。"
         case .syncFailed: "剧情同步还没完成，代笔已暂停，不会开始下一章。"
         case .incompleteCandidate: "本章正文不完整。继续将重新生成整章。"
         case .planMismatch: "这篇稿和当前计划对不上。继续将按当前计划重写。"
@@ -123,7 +178,8 @@ enum NovelGhostwritePauseReason: String, Codable, Equatable, Sendable {
     var requiresRewriteOnContinue: Bool {
         switch self {
         case .acceptanceFailed, .obviousRepetition, .blockingContinuity,
-             .incompleteCandidate, .planMismatch, .healBudgetExhausted:
+             .incompleteCandidate, .planMismatch, .healBudgetExhausted,
+             .collectBaseStale:
             return true
         case .userPaused, .continuityAuditIncomplete, .collectFailed, .syncFailed,
              .planProposalFailed, .planProposedForNewBatch,
@@ -208,7 +264,7 @@ struct NovelGhostwriteFailureReceipt: Codable, Equatable, Sendable {
                     + continuityNotes.prefix(4).map { "- \(clip($0, 120))" }.joined(separator: "\n")
             )
         }
-        lines.append("请重写完整一章：落实上述要求，开篇换新，不要复述已写过的同一动作节拍。")
+        lines.append("上一稿已写好的部分视为已确定，只修正上述不确定处；只有补了会破坏整章因果，才整章重来。")
         return clip(lines.joined(separator: "\n\n"), characterLimit)
     }
 
@@ -390,15 +446,25 @@ enum NovelGhostwriteHeal {
         return (index, original, rewritten)
     }
 
-    static func writeUserText(receipt: NovelGhostwriteFailureReceipt?) -> String {
+    static func writeUserText(
+        receipt: NovelGhostwriteFailureReceipt?,
+        sourceDraft: String? = nil
+    ) -> String {
         guard let receipt else {
             return "请按本章计划写完整一章正文。"
         }
-        return """
-        请按本章计划重写完整一章正文。上一稿未通过验收，必须按下列意见修改；不要再用同一开篇。
-
-        \(receipt.healInstructionBlock())
-        """
+        var parts = [
+            "请在上一稿基础上按本章计划补全正文。已写好的部分视为已确定，只改审稿指出的缺口；不要从零重写。",
+            receipt.healInstructionBlock(),
+        ]
+        if let draft = sourceDraft?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !draft.isEmpty {
+            let clipped = draft.count > 12_000
+                ? String(draft.prefix(12_000)) + "…"
+                : draft
+            parts.append("【上一稿正文】\n\(clipped)")
+        }
+        return parts.joined(separator: "\n\n")
     }
 }
 
@@ -492,6 +558,57 @@ struct NovelGhostwriteBatchProgressRecord: Codable, Equatable, Sendable {
         default:
             return true
         }
+    }
+
+    func reconciledAfterManuscriptRevert(
+        document: NovelProjectDocumentV1,
+        branch: NovelBranchRecord,
+        now: Date
+    ) -> NovelGhostwriteBatchProgressRecord {
+        reconciledAfterManuscriptRevert(
+            chapterVersions: document.chapterVersions,
+            workingChapterIDs: Set(
+                NovelBranchSemantics.workingManuscriptChapters(
+                    branch: branch,
+                    document: document
+                ).map(\.chapterID)
+            ),
+            now: now
+        )
+    }
+
+    func reconciledAfterManuscriptRevert(
+        chapterVersions: [NovelChapterVersionRecord],
+        workingChapterIDs: Set<NovelChapterID>,
+        now: Date
+    ) -> NovelGhostwriteBatchProgressRecord {
+        let kept = autoCollectedCandidateIDs.filter { candidateID in
+            guard let version = chapterVersions.first(where: {
+                $0.sourceCandidateID == candidateID
+            }) else {
+                return false
+            }
+            return workingChapterIDs.contains(version.chapterID)
+        }
+        guard kept != autoCollectedCandidateIDs else { return self }
+        var next = self
+        next.autoCollectedCandidateIDs = kept
+        next.completedChapterCount = kept.count
+        next.currentChapterIndex = min(
+            kept.count + 1,
+            NovelGhostwriteBatch.clamp(targetChapterCount)
+        )
+        next.updatedAt = now
+        if next.pauseReason == .batchCompleted,
+           next.completedChapterCount < NovelGhostwriteBatch.clamp(next.targetChapterCount) {
+            next.phase = .paused
+            next.pauseReason = .userPaused
+        }
+        next.detailMessage = Self.mergeDetail(
+            next.detailMessage,
+            "已回退部分自动收录章节，本批进度已按当前正文重算。"
+        )
+        return next
     }
 
     private static func mergeDetail(_ existing: String?, _ note: String) -> String {
@@ -811,9 +928,9 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
         case .batchCompleted, .chapterCompleted, .cancelled, nil:
             return false
         case .userPaused, .acceptanceFailed, .obviousRepetition, .blockingContinuity,
-             .continuityAuditIncomplete, .collectFailed, .syncFailed, .incompleteCandidate,
-             .planMismatch, .planProposalFailed, .planProposedForNewBatch,
-             .healBudgetExhausted, .infrastructureFailed:
+             .continuityAuditIncomplete, .collectFailed, .collectBaseStale, .syncFailed,
+             .incompleteCandidate, .planMismatch, .planProposalFailed,
+             .planProposedForNewBatch, .healBudgetExhausted, .infrastructureFailed:
             return true
         }
     }
@@ -907,7 +1024,7 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
         }
     }
 
-    /// - Parameter sourceDraft: 仅人工润修时附上一稿正文（有界），便于改而非空写。
+    /// - Parameter sourceDraft: 人工润修与自动自愈都钉上一稿（有界），避免从零重写。
     static func writeUserText(
         receipt: NovelGhostwriteFailureReceipt?,
         revisionBrief: String?,
@@ -929,7 +1046,7 @@ struct NovelGhostwriteProgress: Equatable, Sendable {
             }
             return parts.joined(separator: "\n\n")
         }
-        return NovelGhostwriteHeal.writeUserText(receipt: receipt)
+        return NovelGhostwriteHeal.writeUserText(receipt: receipt, sourceDraft: sourceDraft)
     }
 
     /// 同步成功后把待记账章计入 completed；返回是否已达本批目标。

@@ -102,8 +102,8 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
                 probe.snapshotCount += 1
                 return probe.authoritativeText
             },
-            onUpdate: {
-                probe.published.append($0)
+            onUpdate: { text, _ in
+                probe.published.append(text)
                 didPublish.fulfill()
             }
         )
@@ -129,7 +129,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
                 probe.snapshotCount += 1
                 return probe.authoritativeText
             },
-            onUpdate: { probe.published.append($0) }
+            onUpdate: { text, _ in probe.published.append(text) }
         )
 
         session.scheduleFlush()
@@ -142,6 +142,361 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         try await Task.sleep(nanoseconds: 40_000_000)
         XCTAssertEqual(probe.snapshotCount, 1, "The cancelled delayed flush must not snapshot after terminal close.")
         XCTAssertEqual(probe.published, ["authoritative final"])
+    }
+
+    /// 停止发生在 `drainAndClose` 已关闭、全文尚未发完时：`flushAndClose`
+    /// 必须立刻把权威全文推给 onUpdate。否则 runner.cancel 看到已关闭就
+    /// 直接返回，视图只留半截前缀。
+    func testFlushAndClosePublishesFinalTextWhenDrainAlreadyClosed() async throws {
+        let prefix = "已显示"
+        let fullText = prefix + String(repeating: "字", count: 2_000)
+        let probe = CouncilPresentationProbe(authoritativeText: prefix)
+        var published: [String] = []
+        let session = IOSCouncilTextPresentationSession(
+            flushDelayNanoseconds: 20_000_000,
+            snapshotProvider: {
+                probe.snapshotCount += 1
+                return probe.authoritativeText
+            },
+            onUpdate: { text, _ in published.append(text) }
+        )
+
+        session.scheduleFlush()
+        let prefixDeadline = Date().addingTimeInterval(1)
+        while published.last != prefix, Date() < prefixDeadline {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTAssertEqual(published.last, prefix)
+
+        probe.authoritativeText = fullText
+        let drainTask = Task { await session.drainAndClose() }
+        let closedDeadline = Date().addingTimeInterval(1)
+        while !session.isClosed, Date() < closedDeadline {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        XCTAssertTrue(session.isClosed)
+        XCTAssertNotEqual(published.last, fullText, "precondition: 排空尚未发完全文")
+
+        let flushed = session.flushAndClose()
+        XCTAssertEqual(flushed, fullText)
+        XCTAssertEqual(published.last, fullText, "已关闭时 flushAndClose 必须立刻发布权威全文")
+
+        drainTask.cancel()
+        _ = await drainTask
+    }
+
+    // MARK: - 流式节奏层与终态排空契约（StreamPresentationPacingPolicy 同源）
+
+    /// 流式爆发：provider 一次吐出大积压，展示侧按 48ms 节奏拍逐拍追平——
+    /// 单拍推进 ≤ 流式上限、前缀单调、流式拍 allowance 恒为 1（与 Chat 语义一致）。
+    func testCouncilPresentationSessionPacesBurstAcrossBeats() async throws {
+        let fullText = "已显示" + String(repeating: "长", count: 300)
+        let probe = CouncilPresentationProbe(authoritativeText: fullText)
+        var published: [String] = []
+        var allowances: [CGFloat] = []
+        let session = IOSCouncilTextPresentationSession(
+            flushDelayNanoseconds: 20_000_000,
+            snapshotProvider: {
+                probe.snapshotCount += 1
+                return probe.authoritativeText
+            },
+            onUpdate: {
+                published.append($0)
+                allowances.append($1)
+            }
+        )
+
+        session.scheduleFlush()
+        let deadline = Date().addingTimeInterval(3)
+        while published.last != fullText, Date() < deadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        XCTAssertEqual(
+            published.last,
+            fullText,
+            "流式拍必须逐拍追平权威快照（300 字积压应在 ~9 拍内完成）"
+        )
+        XCTAssertGreaterThan(published.count, 1, "大积压必须分多拍输出，不能一拍倒完")
+        for (previous, next) in zip(published, published.dropFirst()) {
+            XCTAssertTrue(
+                next.hasPrefix(previous),
+                "流式前缀必须单调增长：\(previous.prefix(12))… → \(next.prefix(12))…"
+            )
+        }
+        let advances = zip(published, published.dropFirst()).map { $1.count - $0.count }
+        XCTAssertLessThanOrEqual(
+            advances.max() ?? 0,
+            StreamPresentationPacingPolicy.maximumTextAdvance,
+            "流式单拍推进不得超过流式上限（36 字），否则 TextKit 高度与底部跟随追不上"
+        )
+        XCTAssertTrue(
+            allowances.allSatisfy { $0 == 1 },
+            "流式拍 allowance 必须恒为 1，只有终态排空才收紧：\(allowances)"
+        )
+    }
+
+    /// 终态排空契约：完成时积压一次定锚（whoosh 中段 > 流式上限），尾段随剩余
+    /// 连续减速到打字节奏（末拍 ≤ 12 字），lagAllowance 随剩余单调衰减到 0。
+    func testCouncilTerminalDrainDeceleratesGracefulTailAndTightensAllowance() async throws {
+        let fullText = "已显示" + String(repeating: "字", count: 2_000)
+        let probe = CouncilPresentationProbe(authoritativeText: fullText)
+        var published: [String] = []
+        var allowances: [CGFloat] = []
+        let session = IOSCouncilTextPresentationSession(
+            flushDelayNanoseconds: 1_000_000_000,
+            snapshotProvider: {
+                probe.snapshotCount += 1
+                return probe.authoritativeText
+            },
+            onUpdate: {
+                published.append($0)
+                allowances.append($1)
+            }
+        )
+
+        let final = await session.drainAndClose()
+
+        XCTAssertEqual(final, fullText, "排空必须返回权威全文")
+        XCTAssertEqual(published.last, fullText, "最后一拍必须落定权威全文")
+        XCTAssertGreaterThan(published.count, 1)
+        for (previous, next) in zip(published, published.dropFirst()) {
+            XCTAssertTrue(next.hasPrefix(previous), "排空前缀必须单调增长")
+        }
+        let advances = zip(published, published.dropFirst()).map { $1.count - $0.count }
+        XCTAssertGreaterThan(
+            advances.first ?? 0,
+            StreamPresentationPacingPolicy.maximumTextAdvance,
+            "大积压排空中段必须 whoosh（拍速超过流式上限，避免 2000 字拖十几秒）"
+        )
+        XCTAssertLessThanOrEqual(
+            advances.last ?? Int.max,
+            StreamPresentationPacingPolicy.minimumTextAdvance,
+            "末拍必须回到打字节奏（优雅尾），最后一个字逐字落定"
+        )
+        XCTAssertEqual(allowances.last, 0, "最后一拍落定后 allowance 必须归零")
+        XCTAssertLessThanOrEqual(allowances.first ?? 1, 1)
+        XCTAssertTrue(
+            zip(allowances, allowances.dropFirst()).allSatisfy { $0 >= $1 },
+            "allowance 必须随剩余积压单调衰减（连续收紧，无分档回跳）：\(allowances)"
+        )
+    }
+
+    /// 完成零跳变契约（driver 级，议会议会无 UI 回放基建——真实回放形态参考
+    /// ChatSwiftUIStreamReplayTests.testTerminalDrainLagAllowanceLandsViewportWithoutCompletionHop；
+    /// UI 级逐帧复核留待真机）。
+    ///
+    /// 用生产排空拍序列（真实 IOSCouncilTextPresentationSession.drainAndClose）
+    /// 驱动共享 NativeTimelineScrollCore：流式→排空→完成全窗帧间位移连续、
+    /// 无单帧瞬移、无回跳，终态收敛贴底。
+    func testCouncilCompletionDrainCommitsContinuousDisplacementAndPinsDriver() async throws {
+        // 与 Chat 回放同口径：排空段从 ~576 字积压开始（锚速 36 字/拍），
+        // whoosh 中段由排空契约（上一条）锁定拍速，这里锁视口运动连续性。
+        let fullText = "已显示" + String(repeating: "字", count: 576)
+        let probe = CouncilPresentationProbe(authoritativeText: fullText)
+        var beats: [(advance: Int, allowance: CGFloat)] = []
+        var previousLength = 0
+        let session = IOSCouncilTextPresentationSession(
+            flushDelayNanoseconds: 1_000_000_000,
+            snapshotProvider: {
+                probe.snapshotCount += 1
+                return probe.authoritativeText
+            },
+            onUpdate: { text, allowance in
+                let length = text.count
+                beats.append((advance: length - previousLength, allowance: allowance))
+                previousLength = length
+            }
+        )
+        _ = await session.drainAndClose()
+        XCTAssertGreaterThan(beats.count, 1)
+
+        // —— 核心模拟：1 字 ≈ 1pt 高度（单调模型，只锁运动连续性）——
+        let viewport: CGFloat = 800
+        let bottomInset: CGFloat = 120
+        let visibleHeight = viewport - bottomInset
+        var now: TimeInterval = 1_000
+        // 排空前视口已贴底：bottomTarget = contentHeight - visibleHeight。
+        var contentHeight: CGFloat = visibleHeight + 400
+        var offsetY: CGFloat = 400
+        func geometry() -> NativeTimelineScrollGeometry {
+            NativeTimelineScrollGeometry(
+                offsetY: offsetY,
+                contentHeight: contentHeight,
+                viewportHeight: viewport,
+                adjustedInsetTop: 0,
+                adjustedInsetBottom: bottomInset,
+                distanceToBottom: max(0, contentHeight - offsetY - visibleHeight),
+                userInteracting: false
+            )
+        }
+        func apply(_ actions: [NativeTimelineScrollAction]) {
+            for action in actions {
+                if case let .writeOffsetY(y) = action {
+                    offsetY = y
+                }
+            }
+        }
+        var state: NativeTimelineScrollState = .followingBottom(
+            virtualOffset: offsetY,
+            target: contentHeight - visibleHeight,
+            lastFollowRequestAt: now,
+            lagAllowance: 1
+        )
+        var samples: [CGFloat] = [offsetY]
+        for beat in beats {
+            contentHeight += CGFloat(beat.advance)
+            let reduced = NativeTimelineScrollCore.reduce(
+                state: state,
+                intent: .streamContentGrew(lagAllowance: beat.allowance),
+                geometry: geometry(),
+                now: now
+            )
+            state = reduced.state
+            apply(reduced.actions)
+            // 一拍 ≈ 48ms ≈ 3 帧 @60Hz。
+            for _ in 0..<3 {
+                now += 1.0 / 60.0
+                let ticked = NativeTimelineScrollCore.tick(
+                    state: state,
+                    geometry: geometry(),
+                    now: now,
+                    dt: 1.0 / 60.0
+                )
+                state = ticked.state
+                apply(ticked.actions)
+                samples.append(offsetY)
+            }
+        }
+        // 完成：generationTerminated → settlingAfterTerminal 逐帧钉底 + 静默交还。
+        // 完成窗从最后一拍排空的帧起算（与 Chat 回放的 paragraphLength==final 同口径）。
+        let completionWindowStart = samples.count - 3
+        let terminal = NativeTimelineScrollCore.reduce(
+            state: state,
+            intent: .generationTerminated,
+            geometry: geometry(),
+            now: now
+        )
+        state = terminal.state
+        apply(terminal.actions)
+        for _ in 0..<120 {
+            now += 1.0 / 60.0
+            let ticked = NativeTimelineScrollCore.tick(
+                state: state,
+                geometry: geometry(),
+                now: now,
+                dt: 1.0 / 60.0
+            )
+            state = ticked.state
+            apply(ticked.actions)
+            samples.append(offsetY)
+        }
+
+        // 契约一：完成窗（最后一拍排空 + generationTerminated + settle）帧间位移
+        // ≤ 14pt——与 ChatSwiftUIStreamReplayTests 的完成窗校准同口径：排空收尾
+        // 的收紧值已让视口在最后一拍前贴回底部，完成瞬间不得再有任何单帧瞬移。
+        let completionWindowShifts = zip(
+            samples.dropFirst(completionWindowStart),
+            samples.dropFirst(completionWindowStart - 1)
+        ).map { abs($0 - $1) }
+        XCTAssertLessThanOrEqual(
+            completionWindowShifts.max() ?? 0,
+            14.0,
+            "完成窗的帧间位移必须连续（缓动追入），不允许单帧瞬移：\(completionWindowShifts.max() ?? 0)"
+        )
+        // 契约二：全窗（流式→排空→完成）帧间位移 ≤ 24pt——合成模型 60Hz 下
+        // whoosh 中段的指数追底稳态滞后首帧 ~16pt（速度连续，非瞬移），
+        // 24pt 上限仍能抓住旧病（完成瞬间瞬时钉底一帧清 30–50pt 欠账）。
+        // 本断言只锁「无单帧瞬移」：排空拍速的 whoosh/减速曲线由
+        // testCouncilTerminalDrainDeceleratesGracefulTailAndTightensAllowance 锁定。
+        let maximumFrameShift = zip(samples.dropFirst(), samples).map { abs($0 - $1) }.max() ?? 0
+        XCTAssertLessThanOrEqual(
+            maximumFrameShift,
+            24.0,
+            "流式→排空→完成序列不得出现单帧瞬移（指数追底速度连续）：\(maximumFrameShift)"
+        )
+        XCTAssertTrue(
+            zip(samples.dropFirst(), samples).allSatisfy { $0 >= $1 },
+            "完成序列不得回跳（单调贴底）"
+        )
+        let finalDistance = max(0, contentHeight - offsetY - visibleHeight)
+        XCTAssertLessThanOrEqual(
+            finalDistance,
+            2.0,
+            "完成序列必须收敛贴底：\(finalDistance)"
+        )
+    }
+
+    /// 生产接线锁：完成路径必须走 drainAndClose（优雅排空），失败/取消仍走
+    /// flushAndClose（精确落定）；updateMessage 事件携带 lagAllowance，视图提交
+    /// streamContentGrew(lagAllowance:) 并让整轮结束走 generationTerminated。
+    func testCouncilPacingWiringCarriesAllowanceToDriverCommit() throws {
+        let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let iosRoot = testsDirectory.deletingLastPathComponent()
+        let runnerSource = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/CouncilRunner.swift"),
+            encoding: .utf8
+        )
+        let runtimeSource = try String(
+            contentsOf: iosRoot.appendingPathComponent("iosApp/CouncilChatRuntimeView.swift"),
+            encoding: .utf8
+        )
+
+        let completePath = try sourceBlock(
+            runnerSource,
+            from: "case .complete:",
+            to: "clearActiveStreamIfNeeded(stream)"
+        )
+        XCTAssertTrue(
+            completePath.contains("await stream.drainAndClose(drainingQueuedChunks: false)"),
+            "完成路径必须走优雅排空（drainAndClose），而不是精确整段落定"
+        )
+        XCTAssertTrue(
+            runnerSource.contains("case updateMessage(id: UUID, body: String, status: IOSCouncilRoomMessageStatus, lagAllowance: CGFloat)"),
+            "updateMessage 事件必须携带 lagAllowance"
+        )
+        XCTAssertTrue(
+            runtimeSource.contains("activeTailLagAllowance = lagAllowance"),
+            "视图模型必须接收排空拍收紧值"
+        )
+        XCTAssertTrue(
+            runtimeSource.contains("scrollDriver.submit(.streamContentGrew(lagAllowance: viewModel.activeTailLagAllowance))"),
+            "驱动提交必须携带当前收紧值（默认 1 会把同拍先发的收紧逐拍打回）"
+        )
+        XCTAssertTrue(
+            runtimeSource.contains("scrollDriver.submit(.generationTerminated)"),
+            "整轮结束必须走 driver 的 generationTerminated（逐帧钉底 + 静默交还）"
+        )
+    }
+
+    /// 完成事件必须携带排空收尾的收紧值（0），不得把默认 1 打回；流式拍透传 1。
+    func testCouncilRunnerCarriesDrainAllowanceIntoCompletionEvents() async throws {
+        let defaults = isolatedDefaults()
+        let taskStore = IOSAdvancedTaskStore(userDefaults: defaults, storageKey: "tasks")
+        let runner = IOSCouncilRoomRunner(
+            streamer: PacedCouncilStreamer(),
+            researcher: StaticCouncilResearcher(),
+            taskStore: taskStore
+        )
+        var events: [IOSCouncilRoomEvent] = []
+        _ = await runner.run(
+            request: roomRequest(
+                settings: compactRoomSettings(defaultRounds: 1),
+                researchConsent: .denied
+            ),
+            onEvent: { events.append($0) }
+        )
+        let allowances = events.compactMap { event -> CGFloat? in
+            guard case let .updateMessage(_, _, _, lagAllowance) = event else { return nil }
+            return lagAllowance
+        }
+        XCTAssertTrue(allowances.contains(1), "流式拍必须透传 allowance 1")
+        XCTAssertTrue(allowances.contains(0.5), "排空拍必须透传中间收紧值")
+        XCTAssertEqual(
+            allowances.last,
+            0,
+            "完成事件必须携带排空收尾的收紧值（0），否则默认 1 会把最后一拍的收紧打回"
+        )
     }
 
     func testCouncilGeneratedTextSnapshotDoesNotExposeInputBeforeAssistantOutput() {
@@ -1132,7 +1487,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertTrue(outcome.transcript.contains("风险席位缺席"))
 
         let failedUpdate = events.contains { event in
-            guard case let .updateMessage(_, body, status) = event else { return false }
+            guard case let .updateMessage(_, body, status, _) = event else { return false }
             return status == .failed && body.contains("席位失败")
         }
         XCTAssertTrue(failedUpdate)
@@ -1315,7 +1670,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         XCTAssertEqual(outcome.status, .completed)
         XCTAssertEqual(outcome.failedSeats, ["风险"])
         let riskFailure = events.compactMap { event -> String? in
-            guard case let .updateMessage(_, body, status) = event,
+            guard case let .updateMessage(_, body, status, _) = event,
                   status == .failed else { return nil }
             return body
         }.last
@@ -1346,7 +1701,7 @@ final class IOSCouncilRunnerMechanicsTests: XCTestCase {
         )
 
         let failedBody = events.compactMap { event -> String? in
-            guard case let .updateMessage(_, body, status) = event,
+            guard case let .updateMessage(_, body, status, _) = event,
                   status == .failed else { return nil }
             return body
         }.last
@@ -2488,7 +2843,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         callCount += 1
         receivedModels.append(params.model)
@@ -2500,7 +2855,7 @@ private final class ScriptedCouncilStreamer: IOSCouncilTextStreaming {
         let next = outputs.removeFirst()
         switch next {
         case .success(let text):
-            onUpdate(text)
+            onUpdate(text, 1)
             return text
         case .failure(let error):
             throw error
@@ -2526,7 +2881,7 @@ private final class PartialTailCouncilStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         callCount += 1
         switch callCount {
@@ -2535,7 +2890,7 @@ private final class PartialTailCouncilStreamer: IOSCouncilTextStreaming {
         case 2:
             return publish("工程发言", through: onUpdate)
         case 3:
-            onUpdate(failedTail ?? "")
+            onUpdate(failedTail ?? "", 1)
             throw CouncilTestError.scriptedFailure
         case 4:
             return publish("主持总结", through: onUpdate)
@@ -2548,9 +2903,9 @@ private final class PartialTailCouncilStreamer: IOSCouncilTextStreaming {
 
     private func publish(
         _ text: String,
-        through onUpdate: @MainActor (String) -> Void
+        through onUpdate: @MainActor (String, CGFloat) -> Void
     ) -> String {
-        onUpdate(text)
+        onUpdate(text, 1)
         return text
     }
 }
@@ -2580,16 +2935,16 @@ private final class ProgressingFinalCouncilStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         if !immediateOutputs.isEmpty {
             let text = immediateOutputs.removeFirst()
-            onUpdate(text)
+            onUpdate(text, 1)
             return text
         }
-        onUpdate("第一段")
+        onUpdate("第一段", 1)
         try await Task.sleep(nanoseconds: 100_000_000)
-        onUpdate("第一段第二段")
+        onUpdate("第一段第二段", 1)
         try await Task.sleep(nanoseconds: 100_000_000)
         return "第一段第二段"
     }
@@ -2611,26 +2966,26 @@ private final class DelayedPartialCouncilStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         callCount += 1
         switch callCount {
         case 1:
-            onUpdate("最终议题")
+            onUpdate("最终议题", 1)
             return "最终议题"
         case 2:
             // Let the placeholder's first checkpoint land, then publish a speaking
             // tail and hold long enough for a second throttled checkpoint.
             try await Task.sleep(nanoseconds: 450_000_000)
-            onUpdate(Self.partialTail)
+            onUpdate(Self.partialTail, 1)
             partialPublished.fulfill()
             try await Task.sleep(nanoseconds: 450_000_000)
             return Self.partialTail
         case 3:
-            onUpdate("风险发言")
+            onUpdate("风险发言", 1)
             return "风险发言"
         case 4:
-            onUpdate("主持总结")
+            onUpdate("主持总结", 1)
             return "主持总结"
         default:
             throw CouncilTestError.unexpectedCall
@@ -2649,7 +3004,7 @@ private final class BlockingCouncilProbeStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
@@ -2668,7 +3023,7 @@ private final class BlockingCouncilProbeStreamer: IOSCouncilTextStreaming {
 private final class RestartableCouncilStreamer: IOSCouncilTextStreaming {
     private let firstStreamStarted: XCTestExpectation
     private var firstContinuation: CheckedContinuation<String, Never>?
-    private var firstUpdate: (@MainActor (String) -> Void)?
+    private var firstUpdate: (@MainActor (String, CGFloat) -> Void)?
     private var replacementOutputs = ["最终议题", "工程发言", "风险发言", "主持总结"]
     private(set) var callCount = 0
     private(set) var cancelCount = 0
@@ -2681,7 +3036,7 @@ private final class RestartableCouncilStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         callCount += 1
         if callCount == 1 {
@@ -2695,14 +3050,14 @@ private final class RestartableCouncilStreamer: IOSCouncilTextStreaming {
             throw CouncilTestError.unexpectedCall
         }
         let text = replacementOutputs.removeFirst()
-        onUpdate(text)
+        onUpdate(text, 1)
         return text
     }
 
     func cancel() {
         cancelCount += 1
         guard let continuation = firstContinuation else { return }
-        firstUpdate?("旧轮精确尾部")
+        firstUpdate?("旧轮精确尾部", 1)
         firstContinuation = nil
         firstUpdate = nil
         continuation.resume(returning: "旧轮精确尾部")
@@ -2764,6 +3119,24 @@ private final class RecordingCouncilResearcher: IOSCouncilResearching {
         callCount += 1
         return IOSCouncilResearchBundle(searches: [], scrapedPages: [], failures: [])
     }
+}
+
+@MainActor
+private final class PacedCouncilStreamer: IOSCouncilTextStreaming {
+    /// 每次调用模拟一段完整生产序列：流式拍 1 → 排空拍中间值 → 排空拍 0。
+    func streamText(
+        providerSetting: ProviderSetting,
+        messages: [UIMessage],
+        params: TextGenerationParams,
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
+    ) async throws -> String {
+        onUpdate("第一段", 1)
+        onUpdate("第一段第二段", 0.5)
+        onUpdate("第一段第二段第三段", 0)
+        return "第一段第二段第三段"
+    }
+
+    func cancel() {}
 }
 
 private enum CouncilTestError: LocalizedError {

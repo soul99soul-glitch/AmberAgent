@@ -574,6 +574,34 @@ final class IOSGeminiProviderTests: XCTestCase {
         )
     }
 
+    func testWireModelIdDoesNotInventSuffixWhenCatalogUnknown() {
+        XCTAssertEqual(
+            IOSAntigravityModelId.wireModelId(
+                "gemini-3.7-flash",
+                reasoning: ReasoningLevel.medium,
+                variants: [:]
+            ),
+            "gemini-3.7-flash"
+        )
+        XCTAssertEqual(
+            IOSAntigravityModelId.wireModelId(
+                "gemini-3.7-flash",
+                reasoning: ReasoningLevel.auto_,
+                variants: [:]
+            ),
+            "gemini-3.7-flash"
+        )
+    }
+
+    func testAntigravityVariantsPersistAcrossReplace() {
+        IOSAntigravityModelVariants.replace(["gemini-3.7-flash": ["tiered", "high"]])
+        XCTAssertEqual(
+            IOSAntigravityModelVariants.load()["gemini-3.7-flash"],
+            ["tiered", "high"]
+        )
+        IOSAntigravityModelVariants.replace([:])
+    }
+
     func testFallbackCatalogIncludesGemini37Flash() {
         XCTAssertEqual(IOSGeminiConstants.fallbackModels.first?.modelId, "gemini-3.7-flash")
         XCTAssertTrue(IOSGeminiConstants.fallbackModels.contains { $0.modelId == "gemini-3.7-flash" })
@@ -599,7 +627,7 @@ final class IOSGeminiProviderTests: XCTestCase {
             )
             XCTFail("expected httpStatus error")
         } catch let error as IOSGeminiError {
-            XCTAssertEqual(error, .httpStatus(403, ""))
+            XCTAssertEqual(error, .httpStatus(403, "wire model: gemini-3-pro-preview"))
         } catch {
             XCTFail("unexpected error \(error)")
         }

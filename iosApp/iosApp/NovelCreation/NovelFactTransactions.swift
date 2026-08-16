@@ -471,7 +471,8 @@ enum NovelFactTransactionReducer {
         retryCommand: NovelRetryPendingCommand? = nil,
         artifacts: NovelFactTransactionReceiptArtifacts,
         in document: NovelProjectDocumentV1,
-        now: Date = Date()
+        now: Date = Date(),
+        acceptEmptyFacts: Bool = false
     ) throws -> NovelFactTransactionResult {
         var validatedDelta = try validate(delta)
         let pending = try requirePending(pendingID, kind: .collection, in: document)
@@ -521,7 +522,8 @@ enum NovelFactTransactionReducer {
             evidenceSource: pending.selectedText,
             branch: branch,
             baseState: baseState,
-            document: document
+            document: document,
+            acceptEmptyFacts: acceptEmptyFacts
         )
         try validateStateFacts(
             validatedDelta,
@@ -1097,7 +1099,16 @@ enum NovelFactTransactionReducer {
         } else if artifacts == nil {
             throw NovelError.invalidInput("Manual synchronization has no completed model evidence.")
         }
-        let validatedRebuild = try validate(rebuild)
+        // Host-accepted empty rebuilds may keep a blank project's empty
+        // summary/outline. Model-schema `validate` rejects those empty
+        // strings, but they are legal durable snapshot values. Mapped
+        // last-chapter deltas may also keep an empty outline when the
+        // model omitted `branchOutlinePatch`.
+        let validatedRebuild = skipsRebuildModelSchema(
+            rebuild,
+            summary: input.baseStateSnapshot.summary,
+            outline: input.baseStateSnapshot.branchOutline
+        ) ? rebuild : try validate(rebuild)
         try validateStateFacts(
             validatedRebuild,
             evidenceSource: input.manuscript,
@@ -1594,7 +1605,8 @@ enum NovelFactTransactionReducer {
             attemptOperationID: retryCommand?.context.operationID ?? pending.operationID,
             attemptPayloadSHA256: try retryCommand?.canonicalPayloadSHA256() ??
                 pending.payloadSHA256,
-            kind: kind
+            kind: kind,
+            chunkIndex: injection.factTransaction?.chunkIndex
         )
         guard injection.projectID == document.project.id,
               injection.branchID == pending.branchID,

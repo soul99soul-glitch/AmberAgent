@@ -549,7 +549,7 @@ private final class IOSCouncilModelProbeOperation {
             providerSetting: providerSetting,
             messages: messages,
             params: params,
-            onUpdate: { _ in }
+            onUpdate: { _, _ in }
         )
     }
 

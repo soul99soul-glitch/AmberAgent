@@ -1593,7 +1593,27 @@ private extension DefaultNovelCreation {
             // The partial and its remote cursor move in one sidecar record. The
             // first response ID is forced immediately; later frames use the
             // existing byte/time throttle so streaming does not write per token.
-            _ = await flushRecoverySidecar(runID: runID, force: mustPersistFirstCursor)
+            let didPersistCursor = await flushRecoverySidecar(
+                runID: runID,
+                force: mustPersistFirstCursor
+            )
+            if didPersistCursor {
+                let shouldDetachForBackground = await MainActor.run {
+                    guard UIApplication.shared.applicationState == .background else {
+                        return false
+                    }
+                    let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+                        projectID: runtime.projectID,
+                        branchID: runtime.branchID
+                    )
+                    return !BackgroundGenerationKeepAlive.shared.holdsLease(
+                        ghostwriteLeaseID
+                    )
+                }
+                if shouldDetachForBackground {
+                    _ = await detachResumableRunForBackground(runID)
+                }
+            }
         case .responseDisconnected:
             runtime.isDetachedForBackground = true
             generationRuntimes[runID] = runtime

@@ -234,6 +234,43 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(session.binding?.projectID, document.project.id)
         XCTAssertEqual(session.binding?.branchID, document.branches.first?.id)
         XCTAssertEqual(session.durableMessages, document.sessions.first?.messages)
+        XCTAssertEqual(session.mode, .discussPlan)
+        XCTAssertEqual(
+            NovelComposerIntent(mode: session.mode, granularity: session.granularity),
+            .discuss
+        )
+    }
+
+    func testComposerIntentRemembersWriteAPassageAndDoesNotSnapBackToWholeChapter() async throws {
+        let defaults = UserDefaults(suiteName: "session-composer-\(UUID().uuidString)")!
+        let repository = InMemoryNovelProjectRepository()
+        var document = try NovelTestFixtures.document()
+        document.project.lastGenerationGranularity = .wholeChapter
+        _ = try await repository.createProject(document)
+        let workspace = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await workspace.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+
+        let session = NovelSessionViewModel(
+            workspace: workspace,
+            composerDefaults: defaults
+        )
+        session.setComposerIntent(.continueProse)
+        XCTAssertEqual(session.mode, .writeProse)
+        XCTAssertEqual(session.granularity, .continuation)
+
+        await session.bindToCurrentSelection()
+        XCTAssertEqual(session.mode, .writeProse)
+        XCTAssertEqual(session.granularity, .continuation)
+
+        let reopened = NovelSessionViewModel(
+            workspace: workspace,
+            composerDefaults: defaults
+        )
+        XCTAssertEqual(reopened.mode, .writeProse)
+        XCTAssertEqual(reopened.granularity, .continuation)
     }
 
     func testIgnoringIncidentalCharacterIdentityMentionClosesItDurably() async throws {
@@ -368,6 +405,147 @@ final class NovelSessionViewModelTests: XCTestCase {
             .seconds(2),
             "Adding the live tail must not force the long lazy history through a watchdog-scale layout pass."
         )
+        await harness.session.stop()
+    }
+
+    /// 思考密集流 cadence 探针（真机 bug：小说创作里思考框出现时整体卡顿，收起思考即恢复）。
+    ///
+    /// 长 reasoning 按真机 chunk 率（25ms/块 ≈ 40 块/s）高频灌入，挂真实 NovelSessionView
+    /// 于窗口，display link 逐帧采样帧间隔：断言 p95 ≤ 40ms、无 >80ms 长停顿（与 Chat
+    /// 思考卡 cadence 门禁同阈值）。修复前红证据：reasoning 每个 chunk 原样合并进
+    /// row.reasoningContent（网络节奏直上 UI），消费端饱和——探针实测 p95 88ms、
+    /// max 1.38s、93/147 帧 >50ms；卡片内所有优化（尾段整体淡入、sizeThatFades 去
+    /// layoutIfNeeded、内部滚动 540pt/s、cadence 门禁）都以「每拍一次 append」为前提，
+    /// 逐 chunk 触发整行重建+测量。
+    ///
+    /// 确定性发布预算（与正文 burst 合并契约同型）：tail renderRevision（≈SwiftUI 可见
+    /// 发布次数）必须小于 chunk 数——reasoning 必须走与正文同源的 48ms 拍合并，
+    /// 不能逐 chunk 发布。
+    func testReasoningDenseStreamKeepsDisplayLinkResponsive() async throws {
+        var document = try NovelTestFixtures.document()
+        let longMarkdown = "# 第一章\n\n" + String(repeating: "破庙里的风裹着雨气，众人压低声音商议下一步。\n\n", count: 180)
+        document.sessions[0].messages = (0..<8).map { index in
+            NovelSessionMessageRecord(
+                id: NovelMessageID(),
+                sequence: Int64(index),
+                role: index.isMultiple(of: 2) ? .user : .assistant,
+                mode: index.isMultiple(of: 2) ? .discussPlan : .writeProse,
+                kind: index.isMultiple(of: 2) ? .userInput : .discussion,
+                content: index.isMultiple(of: 2) ? "继续" : longMarkdown,
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)),
+                runID: nil,
+                candidateID: nil
+            )
+        }
+        document.sessions[0].revision = Int64(document.sessions[0].messages.count)
+        try NovelDocumentValidator.validate(document)
+
+        // 后缀 chunk（真机 provider 的增量语义）+ 真机 chunk 节奏（25ms/块）。
+        let chunkCount = 120
+        let chunkGap: TimeInterval = 0.025
+        let fragment = "思考推进剧情的关键分歧点在于双方对风险与收益的权衡取舍"
+        let chunks = (0..<chunkCount).map { "\(fragment)第\($0)段" }
+        let expectedReasoning = chunks.joined()
+        var steps: [NovelModelScriptStep] = []
+        for chunk in chunks {
+            steps.append(.reasoningDelta(chunk))
+            steps.append(.delay(chunkGap))
+        }
+        steps.append(.pause)
+        let harness = try await makeHarness(
+            document: document,
+            scripts: [NovelModelScript(steps: steps)]
+        )
+        harness.session.mode = .writeProse
+        harness.session.granularity = .wholeChapter
+
+        let settings = IOSSharedSettingsStore(
+            userDefaults: UserDefaults(suiteName: "NovelReasoningCadence-\(UUID().uuidString)")!
+        )
+        let host = UIHostingController(rootView: NovelSessionLayoutHarness(
+            workspace: harness.workspace,
+            session: harness.session,
+            settings: settings
+        ))
+        let window = makeWindow(rootViewController: host)
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        window.layoutIfNeeded()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        let probe = DisplayLinkGapProbe()
+        let didStart = await harness.session.send(text: "写一段")
+        XCTAssertTrue(didStart)
+
+        // 预热 ~300ms：run 启动、思考卡首帧挂载/展开、scroll driver 启动都发生在
+        // 这里——它们是每场 run 一次的一次性布局瞬态（非本门禁对象）。探针只测
+        // 思考密集流稳态（用户报告「思考框出现后整体卡」的持续窗口）。
+        try? await Task.sleep(for: .milliseconds(300))
+        probe.start()
+
+        // 泵到思考内容全部合并（120 块 × 25ms ≈ 3s 灌入窗）。
+        let caughtUp = await eventually(timeout: 10) {
+            harness.session.transientTail?.reasoningContent == expectedReasoning
+        }
+        XCTAssertTrue(caughtUp, "思考流应完整合并，不丢 chunk。")
+        try? await Task.sleep(for: .milliseconds(300))
+        probe.stop()
+
+        let gapMilliseconds = probe.gaps.dropFirst(2).map { $0 * 1_000 }.sorted()
+        let maxGap = try XCTUnwrap(gapMilliseconds.last)
+        let p95Index = min(
+            gapMilliseconds.count - 1,
+            Int((Double(gapMilliseconds.count) * 0.95).rounded(.up)) - 1
+        )
+        let p95Gap = gapMilliseconds[max(0, p95Index)]
+        let over50ms = gapMilliseconds.filter { $0 > 50 }.count
+        let slowFrameIndices = probe.gaps.dropFirst(2).enumerated()
+            .filter { $0.element > 0.05 }
+            .map { "\($0.offset)@\(String(format: "%.0f", $0.element * 1_000))ms" }
+        let bucket = { (upper: Double) in gapMilliseconds.filter { $0 <= upper }.count }
+        print(String(
+            format: "[PERF-HITCH] novelReasoning samples=%d p50=%.2fms p95=%.2fms max=%.2fms over50ms=%d " +
+                "buckets<=8ms:%d <=16ms:%d <=24ms:%d <=40ms:%d <=80ms:%d slowFrames=%@",
+            gapMilliseconds.count,
+            gapMilliseconds[gapMilliseconds.count / 2],
+            p95Gap,
+            maxGap,
+            over50ms,
+            bucket(8),
+            bucket(16),
+            bucket(24),
+            bucket(40),
+            bucket(80),
+            slowFrameIndices.isEmpty ? "none" : slowFrameIndices.joined(separator: ",")
+        ))
+        XCTAssertGreaterThan(
+            gapMilliseconds.count,
+            20,
+            "探针采样数过少，无法形成帧间隔分布（display link 未在灌入窗内驱动）。"
+        )
+        XCTAssertLessThanOrEqual(
+            p95Gap,
+            40,
+            "reasoning 密集流期间至少 95% 的可见帧间隔应 ≤40ms——reasoning 不得逐 chunk 直上 UI（应走 48ms 拍合并）。"
+        )
+        XCTAssertLessThanOrEqual(
+            maxGap,
+            80,
+            "reasoning 密集流不得造成肉眼可见的连续主线程停顿。"
+        )
+        if caughtUp {
+            let presentationRevision = try XCTUnwrap(harness.session.transientTail?.renderRevision)
+            XCTAssertLessThan(
+                presentationRevision,
+                UInt64(chunkCount),
+                "Provider chunk 数不得直接决定 reasoning 的 SwiftUI 发布次数（必须走 48ms 拍合并）。"
+            )
+        }
+
+        let runID = try XCTUnwrap(harness.session.activeRunID)
+        await harness.adapter.resume(runID: runID)
         await harness.session.stop()
     }
 
@@ -1286,7 +1464,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         let partial = "Mara opened the archive.\n\nShe found a map."
         let harness = try await makeHarness(scripts: [
             NovelModelScript(steps: [.delta(partial), .pause]),
-            NovelModelScript(steps: [.delta(validRebuildJSON), .pause, .complete]),
+            NovelModelScript(steps: [.delta(validDeltaJSON), .complete]),
         ])
         harness.session.mode = .writeProse
         harness.session.granularity = .wholeChapter
@@ -1327,6 +1505,7 @@ final class NovelSessionViewModelTests: XCTestCase {
             .collected
         )
         XCTAssertEqual(collectedProject.chapterVersions.last?.content, partial)
+        XCTAssertEqual(collectedProject.branches[0].syncStatus, .synchronized)
         let projected = try XCTUnwrap(harness.session.projectedListModel(
             project: try XCTUnwrap(harness.workspace.projectSnapshot),
             branch: try XCTUnwrap(harness.workspace.branchSnapshot)
@@ -1336,16 +1515,11 @@ final class NovelSessionViewModelTests: XCTestCase {
             return false
         })
 
-        let syncStarted = await eventually { await harness.adapter.requests.count == 2 }
-        XCTAssertTrue(syncStarted)
-        let requests = await harness.adapter.requests
-        let syncRunID = try XCTUnwrap(requests.last?.runID)
-        await harness.adapter.resume(runID: syncRunID)
         let syncCompleted = await eventually(timeout: 5) {
             harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
                 !harness.workspace.isPerforming
         }
-        XCTAssertTrue(syncCompleted, harness.workspace.errorMessage ?? "自动剧情同步未完成")
+        XCTAssertTrue(syncCompleted, harness.workspace.errorMessage ?? "收录后剧情状态未保持已同步")
 
         await harness.workspace.undoBranchHead()
         await harness.session.bindToCurrentSelection()
@@ -2318,15 +2492,22 @@ final class NovelSessionViewModelTests: XCTestCase {
             harness.session.projectedListModel(project: durableProject, branch: durableBranch)
         )
         XCTAssertNil(durableList.activeTailID)
-        XCTAssertTrue(durableList.activeRunRows.isEmpty)
-        XCTAssertTrue(Set(terminalRunRowIDs).isSubset(of: Set(durableList.historicalRows.map(\.id))))
+        XCTAssertEqual(
+            durableList.activeRunRows.map(\.id),
+            terminalRunRowIDs,
+            "Finished run must stay pinned in the active stack so the bubble is not reparented."
+        )
+        XCTAssertTrue(
+            Set(terminalRunRowIDs).isDisjoint(with: Set(durableList.historicalRows.map(\.id))),
+            "Pinned finished rows must not also appear in history."
+        )
     }
 
     func testSelectedStableParagraphCollectsAndCommitsFacts() async throws {
         let prose = "Mara opened the archive.\n\nShe found a map."
         let harness = try await makeHarness(scripts: [
             NovelModelScript(steps: [.delta(prose), .complete]),
-            NovelModelScript(steps: [.delta(validRebuildJSON), .pause, .complete]),
+            NovelModelScript(steps: [.delta(validDeltaJSON), .complete]),
         ])
         harness.session.mode = .writeProse
         harness.session.granularity = .continuation
@@ -2350,25 +2531,15 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(final.candidates.first { $0.id == candidate.id }?.status, .collected)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         XCTAssertEqual(final.checkpoints.last?.kind, .collection)
-        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
 
-        let syncStarted = await eventually {
-            await harness.adapter.requests.count == 2
-        }
-        XCTAssertTrue(syncStarted)
-        XCTAssertFalse(harness.session.canSend)
-        let collectionRequests = await harness.adapter.requests
-        let syncRequest = try XCTUnwrap(collectionRequests.last)
-        await harness.adapter.resume(runID: syncRequest.runID)
         let syncCompleted = await eventually {
-            let document = try? await harness.repository.loadProject(id: harness.projectID).document
-            return document?.branches[0].syncStatus == .synchronized &&
-                harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
+            harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
                 !harness.workspace.isPerforming
         }
         XCTAssertTrue(syncCompleted)
 
-        // Undo skips the technical state-sync checkpoint together with its collection.
+        // 收录当时已抽完状态，一次 undo 就是撤回这次收录。
         await harness.workspace.undoBranchHead()
         await harness.session.bindToCurrentSelection()
         let undone = try await harness.repository.loadProject(id: harness.projectID).document
@@ -2482,7 +2653,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         try await assertPersistedManualSyncResumes(status: .pending)
     }
 
-    func testWorkspaceAppearanceLeavesRetryableManualSyncForExplicitRetry() async throws {
+    func testWorkspaceAppearanceHealsRetryableManualSyncWithPreviousError() async throws {
         let fixture = try persistedManualSync(status: .retryable)
         let harness = try await makeHarness(
             document: fixture.document,
@@ -2493,14 +2664,27 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
 
         harness.workspace.scheduleAutomaticStateSyncIfNeeded()
-        try? await Task.sleep(for: .milliseconds(400))
-
+        let syncStarted = await eventually {
+            await harness.adapter.requests.count == 1
+        }
+        XCTAssertTrue(syncStarted, "retryable pending should auto-start heal")
         let requests = await harness.adapter.requests
-        XCTAssertTrue(requests.isEmpty)
-        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
-        XCTAssertEqual(persisted.pendingOperations.first?.status, .retryable)
-        XCTAssertEqual(persisted.pendingOperations.first?.lastError, "上一次状态同步超时")
-        XCTAssertFalse(harness.workspace.isPerforming)
+        let request = try XCTUnwrap(requests.first)
+        let userText = request.messages
+            .filter { $0.role == .user }
+            .map(\.content)
+            .joined(separator: "\n")
+        XCTAssertTrue(
+            userText.contains("PREVIOUS ATTEMPT FAILURE"),
+            "heal request must carry lastError; got \(userText.prefix(400))"
+        )
+        XCTAssertTrue(userText.contains("上一次状态同步超时"))
+
+        let syncCompleted = await eventually(timeout: 5) {
+            let project = try? await harness.repository.loadProject(id: harness.projectID).document
+            return project?.branches[0].syncStatus == .synchronized
+        }
+        XCTAssertTrue(syncCompleted, "heal with lastError must still commit")
     }
 
     func testRetryableManualSyncBlocksGeneratingANewProseCandidate() async throws {
@@ -2541,7 +2725,8 @@ final class NovelSessionViewModelTests: XCTestCase {
             scripts: [
                 NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
                 NovelModelScript(steps: [.delta(prose), .complete]),
-                NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
+                NovelModelScript(steps: [.delta(validDeltaJSON), .complete]),
+                NovelModelScript(steps: [.delta(validDeltaJSON), .complete]),
             ]
         )
         harness.session.mode = .writeProse
@@ -2596,7 +2781,7 @@ final class NovelSessionViewModelTests: XCTestCase {
                 harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
                 harness.workspace.projectSnapshot?.checkpoints.first(where: {
                     $0.id == harness.workspace.branchSnapshot?.branch.headCheckpointID
-                })?.kind == .manualSync
+                })?.kind == .collection
         }
         XCTAssertTrue(collectionSynchronized)
 
@@ -2869,21 +3054,64 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertTrue(activityCleared, "同步终态后 stateSyncActivity 应被清理")
     }
 
-    func testFailedAutomaticManualSyncPersistsOneRetryableFailureWithoutSpinning() async throws {
+    func testAutomaticManualSyncHealsTransientFailureWithoutBanner() async throws {
         let fixture = try persistedManualSync(status: .pending)
         let failure = NovelModelFailure(
-            code: "state_sync_timeout",
+            code: "structured_no_output_timeout",
             message: "状态同步请求超时，请稍后重试。",
             isRetryable: true
         )
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [NovelModelScript(steps: [.fail(failure)])]
+            scripts: [
+                NovelModelScript(steps: [.fail(failure)]),
+                NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
+            ]
         )
+        let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+
+        harness.workspace.scheduleAutomaticStateSyncIfNeeded()
+        let recovered = await eventually(timeout: 5) {
+            let project = try? await harness.repository.loadProject(id: harness.projectID).document
+            return project?.branches[0].syncStatus == .synchronized
+        }
+        XCTAssertTrue(recovered, "one transient fail should auto-heal to synchronized")
+        XCTAssertNil(harness.workspace.automaticStateSyncFailureMessage(
+            projectID: harness.projectID,
+            branchID: branchID
+        ))
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 2)
+        let retryUserText = requests[1].messages
+            .filter { $0.role == .user }
+            .map(\.content)
+            .joined(separator: "\n")
+        XCTAssertTrue(
+            retryUserText.contains("PREVIOUS ATTEMPT FAILURE"),
+            "second attempt must include lastError; got \(retryUserText.prefix(400))"
+        )
+        XCTAssertTrue(retryUserText.contains(failure.message))
+    }
+
+    func testAutomaticManualSyncStopsAfterBoundedHealAttempts() async throws {
+        let fixture = try persistedManualSync(status: .pending)
+        let failure = NovelModelFailure(
+            code: "structured_no_output_timeout",
+            message: "状态同步请求超时，请稍后重试。",
+            isRetryable: true
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: Array(
+                repeating: NovelModelScript(steps: [.fail(failure)]),
+                count: NovelGhostwriteHeal.defaultMaxInfraRetries
+            )
+        )
+        let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
 
         harness.workspace.scheduleAutomaticStateSyncIfNeeded()
 
-        let failurePersisted = await eventually {
+        let failurePersisted = await eventually(timeout: 5) {
             guard let loaded = try? await harness.repository.loadProject(id: harness.projectID),
                   let pending = loaded.document.pendingOperations.first(where: {
                       $0.id == fixture.pendingID
@@ -2892,13 +3120,17 @@ final class NovelSessionViewModelTests: XCTestCase {
             }
             return pending.status == .retryable &&
                 pending.lastError == failure.message &&
-                !harness.workspace.isPerforming
+                !harness.workspace.isPerforming &&
+                harness.workspace.automaticStateSyncFailureMessage(
+                    projectID: harness.projectID,
+                    branchID: branchID
+                ) != nil
         }
         XCTAssertTrue(failurePersisted)
 
-        try? await Task.sleep(for: .milliseconds(350))
+        try? await Task.sleep(for: .milliseconds(400))
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.count, NovelGhostwriteHeal.defaultMaxInfraRetries)
         let persisted = try await harness.repository.loadProject(id: harness.projectID).document
         XCTAssertEqual(persisted.branches[0].syncStatus, .needsSync)
         XCTAssertEqual(persisted.pendingOperations.first?.status, .retryable)
@@ -2909,17 +3141,127 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
     }
 
+    func testChapterRevisionApprovalSyncsLastChapterWithOneStateDelta() async throws {
+        let fixture = try documentWithChapter(
+            content: "第一段。\n\n第二段有矛盾。\n\n第三段。"
+        )
+        let prompt = NovelAskUserPrompt(
+            question: "将第 1 章《第一章》第 2 段写入正文？",
+            options: NovelChapterRevisionApproval.options,
+            chapterRevision: NovelChapterRevisionProposal(
+                chapterID: fixture.chapterID,
+                chapterOrdinal: 1,
+                chapterTitle: "第一章",
+                startParagraph: 2,
+                endParagraph: 2,
+                oldText: "第二段有矛盾。",
+                newText: "第二段已经改掉了那个矛盾。",
+                reason: "事实自相矛盾"
+            )
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.askUser(prompt, preface: "这段和前面的设定对不上。")]),
+                NovelModelScript(steps: [.delta(validRevisionDeltaJSON), .pause, .complete]),
+            ]
+        )
+        harness.session.mode = .discussPlan
+        let didStart = await harness.session.send(text: "请改第二段")
+        XCTAssertTrue(didStart)
+        let didAsk = await eventually {
+            !harness.session.isRunning &&
+                harness.session.durableMessages.last?.interaction == .askUser(prompt)
+        }
+        XCTAssertTrue(didAsk)
+        let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
+        let messageCountBefore = harness.session.durableMessages.count
+
+        let answerTask = Task { @MainActor in
+            await harness.session.answerAskUser(
+                promptMessageID: promptMessage.id,
+                answer: NovelChapterRevisionApproval.approveOption
+            )
+        }
+        let canStop = await eventually(timeout: 5) {
+            await harness.adapter.requests.count >= 2 &&
+                harness.workspace.canCancelAutomaticStateSync(
+                    projectID: harness.projectID,
+                    branchID: harness.workspace.selectedBranchID ?? fixture.document.branches[0].id
+                )
+        }
+        XCTAssertTrue(canStop, "末章快路径同步必须露出已有的停止按钮")
+        let pausedRequests = await harness.adapter.requests
+        let syncRunID = try XCTUnwrap(pausedRequests.last?.runID)
+        await harness.adapter.resume(runID: syncRunID)
+        let didAnswer = await answerTask.value
+        XCTAssertTrue(didAnswer)
+        let synced = await eventually(timeout: 5) {
+            harness.workspace.branchSnapshot?.branch.syncStatus == .synchronized &&
+                !harness.workspace.isPerforming &&
+                !harness.session.isRunning
+        }
+        XCTAssertTrue(synced, harness.workspace.errorMessage ?? "写入正文后剧情同步未完成")
+
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(
+            persisted.chapterVersions.last?.content,
+            "第一段。\n\n第二段已经改掉了那个矛盾。\n\n第三段。"
+        )
+        XCTAssertEqual(persisted.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(persisted.pendingOperations.isEmpty)
+        XCTAssertEqual(harness.session.durableMessages.count, messageCountBefore)
+        XCTAssertFalse(harness.session.isRunning)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 2)
+        let syncUser = requests[1].messages.last?.content ?? ""
+        XCTAssertTrue(syncUser.contains("NEWLY COLLECTED MANUSCRIPT"))
+        XCTAssertFalse(syncUser.contains("ORDERED MANUSCRIPT INPUT"))
+        XCTAssertTrue(syncUser.contains("第二段已经改掉了那个矛盾。"))
+    }
+
+    func testAutomaticManualSyncDoesNotOuterRetryValidationFailures() async throws {
+        let fixture = try persistedManualSync(status: .pending)
+        let truncated = #"{"schemaVersion":1,"stateSummary":"Mara entered"#
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: Array(
+                repeating: NovelModelScript(steps: [.delta(truncated), .complete]),
+                count: 3
+            )
+        )
+        let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
+
+        harness.workspace.scheduleAutomaticStateSyncIfNeeded()
+        let failed = await eventually(timeout: 5) {
+            harness.workspace.automaticStateSyncFailureMessage(
+                projectID: harness.projectID,
+                branchID: branchID
+            ) != nil &&
+                !harness.workspace.isPerforming
+        }
+        XCTAssertTrue(failed)
+        try? await Task.sleep(for: .milliseconds(400))
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 3)
+        let persisted = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(persisted.branches[0].syncStatus, .needsSync)
+        XCTAssertEqual(persisted.pendingOperations.first?.status, .retryable)
+    }
+
     func testAutomaticSyncFailureRetryStartsRetryablePendingOnFirstTap() async throws {
         let fixture = try persistedManualSync(status: .pending)
         let failure = NovelModelFailure(
-            code: "state_sync_timeout",
+            code: "structured_no_output_timeout",
             message: "状态同步请求超时，请稍后重试。",
             isRetryable: true
         )
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [
-                NovelModelScript(steps: [.fail(failure)]),
+            scripts: Array(
+                repeating: NovelModelScript(steps: [.fail(failure)]),
+                count: NovelGhostwriteHeal.defaultMaxInfraRetries
+            ) + [
                 NovelModelScript(steps: [
                     .delta(validRebuildJSON),
                     .pause,
@@ -2930,7 +3272,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         let branchID = try XCTUnwrap(harness.workspace.selectedBranchID)
 
         harness.workspace.scheduleAutomaticStateSyncIfNeeded()
-        let failed = await eventually(timeout: 3) {
+        let failed = await eventually(timeout: 5) {
             harness.workspace.automaticStateSyncFailureMessage(
                 projectID: harness.projectID,
                 branchID: branchID
@@ -2946,7 +3288,7 @@ final class NovelSessionViewModelTests: XCTestCase {
 
         let retriedOnFirstTap = await eventually(timeout: 3) {
             let requests = await harness.adapter.requests
-            return requests.count == 2
+            return requests.count == NovelGhostwriteHeal.defaultMaxInfraRetries + 1
         }
         XCTAssertTrue(
             retriedOnFirstTap,
@@ -3521,7 +3863,35 @@ private extension NovelSessionViewModelTests {
         return await condition()
     }
 
-    func documentWithChapter() throws -> (
+    /// CADisplayLink 逐帧采样主线程帧间隔（与 Chat perf 探针同款）。display link
+    /// 回调被主线程阻塞多久，gap 就记录多久——直接量化「逐 chunk 直上 UI」的掉帧。
+    private final class DisplayLinkGapProbe: NSObject {
+        private var displayLink: CADisplayLink?
+        private var previousTimestamp: CFTimeInterval?
+        private(set) var gaps: [TimeInterval] = []
+
+        func start() {
+            let displayLink = CADisplayLink(target: self, selector: #selector(tick(_:)))
+            displayLink.add(to: .main, forMode: .common)
+            self.displayLink = displayLink
+        }
+
+        func stop() {
+            displayLink?.invalidate()
+            displayLink = nil
+            previousTimestamp = nil
+        }
+
+        @objc private func tick(_ displayLink: CADisplayLink) {
+            defer { previousTimestamp = displayLink.timestamp }
+            guard let previousTimestamp else { return }
+            gaps.append(displayLink.timestamp - previousTimestamp)
+        }
+    }
+
+    func documentWithChapter(
+        content: String = "Mara crossed the hall. The gate stayed closed."
+    ) throws -> (
         document: NovelProjectDocumentV1,
         chapterID: NovelChapterID
     ) {
@@ -3535,7 +3905,7 @@ private extension NovelSessionViewModelTests {
             chapterID: chapterID,
             kind: .collected,
             title: "第一章",
-            content: "Mara crossed the hall. The gate stayed closed.",
+            content: content,
             factCompatibilityID: UUID(),
             sourceCandidateID: nil,
             createdAt: document.project.updatedAt,
@@ -3724,6 +4094,50 @@ private extension NovelSessionViewModelTests {
           "characters": {"title": "人物", "content": "调查员林遥追查一段伪造记忆。"},
           "masterOutline": {"title": "总纲", "content": "林遥逐步发现城市证词系统被篡改。"},
           "writingRequirements": {"title": "写作要求", "content": "克制、悬疑，保持线索公平。"}
+        }
+        """
+    }
+
+    var validDeltaJSON: String {
+        """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Mara entered the archive.",
+          "events": [{
+            "id": "archive-opened",
+            "kind": "discovery",
+            "summary": "Mara entered the archive.",
+            "entityReferences": ["Mara"],
+            "evidence": "Mara opened the archive."
+          }],
+          "characterChanges": [],
+          "relationshipChanges": [],
+          "foreshadowingChanges": [],
+          "unresolvedEntityNames": ["Mara"],
+          "branchOutlinePatch": "Mara investigates the archive.",
+          "settingProposals": []
+        }
+        """
+    }
+
+    var validRevisionDeltaJSON: String {
+        """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "第二段的矛盾已经改掉。",
+          "events": [{
+            "id": "event-fixed",
+            "kind": "discovery",
+            "summary": "矛盾已改。",
+            "entityReferences": [],
+            "evidence": "第二段已经改掉了那个矛盾。"
+          }],
+          "characterChanges": [],
+          "relationshipChanges": [],
+          "foreshadowingChanges": [],
+          "unresolvedEntityNames": [],
+          "branchOutlinePatch": "矛盾已改。",
+          "settingProposals": []
         }
         """
     }

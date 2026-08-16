@@ -15,6 +15,16 @@ final class NovelCharacterIdentityCandidateTests: XCTestCase {
         }
     }
 
+    func testPolitiesAndRegimesAreNotCharacterIdentityCandidates() {
+        let polities = ["契丹", "北汉", "南唐", "后周", "大辽", "西夏", "女真", "吐蕃"]
+        for name in polities {
+            XCTAssertFalse(
+                NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate(name),
+                "\(name) is a polity/regime, not a character identity card target"
+            )
+        }
+    }
+
     func testPersonNamesRemainCharacterIdentityCandidates() {
         let people = ["赵匡胤", "赵京娘", "柴荣", "郭威", "沈砚", "赵光义", "京娘", "赵将军", "Mara", "Ivo"]
         for name in people {
@@ -128,6 +138,145 @@ final class NovelCharacterIdentityCandidateTests: XCTestCase {
                     NovelCharacterIdentityResolver.normalize("柴荣")
             }),
             "person mentions from evidence-backed refs should remain eligible: \(sanitized.unresolvedEntityNames)"
+        )
+    }
+
+    func testSceneDressingTitlesAreNotWorthProposingAsSettings() {
+        let junk = ["粮仓", "马厩", "李家", "谁家", "赵家后院", "谁家的后院", "厢房", "灶房"]
+        for title in junk {
+            XCTAssertFalse(
+                NovelSettingProposalFilter.isWorthProposing(title: title),
+                "\(title) is scene furniture, not a durable setting card"
+            )
+        }
+    }
+
+    func testStoryDefiningSettingsRemainWorthProposing() {
+        let keep = ["开封府", "殿前司", "禁军", "澶州北寨", "司马家"]
+        for title in keep {
+            XCTAssertTrue(
+                NovelSettingProposalFilter.isWorthProposing(title: title),
+                "\(title) should stay eligible as a setting proposal"
+            )
+        }
+    }
+
+    func testCollectionDeltaDropsSceneDressingSettingProposals() throws {
+        let document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        let baseState = try XCTUnwrap(document.stateSnapshots.first)
+        let manuscript = "赵匡胤自澶州起兵。城西有座粮仓。殿前司掌禁军。"
+        let delta = NovelStateDeltaV1(
+            schemaVersion: 1,
+            stateSummary: "赵匡胤在澶州，殿前司仍掌禁军。",
+            events: [
+                NovelStateEventV1(
+                    id: "e-start",
+                    kind: "travel",
+                    summary: "自澶州起兵",
+                    entityReferences: ["澶州", "赵匡胤"],
+                    evidence: "赵匡胤自澶州起兵。"
+                )
+            ],
+            characterChanges: [],
+            relationshipChanges: [],
+            foreshadowingChanges: [],
+            unresolvedEntityNames: ["契丹", "北汉", "赵匡胤"],
+            branchOutlinePatch: "赵匡胤自澶州起兵。",
+            settingProposals: [
+                NovelSettingProposalDraftV1(
+                    id: "p-granary",
+                    title: "粮仓",
+                    content: "城西有座粮仓。",
+                    evidence: "城西有座粮仓。"
+                ),
+                NovelSettingProposalDraftV1(
+                    id: "p-dianqian",
+                    title: "殿前司",
+                    content: "殿前司掌禁军。",
+                    evidence: "殿前司掌禁军。"
+                ),
+            ]
+        )
+        let sanitized = try NovelFactTransactionReducer.sanitizedCollectionDelta(
+            in: delta,
+            evidenceSource: manuscript,
+            branch: branch,
+            baseState: baseState,
+            document: document
+        )
+        XCTAssertFalse(
+            sanitized.settingProposals.contains(where: { $0.title == "粮仓" }),
+            "granary scene furniture must not become a setting card: \(sanitized.settingProposals.map(\.title))"
+        )
+        XCTAssertTrue(
+            sanitized.settingProposals.contains(where: { $0.title == "殿前司" }),
+            "story-defining institution should remain: \(sanitized.settingProposals.map(\.title))"
+        )
+        XCTAssertFalse(
+            sanitized.unresolvedEntityNames.contains(where: {
+                ["契丹", "北汉"].contains(NovelCharacterIdentityResolver.normalize($0))
+            }),
+            "polities must not enter unresolved character list: \(sanitized.unresolvedEntityNames)"
+        )
+    }
+
+    func testPersistedDerivedSceneDressingIsHiddenFromActiveList() throws {
+        var document = try NovelTestFixtures.document()
+        let branchID = document.branches[0].id
+        let now = document.project.updatedAt
+        let granary = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: branchID,
+            title: "粮仓",
+            content: "城西有座粮仓。",
+            createdAt: now,
+            isResolved: false,
+            origin: .derivedState
+        )
+        let office = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: branchID,
+            title: "殿前司",
+            content: "殿前司掌禁军。",
+            createdAt: now,
+            isResolved: false,
+            origin: .derivedState
+        )
+        let quickStartGranary = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: branchID,
+            title: "粮仓",
+            content: "开局建议里的粮仓。",
+            createdAt: now,
+            isResolved: false,
+            origin: .quickStart(runID: NovelRunID(), suggestedKind: .world)
+        )
+        XCTAssertTrue(
+            NovelSettingProposalFilter.shouldSurface(quickStartGranary),
+            "Quick Start cards are not scene-furniture filtered"
+        )
+        document.settingProposals = [granary, office]
+        let source = document.stateSnapshots[0]
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: source.id,
+            eventIDs: source.eventIDs,
+            summary: source.summary,
+            branchOutline: source.branchOutline,
+            unresolvedEntityNames: source.unresolvedEntityNames,
+            createdAt: source.createdAt,
+            settingProposalIDs: [granary.id, office.id]
+        )
+        try NovelDocumentValidator.validate(document)
+
+        let active = document.activeSettingProposals(for: branchID)
+        XCTAssertFalse(
+            active.contains(where: { $0.id == granary.id }),
+            "already-persisted derived 粮仓 must not surface"
+        )
+        XCTAssertTrue(
+            active.contains(where: { $0.id == office.id }),
+            "persisted 殿前司 must remain visible"
         )
     }
 }

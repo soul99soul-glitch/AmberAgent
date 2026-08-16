@@ -46,7 +46,8 @@ final class BackgroundGenerationKeepAlive {
         var subtitle: String
         /// Whether a system continued-processing task should be submitted.
         var submitSystemTask: Bool
-        /// True after a system request was handed to BGTaskScheduler (adopted or still queued).
+        /// True after a system request was handed to BGTaskScheduler. This is diagnostic
+        /// state only; execution is protected only after `systemTask` is adopted.
         var didSubmitSystemTask: Bool
         var progressTotalUnitCount: Int64?
         var progressCompletedUnitCount: Int64
@@ -92,6 +93,8 @@ final class BackgroundGenerationKeepAlive {
     private let registerLaunchHandler: RegisterLaunchHandler
     /// Delay before a single resubmit after BGTaskScheduler refuses the first submit.
     private let systemSubmitRetryDelayNanoseconds: UInt64
+    /// Continued-processing requests may only originate while the App is foregrounded.
+    private let isApplicationForeground: () -> Bool
 
     init(
         beginBackgroundTask: @escaping BeginBackgroundTask = { name, expiration in
@@ -109,7 +112,10 @@ final class BackgroundGenerationKeepAlive {
         registerLaunchHandler: @escaping RegisterLaunchHandler = { identifier, handler in
             BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil, launchHandler: handler)
         },
-        systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000
+        systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000,
+        isApplicationForeground: @escaping () -> Bool = {
+            UIApplication.shared.applicationState != .background
+        }
     ) {
         self.beginBackgroundTask = beginBackgroundTask
         self.endBackgroundTask = endBackgroundTask
@@ -117,6 +123,7 @@ final class BackgroundGenerationKeepAlive {
         self.cancelTaskRequest = cancelTaskRequest
         self.registerLaunchHandler = registerLaunchHandler
         self.systemSubmitRetryDelayNanoseconds = systemSubmitRetryDelayNanoseconds
+        self.isApplicationForeground = isApplicationForeground
     }
 
     private var bundleIdentifier: String { Bundle.main.bundleIdentifier ?? "app.amber.ios" }
@@ -142,7 +149,7 @@ final class BackgroundGenerationKeepAlive {
         leases[leaseId] != nil
     }
 
-    /// 把 UIKit 短窗、已排队 request 和系统已接管明确分开。
+    /// 把 UIKit 短窗、已提交 request 和系统已接管明确分开。
     func executionAssertion(for leaseId: String) -> ExecutionAssertion {
         guard let lease = leases[leaseId] else { return .none }
         if lease.systemTask != nil { return .adopted }
@@ -278,17 +285,21 @@ final class BackgroundGenerationKeepAlive {
     ) {
         guard var lease = leases[leaseId] else { return }
         if let total {
-            lease.progressTotalUnitCount = max(1, total)
-            lease.progressCompletedUnitCount = min(
-                lease.progressCompletedUnitCount,
-                lease.progressTotalUnitCount ?? 1
-            )
+            // Foundation Progress 用负数 total 表示无法预知总量。长流和多阶段
+            // pipeline 只报告真实事件数，不编一个时间百分比。
+            lease.progressTotalUnitCount = total < 0 ? -1 : max(1, total)
+            if total >= 0 {
+                lease.progressCompletedUnitCount = min(
+                    lease.progressCompletedUnitCount,
+                    lease.progressTotalUnitCount ?? 1
+                )
+            }
         }
         if let subtitle {
             lease.subtitle = subtitle
         }
         let boundedCompleted: Int64
-        if let total = lease.progressTotalUnitCount {
+        if let total = lease.progressTotalUnitCount, total >= 0 {
             boundedCompleted = min(max(0, completed), total)
         } else {
             boundedCompleted = max(0, completed)
@@ -297,7 +308,7 @@ final class BackgroundGenerationKeepAlive {
             lease.progressCompletedUnitCount,
             boundedCompleted
         )
-        if let total = lease.progressTotalUnitCount {
+        if let total = lease.progressTotalUnitCount, total >= 0 {
             lease.progressCompletedUnitCount = min(
                 lease.progressCompletedUnitCount,
                 total
@@ -311,6 +322,21 @@ final class BackgroundGenerationKeepAlive {
             systemTask.updateTitle(lease.title, subtitle: lease.subtitle)
         }
         leases[leaseId] = lease
+    }
+
+    /// 为总量不可预知的长任务记录一个真实工作增量。调用方只在收到模型 chunk、
+    /// 落下 durable 分段或跨过业务阶段时调用；这里不生成定时心跳。
+    func advanceProgress(
+        _ leaseId: String,
+        by units: Int64 = 1,
+        subtitle: String? = nil
+    ) {
+        guard let lease = leases[leaseId], units >= 0 else { return }
+        updateProgress(
+            leaseId,
+            completed: lease.progressCompletedUnitCount + units,
+            subtitle: subtitle
+        )
     }
 
     /// 将前台流的通用租约显式交给专用后台协调器。
@@ -350,6 +376,13 @@ final class BackgroundGenerationKeepAlive {
     // MARK: - 内部
 
     private func submitContinuedTask(_ leaseId: String, title: String, subtitle: String) {
+        guard isApplicationForeground() else {
+            IOSBackgroundLifecycleLog.record(
+                "keepAliveSubmitSkippedBackground(\(leaseId))",
+                detail: snapshotDetail
+            )
+            return
+        }
         let taskIdentifier = identifier(for: leaseId)
         leaseIdsByIdentifier[taskIdentifier] = leaseId
 
@@ -383,8 +416,8 @@ final class BackgroundGenerationKeepAlive {
             title: title,
             subtitle: subtitle
         )
-        // .queue 而不是 .fail：排队等系统有资源，好过当场判死。第一条腿在
-        // 排队期间撑着，真等不到也只是退化成 30 秒，不会更差。
+        // 这是用户在前台明确启动的长任务。系统暂时没有资源时继续排队，
+        // 不能把“尚未接管”当成业务失败。
         request.strategy = .queue
 
         do {
@@ -416,6 +449,14 @@ final class BackgroundGenerationKeepAlive {
             guard let lease = self.leases[leaseId],
                   lease.systemTask == nil,
                   !lease.didSubmitSystemTask else { return }
+            guard self.isApplicationForeground() else {
+                self.cancelSystemSubmitRetry(for: leaseId)
+                IOSBackgroundLifecycleLog.record(
+                    "keepAliveSubmitRetrySkippedBackground(\(leaseId))",
+                    detail: self.snapshotDetail
+                )
+                return
+            }
             IOSBackgroundLifecycleLog.record(
                 "keepAliveSubmitRetry(\(leaseId))",
                 detail: self.snapshotDetail
@@ -513,9 +554,8 @@ final class BackgroundGenerationKeepAlive {
 
     /// 摘租约必须连 identifier 反查表和已提交的请求一起摘。
     ///
-    /// 撤请求是必须的：`.queue` 下提交出去的请求不会自己过期，不撤的话系统会在
-    /// 这一轮早就结束之后才调度到它，把 App 唤起来、给用户弹一张名不副实的
-    /// 「正在生成」进度卡，白烧一次唤醒。已经被调度走的那些 cancel 是 no-op。
+    /// 撤请求是必须的：业务已结束后不能再让系统调度到一张失去 owner 的进度卡。
+    /// 已经被调度走的那些 cancel 是 no-op。
     @discardableResult
     private func removeLease(_ leaseId: String) -> Lease? {
         cancelSystemSubmitRetry(for: leaseId)

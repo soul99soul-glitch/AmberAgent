@@ -668,9 +668,15 @@ struct NativeChatTimelineView: View {
         switch entry.kind {
         case .emptyState:
             ChatEmptyState()
-        case .configurationIssue:
-            // 配置引导卡已下线：缺 Key 时也不再占位整页「还不能聊天」。
-            EmptyView()
+        case .configurationIssue(let compact):
+            if let configurationIssue {
+                ChatConfigurationNoticeCard(
+                    issue: configurationIssue,
+                    compact: compact,
+                    onPrimary: { onAction(.primaryConfiguration) },
+                    onModelDefaults: { onAction(.modelDefaults) }
+                )
+            }
         case .message:
             if let message = entry.message,
                let index = entry.index,
@@ -1076,6 +1082,65 @@ struct NativeChatTimelineView: View {
         next.liveRenderingFarFromBottom = false
         next.showScrollToBottom = false
         publishViewportState(next)
+    }
+}
+
+private struct ChatConfigurationNoticeCard: View {
+    let issue: ChatConfigurationIssue
+    let compact: Bool
+    let onPrimary: () -> Void
+    let onModelDefaults: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(issue.title)
+                    .font(compact ? .subheadline.weight(.semibold) : .headline)
+                    .foregroundStyle(AmberTheme.foreground)
+                Text(issue.message)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack(spacing: 8) {
+                Button(primaryTitle, action: onPrimary)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(AmberTheme.accent)
+
+                if issue != .missingModel {
+                    Button("选择模型", action: onModelDefaults)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                }
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            AmberTheme.surface.opacity(0.92),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(AmberTheme.borderSoft, lineWidth: 0.5)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private var primaryTitle: String {
+        switch issue {
+        case .missingAPIKey: "添加 API Key"
+        case .invalidBaseURL: "修正服务商"
+        case .missingModel: "选择模型"
+        case .missingProvider: "配置服务商"
+        case .providerDisabled: "启用服务商"
+        case .unsupportedProvider: "切换服务商"
+        case .codexNotSignedIn: "登录 Codex"
+        case .grokNotSignedIn: "登录 Grok"
+        case .geminiNotSignedIn: "登录 Antigravity"
+        }
     }
 }
 

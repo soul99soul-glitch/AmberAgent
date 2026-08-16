@@ -226,4 +226,42 @@ final class ParagraphStreamingAppendTests: XCTestCase {
         XCTAssertEqual(view.accessibilityLabel, "第一段继续")
         XCTAssertNil(view.accessibilityCustomActions)
     }
+
+    /// 小说/Chat 说完后 `shouldAnimateText` 会立刻关掉。旧实现把
+    /// `animatedByWord == false` 当成全量 `attributedText` 替换，已排好的
+    /// 两万字 CJK 会在主线程重排超过 10s，被 FrontBoard watchdog 杀掉。
+    /// 前缀扩展必须仍走 append；只有需要淡入时才挂 fade。
+    func testCompletionStyleAppendWithoutAnimationStaysOnFastPath() {
+        let width: CGFloat = 361
+        let measureSize = CGSize(width: width, height: .greatestFiniteMagnitude)
+        let base = makeLongParagraph(targetUTF16: 24_000)
+
+        let view = ParagraphUIView.makeTextKit1View()
+        view.frame = CGRect(x: 0, y: 0, width: width, height: 10)
+        view.setParagraphContents(
+            NSMutableAttributedString(string: base, attributes: attributes),
+            lineSpacing: 4,
+            animatedByWord: false
+        )
+        _ = view.sizeThatFits(measureSize)
+
+        ParagraphUIViewAppendPathTestHook.reset()
+        let completed = NSMutableAttributedString(
+            string: base + "说完后追加的尾巴",
+            attributes: attributes
+        )
+        view.setParagraphContents(completed, lineSpacing: 4, animatedByWord: false)
+
+        XCTAssertEqual(
+            ParagraphUIViewAppendPathTestHook.appendHitCount,
+            1,
+            "完成态关掉逐词淡入后，纯追加仍须走 textStorage.append"
+        )
+        XCTAssertEqual(
+            ParagraphUIViewAppendPathTestHook.missReasonCounts["notAnimatedByWord"] ?? 0,
+            0,
+            "不得再把 animatedByWord == false 当成全量替换理由"
+        )
+        XCTAssertEqual(view.textStorage.string, completed.string)
+    }
 }

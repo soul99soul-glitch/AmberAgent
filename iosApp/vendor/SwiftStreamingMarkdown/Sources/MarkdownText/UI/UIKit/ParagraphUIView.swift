@@ -318,8 +318,10 @@ class ParagraphUIView: UITextView {
     // previous contents. Appending only the new tail keeps TextKit's layout
     // for the existing text valid (a full attributedText replacement
     // invalidates the whole paragraph), and keeps in-flight word fades running.
-    if animatedByWord,
-       usesTextKit1,
+    // Animation is not a prerequisite: completion turns shouldAnimateText off
+    // while the last beats are still prefix extensions. Gating append on
+    // animatedByWord forced a full CJK relayout and tripped the 10s watchdog.
+    if usesTextKit1,
        self.lineSpacing == lineSpacing,
        let appendedRange = paragraphContents.appendedTailRange(toBecome: newContents) {
       #if DEBUG
@@ -343,14 +345,14 @@ class ParagraphUIView: UITextView {
       accessibilityLabel = textStorage.string
       accessibilityCustomActions = nil
       invalidateIntrinsicContentSize()
-      appendFadeAnimations(in: appendedRange, asUnit: appendsTailFadeAsUnit)
+      if animatedByWord {
+        appendFadeAnimations(in: appendedRange, asUnit: appendsTailFadeAsUnit)
+      }
       return
     }
 
     #if DEBUG
-    if !animatedByWord {
-      ParagraphUIViewAppendPathTestHook.recordMiss("notAnimatedByWord")
-    } else if !usesTextKit1 {
+    if !usesTextKit1 {
       ParagraphUIViewAppendPathTestHook.recordMiss("textKit2")
     } else if self.lineSpacing != lineSpacing {
       ParagraphUIViewAppendPathTestHook.recordMiss("lineSpacingChanged")

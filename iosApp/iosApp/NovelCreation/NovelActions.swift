@@ -359,6 +359,8 @@ struct NovelSyncManualEditsCommand: Equatable, Sendable {
     let checkpointID: NovelCheckpointID
     let stateSnapshotID: NovelStateSnapshotID
     let expectedWorkingRevision: Int64
+    /// Call-site only. Not part of the durable payload hash.
+    var preferStateDelta: Bool = false
 }
 
 struct NovelRetryPendingCommand: Equatable, Sendable {

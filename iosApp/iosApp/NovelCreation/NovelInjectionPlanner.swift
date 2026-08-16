@@ -1312,6 +1312,12 @@ private extension NovelInjectionPlanner {
                     "Chapter revision proposal: chapter \(revision.chapterOrdinal) 《\(revision.chapterTitle)》 \(range)\n" +
                     "Previous text:\n\(revision.oldText)\n" +
                     "Proposed text:\n\(revision.newText)"
+            } else if let revert = prompt.manuscriptRevert {
+                let chapters = zip(revert.chapterOrdinals, revert.chapterTitles)
+                    .map { "chapter \($0) 《\($1)》" }
+                    .joined(separator: ", ")
+                interaction = "Question: \(prompt.question)\n" +
+                    "Manuscript revert proposal: last \(revert.chapterCount) chapters (\(chapters))"
             } else {
                 interaction = "Question: \(prompt.question)"
             }

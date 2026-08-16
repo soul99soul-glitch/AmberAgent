@@ -786,6 +786,9 @@ extension NovelGenerationReducer {
         guard !prompt.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NovelError.invalidInput("Ask User requires question text.")
         }
+        if prompt.chapterRevision != nil, prompt.manuscriptRevert != nil {
+            throw NovelError.invalidInput("Ask User cannot combine chapter revision and manuscript revert.")
+        }
         if let revision = prompt.chapterRevision {
             guard prompt.options == NovelChapterRevisionApproval.options else {
                 throw NovelError.invalidInput("Chapter revision approval must use the fixed confirm/reject options.")
@@ -798,6 +801,19 @@ extension NovelGenerationReducer {
             guard !revision.oldText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !revision.newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw NovelError.invalidInput("Chapter revision approval is missing old or new text.")
+            }
+            return
+        }
+        if let revert = prompt.manuscriptRevert {
+            guard prompt.options == NovelManuscriptRevertApproval.options else {
+                throw NovelError.invalidInput("Manuscript revert approval must use the fixed confirm/reject options.")
+            }
+            guard revert.chapterCount >= 1,
+                  revert.chapterIDs.count == revert.chapterCount,
+                  revert.chapterTitles.count == revert.chapterCount,
+                  revert.chapterOrdinals.count == revert.chapterCount,
+                  Set(revert.chapterIDs).count == revert.chapterCount else {
+                throw NovelError.invalidInput("Manuscript revert approval is missing chapter targets.")
             }
             return
         }

@@ -1978,6 +1978,7 @@ struct NovelWritingContextSheet: View {
         let saved = await workspace.setCollaborationMode(mode)
         if saved {
             selectedMode = mode
+            session.reconcileComposerIntent()
         } else {
             selectedMode = collaborationMode
             modeSwitchMessage = workspace.errorMessage ?? "模式切换失败，请重试。"

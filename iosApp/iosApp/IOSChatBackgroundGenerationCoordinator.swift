@@ -598,6 +598,12 @@ final class IOSChatBackgroundGenerationCoordinator {
 
     @discardableResult
     func cancelActiveJob(conversationId: KotlinUuid) -> Bool {
+        if let runId = activeRunId(conversationId: conversationId) {
+            return cancelJob(runId: runId)
+        }
+        for requestId in taskMap().keys where activeJobs[requestId] == nil {
+            _ = job(for: requestId)
+        }
         guard let runId = activeRunId(conversationId: conversationId) else { return false }
         return cancelJob(runId: runId)
     }
@@ -611,10 +617,14 @@ final class IOSChatBackgroundGenerationCoordinator {
 
     @discardableResult
     func cancelJob(runId: String) -> Bool {
-        guard let match = activeJobs.first(where: { $0.value.runId == runId }) else {
+        if let match = activeJobs.first(where: { $0.value.runId == runId }) {
+            return cancelJob(requestId: match.key, job: match.value)
+        }
+        guard let requestId = taskMap().first(where: { $0.value == runId })?.key,
+              let job = job(for: requestId) else {
             return false
         }
-        return cancelJob(requestId: match.key, job: match.value)
+        return cancelJob(requestId: requestId, job: job)
     }
 
     @discardableResult
@@ -2461,6 +2471,44 @@ final class IOSChatBackgroundGenerationCoordinator {
             uploadMessageCount: uploadMessageCount,
             displayMessages: displayMessages
         )
+    }
+
+    /// 只落盘 cursor owner，不进 `activeJobs`。对应生产 `checkpointDurableResponse`
+    /// 在 detach 后、尚未 `start(.resumeResponse)` 的窗口；测试里绕过
+    /// `BGTaskScheduler.register`（XCTest 进程里动态 id 常会失败）。
+    @discardableResult
+    func persistDurableResponseCheckpointForTesting(_ handoff: IOSChatBackgroundHandoff) -> Bool {
+        guard handoff.mode == .resumeResponse, handoff.responseId != nil else {
+            return false
+        }
+        let requestId = requestIdentifier(for: handoff.runId)
+        do {
+            try persist(handoff: handoff, requestId: requestId)
+        } catch {
+            return false
+        }
+        remember(runId: handoff.runId, requestId: requestId)
+        return true
+    }
+
+    /// 临时换依赖供 `job(for:)` 水合，不走 `configure()` 的 task-map 预热
+    /// （预热会把 payload 填进 `activeJobs`，掩盖「只按 runId 取消」的缺口）。
+    func withDependenciesForTesting(
+        conversationStore: IOSConversationStore,
+        toolRuntime: ChatToolRuntime,
+        sharedSettings: IOSSharedSettingsStore,
+        _ body: () -> Void
+    ) {
+        let previous = dependencies
+        dependencies = IOSChatBackgroundDependencies(
+            conversationStore: conversationStore,
+            toolRuntime: toolRuntime,
+            sharedSettings: sharedSettings,
+            liveActivityController: .shared,
+            saveMiniAppIfPresent: nil
+        )
+        defer { dependencies = previous }
+        body()
     }
 #endif
 

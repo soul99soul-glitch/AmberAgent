@@ -4,6 +4,8 @@ import XCTest
 
 final class NovelFactTransactionLifecycleTests: XCTestCase {
     func testCollectionCommitsImmediatelyWithoutStartingFactModel() async throws {
+        // 2026-08-16：共创点收录与代笔自动收录同一条 inline stateDelta。
+        // 旧契约是 user collect 0 请求、needsSync；现改为收录当时抽完并保持 synchronized。
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
@@ -24,11 +26,11 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.candidates[0].status, .collected)
         XCTAssertEqual(final.chapterVersions.last?.content, fixture.candidate.content)
         XCTAssertTrue(final.pendingOperations.isEmpty)
-        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
-        XCTAssertTrue(final.injectionReceipts.isEmpty)
-        XCTAssertTrue(final.generationReceipts.isEmpty)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertFalse(final.injectionReceipts.isEmpty)
+        XCTAssertFalse(final.generationReceipts.isEmpty)
         let requests = await harness.adapter.requests
-        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(requests.count, 1)
     }
 
     func testSystemAutoCollectUsesInlineStateDeltaAndStaysSynchronized() async throws {
@@ -88,6 +90,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
     }
 
     func testDeferredSyncRebuildsAnImmediatelyCollectedChapter() async throws {
+        // 2026-08-16：共创收录先走 inline delta；超时不回修，回退 without-sync
+        // 后再走既有 suffix rebuild。
         var fixture = try candidateDocument()
         fixture.document.project.modelPolicy = .fixed(
             providerID: "creative-provider",
@@ -97,34 +101,13 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             providerID: "sync-provider",
             modelID: "sync-model"
         )
-        let rebuild = """
-        {
-          "schemaVersion": 1,
-          "stateSummary": "Mara entered the archive and heard the bell.",
-          "branchOutline": "Mara investigates the archive.",
-          "events": [{
-            "id": "event-rebuilt-archive",
-            "kind": "discovery",
-            "summary": "Mara entered the archive.",
-            "entityReferences": ["Mara"],
-            "evidence": "Mara opened the archive."
-          }, {
-            "id": "event-paraphrased",
-            "kind": "discovery",
-            "summary": "Mara found hidden records.",
-            "entityReferences": ["Mara"],
-            "evidence": "She discovered secret records inside."
-          }],
-          "characterStates": [],
-          "relationships": [],
-          "foreshadowing": [],
-          "unresolvedEntityNames": ["Mara"],
-          "settingProposals": []
-        }
-        """
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [NovelModelScript(steps: [.delta(rebuild), .complete])]
+            scripts: [
+                NovelModelScript(steps: [.pause]),
+                NovelModelScript(steps: [.delta(validArchiveRebuildJSON()), .complete]),
+            ],
+            factRequestTimeout: 0.15
         )
         let collect = collectCommand(
             document: fixture.document,
@@ -132,6 +115,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         )
         _ = try await harness.creation.perform(.collectCandidate(collect))
         let collected = try await harness.repository.document(collect.projectID)
+        XCTAssertEqual(collected.branches[0].syncStatus, .needsSync)
         let branch = collected.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -159,9 +143,237 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
         XCTAssertEqual(final.events.map(\.summary), ["Mara entered the archive."])
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.count, 2)
         let policies = await harness.adapter.resolvedPolicies
-        XCTAssertEqual(policies, [.fixed(providerID: "sync-provider", modelID: "sync-model")])
+        XCTAssertEqual(policies, [
+            .fixed(providerID: "sync-provider", modelID: "sync-model"),
+            .fixed(providerID: "sync-provider", modelID: "sync-model"),
+        ])
+    }
+
+    func testManualSyncRepairsTruncatedJSONUsingPreviousOutput() async throws {
+        let fixture = try candidateDocument()
+        let truncated = #"{"schemaVersion":1,"stateSummary":"Mara entered"#
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(truncated), .complete]),
+                NovelModelScript(steps: [.delta(validArchiveRebuildJSON()), .complete]),
+            ]
+        )
+        try await collectThenSync(fixture: fixture, harness: harness)
+
+        let final = try await harness.repository.document(fixture.document.project.id)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 3)
+        let repairUser = requests[2].messages
+            .filter { $0.role == .user }
+            .map(\.content)
+            .joined(separator: "\n")
+        XCTAssertTrue(repairUser.contains("PREVIOUS OUTPUT"))
+        XCTAssertTrue(repairUser.contains(truncated))
+        XCTAssertTrue(repairUser.contains("FAILURE"))
+    }
+
+    func testManualSyncRepairsUnmatchedEvidenceUsingDecodedJSON() async throws {
+        let fixture = try candidateDocument()
+        let invented = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Someone invented a dragon.",
+          "branchOutline": "A dragon appears.",
+          "events": [{
+            "id": "dragon",
+            "kind": "discovery",
+            "summary": "A dragon appeared.",
+            "entityReferences": [],
+            "evidence": "A dragon burst through the ceiling tiles."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": [],
+          "settingProposals": []
+        }
+        """
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(invented), .complete]),
+                NovelModelScript(steps: [.delta(validArchiveRebuildJSON()), .complete]),
+            ]
+        )
+        try await collectThenSync(fixture: fixture, harness: harness)
+
+        let final = try await harness.repository.document(fixture.document.project.id)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 3)
+        let repairUser = requests[2].messages
+            .filter { $0.role == .user }
+            .map(\.content)
+            .joined(separator: "\n")
+        XCTAssertTrue(repairUser.contains("PREVIOUS OUTPUT"))
+        XCTAssertTrue(repairUser.contains("dragon"))
+        XCTAssertTrue(
+            repairUser.contains("证据") || repairUser.contains("evidence") ||
+                repairUser.contains("对不上")
+        )
+        XCTAssertTrue(
+            repairUser.contains("A dragon burst through the ceiling tiles."),
+            "repair must name the unmatched evidence sentence"
+        )
+    }
+
+    func testManualSyncAcceptsEmptyFactsAfterUnmatchedRepairsAreExhausted() async throws {
+        let fixture = try candidateDocument()
+        let invented = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Someone invented a dragon.",
+          "branchOutline": "A dragon appears.",
+          "events": [{
+            "id": "dragon",
+            "kind": "discovery",
+            "summary": "A dragon appeared.",
+            "entityReferences": [],
+            "evidence": "A dragon burst through the ceiling tiles."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": [],
+          "settingProposals": []
+        }
+        """
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(invented), .complete]),
+                NovelModelScript(steps: [.delta(invented), .complete]),
+                NovelModelScript(steps: [.delta(invented), .complete]),
+            ]
+        )
+        try await collectThenSync(fixture: fixture, harness: harness)
+
+        let final = try await harness.repository.document(fixture.document.project.id)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 4)
+        XCTAssertFalse(
+            final.events.contains(where: { $0.summary.contains("dragon") })
+        )
+    }
+
+    func testUserCollectRepairsUnmatchedDeltaThenStaysSynchronized() async throws {
+        let fixture = try candidateDocument()
+        let invented = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Someone invented a dragon.",
+          "events": [{
+            "id": "dragon",
+            "kind": "discovery",
+            "summary": "A dragon appeared.",
+            "entityReferences": [],
+            "evidence": "A dragon burst through the ceiling tiles."
+          }],
+          "characterChanges": [],
+          "relationshipChanges": [],
+          "foreshadowingChanges": [],
+          "unresolvedEntityNames": [],
+          "branchOutlinePatch": "A dragon appears.",
+          "settingProposals": []
+        }
+        """
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(invented), .complete]),
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+            ]
+        )
+        let command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        guard case .candidateCollected = try await harness.creation.perform(
+            .collectCandidate(command)
+        ) else {
+            return XCTFail("Expected repaired collection")
+        }
+        let final = try await harness.repository.document(command.projectID)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 2)
+        let repairUser = requests[1].messages
+            .filter { $0.role == .user }
+            .map(\.content)
+            .joined(separator: "\n")
+        XCTAssertTrue(repairUser.contains("A dragon burst through the ceiling tiles."))
+    }
+
+    func testManualSyncDoesNotRepairTimeoutAfterARejectedDraft() async throws {
+        let fixture = try candidateDocument()
+        let invented = """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Someone invented a dragon.",
+          "branchOutline": "A dragon appears.",
+          "events": [{
+            "id": "dragon",
+            "kind": "discovery",
+            "summary": "A dragon appeared.",
+            "entityReferences": [],
+            "evidence": "A dragon burst through the ceiling tiles."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": [],
+          "settingProposals": []
+        }
+        """
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(invented), .complete]),
+                NovelModelScript(steps: [.pause]),
+            ],
+            factRequestTimeout: 0.15
+        )
+        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
+        let branch = edited.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: edited.project.revision,
+                expectedConfigRevision: edited.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: edited.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        do {
+            _ = try await harness.creation.perform(.syncManualEdits(sync))
+            XCTFail("Timeout after a rejected draft must not succeed")
+        } catch let failure as NovelStructuredModelExecutionFailure {
+            XCTAssertEqual(failure.failure.code, "structured_no_output_timeout")
+        }
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 3, "timeout must not start a fourth repair call")
     }
 
     func testManualSyncSurvivesSlowButContinuousOutputPastTheAbsoluteFactTimeout() async throws {
@@ -200,33 +412,31 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let third = rebuild.index(rebuild.startIndex, offsetBy: quarter * 3)
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [NovelModelScript(steps: [
-                .delta(String(rebuild[..<first])),
-                .pause,
-                .delta(String(rebuild[first..<second])),
-                .pause,
-                .delta(String(rebuild[second..<third])),
-                .pause,
-                .delta(String(rebuild[third...])),
-                .complete,
-            ])],
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [
+                    .delta(String(rebuild[..<first])),
+                    .pause,
+                    .delta(String(rebuild[first..<second])),
+                    .pause,
+                    .delta(String(rebuild[second..<third])),
+                    .pause,
+                    .delta(String(rebuild[third...])),
+                    .complete,
+                ]),
+            ],
             factRequestTimeout: 0.3
         )
-        let collect = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        _ = try await harness.creation.perform(.collectCandidate(collect))
-        let collected = try await harness.repository.document(collect.projectID)
-        let branch = collected.branches[0]
+        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
+        let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
                 operationID: NovelOperationID(),
-                expectedProjectRevision: collected.project.revision,
-                expectedConfigRevision: collected.project.configRevision,
+                expectedProjectRevision: edited.project.revision,
+                expectedConfigRevision: edited.project.configRevision,
                 expectedBranchHeadRevision: branch.headRevision
             ),
-            projectID: collected.project.id,
+            projectID: edited.project.id,
             branchID: branch.id,
             pendingID: NovelPendingOperationID(),
             checkpointID: NovelCheckpointID(),
@@ -238,11 +448,11 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             try await harness.creation.perform(.syncManualEdits(sync))
         }
         let requestStarted = await eventually {
-            await harness.adapter.requests.count == 1
+            await harness.adapter.requests.count == 2
         }
         XCTAssertTrue(requestStarted)
         let requests = await harness.adapter.requests
-        let runID = try XCTUnwrap(requests.first).runID
+        let runID = try XCTUnwrap(requests.last).runID
 
         for _ in 0..<3 {
             try await Task.sleep(nanoseconds: 150_000_000)
@@ -252,7 +462,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         guard case .manualSyncCommitted = try await syncTask.value else {
             return XCTFail("Expected slow-but-continuous output to still complete synchronization")
         }
-        let final = try await harness.repository.document(collect.projectID)
+        let final = try await harness.repository.document(edited.project.id)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
         XCTAssertTrue(final.pendingOperations.isEmpty)
@@ -264,24 +474,22 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [NovelModelScript(steps: [.pause])],
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.pause]),
+            ],
             factRequestTimeout: 0.15
         )
-        let collect = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
-        )
-        _ = try await harness.creation.perform(.collectCandidate(collect))
-        let collected = try await harness.repository.document(collect.projectID)
-        let branch = collected.branches[0]
+        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
+        let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
                 operationID: NovelOperationID(),
-                expectedProjectRevision: collected.project.revision,
-                expectedConfigRevision: collected.project.configRevision,
+                expectedProjectRevision: edited.project.revision,
+                expectedConfigRevision: edited.project.configRevision,
                 expectedBranchHeadRevision: branch.headRevision
             ),
-            projectID: collected.project.id,
+            projectID: edited.project.id,
             branchID: branch.id,
             pendingID: NovelPendingOperationID(),
             checkpointID: NovelCheckpointID(),
@@ -296,7 +504,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             // Expected: the no-output timeout still fires when there is no output at all.
         }
 
-        let durable = try await harness.repository.document(collect.projectID)
+        let durable = try await harness.repository.document(edited.project.id)
         XCTAssertEqual(durable.pendingOperations.first?.status, .retryable)
         XCTAssertEqual(durable.branches[0].syncStatus, .needsSync)
     }
@@ -338,6 +546,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
     }
 
     func testCollectionDoesNotDependOnModelContextWindow() async throws {
+        // 2026-08-16：共创收录会打 stateDelta。5k 窗口会被注入预算判死，
+        // 这不再是「收录不依赖窗口」；本例只锁正常窗口下收录当时抽完。
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
@@ -348,7 +558,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
                 modelID: "small-model",
                 wireModelID: "small-wire-model",
                 displayName: "Small Model",
-                contextWindowTokens: 5_000
+                contextWindowTokens: 128_000
             )
         )
         let command = collectCommand(
@@ -359,12 +569,13 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         _ = try await harness.creation.perform(.collectCandidate(command))
 
         let requests = await harness.adapter.requests
-        XCTAssertTrue(requests.isEmpty)
+        XCTAssertEqual(requests.count, 1)
         let durable = try await harness.repository.document(command.projectID)
         XCTAssertEqual(durable.candidates[0].status, .collected)
         XCTAssertTrue(durable.pendingOperations.isEmpty)
-        XCTAssertTrue(durable.injectionReceipts.isEmpty)
-        XCTAssertTrue(durable.generationReceipts.isEmpty)
+        XCTAssertEqual(durable.branches[0].syncStatus, .synchronized)
+        XCTAssertFalse(durable.injectionReceipts.isEmpty)
+        XCTAssertFalse(durable.generationReceipts.isEmpty)
     }
 
     func testRestartCanRetryDurablePendingWithoutTheOriginalProviderTask() async throws {
@@ -612,37 +823,16 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let rebuildJSON = validRebuildJSON()
         let harness = try await makeHarness(
             document: fixture.document,
-            scripts: [NovelModelScript(steps: [.delta(rebuildJSON), .complete])]
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(rebuildJSON), .complete]),
+            ]
         )
-        let collect = collectCommand(
-            document: fixture.document,
-            candidate: fixture.candidate
+        let edited = try await collectAndEdit(
+            fixture: fixture,
+            harness: harness,
+            editedContent: "Mara forced open the archive door."
         )
-        _ = try await harness.creation.perform(.collectCandidate(collect))
-        let collected = try await harness.repository.document(collect.projectID)
-        let branch = collected.branches[0]
-        let selection = try XCTUnwrap(branch.workingChapterSelections.first)
-        let version = try XCTUnwrap(collected.chapterVersions.first(where: {
-            $0.id == selection.versionID
-        }))
-        let edit = NovelSaveManualEditCommand(
-            context: NovelMutationContext(
-                operationID: NovelOperationID(),
-                expectedProjectRevision: collected.project.revision,
-                expectedConfigRevision: collected.project.configRevision,
-                expectedBranchHeadRevision: branch.headRevision
-            ),
-            projectID: collected.project.id,
-            branchID: branch.id,
-            chapterID: version.chapterID,
-            versionID: NovelChapterVersionID(),
-            title: version.title,
-            content: "Mara forced open the archive door.",
-            factCompatibilityID: UUID(),
-            expectedWorkingRevision: branch.workingRevision
-        )
-        _ = try await harness.creation.perform(.saveManualEdit(edit))
-        let edited = try await harness.repository.document(collect.projectID)
         let editedBranch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -661,10 +851,11 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         _ = try await harness.creation.perform(.syncManualEdits(sync))
 
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 1)
-        let rebuildRequest = requests[0]
+        XCTAssertEqual(requests.count, 2)
+        let rebuildRequest = requests[1]
         let system = rebuildRequest.messages.first?.content ?? ""
         let user = rebuildRequest.messages.last?.content ?? ""
+        XCTAssertTrue(user.contains("ORDERED MANUSCRIPT INPUT"))
         XCTAssertFalse(system.contains("potentially stale"))
         XCTAssertTrue(user.contains("Mara forced open the archive door."))
         XCTAssertFalse(rebuildRequest.messages.contains {
@@ -673,8 +864,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let final = try await harness.repository.document(sync.projectID)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.branches[0].currentStateSnapshotID, sync.stateSnapshotID)
-        XCTAssertEqual(final.injectionReceipts.count, 1)
-        XCTAssertEqual(final.generationReceipts.count, 1)
+        XCTAssertEqual(final.injectionReceipts.count, 2)
+        XCTAssertEqual(final.generationReceipts.count, 2)
         let manualInjection = try XCTUnwrap(final.injectionReceipts.last)
         XCTAssertFalse(manualInjection.sections.contains {
             if case .sessionMessage = $0.kind { return true }
@@ -689,6 +880,52 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             kind: .manualRebuild,
             chunkIndex: 0
         ))
+    }
+
+    func testLastChapterManualSyncUsesStateDeltaWhenPreferred() async throws {
+        let fixture = try candidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
+                NovelModelScript(steps: [.delta(validDeltaJSON(
+                    summary: "Mara forced the archive door.",
+                    evidence: "Mara forced open the archive door.",
+                    outlinePatch: nil
+                )), .complete]),
+            ]
+        )
+        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
+        let branch = edited.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: edited.project.revision,
+                expectedConfigRevision: edited.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: edited.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision,
+            preferStateDelta: true
+        )
+        guard case .manualSyncCommitted = try await harness.creation.perform(
+            .syncManualEdits(sync)
+        ) else {
+            return XCTFail("Expected single-chapter delta sync to commit")
+        }
+        let final = try await harness.repository.document(edited.project.id)
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(final.pendingOperations.isEmpty)
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 2)
+        let deltaUser = requests[1].messages.last?.content ?? ""
+        XCTAssertTrue(deltaUser.contains("NEWLY COLLECTED MANUSCRIPT"))
+        XCTAssertFalse(deltaUser.contains("ORDERED MANUSCRIPT INPUT"))
+        XCTAssertTrue(deltaUser.contains("Mara forced open the archive door."))
     }
 
     func testFileBackedManualChunksResumeSameRetryWithoutResolvingAgain() async throws {
@@ -1803,8 +2040,14 @@ private extension NovelFactTransactionLifecycleTests {
         )
     }
 
-    func validDeltaJSON(summary: String = "Mara entered the archive.") -> String {
-        """
+    func validDeltaJSON(
+        summary: String = "Mara entered the archive.",
+        evidence: String = "Mara opened the archive.",
+        outlinePatch: String? = "Mara investigates the archive."
+    ) -> String {
+        let outlineField = outlinePatch.map { "\"branchOutlinePatch\": \"\($0)\"," }
+            ?? "\"branchOutlinePatch\": null,"
+        return """
         {
           "schemaVersion": 1,
           "stateSummary": "\(summary)",
@@ -1813,13 +2056,13 @@ private extension NovelFactTransactionLifecycleTests {
             "kind": "discovery",
             "summary": "Mara entered the archive.",
             "entityReferences": ["Mara"],
-            "evidence": "Mara opened the archive."
+            "evidence": "\(evidence)"
           }],
           "characterChanges": [],
           "relationshipChanges": [],
           "foreshadowingChanges": [],
           "unresolvedEntityNames": ["Mara"],
-          "branchOutlinePatch": "Mara investigates the archive.",
+          \(outlineField)
           "settingProposals": []
         }
         """
@@ -1837,6 +2080,87 @@ private extension NovelFactTransactionLifecycleTests {
             "summary": "Mara entered the revised archive.",
             "entityReferences": ["Mara"],
             "evidence": "Mara forced open the archive door."
+          }],
+          "characterStates": [],
+          "relationships": [],
+          "foreshadowing": [],
+          "unresolvedEntityNames": ["Mara"],
+          "settingProposals": []
+        }
+        """
+    }
+
+    func collectAndEdit(
+        fixture: (document: NovelProjectDocumentV1, candidate: NovelCandidateRecord),
+        harness: Harness,
+        editedContent: String? = nil
+    ) async throws -> NovelProjectDocumentV1 {
+        let collect = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        _ = try await harness.creation.perform(.collectCandidate(collect))
+        let collected = try await harness.repository.document(collect.projectID)
+        let collectedBranch = collected.branches[0]
+        let version = try XCTUnwrap(collected.chapterVersions.last)
+        _ = try await harness.creation.perform(.saveManualEdit(NovelSaveManualEditCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: collected.project.revision,
+                expectedConfigRevision: collected.project.configRevision,
+                expectedBranchHeadRevision: collectedBranch.headRevision
+            ),
+            projectID: collected.project.id,
+            branchID: collectedBranch.id,
+            chapterID: version.chapterID,
+            versionID: NovelChapterVersionID(),
+            title: version.title,
+            content: editedContent ?? (version.content + "\n\nMara forced open the archive door."),
+            factCompatibilityID: UUID(),
+            expectedWorkingRevision: collectedBranch.workingRevision
+        )))
+        return try await harness.repository.document(collect.projectID)
+    }
+
+    func collectThenSync(
+        fixture: (document: NovelProjectDocumentV1, candidate: NovelCandidateRecord),
+        harness: Harness
+    ) async throws {
+        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
+        let branch = edited.branches[0]
+        let sync = NovelSyncManualEditsCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: edited.project.revision,
+                expectedConfigRevision: edited.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: edited.project.id,
+            branchID: branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        guard case .manualSyncCommitted = try await harness.creation.perform(
+            .syncManualEdits(sync)
+        ) else {
+            return XCTFail("Expected manual sync to commit after repair")
+        }
+    }
+
+    func validArchiveRebuildJSON() -> String {
+        """
+        {
+          "schemaVersion": 1,
+          "stateSummary": "Mara entered the archive and heard the bell.",
+          "branchOutline": "Mara investigates the archive.",
+          "events": [{
+            "id": "event-rebuilt-archive",
+            "kind": "discovery",
+            "summary": "Mara entered the archive.",
+            "entityReferences": ["Mara"],
+            "evidence": "Mara opened the archive."
           }],
           "characterStates": [],
           "relationships": [],

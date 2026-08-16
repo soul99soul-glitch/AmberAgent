@@ -145,7 +145,9 @@ enum IOSAntigravityModelId {
             return "\(base)-\(variant)"
         }
         if available.isEmpty {
-            return resolve(wanted)
+            // Never invent `-medium` / `-tiered` without a live catalog.
+            // cloudcode-pa 404s GA names *and* guessed suffixes.
+            return base
         }
         if let match = preference(for: wanted).first(where: { available.contains($0) }) {
             return resolve(match.isEmpty ? nil : match)
@@ -155,7 +157,26 @@ enum IOSAntigravityModelId {
 }
 
 enum IOSAntigravityModelVariants {
-    nonisolated(unsafe) static var effortsByBase: [String: Set<String>] = [:]
+    private static let defaultsKey = "amber.antigravity.modelVariants"
+
+    nonisolated(unsafe) static var effortsByBase: [String: Set<String>] = load()
+
+    static func replace(_ grouped: [String: Set<String>]) {
+        effortsByBase = grouped
+        let encoded = Dictionary(uniqueKeysWithValues: grouped.map { key, value in
+            (key, Array(value))
+        })
+        UserDefaults.standard.set(encoded, forKey: defaultsKey)
+    }
+
+    static func load() -> [String: Set<String>] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: [String]] else {
+            return [:]
+        }
+        return Dictionary(uniqueKeysWithValues: raw.map { key, value in
+            (key, Set(value))
+        })
+    }
 }
 
 enum IOSGeminiProviderResolver {
@@ -507,11 +528,16 @@ final class IOSGeminiClient {
         params: TextGenerationParams,
         onChunk: @escaping (MessageChunk) -> Void
     ) async throws {
-        let request = try await makeStreamRequest(messages: messages, params: params)
+        let (request, wireModelId) = try await makeStreamRequest(messages: messages, params: params)
         let (bytes, response) = try await session.bytes(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
-            throw IOSGeminiError.httpStatus(status, await Self.readHTTPErrorDetail(from: bytes))
+            var detail = await Self.readHTTPErrorDetail(from: bytes)
+            if !wireModelId.isEmpty {
+                let suffix = "wire model: \(wireModelId)"
+                detail = detail.isEmpty ? suffix : "\(detail) (\(suffix))"
+            }
+            throw IOSGeminiError.httpStatus(status, detail)
         }
 
         var pendingCalls: [Int: (name: String, args: String, thoughtSignature: String?)] = [:]
@@ -699,7 +725,7 @@ final class IOSGeminiClient {
             guard isChatCatalogModel(base), !isAliasBase(base) else { continue }
             grouped[base, default: []].insert(variant ?? "")
         }
-        IOSAntigravityModelVariants.effortsByBase = grouped
+        IOSAntigravityModelVariants.replace(grouped)
         var models: [Model] = grouped.keys.map { base in
             Self.model(
                 base,
@@ -759,7 +785,10 @@ final class IOSGeminiClient {
 
     // MARK: request construction
 
-    private func makeStreamRequest(messages: [UIMessage], params: TextGenerationParams) async throws -> URLRequest {
+    private func makeStreamRequest(
+        messages: [UIMessage],
+        params: TextGenerationParams
+    ) async throws -> (URLRequest, String) {
         let inner = IOSGeminiPayloadBuilder.makeBody(
             messages: messages,
             params: params,
@@ -767,18 +796,24 @@ final class IOSGeminiClient {
         )
         let url: URL
         var request: URLRequest
+        var wireModelId = params.model.modelId
 
         if IOSGeminiProviderResolver.isAntigravityOAuth(provider) {
             let token = try await resolveOAuthSessionToken()
             guard let target = URL(string: IOSGeminiConstants.cloudcodePaBaseUrl + "/v1internal:streamGenerateContent?alt=sse") else {
                 throw IOSGeminiError.stream("Gemini 请求地址无效。")
             }
+            let (base, _) = IOSAntigravityModelId.split(params.model.modelId)
+            if IOSAntigravityModelVariants.effortsByBase[base] == nil {
+                _ = try? await fetchAntigravityModels()
+            }
+            wireModelId = IOSAntigravityModelId.wireModelId(
+                params.model.modelId,
+                reasoning: params.reasoningLevel,
+                variants: IOSAntigravityModelVariants.effortsByBase
+            )
             let wrapper = IOSGeminiPayloadBuilder.makeCloudCodeAssistWrapper(
-                modelId: IOSAntigravityModelId.wireModelId(
-                    params.model.modelId,
-                    reasoning: params.reasoningLevel,
-                    variants: IOSAntigravityModelVariants.effortsByBase
-                ),
+                modelId: wireModelId,
                 projectId: token.projectId,
                 inner: inner
             )
@@ -809,7 +844,7 @@ final class IOSGeminiClient {
             Self.applyCustomHeaders(params.customHeaders, to: &request)
             request.setValue(accessKey, forHTTPHeaderField: "x-goog-api-key")
         }
-        return request
+        return (request, wireModelId)
     }
 
     private static func applyCustomHeaders(_ headers: [CustomHeader], to request: inout URLRequest) {

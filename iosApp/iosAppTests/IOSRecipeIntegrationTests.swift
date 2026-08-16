@@ -29,6 +29,58 @@ final class IOSRecipeIntegrationTests: XCTestCase {
         tempDirs.removeAll()
     }
 
+    func testPrimitiveCatalogMatchesExecutableRecipeRoutes() {
+        for supported in [
+            "workspace_file_read",
+            "tools_list",
+            "skill_validate",
+            "mcp_call",
+            "provider_config_status",
+            "theme_pack_status",
+        ] {
+            XCTAssertNotNil(
+                IOSDynamicToolRegistry.primitiveCatalogEntry(for: supported),
+                "\(supported) has a real recipe adapter"
+            )
+        }
+
+        for rejected in [
+            "skill_import",
+            "provider_config_apply",
+            "theme_pack_import",
+            "recipe_import",
+            "generate_image",
+            "mcp__unknown__missing",
+            "wm_eval",
+        ] {
+            XCTAssertNil(
+                IOSDynamicToolRegistry.primitiveCatalogEntry(for: rejected),
+                "\(rejected) must fail validation instead of changing semantics at runtime"
+            )
+        }
+    }
+
+    func testCheckpointSaveReportsFailureBeforeApprovalCanPause() {
+        let root = tempRoot()
+        let blockingFile = root.appendingPathComponent("not-a-directory")
+        XCTAssertTrue(FileManager.default.createFile(atPath: blockingFile.path, contents: Data()))
+        let store = IOSRecipeExecutionCheckpointStore(baseDirectory: blockingFile)
+        let checkpoint = IOSRecipeExecutionCheckpoint(
+            schemaVersion: IOSRecipeExecutionCheckpointStore.schemaVersion,
+            toolCallId: "checkpoint-write-failure",
+            recipeName: "checkpoint_probe",
+            recipeVersion: "1.0.0",
+            catalogRevision: 1,
+            inputs: [:],
+            stepOutputs: [:],
+            completedSteps: [],
+            nextStepIndex: 0,
+            executionId: "execution-checkpoint-write-failure"
+        )
+
+        XCTAssertFalse(store.save(checkpoint))
+    }
+
     // MARK: - Acceptance 2: hot-reload e2e canary (search → promote → call → final)
 
     func testHotReloadCanarySearchPromoteCallResultRoundByRound() async throws {

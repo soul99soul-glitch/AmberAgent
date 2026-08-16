@@ -66,12 +66,16 @@ struct NovelStructuredModelPreparation: Equatable, Sendable {
 struct NovelStructuredModelExecutionFailure: Error, Equatable, Sendable {
     let failure: NovelFailure
     let structuredOutputFailure: NovelStructuredOutputFailure?
+    /// Raw model text when decode failed. Repair turns feed this back;
+    /// banners must not surface it.
+    let rawText: String?
 
     init(
         code: String,
         message: String,
         isRetryable: Bool,
-        structuredOutputFailure: NovelStructuredOutputFailure? = nil
+        structuredOutputFailure: NovelStructuredOutputFailure? = nil,
+        rawText: String? = nil
     ) {
         failure = NovelFailure(
             code: code,
@@ -79,11 +83,27 @@ struct NovelStructuredModelExecutionFailure: Error, Equatable, Sendable {
             isRetryable: isRetryable
         )
         self.structuredOutputFailure = structuredOutputFailure
+        self.rawText = rawText
     }
 }
 
 extension NovelStructuredModelExecutionFailure: LocalizedError {
     var errorDescription: String? { failure.message }
+
+    /// Decode/schema failures can be repaired from `rawText`. Timeout and
+    /// transport errors have no new output — do not reuse an older draft.
+    var allowsOutputRepair: Bool {
+        switch failure.code {
+        case "cancelled",
+             "structured_no_output_timeout",
+             "model_stream_failed",
+             "model_start_failed",
+             "model_unavailable":
+            false
+        default:
+            true
+        }
+    }
 }
 
 private enum NovelStructuredModelRaceOutcome: Sendable {
@@ -335,13 +355,15 @@ struct NovelStructuredModelExecutor: Sendable {
                 code: "invalid_structured_output",
                 message: failure.message,
                 isRetryable: true,
-                structuredOutputFailure: failure
+                structuredOutputFailure: failure,
+                rawText: text
             )
         } catch {
             throw NovelStructuredModelExecutionFailure(
                 code: "invalid_structured_output",
                 message: error.localizedDescription,
-                isRetryable: true
+                isRetryable: true,
+                rawText: text
             )
         }
     }

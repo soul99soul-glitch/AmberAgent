@@ -185,6 +185,24 @@ class NovelProjectToolDeclarationsTest {
     }
 
     @Test
+    fun revertRecentChaptersDeclarationRequiresCountAndApprovalCard() {
+        val tool = createNovelRevertRecentChaptersToolDeclaration()
+        assertEquals("novel_revert_recent_chapters", tool.name)
+        assertTrue(tool.needsApproval, "回退章节必须走审批卡")
+        assertFalse(tool.allowsAutoApproval, "回退章节不得自动批准")
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertEquals(listOf("chapter_count"), params.required)
+        assertTrue("reason" in params.properties)
+        val count = params.properties["chapter_count"]!!.jsonObject
+        assertEquals("integer", count["type"]?.jsonPrimitive?.contentOrNull)
+        val description = tool.description
+        assertTrue("approval" in description, "描述必须写明审批卡")
+        assertTrue("chapter_count" in description || "N" in description)
+    }
+
+    @Test
     fun novelDeclarationsAreNotPartOfTheIosToolCatalog() {
         val novelNames = listOf(
             "novel_rename_project",
@@ -197,8 +215,35 @@ class NovelProjectToolDeclarationsTest {
             "novel_list_chapters",
             "novel_read_chapter",
             "novel_revise_chapter",
+            "novel_revert_recent_chapters",
+            "novel_list_setting_proposals",
+            "novel_reject_setting_proposals",
         )
         val catalogNames = iosToolDeclarations(novelNames).map { it.name }
         assertTrue(catalogNames.isEmpty(), "小说写工具不得进入 iosToolDeclaration 注册表: $catalogNames")
+    }
+
+    @Test
+    fun listSettingProposalsDeclarationIsReadOnlyAndTakesNoArguments() {
+        val tool = createNovelListSettingProposalsToolDeclaration()
+        assertEquals("novel_list_setting_proposals", tool.name)
+        assertFalse(tool.needsApproval)
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertTrue(params.properties.isEmpty(), "列表工具不声明参数")
+        assertTrue(params.required.isNullOrEmpty())
+        assertTrue("read-only" in tool.description || "does not change" in tool.description)
+    }
+
+    @Test
+    fun rejectSettingProposalsDeclarationAllowsOmittingIdsToRejectAll() {
+        val tool = createNovelRejectSettingProposalsToolDeclaration()
+        assertEquals("novel_reject_setting_proposals", tool.name)
+        assertFalse(tool.needsApproval)
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertTrue(params.required.isNullOrEmpty(), "proposal_ids 可省略表示全部拒绝")
+        assertTrue("proposal_ids" in params.properties)
+        assertTrue("every" in tool.description || "all" in tool.description || "empty" in tool.description)
     }
 }

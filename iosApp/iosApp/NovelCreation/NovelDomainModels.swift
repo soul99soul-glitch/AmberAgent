@@ -409,15 +409,19 @@ struct NovelAskUserPrompt: Codable, Equatable, Sendable {
     /// Present only for `novel_revise_chapter` approval cards. Ordinary Ask User
     /// prompts leave this nil so historical documents keep decoding.
     let chapterRevision: NovelChapterRevisionProposal?
+    /// Present only for `novel_revert_recent_chapters` approval cards.
+    let manuscriptRevert: NovelManuscriptRevertProposal?
 
     init(
         question: String,
         options: [String],
-        chapterRevision: NovelChapterRevisionProposal? = nil
+        chapterRevision: NovelChapterRevisionProposal? = nil,
+        manuscriptRevert: NovelManuscriptRevertProposal? = nil
     ) {
         self.question = question
         self.options = options
         self.chapterRevision = chapterRevision
+        self.manuscriptRevert = manuscriptRevert
     }
 }
 
@@ -435,6 +439,23 @@ struct NovelChapterRevisionProposal: Codable, Equatable, Sendable {
     let endParagraph: Int
     let oldText: String
     let newText: String
+    let reason: String?
+}
+
+enum NovelManuscriptRevertApproval {
+    static let approveOption = "回退这几章"
+    static let rejectOption = "取消回退"
+    static let options = [approveOption, rejectOption]
+}
+
+struct NovelManuscriptRevertProposal: Codable, Equatable, Sendable {
+    let chapterCount: Int
+    let chapterIDs: [NovelChapterID]
+    let chapterTitles: [String]
+    let chapterOrdinals: [Int]
+    let targetCheckpointID: NovelCheckpointID
+    let expectedHeadRevision: Int64
+    let expectedWorkingRevision: Int64
     let reason: String?
 }
 
@@ -744,6 +765,7 @@ struct NovelCharacterIdentityResolver: Sendable {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { return false }
         if looksLikeChineseToponymOrInstitution(trimmed) { return false }
+        if looksLikePolityOrRegime(trimmed) { return false }
         if looksLikeLatinToponymOrInstitution(trimmed) { return false }
         if looksLikePureOfficeOrRoleTitle(trimmed) { return false }
         if looksLikeGenericCrowdLabel(trimmed) { return false }
@@ -766,6 +788,39 @@ struct NovelCharacterIdentityResolver: Sendable {
         for suffix in chinesePlaceOrInstitutionSuffixes where name.hasSuffix(suffix) {
             // Suffix alone is not a mention; require a stem (澶+州, 汴+京).
             if name.count > suffix.count { return true }
+        }
+        return false
+    }
+
+    /// Dynasties, regimes, and ethnic polities used as places (契丹、北汉).
+    /// Suffix rules miss these because they have no 州/京/府 ending.
+    private static let namedPolitiesAndRegimes: Set<String> = [
+        "契丹", "女真", "蒙古", "回鹘", "吐蕃", "党项", "渤海",
+        "高丽", "新罗", "百济", "安南", "交趾",
+        "西夏", "大理", "大辽", "大金", "大蒙古",
+        "吴越", "荆南", "北齐", "东魏", "西魏",
+    ]
+
+    private static let dynastyDirectionPrefixes: Set<Character> = [
+        "南", "北", "东", "西", "后", "前", "大",
+    ]
+
+    private static let dynastyStems: Set<Character> = [
+        "汉", "唐", "宋", "齐", "周", "魏", "晋", "梁", "楚", "吴", "越", "辽", "金", "元", "明", "清",
+    ]
+
+    private static func looksLikePolityOrRegime(_ name: String) -> Bool {
+        if namedPolitiesAndRegimes.contains(name) { return true }
+        if name.count == 2,
+           let prefix = name.first,
+           let stem = name.last,
+           dynastyDirectionPrefixes.contains(prefix),
+           dynastyStems.contains(stem) {
+            return true
+        }
+        if name.count == 2, name.hasSuffix("朝"),
+           let stem = name.first, dynastyStems.contains(stem) {
+            return true
         }
         return false
     }
@@ -955,6 +1010,49 @@ struct NovelCharacterIdentityResolver: Sendable {
             shared += 1
         }
         return shared
+    }
+}
+
+/// Derived-state setting proposals: keep recurring story-defining cards,
+/// drop one-scene furniture (粮仓、谁家后院).
+enum NovelSettingProposalFilter: Sendable {
+    static func isWorthProposing(title: String, content: String = "") -> Bool {
+        _ = content
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { return false }
+        return !isSceneDressingTitle(trimmed)
+    }
+
+    static func shouldSurface(_ proposal: NovelSettingProposalRecord) -> Bool {
+        switch proposal.origin {
+        case .some(.quickStart), .some(.contextualCharacter):
+            return true
+        case .some(.derivedState), nil:
+            return isWorthProposing(title: proposal.title, content: proposal.content)
+        }
+    }
+
+    private static let sceneDressingTitles: Set<String> = [
+        "粮仓", "马厩", "马棚", "牛棚", "猪圈", "鸡窝",
+        "厢房", "耳房", "偏房", "后院", "前院", "前厅", "正厅", "堂屋",
+        "灶房", "厨房", "柴房", "茅厕", "茅房", "井台", "水井",
+        "库房", "地窖", "阁楼", "客房", "酒窖", "柴堆",
+        "院子", "宅院", "门房", "门楼", "庭院", "谁家",
+    ]
+
+    private static let sceneDressingSuffixes: [String] = [
+        "粮仓", "马厩", "马棚", "后院", "前院", "厢房", "灶房", "厨房",
+        "柴房", "茅厕", "院子", "宅院", "庭院", "门房",
+    ]
+
+    private static func isSceneDressingTitle(_ title: String) -> Bool {
+        if sceneDressingTitles.contains(title) { return true }
+        if title.count == 2, title.hasSuffix("家") { return true }
+        for suffix in sceneDressingSuffixes where title.hasSuffix(suffix) && title.count > suffix.count {
+            let stem = String(title.dropLast(suffix.count)).replacingOccurrences(of: "的", with: "")
+            if stem.hasSuffix("家") || stem.count <= 2 { return true }
+        }
+        return false
     }
 }
 
@@ -1925,7 +2023,8 @@ extension NovelProjectDocumentV1 {
         return settingProposals.filter { proposal in
             guard proposal.branchID == branchID,
                   !proposal.isResolved,
-                  proposal.supersededByRunID == nil else { return false }
+                  proposal.supersededByRunID == nil,
+                  NovelSettingProposalFilter.shouldSurface(proposal) else { return false }
             if activeIDs.contains(proposal.id) { return true }
             if case .some(.quickStart) = proposal.origin { return true }
             if case .some(.contextualCharacter) = proposal.origin { return true }
@@ -2041,6 +2140,26 @@ struct NovelProjectSnapshot: Equatable, Sendable {
 
     func upcomingArc(for branchID: NovelBranchID) -> NovelUpcomingArcRecord? {
         upcomingArcs.first(where: { $0.branchID == branchID })
+    }
+
+    func activeSettingProposals(for branchID: NovelBranchID) -> [NovelSettingProposalRecord] {
+        guard let branch = branches.first(where: { $0.id == branchID }),
+              let state = stateSnapshots.first(where: {
+                  $0.id == branch.currentStateSnapshotID
+              }) else {
+            return []
+        }
+        let activeIDs = Set(state.settingProposalIDs)
+        return settingProposals.filter { proposal in
+            guard proposal.branchID == branchID,
+                  !proposal.isResolved,
+                  proposal.supersededByRunID == nil,
+                  NovelSettingProposalFilter.shouldSurface(proposal) else { return false }
+            if activeIDs.contains(proposal.id) { return true }
+            if case .some(.quickStart) = proposal.origin { return true }
+            if case .some(.contextualCharacter) = proposal.origin { return true }
+            return false
+        }
     }
 }
 

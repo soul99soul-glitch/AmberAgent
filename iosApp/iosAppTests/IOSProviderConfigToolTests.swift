@@ -184,6 +184,27 @@ final class IOSProviderConfigToolTests: XCTestCase {
         XCTAssertTrue(providers.contains { ($0["has_api_key"] as? Bool) == true })
     }
 
+    func testStatusReportsAssistantChatSlot() async throws {
+        let store = makeStore()
+        _ = seedProvider(store: store, withModel: true)
+        let model = try XCTUnwrap(
+            store.snapshot.providers.last?.models.first(where: { $0.type == ModelType.chat })
+        )
+        let modelId = model.id.toHexDashString()
+        store.setCurrentAssistantChatModelId(modelId)
+
+        let output = await makeService(store).execute(
+            toolName: "provider_config_status",
+            argumentsJSON: "{}"
+        )
+
+        let payload = parseJSON(output)
+        let slots = try XCTUnwrap(payload["slots"] as? [String: Any])
+        let assistant = try XCTUnwrap(slots["assistant_chat"] as? [String: Any])
+        XCTAssertEqual(assistant["model_id"] as? String, modelId)
+        XCTAssertEqual(assistant["resolved"] as? Bool, true)
+    }
+
     // MARK: - P1 apply
 
     func testApplyWritesKeyAndStatusReflectsHasKeyWithoutEcho() async {
@@ -460,6 +481,24 @@ final class IOSProviderConfigToolTests: XCTestCase {
         )
         XCTAssertFalse(preview.contains("sk-live-abcdefghijklmnop"))
         XCTAssertTrue(preview.contains("****") || preview.contains("mnop"))
+    }
+
+    func testAwaitingApprovalSnapshotRedactsKeyWithoutMutatingLiveCall() throws {
+        let secret = "sk-live-awaiting-approval-secret"
+        let tool = makeToolCall(
+            name: "provider_config_apply",
+            input: #"{"provider_name":"OpenRouter","api_key":"\#(secret)"}"#
+        )
+        let liveMessages = [makeAssistantMessage(parts: [tool])]
+
+        let persisted = IOSProviderConfigToolCatalog.redactedApprovalMessages(liveMessages)
+        let persistedTool = try XCTUnwrap(
+            persisted.flatMap(\.parts).compactMap { $0 as? UIMessagePart.Tool }.first
+        )
+
+        XCTAssertFalse(persistedTool.input.contains(secret))
+        XCTAssertTrue(persistedTool.input.contains("****"))
+        XCTAssertTrue(tool.input.contains(secret), "审批执行仍需使用内存中的原始参数")
     }
 
     func testTimelineDetailRedactsApiKey() {

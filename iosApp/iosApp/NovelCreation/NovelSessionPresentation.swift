@@ -426,8 +426,14 @@ struct NovelSessionListModel: Equatable, Sendable {
     }
 
     private var activeRunID: NovelRunID? {
-        guard let activeTailID else { return nil }
-        return rows.first(where: { $0.id == activeTailID })?.runID
+        if let activeTailID {
+            return rows.first(where: { $0.id == activeTailID })?.runID
+        }
+        // Keep the just-finished run in the active stack after the tail
+        // retires. Moving those rows into the history ForEach remounts the
+        // finished markdown bubble; merging both stacks into one VStack
+        // instead remeasures every historical chapter on each stream tick.
+        return rows.last(where: { $0.runID != nil })?.runID
     }
 }
 

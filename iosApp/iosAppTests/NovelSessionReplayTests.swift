@@ -320,6 +320,18 @@ final class NovelSessionReplayTests: XCTestCase {
             source.contains("!scrollDriver.isUIKitUserInteracting"),
             "Stream-growth snap must not fire during UIKit user interaction."
         )
+        XCTAssertTrue(
+            source.contains("ForEach(visibleHistoricalRows)"),
+            "Windowed history must stay in its own eager stack."
+        )
+        XCTAssertTrue(
+            source.contains("ForEach(activeRunRows)"),
+            "The live/pinned run must stay in a sibling stack so stream ticks do not remeasure history."
+        )
+        XCTAssertFalse(
+            source.contains("visibleTranscriptRows("),
+            "Do not merge history and the active run into one VStack."
+        )
     }
 
     func testDragResumeUsesSharedNearBottomThreshold() {
@@ -1948,8 +1960,12 @@ final class NovelSessionReplayTests: XCTestCase {
             "程序化 setContentOffset 产生的 interacting 不能被小说页误判成用户拖拽。"
         )
         XCTAssertTrue(
+            source.contains("oldValue.rowCount - oldValue.activeRunRowCount"),
+            "窗口吸收必须按 historical 行数。钉住的完成 run 下一轮才进历史,那时由 limitAfterRowsAppended 吸收。"
+        )
+        XCTAssertFalse(
             source.contains("NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory("),
-            "完成瞬间必须吸收转入历史的行数，否则窗口会裁掉完成前已可见的旧行。"
+            "退役时行还在活动栈;再调用一遍会把同一批行算进窗口两次。"
         )
     }
 

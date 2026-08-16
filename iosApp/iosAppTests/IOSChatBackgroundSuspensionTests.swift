@@ -202,7 +202,7 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
     }
 
     @MainActor
-    func testBackgroundTransitionSettlesUIKitOnlyRunInsideShortWindow() {
+    func testBackgroundTransitionKeepsUIKitOnlyRunInsideShortWindow() {
         let keepAlive = makeHandoffKeepAlive(submitSucceeds: false)
         var startedCount = 0
         let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
@@ -222,9 +222,9 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
 
         XCTAssertFalse(didHandoff)
         XCTAssertEqual(startedCount, 0)
-        // cancel 已同步清掉业务 owner；UIKit 短窗特意保留到异步落盘结束。
+        // 不重发模型请求；同一条流继续使用仍有效的 UIKit 短窗。
         XCTAssertEqual(keepAlive.executionAssertion(for: runId), .uiOnly)
-        XCTAssertFalse(coordinator.isRunning)
+        XCTAssertTrue(coordinator.isRunning)
     }
 
     @MainActor
@@ -441,6 +441,60 @@ final class IOSChatBackgroundSuspensionTests: XCTestCase {
         XCTAssertEqual(startedCount, 0)
     }
 
+    /// scene handoff（`honorKeepAliveLease: true`）在等审批时不得走
+    /// 「执行权 .none → 撤单」。lease 已 end 时旧 early-return 会跳过后面的
+    /// `hasPendingToolApproval` 守卫并 `cancel`。
+    @MainActor
+    func testSceneHandoffRejectsPendingToolApprovalWithoutCancelling() async {
+        let keepAlive = BackgroundGenerationKeepAlive(
+            beginBackgroundTask: { _, _ in .invalid },
+            endBackgroundTask: { _ in },
+            submitTaskRequest: { _ in },
+            cancelTaskRequest: { _ in },
+            registerLaunchHandler: { _, _ in true }
+        )
+        var startedCount = 0
+        let coordinator = makeHandoffCoordinator(backgroundExecution: keepAlive) { _, _ in
+            startedCount += 1
+            return true
+        }
+        let runId = "handoff-approval-scene-\(UUID().uuidString)"
+        coordinator.installRunSnapshotForTesting(runId: runId, snapshot: nil)
+        coordinator.installBackgroundHandoffForTesting(makeHandoff(runId: runId, pendingToolName: nil))
+        keepAlive.begin(runId, title: "t", subtitle: "s", submitSystemTask: false)
+        let pending = ChatPendingToolApproval(
+            toolCall: makeHandoffPendingToolPart(toolName: "search_web", input: #"{"query":"amber"}"#),
+            providerSetting: makeHandoffProviderSetting(),
+            params: makeHandoffParams(),
+            runId: runId,
+            startedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            inputDigest: "handoff-digest",
+            conversationId: nil,
+            baseMessages: []
+        )
+        await coordinator.installPendingSearchApprovalForTesting(
+            pending: pending,
+            request: SearchToolApprovalRequest(
+                id: "handoff-req-scene-1",
+                toolName: "search_web",
+                target: "amber",
+                providerName: "handoff-test",
+                providerType: "openai",
+                reason: "test"
+            )
+        )
+
+        XCTAssertEqual(keepAlive.executionAssertion(for: runId), .none)
+        let didHandoff = coordinator.handoffCurrentGenerationToBackground(
+            conversationStore: makeHandoffConversationStore(),
+            honorKeepAliveLease: true
+        )
+
+        XCTAssertFalse(didHandoff, "审批等待中必须拒绝交接")
+        XCTAssertEqual(startedCount, 0)
+        XCTAssertTrue(coordinator.isRunning, "等审批时进后台不得撤单")
+    }
+
     /// 无在途工具（纯流式）→ true，既有路径不回归。
     @MainActor
     func testHandoffAllowsStreamingWithNoInFlightTool() {
@@ -508,5 +562,152 @@ final class IOSChatBackgroundStaleSweepTests: XCTestCase {
                 .dictionary(forKey: taskMapKey)?[requestId] == nil,
             "冷启动扫尾后不能保留会触发下一次后台提交的 task map owner"
         )
+    }
+
+    /// detach 后只剩 task-map/payload，没有 `activeJobs`。按 runId 取消必须
+    /// 能水合这份 owner，否则服务端 response 会继续跑、回前台还会续上。
+    @MainActor
+    func testCancelJobFindsCheckpointedDurableResponseWithoutActiveJob() {
+        let fixture = DurableCancelFixture(name: "durable-cancel")
+        assertCancelFindsCheckpointedOwner(fixture) { coordinator, handoff in
+            coordinator.cancelJob(runId: handoff.runId)
+        }
+    }
+
+    /// Chat 停止按钮走 `cancelActiveJob(conversationId:)`，不是 runId。
+    @MainActor
+    func testCancelActiveJobFindsCheckpointedDurableResponseWithoutActiveJob() {
+        let fixture = DurableCancelFixture(name: "durable-cancel-conv")
+        assertCancelFindsCheckpointedOwner(fixture) { coordinator, handoff in
+            coordinator.cancelActiveJob(conversationId: handoff.conversationId)
+        }
+    }
+
+    @MainActor
+    private func assertCancelFindsCheckpointedOwner(
+        _ fixture: DurableCancelFixture,
+        cancel: (IOSChatBackgroundGenerationCoordinator, IOSChatBackgroundHandoff) -> Bool
+    ) {
+        let coordinator = IOSChatBackgroundGenerationCoordinator.shared
+        XCTAssertTrue(coordinator.persistDurableResponseCheckpointForTesting(fixture.handoff))
+        XCTAssertFalse(
+            coordinator.restorableRunIds.contains(fixture.handoff.runId),
+            "checkpoint 不得提前挂进 activeJobs"
+        )
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DurableCancel-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            coordinator.discardDurableResponse(runId: fixture.handoff.runId)
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let sharedSettings = IOSSharedSettingsStore(
+            userDefaults: UserDefaults(suiteName: "\(fixture.name)-\(UUID().uuidString)")!
+        )
+        _ = sharedSettings.addProvider(fixture.provider)
+        let store = IOSConversationStore(baseDirectory: directory)
+        let runtime = ChatToolRuntime(
+            settingsStore: SettingsStore(),
+            sharedSettings: sharedSettings,
+            localToolExecutor: nil,
+            searchTransport: HandoffTestSearchTransport(),
+            mcpManager: IOSMcpManager(serverProvider: { [] })
+        )
+
+        var didCancel = false
+        coordinator.withDependenciesForTesting(
+            conversationStore: store,
+            toolRuntime: runtime,
+            sharedSettings: sharedSettings
+        ) {
+            didCancel = cancel(coordinator, fixture.handoff)
+        }
+        XCTAssertTrue(didCancel, "只有 payload/task map 时取消也必须生效")
+    }
+}
+
+private struct DurableCancelFixture {
+    let name: String
+    let provider: ProviderSetting.OpenAI
+    let handoff: IOSChatBackgroundHandoff
+
+    @MainActor
+    init(name: String) {
+        let runId = "\(name)-\(UUID().uuidString)"
+        let model = Model(
+            modelId: "\(name)-model",
+            displayName: "\(name)-model",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let provider = ProviderSetting.OpenAI(
+            id: KotlinUuid.companion.random(),
+            enabled: true,
+            name: name,
+            models: [model],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "sk-test",
+            baseUrl: "https://example.test",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: true,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        let messages = [
+            UIMessage(
+                id: KotlinUuid.companion.random(),
+                role: MessageRole.assistant,
+                parts: [],
+                annotations: [],
+                createdAt: Kotlinx_datetimeLocalDateTime(
+                    year: 2026, month: 8, day: 16, hour: 0, minute: 0, second: 0, nanosecond: 0
+                ),
+                finishedAt: nil,
+                modelId: nil,
+                usage: nil,
+                translation: nil
+            )
+        ]
+        var handoff = IOSChatBackgroundHandoff(
+            runId: runId,
+            startedAt: Int64(Date().timeIntervalSince1970 * 1000),
+            inputDigest: "\(name)-digest",
+            conversationId: KotlinUuid.companion.random(),
+            providerId: provider.id.toHexDashString(),
+            providerSetting: provider,
+            params: TextGenerationParams(
+                model: model,
+                temperature: KotlinFloat(value: 0.7),
+                topP: nil,
+                maxTokens: nil,
+                tools: [],
+                reasoningLevel: .off,
+                customHeaders: [],
+                customBody: []
+            ),
+            uploadMessages: messages,
+            displayMessages: messages,
+            mode: .resumeResponse,
+            generativeUiRequirement: .none,
+            generativeUiFallbackAttempted: false,
+            fullToolNames: []
+        )
+        handoff.responseId = "resp-\(runId)"
+        self.name = name
+        self.provider = provider
+        self.handoff = handoff
     }
 }

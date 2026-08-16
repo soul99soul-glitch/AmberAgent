@@ -1,6 +1,211 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-15（讨论改正文审批卡）
+Last updated: 2026-08-17（设定建议闭环修补）
+
+## 设定建议闭环修补（2026-08-17，工作区未提交）
+
+审查后的三处缺口，只补识别和文案，不改写路径、不加确认框：
+
+- 已落盘的 derived-state 家具卡在 `activeSettingProposals` 里不再露出；Quick Start 仍按原样。
+- 「谁家的后院」按去掉「的」后的词干识别。
+- 讨论提示升到 `novel.discussion.v12`：代笔中只许拒绝设定卡，不许 `novel_revise_material`。
+- 按钮改为「拒绝全部待确认」，写明会清当前分支全部分类。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-settings-filter`）：身份/场景家具过滤、已落盘粮仓不露出、讨论 v12 与 v11 旧回执，均绿。未装真机、未 commit。
+
+## 小说工作区：先备份再谈重构（2026-08-16）
+
+北星：书是文件，agent 通用读写，host 守正史闸门和版本指针。磁盘目的地是 markdown 工作树，JSON 包是过渡。不内嵌真 git，不对正文做三路 merge。审批卡、身份卡、设定页等作者 UI 保留。
+
+现在不迁库。权威仍是 JSON 包。先做可往返的 markdown 工作区备份（目录/zip），导入只建新项目；会话、候选、检查点链不进备份。现有单文件成稿导出保留。
+
+规格：`docs/superpowers/specs/2026-08-16-novel-markdown-workspace-design.md`。未开工、未改代码。下手前按规格验收条款复核。
+
+## 设定建议少提、可一次全拒（2026-08-16，工作区未提交）
+
+剧情同步会把粮仓、谁家后院这类场景家具提成设定卡，还会把契丹、北汉当成「对应哪位角色」。
+
+行为：
+- 事实同步仍会丢掉场景家具建议；契丹、北汉、南唐这类政权名不再进身份卡。
+- 讨论可 `novel_list_setting_proposals` 看待确认建议，该留的用现有 `novel_revise_material` 写入，其余 `novel_reject_setting_proposals`（省略 ids 即全拒）。代笔推进中也可清建议。
+- 设定页每个待确认分区有「拒绝全部待确认」，一次清掉当前分支全部待确认建议。
+- 讨论提示现为 `novel.discussion.v12`（见上一节）；事实提示 `state-delta.v4` / `manual-sync.v5`；旧版回执仍可读。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-settings-filter`）：身份/场景家具过滤、讨论提示 v11、事实提示 v4/v5 旧回执、设定建议 list/全拒/指定拒/非法 JSON、代笔中仍可清建议、adapter 组装点带上新工具、ViewModel「全部拒绝」清卡，均绿。本机无 Java，未跑 `:ai-core` 声明测试。2026-08-16 约 23:55 无线覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `2370DDFD-1309-40E9-AAE3-AAB54D87E121`），`app.amber.ios` 1.0/1 已拉起。未 commit。
+
+## 创作方式默认讨论并记住（2026-08-16，工作区未提交）
+
+打开会话不再默认「写整章」。代笔没有本章计划时，「写整章」发不了，却总被自动放在这一档。
+
+行为：
+- 未记过选择时，创作方式是「讨论」。
+- 手动改成「写一段 / 写整章 / 讨论」后，按项目记在 UserDefaults，下次打开还在这一档。
+- 代笔且未确认本章计划时，若记下的是「写整章」，打开或切入代笔会回到「讨论」，避免发送键灰掉。
+- 切项目不再用 `lastGenerationGranularity` 把「写一段」打回「写整章」。代笔流水线不改这档选择。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-composer-intent`）：偏好 resolve/落盘 3 例、既有 intent 映射 2 例、会话默认讨论、记住写一段且 bind 不回弹，均绿。2026-08-16 约 23:10 无线覆盖安装到 iPhone Air（容器 `154F8A20-5A49-48D1-BD32-1093062A210D`）并已拉起。未 commit。
+
+## 小说说完后又卡住（2026-08-16，工作区未提交）
+
+上一刀把历史和活动 run 合成一个 ForEach 后，真机不再 10s watchdog，但主线程整表 SwiftUI 排版能卡一两分钟。今天没有新的 `0x8BADF00D`。`cpu_resource` 20:21:48–20:24:23：90s CPU / 155s（平均 58%，超过 50%/180s），系统没杀进程；内存 108MB → 690MB。SIGQUIT 栈是 `GraphHost.flushTransactions` → `ScrollViewLayoutComputer` → 多层 `VStack.sizeThatFits` → `_FixedSizeLayout`，不是 TextKit remount。
+
+根因（对上栈，不是猜）：
+- 合成后每个流式/终态 tick 让窗口里全部历史整章气泡和 `.fixedSize(vertical: true)` 走同一套 `sizeThatFits`。
+- 以前两个 sibling VStack 时，流式只打活动栈（通常 2 行）。
+
+精准修：
+- 恢复两个 eager ForEach。
+- `activeRunID` 在 tail 退役后钉住最后一轮 run，说完不把气泡挪进历史 ForEach；下一轮新 run 开始时旧行才进历史。
+- 窗口吸收只走 historical 行数的 `limitAfterRowsAppended`；退役时行还在活动栈，不再调用 `limitAfterActiveRunReturnsToHistory`（会把同一批行算两次）。
+- vendor 完成态 append 快路径保留。
+
+未做：不抄 Chat snapshot 缓存，不关 coalescing，不改 lineBreakStrategy，不切超长段。冷打开一篇已经很长的历史气泡仍会一次 `makeUIView` 全文。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-novel-hang`）：源码门禁双 ForEach、窗口吸收口径、`testTerminalRefreshFailureKeepsFinalContentWithoutPretendingToStream`（退役后仍钉在 `activeRunRows`）、完成态 append 快路径、窗口策略 2 例，均绿。2026-08-16 约 20:40 无线覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `351EEED5-43ED-4AB3-A471-E411CE9FC675`）。取栈时对卡住的旧进程发过 SIGQUIT，需重新打开 App。未 commit。
+
+## 小说说完后卡住闪退（2026-08-16，已被上一节取代）
+
+真机 6 份崩溃全是 `0x8BADF00D` FrontBoard watchdog，主线程 TextKit 排一篇超长 CJK 超过 10s。不是 EXC_BAD_ACCESS。
+
+第一刀：TextKit1 前缀扩展不再要求 `animatedByWord`；当时误把历史和活动 run 合成一个 ForEach，修掉 remount 却引入整表排版挂，见上一节。
+
+未做：不抄 Chat snapshot 缓存，不关 coalescing，不改 lineBreakStrategy 当完整修复，不切超长段。冷打开一篇已经很长的历史气泡仍会一次 `makeUIView` 全文，是另一条路径。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-novel-hang`）：完成态 append 绿。既有 `testIncrementalStreamingAppendsMatchBatchLayoutExactly` 仍红（高相同、宽 359 vs 361），回退 vendor 改动后依旧红，不是本轮引入。2026-08-16 约 19:56 无线覆盖安装到 iPhone Air（容器 `D24111EC-05D7-4A13-982E-A5114C1270FD`）。未 commit。
+
+## 整包审查三条 P1（2026-08-16，工作区未提交）
+
+精准修补，未扩防御面：
+
+- Chat detach 后只有 task map/payload：`cancelJob(runId:)` / `cancelActiveJob(conversationId:)` 从 payload 水合再取消。不改 checkpoint 往 `activeJobs` 挂 owner，不改并发计数。
+- 等审批时 scene handoff（`honorKeepAliveLease`）先按 `hasPendingToolApproval` 拒绝，不再因 lease `.none` 撤单。不给所有 persist 加脱敏，不改用户点停止。
+- 议会 `flushAndClose` 在 `drainAndClose` 已关闭但全文未发完时立刻 `onUpdate(finalText)`。不改停止顺序，不抄 Chat 的 snapshot 缓存。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-p1`）：相关 17 例绿（交接全表 11、stale/cancel 3、议会 flush/drain 3）。2026-08-16 无线（`localNetwork`）覆盖安装到 iPhone Air（iOS 27.0，Core Device `94918570-0680-5B93-8E38-7E6B355D4426`），容器 `6011A426-9382-4FFA-9EC4-E87F5EF3E1AF`，`app.amber.ios` 1.0/1 已拉起。未 commit。
+
+## 讨论一次回退最近 N 章（2026-08-16，工作区未提交）
+
+讨论新增 `novel_revert_recent_chapters`：作者说最近几章水，agent 出确认卡，点一次就把末尾 N 章和剧情快照一起撤回到那几章之前。走现有 `undoBranchHead`，不新建检查点种类。
+
+行为：
+- 只回退当前正文末尾连续 N 个未废弃章；中间章仍用正文页废弃/删除。
+- 确认卡列出章名；确认后连撤到目标检查点，正文目录和 `currentStateSnapshotID` 一起回去。
+- 代笔推进中、工作稿相对书头已分叉、会越过 Fork/初始边界时拒绝。
+- 回退成功后按仍在工作稿上的自动收录 ID 重算代笔 sidecar 进度；不新开一批，也不踢剧情重算。
+- 讨论提示升到 `novel.discussion.v10`，保留 v9 供旧回执。
+
+规格：`docs/superpowers/specs/2026-08-16-novel-revert-recent-chapters-design.md`。
+
+审查修补（精准，未扩防御面）：连撤已成功若干步后失败，立刻按当前工作稿重算代笔 sidecar，生产错误带「已回退 K/N」。不回滚已撤步骤，不改同一张卡续撤，不在出卡时加 pending/polish 门。`NovelRecentChapterRevertTests.swift` 补进 iosAppTests target（此前未进 pbxproj）。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-revert`）：`NovelRecentChapterRevertTests` **5/5**（含部分连撤 sidecar）；executor 回退 3 例绿。本机无 Java，未跑 `:ai-core` 声明测试。未装真机、未 commit。
+
+## Chat / 小说后台接管与扩展接线收口（2026-08-16，工作区未提交）
+
+- Chat：官方 `api.openai.com` Responses 在首个 cursor 成功持久化后，若 App 已进后台就立即停止本地 stream，改由服务端 response + 冷启动/回前台续接；若 cursor 早已存在，scene handoff 当场 detach。system request 提交失败但 UIKit 短窗仍有效时不再立刻自我取消，而是让同一条流跑到短窗真正到期；非 durable provider 不重发第二次请求，仍是 iOS continued-processing best-effort。
+- Chat continued-processing progress 不再长期停在 `1/4`：首个真实 chunk、工具阶段、成功终态分别单调推进到 `2/4`、`3/4`、`4/4`。
+- 小说：普通新生成在用户动作发生时立即申请 continued-processing；页面重绑只观察现有 run，不冒充新用户动作重新提交。代笔从 1–10 章整批只持有一个 `novel-ghostwrite-*` lease，内层正文与剧情同步不再各挂一条会独立过期的 UIKit 短 lease；外层 lease 存在时，官方 Responses cursor 落盘后继续本地流，不再 detach 后等待前台 15 分钟。剧情同步和正文 chunk 只用真实工作事件推进 indeterminate progress；无代笔 lease 时，自动同步不会在 App 已处于后台后才启动。
+- Recipe：validator 与 executor 共用同一 primitive route oracle；没有 Recipe adapter 的静态工具、任意动态 `mcp__*`，以及会改变原有交互语义的 `skill_import`、`provider_config_apply`、`theme_pack_import`、`recipe_import` 在发布时 fail-closed。checkpoint 原子写失败时不再显示不可恢复的审批卡。
+- Provider/MCP/UI：`provider_config_status` 补回 `assistant_chat`；MCP capability disabled 时不再声明 `mcp_import_from_skill`；等待 provider key 审批的消息快照先脱敏再落盘。Chat 仅恢复配置错误上下文卡和编排子线程只读原因，不新增全局高级功能入口。
+- 2026-08-17 修正剧情同步退后台数秒即失败的回归：continued-processing 恢复 `.queue`；UIKit 短窗到期时，已提交但尚未 adopt 的 request 继续保留，不再触发业务取消。只调整 KeepAlive 与两条既有契约断言，没有新增状态机或恢复层。`swiftc -parse`、`git diff --check`、arm64 Simulator `build-for-testing` 与 iPhone Air Debug 构建通过；已原位覆盖安装到 iPhone Air 并拉起，数据未卸载。真实 submit/adopt/expiration、30–60 分钟代笔与剧情同步仍待用户真机操作复测。未 commit。
+
+## 代笔自愈钉住上一稿（2026-08-16，工作区未提交）
+
+薄试：验收不过时把上一稿作为已确定正文灌进自动自愈，只改审稿缺口；不做复审任务、不预收录。
+
+行为：
+- 首写提示不变。
+- 自动自愈带 `【上一稿正文】`（有界 12_000），提示改为「已确定 / 不要从零重写」，去掉「开篇换新」。
+- 薄合同升级 brief 同步去掉「开篇换新」。
+- 仍产新候选、再验，过了才收录。
+
+规格：`docs/superpowers/specs/2026-08-16-ghostwrite-heal-preserve-draft-design.md`。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-heal-draft`）：`testGhostwriteAutoHealPinsDeterminedDraftAndDoesNotForceNewOpening` + 润修带稿 + 质量失败须重写 3/3 绿。2026-08-16 无线覆盖安装到 iPhone Air（容器 `23F30FC4-6258-46FF-BA61-24395E83AD9B`）。不 commit，除非用户再要求。
+
+## 代笔旧稿收录死循环（2026-08-16，工作区未提交）
+
+真机「赵大来了」：代笔第 5 章《山呼》反复「当前分支已发生变化，请刷新后重试。」面板没有刷新，继续只拿同一份稿再收。
+
+根因（磁盘取证，不是猜测）：
+- 候选 `D13E8161` baseHeadRevision **160**（半渡收录后写下），主线现在 head **193**。
+- `prepareCollection` 的 `collectionBaseMatches` 失败，复用 `staleBranchHeadRevision` 文案「请刷新」。
+- `collectFailed.requiresRewriteOnContinue == false`，继续代笔复用同一候选，永远过不了。
+- 160→193 期间书确实动过（入汴、北风改稿等）。领域锁正确；错的是代笔把「旧稿不能收」当成「刷新再试」。
+
+修复：
+- 合同仍匹配但书头已离开候选 base：不能复用，继续必须按当前正文重写。
+- 新暂停因 `collectBaseStale`（文案说重写，不说刷新）。清计划失败仍走原来的 `collectFailed`，避免已收录章节再写一章。
+- 已落盘的旧 sidecar 仍是 `collectFailed`：`obtain` 也会跳过对不上书头的稿。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-collect-stale`）：新增 `testStaleCollectionBaseCannotReuseGhostwriteCandidate` 绿；`NovelCollaborationModeTests` 46/47，唯一红是既有 `testGhostwriteSingleChapterHappyPathCollectsAndSyncs`（`syncFailed` ≠ `chapterCompleted`，与本轮收录复用无关）。未再跑全表。2026-08-16 无线覆盖安装到 iPhone Air（容器 `D6FEA428-A4BA-4E6F-BF49-3C5003CA6A75`），`app.amber.ios` 已拉起。不 commit，除非用户再要求。
+
+## 剧情同步快路径（2026-08-16，工作区未提交）
+
+计划：`docs/superpowers/plans/2026-08-16-novel-sync-fast-path.md`（Phase 0–4 已按锁定决策落地，未建待同步点队列）。
+
+行为：
+- 共创点收录 / 代笔自动收录：分支已同步且空闲时一次 `stateDelta`，成功保持 `.synchronized`；已同步不再 `scheduleAutomaticStateSync`。失败先同段回修 ≤2，再 without-sync + rebuild。
+- 审批卡「写入正文」：先收起卡、不 `start()` 讨论；末章一次 `stateDelta`（全文=新章，base=该章之前的 checkpoint）；失败才走既有 rebuild。中间章 / 编辑器整章保存仍 rebuild。`preferStateDelta` 只在 call-site，不进 payload hash。
+- 证据全丢：第一次抛 `state_facts_evidence_unmatched` 并列出 `UNMATCHED EVIDENCE`；2 次回修后提交空事实、保留 base summary。空白项目的空 summary 是合法 durable 值，不再用模型 schema 挡 host 空提交。
+- 外层自愈 ×3 只留给 `allowsOutputRepair == false`（超时/断流/transport）。校验失败出横幅，不盲重抽。
+- 单段 delta 不显示「分段读取…」；该提示只在估计段数 > 1 时出现。
+
+审查修补（精准，未扩防御面）：
+- 末章 delta 映射 rebuild 后：仅当空 summary/outline **等于** durable base 时跳过 rebuild 模型 schema（第 1 章 `.initial` 基线 outline 本就是 `""`；`branchOutlinePatch: null` 应原样保留）。模型 rebuild 输出仍须非空 outline。
+- `executeStateDeltaAllowingRepair` 只回修 `NovelStructuredModelExecutionFailure`；`invalidInput` / schema 失败直接抛，不再喂模型改稿。
+- 会话/阅读器失败横幅补回 `maxWidth: .infinity`。
+- `syncWorkingManuscript` 在 `perform` 期间设 `automaticStateSyncPresentationTarget`，复用已有 Stop。
+- 线格式：`stateDelta` 的 `branchOutlinePatch` 键必须在，值为 `null`；省略键会在解码阶段失败，不是「省略字段」。
+
+刻意未做：新 pending kind、改 `validateEntities`、中间章用 delta、讨论 `canStart` 在 `isPerforming` 时放开、启发式「编辑够小就 delta」、审批只记内存、按钮三种质感、hint 行高、digest 字符串替换。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-sync-fast`）：`NovelFactTransactionLifecycleTests` **32/32** + `NovelManualEditSyncTests` **21/21**；会话定点（末章一次 delta + Stop、外层不重试校验、共创收录、超时自愈、共享 Stop）5/5。未再跑上一轮 82 例全表。`IOSNovelCreationWiringTests` 4 例红在资料/创建稿保护字符串，与本轮无交集。
+
+2026-08-16 无线（`localNetwork`）覆盖安装到 iPhone Air（iOS 27.0，Core Device `94918570-0680-5B93-8E38-7E6B355D4426`），容器 `BDCBE1A1-739C-4E91-B2F2-87144B266A0C`，`app.amber.ios` 1.0/1 已拉起（pid 52173）。未验证：真机共创收录后无「待同步」、审批写入末章一次短同步。残余：中间章仍 rebuild；Grok Web 工具未挂载。不 commit，除非用户再要求。
+
+## 剧情状态同步自愈（2026-08-16，工作区未提交）
+
+真机：手改/写入正文后剧情同步屡次失败。旧「自愈」是代笔质量改稿（A′），不是同步自愈；共创路径只跑一次就出横幅，重试不把 lastError 回灌给模型，等于盲跑同一段。
+
+修复（共创/手改/代笔共用）：
+- `runAutomaticStateSync` 对可恢复失败自动重试最多 3 次（与 `NovelGhostwriteHeal.defaultMaxInfraRetries` 同预算）；快照加载抖动也走同一预算。
+- 当前未提交段的模型请求带上 `PREVIOUS ATTEMPT FAILURE` + lastError（最多 240 字）；不写入 durable `modelInputSHA256`，避免重算哈希把已成功段判废。
+- 同段内若模型已吐出文本但解码/事实校验失败：把原文或已解 JSON 回灌（`PREVIOUS OUTPUT` + `FAILURE`），最多补全/改写 2 次，再失败才整段重抽。超时无输出不走这条。
+- 代笔 `awaitGhostwriteStateSync` 只在「同步从未启动」时 kick；预算用尽不再叠加热重试。
+- 写入正文恢复自动开同步（不再 `schedulesAutomaticSync: false`）；审批卡仍不拉起讨论，避免再叠死锁。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-sync-heal`）：新增/改写的 10 例定点全绿（modelInput 2、appearance heal、transient heal、bounded stop、banner 后再点重试、snapshot 自愈、reload 失败后继续 durable pending、cancel 后再重试、pending 恢复）。`NovelFactTransactionLifecycleTests` 随上一轮回归跑过，未出现在失败列表。另 3 例 `NovelCreationViewModelTests`（import preview / unavailable project / historical rewrite）隔离复跑仍 XCTAssertNotNil，路径与本轮同步自愈无交集，按既有基线记录。
+
+审查修补（精准，2026-08-16）：超时/断流/取消即使有上一稿也不回修；外层重试保留进度条 startedAt，不在分析中跳回「准备」；会话/阅读器失败横幅改上字下按钮；写入后收起审批卡原文/改为。未再扩讨论锁、未清 durable lastError、未加重新载入按钮。2026-08-16 无线（`localNetwork`）覆盖安装到 iPhone Air，容器 `D79AD3E6-A88B-436A-9E3D-E29DB9A590C7`，`app.amber.ios` 已拉起。
+
+## 写入正文后卡住（2026-08-15，工作区未提交）
+
+真机：审批卡点「写入正文」后会话不能操作。确认后立刻 `start()` 一轮讨论（userText=写入正文），叠加上 `saveManualRewrite` 自动剧情同步，两者都把 `isBusy`/`isRunning` 拉高，composer 和顶栏控件全部 disable。修复：写入成功只关卡、不发讨论。2026-08-16 起这条手改重新自动开同步（见上节自愈）；拒绝仍走原来的讨论续答。
+
+## 小说思考框卡顿修复（2026-08-15，工作区未提交）
+
+真机 bug：小说创作里思考框出现时整体非常卡，收起思考即恢复。Chat 侧思考卡（ChatReasoningCard/ChatReasoningBodyTextView）已做过整套优化（尾段整体淡入、sizeThatFades 去 layoutIfNeeded、内部滚动 540pt/s 限速、cadence 门禁 p95≤40ms），小说复用同一张卡——病灶在小说侧使用方式。
+
+- **根因（探针裁决，非猜测）**：`NovelSessionViewModel.applyReasoningPresentation` 把每个网络 chunk 原样合并进 `row.reasoningContent`（网络节奏直上 UI）。卡片内优化全部以「每拍一次 append」为前提；逐 chunk 直上时每个 chunk 都触发整行重建+测量（@Observable tail 突变 → 整 view body 重估 → 行 digest 变化 → 卡片 updateUIView → TextKit sizeThatFits）。探针实测消费端饱和：**每 chunk ≈55ms 稳态**，p95 88ms、max **1.38s**、93/147 帧 >50ms，8s 灌入窗内 400 chunk 只发布 143 个。
+- **eager VStack 次要嫌疑裁决**：非主项。思考卡 thinking 期高度上限 180pt（`bodyHeightLimit = isThinking ? 180 : 260`）——思考文本数千字时行高早已封顶，外层 VStack 无逐 chunk 重排；整栈重排只是逐 chunk 发布的组成部分而非独立病灶。未动 eager 结构（懒加载会破坏既有「窗口历史不卸载」契约）。
+- **修复（最小，与正文同源）**：reasoning 走与正文 `presentationFlush` 同一 48ms 时钟拍合并——chunk 先并入 `pendingReasoningText`（按既有前缀去重语义累积），每拍一次合并进 tail（一次可见发布）；`markReasoningFinishedIfNeeded` 同步收口（未发布尾巴与 `isReasoningLive=false` 同一拍落地，卡片软收起与正文出现同拍，lifecycle broadcast/storage 语义不变）；`cancelPendingPresentation` 顺带清 pending reasoning（install/terminal/clear 边界）。
+- **红/绿证据**（`NovelSessionViewModelTests.testReasoningDenseStreamKeepsDisplayLinkResponsive`，同测试红绿对照）：未节流路径 p95=52.13ms、max=66.27ms、renderRevision=120=chunk 数红；修复后 **p95 34-36ms ≤40、max 40-74ms（单帧尖峰，基线波动）、0 帧 >50ms（多数轮次）、renderRevision≈65<120**，灌入窗 163 帧全 ≤40ms（best run）。首 0.3s 预热窗（run 启动/思考卡首帧挂载/scroll driver 启动）不计入门禁，属每场 run 一次的一次性瞬态。
+- **测试基建**：`NovelModelScriptStep` 新增 `.delay(TimeInterval)`（emit 侧睡 delay，模拟真机 chunk 率；消费端仍无间隔连发，逐 chunk 直上只会拉长饱和窗口——纯增量，既有 switch 全编译）。
+- **门禁**（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix6）：NovelSessionViewModelTests 82 例（3 失败=既有基线 `testWorkspaceAppearanceLeavesRetryableManualSyncForExplicitRetry`，经对照实验证明与本轮无关——revert 修复后同样红）、NovelSessionReplayTests 46/46、NovelCreationPresentationTests 45/45、ChatReasoningCardTests 10/10（思考卡契约：orb cadence p95 16.67ms、软收起/淡入/滚动位置）、NovelGenerationLifecycleTests 53/53（共享 scripted adapter 安全网）。共 236 例，3 失败全部落在该基线测试。
+- **残余**：探针测试在负载下偶发测试宿主被 SIGKILL/启动失败（本仓既有 perf 探针同类负载敏感，复跑即绿，无崩溃报告）；真机逐帧手感留待用户验收。
+
+## 议会流式呈现节奏层（2026-08-15，工作区未提交）
+
+产品目标：议会转写流接入与 Chat/小说同源的流式呈现——节奏平滑（缓冲兜底+渐进加速）、终态排空优雅收尾（连续减速+末拍完整淡入）、完成零跳变（lagAllowance τ 收紧 + driver 方向性收锚）。
+
+- **节奏层落点**：`IOSCouncilTextPresentationSession`（CouncilRunner.swift，本来就是「presentation-only gate」）。此前它只是 48ms 把全文快照直上 UI，无字符预算。现改为每刷新窗一拍（流式 `textAdvance` 预算，未追平自续拍），完成路径新增 `drainAndClose`（锚速 whoosh 中段 + `terminalTextAdvance` 优雅尾逐拍减速，拍间隔按减速后实际拍速逐拍重算 8→48ms，与 Chat `drainStreamPresentation` 同构）；失败/取消仍走 `flushAndClose` 精确落定。不碰 provider 读取与多模型轮次语义。
+- **lagAllowance 全链透传**：排空拍 `lagAllowance(remaining:drainStart:)` → `onUpdate(text, allowance)`（协议签名 `(String) -> Void` → `(String, CGFloat) -> Void`，5 个测试 fake + CouncilSettingsView 探针同步）→ `IOSCouncilRoomEvent.updateMessage(id:body:status:lagAllowance:)` → 视图模型 `activeTailLagAllowance`（append/resetRoom 复位 1，完成事件携带 0）→ `scheduleMeasuredGrowthFollowToBottom` 提交 `.streamContentGrew(lagAllowance:)`（替换默认 1）。
+- **跟随策略收敛**：几何回调冗余分支删（`!pinOwns || driverActive` 在 measured-growth 分支下恒等于 `isNativeScrollDriverDesired`，已化简）；整轮结束 `scheduleTerminalBottomSettle` driver 分支改 `.generationTerminated`（新房间/历史重放保持 explicitBottom，`terminalRun: false`）；80ms withAnimation 回退仅在 driver 未激活时保留。
+- **契约测试**（IOSCouncilRunnerMechanicsTests +6 例）：流式爆发逐拍追平（≤36 字/拍、allowance 恒 1）、终态排空优雅尾（中段 whoosh >36、末拍 ≤12、allowance 单调衰减归零）、完成零跳变 driver 级回放（生产 drain 拍序列驱动 NativeTimelineScrollCore：完成窗 ≤14pt、全窗 ≤24pt、单调贴底、终态 ≤2pt——议会无 UI 回放基建，UI 级逐帧留待真机）、runner 完成事件携带 0、接线源断言。既有 2 例 presentation session 测试与 3 处 `.updateMessage` 模式匹配按新签名更新（带理由）。
+- **顺带核查（只读，未改）**：`NovelSessionViewModel.publishTerminalPresentation` 排空循环**拍间隔用完成时锚速一次算死**（`drainDelayNanos` 在循环外定值），`terminalStep` 虽已逐拍减速但 sleep 恒为锚速间隔——末段减速拍被 8ms 压缩，尾拍视觉仍偏快。建议修法与 Chat `drainStreamPresentation` 同构：循环内 `beatAdvance = terminalTextAdvance(remainingBacklog, fixedAdvance: drainAdvance)` 后 `sleep(terminalDrainDelayNanos(beatAdvance))`。**未改**：NovelSessionViewModel/NovelSessionView 让出给并发性能任务。
+- 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix5）：Council 74/74 + Archive 18/18 + NovelReplay 46/46 + NovelPresentation 45/45 + parity 排空契约 1/1 = **184/184 全绿**；ChatSwiftUIStreamReplayTests 隔离复跑 29/30，唯一失败 = 既有 perf 探针负载抖动（p95 43.09>40 / max 101>80，与记录基线同幅度；全套件连跑时 16 例负载性抖动，隔离复跑全过——本轮未触碰 Chat 流式路径）。
+- 未验证：真机议会收尾手感、排空淡入观感。
 
 ## 改正文审批卡复核修补（2026-08-15）
 

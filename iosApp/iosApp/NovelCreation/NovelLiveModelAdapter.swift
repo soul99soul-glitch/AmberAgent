@@ -1126,6 +1126,29 @@ extension NovelLiveModelAdapter {
                     }
                     return
                 }
+                if let approval = result.pendingApproval,
+                   approval.toolName == "novel_revert_recent_chapters" {
+                    guard let projectExecutor = executorMap["novel_revert_recent_chapters"]
+                            as? IOSNovelProjectToolExecutor else {
+                        callbacks.onFailure(failure(
+                            code: "discussion_manuscript_revert_unavailable",
+                            message: "当前讨论无法准备回退章节审批，请重试。",
+                            isRetryable: true
+                        ))
+                        return
+                    }
+                    switch await projectExecutor.revertApprovalPrompt(from: approval.arguments) {
+                    case .success(let prompt):
+                        callbacks.onAskUser(prompt, joinedAssistantText(in: result.messages))
+                    case .failure(let issue):
+                        callbacks.onFailure(failure(
+                            code: "discussion_manuscript_revert_invalid",
+                            message: issue.message,
+                            isRetryable: true
+                        ))
+                    }
+                    return
+                }
                 if result.pendingApproval != nil {
                     callbacks.onFailure(failure(
                         code: "discussion_tool_approval_required",
@@ -1230,6 +1253,9 @@ private extension NovelLiveModelAdapter {
                     ToolKt.createNovelListChaptersToolDeclaration(),
                     ToolKt.createNovelReadChapterToolDeclaration(),
                     ToolKt.createNovelReviseChapterToolDeclaration(),
+                    ToolKt.createNovelRevertRecentChaptersToolDeclaration(),
+                    ToolKt.createNovelListSettingProposalsToolDeclaration(),
+                    ToolKt.createNovelRejectSettingProposalsToolDeclaration(),
                 ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,

@@ -213,6 +213,47 @@ fun createNovelReviseChapterToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createNovelRevertRecentChaptersToolDeclaration(): Tool = Tool(
+    name = "novel_revert_recent_chapters",
+    description = """
+        Propose rolling back the last N working manuscript chapters together with their plot-state
+        snapshots. The host shows an approval card listing the chapter titles; the branch head
+        moves only after the author approves. `chapter_count` is the number of most recent
+        non-discarded working chapters to revert (suffix only, not a middle-chapter delete).
+        `reason` is an optional short note shown on the card. Refused while ghostwriting is
+        advancing, if the working manuscript still needs sync, or if revert would pass the
+        branch fork/initial boundary. Do not use ask_user to ask whether to apply.
+    """.trimIndent(),
+    parameters = { novelRevertRecentChaptersParameters() },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
+fun createNovelListSettingProposalsToolDeclaration(): Tool = Tool(
+    name = "novel_list_setting_proposals",
+    description = """
+        List pending setting proposals on the current branch (id, title, content preview).
+        These are uncommitted suggestions from plot-state sync, not saved materials.
+        Use this to decide what to keep via novel_revise_material, then clear the rest with
+        novel_reject_setting_proposals. This is read-only and does not change the project.
+    """.trimIndent(),
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelRejectSettingProposalsToolDeclaration(): Tool = Tool(
+    name = "novel_reject_setting_proposals",
+    description = """
+        Reject pending setting proposals on the current branch without writing materials.
+        Omit `proposal_ids` or pass an empty array to reject every active proposal at once.
+        Pass specific UUIDs from novel_list_setting_proposals to reject only those.
+        The change is saved directly into the novel project document.
+    """.trimIndent(),
+    parameters = { novelRejectSettingProposalsParameters() },
+    execute = { emptyList() }
+)
+
 fun createMemoryToolDeclaration(): Tool = Tool(
     name = "memory_tool",
     description = """
@@ -2243,6 +2284,33 @@ private fun novelReviseChapterParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("start_paragraph", "end_paragraph", "new_text")
+)
+
+private fun novelRevertRecentChaptersParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("chapter_count", buildJsonObject {
+            put("type", "integer")
+            put("description", "Number of most recent working chapters to revert (1-64)")
+            put("minimum", 1)
+            put("maximum", 64)
+        })
+        put("reason", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional short note shown on the approval card")
+        })
+    },
+    required = listOf("chapter_count")
+)
+
+private fun novelRejectSettingProposalsParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("proposal_ids", buildJsonObject {
+            put("type", "array")
+            put("description", "UUIDs to reject; omit or empty to reject every active proposal")
+            put("items", buildJsonObject { put("type", "string") })
+        })
+    },
+    required = emptyList()
 )
 
 private fun novelProposeChapterPlanParameters(): InputSchema = InputSchema.Obj(

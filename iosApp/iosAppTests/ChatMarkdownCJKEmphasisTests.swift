@@ -24,6 +24,8 @@ final class ChatMarkdownCJKEmphasisTests: XCTestCase {
             ("紧邻行内代码", "**粗**`code`尾部"),
             ("下划线形式", "这是__重点__内容"),
             ("三星粗斜体", "这是***重点***内容"),
+            ("弯引号包裹", "掀起了**“大宋风雅”热潮**："),
+            ("直引号包裹", "掀起了**\"大宋风雅\"热潮**："),
         ]
         let parser = MarkdownParserImpl()
         for variant in variants {
@@ -37,6 +39,61 @@ final class ChatMarkdownCJKEmphasisTests: XCTestCase {
             XCTAssertTrue(
                 containsStrong(result.document),
                 "流式链路粗体形态失败：\(variant.name) —— \(variant.markdown)"
+            )
+            let plain = collectedText(result.document)
+            XCTAssertFalse(
+                plain.contains("**") || plain.contains("__"),
+                "流式链路仍残留字面定界符：\(variant.name) —— \(plain)"
+            )
+        }
+    }
+
+    func testNativeQuotedTitleHasNoLiteralDelimitersAfterRender() {
+        let samples = [
+            "掀起了**“大宋风雅”热潮**：",
+            "掀起了**\"大宋风雅\"热潮**：",
+            "掀起了**「大宋风雅」热潮**：",
+        ]
+        for sample in samples {
+            let nodes = nativeTextNodeContents(sample)
+            // pulldown-cmark 会把未配对的 ** 拆成四个单独的 `*` Text 节点；
+            // 逐节点修看不到成对定界符。完成态渲染必须先拼接相邻文本再修。
+            XCTAssertTrue(
+                nodes.contains(where: { $0 == "*" }),
+                "预期原生 AST 把 ** 拆成单星号节点：\(nodes) —— \(sample)"
+            )
+            let repaired = AmberMarkdownView.repairRejectedStrong(inAdjacentTextFragments: nodes)
+            let repairedText = String(repaired.characters)
+            XCTAssertFalse(
+                repairedText.contains("**") || repairedText.contains("*"),
+                "拼接后再修仍有字面星号：nodes=\(nodes) text=\(repairedText) sample=\(sample)"
+            )
+            XCTAssertTrue(
+                repaired.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true },
+                "拼接后再修没有 strong：nodes=\(nodes) sample=\(sample)"
+            )
+        }
+    }
+
+    func testQuotedTitleStrongLeavesNoLiteralDelimiters() async {
+        let samples = [
+            "掀起了**“大宋风雅”热潮**：",
+            "掀起了**\"大宋风雅\"热潮**：",
+            "掀起了**「大宋风雅」热潮**：",
+        ]
+        let parser = MarkdownParserImpl()
+        for sample in samples {
+            let result = await parser.parse(
+                text: sample,
+                option: MarkdownParseOption(
+                    speculativeRewrite: false,
+                    repairsRejectedStrongEmphasis: true
+                )
+            )
+            XCTAssertTrue(containsStrong(result.document), "未解析成粗体：\(sample)")
+            XCTAssertFalse(
+                collectedText(result.document).contains("**"),
+                "粗体修完仍有字面 **：\(collectedText(result.document)) —— \(sample)"
             )
         }
     }
@@ -98,6 +155,8 @@ final class ChatMarkdownCJKEmphasisTests: XCTestCase {
         let variants: [(name: String, textNodeContent: String, expectedBold: String)] = [
             ("全角括号包裹", "**（重点）**说明", "（重点）"),
             ("下划线形式 CJK 紧邻", "这是__重点__内容", "重点"),
+            ("弯引号包裹", "掀起了**“大宋风雅”热潮**：", "“大宋风雅”热潮"),
+            ("直引号包裹", "掀起了**\"大宋风雅\"热潮**：", "\"大宋风雅\"热潮"),
         ]
         for variant in variants {
             let attr = AmberMarkdownView.repairRejectedStrong(in: variant.textNodeContent)
@@ -130,12 +189,43 @@ final class ChatMarkdownCJKEmphasisTests: XCTestCase {
 
     // MARK: - Helpers
 
+    private func collectedText(_ node: Markup) -> String {
+        if let text = node as? Text { return text.string }
+        return node.children.map(collectedText).joined()
+    }
+
     private func containsStrong(_ node: Markup) -> Bool {
         if node is Strong { return true }
         for child in node.children where containsStrong(child) {
             return true
         }
         return false
+    }
+
+    private func nativeTextNodeContents(_ markdown: String) -> [String] {
+        guard let data = MarkdownBridge.parse(markdown),
+              let reader = PackedAstReader(data: data),
+              let root = reader.root() else {
+            XCTFail("原生 AST 解析失败")
+            return []
+        }
+        var texts: [String] = []
+        func walk(_ node: PackedAstNode) {
+            if node.type == .text {
+                texts.append(sliceSource(markdown, node: node))
+            }
+            for child in node.children { walk(child) }
+        }
+        walk(root)
+        return texts
+    }
+
+    private func sliceSource(_ source: String, node: PackedAstNode) -> String {
+        let utf8 = Array(source.utf8)
+        let start = Int(node.startOffset)
+        let end = Int(node.endOffset)
+        guard start >= 0, end >= start, end <= utf8.count else { return "<bad \(start)..\(end)>" }
+        return String(decoding: utf8[start..<end], as: UTF8.self)
     }
 
     private func nativeAstContainsStrong(_ markdown: String) -> Bool {

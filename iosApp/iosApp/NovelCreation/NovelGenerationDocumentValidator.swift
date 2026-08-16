@@ -262,8 +262,12 @@ enum NovelGenerationDocumentValidator {
                 // 必须按「历史上发布过的版本集合」判定,不能拿当前模板版本做等值比较:
                 // receipt 是不可变的历史记录,等值比较会让任何一次提示词版本推进把所有
                 // 老项目判成损坏(2026-07-25 真机事故,见 acceptedVersions 注释)。
-                if !NovelPromptCatalog.acceptedVersions(for: expectedPrompt)
-                    .contains(receipt.promptVersion) {
+                // 末章手改快路径用 stateDelta 提示词，receipt 仍记 manualRebuild。
+                var allowed = NovelPromptCatalog.acceptedVersions(for: expectedPrompt)
+                if factTransaction.kind == .manualRebuild {
+                    allowed.formUnion(NovelPromptCatalog.acceptedVersions(for: .stateDeltaV1))
+                }
+                if !allowed.contains(receipt.promptVersion) {
                     issues.append("Injection receipt \(receipt.id) has the wrong fact Prompt version.")
                 }
                 validateFactReceiptLink(

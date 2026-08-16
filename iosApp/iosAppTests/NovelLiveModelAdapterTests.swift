@@ -15,6 +15,9 @@ private let novelDiscussionProjectToolNames: [String] = [
     "novel_list_chapters",
     "novel_read_chapter",
     "novel_revise_chapter",
+    "novel_revert_recent_chapters",
+    "novel_list_setting_proposals",
+    "novel_reject_setting_proposals",
 ]
 
 final class NovelLiveModelAdapterTests: XCTestCase {

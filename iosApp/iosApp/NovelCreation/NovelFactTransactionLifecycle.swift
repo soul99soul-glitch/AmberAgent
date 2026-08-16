@@ -32,7 +32,7 @@ extension DefaultNovelCreation {
             } catch let failure as NovelStructuredModelExecutionFailure
                 where failure.failure.code == "cancelled" {
                 throw failure
-            } catch {
+            } catch is NovelStructuredModelExecutionFailure {
                 return try await executeCollectionWithoutStateSyncFallback(
                     command,
                     payloadSHA256: payloadSHA256
@@ -84,15 +84,16 @@ extension DefaultNovelCreation {
                 document,
                 replacing: loaded
             )
-            return try await executeManualSyncTransaction(
-                projectID: command.projectID,
-                pendingID: command.pendingID,
-                retryCommand: nil,
-                replayContext: command.context,
-                replayKind: .syncManualEdits,
-                replayPayloadSHA256: payloadSHA256,
-                pendingDocument: pendingLoaded.document
-            )
+        return try await executeManualSyncTransaction(
+            projectID: command.projectID,
+            pendingID: command.pendingID,
+            retryCommand: nil,
+            replayContext: command.context,
+            replayKind: .syncManualEdits,
+            replayPayloadSHA256: payloadSHA256,
+            pendingDocument: pendingLoaded.document,
+            preferStateDelta: command.preferStateDelta
+        )
         }
     }
 
@@ -190,18 +191,21 @@ extension DefaultNovelCreation {
             replayContext: command.context,
             replayKind: .retryPending,
             replayPayloadSHA256: payloadSHA256,
-            pendingDocument: reservedLoaded.document
+            pendingDocument: reservedLoaded.document,
+            preferStateDelta: false
         )
     }
 }
 
 private extension DefaultNovelCreation {
-    /// 代笔自动收录：分支已同步、无挂起事务、无在途 run 时优先单章 stateDelta。
+    /// 代笔自动收录或共创点收录：分支已同步、无挂起事务、无在途 run 时优先单章 stateDelta。
     func prefersInlineStateDeltaCollect(
         _ command: NovelCollectCandidateCommand,
         in document: NovelProjectDocumentV1
     ) -> Bool {
-        guard command.source == .systemAutoCollect else { return false }
+        guard command.source == .systemAutoCollect || command.source == .user else {
+            return false
+        }
         guard let branch = document.branches.first(where: { $0.id == command.branchID }) else {
             return false
         }
@@ -422,41 +426,41 @@ private extension DefaultNovelCreation {
                 replacing: beforeRequest
             )
             try Task.checkCancellation()
-            // 与 manual rebuild 一致：连续无输出超时，流式有增量则刷新计时。
-            let execution = try await executor.executePrepared(
-                invocation,
-                noOutputTimeout: factRequestTimeout
-            )
-            guard case .stateDelta(let delta) = execution.output else {
-                throw NovelError.invalidInput("The collection returned the wrong structured result.")
-            }
-
-            let reloaded = try await reloadFactDocument(projectID: projectID)
-            try validatePendingGuard(pending, in: reloaded.document)
-            let finalized = try NovelFactTransactionReducer.finalizeCollection(
-                pendingID: pendingID,
-                delta: delta,
-                retryCommand: retryCommand,
-                artifacts: receipts,
-                in: reloaded.document,
-                now: now()
-            )
-            do {
-                _ = try await commitFactDocument(
-                    finalized.document,
-                    replacing: reloaded
+            return try await executeStateDeltaAllowingRepair(
+                executor: executor,
+                preparation: preparation,
+                invocation: invocation,
+                manuscript: extractionInput.manuscript,
+                contextText: plan.contextText
+            ) { delta, acceptEmptyFacts in
+                let reloaded = try await reloadFactDocument(projectID: projectID)
+                try validatePendingGuard(pending, in: reloaded.document)
+                let finalized = try NovelFactTransactionReducer.finalizeCollection(
+                    pendingID: pendingID,
+                    delta: delta,
+                    retryCommand: retryCommand,
+                    artifacts: receipts,
+                    in: reloaded.document,
+                    now: now(),
+                    acceptEmptyFacts: acceptEmptyFacts
                 )
-                return finalized.outcome
-            } catch {
-                if let replay = try await reconcileFactOutcome(
-                    projectID: projectID,
-                    context: replayContext,
-                    kind: replayKind,
-                    payloadSHA256: replayPayloadSHA256
-                ) {
-                    return replay
+                do {
+                    _ = try await commitFactDocument(
+                        finalized.document,
+                        replacing: reloaded
+                    )
+                    return finalized.outcome
+                } catch {
+                    if let replay = try await reconcileFactOutcome(
+                        projectID: projectID,
+                        context: replayContext,
+                        kind: replayKind,
+                        payloadSHA256: replayPayloadSHA256
+                    ) {
+                        return replay
+                    }
+                    throw error
                 }
-                throw error
             }
         } catch {
             await markPendingRetryable(
@@ -475,7 +479,8 @@ private extension DefaultNovelCreation {
         replayContext: NovelMutationContext,
         replayKind: NovelOperationKind,
         replayPayloadSHA256: String,
-        pendingDocument: NovelProjectDocumentV1
+        pendingDocument: NovelProjectDocumentV1,
+        preferStateDelta: Bool = false
     ) async throws -> NovelOutcome {
         guard let pending = pendingDocument.pendingOperations.first(where: {
             $0.id == pendingID && $0.kind == .manualSync
@@ -492,6 +497,26 @@ private extension DefaultNovelCreation {
                 pending: pending,
                 retryCommand: retryCommand
             )
+            if preferStateDelta {
+                let rebuildInput = try NovelFactTransactionReducer.manualRebuildInput(
+                    pendingID: pendingID,
+                    in: pendingDocument
+                )
+                if rebuildInput.chapters.count == 1 {
+                    return try await executeSingleChapterDeltaThenFinalize(
+                        projectID: projectID,
+                        pendingID: pendingID,
+                        retryCommand: retryCommand,
+                        replayContext: replayContext,
+                        replayKind: replayKind,
+                        replayPayloadSHA256: replayPayloadSHA256,
+                        pending: pending,
+                        rebuildInput: rebuildInput,
+                        executor: executor,
+                        attempt: attempt
+                    )
+                }
+            }
             var currentDocument = pendingDocument
             var lockedPreparation: NovelStructuredModelPreparation?
             var committedChunkInThisInvocation = false
@@ -603,7 +628,13 @@ private extension DefaultNovelCreation {
                         modelPolicy: preparation.modelPolicy,
                         task: .stateRebuild(
                             baseContext: selection.plan.contextText,
-                            manuscript: selection.modelInput
+                            manuscript: NovelManualSyncChunker.modelInput(
+                                chunk: selection.manuscript,
+                                index: selection.index,
+                                previousError: committedChunkInThisInvocation
+                                    ? nil
+                                    : currentPending.lastError
+                            )
                         )
                     ),
                     preparation: preparation
@@ -640,21 +671,16 @@ private extension DefaultNovelCreation {
                 // 每段请求前清零：否则段间间隔里 banner 会把上一段的最终字数
                 // 安到「正在处理第 N+1 段」头上，新段首个 delta 到达时可见回跳。
                 NovelStateSyncStreamProgress.shared.set(pendingID: pendingID, characters: 0)
-                let execution = try await executor.executePrepared(
-                    invocation,
-                    noOutputTimeout: factRequestTimeout,
-                    onStreamedText: { characters in
-                        NovelStateSyncStreamProgress.shared.set(
-                            pendingID: pendingID,
-                            characters: characters
-                        )
-                    }
+                let rebuild = try await executeStateRebuildAllowingRepair(
+                    executor: executor,
+                    preparation: preparation,
+                    invocation: invocation,
+                    selection: selection,
+                    currentPending: currentPending,
+                    progress: progress,
+                    document: currentDocument,
+                    pendingID: pendingID
                 )
-                guard case .stateRebuild(let rebuild) = execution.output else {
-                    throw NovelError.invalidInput(
-                        "Manual synchronization returned the wrong structured result."
-                    )
-                }
 
                 let reloaded = try await reloadFactDocument(projectID: projectID)
                 try validatePendingGuard(currentPending, in: reloaded.document)
@@ -725,6 +751,311 @@ private extension DefaultNovelCreation {
                 error: error
             )
             throw error
+        }
+    }
+
+    /// Same reserved attempt: if the model emitted text that failed decode or
+    /// fact validation, feed that text back instead of discarding it.
+    private func executeStateRebuildAllowingRepair(
+        executor: NovelStructuredModelExecutor,
+        preparation: NovelStructuredModelPreparation,
+        invocation initialInvocation: NovelStructuredModelInvocation,
+        selection: NovelManualSyncChunkSelection,
+        currentPending: NovelPendingOperationRecord,
+        progress: NovelManualSyncProgress?,
+        document: NovelProjectDocumentV1,
+        pendingID: NovelPendingOperationID
+    ) async throws -> NovelStateRebuildV1 {
+        var invocation = initialInvocation
+        var lastOutputText: String?
+        var repairCount = 0
+        while true {
+            try Task.checkCancellation()
+            do {
+                let execution = try await executor.executePrepared(
+                    invocation,
+                    noOutputTimeout: factRequestTimeout,
+                    onStreamedText: { characters in
+                        NovelStateSyncStreamProgress.shared.set(
+                            pendingID: pendingID,
+                            characters: characters
+                        )
+                    }
+                )
+                guard case .stateRebuild(let decoded) = execution.output else {
+                    throw NovelError.invalidInput(
+                        "Manual synchronization returned the wrong structured result."
+                    )
+                }
+                lastOutputText = encodeRebuildForRepair(decoded)
+                return try NovelFactTransactionReducer.validateManualChunkOutput(
+                    decoded,
+                    evidenceSource: selection.manuscript,
+                    accumulated: progress?.accumulatedRebuild,
+                    baseState: try NovelFactTransactionReducer.manualRebuildInput(
+                        pendingID: pendingID,
+                        in: document
+                    ).baseStateSnapshot,
+                    branchID: currentPending.branchID,
+                    in: document
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                if let failure = error as? NovelStructuredModelExecutionFailure,
+                   !failure.allowsOutputRepair {
+                    throw error
+                }
+                let previous = (error as? NovelStructuredModelExecutionFailure)?.rawText
+                    ?? lastOutputText
+                if repairCount >= NovelManualSyncChunker.maxOutputRepairAttempts,
+                   let failure = error as? NovelStructuredModelExecutionFailure,
+                   failure.failure.code == "state_facts_evidence_unmatched",
+                   let lastOutputText,
+                   let decoded = decodeRebuildForRepair(lastOutputText) {
+                    return try NovelFactTransactionReducer.validateManualChunkOutput(
+                        decoded,
+                        evidenceSource: selection.manuscript,
+                        accumulated: progress?.accumulatedRebuild,
+                        baseState: try NovelFactTransactionReducer.manualRebuildInput(
+                            pendingID: pendingID,
+                            in: document
+                        ).baseStateSnapshot,
+                        branchID: currentPending.branchID,
+                        in: document,
+                        acceptEmptyFacts: true
+                    )
+                }
+                guard repairCount < NovelManualSyncChunker.maxOutputRepairAttempts,
+                      let previous,
+                      !previous.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw error
+                }
+                repairCount += 1
+                lastOutputText = previous
+                invocation = try executor.prepareInvocation(
+                    NovelStructuredModelExecutionRequest(
+                        runID: NovelRunID(),
+                        modelPolicy: preparation.modelPolicy,
+                        task: .stateRebuild(
+                            baseContext: selection.plan.contextText,
+                            manuscript: NovelManualSyncChunker.repairManuscript(
+                                chunk: selection.manuscript,
+                                index: selection.index,
+                                previousOutput: previous,
+                                error: factFailureMessage(error)
+                            )
+                        )
+                    ),
+                    preparation: preparation
+                )
+                NovelStateSyncStreamProgress.shared.set(pendingID: pendingID, characters: 0)
+            }
+        }
+    }
+
+    private func encodeRebuildForRepair(_ rebuild: NovelStateRebuildV1) -> String? {
+        encodeJSONForRepair(rebuild)
+    }
+
+    private func decodeRebuildForRepair(_ text: String) -> NovelStateRebuildV1? {
+        guard let data = text.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(NovelStateRebuildV1.self, from: data)
+    }
+
+    private func encodeJSONForRepair<Value: Encodable>(_ value: Value) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(value),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return text
+    }
+
+    private func executeStateDeltaAllowingRepair<Result>(
+        executor: NovelStructuredModelExecutor,
+        preparation: NovelStructuredModelPreparation,
+        invocation initialInvocation: NovelStructuredModelInvocation,
+        manuscript: String,
+        contextText: String,
+        commit: (NovelStateDeltaV1, Bool) async throws -> Result
+    ) async throws -> Result {
+        var invocation = initialInvocation
+        var lastDelta: NovelStateDeltaV1?
+        var lastOutputText: String?
+        var repairCount = 0
+        while true {
+            try Task.checkCancellation()
+            do {
+                let execution = try await executor.executePrepared(
+                    invocation,
+                    noOutputTimeout: factRequestTimeout
+                )
+                guard case .stateDelta(let decoded) = execution.output else {
+                    throw NovelError.invalidInput("The collection returned the wrong structured result.")
+                }
+                lastDelta = decoded
+                lastOutputText = encodeJSONForRepair(decoded)
+                return try await commit(decoded, false)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard let failure = error as? NovelStructuredModelExecutionFailure else {
+                    throw error
+                }
+                if !failure.allowsOutputRepair {
+                    throw error
+                }
+                let previous = failure.rawText ?? lastOutputText
+                if repairCount >= NovelManualSyncChunker.maxOutputRepairAttempts,
+                   failure.failure.code == "state_facts_evidence_unmatched",
+                   let lastDelta {
+                    return try await commit(lastDelta, true)
+                }
+                guard repairCount < NovelManualSyncChunker.maxOutputRepairAttempts,
+                      let previous,
+                      !previous.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw error
+                }
+                repairCount += 1
+                lastOutputText = previous
+                invocation = try executor.prepareInvocation(
+                    NovelStructuredModelExecutionRequest(
+                        runID: NovelRunID(),
+                        modelPolicy: preparation.modelPolicy,
+                        task: .stateDelta(
+                            context: contextText,
+                            manuscript: NovelManualSyncChunker.repairManuscript(
+                                chunk: manuscript,
+                                index: 0,
+                                previousOutput: previous,
+                                error: factFailureMessage(error)
+                            )
+                        )
+                    ),
+                    preparation: preparation
+                )
+            }
+        }
+    }
+
+    private func executeSingleChapterDeltaThenFinalize(
+        projectID: NovelProjectID,
+        pendingID: NovelPendingOperationID,
+        retryCommand: NovelRetryPendingCommand?,
+        replayContext: NovelMutationContext,
+        replayKind: NovelOperationKind,
+        replayPayloadSHA256: String,
+        pending: NovelPendingOperationRecord,
+        rebuildInput: NovelManualRebuildInput,
+        executor: NovelStructuredModelExecutor,
+        attempt: NovelFactTransactionAttempt
+    ) async throws -> NovelOutcome {
+        let document = try await reloadFactDocument(projectID: projectID).document
+        let policy = modelPolicy(for: .stateSync, in: document)
+        let preparation = try await executor.prepare(
+            modelPolicy: policy,
+            taskKind: .stateDelta,
+            requestedInputBudgetTokens: NovelStructuredModelExecutor
+                .maximumInternalInputBudgetTokens
+        )
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: pending.branchID,
+                promptKind: .stateDeltaV1,
+                userText: rebuildInput.manuscript,
+                stateSnapshotIDOverride: rebuildInput.baseStateSnapshot.id,
+                sessionCursorLimit: rebuildInput.sessionCursor,
+                budget: factInjectionBudget(
+                    maxEstimatedInputTokens: preparation.effectiveInputBudgetTokens
+                )
+            )
+        )
+        let invocation = try executor.prepareInvocation(
+            NovelStructuredModelExecutionRequest(
+                runID: NovelRunID(),
+                modelPolicy: policy,
+                task: .stateDelta(
+                    context: plan.contextText,
+                    manuscript: rebuildInput.manuscript
+                )
+            ),
+            preparation: preparation
+        )
+        let receipts = makeFactReceipts(
+            projectID: projectID,
+            branchID: pending.branchID,
+            pending: pending,
+            attempt: attempt,
+            kind: .manualRebuild,
+            chunkIndex: 0,
+            plan: plan,
+            invocation: invocation,
+            requestedInputBudgetTokens: preparation.requestedInputBudgetTokens,
+            createdAt: now()
+        )
+        let beforeRequest = try await reloadFactDocument(projectID: projectID)
+        try validatePendingGuard(pending, in: beforeRequest.document)
+        let requestDocument = try NovelFactRequestReceiptReducer.reserve(
+            receipts,
+            pendingID: pendingID,
+            in: beforeRequest.document,
+            now: now()
+        )
+        _ = try await commitFactDocument(requestDocument, replacing: beforeRequest)
+        return try await executeStateDeltaAllowingRepair(
+            executor: executor,
+            preparation: preparation,
+            invocation: invocation,
+            manuscript: rebuildInput.manuscript,
+            contextText: plan.contextText
+        ) { delta, acceptEmptyFacts in
+            let mapped = NovelStateRebuildV1(
+                schemaVersion: delta.schemaVersion,
+                stateSummary: delta.stateSummary,
+                branchOutline: delta.branchOutlinePatch ?? rebuildInput.baseStateSnapshot.branchOutline,
+                events: delta.events,
+                characterStates: delta.characterChanges,
+                relationships: delta.relationshipChanges,
+                foreshadowing: delta.foreshadowingChanges,
+                unresolvedEntityNames: delta.unresolvedEntityNames,
+                settingProposals: delta.settingProposals
+            )
+            let validated = try NovelFactTransactionReducer.validateManualChunkOutput(
+                mapped,
+                evidenceSource: rebuildInput.manuscript,
+                accumulated: nil,
+                baseState: rebuildInput.baseStateSnapshot,
+                branchID: pending.branchID,
+                in: try await reloadFactDocument(projectID: projectID).document,
+                acceptEmptyFacts: acceptEmptyFacts
+            )
+            let reloaded = try await reloadFactDocument(projectID: projectID)
+            try validatePendingGuard(pending, in: reloaded.document)
+            let finalized = try NovelFactTransactionReducer.finalizeManualSync(
+                pendingID: pendingID,
+                rebuild: validated,
+                retryCommand: retryCommand,
+                artifacts: receipts,
+                in: reloaded.document,
+                now: now()
+            )
+            do {
+                _ = try await commitFactDocument(finalized.document, replacing: reloaded)
+                return finalized.outcome
+            } catch {
+                if let replay = try await reconcileFactOutcome(
+                    projectID: projectID,
+                    context: replayContext,
+                    kind: replayKind,
+                    payloadSHA256: replayPayloadSHA256
+                ) {
+                    return replay
+                }
+                throw error
+            }
         }
     }
 

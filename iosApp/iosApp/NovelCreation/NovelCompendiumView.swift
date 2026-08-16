@@ -194,6 +194,7 @@ private struct NovelMaterialCategoryView: View {
     private var proposalSection: some View {
         if !proposals.isEmpty {
             Section("待确认建议") {
+                NovelSettingProposalRejectAllButton(viewModel: viewModel)
                 ForEach(proposals, id: \.id) { proposal in
                     NovelCompendiumProposalCard(
                         proposal: proposal,
@@ -254,6 +255,7 @@ private struct NovelStoryCompendiumView: View {
         List {
             if !proposals.isEmpty {
                 Section("待确认建议") {
+                    NovelSettingProposalRejectAllButton(viewModel: viewModel)
                     ForEach(proposals, id: \.id) { proposal in
                         NovelCompendiumProposalCard(
                             proposal: proposal,
@@ -386,6 +388,7 @@ private struct NovelCompendiumMoreView: View {
         List {
             if !proposals.isEmpty {
                 Section("其他待确认建议") {
+                    NovelSettingProposalRejectAllButton(viewModel: viewModel)
                     ForEach(proposals, id: \.id) { proposal in
                         NovelCompendiumProposalCard(
                             proposal: proposal,
@@ -729,6 +732,19 @@ struct NovelQuickStartRegenerationSheet: View {
             }
             dismiss()
         }
+    }
+}
+
+struct NovelSettingProposalRejectAllButton: View {
+    let viewModel: NovelCreationViewModel
+
+    var body: some View {
+        Button("拒绝全部待确认", role: .destructive) {
+            Task { await viewModel.rejectActiveSettingProposals() }
+        }
+        .disabled(!viewModel.canMutate)
+        .accessibilityLabel("拒绝全部待确认设定建议")
+        .accessibilityHint("拒绝当前分支上所有分类的待确认设定建议，不会写入资料")
     }
 }
 

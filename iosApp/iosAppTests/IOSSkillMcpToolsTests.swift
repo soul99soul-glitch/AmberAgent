@@ -981,6 +981,33 @@ final class IOSSkillMcpToolsTests: XCTestCase {
         XCTAssertTrue(writeNames.contains("workspace_file_write"))
     }
 
+    func testChatOmitsNetworkMcpToolsWhenCapabilityIsDisabled() throws {
+        let defaults = isolatedDefaults()
+        let permissionStore = IOSPermissionStore(userDefaults: defaults)
+        let capability = try XCTUnwrap(
+            IOSCapabilityRegistry.capabilities.first { $0.id == "ios.mcp.tool_call" }
+        )
+        permissionStore.setPolicy(.disabled, for: capability)
+        let viewModel = ChatViewModel(
+            settingsStore: SettingsStore(),
+            sharedSettings: IOSSharedSettingsStore(userDefaults: defaults),
+            localToolExecutor: IOSLocalToolExecutor(
+                permissionStore: permissionStore,
+                documentStore: DocumentAccessStore()
+            ),
+            autoGenerateResponses: false
+        )
+
+        let names = Set(
+            viewModel.toolExposureBridgeForTesting()?.fullToolDeclarations().map(\.name) ?? []
+        )
+        XCTAssertFalse(names.contains("mcp_call"))
+        XCTAssertFalse(names.contains("mcp_test"))
+        XCTAssertFalse(names.contains("mcp_import_from_skill"))
+        XCTAssertTrue(names.contains("mcp_list"))
+        XCTAssertTrue(names.contains("mcp_describe_tool"))
+    }
+
     // MARK: - G2: schema persistence + mcp_describe_tool
 
     func testMcpToolSchemaIsPersistedAndReloaded() throws {

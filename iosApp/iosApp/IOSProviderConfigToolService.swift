@@ -457,8 +457,10 @@ final class IOSProviderConfigToolService {
             return ["model_id": id, "resolved": false, "label": NSNull()]
         }
         func hex(_ id: KotlinUuid) -> String { id.toHexDashString() }
+        let assistantChatModelId = snapshot.getCurrentAssistant().chatModelId ?? snapshot.chatModelId
         return [
             "chat": resolve(hex(snapshot.chatModelId), wantImage: false),
+            "assistant_chat": resolve(hex(assistantChatModelId), wantImage: false),
             "title": resolve(hex(snapshot.titleModelId), wantImage: false),
             "ocr": resolve(hex(snapshot.ocrModelId), wantImage: false),
             "compress": resolve(hex(snapshot.compressModelId), wantImage: false),
@@ -573,6 +575,43 @@ enum IOSProviderConfigToolCatalog {
             return "{}"
         }
         return text
+    }
+
+    /// Approval snapshots are durable before the tool runs. Keep the live
+    /// in-memory call intact for the approved write, but never persist or
+    /// re-upload a plaintext provider key while waiting for that approval.
+    static func redactedApprovalMessages(_ messages: [UIMessage]) -> [UIMessage] {
+        messages.map { message in
+            var changed = false
+            let parts = message.parts.map { part -> UIMessagePart in
+                guard let tool = part as? UIMessagePart.Tool,
+                      tool.toolName == "provider_config_apply" else {
+                    return part
+                }
+                changed = true
+                return UIMessagePart.Tool(
+                    toolCallId: tool.toolCallId,
+                    toolName: tool.toolName,
+                    input: redactedArgumentsJSON(tool.input),
+                    output: tool.output,
+                    approvalState: tool.approvalState,
+                    streamIndex: tool.streamIndex,
+                    metadata: nil
+                )
+            }
+            guard changed else { return message }
+            return UIMessage(
+                id: message.id,
+                role: message.role,
+                parts: parts,
+                annotations: message.annotations,
+                createdAt: message.createdAt,
+                finishedAt: message.finishedAt,
+                modelId: message.modelId,
+                usage: message.usage,
+                translation: message.translation
+            )
+        }
     }
 
     /// Approval-card preview that never echoes raw API keys.

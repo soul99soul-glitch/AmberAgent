@@ -969,6 +969,13 @@ struct ChatView: View {
                 ComposerAttachmentStatusLabel(status: .error(error))
             }
 
+            if viewModel.currentConversationIsOrchestratedChild,
+               let message = ChatComposerSendBlockReason.orchestratedThread.userVisibleMessage {
+                ComposerAttachmentStatusLabel(
+                    status: .muted(message, systemImage: "arrow.triangle.branch")
+                )
+            }
+
             if let error = viewModel.configurationError {
                 Text(error)
                     .font(.caption)
@@ -1030,6 +1037,7 @@ struct ChatView: View {
                                 isDisabled: viewModel.isRecognizingImages
                                     || viewModel.isAttachingSelectedFile
                                     || hasPendingToolApproval
+                                    || viewModel.currentConversationIsOrchestratedChild
                             ) {
                                 withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
                                     isAttachExpanded.toggle()
@@ -1041,7 +1049,8 @@ struct ChatView: View {
                                     text: $viewModel.inputText,
                                     height: $composerInputHeight,
                                     isFocused: inputFocusBinding,
-                                    isEnabled: !hasPendingToolApproval,
+                                    isEnabled: !hasPendingToolApproval
+                                        && !viewModel.currentConversationIsOrchestratedChild,
                                     sendOnEnter: sharedSettings.displaySetting.sendOnEnter,
                                     controller: composerInputController,
                                     onSubmit: sendComposerMessage

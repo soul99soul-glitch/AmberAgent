@@ -55,15 +55,55 @@ extension NovelFactTransactionReducer {
         return try NovelStructuredOutputDecoder.decodeStateRebuild(from: encoder.encode(value))
     }
 
+    /// Host-accepted empty rebuild: no facts, summary/outline kept from the
+    /// projected base. Blank projects legally store empty snapshot strings;
+    /// the model schema does not, so callers must not re-run `validate(_:)`.
+    static func preservesBaseWithoutFacts(
+        _ rebuild: NovelStateRebuildV1,
+        summary: String,
+        outline: String
+    ) -> Bool {
+        rebuild.events.isEmpty &&
+            rebuild.characterStates.isEmpty &&
+            rebuild.relationships.isEmpty &&
+            rebuild.foreshadowing.isEmpty &&
+            rebuild.stateSummary == summary &&
+            rebuild.branchOutline == outline
+    }
+
+    /// Blank-project snapshots legally store empty summary/outline. Rebuild
+    /// model-schema `validate` does not. Skip that schema only when the empty
+    /// fields are exactly those durable base values.
+    static func skipsRebuildModelSchema(
+        _ rebuild: NovelStateRebuildV1,
+        summary: String,
+        outline: String
+    ) -> Bool {
+        let emptySummary = rebuild.stateSummary
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let emptyOutline = rebuild.branchOutline
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        guard emptySummary || emptyOutline else { return false }
+        return (!emptySummary || rebuild.stateSummary == summary)
+            && (!emptyOutline || rebuild.branchOutline == outline)
+    }
+
     static func validateManualChunkOutput(
         _ value: NovelStateRebuildV1,
         evidenceSource: String,
         accumulated: NovelStateRebuildV1?,
         baseState: NovelStateSnapshotRecord,
         branchID: NovelBranchID,
-        in document: NovelProjectDocumentV1
+        in document: NovelProjectDocumentV1,
+        acceptEmptyFacts: Bool = false
     ) throws -> NovelStateRebuildV1 {
-        let validated = try validate(value)
+        let schemaBaseSummary = accumulated?.stateSummary ?? baseState.summary
+        let schemaBaseOutline = accumulated?.branchOutline ?? baseState.branchOutline
+        let validated = skipsRebuildModelSchema(
+            value,
+            summary: schemaBaseSummary,
+            outline: schemaBaseOutline
+        ) ? value : try validate(value)
         guard let branch = document.branches.first(where: { $0.id == branchID }) else {
             throw NovelError.branchNotFound(branchID)
         }
@@ -84,7 +124,8 @@ extension NovelFactTransactionReducer {
             evidenceSource: evidenceSource,
             branch: branch,
             baseState: projectedBase,
-            document: document
+            document: document,
+            acceptEmptyFacts: acceptEmptyFacts
         )
         try validateStateFacts(
             sanitized,
@@ -142,43 +183,52 @@ extension NovelFactTransactionReducer {
         evidenceSource: String,
         branch: NovelBranchRecord,
         baseState: NovelStateSnapshotRecord,
-        document: NovelProjectDocumentV1
+        document: NovelProjectDocumentV1,
+        acceptEmptyFacts: Bool = false
     ) throws -> NovelStateDeltaV1 {
         // Normalized once and reused across every filter below, instead of
         // each `evidenceMatches` call re-normalizing the same (potentially
         // multi-thousand-character) manuscript from scratch per fact.
         let normalizedEvidenceSource = normalizeEvidenceWhitespace(evidenceSource)
-        let events = value.events.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let characterChanges = value.characterChanges.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let relationshipChanges = value.relationshipChanges.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let foreshadowingChanges = value.foreshadowingChanges.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let hasEvidenceBackedFacts = !events.isEmpty ||
-            !characterChanges.isEmpty ||
-            !relationshipChanges.isEmpty ||
-            !foreshadowingChanges.isEmpty
+        let events = partitionEvidence(
+            value.events,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let characterChanges = partitionEvidence(
+            value.characterChanges,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let relationshipChanges = partitionEvidence(
+            value.relationshipChanges,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let foreshadowingChanges = partitionEvidence(
+            value.foreshadowingChanges,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let hasEvidenceBackedFacts = !events.kept.isEmpty ||
+            !characterChanges.kept.isEmpty ||
+            !relationshipChanges.kept.isEmpty ||
+            !foreshadowingChanges.kept.isEmpty
         let rawHasFacts = !value.events.isEmpty ||
             !value.characterChanges.isEmpty ||
             !value.relationshipChanges.isEmpty ||
             !value.foreshadowingChanges.isEmpty
         try requireEvidenceNotAllDiscarded(
             rawHasFacts: rawHasFacts,
-            hasEvidenceBackedFacts: hasEvidenceBackedFacts
+            hasEvidenceBackedFacts: hasEvidenceBackedFacts,
+            unmatchedEvidence: events.discarded + characterChanges.discarded
+                + relationshipChanges.discarded + foreshadowingChanges.discarded,
+            acceptEmptyFacts: acceptEmptyFacts
         )
         let settingProposals = value.settingProposals.filter {
             evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
+                && NovelSettingProposalFilter.isWorthProposing(title: $0.title, content: $0.content)
         }
 
-        let referenced = events.flatMap(\.entityReferences) +
-            characterChanges.map(\.characterName) +
-            relationshipChanges.flatMap { [$0.sourceEntity, $0.targetEntity] }
+        let referenced = events.kept.flatMap(\.entityReferences) +
+            characterChanges.kept.map(\.characterName) +
+            relationshipChanges.kept.flatMap { [$0.sourceEntity, $0.targetEntity] }
         let unresolved = try sanitizedUnresolvedEntityNames(
             base: baseState.unresolvedEntityNames,
             referenced: referenced,
@@ -189,10 +239,10 @@ extension NovelFactTransactionReducer {
         return NovelStateDeltaV1(
             schemaVersion: value.schemaVersion,
             stateSummary: hasEvidenceBackedFacts ? value.stateSummary : baseState.summary,
-            events: events,
-            characterChanges: characterChanges,
-            relationshipChanges: relationshipChanges,
-            foreshadowingChanges: foreshadowingChanges,
+            events: events.kept,
+            characterChanges: characterChanges.kept,
+            relationshipChanges: relationshipChanges.kept,
+            foreshadowingChanges: foreshadowingChanges.kept,
             unresolvedEntityNames: unresolved,
             branchOutlinePatch: hasEvidenceBackedFacts ? value.branchOutlinePatch : nil,
             settingProposals: settingProposals
@@ -245,42 +295,51 @@ extension NovelFactTransactionReducer {
         evidenceSource: String,
         branch: NovelBranchRecord,
         baseState: NovelStateSnapshotRecord,
-        document: NovelProjectDocumentV1
+        document: NovelProjectDocumentV1,
+        acceptEmptyFacts: Bool = false
     ) throws -> NovelStateRebuildV1 {
         // Normalized once and reused across every filter below, instead of
         // each `evidenceMatches` call re-normalizing the same (potentially
         // multi-thousand-character) manuscript from scratch per fact.
         let normalizedEvidenceSource = normalizeEvidenceWhitespace(evidenceSource)
-        let events = value.events.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let characterStates = value.characterStates.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let relationships = value.relationships.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
-        let foreshadowing = value.foreshadowing.filter {
-            evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
-        }
+        let events = partitionEvidence(
+            value.events,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let characterStates = partitionEvidence(
+            value.characterStates,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let relationships = partitionEvidence(
+            value.relationships,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
+        let foreshadowing = partitionEvidence(
+            value.foreshadowing,
+            inNormalizedManuscript: normalizedEvidenceSource
+        ) { $0.evidence }
         let settingProposals = value.settingProposals.filter {
             evidenceMatches($0.evidence, inNormalizedManuscript: normalizedEvidenceSource)
+                && NovelSettingProposalFilter.isWorthProposing(title: $0.title, content: $0.content)
         }
-        let hasEvidenceBackedFacts = !events.isEmpty ||
-            !characterStates.isEmpty ||
-            !relationships.isEmpty ||
-            !foreshadowing.isEmpty
+        let hasEvidenceBackedFacts = !events.kept.isEmpty ||
+            !characterStates.kept.isEmpty ||
+            !relationships.kept.isEmpty ||
+            !foreshadowing.kept.isEmpty
         let rawHasFacts = !value.events.isEmpty ||
             !value.characterStates.isEmpty ||
             !value.relationships.isEmpty ||
             !value.foreshadowing.isEmpty
         try requireEvidenceNotAllDiscarded(
             rawHasFacts: rawHasFacts,
-            hasEvidenceBackedFacts: hasEvidenceBackedFacts
+            hasEvidenceBackedFacts: hasEvidenceBackedFacts,
+            unmatchedEvidence: events.discarded + characterStates.discarded
+                + relationships.discarded + foreshadowing.discarded,
+            acceptEmptyFacts: acceptEmptyFacts
         )
-        let referenced = events.flatMap(\.entityReferences) +
-            characterStates.map(\.characterName) +
-            relationships.flatMap { [$0.sourceEntity, $0.targetEntity] }
+        let referenced = events.kept.flatMap(\.entityReferences) +
+            characterStates.kept.map(\.characterName) +
+            relationships.kept.flatMap { [$0.sourceEntity, $0.targetEntity] }
         let unresolved = try sanitizedUnresolvedEntityNames(
             base: baseState.unresolvedEntityNames,
             referenced: referenced,
@@ -292,10 +351,10 @@ extension NovelFactTransactionReducer {
             schemaVersion: value.schemaVersion,
             stateSummary: hasEvidenceBackedFacts ? value.stateSummary : baseState.summary,
             branchOutline: hasEvidenceBackedFacts ? value.branchOutline : baseState.branchOutline,
-            events: events,
-            characterStates: characterStates,
-            relationships: relationships,
-            foreshadowing: foreshadowing,
+            events: events.kept,
+            characterStates: characterStates.kept,
+            relationships: relationships.kept,
+            foreshadowing: foreshadowing.kept,
             unresolvedEntityNames: unresolved,
             settingProposals: settingProposals
         )
@@ -884,14 +943,41 @@ extension NovelFactTransactionReducer {
     /// (`!hasEvidenceBackedFacts`). A model that legitimately extracted no
     /// facts at all (`!rawHasFacts`) is not a failure — that is a valid
     /// "nothing changed this chapter" result and must keep committing.
+    private static func partitionEvidence<Fact>(
+        _ facts: [Fact],
+        inNormalizedManuscript source: String,
+        evidence: (Fact) -> String
+    ) -> (kept: [Fact], discarded: [String]) {
+        var kept: [Fact] = []
+        var discarded: [String] = []
+        kept.reserveCapacity(facts.count)
+        for fact in facts {
+            let quote = evidence(fact)
+            if evidenceMatches(quote, inNormalizedManuscript: source) {
+                kept.append(fact)
+            } else {
+                discarded.append(quote)
+            }
+        }
+        return (kept, discarded)
+    }
+
     private static func requireEvidenceNotAllDiscarded(
         rawHasFacts: Bool,
-        hasEvidenceBackedFacts: Bool
+        hasEvidenceBackedFacts: Bool,
+        unmatchedEvidence: [String],
+        acceptEmptyFacts: Bool = false
     ) throws {
         guard rawHasFacts && !hasEvidenceBackedFacts else { return }
+        if acceptEmptyFacts { return }
+        var message = "模型给出的证据文字与正文对不上，本次状态同步未写入任何内容，请重试。"
+        let listed = unmatchedEvidence.prefix(6).filter { !$0.isEmpty }
+        if !listed.isEmpty {
+            message += "\nUNMATCHED EVIDENCE\n" + listed.map { "- \($0)" }.joined(separator: "\n")
+        }
         throw NovelStructuredModelExecutionFailure(
             code: "state_facts_evidence_unmatched",
-            message: "模型给出的证据文字与正文对不上，本次状态同步未写入任何内容，请重试。",
+            message: message,
             isRetryable: true
         )
     }

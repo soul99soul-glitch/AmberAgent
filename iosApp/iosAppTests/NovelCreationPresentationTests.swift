@@ -707,6 +707,66 @@ final class NovelCreationPresentationTests: XCTestCase {
         )
     }
 
+    func testComposerIntentDefaultsToDiscussionAndRemembersWriteAPassage() {
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: nil,
+                collaborationMode: .cocreation,
+                hasConfirmedChapterPlan: false
+            ),
+            .discuss
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .continueProse,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: false
+            ),
+            .continueProse
+        )
+    }
+
+    func testComposerIntentFallsBackFromWholeChapterWhenGhostwriteHasNoPlan() {
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: false
+            ),
+            .discuss
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: true
+            ),
+            .wholeChapter
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .cocreation,
+                hasConfirmedChapterPlan: false
+            ),
+            .wholeChapter
+        )
+    }
+
+    func testComposerIntentPreferenceRoundTripsPerProject() {
+        let defaults = UserDefaults(suiteName: "composer-intent-\(UUID().uuidString)")!
+        let projectID = NovelProjectID()
+        XCTAssertNil(NovelComposerIntentPreference.stored(for: projectID, defaults: defaults))
+        NovelComposerIntentPreference.store(.continueProse, for: projectID, defaults: defaults)
+        XCTAssertEqual(
+            NovelComposerIntentPreference.stored(for: projectID, defaults: defaults),
+            .continueProse
+        )
+        XCTAssertNil(
+            NovelComposerIntentPreference.stored(for: NovelProjectID(), defaults: defaults)
+        )
+    }
+
     func testComposerSubmissionUsesTheSameGateForButtonAndKeyboard() {
         XCTAssertTrue(NovelSessionComposerPolicy.canSubmit(canSend: true, text: "继续写"))
         XCTAssertFalse(NovelSessionComposerPolicy.canSubmit(canSend: false, text: "继续写"))

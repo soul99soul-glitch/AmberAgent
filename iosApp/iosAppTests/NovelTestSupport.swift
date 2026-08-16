@@ -22,6 +22,9 @@ enum NovelModelScriptStep: Equatable, Sendable {
     case complete
     case fail(NovelModelFailure)
     case pause
+    /// 生产端节奏（模拟真机网络 chunk 率）：emit 侧睡 delay 再发下一事件。
+    /// 消费端仍是无间隔连发——被测方若逐 chunk 直上 UI，延迟步只会拉长饱和窗口。
+    case delay(TimeInterval)
 }
 
 struct NovelModelScript: Equatable, Sendable {
@@ -152,6 +155,8 @@ actor ScriptedNovelModelAdapter: NovelModelRunning {
                     continuation.finish()
                     return
                 }
+            case .delay(let seconds):
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             }
         }
         continuation.finish()

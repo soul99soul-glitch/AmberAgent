@@ -4,6 +4,80 @@ import XCTest
 final class NovelManualEditSyncTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_200_000)
 
+    func testManualSyncModelInputOmitsCorrectionWhenThereIsNoPreviousError() {
+        let input = NovelManualSyncChunker.modelInput(
+            chunk: "Mara opened the archive.",
+            index: 0
+        )
+        XCTAssertTrue(input.contains("CURRENT MANUSCRIPT CHUNK"))
+        XCTAssertFalse(input.contains("PREVIOUS ATTEMPT FAILURE"))
+        XCTAssertEqual(
+            input,
+            NovelManualSyncChunker.modelInput(
+                chunk: "Mara opened the archive.",
+                index: 0,
+                previousError: nil
+            )
+        )
+    }
+
+    func testManualSyncModelInputAppendsBoundedPreviousErrorOnRetry() {
+        let input = NovelManualSyncChunker.modelInput(
+            chunk: "Mara opened the archive.",
+            index: 0,
+            previousError: "模型给出的证据文字与正文对不上，本次状态同步未写入任何内容，请重试。"
+        )
+        XCTAssertTrue(input.contains("PREVIOUS ATTEMPT FAILURE"))
+        XCTAssertTrue(input.contains("证据文字与正文对不上"))
+        XCTAssertTrue(input.contains("CURRENT MANUSCRIPT CHUNK"))
+
+        let longError = String(repeating: "x", count: 400)
+        let truncated = NovelManualSyncChunker.modelInput(
+            chunk: "Mara opened the archive.",
+            index: 1,
+            previousError: "  \(longError)\n"
+        )
+        XCTAssertEqual(NovelManualSyncChunker.correctionHint(longError)?.count, 240)
+        XCTAssertTrue(truncated.contains(String(repeating: "x", count: 240)))
+        XCTAssertFalse(truncated.contains(String(repeating: "x", count: 241)))
+    }
+
+    func testManualSyncRepairManuscriptFeedsPreviousOutputAndError() {
+        let previous = #"{"schemaVersion":1,"stateSummary":"Mara"#
+        let repaired = NovelManualSyncChunker.repairManuscript(
+            chunk: "Mara opened the archive.",
+            index: 0,
+            previousOutput: previous,
+            error: "The model returned malformed JSON."
+        )
+        XCTAssertTrue(repaired.contains("MANUAL SYNC CHUNK 1 REPAIR"))
+        XCTAssertTrue(repaired.contains("PREVIOUS OUTPUT"))
+        XCTAssertTrue(repaired.contains(previous))
+        XCTAssertTrue(repaired.contains("FAILURE"))
+        XCTAssertTrue(repaired.contains("malformed JSON"))
+        XCTAssertTrue(repaired.contains("Mara opened the archive."))
+        XCTAssertFalse(
+            NovelManualSyncChunker.modelInput(
+                chunk: "Mara opened the archive.",
+                index: 0
+            ).contains("PREVIOUS OUTPUT")
+        )
+    }
+
+    func testManualSyncRepairManuscriptClipsHugePreviousOutput() {
+        let huge = String(repeating: "a", count: 20_000)
+        let clipped = NovelManualSyncChunker.clipRepairOutput(huge)
+        XCTAssertEqual(clipped.count, 16_000)
+        let repaired = NovelManualSyncChunker.repairManuscript(
+            chunk: "Mara opened the archive.",
+            index: 2,
+            previousOutput: huge,
+            error: "truncated"
+        )
+        XCTAssertFalse(repaired.contains(huge))
+        XCTAssertTrue(repaired.contains(String(repeating: "a", count: 16_000)))
+    }
+
     func testManualSyncDropsUnsupportedFactsWithoutRejectingTheWholeRebuild() throws {
         let document = try NovelTestFixtures.document()
         let rebuild = NovelStateRebuildV1(
@@ -101,7 +175,23 @@ final class NovelManualEditSyncTests: XCTestCase {
             }
             XCTAssertEqual(failure.failure.code, "state_facts_evidence_unmatched")
             XCTAssertTrue(failure.failure.isRetryable)
+            XCTAssertTrue(failure.failure.message.contains("UNMATCHED EVIDENCE"))
+            XCTAssertTrue(
+                failure.failure.message.contains("This evidence is absent from the manuscript.")
+            )
         }
+
+        let accepted = try NovelFactTransactionReducer.validateManualChunkOutput(
+            rebuild,
+            evidenceSource: "Mara opened the archive.",
+            accumulated: projected,
+            baseState: baseState,
+            branchID: document.branches[0].id,
+            in: document,
+            acceptEmptyFacts: true
+        )
+        XCTAssertEqual(accepted.stateSummary, projected.stateSummary)
+        XCTAssertTrue(accepted.events.isEmpty)
     }
 
     func testDirectManualSyncFinalizeRejectsDerivedStateWithoutReliableFacts() throws {
@@ -335,7 +425,7 @@ final class NovelManualEditSyncTests: XCTestCase {
             in: document,
             now: now
         ).document
-        document = try documentWithCandidate("A third candidate.", in: document)
+        document = try documentWithAvailableCandidate("A third candidate.", in: document)
         let candidate = try XCTUnwrap(document.candidates.last)
         let collect = collectCommand(document: document, candidate: candidate)
 
@@ -1004,7 +1094,7 @@ final class NovelManualEditSyncTests: XCTestCase {
         let generationIndex = try XCTUnwrap(reserved.generationReceipts.firstIndex {
             $0.id == artifacts.generationReceipt.id
         })
-        for historicalVersion in ["novel.manual-sync.v2", "novel.manual-sync.v3"] {
+        for historicalVersion in ["novel.manual-sync.v2", "novel.manual-sync.v3", "novel.manual-sync.v4"] {
             var mutated = reserved
             mutated.injectionReceipts[injectionIndex] = try receiptChangingPromptVersion(
                 mutated.injectionReceipts[injectionIndex],
@@ -1269,6 +1359,46 @@ private extension NovelManualEditSyncTests {
             expectedConfigRevision: document.project.configRevision,
             expectedBranchHeadRevision: document.branches[0].headRevision
         )
+    }
+
+    /// `needsSync` 时正文 planner 会拒。本 helper 只挂一条可收录候选，不假装开过正式正文。
+    func documentWithAvailableCandidate(
+        _ content: String,
+        in document: NovelProjectDocumentV1
+    ) throws -> NovelProjectDocumentV1 {
+        var next = document
+        let branch = next.branches[0]
+        let candidateID = NovelCandidateID()
+        let messageID = NovelMessageID()
+        let sequence = (next.sessions[0].messages.last?.sequence ?? -1) + 1
+        next.sessions[0].messages.append(NovelSessionMessageRecord(
+            id: messageID,
+            sequence: sequence,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: content,
+            createdAt: now,
+            runID: nil,
+            candidateID: candidateID
+        ))
+        next.sessions[0].revision += 1
+        next.candidates.append(NovelCandidateRecord(
+            id: candidateID,
+            kind: .prose,
+            branchID: branch.id,
+            sessionID: branch.sessionID,
+            sourceMessageID: messageID,
+            baseCheckpointID: branch.headCheckpointID,
+            baseHeadRevision: branch.headRevision,
+            status: .available,
+            content: content,
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            createdAt: now
+        ))
+        try NovelDocumentValidator.validate(next)
+        return next
     }
 
     func documentWithCandidate(

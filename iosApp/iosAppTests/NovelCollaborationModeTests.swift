@@ -422,9 +422,14 @@ final class NovelCollaborationModeTests: XCTestCase {
         await workspace.loadProjects(selecting: document.project.id)
         let session = NovelSessionViewModel(workspace: workspace)
         await session.bindToCurrentSelection()
+        let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: document.project.id,
+            branchID: branchID
+        )
 
         XCTAssertTrue(session.canStartGhostwriteChapter)
         XCTAssertTrue(session.startGhostwriteChapter(targetChapterCount: 1))
+        XCTAssertTrue(BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID))
 
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
@@ -451,6 +456,7 @@ final class NovelCollaborationModeTests: XCTestCase {
         // 恰好四次模型调用：写稿 → 验收 → 连续性 → 状态重建同步。
         let requests = await adapter.requests
         XCTAssertEqual(requests.count, 4)
+        XCTAssertFalse(BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID))
     }
 
     func testCollaborationModeCanSwitchBackToCocreation() throws {
@@ -792,6 +798,130 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertTrue(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: plan.id), to: plan))
         XCTAssertFalse(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: NovelChapterPlanID()), to: plan))
         XCTAssertFalse(NovelGhostwriteCandidateOwnership.belongs(candidate(ghostwritePlanID: nil), to: plan))
+    }
+
+    func testStaleCollectionBaseCannotReuseGhostwriteCandidate() {
+        // 真机「赵大来了」：山呼稿 baseHead=160，分支已到 193。
+        // belongs 仍成立，但再收录只会抛 staleBranchHeadRevision；继续必须重写。
+        let planID = NovelChapterPlanID()
+        let digest = "a6112fda5fab07b555213efd874da5ff36e36dcfc58e59d184b618d5a6ad9fe5"
+        let branchID = NovelBranchID()
+        let plan = NovelChapterPlanRecord(
+            id: planID,
+            branchID: branchID,
+            status: .confirmed,
+            outlinePlacement: "山呼",
+            goalAndConflict: "进城",
+            mustHappen: ["见旗"],
+            mustNotHappen: [],
+            endingHook: "",
+            visibleFacts: [],
+            contentDigest: digest,
+            updatedAt: Date(timeIntervalSince1970: 0),
+            confirmedAt: Date(timeIntervalSince1970: 0)
+        )
+        let matching = NovelCandidateRecord(
+            id: NovelCandidateID(),
+            kind: .prose,
+            branchID: branchID,
+            sessionID: NovelSessionID(),
+            sourceMessageID: NovelMessageID(),
+            baseCheckpointID: NovelCheckpointID(),
+            baseHeadRevision: 193,
+            status: .available,
+            content: "# 山呼",
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            chapterPlanDigest: digest,
+            ghostwritePlanID: planID,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let stale = NovelCandidateRecord(
+            id: NovelCandidateID(),
+            kind: .prose,
+            branchID: branchID,
+            sessionID: NovelSessionID(),
+            sourceMessageID: NovelMessageID(),
+            baseCheckpointID: NovelCheckpointID(),
+            baseHeadRevision: 160,
+            status: .available,
+            content: "# 山呼",
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            chapterPlanDigest: digest,
+            ghostwritePlanID: planID,
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let currentHead = NovelCheckpointID()
+        XCTAssertTrue(
+            NovelGhostwriteCandidateOwnership.canReuseForAutomaticCollect(
+                matching,
+                plan: plan,
+                branchHeadCheckpointID: matching.baseCheckpointID,
+                branchHeadRevision: 193,
+                checkpoints: [],
+                sourceMessage: nil,
+                superseded: [],
+                alreadyCollected: []
+            )
+        )
+        XCTAssertFalse(
+            NovelGhostwriteCandidateOwnership.canReuseForAutomaticCollect(
+                stale,
+                plan: plan,
+                branchHeadCheckpointID: currentHead,
+                branchHeadRevision: 193,
+                checkpoints: [],
+                sourceMessage: nil,
+                superseded: [],
+                alreadyCollected: []
+            )
+        )
+        XCTAssertEqual(
+            NovelGhostwriteCollectFailure.pauseReason(
+                candidate: stale,
+                branchHeadCheckpointID: currentHead,
+                branchHeadRevision: 193,
+                checkpoints: [],
+                sourceMessage: nil
+            ),
+            .collectBaseStale
+        )
+        XCTAssertEqual(
+            NovelGhostwriteCollectFailure.pauseReason(
+                candidate: matching,
+                branchHeadCheckpointID: matching.baseCheckpointID,
+                branchHeadRevision: 193,
+                checkpoints: [],
+                sourceMessage: nil
+            ),
+            .collectFailed
+        )
+        XCTAssertTrue(NovelGhostwritePauseReason.collectBaseStale.requiresRewriteOnContinue)
+        XCTAssertFalse(NovelGhostwritePauseReason.collectFailed.requiresRewriteOnContinue)
+        XCTAssertTrue(
+            NovelGhostwritePauseReason.collectBaseStale.displayMessage.contains("重写")
+        )
+        XCTAssertFalse(
+            NovelGhostwritePauseReason.collectBaseStale.displayMessage.contains("刷新")
+        )
+
+        let progress = NovelGhostwriteProgress(
+            binding: NovelSessionBinding(
+                projectID: NovelProjectID(),
+                branchID: branchID
+            ),
+            phase: .failed,
+            pauseReason: .collectBaseStale,
+            candidateID: stale.id,
+            startedAt: Date(timeIntervalSince1970: 0),
+            targetChapterCount: 5,
+            completedChapterCount: 4,
+            currentChapterIndex: 5
+        )
+        XCTAssertTrue(progress.mustRewriteCandidateOnResume)
+        XCTAssertTrue(progress.shouldContinueSameBatch)
+        XCTAssertTrue(progress.boardStepSummary.contains("将重写"))
     }
 
     func testCollectRejectsCandidateWhenChapterPlanDigestMismatches() throws {
@@ -1549,7 +1679,7 @@ final class NovelCollaborationModeTests: XCTestCase {
         XCTAssertTrue(withDraft.contains("【上一稿正文】"))
         XCTAssertTrue(withDraft.contains("碍眼"))
         XCTAssertTrue(withDraft.contains("【润修要求】"))
-        // 自动改写路径不带 brief 时仍走 receipt 模板
+        // 自动自愈也必须钉住上一稿：确定性部分由宿主固化，不从零重写。
         let auto = NovelGhostwriteProgress.writeUserText(
             receipt: NovelGhostwriteFailureReceipt.make(
                 reason: .acceptanceFailed,
@@ -1560,10 +1690,41 @@ final class NovelCollaborationModeTests: XCTestCase {
                 planDigest: nil
             ),
             revisionBrief: nil,
-            sourceDraft: "不该出现"
+            sourceDraft: "沈砚按着刀从柳林里出来。"
         )
-        XCTAssertFalse(auto.contains("不该出现"))
+        XCTAssertTrue(auto.contains("【上一稿正文】"))
+        XCTAssertTrue(auto.contains("柳林"))
         XCTAssertTrue(auto.contains("缺拍") || auto.contains("必须补写"))
+        XCTAssertTrue(auto.contains("不要从零重写") || auto.contains("已确定"))
+        XCTAssertFalse(auto.contains("开篇换新"))
+        XCTAssertFalse(auto.contains("不要再用同一开篇"))
+    }
+
+    func testGhostwriteAutoHealPinsDeterminedDraftAndDoesNotForceNewOpening() {
+        XCTAssertEqual(
+            NovelGhostwriteHeal.writeUserText(receipt: nil),
+            "请按本章计划写完整一章正文。"
+        )
+        let receipt = NovelGhostwriteFailureReceipt.make(
+            reason: .acceptanceFailed,
+            summary: "缺必发生：半渡点火",
+            missingMustHappen: ["半渡点火"],
+            attemptIndex: 1,
+            sourceCandidateID: NovelCandidateID(),
+            planDigest: "digest"
+        )
+        let block = receipt.healInstructionBlock()
+        XCTAssertTrue(block.contains("已确定") || block.contains("不确定"))
+        XCTAssertFalse(block.contains("开篇换新"))
+        let text = NovelGhostwriteHeal.writeUserText(
+            receipt: receipt,
+            sourceDraft: "赵大没有吹角。"
+        )
+        XCTAssertTrue(text.contains("【上一稿正文】"))
+        XCTAssertTrue(text.contains("没有吹角"))
+        XCTAssertTrue(text.contains("已确定") || text.contains("不要从零重写"))
+        XCTAssertFalse(text.contains("开篇换新"))
+        XCTAssertFalse(text.contains("不要再用同一开篇"))
     }
 
     func testGhostwriteCancellationPauseReasonPrefersUserPause() {

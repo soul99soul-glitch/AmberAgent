@@ -127,6 +127,101 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         return (harness, ids)
     }
 
+    private func makeHarnessWithSettingProposals(
+        _ titles: [String]
+    ) async throws -> (Harness, [NovelProposalID]) {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        var document = try NovelTestFixtures.document()
+        let now = document.project.updatedAt
+        var ids: [NovelProposalID] = []
+        for title in titles {
+            let proposal = NovelSettingProposalRecord(
+                id: NovelProposalID(),
+                branchID: document.branches[0].id,
+                title: title,
+                content: "\(title) 的说明。",
+                createdAt: now,
+                isResolved: false
+            )
+            document.settingProposals.append(proposal)
+            ids.append(proposal.id)
+        }
+        let source = document.stateSnapshots[0]
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: source.id,
+            eventIDs: source.eventIDs,
+            summary: source.summary,
+            branchOutline: source.branchOutline,
+            unresolvedEntityNames: source.unresolvedEntityNames,
+            createdAt: source.createdAt,
+            settingProposalIDs: ids
+        )
+        try NovelDocumentValidator.validate(document)
+        _ = try await repository.createProject(document)
+        let creation = DefaultNovelCreation(repository: repository)
+        let executor = IOSNovelProjectToolExecutor(
+            projectContext: NovelProjectToolRunContext(
+                projectID: document.project.id,
+                branchID: document.branches[0].id
+            ),
+            creation: creation
+        )
+        let harness = Harness(
+            root: root,
+            creation: creation,
+            projectID: document.project.id,
+            branchID: document.branches[0].id,
+            executor: executor
+        )
+        return (harness, ids)
+    }
+
+    /// Real collection lineage so undo can walk one checkpoint per chapter.
+    private func makeHarnessWithCollectedLineage(
+        additionalChapters: [(title: String, content: String)]
+    ) async throws -> (Harness, NovelStateSnapshotID) {
+        let root = try NovelTestFixtures.temporaryDirectory()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        var document = try NovelBranchTestFixtures.documentWithCollectedCandidate(
+            content: "第一章：留下的正文。"
+        )
+        let firstSnapshotID = document.branches[0].currentStateSnapshotID
+        let branchID = document.branches[0].id
+        for chapter in additionalChapters {
+            let generated = try NovelBranchTestFixtures.appendCompletedRun(
+                to: document,
+                branchID: branchID,
+                kind: .prose,
+                content: chapter.content
+            )
+            let candidateID = try XCTUnwrap(generated.candidateID)
+            document = try NovelBranchTestFixtures.collectCandidate(
+                candidateID,
+                in: generated.document,
+                title: chapter.title
+            )
+        }
+        try NovelDocumentValidator.validate(document)
+        _ = try await repository.createProject(document)
+        let creation = DefaultNovelCreation(repository: repository)
+        let executor = IOSNovelProjectToolExecutor(
+            projectContext: NovelProjectToolRunContext(
+                projectID: document.project.id,
+                branchID: branchID
+            ),
+            creation: creation
+        )
+        let harness = Harness(
+            root: root,
+            creation: creation,
+            projectID: document.project.id,
+            branchID: branchID,
+            executor: executor
+        )
+        return (harness, firstSnapshotID)
+    }
+
     private func jsonArgs(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object)
         return String(data: data, encoding: .utf8)!
@@ -440,6 +535,120 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .saveManualEdit })
     }
 
+    func testRevertRecentChaptersPausesForApprovalThenRollsBackOnConfirm() async throws {
+        let (harness, firstSnapshotID) = try await makeHarnessWithCollectedLineage(
+            additionalChapters: [
+                (title: "口中名", content: "第二章：城里有人叫他的名字。"),
+                (title: "山呼", content: "第三章：山里有人应声。"),
+            ]
+        )
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let arguments = jsonArgs([
+            "chapter_count": 2,
+            "reason": "最近两章比较水",
+        ])
+        let paused = await harness.execute("novel_revert_recent_chapters", arguments)
+        guard case .needsApproval(let reason) = paused else {
+            XCTFail("模型发起回退应停在审批卡，实际 \(paused)")
+            return
+        }
+        XCTAssertTrue(reason.contains("确认"))
+
+        var snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.branches.first?.workingChapterSelections.count, 3)
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .undoBranchHead })
+
+        let prompt = try await harness.executor.revertApprovalPrompt(from: arguments).get()
+        XCTAssertEqual(prompt.options, NovelManuscriptRevertApproval.options)
+        XCTAssertEqual(prompt.manuscriptRevert?.chapterTitles, ["口中名", "山呼"])
+        XCTAssertEqual(prompt.manuscriptRevert?.chapterCount, 2)
+
+        let written = await harness.executor.execute(
+            name: "novel_revert_recent_chapters",
+            arguments: arguments,
+            isUserInitiated: true
+        )
+        guard case .filled(let receipt) = written else {
+            XCTFail("作者确认后应回退章节，实际 \(written)")
+            return
+        }
+        XCTAssertTrue(receipt.contains("口中名"))
+        XCTAssertTrue(receipt.contains("山呼"))
+
+        snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.branches.first?.workingChapterSelections.count, 1)
+        XCTAssertEqual(snapshot.branches.first?.currentStateSnapshotID, firstSnapshotID)
+        XCTAssertEqual(
+            snapshot.appliedOperations.filter { $0.kind == .undoBranchHead }.count,
+            2
+        )
+    }
+
+    func testRevertRecentChaptersRejectsInvalidCountWithoutWriting() async throws {
+        let (harness, _) = try await makeHarnessWithCollectedLineage(additionalChapters: [])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_revert_recent_chapters",
+            jsonArgs(["chapter_count": 3])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("章数不够应失败，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("没有这么多章") || message.contains("章"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .undoBranchHead })
+    }
+
+    func testGhostwriteBlocksRecentChapterRevert() async throws {
+        let (harness, _) = try await makeHarnessWithCollectedLineage(
+            additionalChapters: [(title: "山呼", content: "第二章。")]
+        )
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try await harness.creation.saveGhostwriteBatchProgress(NovelGhostwriteBatchProgressRecord(
+            schemaVersion: NovelGhostwriteBatchProgressRecord.currentSchemaVersion,
+            projectID: harness.projectID,
+            branchID: harness.branchID,
+            phase: .writing,
+            pauseReason: nil,
+            detailMessage: nil,
+            candidateID: nil,
+            chapterPlanDigest: nil,
+            autoCollectedCandidateIDs: [],
+            startedAt: startedAt,
+            updatedAt: startedAt,
+            targetChapterCount: 1,
+            completedChapterCount: 0,
+            currentChapterIndex: 1,
+            lastCompletedPlanSummary: nil,
+            pendingSyncChapterCredit: false,
+            qualityAttemptIndex: 0,
+            maxQualityAttempts: 3,
+            lastFailureReceipt: nil,
+            supersededCandidateIDs: [],
+            recentFailureFingerprints: [],
+            revisionBriefOverride: nil,
+            didThinContractAmendThisChapter: false,
+            contractAmendments: []
+        ))
+
+        let outcome = await harness.execute(
+            "novel_revert_recent_chapters",
+            jsonArgs(["chapter_count": 1])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("代笔中回退应被拒绝，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("代笔正在推进本章"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .undoBranchHead })
+    }
+
     func testProposeChapterPlanSavesDraftAndReusesExistingPlanID() async throws {
         let harness = try await makeHarness()
         defer { try? FileManager.default.removeItem(at: harness.root) }
@@ -505,6 +714,7 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
             ("novel_revise_chapter", jsonArgs([
                 "start_paragraph": 1, "end_paragraph": 1, "new_text": "   ",
             ]), "不能为空"),
+            ("novel_revert_recent_chapters", "{}", "chapter_count"),
         ]
         for (name, arguments, expectedFragment) in cases {
             let outcome = await harness.execute(name, arguments)
@@ -598,6 +808,126 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         XCTAssertTrue(message.contains("没有「往后几章」备注"))
     }
 
+    // MARK: - Setting proposals
+
+    func testListSettingProposalsEmptyIsFilled() async throws {
+        let harness = try await makeHarness()
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute("novel_list_setting_proposals", "{}")
+        guard case .filled(let text) = outcome else {
+            XCTFail("空列表应返回 filled，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(text.contains("当前没有待确认的设定建议"))
+    }
+
+    func testListSettingProposalsIncludesIdsAndTitles() async throws {
+        let (harness, ids) = try await makeHarnessWithSettingProposals(["粮仓", "殿前司"])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute("novel_list_setting_proposals", "{}")
+        guard case .filled(let text) = outcome else {
+            XCTFail("Expected filled, got \(outcome)")
+            return
+        }
+        XCTAssertTrue(text.contains("粮仓"))
+        XCTAssertTrue(text.contains("殿前司"))
+        XCTAssertTrue(text.contains(ids[0].description))
+        XCTAssertTrue(text.contains(ids[1].description))
+        let snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.activeSettingProposals(for: harness.branchID).count, 2)
+    }
+
+    func testRejectSettingProposalsOmittingIdsRejectsAll() async throws {
+        let (harness, _) = try await makeHarnessWithSettingProposals(["粮仓", "马厩", "殿前司"])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute("novel_reject_setting_proposals", "{}")
+        guard case .filled(let text) = outcome else {
+            XCTFail("全拒应返回 filled，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(text.contains("已拒绝 3 条"))
+        XCTAssertTrue(text.contains("粮仓"))
+        XCTAssertTrue(text.contains("马厩"))
+        XCTAssertTrue(text.contains("殿前司"))
+
+        let snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.activeSettingProposals(for: harness.branchID).count, 0)
+        XCTAssertEqual(snapshot.settingProposals.filter(\.isResolved).count, 3)
+        XCTAssertEqual(
+            snapshot.appliedOperations.filter { $0.kind == .resolveSettingProposal }.count,
+            3
+        )
+    }
+
+    func testRejectSettingProposalsEmptyArrayRejectsAll() async throws {
+        let (harness, _) = try await makeHarnessWithSettingProposals(["粮仓"])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_reject_setting_proposals",
+            jsonArgs(["proposal_ids": [] as [String]])
+        )
+        guard case .filled = outcome else {
+            XCTFail("空数组应全拒，实际 \(outcome)")
+            return
+        }
+        let snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.activeSettingProposals(for: harness.branchID).count, 0)
+    }
+
+    func testRejectSettingProposalsSpecifiedIdLeavesTheRest() async throws {
+        let (harness, ids) = try await makeHarnessWithSettingProposals(["粮仓", "殿前司"])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_reject_setting_proposals",
+            jsonArgs(["proposal_ids": [ids[0].rawValue.uuidString]])
+        )
+        guard case .filled(let text) = outcome else {
+            XCTFail("指定拒绝应返回 filled，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(text.contains("粮仓"))
+        XCTAssertFalse(text.contains("殿前司"))
+
+        let snapshot = try await harness.snapshot()
+        let remaining = snapshot.activeSettingProposals(for: harness.branchID)
+        XCTAssertEqual(remaining.map(\.title), ["殿前司"])
+    }
+
+    func testRejectSettingProposalsUnknownIdFailsAndLeavesDocument() async throws {
+        let (harness, ids) = try await makeHarnessWithSettingProposals(["粮仓"])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_reject_setting_proposals",
+            jsonArgs(["proposal_ids": [UUID().uuidString]])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("未知 id 应失败，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("找不到待确认的设定建议"))
+
+        let snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.activeSettingProposals(for: harness.branchID).map(\.id), ids)
+    }
+
+    func testRejectSettingProposalsInvalidJSONFails() async throws {
+        let harness = try await makeHarness()
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute("novel_reject_setting_proposals", "{")
+        guard case .failed(let message) = outcome else {
+            XCTFail("非法 JSON 应失败，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("参数无效"))
+    }
+
     // MARK: - Ghostwrite guard
 
     func testGhostwriteRunningBlocksPlanAndMaterialButNotRenameOrArc() async throws {
@@ -669,6 +999,16 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         )
         guard case .filled = arc else {
             XCTFail("代笔中记录下一弧不应被挡，实际 \(arc)")
+            return
+        }
+        let list = await harness.execute("novel_list_setting_proposals", "{}")
+        guard case .filled = list else {
+            XCTFail("代笔中应允许列出设定建议，实际 \(list)")
+            return
+        }
+        let reject = await harness.execute("novel_reject_setting_proposals", "{}")
+        guard case .filled = reject else {
+            XCTFail("代笔中应允许清设定建议，实际 \(reject)")
             return
         }
         let snapshot = try await harness.snapshot()

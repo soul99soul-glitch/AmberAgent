@@ -182,7 +182,7 @@ struct NovelChapterReaderView: View {
             NovelStateSyncProgressBanner(
                 title: currentStateSyncStatusTitle,
                 activity: currentStateSyncActivity,
-                secondaryHint: "分段读取正文并更新剧情状态，大项目会较久。",
+                secondaryHint: currentStateSyncActivity?.segmentedRebuildHint,
                 canStop: {
                     guard let projectID = viewModel.selectedProjectID,
                           let branchID = viewModel.selectedBranchID else { return false }
@@ -205,11 +205,11 @@ struct NovelChapterReaderView: View {
             .padding(.vertical, 9)
             .background(AmberTheme.accentAmber.opacity(0.10))
         } else if let recovery = currentStateSyncRecoveryMessage {
-            HStack(spacing: 9) {
+            VStack(alignment: .leading, spacing: 8) {
                 Label(recovery, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(AmberTheme.foreground2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Button("重试同步") {
                     guard let projectID = viewModel.selectedProjectID,
                           let branchID = viewModel.selectedBranchID else { return }
@@ -220,6 +220,7 @@ struct NovelChapterReaderView: View {
                 .contentShape(Rectangle())
                 .disabled(!canRetryCurrentStateSync)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 20)
             .padding(.vertical, 9)
             .background(AmberTheme.accentAmber.opacity(0.10))

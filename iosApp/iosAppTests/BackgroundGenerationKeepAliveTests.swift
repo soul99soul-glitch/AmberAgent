@@ -27,7 +27,8 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         var remainingSubmitFailures: Int = 0
 
         func makeKeepAlive(
-            systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000
+            systemSubmitRetryDelayNanoseconds: UInt64 = 1_500_000_000,
+            isApplicationForeground: @escaping () -> Bool = { true }
         ) -> BackgroundGenerationKeepAlive {
             BackgroundGenerationKeepAlive(
                 beginBackgroundTask: { [self] name, expiration in
@@ -62,7 +63,8 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
                     registeredIdentifiers.append(identifier)
                     return registrationResult
                 },
-                systemSubmitRetryDelayNanoseconds: systemSubmitRetryDelayNanoseconds
+                systemSubmitRetryDelayNanoseconds: systemSubmitRetryDelayNanoseconds,
+                isApplicationForeground: isApplicationForeground
             )
         }
     }
@@ -84,10 +86,22 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertEqual(spy.registeredIdentifiers, [request.identifier])
         XCTAssertEqual(request.title, "Amber 正在生成")
         XCTAssertEqual(request.subtitle, "GPT")
-        // .fail 会在系统忙时当场判死；排队才有第二次机会。
+        // 系统暂时没有资源时要继续排队，不能把尚未接管当成业务失败。
         XCTAssertEqual(request.strategy, .queue)
         XCTAssertTrue(keepAlive.holdsLease("run-1"))
         XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .submitted)
+    }
+
+    func testBeginWhileBackgroundedKeepsOnlyUIKitLease() {
+        let spy = SystemSpy()
+        let keepAlive = spy.makeKeepAlive(isApplicationForeground: { false })
+
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+
+        XCTAssertEqual(spy.begunNames, ["AmberGeneration-run-1"])
+        XCTAssertTrue(spy.registeredIdentifiers.isEmpty)
+        XCTAssertTrue(spy.submittedRequests.isEmpty)
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .uiOnly)
     }
 
     func testBeginCanSkipSystemTaskWhileKeepingUIKitLease() {
@@ -205,6 +219,23 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertEqual(spy.events.filter { $0 == "submit-fail" }.count, 2)
     }
 
+    func testSubmitFailureDoesNotRetryAfterAppMovesToBackground() async {
+        let spy = SystemSpy()
+        spy.remainingSubmitFailures = 1
+        var isForeground = true
+        let keepAlive = spy.makeKeepAlive(
+            systemSubmitRetryDelayNanoseconds: 20_000_000,
+            isApplicationForeground: { isForeground }
+        )
+
+        keepAlive.begin("run-1", title: "t", subtitle: "s")
+        isForeground = false
+        try? await Task.sleep(nanoseconds: 80_000_000)
+
+        XCTAssertEqual(spy.events, ["begin", "submit-fail"])
+        XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .uiOnly)
+    }
+
     func testAbandonSystemAssertionCancelsPendingRetryWithoutDroppingUIKitLease() async {
         let spy = SystemSpy()
         spy.remainingSubmitFailures = 1
@@ -295,8 +326,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
         XCTAssertTrue(spy.cancelledIdentifiers.isEmpty)
         keepAlive.end("run-1")
 
-        // .queue 的请求不会自己过期。不撤，系统会在这一轮早就结束之后才调度到，
-        // 把 App 唤起来、弹一张名不副实的「正在生成」进度卡。
+        // 已提交但尚未接管的请求也要撤；否则系统可能在业务早已结束后才调度到。
         XCTAssertEqual(spy.cancelledIdentifiers, [keepAlive.identifier(for: "run-1")])
     }
 
@@ -310,6 +340,7 @@ final class BackgroundGenerationKeepAliveTests: XCTestCase {
 
         XCTAssertTrue(spy.cancelledIdentifiers.isEmpty)
         XCTAssertEqual(expired, 0)
+        XCTAssertTrue(keepAlive.holdsLease("run-1"))
         XCTAssertEqual(keepAlive.executionAssertion(for: "run-1"), .submitted)
         XCTAssertEqual(spy.endedTaskIds.count, 1)
     }

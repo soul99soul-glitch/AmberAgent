@@ -34,6 +34,9 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         "novel_list_chapters",
         "novel_read_chapter",
         "novel_revise_chapter",
+        "novel_revert_recent_chapters",
+        "novel_list_setting_proposals",
+        "novel_reject_setting_proposals",
     ]
 
     static let readOutputCharacterLimit = 24_000
@@ -71,6 +74,12 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return await readChapter(arguments)
         case "novel_revise_chapter":
             return await reviseChapter(arguments, isUserInitiated: isUserInitiated)
+        case "novel_revert_recent_chapters":
+            return await revertRecentChapters(arguments, isUserInitiated: isUserInitiated)
+        case "novel_list_setting_proposals":
+            return await listSettingProposals()
+        case "novel_reject_setting_proposals":
+            return await rejectSettingProposals(arguments)
         default:
             return .failed("未知的小说项目工具：\(name)。")
         }
@@ -533,6 +542,150 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         return .success(prompt)
     }
 
+    private func revertRecentChapters(
+        _ arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        switch await revertApprovalPrompt(from: arguments) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let prompt):
+            if isUserInitiated {
+                return await applyRevert(prompt.manuscriptRevert)
+            }
+            return .needsApproval("等待作者确认回退章节")
+        }
+    }
+
+    private func listSettingProposals() async -> IOSAgentToolOutcome {
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法列出设定建议。")
+        }
+        let proposals = snapshot.activeSettingProposals(for: branchID)
+        guard !proposals.isEmpty else {
+            return .filled("当前没有待确认的设定建议。")
+        }
+        let lines = proposals.map { proposal in
+            let preview = proposal.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            let clipped = preview.count > 80 ? String(preview.prefix(80)) + "…" : preview
+            return "- \(proposal.title) (id: \(proposal.id))\n  \(clipped)"
+        }
+        return .filled(
+            "待确认设定建议 \(proposals.count) 条。值得留下的用 novel_revise_material 写入；其余用 novel_reject_setting_proposals 清掉（省略 proposal_ids 即全部拒绝）。\n"
+                + lines.joined(separator: "\n")
+        )
+    }
+
+    private func rejectSettingProposals(_ arguments: String) async -> IOSAgentToolOutcome {
+        let trimmed = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        let args: RejectSettingProposalsArguments
+        if trimmed.isEmpty {
+            args = RejectSettingProposalsArguments(proposal_ids: nil)
+        } else {
+            guard let decoded: RejectSettingProposalsArguments = decode(arguments) else {
+                return .failed(
+                    "novel_reject_setting_proposals 参数无效：proposal_ids 需为 UUID 数组，可省略以全部拒绝。"
+                )
+            }
+            args = decoded
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法拒绝设定建议。")
+        }
+        let active = snapshot.activeSettingProposals(for: branchID)
+        guard !active.isEmpty else {
+            return .filled("当前没有待确认的设定建议。")
+        }
+        let requestedIDs: [NovelProposalID]
+        if let rawIDs = args.proposal_ids, !rawIDs.isEmpty {
+            var parsed: [NovelProposalID] = []
+            for raw in rawIDs {
+                guard let uuid = UUID(uuidString: raw) else {
+                    return .failed("novel_reject_setting_proposals 的 proposal_ids 不是合法 UUID：\(raw)。")
+                }
+                parsed.append(NovelProposalID(uuid))
+            }
+            requestedIDs = parsed
+        } else {
+            requestedIDs = active.map(\.id)
+        }
+        let activeIDs = Set(active.map(\.id))
+        if let missing = requestedIDs.first(where: { !activeIDs.contains($0) }) {
+            return .failed("找不到待确认的设定建议：\(missing)。")
+        }
+        var rejectedTitles: [String] = []
+        for proposalID in requestedIDs {
+            guard let current = await loadSnapshot() else {
+                return .failed("拒绝设定建议时项目状态丢失。")
+            }
+            guard let branch = current.branches.first(where: { $0.id == branchID }) else {
+                return .failed("当前分支不可用，无法拒绝设定建议。")
+            }
+            guard let proposal = current.activeSettingProposals(for: branchID).first(where: {
+                $0.id == proposalID
+            }) else {
+                continue
+            }
+            let command = NovelResolveSettingProposalCommand(
+                context: mutationContext(
+                    projectRevision: current.project.revision,
+                    configRevision: current.project.configRevision,
+                    branchHeadRevision: branch.headRevision
+                ),
+                projectID: projectID,
+                proposalID: proposalID,
+                resolution: .reject
+            )
+            if let failure = await perform(.resolveSettingProposal(command)) {
+                return .failed("拒绝「\(proposal.title)」失败：\(failure)")
+            }
+            rejectedTitles.append(proposal.title)
+        }
+        if rejectedTitles.isEmpty {
+            return .filled("当前没有待确认的设定建议。")
+        }
+        return .filled("已拒绝 \(rejectedTitles.count) 条设定建议：\(rejectedTitles.joined(separator: "、"))。")
+    }
+
+    func revertApprovalPrompt(from arguments: String) async -> Result<NovelAskUserPrompt, NovelProjectToolIssue> {
+        guard let args: RevertRecentChaptersArguments = decode(arguments) else {
+            return .failure(.init(
+                "novel_revert_recent_chapters 参数无效：需要 chapter_count。"
+            ))
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failure(.init("当前小说项目不可用，无法回退章节。"))
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failure(.init(reason))
+        }
+        switch revertPlan(chapterCount: args.chapter_count, snapshot: snapshot) {
+        case .failure(let issue):
+            return .failure(issue)
+        case .success(let planned):
+            let reason = args.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let titles = planned.plan.chapters.map { "第 \($0.ordinal) 章《\($0.title)》" }
+            let question = titles.count == 1
+                ? "回退\(titles[0])？正文和剧情同步点会一起回到这一章之前。"
+                : "回退最近 \(titles.count) 章（\(titles.joined(separator: "、"))）？正文和剧情同步点会一起回到这几章之前。"
+            let prompt = NovelAskUserPrompt(
+                question: question,
+                options: NovelManuscriptRevertApproval.options,
+                manuscriptRevert: NovelManuscriptRevertProposal(
+                    chapterCount: planned.plan.chapters.count,
+                    chapterIDs: planned.plan.chapters.map(\.chapterID),
+                    chapterTitles: planned.plan.chapters.map(\.title),
+                    chapterOrdinals: planned.plan.chapters.map(\.ordinal),
+                    targetCheckpointID: planned.plan.targetCheckpointID,
+                    expectedHeadRevision: planned.branch.headRevision,
+                    expectedWorkingRevision: planned.branch.workingRevision,
+                    reason: reason?.isEmpty == true ? nil : reason
+                )
+            )
+            return .success(prompt)
+        }
+    }
+
     // MARK: - Helpers
 
     /// Returns nil on success; a human-readable failure reason otherwise.
@@ -680,6 +833,106 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         )
     }
 
+    private func applyRevert(_ proposal: NovelManuscriptRevertProposal?) async -> IOSAgentToolOutcome {
+        guard let proposal else {
+            return .failed("回退审批缺少章节目标。")
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法回退章节。")
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failed(reason)
+        }
+        switch revertPlan(chapterCount: proposal.chapterCount, snapshot: snapshot) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let planned):
+            guard planned.branch.headRevision == proposal.expectedHeadRevision,
+                  planned.branch.workingRevision == proposal.expectedWorkingRevision,
+                  planned.plan.targetCheckpointID == proposal.targetCheckpointID,
+                  planned.plan.chapters.map(\.chapterID) == proposal.chapterIDs else {
+                return .failed("当前分支已经变化，请重新发起回退。")
+            }
+            for step in 1...planned.plan.undoStepCount {
+                guard let current = await loadSnapshot(),
+                      let branch = current.branches.first(where: { $0.id == branchID }) else {
+                    if step > 1 {
+                        await reconcileGhostwriteProgressAfterRevert()
+                    }
+                    return .failed("回退进行到第 \(step) 步时项目不可用。")
+                }
+                let command = NovelUndoBranchHeadCommand(
+                    context: NovelMutationContext(
+                        operationID: NovelOperationID(),
+                        expectedProjectRevision: current.project.revision,
+                        expectedConfigRevision: current.project.configRevision,
+                        expectedBranchHeadRevision: branch.headRevision
+                    ),
+                    projectID: projectID,
+                    branchID: branchID,
+                    expectedWorkingRevision: branch.workingRevision
+                )
+                if let failure = await perform(.undoBranchHead(command)) {
+                    if step > 1 {
+                        await reconcileGhostwriteProgressAfterRevert()
+                    }
+                    return .failed("已回退 \(step - 1)/\(planned.plan.undoStepCount) 步后失败：\(failure)")
+                }
+            }
+            await reconcileGhostwriteProgressAfterRevert()
+            let titles = proposal.chapterTitles.enumerated().map { index, title in
+                "第 \(proposal.chapterOrdinals[index]) 章《\(title)》"
+            }
+            return .filled("已回退\(titles.joined(separator: "、"))。正文和剧情同步点已回到这几章之前。")
+        }
+    }
+
+    private func revertPlan(
+        chapterCount: Int,
+        snapshot: NovelProjectSnapshot
+    ) -> Result<(plan: NovelRecentChapterRevertPlan, branch: NovelBranchRecord), NovelProjectToolIssue> {
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return .failure(.init("当前分支不可用，无法回退章节。"))
+        }
+        switch NovelBranchSemantics.recentChapterRevertPlan(
+            chapterCount: chapterCount,
+            branch: branch,
+            chapters: snapshot.chapters,
+            chapterVersions: snapshot.chapterVersions,
+            checkpoints: snapshot.checkpoints
+        ) {
+        case .failure(let failure):
+            return .failure(.init(failure.localizedDescription))
+        case .success(let plan):
+            return .success((plan, branch))
+        }
+    }
+
+    private func reconcileGhostwriteProgressAfterRevert() async {
+        guard let creation,
+              let snapshot = await loadSnapshot(),
+              let branch = snapshot.branches.first(where: { $0.id == branchID }),
+              let record = try? await creation.loadGhostwriteBatchProgress(
+                projectID: projectID,
+                branchID: branchID
+              ) else {
+            return
+        }
+        let reconciled = record.reconciledAfterManuscriptRevert(
+            chapterVersions: snapshot.chapterVersions,
+            workingChapterIDs: Set(
+                NovelBranchSemantics.workingManuscriptChapters(
+                    branch: branch,
+                    chapters: snapshot.chapters,
+                    chapterVersions: snapshot.chapterVersions
+                ).map(\.chapterID)
+            ),
+            now: Date()
+        )
+        guard reconciled != record else { return }
+        try? await creation.saveGhostwriteBatchProgress(reconciled)
+    }
+
     /// 代笔运行中禁止改写合同/资料——对齐 UI 禁用合同编辑的既有判定
     /// （NovelSessionViewModel.isGhostwriting 相位集）。不查 activeRuns：调用方
     /// 本身就是一条进行中的 discussion run，查 activeRuns 会无条件自锁。
@@ -699,13 +952,14 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
 
     private func mutationContext(
         projectRevision: Int64? = nil,
-        configRevision: Int64? = nil
+        configRevision: Int64? = nil,
+        branchHeadRevision: Int64? = nil
     ) -> NovelMutationContext {
         NovelMutationContext(
             operationID: NovelOperationID(),
             expectedProjectRevision: projectRevision,
             expectedConfigRevision: configRevision,
-            expectedBranchHeadRevision: nil
+            expectedBranchHeadRevision: branchHeadRevision
         )
     }
 
@@ -782,4 +1036,13 @@ private struct ReviseChapterArguments: Decodable {
     let end_paragraph: Int
     let new_text: String
     let reason: String?
+}
+
+private struct RevertRecentChaptersArguments: Decodable {
+    let chapter_count: Int
+    let reason: String?
+}
+
+private struct RejectSettingProposalsArguments: Decodable {
+    let proposal_ids: [String]?
 }

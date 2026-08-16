@@ -41,6 +41,8 @@
 - [`superpowers/plans/2026-08-10-novel-session-streaming-parity.md`](superpowers/plans/2026-08-10-novel-session-streaming-parity.md)：小说会话流式对齐 Chat（终态排空、思考呈现、列表/滚动、污染防火墙）；Active Proposed，实施前按文件内成功标准与禁区复核实时代码。
 - [`AGENT_ORCHESTRATION_ADOPTION_PLAN.md`](AGENT_ORCHESTRATION_ADOPTION_PLAN.md)：借鉴 codex 编排体系的 P0–P3 Proposed 计划（tool_search → 线程 mailbox → 记忆 polluted/citation → code mode）；含 2026-08-08 四路代码复核事实与开工前复核清单，实施前须按清单重新核对实时代码。
 - [`IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md`](IOS_THEME_SYSTEM_ADVANCEMENT_PLAN.md)：iOS 主题系统完善计划（P0–P3 Active 完成；P4 资源包/沉浸色需产品闸门）；每个 Phase 下笔前须按文件内复核清单重核实时代码。设计契约见 [`IOS_THEME_PACK_DESIGN_SPEC.md`](IOS_THEME_PACK_DESIGN_SPEC.md)。
+- [`superpowers/specs/2026-08-16-novel-markdown-workspace-design.md`](superpowers/specs/2026-08-16-novel-markdown-workspace-design.md)：小说文件工作区 + 薄 VCS 北星；先 markdown 备份/导入，不改运行时存储（Proposed）。
+- [`superpowers/plans/2026-08-16-novel-sync-fast-path.md`](superpowers/plans/2026-08-16-novel-sync-fast-path.md)：剧情同步快路径（收录时 delta、末章改正文一次 delta、书记自改、点名回修）；Phase 0–4 已按锁定决策落地，中间章仍 rebuild。
 - [`NOVEL_COCREATION_GHOSTWRITE_PLAN.md`](NOVEL_COCREATION_GHOSTWRITE_PLAN.md)：共创 / 代笔双模式 Proposed 计划；含共创补洞与代笔自动收录 MVP，实施前需再核对实时代码。
 - [`NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md`](NOVEL_SESSION_MEMORY_PLAN_2026-07-19.md)：S1-S3 已完成，S4-S7 暂停，需真实 provider/真机证据后再决定。
 - [`IOS_AGENT_HARDENING_PLAN_2026-07-29.md`](IOS_AGENT_HARDENING_PLAN_2026-07-29.md)：iOS Agent 不变量补强设计稿；开始前必须重新核对当前代码是否已部分落地。

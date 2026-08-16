@@ -14,10 +14,18 @@ func novelContinuityBackgroundLeaseID(for ownerID: UUID) -> String {
     "novel-continuity-\(ownerID.uuidString)"
 }
 
+func novelGhostwriteBackgroundLeaseID(
+    projectID: NovelProjectID,
+    branchID: NovelBranchID
+) -> String {
+    "novel-ghostwrite-\(projectID)-\(branchID)"
+}
+
 func isProtectedNovelBackgroundLeaseID(_ leaseID: String) -> Bool {
     leaseID.hasPrefix("novel-run-") ||
         leaseID.hasPrefix("novel-state-sync-") ||
-        leaseID.hasPrefix("novel-continuity-")
+        leaseID.hasPrefix("novel-continuity-") ||
+        leaseID.hasPrefix("novel-ghostwrite-")
 }
 
 enum NovelProjectImportChoice: Equatable, Sendable {
@@ -135,6 +143,11 @@ struct NovelStateSyncActivity: Equatable, Sendable {
         return NovelManualSyncChunker.estimatedSegmentCount(
             manuscriptCharacterCount: totalCharacters
         )
+    }
+
+    var segmentedRebuildHint: String? {
+        guard let estimatedTotalSegments, estimatedTotalSegments > 1 else { return nil }
+        return "分段读取正文并更新剧情状态，大项目会较久。"
     }
 
     /// Secondary copy for banners: chunk, word count, elapsed — always concrete
@@ -287,6 +300,9 @@ final class NovelCreationViewModel {
     @ObservationIgnored private var operationOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityOwnerID: UUID?
     @ObservationIgnored private var stateSyncActivityTask: Task<Void, Never>?
+    @ObservationIgnored private var stateSyncReportedWorkByOwnerID: [UUID: Int64] = [:]
+    /// Keep the visible progress strip across outer heal `perform()`s.
+    @ObservationIgnored private var automaticStateSyncKeepAlive = false
     @ObservationIgnored private var manualStateSyncTask: Task<Void, Never>?
     @ObservationIgnored private var manualStateSyncPendingID: NovelPendingOperationID?
     private var manualStateSyncTarget: NovelAutomaticStateSyncTarget?
@@ -299,6 +315,7 @@ final class NovelCreationViewModel {
     /// pending.lastError was not written yet so retry banners do not collapse to a
     /// useless generic "没有完成，请重试".
     @ObservationIgnored private var lastStateSyncOperationError: String?
+    @ObservationIgnored private var lastStateSyncOperationCause: Error?
     /// Targets the user explicitly stopped. Prevents cancel from looking like a no-op when
     /// `needsSync` remains true and would immediately reschedule the same work.
     private var userSuppressedStateSyncTargets: Set<NovelAutomaticStateSyncTarget> = []
@@ -499,15 +516,18 @@ final class NovelCreationViewModel {
 
     func cancelAutomaticStateSync(
         projectID: NovelProjectID,
-        branchID: NovelBranchID
+        branchID: NovelBranchID,
+        suppressReschedule: Bool = true
     ) {
         guard canCancelAutomaticStateSync(projectID: projectID, branchID: branchID) else {
             return
         }
         let target = NovelAutomaticStateSyncTarget(projectID: projectID, branchID: branchID)
-        // Remember the stop so auto-reschedule (`scheduleAutomaticStateSyncIfNeeded`)
-        // cannot immediately re-arm the same blocked banner after cancel returns.
-        userSuppressedStateSyncTargets.insert(target)
+        // Only an explicit user Stop suppresses automatic reschedule. System lease
+        // expiration cancels the current mutation but keeps the durable retry path live.
+        if suppressReschedule {
+            userSuppressedStateSyncTargets.insert(target)
+        }
         // Keep a short “正在停止” presentation until task/mutation teardown finishes so
         // selection block is not unexplained after the running banner disappears.
         stateSyncStoppingTargets.insert(target)
@@ -726,6 +746,7 @@ final class NovelCreationViewModel {
         // Explicit retry must always lift Stop suppress.
         userSuppressedStateSyncTargets.remove(target)
         lastStateSyncOperationError = nil
+        lastStateSyncOperationCause = nil
         if let message = errorMessage,
            message.contains("剧情同步") || message.contains("剧情状态") {
             errorMessage = nil
@@ -1783,6 +1804,17 @@ final class NovelCreationViewModel {
         )))
     }
 
+    @discardableResult
+    func rejectActiveSettingProposals() async -> Bool {
+        let ids = branchSnapshot?.activeSettingProposals.map(\.id) ?? []
+        guard !ids.isEmpty else { return true }
+        for id in ids {
+            let ok = await resolveProposal(id, resolution: .reject)
+            if !ok { return false }
+        }
+        return true
+    }
+
     func setMainBranch(_ branchID: NovelBranchID) async {
         guard let project = projectSnapshot else { return }
         _ = await perform(.setMainBranch(NovelSetMainBranchCommand(
@@ -1857,6 +1889,87 @@ final class NovelCreationViewModel {
             branchID: branch.branch.id,
             expectedWorkingRevision: branch.branch.workingRevision
         )))
+    }
+
+    func revertRecentChapters(_ proposal: NovelManuscriptRevertProposal) async -> Bool {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot else {
+            errorMessage = "项目尚未就绪，请重新载入后再试。"
+            return false
+        }
+        switch NovelBranchSemantics.recentChapterRevertPlan(
+            chapterCount: proposal.chapterCount,
+            branch: branch.branch,
+            chapters: project.chapters,
+            chapterVersions: project.chapterVersions,
+            checkpoints: project.checkpoints
+        ) {
+        case .failure(let failure):
+            errorMessage = failure.localizedDescription
+            return false
+        case .success(let plan):
+            guard branch.branch.headRevision == proposal.expectedHeadRevision,
+                  branch.branch.workingRevision == proposal.expectedWorkingRevision,
+                  plan.targetCheckpointID == proposal.targetCheckpointID,
+                  plan.chapters.map(\.chapterID) == proposal.chapterIDs else {
+                errorMessage = "当前分支已经变化，请重新发起回退。"
+                return false
+            }
+            for step in 1...plan.undoStepCount {
+                guard let currentProject = projectSnapshot,
+                      let currentBranch = branchSnapshot else {
+                    if step > 1 {
+                        await reconcileGhostwriteProgressAfterRevert()
+                    }
+                    errorMessage = "回退进行到第 \(step) 步时项目不可用。"
+                    return false
+                }
+                let undone = await perform(.undoBranchHead(NovelUndoBranchHeadCommand(
+                    context: mutationContext(
+                        projectRevision: currentProject.project.revision,
+                        branchHeadRevision: currentBranch.branch.headRevision
+                    ),
+                    projectID: currentProject.project.id,
+                    branchID: currentBranch.branch.id,
+                    expectedWorkingRevision: currentBranch.branch.workingRevision
+                )))
+                if !undone {
+                    if step > 1 {
+                        await reconcileGhostwriteProgressAfterRevert()
+                        if let existing = errorMessage, !existing.isEmpty {
+                            errorMessage = "已回退 \(step - 1)/\(plan.undoStepCount) 步后失败：\(existing)"
+                        }
+                    }
+                    return false
+                }
+            }
+            await reconcileGhostwriteProgressAfterRevert()
+            return true
+        }
+    }
+
+    private func reconcileGhostwriteProgressAfterRevert() async {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot,
+              let record = try? await creation.loadGhostwriteBatchProgress(
+                projectID: project.project.id,
+                branchID: branch.branch.id
+              ) else {
+            return
+        }
+        let reconciled = record.reconciledAfterManuscriptRevert(
+            chapterVersions: project.chapterVersions,
+            workingChapterIDs: Set(
+                NovelBranchSemantics.workingManuscriptChapters(
+                    branch: branch.branch,
+                    chapters: project.chapters,
+                    chapterVersions: project.chapterVersions
+                ).map(\.chapterID)
+            ),
+            now: Date()
+        )
+        guard reconciled != record else { return }
+        try? await creation.saveGhostwriteBatchProgress(reconciled)
     }
 
     @discardableResult
@@ -1984,7 +2097,8 @@ final class NovelCreationViewModel {
     func saveManualRewrite(
         chapterID: NovelChapterID,
         title: String,
-        content: String
+        content: String,
+        schedulesAutomaticSync: Bool = true
     ) async -> Bool {
         guard let project = projectSnapshot,
               let branch = branchSnapshot,
@@ -2006,7 +2120,7 @@ final class NovelCreationViewModel {
             factCompatibilityID: UUID(),
             expectedWorkingRevision: branch.branch.workingRevision
         )))
-        if saved {
+        if saved, schedulesAutomaticSync {
             scheduleAutomaticStateSync(
                 projectID: project.project.id,
                 branchID: branch.branch.id
@@ -2015,23 +2129,77 @@ final class NovelCreationViewModel {
         return saved
     }
 
-    func startSessionRun(_ request: NovelRunRequest) async throws -> NovelRun {
-        beginBackgroundGeneration(for: request)
+    @discardableResult
+    func syncWorkingManuscript(preferStateDelta: Bool) async -> Bool {
+        guard let project = projectSnapshot,
+              let branch = branchSnapshot,
+              branch.branch.syncStatus == .needsSync else {
+            return true
+        }
+        let target = NovelAutomaticStateSyncTarget(
+            projectID: project.project.id,
+            branchID: branch.branch.id
+        )
+        automaticStateSyncPresentationTarget = target
+        defer {
+            if automaticStateSyncPresentationTarget == target {
+                automaticStateSyncPresentationTarget = nil
+            }
+            stateSyncStoppingTargets.remove(target)
+        }
+        return await perform(.syncManualEdits(NovelSyncManualEditsCommand(
+            context: mutationContext(
+                projectRevision: project.project.revision,
+                configRevision: project.project.configRevision,
+                branchHeadRevision: branch.branch.headRevision
+            ),
+            projectID: project.project.id,
+            branchID: branch.branch.id,
+            pendingID: NovelPendingOperationID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            expectedWorkingRevision: branch.branch.workingRevision,
+            preferStateDelta: preferStateDelta
+        )))
+    }
+
+    func startSessionRun(
+        _ request: NovelRunRequest,
+        acquiresBackgroundLease: Bool = true
+    ) async throws -> NovelRun {
+        if acquiresBackgroundLease {
+            beginBackgroundGeneration(for: request)
+        }
         do {
             return try await creation.start(request)
         } catch {
-            endBackgroundGeneration(for: request.id)
+            if acquiresBackgroundLease {
+                endBackgroundGeneration(for: request.id)
+            }
             throw error
         }
     }
 
-    /// 在已经取得 session 单写者之后、第一次 await 之前提交系统继续处理任务。
-    /// 页面订阅只是观察者；后台到期回调走同一条可持久化中断路径。
+    /// 在已经取得 session 单写者之后、第一次 await 之前取得后台执行权。
+    /// 代笔内层正文沿用整批 lease，避免每章再挂一条会独立过期的短 lease。
     func beginBackgroundGeneration(for request: NovelRunRequest) {
         let leaseID = novelRunBackgroundLeaseID(for: request.id)
-        // BGContinuedProcessingTaskRequest 必须由当前前台用户动作提交；如果等到
-        // 首 token 才 promote，用户已退后台时系统会拒绝这次关联，恰好丢掉最慢的
-        // 准备/等模型阶段。进度仍从 0/4 开始，正文到达后只更新展示阶段。
+        let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: request.projectID,
+            branchID: request.branchID
+        )
+        if request.ghostwritePlanID != nil,
+           BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID) {
+            BackgroundGenerationKeepAlive.shared.advanceProgress(
+                ghostwriteLeaseID,
+                by: 1,
+                subtitle: "正在生成正文"
+            )
+            return
+        }
+
+        // 普通正文生成由当前用户动作直接申请 continued-processing；等首段输出
+        // 再提交会错过退后台后的申请窗口。
         BackgroundGenerationKeepAlive.shared.begin(
             leaseID,
             title: "Amber 小说创作中",
@@ -2050,18 +2218,10 @@ final class NovelCreationViewModel {
                     await self?.handleNovelGenerationKeepAliveLoss(
                         projectID: request.projectID,
                         runID: request.id,
-                        rearm: {
-                            // 已有输出后系统卡丢失：重挂并立即 promote。
-                            self?.beginBackgroundGeneration(for: request)
-                            BackgroundGenerationKeepAlive.shared.promoteSystemTaskIfNeeded(
-                                leaseID,
-                                subtitle: "正在生成正文"
-                            )
-                        }
+                        rearm: { self?.beginBackgroundGeneration(for: request) }
                     )
                 }
-            },
-            submitSystemTask: true
+            }
         )
         BackgroundGenerationKeepAlive.shared.updateProgress(
             leaseID,
@@ -2391,6 +2551,14 @@ final class NovelCreationViewModel {
             projectID: projectID,
             branchID: branchID
         )
+        let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: projectID,
+            branchID: branchID
+        )
+        guard UIApplication.shared.applicationState != .background ||
+                BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID) else {
+            return
+        }
         guard !userSuppressedStateSyncTargets.contains(target) else { return }
         guard target != automaticStateSyncTarget,
               target != queuedAutomaticStateSyncTarget else { return }
@@ -2876,6 +3044,7 @@ final class NovelCreationViewModel {
             if stateSyncContext != nil {
                 // Keep the real invalidInput / model detail — errorDescription alone
                 // used to collapse everything to a useless short line.
+                lastStateSyncOperationCause = operationError
                 lastStateSyncOperationError = NovelPresentation.stateSyncFailureMessage(
                     for: operationError
                 )
@@ -2885,6 +3054,7 @@ final class NovelCreationViewModel {
         }
 
         if stateSyncContext != nil {
+            lastStateSyncOperationCause = nil
             lastStateSyncOperationError = nil
         }
         if reportsError { errorMessage = nil }
@@ -2943,15 +3113,23 @@ final class NovelCreationViewModel {
         pendingID: NovelPendingOperationID,
         attemptOperationID: NovelOperationID
     ) {
-        let startedAt = Date()
+        let sameTarget = stateSyncActivity?.projectID == projectID &&
+            stateSyncActivity?.branchID == branchID
+        let startedAt = sameTarget ? (stateSyncActivity?.startedAt ?? Date()) : Date()
         stateSyncActivityOwnerID = ownerID
-        stateSyncActivity = .preparing(
+        if !(sameTarget && stateSyncActivity?.phase == .analyzing) {
+            stateSyncActivity = .preparing(
+                projectID: projectID,
+                branchID: branchID,
+                pendingID: pendingID,
+                startedAt: startedAt
+            )
+        }
+        beginStateSyncBackgroundLease(
+            ownerID: ownerID,
             projectID: projectID,
-            branchID: branchID,
-            pendingID: pendingID,
-            startedAt: startedAt
+            branchID: branchID
         )
-        beginStateSyncBackgroundLease(ownerID: ownerID, projectID: projectID)
         stateSyncActivityTask?.cancel()
         stateSyncActivityTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2966,7 +3144,15 @@ final class NovelCreationViewModel {
                        attemptOperationID: attemptOperationID,
                        startedAt: startedAt
                    ), self.stateSyncActivityOwnerID == ownerID {
+                    let streamedCharacters = NovelStateSyncStreamProgress.shared.count(
+                        pendingID: pendingID
+                    )
                     self.stateSyncActivity = activity
+                    self.updateStateSyncBackgroundProgress(
+                        ownerID: ownerID,
+                        activity: activity,
+                        streamedCharacters: streamedCharacters
+                    )
                 }
                 try? await Task.sleep(for: .seconds(1))
             }
@@ -2978,16 +3164,41 @@ final class NovelCreationViewModel {
         BackgroundGenerationKeepAlive.shared.end(
             novelStateSyncBackgroundLeaseID(for: ownerID)
         )
+        stateSyncReportedWorkByOwnerID.removeValue(forKey: ownerID)
         stateSyncActivityTask?.cancel()
         stateSyncActivityTask = nil
         stateSyncActivityOwnerID = nil
-        stateSyncActivity = nil
+        let keepVisible = automaticStateSyncKeepAlive &&
+            stateSyncActivity.map { activity in
+                automaticStateSyncPresentationTarget == NovelAutomaticStateSyncTarget(
+                    projectID: activity.projectID,
+                    branchID: activity.branchID
+                )
+            } == true
+        if !keepVisible {
+            stateSyncActivity = nil
+        }
     }
 
     private func beginStateSyncBackgroundLease(
         ownerID: UUID,
-        projectID: NovelProjectID
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
     ) {
+        stateSyncReportedWorkByOwnerID[ownerID] = 0
+        let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: projectID,
+            branchID: branchID
+        )
+        if BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID) {
+            BackgroundGenerationKeepAlive.shared.advanceProgress(
+                ghostwriteLeaseID,
+                by: 1,
+                subtitle: "代笔中 · 剧情同步"
+            )
+            return
+        }
+
         let leaseID = novelStateSyncBackgroundLeaseID(for: ownerID)
         let expire: () -> Void = { [weak self] in
             Task { @MainActor [weak self] in
@@ -3004,6 +3215,46 @@ final class NovelCreationViewModel {
             onExpire: expire,
             onSystemTaskExpiration: expire
         )
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            leaseID,
+            completed: 0,
+            total: -1,
+            subtitle: "剧情同步"
+        )
+    }
+
+    private func updateStateSyncBackgroundProgress(
+        ownerID: UUID,
+        activity: NovelStateSyncActivity,
+        streamedCharacters: Int
+    ) {
+        let reportedWork = Int64(
+            max(0, activity.completedCharacters) + max(0, streamedCharacters)
+        )
+        let previousWork = stateSyncReportedWorkByOwnerID[ownerID] ?? 0
+        let currentWork = max(previousWork, reportedWork)
+        stateSyncReportedWorkByOwnerID[ownerID] = currentWork
+
+        let leaseID = novelStateSyncBackgroundLeaseID(for: ownerID)
+        if BackgroundGenerationKeepAlive.shared.holdsLease(leaseID) {
+            BackgroundGenerationKeepAlive.shared.updateProgress(
+                leaseID,
+                completed: currentWork,
+                subtitle: activity.statusTitle
+            )
+        }
+
+        let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: activity.projectID,
+            branchID: activity.branchID
+        )
+        if BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID) {
+            BackgroundGenerationKeepAlive.shared.advanceProgress(
+                ghostwriteLeaseID,
+                by: currentWork - previousWork,
+                subtitle: "代笔中 · 剧情同步"
+            )
+        }
     }
 
     private func expireStateSyncBackgroundLease(
@@ -3011,6 +3262,7 @@ final class NovelCreationViewModel {
         projectID: NovelProjectID
     ) async {
         guard stateSyncActivityOwnerID == ownerID else { return }
+        stateSyncReportedWorkByOwnerID.removeValue(forKey: ownerID)
         queuedAutomaticStateSyncTarget = nil
         manualStateSyncTask?.cancel()
         automaticStateSyncTask?.cancel()
@@ -3070,6 +3322,9 @@ final class NovelCreationViewModel {
             if self.automaticStateSyncPresentationTarget == target {
                 self.automaticStateSyncPresentationTarget = nil
             }
+            if self.stateSyncActivityOwnerID == nil {
+                self.stateSyncActivity = nil
+            }
             self.automaticStateSyncTask = nil
             self.stateSyncStoppingTargets.remove(target)
             if wasCancelled {
@@ -3092,9 +3347,12 @@ final class NovelCreationViewModel {
     }
 
     private func runAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) async {
+        automaticStateSyncKeepAlive = true
+        defer { automaticStateSyncKeepAlive = false }
         // Let the saving caller finish its immediate refresh before the background
         // transaction begins reading the same branch.
         try? await Task.sleep(for: .milliseconds(250))
+        var healAttempts = 0
         while !Task.isCancelled, !userSuppressedStateSyncTargets.contains(target) {
             let projectSnapshot: NovelProjectSnapshot
             let branchSnapshot: NovelBranchSnapshot
@@ -3109,6 +3367,11 @@ final class NovelCreationViewModel {
             } catch {
                 guard !Task.isCancelled,
                       !userSuppressedStateSyncTargets.contains(target) else { return }
+                healAttempts += 1
+                if healAttempts < NovelGhostwriteHeal.defaultMaxInfraRetries {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    continue
+                }
                 // Banner only — do not set errorMessage (that triggers the global
                 // "无法完成操作" alert and makes Retry look like an instant failure popup).
                 publishAutomaticStateSyncFailure(
@@ -3154,7 +3417,17 @@ final class NovelCreationViewModel {
             guard !Task.isCancelled,
                   !userSuppressedStateSyncTargets.contains(target) else { return }
 
+            let ghostwriteLeaseID = novelGhostwriteBackgroundLeaseID(
+                projectID: target.projectID,
+                branchID: target.branchID
+            )
+            guard UIApplication.shared.applicationState != .background ||
+                    BackgroundGenerationKeepAlive.shared.holdsLease(ghostwriteLeaseID) else {
+                return
+            }
+
             lastStateSyncOperationError = nil
+            lastStateSyncOperationCause = nil
             let succeeded: Bool
             if let pending = branchPending.first {
                 succeeded = await perform(.retryPending(NovelRetryPendingCommand(
@@ -3183,11 +3456,36 @@ final class NovelCreationViewModel {
             // lift suppress so the next edit can auto-schedule again.
             if succeeded {
                 userSuppressedStateSyncTargets.remove(target)
+                lastStateSyncOperationCause = nil
                 lastStateSyncOperationError = nil
                 return
             }
             if Task.isCancelled || userSuppressedStateSyncTargets.contains(target) {
                 return
+            }
+            if let failure = lastStateSyncOperationCause as? NovelStructuredModelExecutionFailure,
+               failure.allowsOutputRepair {
+                let pending = self.projectSnapshot?.pendingOperations.first(where: {
+                    $0.branchID == target.branchID && $0.kind == .manualSync
+                })
+                let completedChunks = pending?.manualSyncProgress?.completedChunks.count ?? 0
+                let raw = pending?.lastError
+                    ?? lastStateSyncOperationError
+                    ?? failure.failure.message
+                publishAutomaticStateSyncFailure(
+                    target: target,
+                    message: NovelPresentation.stateSyncFailureMessage(
+                        raw,
+                        completedChunkCount: completedChunks
+                    )
+                )
+                return
+            }
+            healAttempts += 1
+            if healAttempts < NovelGhostwriteHeal.defaultMaxInfraRetries {
+                // Same pending, next attempt sees lastError in the current chunk.
+                try? await Task.sleep(for: .milliseconds(200))
+                continue
             }
             let pending = self.projectSnapshot?.pendingOperations.first(where: {
                 $0.branchID == target.branchID && $0.kind == .manualSync

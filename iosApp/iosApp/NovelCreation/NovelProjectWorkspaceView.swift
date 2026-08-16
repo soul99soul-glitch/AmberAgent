@@ -302,7 +302,7 @@ struct NovelProjectWorkspaceView: View {
                     activity: currentStateSyncActivity,
                     secondaryHint: isCurrentStateSyncStopping
                         ? "正在停止，完成后可继续操作。"
-                        : "分段读取正文并更新剧情状态，大项目会较久。",
+                        : currentStateSyncActivity?.segmentedRebuildHint,
                     canStop: canCancelCurrentAutomaticStateSync,
                     onStop: {
                         guard let projectID = viewModel.selectedProjectID,

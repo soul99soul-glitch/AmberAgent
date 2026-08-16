@@ -3,10 +3,8 @@ import XCTest
 
 /// 复现「替换章节后剧情状态只加不减」。
 ///
-/// 这些用例刻意走**活路径**：收录用 `commitCollectionWithoutStateSync`(→ `.needsSync`)，
-/// 再由 manual sync 事务重建状态。既有的 NovelManualEditSyncTests / NovelCollectionTests
-/// 用的是 `prepareCollection` + `finalizeCollection`，那条 `.stateDelta` 链路在生产里
-/// 没有生产调用点；旧的 `executeCollectionTransaction` 已移除，因此不能用来判定线上行为。
+/// 这些用例刻意走 without-sync 收录 + suffix rebuild，用来锁「替换章节后旧事实退场」。
+/// 共创/代笔成功收录的生产快路径是 inline stateDelta；本套件不覆盖那条。
 final class NovelChapterReplacementStateTests: XCTestCase {
     private let origin = Date(timeIntervalSince1970: 1_700_300_000)
     private var clock: TimeInterval = 0

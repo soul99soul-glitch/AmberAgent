@@ -54,6 +54,7 @@ struct NovelCharacterPagesView: View {
         List {
             if !characterProposals.isEmpty {
                 Section("待确认角色建议") {
+                    NovelSettingProposalRejectAllButton(viewModel: viewModel)
                     ForEach(characterProposals, id: \.id) { proposal in
                         NovelCompendiumProposalCard(
                             proposal: proposal,

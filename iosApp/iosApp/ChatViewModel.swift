@@ -196,11 +196,11 @@ final class ChatViewModel {
     /// 当前会话是否编排子线程（存在 thread_edge）。composerSendBlockReason 每条
     /// keystroke 都读，必须缓存；会话切换时由 reloadFromStore() 异步刷新（经
     /// 注入的编排服务查一次 Room）。测试可 `await orchestratedStatusRefreshTask?.value`。
-    @ObservationIgnored private(set) var currentConversationIsOrchestratedChild = false
+    private(set) var currentConversationIsOrchestratedChild = false
     @ObservationIgnored private(set) var orchestratedStatusRefreshTask: Task<Void, Never>?
     /// 当前会话是否参与线程树（是子线程或有子线程）。参与的会话才注入 mailbox
     /// 语义说明（普通会话不付这笔 token）；与只读判定同一刷新任务。
-    @ObservationIgnored private(set) var currentConversationHasOrchestrationLinks = false
+    private(set) var currentConversationHasOrchestrationLinks = false
 
     /// 刷新当前会话的子线程判定（Room 查询一次）。reloadFromStore 与测试共用。
     func refreshCurrentConversationOrchestratedStatus() async {
@@ -3399,7 +3399,9 @@ final class ChatViewModel {
         }
         var mcpManagementNames = Array(IOSMcpManagementToolCatalog.toolNames)
         if !mcpNetworkEnabled {
-            mcpManagementNames.removeAll { $0 == "mcp_test" }
+            mcpManagementNames.removeAll {
+                $0 == "mcp_test" || $0 == "mcp_import_from_skill"
+            }
         }
         toolDeclarations.append(contentsOf: ToolKt.iosToolDeclarations(
             names: mcpManagementNames.sorted()

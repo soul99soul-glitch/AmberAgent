@@ -142,17 +142,19 @@ struct IOSRecipeExecutionCheckpointStore {
             .appendingPathComponent(".checkpoints", isDirectory: true)
     }
 
-    /// Atomic write; the parent directory is created on demand. Best-effort
-    /// mirror (a failed checkpoint write must not block the pause, but it is
-    /// logged loudly — the checkpoint is the resume contract).
-    func save(_ checkpoint: IOSRecipeExecutionCheckpoint) {
+    /// Atomic write; the parent directory is created on demand. Approval must
+    /// not be published unless this durable resume contract exists on disk.
+    @discardableResult
+    func save(_ checkpoint: IOSRecipeExecutionCheckpoint) -> Bool {
         do {
             try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys]
             try encoder.encode(checkpoint).write(to: fileURL(toolCallId: checkpoint.toolCallId), options: .atomic)
+            return true
         } catch {
             NSLog("[IOSRecipeTools] checkpoint write failed toolCallId=\(checkpoint.toolCallId): \(error.localizedDescription)")
+            return false
         }
     }
 

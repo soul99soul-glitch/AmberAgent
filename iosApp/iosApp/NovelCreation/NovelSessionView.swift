@@ -36,6 +36,43 @@ enum NovelComposerIntent: String, CaseIterable, Identifiable {
     }
 }
 
+enum NovelComposerIntentPreference {
+    private static let keyPrefix = "novel.composerIntent."
+
+    static func resolve(
+        stored: NovelComposerIntent?,
+        collaborationMode: NovelCollaborationMode,
+        hasConfirmedChapterPlan: Bool
+    ) -> NovelComposerIntent {
+        let intent = stored ?? .discuss
+        if collaborationMode == .ghostwrite,
+           !hasConfirmedChapterPlan,
+           intent == .wholeChapter {
+            return .discuss
+        }
+        return intent
+    }
+
+    static func stored(
+        for projectID: NovelProjectID,
+        defaults: UserDefaults
+    ) -> NovelComposerIntent? {
+        defaults.string(forKey: key(for: projectID)).flatMap(NovelComposerIntent.init(rawValue:))
+    }
+
+    static func store(
+        _ intent: NovelComposerIntent,
+        for projectID: NovelProjectID,
+        defaults: UserDefaults
+    ) {
+        defaults.set(intent.rawValue, forKey: key(for: projectID))
+    }
+
+    private static func key(for projectID: NovelProjectID) -> String {
+        keyPrefix + projectID.rawValue.uuidString
+    }
+}
+
 enum NovelSessionBottomProximityPolicy {
     static func isNearBottom(distanceToBottom: CGFloat) -> Bool {
         distanceToBottom <= ChatLayout.nearBottomResumeThreshold
@@ -301,8 +338,12 @@ struct NovelSessionView: View {
                         }
                     }
 
-                    // Active run stays in a sibling eager stack so complete/retire
-                    // does not reparent the same id from a different lazy container.
+                    // Active run stays in a sibling eager stack. The list model
+                    // pins the just-finished run here after the tail retires, so
+                    // complete does not reparent the same id into history.
+                    // Do not merge the two ForEach: one VStack remeasures every
+                    // historical chapter on each stream tick (155s main-thread
+                    // hang / cpu_resource on 赵大来了-scale).
                     if !activeRunRows.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
                             ForEach(activeRunRows) { row in
@@ -656,15 +697,11 @@ struct NovelSessionView: View {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
-                .foregroundStyle(AmberTheme.accentAmber)
-
-            Text(message)
+        VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.arrow.triangle.2.circlepath")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(AmberTheme.foreground2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
+                .fixedSize(horizontal: false, vertical: true)
             Button("重试同步") {
                 workspace.retryStateSync(
                     projectID: projectID,
@@ -680,6 +717,7 @@ struct NovelSessionView: View {
                 !workspace.canRetryStateSync(projectID: projectID, branchID: branchID)
             )
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func polishRecoveryBanner(
@@ -1299,11 +1337,7 @@ struct NovelSessionView: View {
                 NovelComposerIntent(mode: viewModel.mode, granularity: viewModel.granularity)
             },
             set: { intent in
-                let values = intent.requestValues
-                viewModel.mode = values.mode
-                if intent != .discuss {
-                    viewModel.granularity = values.granularity
-                }
+                viewModel.setComposerIntent(intent)
             }
         )
     }
@@ -1541,6 +1575,9 @@ struct NovelSessionView: View {
         // 口径必须与 `startIndex` 一致——那里用的是 **historicalRows**。若用含活动
         // run 的 rowCount,run 开始时活动行会被算进吸收量,startIndex 反而净下降
         // (每轮 −activeRunRowCount),等于在视口上方插入旧历史。
+        // 刚完成的 run 钉在活动栈,退役不增加 historical 行数;下一轮开始时旧
+        // 钉住行才进入 historical,由这里的增量吸收,不要再叠一层
+        // `limitAfterActiveRunReturnsToHistory`(会把同一批行算两次)。
         historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterRowsAppended(
             currentLimit: historyWindowLimit,
             previousRowCount: oldValue.rowCount - oldValue.activeRunRowCount,
@@ -1560,12 +1597,6 @@ struct NovelSessionView: View {
                 dispatchFollowEvent(.terminalLayoutChanged)
             }
         } else if oldValue.activeTailID != nil, newValue.activeTailID == nil {
-            historyWindowLimit = NovelSessionHistoryWindowPolicy.limitAfterActiveRunReturnsToHistory(
-                currentLimit: historyWindowLimit,
-                activeRunRowCount: oldValue.activeRunRowCount,
-                previousRowCount: oldValue.rowCount,
-                currentRowCount: newValue.rowCount
-            )
             dispatchFollowEvent(.terminalReached)
         } else if oldValue.rowCount != newValue.rowCount || oldValue.lastRowDigest != newValue.lastRowDigest {
             dispatchFollowEvent(.terminalLayoutChanged)

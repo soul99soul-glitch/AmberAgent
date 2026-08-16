@@ -112,21 +112,6 @@ private enum RecipeStepGate {
     case unsupported(reason: String)
 }
 
-/// Primitive execution families (mirrors `nextPendingToolCall` grouping).
-private enum IOSRecipePrimitiveRoute {
-    case workspace
-    case search
-    case ish
-    case webMount
-    case memory
-    case sessionRead
-    case discovery
-    case skill
-    case advanced
-    case recipeImport
-    case unsupported
-}
-
 /// One post-gate step execution result.
 private enum RecipePrimitiveStepResult {
     case output(String)
@@ -2655,7 +2640,44 @@ final class ChatToolRuntime {
                 case .approvalRequired(let reason):
                     // Durable pause: the checkpoint is on disk BEFORE the
                     // coordinator marks the run awaiting permission.
-                    recipeExecutionCheckpointStore.save(state.checkpoint())
+                    guard recipeExecutionCheckpointStore.save(state.checkpoint()) else {
+                        let failureReason = "无法保存 Recipe 待确认状态，请检查存储空间后重试。"
+                        let error = IOSRecipeRunError.stepFailed(
+                            stepId: step.id,
+                            tool: step.tool,
+                            message: failureReason
+                        )
+                        await recordRecipeStepFinishedOnly(
+                            state: state,
+                            step: step,
+                            errorCode: "checkpoint_write",
+                            runId: context.runId
+                        )
+                        await recordRecipeLevelFinished(
+                            recipeName: state.recipeName,
+                            recipeVersion: state.recipeVersion,
+                            executionId: state.executionId,
+                            outcome: "failed",
+                            outcomeKind: "error",
+                            errorCode: "checkpoint_write",
+                            runId: context.runId
+                        )
+                        let outcome = IOSRecipeRunOutcome.failed(
+                            failedStep: step.id,
+                            error: error,
+                            completedSteps: state.completedSteps
+                        )
+                        return .completed(finishRecipeCall(
+                            state: state,
+                            context: context,
+                            outputText: runner.structuredErrorJSON(for: outcome)
+                                ?? ChatToolOutputFormatter.toolFailureJSON(
+                                    toolName: context.toolCall.toolName,
+                                    reason: failureReason,
+                                    status: "failed"
+                                )
+                        ))
+                    }
                     preparedRecipeExecutions[state.toolCallId] = state
                     let payload = RecipeStepApprovalPayload(
                         stepId: step.id,
@@ -2990,7 +3012,7 @@ final class ChatToolRuntime {
             streamIndex: nil,
             metadata: nil
         )
-        switch recipePrimitiveRoute(for: tool) {
+        switch IOSRecipePrimitiveCatalog.route(for: tool) {
         case .workspace:
             let output = await workspaceToolExecutionOutput(toolCall, isUserInitiated: isUserInitiated)
             if case .needsUserAction(let reason) = output {
@@ -3059,7 +3081,7 @@ final class ChatToolRuntime {
     /// execution itself is never duplicated — only the "would this need a
     /// card" decision, so a recipe step cannot silently skip a gate.
     private func recipeStepGate(tool: String, argsJSON: String) -> RecipeStepGate {
-        switch recipePrimitiveRoute(for: tool) {
+        switch IOSRecipePrimitiveCatalog.route(for: tool) {
         case .workspace:
             return workspaceRecipeStepGate(toolName: tool)
         case .search:
@@ -3197,31 +3219,6 @@ final class ChatToolRuntime {
             return .approvalRequired(reason: "WebMount 浏览器操作需要显式批准。")
         }
         return .proceed
-    }
-
-    /// Classification of a primitive ToolId into the existing execution
-    /// family (single source for the recipe step gate + post-approval
-    /// execution; mirrors `nextPendingToolCall`'s grouping).
-    private func recipePrimitiveRoute(for tool: String) -> IOSRecipePrimitiveRoute {
-        if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool) { return .workspace }
-        if IOSSearchExecutor.supportedToolNames.contains(tool) { return .search }
-        if IOSIshToolCatalog.supportedToolNames.union(IOSEmbeddedIshToolCatalog.supportedToolNames).contains(tool) { return .ish }
-        if IOSWebMountToolCatalog.supportedToolNames.union(IOSWebMountToolCatalog.unsupportedToolNames).contains(tool) { return .webMount }
-        if tool == "memory_tool" { return .memory }
-        if tool == "session_search" || tool == "session_read" { return .sessionRead }
-        if tool == "tool_search" || tool == "tools_list" { return .discovery }
-        if IOSSkillToolCatalog.toolNames.contains(tool) { return .skill }
-        if IOSProviderConfigToolCatalog.toolNames.contains(tool) { return .advanced }
-        if IOSThemePackToolCatalog.toolNames.contains(tool) { return .advanced }
-        if tool == "mcp_call" || ToolKt.isExpandedMcpToolName(name: tool)
-            || tool == "subagent_dispatch" || tool == "model_council_run"
-            || tool == "spawn_agent" || tool == "list_agents" || tool == "interrupt_agent"
-            || tool == "send_message" || tool == "followup_task" || tool == "wait_agent"
-            || tool == "exec" || tool == "wait" {
-            return .advanced
-        }
-        if tool == "recipe_import" { return .recipeImport }
-        return .unsupported
     }
 
     /// Recipe-level ledger record (§15 Phase 0 attribution): one Finished row

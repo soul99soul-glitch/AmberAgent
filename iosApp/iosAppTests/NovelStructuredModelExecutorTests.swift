@@ -55,6 +55,8 @@ final class NovelStructuredModelExecutorTests: XCTestCase {
         } catch let failure as NovelStructuredModelExecutionFailure {
             XCTAssertEqual(failure.failure.code, "structured_no_output_timeout")
             XCTAssertTrue(failure.failure.isRetryable)
+            XCTAssertFalse(failure.allowsOutputRepair)
+            XCTAssertNil(failure.rawText)
         }
 
         let cancelledRunIDs = await adapter.cancelledRunIDs
@@ -241,6 +243,8 @@ final class NovelStructuredModelExecutorTests: XCTestCase {
             XCTAssertEqual(error.failure.code, "invalid_structured_output")
             XCTAssertEqual(error.structuredOutputFailure?.category, .duplicateKey)
             XCTAssertTrue(error.failure.isRetryable)
+            XCTAssertTrue(error.allowsOutputRepair)
+            XCTAssertEqual(error.rawText, invalid)
         }
     }
 

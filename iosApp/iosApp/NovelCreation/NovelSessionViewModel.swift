@@ -301,7 +301,7 @@ private struct NovelCharacterIdentityMentionsCacheEntry {
 @MainActor
 @Observable
 final class NovelSessionViewModel {
-    var mode: NovelSessionMode = .writeProse
+    var mode: NovelSessionMode = .discussPlan
     var granularity: NovelGenerationGranularity = .wholeChapter
     private(set) var binding: NovelSessionBinding?
     private(set) var transientTail: NovelSessionTransientTail?
@@ -337,6 +337,9 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var terminalAwaitingRefresh = false
     @ObservationIgnored private var cancelledStartRunIDs: Set<NovelRunID> = []
     @ObservationIgnored private var answeringAskUserMessageID: NovelMessageID?
+    /// Session-local card close after 写入正文. Not a durable message; leaving
+    /// the project drops it. Avoids starting a follow-up model turn that locks the UI.
+    private var locallyResolvedAskUser: [NovelMessageID: NovelAskUserResponse] = [:]
     @ObservationIgnored private var sessionActionOwnerID: UUID?
     @ObservationIgnored private var polishRetryTask: Task<Void, Never>?
     @ObservationIgnored private var polishRetryTaskBinding: NovelSessionBinding?
@@ -353,6 +356,7 @@ final class NovelSessionViewModel {
     var ghostwriteTargetChapterCount: Int = NovelGhostwriteBatch.minChapterCount
     @ObservationIgnored var ghostwriteTask: Task<Void, Never>?
     @ObservationIgnored var ghostwriteTaskBinding: NovelSessionBinding?
+    @ObservationIgnored private var ghostwriteBackgroundLeaseOwnerID: UUID?
     @ObservationIgnored var ghostwriteOwnedRunID: NovelRunID?
     /// pause / 离页取消时置 true：catch 不得把本批标成 `.cancelled`（会丢续跑与 sidecar）。
     @ObservationIgnored var ghostwriteCancelAsUserPause = false
@@ -374,11 +378,21 @@ final class NovelSessionViewModel {
     @ObservationIgnored private var quickStartStructuredContent: String?
     @ObservationIgnored private var characterProposalStructuredContent: String?
     @ObservationIgnored private var presentationFlushTask: Task<Void, Never>?
+    /// 思考流 48ms 拍合并（与正文 presentationFlush 同源时钟）：网络 chunk 先并入
+    /// pendingReasoningText，每拍一次合并进 row.reasoningContent。卡片内优化
+    /// （尾段整体淡入、sizeThatFades 去 layoutIfNeeded、内部滚动 540pt/s 限速、
+    /// cadence 门禁 p95≤40ms）都以「每拍一次 append」为前提——逐 chunk 直上 UI 时
+    /// 每个网络 chunk 都触发整行重建+测量（真机思考框整体卡顿，探针实测 p95 88ms/
+    /// max 1.38s）。只影响呈现节奏，不动 lifecycle broadcast 语义与 storage。
+    @ObservationIgnored private var reasoningFlushTask: Task<Void, Never>?
+    @ObservationIgnored private var reasoningFlushToken = UUID()
+    @ObservationIgnored private var pendingReasoningText: String?
     /// 终态 tail 的延迟退役任务:完成后保留 tail 一个静窗再清空,避免完成瞬间整屏一跳。
     @ObservationIgnored private var terminalTailRetirementTask: Task<Void, Never>?
     /// 终态 tail 退役前的静窗时长,默认与底部跟随的 terminalQuietDelay 对齐(滚动落定
     /// 与 tail 退役同步)。测试可注入 0 走立即退役的快路径,保持旧的「完成即清空」契约。
     @ObservationIgnored private let terminalQuietDelay: TimeInterval
+    @ObservationIgnored private let composerDefaults: UserDefaults
     /// 批量润色等待候选时的「run 落定」宽限窗:activeRunID 在 terminalAwaitingRefresh
     /// 窗口会短暂为 nil,落定判失败前必须先过这个窗。测试可注入小值加快失败用例。
     @ObservationIgnored private let batchPolishSettleGrace: TimeInterval
@@ -390,12 +404,14 @@ final class NovelSessionViewModel {
         workspace: NovelCreationViewModel,
         terminalQuietDelay: TimeInterval = NovelSessionBottomFollowPolicy.terminalQuietDelay,
         batchPolishSettleGrace: TimeInterval = 5,
-        batchPolishCandidateTimeout: TimeInterval = 900
+        batchPolishCandidateTimeout: TimeInterval = 900,
+        composerDefaults: UserDefaults = .standard
     ) {
         self.workspace = workspace
         self.terminalQuietDelay = terminalQuietDelay
         self.batchPolishSettleGrace = batchPolishSettleGrace
         self.batchPolishCandidateTimeout = batchPolishCandidateTimeout
+        self.composerDefaults = composerDefaults
         guard let project = workspace.projectSnapshot,
               let branch = workspace.branchSnapshot,
               workspace.selectedProjectID == project.project.id,
@@ -406,8 +422,56 @@ final class NovelSessionViewModel {
             projectID: project.project.id,
             branchID: branch.branch.id
         )
-        granularity = project.project.lastGenerationGranularity
+        applyComposerPreference(project: project, branch: branch, persistFallback: true)
         hydrateTerminalState()
+    }
+
+    func setComposerIntent(_ intent: NovelComposerIntent) {
+        applyComposerIntent(intent)
+        if let projectID = binding?.projectID ?? workspace.selectedProjectID {
+            NovelComposerIntentPreference.store(intent, for: projectID, defaults: composerDefaults)
+        }
+    }
+
+    func reconcileComposerIntent() {
+        guard let project = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot else {
+            mode = .discussPlan
+            return
+        }
+        applyComposerPreference(project: project, branch: branch, persistFallback: true)
+    }
+
+    private func applyComposerPreference(
+        project: NovelProjectSnapshot,
+        branch: NovelBranchSnapshot,
+        persistFallback: Bool
+    ) {
+        let stored = NovelComposerIntentPreference.stored(
+            for: project.project.id,
+            defaults: composerDefaults
+        )
+        let resolved = NovelComposerIntentPreference.resolve(
+            stored: stored,
+            collaborationMode: project.project.collaborationMode,
+            hasConfirmedChapterPlan: project.confirmedChapterPlan(for: branch.branch.id) != nil
+        )
+        applyComposerIntent(resolved)
+        if persistFallback, resolved != stored {
+            NovelComposerIntentPreference.store(
+                resolved,
+                for: project.project.id,
+                defaults: composerDefaults
+            )
+        }
+    }
+
+    private func applyComposerIntent(_ intent: NovelComposerIntent) {
+        let values = intent.requestValues
+        mode = values.mode
+        if intent != .discuss {
+            granularity = values.granularity
+        }
     }
 
     var durableMessages: [NovelSessionMessageRecord] {
@@ -629,13 +693,15 @@ final class NovelSessionViewModel {
             transientTail: transientTail
         )
         if let cached = projectionCache, cached.key == key {
-            guard let tail = transientTail else { return cached.model }
+            guard let tail = transientTail else {
+                return overlayLocalAskUserAnswers(cached.model)
+            }
             if let updated = NovelSessionPresentation.updatingTransientTail(
                 in: cached.model,
                 with: tail
             ) {
                 projectionCache = NovelSessionProjectionCacheEntry(key: key, model: updated)
-                return updated
+                return overlayLocalAskUserAnswers(updated)
             }
         }
         #if DEBUG
@@ -648,7 +714,52 @@ final class NovelSessionViewModel {
             transientTail: transientTail
         ))
         projectionCache = NovelSessionProjectionCacheEntry(key: key, model: model)
-        return model
+        return overlayLocalAskUserAnswers(model)
+    }
+
+    private func overlayLocalAskUserAnswers(_ model: NovelSessionListModel) -> NovelSessionListModel {
+        guard !locallyResolvedAskUser.isEmpty else { return model }
+        var changed = false
+        let rows = model.rows.map { row -> NovelSessionRowModel in
+            guard let askUser = row.askUser,
+                  askUser.response == nil,
+                  let response = locallyResolvedAskUser[row.id] else {
+                return row
+            }
+            changed = true
+            let resolved = NovelAskUserPresentation(prompt: askUser.prompt, response: response)
+            return NovelSessionRowModel(
+                id: row.id,
+                sequence: row.sequence,
+                role: row.role,
+                mode: row.mode,
+                granularity: row.granularity,
+                kind: row.kind,
+                content: row.content,
+                reasoningContent: row.reasoningContent,
+                isReasoningLive: row.isReasoningLive,
+                createdAt: row.createdAt,
+                runID: row.runID,
+                runStatus: row.runStatus,
+                candidate: row.candidate,
+                committedChange: row.committedChange,
+                askUser: resolved,
+                archive: row.archive,
+                transientPhase: row.transientPhase,
+                actions: row.actions,
+                digest: NovelSessionRowDigest(
+                    layout: row.digest.layout.replacingOccurrences(of: ":pending;", with: ":answered;"),
+                    presentation: row.digest.presentation
+                ),
+                lagAllowance: row.lagAllowance
+            )
+        }
+        guard changed else { return model }
+        return NovelSessionListModel(
+            sessionID: model.sessionID,
+            rows: rows,
+            activeTailID: model.activeTailID
+        )
     }
 
     /// Build the session list model off the main actor, then install the cache.
@@ -868,12 +979,13 @@ final class NovelSessionViewModel {
             operationErrorMessage = nil
             refreshErrorMessage = nil
             lastFailure = nil
-            granularity = project.project.lastGenerationGranularity
+            applyComposerPreference(project: project, branch: branch, persistFallback: true)
             // New session: drop secondary chrome and projection until staged open advances.
             advanceLoadStage(to: .idle)
             projectionCache = nil
             pendingCharacterIdentityMentionsCache = nil
             characterIdentityChoicesCache = nil
+            locallyResolvedAskUser = [:]
         }
         consumerAttachmentDesired = true
         hydrateTerminalState()
@@ -984,8 +1096,30 @@ final class NovelSessionViewModel {
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed == NovelChapterRevisionApproval.approveOption {
                 guard await applyChapterRevision(revision) else { return false }
+                locallyResolvedAskUser[promptMessageID] = NovelAskUserResponse(
+                    promptMessageID: promptMessageID,
+                    answer: trimmed
+                )
+                await syncRevisionPlotState(chapterID: revision.chapterID)
+                operationErrorMessage = nil
+                return true
             } else if trimmed != NovelChapterRevisionApproval.rejectOption {
                 operationErrorMessage = "请选择写入正文或拒绝这次修改。"
+                return false
+            }
+        }
+        if let revert = prompt.manuscriptRevert {
+            let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == NovelManuscriptRevertApproval.approveOption {
+                guard await applyManuscriptRevert(revert) else { return false }
+                locallyResolvedAskUser[promptMessageID] = NovelAskUserResponse(
+                    promptMessageID: promptMessageID,
+                    answer: trimmed
+                )
+                operationErrorMessage = nil
+                return true
+            } else if trimmed != NovelManuscriptRevertApproval.rejectOption {
+                operationErrorMessage = "请选择回退这几章或取消回退。"
                 return false
             }
         }
@@ -1055,13 +1189,47 @@ final class NovelSessionViewModel {
         let saved = await workspace.saveManualRewrite(
             chapterID: proposal.chapterID,
             title: version.title,
-            content: replaced.newContent
+            content: replaced.newContent,
+            schedulesAutomaticSync: false
         )
         if !saved {
             operationErrorMessage = workspace.errorMessage ?? "改正文保存失败，请重试。"
             return false
         }
         return true
+    }
+
+    private func applyManuscriptRevert(_ proposal: NovelManuscriptRevertProposal) async -> Bool {
+        if isGhostwriting {
+            operationErrorMessage = "代笔正在推进本章，暂时不能回退章节。"
+            return false
+        }
+        let reverted = await workspace.revertRecentChapters(proposal)
+        if !reverted {
+            operationErrorMessage = workspace.errorMessage ?? "回退章节失败，请重试。"
+            return false
+        }
+        return true
+    }
+
+    private func syncRevisionPlotState(chapterID: NovelChapterID) async {
+        guard let branch = workspace.branchSnapshot else { return }
+        let isLastWorkingChapter = branch.branch.workingChapterSelections.last?.chapterID
+            == chapterID
+        if isLastWorkingChapter {
+            let synced = await workspace.syncWorkingManuscript(preferStateDelta: true)
+            if !synced {
+                workspace.scheduleAutomaticStateSync(
+                    projectID: branch.projectID,
+                    branchID: branch.branch.id
+                )
+            }
+            return
+        }
+        workspace.scheduleAutomaticStateSync(
+            projectID: branch.projectID,
+            branchID: branch.branch.id
+        )
     }
 
     @discardableResult
@@ -1417,10 +1585,12 @@ final class NovelSessionViewModel {
         endAction()
         _ = await refreshDurable(binding: binding, token: bindingToken)
         guard outcome != nil else { return false }
-        workspace.scheduleAutomaticStateSync(
-            projectID: project.project.id,
-            branchID: branch.branch.id
-        )
+        if workspace.branchSnapshot?.branch.syncStatus == .needsSync {
+            workspace.scheduleAutomaticStateSync(
+                projectID: project.project.id,
+                branchID: branch.branch.id
+            )
+        }
         return true
     }
 
@@ -2535,11 +2705,20 @@ private extension NovelSessionViewModel {
         guard transientTail?.runID == runID else { return }
         switch event {
         case .started:
+            if draft.ghostwritePlanID != nil {
+                advanceGhostwriteBackgroundProgress(by: 1)
+            }
             _ = await refreshDurable(binding: binding, token: token)
             adoptDurableRunRecord(runID: runID)
         case .reasoningDelta(let text):
+            if draft.ghostwritePlanID != nil, !text.isEmpty {
+                advanceGhostwriteBackgroundProgress(by: Int64(text.utf8.count))
+            }
             applyReasoningPresentation(text, runID: runID, token: token)
         case .delta(let text):
+            if draft.ghostwritePlanID != nil, !text.isEmpty {
+                advanceGhostwriteBackgroundProgress(by: Int64(text.utf8.count))
+            }
             markReasoningFinishedIfNeeded(runID: runID, token: token)
             if draft.kind == .quickStart {
                 appendQuickStartStructuredDelta(text, runID: runID, token: token)
@@ -2549,6 +2728,9 @@ private extension NovelSessionViewModel {
                 enqueuePresentationDelta(text, runID: runID, token: token)
             }
         case .replaced(let text):
+            if draft.ghostwritePlanID != nil, !text.isEmpty {
+                advanceGhostwriteBackgroundProgress(by: Int64(text.utf8.count))
+            }
             markReasoningFinishedIfNeeded(runID: runID, token: token)
             if draft.kind == .quickStart {
                 replaceQuickStartStructuredContent(text, runID: runID, token: token)
@@ -2657,7 +2839,10 @@ private extension NovelSessionViewModel {
             phase: run.partialContent.isEmpty ? .waitingForFirstToken : .streaming
         )
         do {
-            let observed = try await workspace.startSessionRun(request)
+            let observed = try await workspace.startSessionRun(
+                request,
+                acquiresBackgroundLease: false
+            )
             guard attachAttemptID == attemptID,
                   consumerAttachmentDesired,
                   binding == expectedBinding,
@@ -2861,6 +3046,11 @@ private extension NovelSessionViewModel {
     }
 
     /// Presentation-only thinking stream. Never touches manuscript presentation buffer.
+    ///
+    /// 48ms 拍节流（与正文 presentationFlush 同源）：chunk 先并入 pendingReasoningText
+    /// （按既有前缀去重语义累积），每拍一次合并进 row.reasoningContent。终态/正文切换
+    /// 前由 markReasoningFinishedIfNeeded 同步收口最后一段思考——presentation 延迟
+    /// ≤48ms，lifecycle broadcast 语义与 storage 均不变。
     func applyReasoningPresentation(
         _ text: String,
         runID: NovelRunID,
@@ -2870,15 +3060,76 @@ private extension NovelSessionViewModel {
               bindingToken == token,
               let current = transientTail,
               current.runID == runID else { return }
-        let merged: String
-        if text.hasPrefix(current.reasoningContent) || current.reasoningContent.isEmpty {
-            merged = text
-        } else if current.reasoningContent.hasPrefix(text) {
+        let effective = pendingReasoningText ?? current.reasoningContent
+        let accumulated: String
+        if text.hasPrefix(effective) || effective.isEmpty {
+            accumulated = text
+        } else if effective.hasPrefix(text) {
             return
         } else {
-            merged = current.reasoningContent + text
+            accumulated = effective + text
         }
-        guard merged != current.reasoningContent || !current.isReasoningLive else { return }
+        guard accumulated != current.reasoningContent || !current.isReasoningLive else { return }
+        pendingReasoningText = accumulated
+        scheduleReasoningFlush(runID: runID, token: token)
+    }
+
+    func markReasoningFinishedIfNeeded(runID: NovelRunID, token: UUID) {
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID,
+              current.isReasoningLive else { return }
+        // 同步收口：尚未发布的思考尾巴与 isReasoningLive=false 在同一拍落地，
+        // 卡片软收起与正文出现同拍（与逐 chunk 直上时代理等价，无额外延迟）。
+        flushPendingReasoning(runID: runID, token: token, finishing: true)
+    }
+
+    private func scheduleReasoningFlush(runID: NovelRunID, token: UUID) {
+        guard reasoningFlushTask == nil else { return }
+        let flushToken = UUID()
+        reasoningFlushToken = flushToken
+        reasoningFlushTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.presentationFlushDelayNanos)
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled, self.reasoningFlushToken == flushToken else { return }
+            self.reasoningFlushTask = nil
+            self.flushPendingReasoning(runID: runID, token: token, finishing: false)
+        }
+    }
+
+    /// 一拍合并：pendingReasoningText 与当前 tail 合并为一次可见发布。
+    /// finishing=true 时（终态/正文切换）同步收口并在同一拍翻转 isReasoningLive=false。
+    private func flushPendingReasoning(
+        runID: NovelRunID,
+        token: UUID,
+        finishing: Bool
+    ) {
+        reasoningFlushTask?.cancel()
+        reasoningFlushTask = nil
+        guard bindingToken == token,
+              let current = transientTail,
+              current.runID == runID else { return }
+        let pending = pendingReasoningText
+        pendingReasoningText = nil
+        if pending == nil, !finishing { return }
+        let merged: String
+        if let pending {
+            if pending.hasPrefix(current.reasoningContent) || current.reasoningContent.isEmpty {
+                merged = pending
+            } else if current.reasoningContent.hasPrefix(pending) {
+                if !finishing { return }
+                merged = current.reasoningContent
+            } else {
+                merged = current.reasoningContent + pending
+            }
+        } else {
+            merged = current.reasoningContent
+        }
+        let nextLive = finishing ? false : true
+        guard merged != current.reasoningContent || current.isReasoningLive != nextLive else { return }
         // Promote waiting placeholder once thinking is visible.
         let nextPhase: NovelSessionTransientTailPhase =
             current.phase == .waitingForFirstToken ? .streaming : current.phase
@@ -2887,21 +3138,7 @@ private extension NovelSessionViewModel {
             renderRevision: current.renderRevision &+ 1,
             phase: nextPhase,
             reasoningContent: merged,
-            isReasoningLive: true
-        )
-    }
-
-    func markReasoningFinishedIfNeeded(runID: NovelRunID, token: UUID) {
-        guard bindingToken == token,
-              let current = transientTail,
-              current.runID == runID,
-              current.isReasoningLive else { return }
-        transientTail = current.updating(
-            content: current.content,
-            renderRevision: current.renderRevision &+ 1,
-            phase: current.phase,
-            reasoningContent: current.reasoningContent,
-            isReasoningLive: false
+            isReasoningLive: nextLive
         )
     }
 
@@ -3167,9 +3404,6 @@ private extension NovelSessionViewModel {
         let drainAdvance = NovelSessionPresentationPacer.terminalDrainAdvance(
             backlogCount: initialBacklog
         )
-        let drainDelayNanos = NovelSessionPresentationPacer.terminalDrainDelayNanos(
-            advance: drainAdvance
-        )
         while !Task.isCancelled,
               bindingToken == token,
               let visibleTail = transientTail,
@@ -3194,7 +3428,17 @@ private extension NovelSessionViewModel {
             )
             updateTail(content: step.content, phase: .streaming, lagAllowance: allowance)
             do {
-                try await Task.sleep(nanoseconds: drainDelayNanos)
+                // 拍间隔跟随优雅尾的实际拍速逐拍重算（8ms 连续放宽到 48ms），
+                // 不能用完成时的锚速定值——否则末段减速拍被 8ms 压缩、尾拍仍砸。
+                let beatAdvance = StreamPresentationPacingPolicy.terminalTextAdvance(
+                    backlogCount: remainingBacklog,
+                    fixedAdvance: drainAdvance
+                )
+                try await Task.sleep(
+                    nanoseconds: NovelSessionPresentationPacer.terminalDrainDelayNanos(
+                        advance: beatAdvance
+                    )
+                )
             } catch {
                 return false
             }
@@ -3202,10 +3446,17 @@ private extension NovelSessionViewModel {
         return false
     }
 
+    /// 清空全部「尚未发布的呈现工作」：正文 presentation buffer 与思考流 pending。
+    /// 思考流的 finish 收口走 markReasoningFinishedIfNeeded（同一拍合并+翻转 live），
+    /// 这里只处理 run 边界（install/terminal/clear）与 buffer 失效路径。
     func cancelPendingPresentation() {
         presentationFlushTask?.cancel()
         presentationFlushTask = nil
         presentationBuffer = nil
+        reasoningFlushTask?.cancel()
+        reasoningFlushTask = nil
+        reasoningFlushToken = UUID()
+        pendingReasoningText = nil
     }
 
     func installTail(
@@ -3392,6 +3643,7 @@ private extension NovelSessionViewModel {
         lastRetryRunID = nil
         advanceLoadStage(to: .idle)
         projectionCache = nil
+        locallyResolvedAskUser = [:]
     }
 
     func cancelPolishRetryForBindingChange(
@@ -3603,13 +3855,30 @@ extension NovelSessionViewModel {
             infraRetryCount: 0
         )
         ghostwriteTaskBinding = binding
+        let backgroundLeaseOwnerID = UUID()
+        ghostwriteBackgroundLeaseOwnerID = backgroundLeaseOwnerID
+        beginGhostwriteBackgroundLease(
+            binding: binding,
+            ownerID: backgroundLeaseOwnerID
+        )
         ghostwriteTask = Task { @MainActor [weak self] in
             await self?.runGhostwriteBatch(binding: binding)
-            guard self?.ghostwriteTaskBinding == binding else { return }
-            self?.ghostwriteTask = nil
-            self?.ghostwriteTaskBinding = nil
-            self?.ghostwriteOwnedRunID = nil
-            self?.isGhostwriteStartingRun = false
+            if self == nil || self?.ghostwriteBackgroundLeaseOwnerID == backgroundLeaseOwnerID {
+                BackgroundGenerationKeepAlive.shared.end(
+                    novelGhostwriteBackgroundLeaseID(
+                        projectID: binding.projectID,
+                        branchID: binding.branchID
+                    )
+                )
+            }
+            guard let self,
+                  self.ghostwriteBackgroundLeaseOwnerID == backgroundLeaseOwnerID,
+                  self.ghostwriteTaskBinding == binding else { return }
+            self.ghostwriteBackgroundLeaseOwnerID = nil
+            self.ghostwriteTask = nil
+            self.ghostwriteTaskBinding = nil
+            self.ghostwriteOwnedRunID = nil
+            self.isGhostwriteStartingRun = false
         }
         if let progress = ghostwriteProgressStorage {
             persistGhostwriteProgress(progress)
@@ -3809,7 +4078,10 @@ extension NovelSessionViewModel {
                 // 下一章：循环顶部会自动拟合同。
             }
         } catch is CancellationError {
-            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
+            await stopOwnedGhostwriteRun(
+                binding: expectedBinding,
+                reason: ghostwriteRunInterruptionReason()
+            )
             let reason = ghostwriteCancellationPauseReason()
             pauseGhostwritePipeline(
                 binding: expectedBinding,
@@ -3819,7 +4091,10 @@ extension NovelSessionViewModel {
             )
             ghostwriteCancelAsUserPause = false
         } catch let failure as NovelStructuredModelExecutionFailure where failure.failure.code == "cancelled" {
-            await stopOwnedGhostwriteRun(binding: expectedBinding, reason: .user)
+            await stopOwnedGhostwriteRun(
+                binding: expectedBinding,
+                reason: ghostwriteRunInterruptionReason()
+            )
             let reason = ghostwriteCancellationPauseReason()
             pauseGhostwritePipeline(
                 binding: expectedBinding,
@@ -3848,7 +4123,7 @@ extension NovelSessionViewModel {
             return .userPaused
         }
         switch ghostwriteProgressStorage?.pauseReason {
-        case .userPaused, .syncFailed:
+        case .userPaused, .syncFailed, .infrastructureFailed:
             return ghostwriteProgressStorage?.pauseReason ?? .userPaused
         case .healBudgetExhausted, .acceptanceFailed, .obviousRepetition,
              .blockingContinuity, .continuityAuditIncomplete:
@@ -3858,6 +4133,12 @@ extension NovelSessionViewModel {
             // 批内协作取消一律可续，不把本批作废。
             return .userPaused
         }
+    }
+
+    private func ghostwriteRunInterruptionReason() -> NovelRunInterruptionReason {
+        ghostwriteProgressStorage?.pauseReason == .infrastructureFailed
+            ? .expiration
+            : .user
     }
 
     /// 单章闭环：写→验→（可选）连续性→收录→清合同→同步。
@@ -4075,10 +4356,13 @@ extension NovelSessionViewModel {
             guard collected else {
                 // 用户暂停/取消时 settle 会 return false，勿标成「收录失败」。
                 try Task.checkCancellation()
+                let reason = ghostwriteCollectPauseReason(for: candidateID)
                 pauseGhostwritePipeline(
                     binding: expectedBinding,
-                    reason: .collectFailed,
-                    detail: operationErrorMessage,
+                    reason: reason,
+                    detail: reason == .collectBaseStale
+                        ? reason.displayMessage
+                        : operationErrorMessage,
                     candidateID: candidateID
                 )
                 return false
@@ -4293,7 +4577,7 @@ extension NovelSessionViewModel {
             $0.revisionBriefOverride = """
             合同已更新禁止项，请勿再写：
             \(additions.map { "- \($0)" }.joined(separator: "\n"))
-            开篇换新，落实本章必发生，避免与近期节拍复读。
+            上一稿已写好的部分视为已确定，只改上述禁止项与未落实的必发生。
             """
         }
         return true
@@ -4353,7 +4637,7 @@ extension NovelSessionViewModel {
             - 原：\(rephrase.original)
             - 现：\(rephrase.rewritten)
 
-            请重写整章，明确写出可辨认的对应情绪/动作，不要只靠暗示；开篇换新，勿复读近期节拍。
+            上一稿已写好的部分视为已确定；请明确写出可辨认的对应情绪/动作，不要只靠暗示。
             """
             $0.detailMessage = "已放宽 1 条必发生措辞，再写一轮…"
         }
@@ -4523,11 +4807,54 @@ extension NovelSessionViewModel {
         _ = await interruptBoundRun(reason: reason, runID: runID)
     }
 
+    private func canReuseGhostwriteCandidate(
+        _ candidate: NovelCandidateRecord,
+        plan: NovelChapterPlanRecord
+    ) -> Bool {
+        guard let document = workspace.projectSnapshot,
+              let branch = workspace.branchSnapshot?.branch else {
+            return false
+        }
+        let sourceMessage = document.sessions
+            .first(where: { $0.id == candidate.sessionID })?
+            .messages.first(where: { $0.id == candidate.sourceMessageID })
+        return NovelGhostwriteCandidateOwnership.canReuseForAutomaticCollect(
+            candidate,
+            plan: plan,
+            branchHeadCheckpointID: branch.headCheckpointID,
+            branchHeadRevision: branch.headRevision,
+            checkpoints: document.checkpoints,
+            sourceMessage: sourceMessage,
+            superseded: ghostwriteProgressStorage?.supersededCandidateIDs ?? [],
+            alreadyCollected: ghostwriteProgressStorage?.autoCollectedCandidateIDs ?? []
+        )
+    }
+
+    private func ghostwriteCollectPauseReason(
+        for candidateID: NovelCandidateID
+    ) -> NovelGhostwritePauseReason {
+        let found = candidate(id: candidateID)
+        let document = workspace.projectSnapshot
+        let branch = workspace.branchSnapshot?.branch
+        let sourceMessage: NovelSessionMessageRecord? = {
+            guard let found, let document else { return nil }
+            return document.sessions
+                .first(where: { $0.id == found.sessionID })?
+                .messages.first(where: { $0.id == found.sourceMessageID })
+        }()
+        return NovelGhostwriteCollectFailure.pauseReason(
+            candidate: found,
+            branchHeadCheckpointID: branch?.headCheckpointID,
+            branchHeadRevision: branch?.headRevision,
+            checkpoints: document?.checkpoints ?? [],
+            sourceMessage: sourceMessage
+        )
+    }
+
     private func obtainGhostwriteCandidate(
         plan: NovelChapterPlanRecord,
         expectedBinding: NovelSessionBinding
     ) async throws -> NovelCandidateID {
-        let superseded = ghostwriteProgressStorage?.supersededCandidateIDs ?? []
         // 质量失败 / 自动改写中：必须产新稿，禁止复用已作废或当前失败候选。
         let mustRewrite: Bool = {
             // 第一条款仅描述「章内自愈在途」（heal 置 phase=.writing 且清 pauseReason）；
@@ -4543,20 +4870,13 @@ extension NovelSessionViewModel {
         }()
         if !mustRewrite,
            let ownedID = ghostwriteProgressStorage?.candidateID,
-           !superseded.contains(ownedID),
            let owned = candidate(id: ownedID),
-           owned.status == .available,
-           NovelGhostwriteCandidateOwnership.belongs(owned, to: plan),
-           !(ghostwriteProgressStorage?.autoCollectedCandidateIDs.contains(ownedID) ?? false) {
+           canReuseGhostwriteCandidate(owned, plan: plan) {
             return ownedID
         }
         if !mustRewrite,
            let recovered = candidates(kind: .prose)
-            .filter({
-                $0.status == .available
-                    && NovelGhostwriteCandidateOwnership.belongs($0, to: plan)
-                    && !superseded.contains($0.id)
-            })
+            .filter({ canReuseGhostwriteCandidate($0, plan: plan) })
             .max(by: { $0.createdAt < $1.createdAt }) {
             mutateGhostwriteProgress(binding: expectedBinding) {
                 $0.candidateID = recovered.id
@@ -4569,11 +4889,10 @@ extension NovelSessionViewModel {
             || revisionBrief != nil
             || (ghostwriteProgressStorage?.qualityAttemptIndex ?? 0) > 0
             || ghostwriteProgressStorage?.phase == .revising
-        // 人工润修：带上一稿正文（有界）；自动改写仍只靠 receipt，避免每轮灌全文。
+        // 润修与自动自愈都钉住上一稿：确定性部分由宿主固化。
         let sourceDraft: String? = {
-            guard revisionBrief != nil else { return nil }
-            let sourceID = healReceipt?.sourceCandidateID
-            guard let sourceID, let body = candidate(id: sourceID)?.content else { return nil }
+            guard let sourceID = healReceipt?.sourceCandidateID,
+                  let body = candidate(id: sourceID)?.content else { return nil }
             let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
         }()
@@ -4797,7 +5116,7 @@ extension NovelSessionViewModel {
                 && pending[0].kind == .manualSync
                 && pending[0].status == .retryable
                 && !workInFlight
-            let shouldKick = (idleNeedsSync || stuckRetryable || syncFailedMessage != nil)
+            let shouldKick = idleNeedsSync
                 && infraRetries < maxInfra
                 && (lastKickAt.map { Date().timeIntervalSince($0) >= 1.5 } ?? true)
 
@@ -4817,7 +5136,16 @@ extension NovelSessionViewModel {
                 continue
             }
 
-            if (idleNeedsSync || stuckRetryable || syncFailedMessage != nil),
+            // Automatic sync already spent its heal budget. Do not kick the same
+            // retryable pending again — that would stack another 3 model calls.
+            let healExhausted = !workInFlight
+                && (stuckRetryable || syncFailedMessage != nil)
+                && Date().timeIntervalSince(lastProgressAt) > 2
+            if healExhausted {
+                return false
+            }
+
+            if idleNeedsSync,
                infraRetries >= maxInfra,
                Date().timeIntervalSince(lastProgressAt) > 3 {
                 return false
@@ -4844,8 +5172,8 @@ extension NovelSessionViewModel {
              .continuityAuditIncomplete, .userPaused, .cancelled,
              .planProposalFailed:
             .paused
-        case .collectFailed, .syncFailed, .incompleteCandidate, .planMismatch,
-             .infrastructureFailed:
+        case .collectFailed, .collectBaseStale, .syncFailed, .incompleteCandidate,
+             .planMismatch, .infrastructureFailed:
             .failed
         }
         mutateGhostwriteProgress(binding: expectedBinding) {
@@ -4886,6 +5214,81 @@ extension NovelSessionViewModel {
         body(&progress)
         ghostwriteProgressStorage = progress
         persistGhostwriteProgress(progress)
+        advanceGhostwriteBackgroundProgress(by: 1, subtitle: progress.statusLabel)
+    }
+
+    private func beginGhostwriteBackgroundLease(
+        binding: NovelSessionBinding,
+        ownerID: UUID
+    ) {
+        let leaseID = novelGhostwriteBackgroundLeaseID(
+            projectID: binding.projectID,
+            branchID: binding.branchID
+        )
+        BackgroundGenerationKeepAlive.shared.begin(
+            leaseID,
+            title: "Amber 代笔中",
+            subtitle: ghostwriteProgressStorage?.statusLabel ?? "准备代笔",
+            onExpire: { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.expireGhostwriteBackgroundLease(
+                        binding: binding,
+                        ownerID: ownerID
+                    )
+                }
+            },
+            onSystemTaskExpiration: { [weak self] in
+                Task { @MainActor [weak self] in
+                    self?.expireGhostwriteBackgroundLease(
+                        binding: binding,
+                        ownerID: ownerID
+                    )
+                }
+            }
+        )
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            leaseID,
+            completed: 0,
+            total: -1,
+            subtitle: ghostwriteProgressStorage?.statusLabel ?? "准备代笔"
+        )
+        advanceGhostwriteBackgroundProgress(by: 1)
+    }
+
+    private func advanceGhostwriteBackgroundProgress(
+        by units: Int64,
+        subtitle: String? = nil
+    ) {
+        guard let progress = ghostwriteProgressStorage,
+              progress.binding == ghostwriteTaskBinding else { return }
+        BackgroundGenerationKeepAlive.shared.advanceProgress(
+            novelGhostwriteBackgroundLeaseID(
+                projectID: progress.binding.projectID,
+                branchID: progress.binding.branchID
+            ),
+            by: units,
+            subtitle: subtitle ?? progress.statusLabel
+        )
+    }
+
+    private func expireGhostwriteBackgroundLease(
+        binding expectedBinding: NovelSessionBinding,
+        ownerID: UUID
+    ) {
+        guard ghostwriteTaskBinding == expectedBinding,
+              ghostwriteBackgroundLeaseOwnerID == ownerID,
+              ghostwriteTask != nil else { return }
+        mutateGhostwriteProgress(binding: expectedBinding) {
+            $0.phase = .failed
+            $0.pauseReason = .infrastructureFailed
+            $0.detailMessage = "后台执行时间已结束，当前批次进度已保存，可以继续。"
+        }
+        workspace.cancelAutomaticStateSync(
+            projectID: expectedBinding.projectID,
+            branchID: expectedBinding.branchID,
+            suppressReschedule: false
+        )
+        ghostwriteTask?.cancel()
     }
 
     /// 验收/连续性审计的基建重试入口：重试时在进度面板给出阶段性提示。

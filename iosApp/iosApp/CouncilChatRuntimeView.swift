@@ -463,11 +463,16 @@ struct CouncilChatRuntimeView: View {
             // snap fights the pin and produces continuous jump/flicker — same
             // anti-pattern as dual 0.08s chase. Viewport shrink / native driver
             // still need an explicit write.
-            let sizeChangesPinOwnsGrowth = followGeneration && !isNativeScrollDriverDesired
+            //
+            // 实测增长分支：driver 未激活时由 sizeChanges pin 独占增长跟随
+            // （pin 开启 = followGeneration && !isNativeScrollDriverDesired，与
+            // 下方条件互补），不在此再发第二条 scrollTo 命令。旧条件
+            // `!pinOwns || driverActive` 在 shouldFollowMeasuredGrowth（隐含
+            // followGeneration）下恒等于 `isNativeScrollDriverDesired`——
+            // 冗余分支已删，行为不变。
             if shouldFollowViewportShrink {
                 scheduleMeasuredGrowthFollowToBottom()
-            } else if shouldFollowMeasuredGrowth,
-                      !sizeChangesPinOwnsGrowth || isNativeScrollDriverActive {
+            } else if shouldFollowMeasuredGrowth, isNativeScrollDriverDesired {
                 scheduleMeasuredGrowthFollowToBottom()
             }
         }
@@ -482,14 +487,19 @@ struct CouncilChatRuntimeView: View {
             if isNativeScrollDriverActive {
                 scrollDriver.submit(.conversationReset)
             }
-            scheduleTerminalBottomSettle()
+            scheduleTerminalBottomSettle(terminalRun: false)
         }
     }
 
     private func scheduleMeasuredGrowthFollowToBottom() {
         guard followGeneration, !followPaused, !userDragging else { return }
         if isNativeScrollDriverActive {
-            scrollDriver.submit(.streamContentGrew())
+            // 跟随拍携带当前 lagAllowance：流式期为 1，终态排空期随剩余积压
+            // 连续衰减（1→0），driver 据此收紧 τ_eff——完成瞬间钉底不再需要
+            // 一次性清掉跟随滞后。排空期即使是被动/几何恢复提交也必须携带
+            // 收紧值，否则默认 1 会把同拍先发的收紧逐拍打回（与 Chat/小说
+            // 语义一致，Novel 侧同类 bug 已修）。
+            scrollDriver.submit(.streamContentGrew(lagAllowance: viewModel.activeTailLagAllowance))
             return
         }
         // A 48ms text presentation flush can be followed by multiple asynchronous
@@ -541,7 +551,10 @@ struct CouncilChatRuntimeView: View {
         measuredGrowthFollowTask?.cancel()
     }
 
-    private func scheduleTerminalBottomSettle() {
+    /// `terminalRun`：整轮结束（isRunning 翻转）走 driver 的 `.generationTerminated`
+    /// （与 Chat/小说终态同构：逐帧钉底 + 静默交还 + idle 近底重锚）；新房间/历史
+    /// 重放保持显式无动画锚底（Chat 的 conversationLoaded 同款语义）。
+    private func scheduleTerminalBottomSettle(terminalRun: Bool = true) {
         cancelPendingMeasuredGrowthFollow()
         terminalSettleTask?.cancel()
         terminalSettleTask = Task { @MainActor in
@@ -552,6 +565,16 @@ struct CouncilChatRuntimeView: View {
                   followGeneration,
                   !followPaused,
                   !userDragging else { return }
+            if isNativeScrollDriverActive {
+                if terminalRun {
+                    scrollDriver.submit(.generationTerminated)
+                } else {
+                    scrollDriver.submit(
+                        .explicitBottom(source: .streamGrowth, animated: false, keyboardToken: nil)
+                    )
+                }
+                return
+            }
             scrollToTranscriptBottom()
         }
     }
@@ -1583,6 +1606,9 @@ final class CouncilChatViewModel {
     var selectedMode: CouncilDiscussionMode = .freeChat
     var messages: [CouncilChatMessage]
     var isRunning = false
+    /// 流式拍恒为 1；终态排空拍随剩余积压连续衰减到 0（与 Chat/小说同源）。
+    /// 视图在提交 `streamContentGrew(lagAllowance:)` 时携带，驱动据此收紧 τ_eff。
+    var activeTailLagAllowance: CGFloat = 1
     var activeSheet: CouncilRuntimeSheet?
     var participants: [CouncilParticipant] = []
     var failedSpeakerIds: Set<String> = []
@@ -2565,8 +2591,9 @@ final class CouncilChatViewModel {
         case .append(let event):
             appendMessage(event)
             scheduleArchive()
-        case .updateMessage(let id, let body, let status):
+        case .updateMessage(let id, let body, let status, let lagAllowance):
             let mapped = CouncilMessageStatus(status)
+            activeTailLagAllowance = lagAllowance
             updateMessage(id, body: body, status: mapped)
             // 流式中途也按既有 300ms 窗口归档最新尾部；不做逐 token 同步写，
             // 但进程在席位发言中断时仍能恢复最近一段已接受正文。
@@ -2575,6 +2602,8 @@ final class CouncilChatViewModel {
     }
 
     private func appendMessage(_ event: IOSCouncilRoomMessageEvent) {
+        // 新消息开始 = 新的流式上下文：排空收紧值不跨消息残留（与 Chat 语义一致）。
+        activeTailLagAllowance = 1
         let participant = event.speakerId.flatMap { id in participants.first(where: { $0.id == id }) }
         let kind = CouncilMessageKind(event.kind)
         let tint = participant?.tint ?? (kind == .system ? AmberTheme.accentIndigo : AmberTheme.muted)
@@ -2734,6 +2763,7 @@ final class CouncilChatViewModel {
         // 重开 = 把画面清成真正空白(和首次进入议会一致:只剩「输入议题开始」占位),
         // 不再自动发一条「已重新开始」系统消息(画蛇添足)。
         messages = []
+        activeTailLagAllowance = 1
         // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
         persistTranscript()
         refreshSettingsBackedParticipants()

@@ -1129,6 +1129,49 @@ final class NovelCreationViewModelTests: XCTestCase {
         _ = projectID
     }
 
+    func testRejectActiveSettingProposalsClearsEveryPendingCard() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        var document = try NovelTestFixtures.document()
+        let now = document.project.updatedAt
+        var ids: [NovelProposalID] = []
+        for title in ["粮仓", "马厩", "殿前司"] {
+            let id = NovelProposalID()
+            ids.append(id)
+            document.settingProposals.append(NovelSettingProposalRecord(
+                id: id,
+                branchID: document.branches[0].id,
+                title: title,
+                content: "\(title) 的说明。",
+                createdAt: now,
+                isResolved: false
+            ))
+        }
+        let source = document.stateSnapshots[0]
+        document.stateSnapshots[0] = NovelStateSnapshotRecord(
+            id: source.id,
+            eventIDs: source.eventIDs,
+            summary: source.summary,
+            branchOutline: source.branchOutline,
+            unresolvedEntityNames: source.unresolvedEntityNames,
+            createdAt: source.createdAt,
+            settingProposalIDs: ids
+        )
+        try NovelDocumentValidator.validate(document)
+        _ = try await repository.createProject(document)
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: repository)
+        )
+        let didSelect = await viewModel.selectProject(document.project.id)
+        XCTAssertTrue(didSelect)
+        XCTAssertEqual(viewModel.branchSnapshot?.activeSettingProposals.count, 3)
+
+        let ok = await viewModel.rejectActiveSettingProposals()
+        XCTAssertTrue(ok)
+        XCTAssertEqual(viewModel.branchSnapshot?.activeSettingProposals.count, 0)
+        XCTAssertEqual(viewModel.projectSnapshot?.settingProposals.filter(\.isResolved).count, 3)
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
     func testQuickStartRegenerationUsesEditedCoreIdeaForCurrentRunWithoutMutatingSeed() async throws {
         let repository = InMemoryNovelProjectRepository()
         let adapter = ScriptedNovelModelAdapter(
@@ -1323,7 +1366,7 @@ final class NovelCreationViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.quickStartStatus, .failed(message: sourceFailure))
     }
 
-    func testAutomaticStateSyncSnapshotFailureIsVisibleAndExplicitlyRetryable() async throws {
+    func testAutomaticStateSyncSnapshotFailureHealsWithoutBanner() async throws {
         let fixture = try documentWithChapter()
         let branch = fixture.document.branches[0]
         let sourceVersion = try XCTUnwrap(fixture.document.chapterVersions.first {
@@ -1372,37 +1415,21 @@ final class NovelCreationViewModelTests: XCTestCase {
             projectID: edited.project.id,
             branchID: branch.id
         )
-        let failureBecameVisible = await eventually {
-            viewModel.automaticStateSyncFailureMessage(
-                projectID: edited.project.id,
-                branchID: branch.id
-            ) != nil
-        }
-
-        XCTAssertTrue(failureBecameVisible)
-        XCTAssertFalse(viewModel.isProjectSelectionBlocked)
-        XCTAssertEqual(
-            viewModel.automaticStateSyncFailureMessage(
-                projectID: edited.project.id,
-                branchID: branch.id
-            ),
-            "项目保存失败，请稍后重试。"
-        )
-        // Auto-sync failures must not raise the global "无法完成操作" alert.
-        XCTAssertNil(viewModel.errorMessage)
-        viewModel.retryAutomaticStateSync(
-            projectID: edited.project.id,
-            branchID: branch.id
-        )
-        let retried = await eventually {
+        let recovered = await eventually(timeout: 5) {
             let requests = await adapter.requests
             return !requests.isEmpty
         }
-        XCTAssertTrue(retried)
+        XCTAssertTrue(recovered)
+        XCTAssertTrue(viewModel.canCancelAutomaticStateSync(
+            projectID: edited.project.id,
+            branchID: branch.id
+        ))
         XCTAssertNil(viewModel.automaticStateSyncFailureMessage(
             projectID: edited.project.id,
             branchID: branch.id
         ))
+        // Auto-sync failures must not raise the global "无法完成操作" alert.
+        XCTAssertNil(viewModel.errorMessage)
         viewModel.cancelAutomaticStateSync(
             projectID: edited.project.id,
             branchID: branch.id
@@ -1548,21 +1575,7 @@ final class NovelCreationViewModelTests: XCTestCase {
         let firstRequest = try XCTUnwrap(firstRequests.first)
         await adapter.resume(runID: firstRequest.runID)
 
-        let retryablePersisted = await eventually {
-            let persisted = try? await repository.loadProject(id: document.project.id).document
-            return persisted?.pendingOperations.first?.status == .retryable &&
-                viewModel.automaticStateSyncFailureMessage(
-                    projectID: document.project.id,
-                    branchID: branch.id
-                ) != nil &&
-                !viewModel.isProjectSelectionBlocked
-        }
-        XCTAssertTrue(retryablePersisted)
-        XCTAssertTrue(viewModel.projectSnapshot?.pendingOperations.isEmpty == true)
-
-        viewModel.retryAutomaticStateSync(projectID: document.project.id, branchID: branch.id)
-
-        let secondRequestStarted = await eventually(timeout: 3) {
+        let secondRequestStarted = await eventually(timeout: 5) {
             await adapter.requests.count == 2
         }
         XCTAssertTrue(secondRequestStarted)
@@ -1722,8 +1735,10 @@ final class NovelCreationViewModelTests: XCTestCase {
                 displayName: "Model",
                 contextWindowTokens: 32_000
             ),
-            scripts: [
-                NovelModelScript(steps: [.fail(failure)]),
+            scripts: Array(
+                repeating: NovelModelScript(steps: [.fail(failure)]),
+                count: NovelGhostwriteHeal.defaultMaxInfraRetries
+            ) + [
                 NovelModelScript(steps: [.pause]),
                 NovelModelScript(steps: [.pause]),
             ]
@@ -1738,7 +1753,7 @@ final class NovelCreationViewModelTests: XCTestCase {
             projectID: document.project.id,
             branchID: branch.id
         )
-        let becameRetryable = await eventually {
+        let becameRetryable = await eventually(timeout: 5) {
             viewModel.projectSnapshot?.pendingOperations.contains(where: {
                 $0.kind == .manualSync && $0.status == .retryable
             }) == true && !viewModel.isProjectSelectionBlocked
@@ -1749,11 +1764,13 @@ final class NovelCreationViewModelTests: XCTestCase {
                 $0.kind == .manualSync && $0.status == .retryable
             })?.id
         )
+        let autoAttempts = await adapter.requests.count
+        XCTAssertEqual(autoAttempts, NovelGhostwriteHeal.defaultMaxInfraRetries)
 
         let firstRetry = viewModel.startManualStateSyncRetry(pendingID)
         XCTAssertNotNil(firstRetry)
         let firstRetryStarted = await eventually {
-            await adapter.requests.count == 2
+            await adapter.requests.count == autoAttempts + 1
         }
         XCTAssertTrue(firstRetryStarted)
 
@@ -1785,7 +1802,7 @@ final class NovelCreationViewModelTests: XCTestCase {
             "Cancel must not orphan manualStateSyncTask and block later retries."
         )
         let secondRetryStarted = await eventually(timeout: 3) {
-            await adapter.requests.count == 3
+            await adapter.requests.count == autoAttempts + 2
         }
         XCTAssertTrue(secondRetryStarted)
         viewModel.cancelAutomaticStateSync(

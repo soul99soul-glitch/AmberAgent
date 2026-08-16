@@ -2,6 +2,68 @@ import CryptoKit
 import Foundation
 @preconcurrency import Shared
 
+/// The recipe validator and executor share this routing oracle. A primitive is
+/// admitted only when the recipe path has a real adapter with matching
+/// semantics; direct-chat-only preview/try-on flows stay out of recipes.
+enum IOSRecipePrimitiveRoute {
+    case workspace
+    case search
+    case ish
+    case webMount
+    case memory
+    case sessionRead
+    case discovery
+    case skill
+    case advanced
+    case recipeImport
+    case unsupported
+}
+
+enum IOSRecipePrimitiveCatalog {
+    static func route(for tool: String) -> IOSRecipePrimitiveRoute {
+        if IOSWorkspaceToolCatalog.supportedToolNames.contains(tool) { return .workspace }
+        if IOSSearchExecutor.supportedToolNames.contains(tool) { return .search }
+        if IOSIshToolCatalog.supportedToolNames
+            .union(IOSEmbeddedIshToolCatalog.supportedToolNames)
+            .contains(tool) {
+            return .ish
+        }
+        if IOSWebMountToolCatalog.supportedToolNames.contains(tool) { return .webMount }
+        if tool == "memory_tool" { return .memory }
+        if tool == "session_search" || tool == "session_read" { return .sessionRead }
+        if tool == "tool_search" || tool == "tools_list" { return .discovery }
+        if IOSSkillToolCatalog.toolNames.contains(tool), tool != "skill_import" { return .skill }
+        if IOSProviderConfigToolCatalog.toolNames.contains(tool), tool != "provider_config_apply" {
+            return .advanced
+        }
+        if IOSThemePackToolCatalog.toolNames.contains(tool), tool != "theme_pack_import" {
+            return .advanced
+        }
+        if tool == "mcp_call"
+            || tool == "subagent_dispatch" || tool == "model_council_run"
+            || tool == "spawn_agent" || tool == "list_agents" || tool == "interrupt_agent"
+            || tool == "send_message" || tool == "followup_task" || tool == "wait_agent"
+            || tool == "exec" || tool == "wait" {
+            return .advanced
+        }
+        if tool == "recipe_import" { return .recipeImport }
+        return .unsupported
+    }
+
+    static func catalogEntry(for tool: String) -> IOSRecipeCatalogEntry? {
+        switch route(for: tool) {
+        case .recipeImport, .unsupported:
+            return nil
+        default:
+            return IOSRecipeCatalogEntry(
+                exists: true,
+                minVersion: "1.0.0",
+                effectClass: IOSToolEffectClassMapping.forToolName(tool, input: "{}")
+            )
+        }
+    }
+}
+
 // MARK: - IOSDynamicToolRegistry (Phase 1 Wave B1; §9.5 / §13.2 / §13.3 / §16)
 //
 // Versioned dynamic tool registry that turns the recipe store's ACTIVE set
@@ -306,20 +368,12 @@ actor IOSDynamicToolRegistry {
         return CatalogContent(recipeTools: descriptors, contentHash: Self.contentHash(of: descriptors))
     }
 
-    /// Existence + effect-class oracle for recipe validation. A tool "exists"
-    /// iff the iOS run can actually declare it (KMP static catalog) or it is
-    /// a dynamic `mcp__*` name; the effect class comes from the existing
-    /// name-based mapping (fail-safe default sideEffect).
+    /// Existence + effect-class oracle for recipe validation. This is the same
+    /// routing oracle used by execution, so a declared static tool with no
+    /// recipe adapter cannot pass validation and fail only at runtime.
     static func primitiveCatalogEntry(for toolName: String) -> IOSRecipeCatalogEntry? {
         if toolName.hasPrefix("recipe__") { return nil }
-        let known = ToolKt.iosToolDeclaration(name: toolName) != nil
-            || ToolKt.isExpandedMcpToolName(name: toolName)
-        guard known else { return nil }
-        return IOSRecipeCatalogEntry(
-            exists: true,
-            minVersion: "1.0.0",
-            effectClass: IOSToolEffectClassMapping.forToolName(toolName, input: "{}")
-        )
+        return IOSRecipePrimitiveCatalog.catalogEntry(for: toolName)
     }
 
     /// `recipe__<name>` — the model-facing prefix (validator already rejects

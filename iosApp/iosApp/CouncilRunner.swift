@@ -431,7 +431,9 @@ enum IOSCouncilRoomEvent: Equatable {
     case state(String)
     case roster([IOSCouncilRoomSpeaker], activeSpeakerId: String?, failedSpeakerIds: Set<String>)
     case append(IOSCouncilRoomMessageEvent)
-    case updateMessage(id: UUID, body: String, status: IOSCouncilRoomMessageStatus)
+    /// `lagAllowance`：流式拍恒为 1；终态排空拍随剩余积压连续衰减到 0。
+    /// 视图层据此提交 `streamContentGrew(lagAllowance:)`（同 Chat/小说语义）。
+    case updateMessage(id: UUID, body: String, status: IOSCouncilRoomMessageStatus, lagAllowance: CGFloat)
 }
 
 struct IOSCouncilRoomContinuation {
@@ -604,11 +606,13 @@ struct IOSCouncilSearchResearcher: IOSCouncilResearching {
 
 @MainActor
 protocol IOSCouncilTextStreaming: AnyObject {
+    /// `onUpdate` 携带 (可见前缀文本, 滚动跟随滞后允许度)。流式拍恒为 1；
+    /// 终态排空拍随剩余积压连续衰减到 0（与 Chat/小说同源，驱动收紧 τ_eff）。
     func streamText(
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String
 
     func cancel()
@@ -617,11 +621,18 @@ protocol IOSCouncilTextStreaming: AnyObject {
 /// A presentation-only gate for council text streams. Provider chunks continue to
 /// accumulate losslessly; the expensive full snapshot is deferred until the one
 /// scheduled UI flush (or an exact terminal/cancel flush).
+///
+/// 节奏层（与 Chat 的 `ChatStreamPresentationPacer.step` / 小说的
+/// `NovelSessionPresentationPacer` 同一份 `StreamPresentationPacingPolicy`）：
+/// 每个 48ms 刷新窗只发布一个节奏拍（流式 `textAdvance` 预算），大积压时
+/// 自续拍直到追平——上游再快，显示侧仍以平滑节拍输出，模型慢时零损失。
+/// 完成路径走 `drainAndClose`：以锚速 whoosh 中段 + 优雅尾连续减速收尾，
+/// 每拍透出随剩余积压衰减的 lagAllowance。
 @MainActor
 final class IOSCouncilTextPresentationSession {
     private let flushDelayNanoseconds: UInt64
     private let snapshotProvider: @MainActor () -> String
-    private let onUpdate: @MainActor (String) -> Void
+    private let onUpdate: @MainActor (String, CGFloat) -> Void
     private var flushTask: Task<Void, Never>?
     private var lastPublishedText: String?
     private(set) var isClosed = false
@@ -630,7 +641,7 @@ final class IOSCouncilTextPresentationSession {
     init(
         flushDelayNanoseconds: UInt64 = 48_000_000,
         snapshotProvider: @escaping @MainActor () -> String,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) {
         self.flushDelayNanoseconds = flushDelayNanoseconds
         self.snapshotProvider = snapshotProvider
@@ -648,28 +659,131 @@ final class IOSCouncilTextPresentationSession {
             }
             guard !Task.isCancelled, !self.isClosed else { return }
             self.flushTask = nil
-            self.publish(self.snapshotProvider())
+            // 一个刷新窗一拍；未追平（provider 快于显示节拍）时自续下一个窗，
+            // 保持 48ms 稳定节拍直到积压清空。
+            if !self.publishBeat(from: self.snapshotProvider(), terminal: false, fixedAdvance: nil, drainStartBacklog: nil) {
+                self.scheduleFlush()
+            }
         }
     }
 
     /// Cancels any delayed publication and synchronously exposes the exact latest
-    /// authoritative text before the caller publishes completed/failed/cancelled state.
+    /// authoritative text before the caller publishes failed/cancelled state.
+    /// 失败/取消不做优雅排空（与 Chat 错误路径一致：整段一次落定）。
     @discardableResult
     func flushAndClose() -> String {
-        guard !isClosed else { return finalText }
+        if isClosed {
+            if lastPublishedText != finalText {
+                lastPublishedText = finalText
+                onUpdate(finalText, 1)
+            }
+            return finalText
+        }
         isClosed = true
         flushTask?.cancel()
         flushTask = nil
         let text = snapshotProvider()
         finalText = text
-        publish(text)
+        if lastPublishedText != text {
+            lastPublishedText = text
+            onUpdate(text, 1)
+        }
         return text
     }
 
-    private func publish(_ text: String) {
-        guard lastPublishedText != text else { return }
-        lastPublishedText = text
-        onUpdate(text)
+    /// 完成路径的终态排空：以完成时积压一次定锚，每拍随剩余积压连续减速
+    /// （`terminalTextAdvance` 优雅尾），拍间隔按减速后的实际拍速逐拍重算
+    /// （8ms whoosh → 48ms 打字节奏），每拍透出 `lagAllowance`（1→0）。
+    /// 取消/中断时立即落定权威全文，绝不留半截前缀上屏。
+    func drainAndClose() async -> String {
+        guard !isClosed else { return finalText }
+        isClosed = true
+        flushTask?.cancel()
+        flushTask = nil
+        let target = snapshotProvider()
+        finalText = target
+        let drainStartBacklog = max(0, target.count - (lastPublishedText?.count ?? 0))
+        guard drainStartBacklog > 0 else {
+            if lastPublishedText != target {
+                lastPublishedText = target
+                onUpdate(target, 0)
+            }
+            return target
+        }
+        let drainAdvance = StreamPresentationPacingPolicy.terminalDrainAdvance(
+            backlogCount: drainStartBacklog
+        )
+        while !Task.isCancelled {
+            if publishBeat(
+                from: target,
+                terminal: true,
+                fixedAdvance: drainAdvance,
+                drainStartBacklog: drainStartBacklog
+            ) {
+                return target
+            }
+            let remainingBefore = max(0, target.count - (lastPublishedText?.count ?? 0))
+            let beatAdvance = StreamPresentationPacingPolicy.terminalTextAdvance(
+                backlogCount: remainingBefore,
+                fixedAdvance: drainAdvance
+            )
+            do {
+                try await Task.sleep(
+                    nanoseconds: StreamPresentationPacingPolicy.terminalDrainDelayNanos(
+                        advance: beatAdvance
+                    )
+                )
+            } catch {
+                break
+            }
+        }
+        if lastPublishedText != target {
+            lastPublishedText = target
+            onUpdate(target, 0)
+        }
+        return target
+    }
+
+    /// 发布一个节奏拍。返回是否已追平权威快照。
+    ///
+    /// 注意：不能在开头用 `!isClosed` 收口——`drainAndClose` 在排空循环前
+    /// 置 `isClosed = true`（封死迟到的 flush），排空拍仍必须照常发布；
+    /// 流式 flush 路径已在任务内检查 `!isClosed`。
+    @discardableResult
+    private func publishBeat(
+        from target: String,
+        terminal: Bool,
+        fixedAdvance: Int?,
+        drainStartBacklog: Int?
+    ) -> Bool {
+        let published = lastPublishedText ?? ""
+        guard target != published else { return true }
+        guard target.hasPrefix(published), target.count > published.count else {
+            // 非前缀替换（理论不达：accumulator 只追加）：直接落定权威全文。
+            lastPublishedText = target
+            onUpdate(target, terminal ? 0 : 1)
+            return true
+        }
+        let backlog = target.count - published.count
+        let advance: Int
+        let allowance: CGFloat
+        if terminal {
+            advance = StreamPresentationPacingPolicy.terminalTextAdvance(
+                backlogCount: backlog,
+                fixedAdvance: fixedAdvance
+            )
+            allowance = StreamPresentationPacingPolicy.lagAllowance(
+                remainingBacklog: max(0, backlog - advance),
+                drainStartBacklog: drainStartBacklog ?? max(backlog, 1)
+            )
+        } else {
+            advance = StreamPresentationPacingPolicy.textAdvance(backlogCount: backlog)
+            allowance = 1
+        }
+        let next = String(target.prefix(published.count + advance))
+        lastPublishedText = next
+        onUpdate(next, allowance)
+        return next == target
     }
 }
 
@@ -692,7 +806,7 @@ private final class IOSCouncilActiveTextStream {
     init(
         accumulator: MessageStreamAccumulator,
         eventSink: ChatStreamEventSink,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) {
         self.accumulator = accumulator
         self.eventSink = eventSink
@@ -708,6 +822,23 @@ private final class IOSCouncilActiveTextStream {
         guard !presentation.isClosed else { return }
         accumulator.append(chunk: chunk)
         presentation.scheduleFlush()
+    }
+
+    /// 完成路径：先收口 sink 与排空队列，再以节奏拍逐拍追平剩余积压
+    /// （优雅尾减速 + lagAllowance 收紧），返回权威全文。
+    func drainAndClose(drainingQueuedChunks: Bool) async -> String {
+        if drainingQueuedChunks, !presentation.isClosed {
+            // Close the sink first so the drained prefix has an exact acceptance
+            // boundary: callbacks racing cancellation are either already queued or
+            // rejected, never admitted between drain and snapshot.
+            eventSink.finish()
+            for chunk in eventSink.takePendingChunks() {
+                accumulator.append(chunk: chunk)
+            }
+        }
+        let text = await presentation.drainAndClose()
+        eventSink.finish()
+        return text
     }
 
     @discardableResult
@@ -747,7 +878,7 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         providerSetting: ProviderSetting,
         messages: [UIMessage],
         params: TextGenerationParams,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         let effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
         let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(
@@ -789,7 +920,9 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
             case .chunk(let chunk):
                 stream.accept(chunk)
             case .complete:
-                let text = stream.flushAndClose(drainingQueuedChunks: false)
+                // 完成路径走优雅排空：锚速 whoosh 中段 + 连续减速收尾，
+                // 每拍透出 lagAllowance（与 Chat/小说终态同源）。
+                let text = await stream.drainAndClose(drainingQueuedChunks: false)
                 clearActiveStreamIfNeeded(stream)
                 return text
             case .error(let error):
@@ -1285,9 +1418,14 @@ final class IOSCouncilRoomRunner {
                         ),
                         request: request,
                         temperature: 0.35,
-                        onUpdate: { text in
+                        onUpdate: { text, allowance in
                             if !text.isEmpty { recordOutput() }
-                            onEvent(.updateMessage(id: topicMessageId, body: text.isEmpty ? "调研和完善议题中..." : text, status: .speaking))
+                            onEvent(.updateMessage(
+                                id: topicMessageId,
+                                body: text.isEmpty ? "调研和完善议题中..." : text,
+                                status: .speaking,
+                                lagAllowance: allowance
+                            ))
                         }
                     )
                 }
@@ -1295,12 +1433,13 @@ final class IOSCouncilRoomRunner {
                     onEvent(.updateMessage(
                         id: topicMessageId,
                         body: "主持人未返回议题。",
-                        status: .failed
+                        status: .failed,
+                        lagAllowance: 1
                     ))
                     throw IOSCouncilRoomRunnerError.emptyOutput("最终议题")
                 }
                 try checkCancelled(runGeneration: currentRunGeneration)
-                onEvent(.updateMessage(id: topicMessageId, body: generatedTopic, status: .completed))
+                onEvent(.updateMessage(id: topicMessageId, body: generatedTopic, status: .completed, lagAllowance: 0))
                 transcript.append("[\(host.name)] \(generatedTopic)")
                 taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(generatedTopic)\n\n")
                 finalTopic = generatedTopic
@@ -1332,7 +1471,7 @@ final class IOSCouncilRoomRunner {
                         ),
                         request: request,
                         temperature: 0.3,
-                        onUpdate: { text in
+                        onUpdate: { text, _ in
                             if !text.isEmpty { recordOutput() }
                         }
                     )
@@ -1357,7 +1496,7 @@ final class IOSCouncilRoomRunner {
                             ),
                             request: request,
                             temperature: 0.3,
-                            onUpdate: { text in
+                            onUpdate: { text, _ in
                                 if !text.isEmpty { recordOutput() }
                             }
                         )
@@ -1484,7 +1623,7 @@ final class IOSCouncilRoomRunner {
                                 ),
                                 request: request,
                                 temperature: request.mode == .debate ? 0.55 : 0.75,
-                                onUpdate: { text in
+                                onUpdate: { text, allowance in
                                     if !text.isEmpty { recordOutput() }
                                     let shown = text.isEmpty
                                         ? "思考中..."
@@ -1495,14 +1634,14 @@ final class IOSCouncilRoomRunner {
                                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         latestMessage.body = shown
                                     }
-                                    onEvent(.updateMessage(id: messageId, body: shown, status: .speaking))
+                                    onEvent(.updateMessage(id: messageId, body: shown, status: .speaking, lagAllowance: allowance))
                                 }
                             )
                         }
                         guard let output = Self.sanitizeSeatOutput(output).trimmedNilIfBlank else {
                             throw IOSCouncilRoomRunnerError.emptyOutput("\(seat.name)席位")
                         }
-                        onEvent(.updateMessage(id: messageId, body: output, status: .completed))
+                        onEvent(.updateMessage(id: messageId, body: output, status: .completed, lagAllowance: 0))
                         transcript.append("[\(seat.name)] \(output)")
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] \(output)\n\n")
                     } catch {
@@ -1516,7 +1655,7 @@ final class IOSCouncilRoomRunner {
                         let failedBody = latestMessage.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             ? "席位失败：\(reason)"
                             : latestMessage.body
-                        onEvent(.updateMessage(id: messageId, body: failedBody, status: .failed))
+                        onEvent(.updateMessage(id: messageId, body: failedBody, status: .failed, lagAllowance: 1))
                         onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                         taskStore.appendLog(id: task.id, chunk: "[\(seat.name)] failed: \(reason)\n\n")
                     }
@@ -1559,20 +1698,20 @@ final class IOSCouncilRoomRunner {
                                 ),
                                 request: request,
                                 temperature: 0.45,
-                                onUpdate: { text in
+                                onUpdate: { text, allowance in
                                     if !text.isEmpty { recordOutput() }
                                     let body = text.isEmpty ? "点评中..." : text
                                     if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                         latestCommentary.body = text
                                     }
-                                    onEvent(.updateMessage(id: commentaryId, body: body, status: .speaking))
+                                    onEvent(.updateMessage(id: commentaryId, body: body, status: .speaking, lagAllowance: allowance))
                                 }
                             )
                         }
                         guard let commentary = commentary.trimmedNilIfBlank else {
                             throw IOSCouncilRoomRunnerError.emptyOutput("主持人点评")
                         }
-                        onEvent(.updateMessage(id: commentaryId, body: commentary, status: .completed))
+                        onEvent(.updateMessage(id: commentaryId, body: commentary, status: .completed, lagAllowance: 0))
                         transcript.append("[\(host.name) · 第\(round)轮点评] \(commentary)")
                         taskStore.appendLog(id: task.id, chunk: "[\(host.name) · 第\(round)轮点评] \(commentary)\n\n")
                     } catch {
@@ -1584,7 +1723,7 @@ final class IOSCouncilRoomRunner {
                         let failedBody = latestCommentary.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                             ? "点评失败：\(error.localizedDescription)"
                             : latestCommentary.body
-                        onEvent(.updateMessage(id: commentaryId, body: failedBody, status: .failed))
+                        onEvent(.updateMessage(id: commentaryId, body: failedBody, status: .failed, lagAllowance: 1))
                     }
                     onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
                 }
@@ -1628,9 +1767,9 @@ final class IOSCouncilRoomRunner {
                     ),
                     request: request,
                     temperature: 0.35,
-                    onUpdate: { text in
+                    onUpdate: { text, allowance in
                         if !text.isEmpty { recordOutput() }
-                        onEvent(.updateMessage(id: summaryId, body: text.isEmpty ? "总结中..." : text, status: .speaking))
+                        onEvent(.updateMessage(id: summaryId, body: text.isEmpty ? "总结中..." : text, status: .speaking, lagAllowance: allowance))
                     }
                 )
             }
@@ -1638,11 +1777,12 @@ final class IOSCouncilRoomRunner {
                 onEvent(.updateMessage(
                     id: summaryId,
                     body: "主持人未返回总结。",
-                    status: .failed
+                    status: .failed,
+                    lagAllowance: 1
                 ))
                 throw IOSCouncilRoomRunnerError.emptyOutput("最终综合")
             }
-            onEvent(.updateMessage(id: summaryId, body: summary, status: .completed))
+            onEvent(.updateMessage(id: summaryId, body: summary, status: .completed, lagAllowance: 0))
             transcript.append("[\(host.name)] \(summary)")
             taskStore.appendLog(id: task.id, chunk: "[\(host.name)] \(summary)\n\n")
             onEvent(.roster([host] + activeSeats, activeSpeakerId: nil, failedSpeakerIds: failedSeatIds))
@@ -2013,7 +2153,7 @@ final class IOSCouncilRoomRunner {
             providerSetting: route.providerSetting,
             messages: [UIMessage.companion.user(prompt: "只回复 OK")],
             params: params,
-            onUpdate: { text in
+            onUpdate: { text, _ in
                 if !text.isEmpty { recordOutput() }
             }
         )
@@ -2026,7 +2166,7 @@ final class IOSCouncilRoomRunner {
         userPrompt: String,
         request: IOSCouncilRoomRunRequest,
         temperature: Float,
-        onUpdate: @escaping @MainActor (String) -> Void
+        onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
         try checkCancelled(runGeneration: runGeneration)
         let route = resolvedRoute(

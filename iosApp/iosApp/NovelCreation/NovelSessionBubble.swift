@@ -488,6 +488,12 @@ private struct NovelAskUserCard: View {
                 blocker: blocker,
                 onSubmit: onSubmit
             )
+        } else if presentation.prompt.manuscriptRevert != nil {
+            NovelManuscriptRevertCard(
+                presentation: presentation,
+                blocker: blocker,
+                onSubmit: onSubmit
+            )
         } else {
             askUserBody
         }
@@ -653,8 +659,10 @@ private struct NovelChapterRevisionCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                revisionBlock(title: "原文", text: revision.oldText)
-                revisionBlock(title: "改为", text: revision.newText)
+                if presentation.response == nil {
+                    revisionBlock(title: "原文", text: revision.oldText)
+                    revisionBlock(title: "改为", text: revision.newText)
+                }
             }
 
             if let response = presentation.response,
@@ -752,6 +760,90 @@ private struct NovelChapterRevisionCard: View {
             AmberTheme.surface.opacity(0.72),
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
+    }
+}
+
+private struct NovelManuscriptRevertCard: View {
+    let presentation: NovelAskUserPresentation
+    let blocker: NovelSessionActionBlocker?
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(statusTitle, systemImage: statusSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor)
+
+            Text(presentation.prompt.question)
+                .font(.body.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let reason = presentation.prompt.manuscriptRevert?.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if presentation.response == nil {
+                if let blocker {
+                    Text(blocker.displayName)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+                HStack(spacing: 10) {
+                    Button {
+                        onSubmit(NovelManuscriptRevertApproval.rejectOption)
+                    } label: {
+                        Text(NovelManuscriptRevertApproval.rejectOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .contentShape(Rectangle())
+
+                    Button {
+                        onSubmit(NovelManuscriptRevertApproval.approveOption)
+                    } label: {
+                        Text(NovelManuscriptRevertApproval.approveOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .contentShape(Rectangle())
+                }
+                .disabled(blocker != nil)
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var statusTitle: String {
+        guard let answer = presentation.response?.answer else { return "回退章节审批" }
+        if answer == NovelManuscriptRevertApproval.approveOption { return "已回退这几章" }
+        if answer == NovelManuscriptRevertApproval.rejectOption { return "已取消回退" }
+        return "已回答"
+    }
+
+    private var statusSymbol: String {
+        switch presentation.response?.answer {
+        case NovelManuscriptRevertApproval.approveOption: "checkmark.circle.fill"
+        case NovelManuscriptRevertApproval.rejectOption: "xmark.circle.fill"
+        default: "arrow.uturn.backward"
+        }
+    }
+
+    private var statusColor: Color {
+        switch presentation.response?.answer {
+        case NovelManuscriptRevertApproval.approveOption: AmberTheme.accentGreen
+        case NovelManuscriptRevertApproval.rejectOption: AmberTheme.foreground2
+        default: AmberTheme.accent
+        }
     }
 }
 

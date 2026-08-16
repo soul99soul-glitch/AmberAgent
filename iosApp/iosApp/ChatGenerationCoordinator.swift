@@ -178,6 +178,7 @@ private final class ChatStreamAccumulatorSession {
     /// P2-c: 本流（一条 assistant 消息）的 citation 隐藏标记跟踪器。
     let citationTracker = IOSMemoryCitationTracker()
     var detectedToolCallIds = Set<String>()
+    var didReportFirstChunk = false
     /// 本轮是否有 chunk 报告了输出上限 finish_reason。累加器只保留 delta/message/usage,
     /// 不透传 finishReason,所以必须在消费 chunk 的当下记录下来。
     var hitOutputLimit = false
@@ -1689,18 +1690,20 @@ final class ChatGenerationCoordinator {
         conversationStore: IOSConversationStore?,
         honorKeepAliveLease: Bool = false
     ) -> Bool {
-        // App 退后台时不再撤单重投：uiOnly 在剩余短窗内立即启动耐久收口，
-        // submitted/adopted 保留用户前台动作已提交的原流。
+        // App 退后台时不撤单重投：有 Responses cursor 就交给服务端耐久续接；
+        // UIKit 短窗、submitted、adopted 都保留同一条流，执行权全无才中断。
         if honorKeepAliveLease, let runId = currentRunId {
+            if hasPendingToolApproval { return false }
+            if detachDurableResponse(runId: runId) {
+                return true
+            }
             switch backgroundExecution.executionAssertion(for: runId) {
             case .none:
-                if !detachDurableResponse(runId: runId) {
-                    _ = cancel(runId: runId, cause: .backgroundInterruption)
-                }
+                _ = cancel(runId: runId, cause: .backgroundInterruption)
             case .uiOnly:
-                if !detachDurableResponse(runId: runId) {
-                    _ = cancel(runId: runId, cause: .backgroundInterruption)
-                }
+                // System request 提交失败仍有 UIKit 短窗；让同一条流继续，
+                // 真到期再由 handleKeepAliveExpiration 持久化 partial 并中断。
+                pendingBackgroundConversationStore = conversationStore
             case .submitted, .adopted:
                 // 保留用户前台动作已提交的原流。
                 pendingBackgroundConversationStore = conversationStore
@@ -2190,6 +2193,15 @@ final class ChatGenerationCoordinator {
                 guard let self, self.currentRunId == runId else { return }
                 switch event.payload {
                 case .chunk(let chunk):
+                    if !streamSession.didReportFirstChunk {
+                        streamSession.didReportFirstChunk = true
+                        self.backgroundExecution.updateProgress(
+                            runId,
+                            completed: 2,
+                            total: 4,
+                            subtitle: "正在接收回复"
+                        )
+                    }
                     accumulator.append(chunk: chunk)
                     if Self.reachedOutputLimit(chunk) {
                         streamSession.hitOutputLimit = true
@@ -2954,7 +2966,7 @@ final class ChatGenerationCoordinator {
     ) async {
         backgroundExecution.updateProgress(
             runId,
-            completed: 2,
+            completed: 3,
             total: 4,
             subtitle: "正在执行工具"
         )
@@ -3784,8 +3796,11 @@ final class ChatGenerationCoordinator {
             )
             return
         }
+        let approvalMessages = IOSProviderConfigToolCatalog.redactedApprovalMessages(
+            pending.baseMessages
+        )
         let didPersist = await bindings.persistMessagesSnapshot(
-            pending.baseMessages,
+            approvalMessages,
             pending.conversationId,
             writeBaseline
         )
@@ -4811,6 +4826,9 @@ final class ChatGenerationCoordinator {
         }
         backgroundHandoff = handoff
         durableCheckpointPersisted = true
+        if pendingBackgroundConversationStore != nil {
+            _ = detachDurableResponse(runId: runId)
+        }
     }
 
     @discardableResult
@@ -4885,6 +4903,14 @@ final class ChatGenerationCoordinator {
         cancelPendingStreamSnapshotPublish()
         cancelStreamEventConsumer()
         // 前台把这一轮跑完了，执行权到此为止。
+        if terminalEvent == .generationCompleted {
+            backgroundExecution.updateProgress(
+                runId,
+                completed: 4,
+                total: 4,
+                subtitle: "回复已完成"
+            )
+        }
         backgroundExecution.end(runId)
         ChatStreamRecorder.shared.finish(runId: runId)
         grokWebStreamTask?.cancel()

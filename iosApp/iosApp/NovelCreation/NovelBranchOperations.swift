@@ -1,6 +1,41 @@
 import CryptoKit
 import Foundation
 
+struct NovelWorkingManuscriptChapter: Equatable, Sendable {
+    let ordinal: Int
+    let chapterID: NovelChapterID
+    let title: String
+    let versionID: NovelChapterVersionID
+}
+
+struct NovelRecentChapterRevertPlan: Equatable, Sendable {
+    let chapters: [NovelWorkingManuscriptChapter]
+    let targetCheckpointID: NovelCheckpointID
+    let undoStepCount: Int
+}
+
+enum NovelRecentChapterRevertFailure: Error, Equatable, Sendable {
+    case invalidChapterCount
+    case notEnoughChapters
+    case workingDiverged
+    case cannotReachTarget
+}
+
+extension NovelRecentChapterRevertFailure: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .invalidChapterCount:
+            "回退章数必须是 1 到 64。"
+        case .notEnoughChapters:
+            "当前正文没有这么多章可以回退。"
+        case .workingDiverged:
+            "请先同步手动改写，再回退章节。"
+        case .cannotReachTarget:
+            "无法回退到分支起点之前。这几章里有从 Fork 继承下来的正文。"
+        }
+    }
+}
+
 enum NovelBranchSemantics {
     static func normalizingDecodedSyncStatus(
         _ document: NovelProjectDocumentV1
@@ -82,31 +117,168 @@ enum NovelBranchSemantics {
         return undoTarget(for: checkpoint, checkpoints: checkpoints)
     }
 
-    static func checkpointBelongsToBranch(
-        _ checkpointID: NovelCheckpointID,
+    static func workingManuscriptChapters(
         branch: NovelBranchRecord,
         document: NovelProjectDocumentV1
+    ) -> [NovelWorkingManuscriptChapter] {
+        workingManuscriptChapters(
+            branch: branch,
+            chapters: document.chapters,
+            chapterVersions: document.chapterVersions
+        )
+    }
+
+    static func workingManuscriptChapters(
+        branch: NovelBranchRecord,
+        chapters: [NovelChapterRecord],
+        chapterVersions: [NovelChapterVersionRecord]
+    ) -> [NovelWorkingManuscriptChapter] {
+        let discarded = Set(
+            chapters.compactMap { chapter -> NovelChapterID? in
+                chapter.discardedAt == nil ? nil : chapter.id
+            }
+        )
+        return branch.workingChapterSelections.enumerated().compactMap { index, selection in
+            guard !discarded.contains(selection.chapterID),
+                  let version = chapterVersions.first(where: {
+                      $0.id == selection.versionID && $0.chapterID == selection.chapterID
+                  }) else {
+                return nil
+            }
+            return NovelWorkingManuscriptChapter(
+                ordinal: index + 1,
+                chapterID: selection.chapterID,
+                title: version.title,
+                versionID: version.id
+            )
+        }
+    }
+
+    static func recentChapterRevertPlan(
+        chapterCount: Int,
+        branch: NovelBranchRecord,
+        document: NovelProjectDocumentV1
+    ) -> Result<NovelRecentChapterRevertPlan, NovelRecentChapterRevertFailure> {
+        recentChapterRevertPlan(
+            chapterCount: chapterCount,
+            branch: branch,
+            chapters: document.chapters,
+            chapterVersions: document.chapterVersions,
+            checkpoints: document.checkpoints
+        )
+    }
+
+    static func recentChapterRevertPlan(
+        chapterCount: Int,
+        branch: NovelBranchRecord,
+        chapters: [NovelChapterRecord],
+        chapterVersions: [NovelChapterVersionRecord],
+        checkpoints: [NovelBranchCheckpointRecord]
+    ) -> Result<NovelRecentChapterRevertPlan, NovelRecentChapterRevertFailure> {
+        guard chapterCount >= 1, chapterCount <= 64 else {
+            return .failure(.invalidChapterCount)
+        }
+        let working = workingManuscriptChapters(
+            branch: branch,
+            chapters: chapters,
+            chapterVersions: chapterVersions
+        )
+        guard chapterCount <= working.count else {
+            return .failure(.notEnoughChapters)
+        }
+        let removing = Array(working.suffix(chapterCount))
+        let removingIDs = Set(removing.map(\.chapterID))
+        guard let head = checkpoints.first(where: { $0.id == branch.headCheckpointID }) else {
+            return .failure(.cannotReachTarget)
+        }
+        guard canUndoHead(head, branch: branch, checkpoints: checkpoints) else {
+            return .failure(.workingDiverged)
+        }
+        var current = head
+        var steps = 0
+        while workingChapterIDs(in: current.chapterSelections, chapters: chapters)
+            .contains(where: { removingIDs.contains($0) })
+        {
+            guard let next = undoTarget(
+                for: current,
+                branch: branch,
+                checkpoints: checkpoints
+            ), checkpointBelongsToBranch(
+                next.id,
+                branch: branch,
+                checkpoints: checkpoints
+            ) else {
+                return .failure(.cannotReachTarget)
+            }
+            current = next
+            steps += 1
+            if steps > 256 {
+                return .failure(.cannotReachTarget)
+            }
+        }
+        guard steps >= 1 else {
+            return .failure(.cannotReachTarget)
+        }
+        return .success(
+            NovelRecentChapterRevertPlan(
+                chapters: removing,
+                targetCheckpointID: current.id,
+                undoStepCount: steps
+            )
+        )
+    }
+
+    private static func workingChapterIDs(
+        in selections: [NovelChapterSelection],
+        chapters: [NovelChapterRecord]
+    ) -> [NovelChapterID] {
+        let discarded = Set(
+            chapters.compactMap { chapter -> NovelChapterID? in
+                chapter.discardedAt == nil ? nil : chapter.id
+            }
+        )
+        return selections.compactMap { selection in
+            discarded.contains(selection.chapterID) ? nil : selection.chapterID
+        }
+    }
+
+    private static func checkpointBelongsToBranch(
+        _ checkpointID: NovelCheckpointID,
+        branch: NovelBranchRecord,
+        checkpoints: [NovelBranchCheckpointRecord]
     ) -> Bool {
-        guard let initial = document.checkpoints.first(where: { $0.kind == .initial }) else {
+        guard let initial = checkpoints.first(where: { $0.kind == .initial }) else {
             return false
         }
         let boundaryID = branch.forkOrigin?.checkpointID ?? initial.id
-        let checkpoints = Dictionary(
-            document.checkpoints.map { ($0.id, $0) },
+        let byID = Dictionary(
+            checkpoints.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
         var visited: Set<NovelCheckpointID> = []
         var currentID = checkpointID
         while currentID != boundaryID {
             guard visited.insert(currentID).inserted,
-                  let checkpoint = checkpoints[currentID],
+                  let checkpoint = byID[currentID],
                   checkpoint.createdOnBranchID == branch.id,
                   let parentID = checkpoint.parentCheckpointID else {
                 return false
             }
             currentID = parentID
         }
-        return checkpoints[boundaryID] != nil
+        return byID[boundaryID] != nil
+    }
+
+    static func checkpointBelongsToBranch(
+        _ checkpointID: NovelCheckpointID,
+        branch: NovelBranchRecord,
+        document: NovelProjectDocumentV1
+    ) -> Bool {
+        checkpointBelongsToBranch(
+            checkpointID,
+            branch: branch,
+            checkpoints: document.checkpoints
+        )
     }
 
     static func inheritedMessageID(

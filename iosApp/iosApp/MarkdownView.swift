@@ -569,6 +569,41 @@ struct AmberMarkdownView: View {
         Text(buildInlineAttrString(nodes, source: source))
     }
 
+    /// Concatenate adjacent `.text` siblings before rejected-strong repair.
+    /// pulldown-cmark emits each leftover `*` as its own Text node, so a
+    /// per-node regex never sees `**…**`.
+    private func buildInlineAttrString(_ nodes: [PackedAstNode], source: String) -> AttributedString {
+        var attrStr = AttributedString()
+        var textRun: [String] = []
+        func flushText() {
+            guard !textRun.isEmpty else { return }
+            attrStr.append(Self.repairRejectedStrong(inAdjacentTextFragments: textRun))
+            textRun.removeAll(keepingCapacity: true)
+        }
+        for node in nodes {
+            switch node.type {
+            case .text:
+                let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
+                if !raw.isEmpty { textRun.append(raw) }
+            case .softBreak:
+                flushText()
+                if let last = attrStr.characters.last, !last.isWhitespace, !isCJK(last) {
+                    attrStr.append(AttributedString(" "))
+                }
+            case .hardBreak:
+                flushText()
+                attrStr.append(AttributedString("\n"))
+            default:
+                flushText()
+                if let part = renderInlineAttr(node, source: source) {
+                    attrStr.append(part)
+                }
+            }
+        }
+        flushText()
+        return attrStr
+    }
+
     /// Render a single inline node into an AttributedString fragment.
     private func renderInlineAttr(_ node: PackedAstNode, source: String) -> AttributedString? {
         switch node.type {
@@ -636,16 +671,21 @@ struct AmberMarkdownView: View {
     }
 
     /// CommonMark flanking 规则会拒绝若干模型高频粗体形态（`**（重点）**`、
-    /// CJK 紧邻的 `__…__` 等），原生 pulldown-cmark AST 里它们只剩 Text 节点
-    /// 中的字面定界符。这里把残留在纯文本里的成对定界符修复回 strong——
-    /// 已被正常解析的粗体不在 Text 节点里，所以天然只作用于解析器拒绝的部分。
-    /// 与 vendor `RejectedEmphasisRepairRewriter` 同口径，两处正则必须同步。
+    /// CJK 紧邻的 `__…__`、`**“引号词”热潮**` 等）。pulldown-cmark 还会把
+    /// 未配对的 `**` 拆成相邻的单个 `*` Text 节点，逐节点修看不到成对定界符。
+    /// 完成态渲染先拼接相邻文本再修。已被正常解析的粗体不在 Text 节点里，
+    /// 所以只作用于解析器拒绝的部分。与 vendor
+    /// `RejectedEmphasisRepairRewriter` 同口径，两处正则必须同步。
     // Swift Regex 不支持 lookbehind：把「内容不得以空白收尾」折进捕获组
     // （内容末字符显式匹配为非空白、非定界符），与 vendor 侧保持同式。
     private static let rejectedStarStrong = try? Regex("\\*\\*(?!\\s)([^*]*?[^\\s*])\\*\\*")
     private static let rejectedUnderscoreStrong = try? Regex("__(?!\\s)([^_]*?[^\\s_])__")
 
-    /// internal 供定点测试直驱；生产只经 `.text` 分支调用。
+    /// internal 供定点测试直驱；生产经相邻 Text 拼接后调用。
+    static func repairRejectedStrong(inAdjacentTextFragments fragments: [String]) -> AttributedString {
+        repairRejectedStrong(in: fragments.joined())
+    }
+
     static func repairRejectedStrong(in raw: String) -> AttributedString {
         guard let star = rejectedStarStrong, let underscore = rejectedUnderscoreStrong else {
             return AttributedString(raw)
@@ -678,32 +718,6 @@ struct AmberMarkdownView: View {
             result.append(AttributedString(String(raw[cursor...])))
         }
         return result
-    }
-
-    /// Build a plain AttributedString by concatenating inline children.
-    ///
-    /// Soft breaks (single newlines inside a paragraph) are NOT hard line breaks.
-    /// CommonMark renders them as a space; for CJK text a space mid-sentence reads
-    /// wrong, so we only insert a space when the preceding character is non-CJK and
-    /// join with nothing between CJK characters. This stops model-wrapped prose — and
-    /// inline citations like `[1]` — from being shattered onto one fragment per line.
-    private func buildInlineAttrString(_ nodes: [PackedAstNode], source: String) -> AttributedString {
-        var attrStr = AttributedString()
-        for node in nodes {
-            switch node.type {
-            case .softBreak:
-                if let last = attrStr.characters.last, !last.isWhitespace, !isCJK(last) {
-                    attrStr.append(AttributedString(" "))
-                }
-            case .hardBreak:
-                attrStr.append(AttributedString("\n"))
-            default:
-                if let part = renderInlineAttr(node, source: source) {
-                    attrStr.append(part)
-                }
-            }
-        }
-        return attrStr
     }
 
     /// Whether a character belongs to a CJK script (or CJK/fullwidth punctuation), used
