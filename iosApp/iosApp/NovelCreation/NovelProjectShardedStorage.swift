@@ -71,6 +71,30 @@ enum NovelProjectShardedStorage {
 
     typealias SectionCache = [String: SectionCacheEntry]
 
+    /// Files in the markdown checkout. Project revision and branch
+    /// `activeRunID` change on every generation persist — those must not
+    /// rebuild 31 chapters.
+    static let checkoutAffectingSections: Set<SectionKey> = [
+        .materials,
+        .materialRevisions,
+        .chapters,
+        .chapterVersions,
+        .events,
+        .stateSnapshots,
+        .checkpoints,
+        .settingProposals,
+    ]
+
+    static func checkoutSidecarNeedsRefresh(
+        previous: SectionCache?,
+        next: SectionCache
+    ) -> Bool {
+        guard let previous else { return true }
+        return checkoutAffectingSections.contains { key in
+            previous[key.rawValue]?.digest != next[key.rawValue]?.digest
+        }
+    }
+
     // MARK: - Paths
 
     static func packageDirectory(projectDirectory: URL, projectID: NovelProjectID) -> URL {

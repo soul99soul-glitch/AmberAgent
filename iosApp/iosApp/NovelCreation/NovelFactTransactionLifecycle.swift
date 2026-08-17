@@ -256,14 +256,27 @@ private extension DefaultNovelCreation {
               }) else {
             throw NovelError.invalidInput("The collected chapter is missing from the working manuscript.")
         }
-        let next = try NovelWorkspacePlotCommit.applyChapterModule(
-            to: collectedLoaded.document,
-            branchID: command.branchID,
-            chapterID: chapterID,
-            chapterTitle: version.title,
-            chapterContent: version.content,
-            now: now()
-        )
+        let next: NovelProjectDocumentV1
+        do {
+            next = try await applyChapterPlotPointer(
+                to: collectedLoaded.document,
+                branchID: command.branchID,
+                chapterID: chapterID,
+                chapterTitle: version.title,
+                chapterContent: version.content
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            next = try NovelWorkspacePlotCommit.applyChapterModule(
+                to: collectedLoaded.document,
+                branchID: command.branchID,
+                chapterID: chapterID,
+                chapterTitle: version.title,
+                chapterContent: version.content,
+                now: now()
+            )
+        }
         _ = try await commitFactDocument(next, replacing: collectedLoaded)
         return committed.outcome
     }

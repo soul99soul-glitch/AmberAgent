@@ -1950,7 +1950,7 @@ final class NovelSessionReplayTests: XCTestCase {
         XCTAssertTrue(source.contains("contentHeight: geometry.contentSize.height"))
         XCTAssertTrue(source.contains("NovelSessionScrollGeometryPolicy.events("))
         XCTAssertTrue(source.contains("for event in followEvents"))
-        XCTAssertTrue(source.contains("!viewModel.retryableBranchPendingOperations.isEmpty"))
+        XCTAssertTrue(source.contains("viewModel.retryableBranchPendingOperations.contains(where:"))
         XCTAssertTrue(source.contains("NativeTimelineScrollReturnPolicy.returnedToBottom("))
         XCTAssertTrue(source.contains("dispatchFollowEvent(.userDragEnded(isAtBottom: returnedToBottom))"))
         XCTAssertTrue(source.contains("ChatLayout.nearBottomResumeThreshold"))

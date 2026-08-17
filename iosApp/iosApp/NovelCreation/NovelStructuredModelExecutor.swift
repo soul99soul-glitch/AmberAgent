@@ -8,6 +8,7 @@ enum NovelStructuredModelTaskKind: String, Codable, Equatable, CaseIterable, Sen
     case continuityAudit
     case chapterPlanAcceptance
     case chapterPlanProposal
+    case workspacePlot
 }
 
 enum NovelStructuredModelTask: Equatable, Sendable {
@@ -20,6 +21,7 @@ enum NovelStructuredModelTask: Equatable, Sendable {
     case continuityAudit(priorFindings: String, manuscript: String)
     case chapterPlanAcceptance(plan: String, candidate: String, recentHighlights: String)
     case chapterPlanProposal(context: String)
+    case workspacePlot(previousSummary: String, chapterTitle: String, chapterContent: String)
 }
 
 struct NovelStructuredModelExecutionRequest: Equatable, Sendable {
@@ -36,6 +38,7 @@ enum NovelStructuredModelOutput: Equatable, Sendable {
     case continuityAudit(NovelContinuityAuditV1)
     case chapterPlanAcceptance(NovelChapterPlanAcceptanceV1)
     case chapterPlanProposal(NovelChapterPlanProposalV1)
+    case workspacePlot(NovelWorkspacePlotDraft)
 }
 
 struct NovelStructuredModelExecutionEvidence: Equatable, Sendable {
@@ -663,6 +666,7 @@ private extension NovelStructuredModelTask {
         case .continuityAudit: .continuityAudit
         case .chapterPlanAcceptance: .chapterPlanAcceptance
         case .chapterPlanProposal: .chapterPlanProposal
+        case .workspacePlot: .workspacePlot
         }
     }
 
@@ -675,6 +679,7 @@ private extension NovelStructuredModelTask {
         case .continuityAudit: .continuityAuditV1
         case .chapterPlanAcceptance: .chapterPlanAcceptanceV1
         case .chapterPlanProposal: .chapterPlanProposalV1
+        case .workspacePlot: .workspacePlotV1
         }
     }
 
@@ -689,6 +694,7 @@ private extension NovelStructuredModelTask {
         case .chapterPlanAcceptance: .stateExtraction
         // Proposal uses creation model policy; purpose tag stays light-weight.
         case .chapterPlanProposal: .stateExtraction
+        case .workspacePlot: .stateExtraction
         }
     }
 
@@ -748,6 +754,20 @@ private extension NovelStructuredModelTask {
                 .init(role: .system, content: prompt.systemText),
                 .init(role: .user, content: context),
             ]
+        case .workspacePlot(let previousSummary, let chapterTitle, let chapterContent):
+            let summary = previousSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = chapterTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            return [
+                .init(role: .system, content: prompt.systemText),
+                .init(
+                    role: .user,
+                    content: "PREVIOUS SUMMARY\n" +
+                        (summary.isEmpty ? "(none)" : summary) +
+                        "\n\nCHAPTER TITLE\n" +
+                        (title.isEmpty ? "(untitled)" : title) +
+                        "\n\nCHAPTER\n" + chapterContent
+                ),
+            ]
         }
     }
 
@@ -781,6 +801,8 @@ private extension NovelStructuredModelTask {
             .chapterPlanProposal(
                 try NovelStructuredOutputDecoder.decodeChapterPlanProposal(from: text)
             )
+        case .workspacePlot:
+            .workspacePlot(try NovelWorkspacePlotDraft.parse(text))
         }
     }
 }
@@ -796,7 +818,7 @@ extension NovelStructuredModelTaskKind {
         switch self {
         case .stateRebuild: 8_192
         case .stateDelta, .discussionArchive, .polishDrift, .continuityAudit,
-             .chapterPlanAcceptance, .chapterPlanProposal:
+             .chapterPlanAcceptance, .chapterPlanProposal, .workspacePlot:
             4_096
         }
     }
@@ -827,6 +849,13 @@ extension NovelStructuredModelTaskKind {
                 topP: 0.8,
                 maxOutputTokens: nil,
                 reasoningLevel: .automatic
+            )
+        case .workspacePlot:
+            .init(
+                temperature: 0.1,
+                topP: 0.8,
+                maxOutputTokens: nil,
+                reasoningLevel: .off
             )
         case .polishDrift, .continuityAudit, .chapterPlanAcceptance:
             .init(

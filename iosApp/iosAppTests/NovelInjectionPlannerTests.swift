@@ -520,7 +520,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
                 promptKind: .stateDeltaV1,
                 userText: "A short collected passage.",
                 budget: NovelInjectionBudget(
-                    maxEstimatedInputTokens: 1_000,
+                    maxEstimatedInputTokens: 2_000,
                     chapterTailCharacterLimit: 0,
                     maximumRecentSessionMessages: 0
                 )
@@ -1261,6 +1261,48 @@ final class NovelInjectionPlannerTests: XCTestCase {
     }
 
     @discardableResult
+    func testCurrentStateWarnsWhenLaterPlotModulesAreStale() throws {
+        var document = try NovelTestFixtures.document()
+        let branch = document.branches[0]
+        guard let index = document.stateSnapshots.firstIndex(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) else {
+            return XCTFail("missing snapshot")
+        }
+        let old = document.stateSnapshots[index]
+        document.stateSnapshots[index] = NovelStateSnapshotRecord(
+            id: old.id,
+            eventIDs: old.eventIDs,
+            summary: old.summary,
+            branchOutline: old.branchOutline,
+            unresolvedEntityNames: old.unresolvedEntityNames,
+            createdAt: old.createdAt,
+            settingProposalIDs: old.settingProposalIDs,
+            characterIdentityClarifications: old.characterIdentityClarifications,
+            recentWrittenHighlights: old.recentWrittenHighlights,
+            chapterPlots: [
+                NovelChapterPlotModule(
+                    chapterID: NovelChapterID(),
+                    text: "后章：城门已开",
+                    stale: true
+                ),
+            ]
+        )
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: branch.id,
+                promptKind: .discussion,
+                userText: "接下来呢"
+            )
+        )
+        XCTAssertTrue(plan.canonicalInput.contains("may be stale"))
+        XCTAssertTrue(plan.canonicalInput.contains("后章：城门已开（后续可能过期）") == false)
+        XCTAssertTrue(
+            document.stateSnapshots[index].injectionHighlightsText().contains("后续可能过期")
+        )
+    }
+
     private func addChapter(
         to document: inout NovelProjectDocumentV1,
         title: String,

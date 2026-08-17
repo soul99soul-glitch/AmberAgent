@@ -583,8 +583,13 @@ struct NovelSessionView: View {
                     projectID: projectID,
                     branchID: branchID
                 )
-            } else if !viewModel.retryableBranchPendingOperations.isEmpty && !viewModel.isBusy {
+            } else if viewModel.retryableBranchPendingOperations.contains(where: {
+                $0.kind != .manualSync
+            }) && !viewModel.isBusy {
                 synchronizationBanner
+            } else if workspace.hasStalePlot && !viewModel.needsSync && !viewModel.isBusy
+                        && !viewModel.isRunning {
+                stalePlotBanner
             }
 
             if let recovery = quickStartRecovery(listModel: listModel) {
@@ -664,6 +669,28 @@ struct NovelSessionView: View {
         )
     }
 
+    private var stalePlotBanner: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("改过前面的章节后，后面的剧情指针可能过期。后文以正文为准。", systemImage: "clock.arrow.circlepath")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("按正文接受") {
+                Task { @MainActor in
+                    await workspace.acceptStalePlot()
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .disabled(
+                viewModel.isBusy || workspace.requiresReload ||
+                    viewModel.access != .readWrite
+            )
+        }
+    }
+
     private var synchronizationBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.arrow.triangle.2.circlepath")
@@ -674,7 +701,9 @@ struct NovelSessionView: View {
                 .foregroundStyle(AmberTheme.foreground2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let pending = viewModel.retryableBranchPendingOperations.first {
+            if let pending = viewModel.retryableBranchPendingOperations.first(where: {
+                $0.kind != .manualSync
+            }) {
                 Button("重试") {
                     Task { @MainActor in
                         await viewModel.retryPending(pending.id)
@@ -864,7 +893,7 @@ struct NovelSessionView: View {
     ) -> some View {
         NovelStateSyncProgressBanner(
             title: workspace.stateSyncStatusTitle(projectID: projectID, branchID: branchID)
-                ?? "正在准备剧情状态",
+                ?? "正在按正文对齐剧情指针",
             activity: nil,
             secondaryHint: workspace.isStateSyncStopping(
                 projectID: projectID,
@@ -1443,7 +1472,9 @@ struct NovelSessionView: View {
     }
 
     private var syncBannerText: String {
-        if let pending = viewModel.retryableBranchPendingOperations.first {
+        if let pending = viewModel.retryableBranchPendingOperations.first(where: {
+            $0.kind != .manualSync
+        }) {
             let failure = pending.lastError?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let failure, !failure.isEmpty {
                 let reason = NovelPresentation.stateSyncFailureMessage(failure)

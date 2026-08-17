@@ -1391,6 +1391,37 @@ struct NovelStoryEventRecord: Codable, Equatable, Sendable {
 struct NovelChapterPlotModule: Codable, Equatable, Sendable {
     var chapterID: NovelChapterID
     var text: String
+    /// Later chapters after an earlier-chapter edit. Text is kept; injection must
+    /// treat it as a stale pointer, not a current commit.
+    var stale: Bool
+
+    init(chapterID: NovelChapterID, text: String, stale: Bool = false) {
+        self.chapterID = chapterID
+        self.text = text
+        self.stale = stale
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case chapterID
+        case text
+        case stale
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        chapterID = try container.decode(NovelChapterID.self, forKey: .chapterID)
+        text = try container.decode(String.self, forKey: .text)
+        stale = try container.decodeIfPresent(Bool.self, forKey: .stale) ?? false
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chapterID, forKey: .chapterID)
+        try container.encode(text, forKey: .text)
+        if stale {
+            try container.encode(true, forKey: .stale)
+        }
+    }
 }
 
 struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
@@ -1527,8 +1558,23 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
     }
 
     func injectionHighlightsText() -> String {
-        guard !recentWrittenHighlights.isEmpty else { return "" }
-        return recentWrittenHighlights.map { "- \($0)" }.joined(separator: "\n")
+        let source: [(text: String, stale: Bool)]
+        if chapterPlots.isEmpty {
+            source = recentWrittenHighlights.map { (text: $0, stale: false) }
+        } else {
+            source = chapterPlots
+                .suffix(Self.maxRecentWrittenHighlights)
+                .map { (text: $0.text, stale: $0.stale) }
+        }
+        return source.compactMap { item in
+            let text = item.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return item.stale ? "- \(text)（后续可能过期）" : "- \(text)"
+        }.joined(separator: "\n")
+    }
+
+    var hasStaleChapterPlots: Bool {
+        chapterPlots.contains(where: \.stale)
     }
 }
 

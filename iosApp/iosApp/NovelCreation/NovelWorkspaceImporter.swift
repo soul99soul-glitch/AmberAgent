@@ -147,11 +147,6 @@ enum NovelWorkspaceImporter {
         }
 
         applyPlot(parsed, to: &document)
-        if parsed.plotSummary == nil {
-            if let index = document.branches.firstIndex(where: { $0.id == branchID }) {
-                document.branches[index].syncStatus = .needsSync
-            }
-        }
         try NovelDocumentValidator.validate(document)
         return document
     }
@@ -313,6 +308,15 @@ private extension NovelWorkspaceImporter {
                 eventIDs.append(event.id)
             }
         }
+        let branch = document.branches[branchIndex]
+        let working = NovelWorkspaceLedger.liveWorkingSelections(branch: branch, in: document)
+        let modules = NovelWorkspaceLedger.alignedModules(
+            existing: old.chapterPlots,
+            working: working,
+            seeds: NovelWorkspaceLedger.seedTexts(working: working, in: document)
+        )
+        let highlights = parsed.highlights
+            ?? NovelWorkspaceLedger.foldedHighlightTexts(modules)
         document.stateSnapshots[snapshotIndex] = NovelStateSnapshotRecord(
             id: old.id,
             eventIDs: eventIDs,
@@ -322,7 +326,8 @@ private extension NovelWorkspaceImporter {
             createdAt: old.createdAt,
             settingProposalIDs: old.settingProposalIDs,
             characterIdentityClarifications: old.characterIdentityClarifications,
-            recentWrittenHighlights: parsed.highlights ?? old.recentWrittenHighlights
+            recentWrittenHighlights: highlights,
+            chapterPlots: modules
         )
     }
 }

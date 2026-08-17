@@ -117,19 +117,96 @@ extension DefaultNovelCreation {
         guard loaded.access == .readWrite else {
             throw NovelError.degradedReadOnly(projectID: projectID)
         }
-        let next = try NovelWorkspacePlotCommit.applyChapterModule(
+        let next = try await applyChapterPlotPointer(
             to: loaded.document,
             branchID: branchID,
             chapterID: chapterID,
             chapterTitle: chapterTitle,
-            chapterContent: chapterContent,
-            now: now()
+            chapterContent: chapterContent
         )
         let committed = try await repository.commitProject(
             next,
             expectedRevision: loaded.document.project.revision
         )
         _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
+    }
+
+    func applyChapterPlotPointer(
+        to document: NovelProjectDocumentV1,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID,
+        chapterTitle: String,
+        chapterContent: String
+    ) async throws -> NovelProjectDocumentV1 {
+        guard let branch = document.branches.first(where: { $0.id == branchID }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        var moduleText = NovelWorkspaceLedger.excerpt(
+            title: chapterTitle,
+            content: chapterContent
+        )
+        var summaryOverride: String?
+        if NovelWorkspaceLedger.isFastForward(branch: branch, chapterID: chapterID),
+           let draft = try await writeWorkspacePlotDraft(
+            document: document,
+            previousSummary: document.stateSnapshots.first {
+                $0.id == branch.currentStateSnapshotID
+            }?.summary ?? "",
+            chapterTitle: chapterTitle,
+            chapterContent: chapterContent
+           ) {
+            moduleText = draft.chapterText
+            if !draft.summary.isEmpty {
+                summaryOverride = draft.summary
+            }
+        }
+        return try NovelWorkspacePlotCommit.applyChapterModule(
+            to: document,
+            branchID: branchID,
+            chapterID: chapterID,
+            chapterTitle: chapterTitle,
+            chapterContent: chapterContent,
+            moduleText: moduleText,
+            summaryOverride: summaryOverride,
+            now: now()
+        )
+    }
+
+    func writeWorkspacePlotDraft(
+        document: NovelProjectDocumentV1,
+        previousSummary: String,
+        chapterTitle: String,
+        chapterContent: String
+    ) async throws -> NovelWorkspacePlotDraft? {
+        do {
+            let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
+            let preparation = try await executor.prepare(
+                modelPolicy: modelPolicy(for: .review, in: document),
+                taskKind: .workspacePlot,
+                requestedInputBudgetTokens: 16_000
+            )
+            let request = NovelStructuredModelExecutionRequest(
+                runID: NovelRunID(),
+                modelPolicy: preparation.modelPolicy,
+                task: .workspacePlot(
+                    previousSummary: previousSummary,
+                    chapterTitle: chapterTitle,
+                    chapterContent: chapterContent
+                )
+            )
+            let evidence = try await executor.executePrepared(
+                try executor.prepareInvocation(request, preparation: preparation),
+                noOutputTimeout: factRequestTimeout
+            )
+            guard case .workspacePlot(let draft) = evidence.output else {
+                return nil
+            }
+            return draft
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return nil
+        }
     }
 
     func applyWorkspacePlotRelink(
@@ -141,6 +218,26 @@ extension DefaultNovelCreation {
             throw NovelError.degradedReadOnly(projectID: projectID)
         }
         let next = try NovelWorkspacePlotCommit.applyRelink(
+            to: loaded.document,
+            branchID: branchID,
+            now: now()
+        )
+        let committed = try await repository.commitProject(
+            next,
+            expectedRevision: loaded.document.project.revision
+        )
+        _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
+    }
+
+    func applyWorkspacePlotAcceptStale(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        let loaded = try await loadCommittedProject(id: projectID)
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: projectID)
+        }
+        let next = try NovelWorkspacePlotCommit.applyAcceptStale(
             to: loaded.document,
             branchID: branchID,
             now: now()

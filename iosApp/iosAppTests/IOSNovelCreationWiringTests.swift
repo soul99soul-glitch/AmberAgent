@@ -921,7 +921,7 @@ final class IOSNovelCreationWiringTests: XCTestCase {
             )
         )
         let deleteBody = viewModel[deleteFn.lowerBound..<nextFn.lowerBound]
-        XCTAssertTrue(deleteBody.contains("scheduleAutomaticStateSync("))
+        XCTAssertTrue(deleteBody.contains("applyWorkspacePlotRelink("))
         XCTAssertTrue(viewModel.contains("已排队，等待当前同步结束后自动开始"))
     }
 

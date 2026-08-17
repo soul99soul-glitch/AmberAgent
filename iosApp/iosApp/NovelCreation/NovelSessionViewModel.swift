@@ -1240,17 +1240,10 @@ final class NovelSessionViewModel {
         title: String,
         content: String
     ) async {
-        guard let branch = workspace.branchSnapshot else { return }
-        if await workspace.applyWorkspaceFastForwardPlot(
+        _ = await workspace.applyWorkspaceFastForwardPlot(
             chapterID: chapterID,
             title: title,
             content: content
-        ) == nil {
-            return
-        }
-        workspace.scheduleAutomaticStateSync(
-            projectID: branch.projectID,
-            branchID: branch.branch.id
         )
     }
 
@@ -1608,10 +1601,7 @@ final class NovelSessionViewModel {
         _ = await refreshDurable(binding: binding, token: bindingToken)
         guard outcome != nil else { return false }
         if workspace.branchSnapshot?.branch.syncStatus == .needsSync {
-            workspace.scheduleAutomaticStateSync(
-                projectID: project.project.id,
-                branchID: branch.branch.id
-            )
+            workspace.scheduleAutomaticStateSyncIfNeeded()
         }
         return true
     }
@@ -1819,11 +1809,23 @@ final class NovelSessionViewModel {
         adoptingPolishCandidateID = candidateID
         defer { adoptingPolishCandidateID = nil }
         await applyPolishAdoption(command)
-        // 与 collectCandidate 对齐：采用后自动触发剧情同步。
-        workspace.scheduleAutomaticStateSync(
-            projectID: project.project.id,
-            branchID: branch.branch.id
-        )
+        if let adopted = workspace.projectSnapshot?.chapterVersions.first(where: {
+            $0.id == command.proposedChapterVersionID
+        }) {
+            _ = await workspace.applyWorkspaceFastForwardPlot(
+                chapterID: adopted.chapterID,
+                title: adopted.title,
+                content: adopted.content
+            )
+        } else if let source = workspace.projectSnapshot?.chapterVersions.first(where: {
+            $0.id == candidate.sourceChapterVersionID
+        }) {
+            _ = await workspace.applyWorkspaceFastForwardPlot(
+                chapterID: source.chapterID,
+                title: source.title,
+                content: candidate.content
+            )
+        }
     }
 
     func retryPolishTransaction(_ transactionID: NovelPendingOperationID) async {
@@ -1853,6 +1855,15 @@ final class NovelSessionViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )
         await applyPolishAdoption(command)
+        if let adopted = workspace.projectSnapshot?.chapterVersions.first(where: {
+            $0.id == command.proposedChapterVersionID
+        }) {
+            _ = await workspace.applyWorkspaceFastForwardPlot(
+                chapterID: adopted.chapterID,
+                title: adopted.title,
+                content: adopted.content
+            )
+        }
         let durableStatus = workspace.projectSnapshot?.polishTransactions.first(where: {
             $0.id == transactionID
         })?.status

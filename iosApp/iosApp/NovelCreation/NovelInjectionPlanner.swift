@@ -805,7 +805,8 @@ private extension NovelPromptKind {
         // 讨论规划不推进正史,needsSync 时仍可聊,但注入会带 stale 警告。
         case .quickStart, .characterProposal, .discussion,
              .stateDeltaV1, .manualSyncV1, .discussionArchiveV1, .polishDriftV1,
-             .continuityAuditV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
+             .continuityAuditV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1,
+             .workspacePlotV1:
             false
         }
     }
@@ -817,7 +818,8 @@ private extension NovelPromptKind {
              .continuityAuditV1:
             true
         case .quickStart, .characterProposal, .discussion, .stateDeltaV1, .manualSyncV1,
-             .discussionArchiveV1, .polishDriftV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
+             .discussionArchiveV1, .polishDriftV1, .chapterPlanAcceptanceV1, .chapterPlanProposalV1,
+             .workspacePlotV1:
             false
         }
     }
@@ -948,6 +950,10 @@ private extension NovelInjectionPlanner {
         if includeUnsynchronizedWarning, branch.syncStatus == .needsSync {
             content += "\n\nWarning: the working manuscript has unsynchronized edits. " +
                 "Treat derived state as potentially stale."
+        }
+        if state.hasStaleChapterPlots {
+            content += "\n\nWarning: plot modules after an earlier-chapter edit may be stale. " +
+                "Prefer the later manuscript over later plot summaries."
         }
         return makeSection(
             kind: .currentState(state.id),

@@ -340,6 +340,27 @@ struct NovelProjectWorkspaceView: View {
                     }
                 }
             }
+        } else if section != .creation, viewModel.hasStalePlot {
+            workspaceStatusStrip {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("改过前面的章节后，后面的剧情指针可能过期。后文以正文为准。", systemImage: "clock.arrow.circlepath")
+                        .font(.footnote.weight(.medium))
+                        .foregroundStyle(AmberTheme.foreground2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("按正文接受") {
+                        Task { @MainActor in
+                            await viewModel.acceptStalePlot()
+                        }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                    .disabled(
+                        viewModel.isPerforming || viewModel.requiresReload ||
+                            viewModel.projectSnapshot?.access != .readWrite
+                    )
+                }
+            }
         }
     }
 
@@ -723,7 +744,7 @@ struct NovelProjectWorkspaceView: View {
             return title
         }
         return currentStateSyncActivity?.phase == .preparing
-            ? "正在准备剧情状态"
+            ? "正在按正文对齐剧情指针"
             : "正在同步剧情状态"
     }
 

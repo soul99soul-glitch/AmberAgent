@@ -511,7 +511,7 @@ final class NovelCreationViewModel {
            activity.branchID == branchID {
             return activity.statusTitle
         }
-        return "正在准备剧情状态"
+        return "正在按正文对齐剧情指针"
     }
 
     func cancelAutomaticStateSync(
@@ -763,7 +763,7 @@ final class NovelCreationViewModel {
             if queuedAutomaticStateSyncTarget == target {
                 queuedAutomaticStateSyncTarget = nil
             }
-            startAutomaticStateSync(target)
+            startWorkspacePlotRelink(target)
             return
         }
 
@@ -810,26 +810,11 @@ final class NovelCreationViewModel {
         if let failure = automaticStateSyncFailure, failure.target == target {
             return failure.message
         }
-        let pending = retryableManualStateSyncPending(
-            projectID: projectID,
-            branchID: branchID
-        )
-        let completedChunks = pending?.manualSyncProgress?.completedChunks.count ?? 0
-        if let detail = pending?.lastError?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !detail.isEmpty {
-            return NovelPresentation.stateSyncFailureMessage(
-                detail,
-                completedChunkCount: completedChunks
-            )
-        }
-        if let detail = lastStateSyncOperationError?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !detail.isEmpty {
-            return NovelPresentation.stateSyncFailureMessage(
-                detail,
-                completedChunkCount: completedChunks
-            )
-        }
-        return "剧情状态尚未同步，完成后才能继续正文操作。"
+        // Leftover cancelled JSON extract is recovered by pointer relink.
+        // Do not keep its lastError (or a generic "尚未同步") as a dead banner
+        // that makes 重试同步 look like the only path while relink is already
+        // running without progress chrome.
+        return nil
     }
 
     func waitForBackgroundGeneration() async {
@@ -2534,17 +2519,16 @@ final class NovelCreationViewModel {
         let branchPending = project.pendingOperations.filter {
             $0.branchID == branch.branch.id
         }
-        // pending 与 retryable 都要能恢复；仅 retryable 时旧逻辑直接 return 会「看起来欠同步却不动」。
-        guard branchPending.isEmpty ||
-                (branchPending.count == 1 &&
-                    branchPending[0].kind == .manualSync &&
-                    (branchPending[0].status == .pending ||
-                        branchPending[0].status == .retryable)) else {
-            return
-        }
-        scheduleAutomaticStateSync(
-            projectID: project.project.id,
-            branchID: branch.branch.id
+        let leftoverManualSync = branchPending.count == 1 &&
+            branchPending[0].kind == .manualSync &&
+            (branchPending[0].status == .pending ||
+                branchPending[0].status == .retryable)
+        guard branchPending.isEmpty || leftoverManualSync else { return }
+        startWorkspacePlotRelink(
+            NovelAutomaticStateSyncTarget(
+                projectID: project.project.id,
+                branchID: branch.branch.id
+            )
         )
     }
 
@@ -2650,18 +2634,6 @@ final class NovelCreationViewModel {
         }
         manualStateSyncTask = task
         return task
-    }
-
-    private func retryableManualStateSyncPending(
-        projectID: NovelProjectID,
-        branchID: NovelBranchID
-    ) -> NovelPendingOperationRecord? {
-        guard projectSnapshot?.project.id == projectID else { return nil }
-        return projectSnapshot?.pendingOperations.first {
-            $0.branchID == branchID &&
-                $0.kind == .manualSync &&
-                $0.status == .retryable
-        }
     }
 
     @discardableResult
@@ -2951,6 +2923,25 @@ final class NovelCreationViewModel {
         } catch {
             report(error)
             return errorMessage ?? error.localizedDescription
+        }
+    }
+
+    var hasStalePlot: Bool {
+        branchSnapshot?.currentState.hasStaleChapterPlots == true
+    }
+
+    func acceptStalePlot() async {
+        guard let projectID = selectedProjectID, let branchID = selectedBranchID else { return }
+        do {
+            try await creation.applyWorkspacePlotAcceptStale(
+                projectID: projectID,
+                branchID: branchID
+            )
+            errorMessage = nil
+            projectSnapshot = try await project(id: projectID)
+            branchSnapshot = try await branch(projectID: projectID, branchID: branchID)
+        } catch {
+            report(error)
         }
     }
 
@@ -3358,6 +3349,56 @@ final class NovelCreationViewModel {
             onExpire: expire,
             onSystemTaskExpiration: expire
         )
+    }
+
+    private func startWorkspacePlotRelink(_ target: NovelAutomaticStateSyncTarget) {
+        guard automaticStateSyncTask == nil,
+              target != automaticStateSyncTarget else { return }
+        automaticStateSyncTarget = target
+        automaticStateSyncPresentationTarget = target
+        if automaticStateSyncFailure?.target == target {
+            automaticStateSyncFailure = nil
+        }
+        automaticStateSyncTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                if self.automaticStateSyncTarget == target {
+                    self.automaticStateSyncTarget = nil
+                }
+                if self.automaticStateSyncPresentationTarget == target {
+                    self.automaticStateSyncPresentationTarget = nil
+                }
+                self.automaticStateSyncTask = nil
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                try await self.creation.applyWorkspacePlotRelink(
+                    projectID: target.projectID,
+                    branchID: target.branchID
+                )
+                if self.automaticStateSyncFailure?.target == target {
+                    self.automaticStateSyncFailure = nil
+                }
+                if self.selectedProjectID == target.projectID {
+                    self.projectSnapshot = try await self.project(id: target.projectID)
+                    if self.selectedBranchID == target.branchID {
+                        self.branchSnapshot = try await self.branch(
+                            projectID: target.projectID,
+                            branchID: target.branchID
+                        )
+                    }
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                self.publishAutomaticStateSyncFailure(
+                    target: target,
+                    message: NovelPresentation.stateSyncFailureMessage(
+                        "剧情指针未能按章回填。\(error.localizedDescription)"
+                    )
+                )
+            }
+        }
     }
 
     private func startAutomaticStateSync(_ target: NovelAutomaticStateSyncTarget) {

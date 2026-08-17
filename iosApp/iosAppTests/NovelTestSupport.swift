@@ -115,6 +115,10 @@ actor ScriptedNovelModelAdapter: NovelModelRunning {
         scripts.append(script)
     }
 
+    func prepend(_ script: NovelModelScript) {
+        scripts.insert(script, at: 0)
+    }
+
     func resume(runID: NovelRunID) {
         activeScripts[runID]?.pauseGate.resume()
     }

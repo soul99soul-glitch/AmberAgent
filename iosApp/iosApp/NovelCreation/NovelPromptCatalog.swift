@@ -15,6 +15,7 @@ enum NovelPromptKind: String, Codable, CaseIterable, Sendable {
     case continuityAuditV1
     case chapterPlanAcceptanceV1
     case chapterPlanProposalV1
+    case workspacePlotV1
 }
 
 struct NovelPromptTemplate: Codable, Equatable, Sendable {
@@ -96,7 +97,7 @@ enum NovelPromptCatalog {
                 "novel.whole-chapter-regeneration.v2",
             ])
         case .characterProposal, .discussionArchiveV1, .polishDriftV1, .continuityAuditV1,
-             .chapterPlanAcceptanceV1, .chapterPlanProposalV1:
+             .chapterPlanAcceptanceV1, .chapterPlanProposalV1, .workspacePlotV1:
             break
         }
         return versions
@@ -503,6 +504,27 @@ enum NovelPromptCatalog {
                 Use the user's language. Return only the JSON object.
 
                 \(chapterPlanProposalJSONContract)
+                """
+            )
+
+        case .workspacePlotV1:
+            NovelPromptTemplate(
+                kind: kind,
+                version: "novel.workspace-plot.v1",
+                systemText: """
+                You write the plot pointer for one newly collected chapter or last-chapter edit.
+                This pointer is the version-control record of where the story stands after this chapter.
+                Return markdown only, with exactly these two headings and no JSON, code fences, or preamble:
+
+                # 本章
+                3-8 short beat lines. Who did what, and how the situation changed. At most 400 characters.
+                Do not catalog furniture, scenery, or setting cards. Do not quote long prose.
+
+                # 当前
+                One paragraph that updates the previous summary so it covers the story through the end
+                of this chapter. At most 800 characters. Do not ignore the previous summary.
+
+                Use the author's language. If the previous summary is empty, write a self-contained current state.
                 """
             )
         }

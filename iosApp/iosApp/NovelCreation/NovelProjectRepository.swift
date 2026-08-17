@@ -1014,7 +1014,12 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         }
         let checkout = packageURL(for: document.project.id)
             .appendingPathComponent("checkout", isDirectory: true)
-        try? NovelWorkspaceBackup.write(document, to: checkout)
+        if NovelProjectShardedStorage.checkoutSidecarNeedsRefresh(
+            previous: cache,
+            next: nextCache
+        ) {
+            try? NovelWorkspaceBackup.write(document, to: checkout)
+        }
     }
 
     private func readInstalledProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {

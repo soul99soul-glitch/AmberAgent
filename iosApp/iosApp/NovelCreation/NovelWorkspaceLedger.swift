@@ -16,11 +16,41 @@ enum NovelWorkspaceLedger {
 
     struct Store: Codable, Equatable, Sendable {
         var head: String?
+        /// Branch id → checkpoint id. Thin-git pointers; `head` mirrors the main branch.
+        var heads: [String: String]
         var commits: [Commit]
+
+        init(head: String? = nil, heads: [String: String] = [:], commits: [Commit] = []) {
+            self.head = head
+            self.heads = heads
+            self.commits = commits
+        }
 
         var headCommit: Commit? {
             guard let head else { return nil }
             return commits.first { $0.id == head }
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case head
+            case heads
+            case commits
+        }
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            head = try container.decodeIfPresent(String.self, forKey: .head)
+            heads = try container.decodeIfPresent([String: String].self, forKey: .heads) ?? [:]
+            commits = try container.decodeIfPresent([Commit].self, forKey: .commits) ?? []
+        }
+
+        func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encodeIfPresent(head, forKey: .head)
+            if !heads.isEmpty {
+                try container.encode(heads, forKey: .heads)
+            }
+            try container.encode(commits, forKey: .commits)
         }
     }
 
@@ -47,6 +77,7 @@ enum NovelWorkspaceLedger {
     }
 
     static func makeCommit(
+        id: String,
         parentID: String?,
         files: [String: String],
         message: String,
@@ -54,13 +85,83 @@ enum NovelWorkspaceLedger {
     ) -> Commit {
         let tree = treeSHA256(files)
         return Commit(
-            id: String(tree.prefix(16)),
+            id: id,
             parentID: parentID,
             createdAt: now,
             message: message,
             treeSHA256: tree,
             files: files
         )
+    }
+
+    static func commitMessage(for kind: NovelCheckpointKind?) -> String {
+        switch kind {
+        case .initial: "初始"
+        case .collection: "收录"
+        case .manualSync: "剧情指针"
+        case .discussionArchive: "讨论归档"
+        case .identityClarification: "人物说明"
+        case .polish: "润色"
+        case .restore: "还原"
+        case nil: "提交"
+        }
+    }
+
+    static func branchTree(
+        branch: NovelBranchRecord,
+        in document: NovelProjectDocumentV1
+    ) -> [String: String] {
+        var tree: [String: String] = [:]
+        for selection in liveWorkingSelections(branch: branch, in: document) {
+            guard let version = document.chapterVersions.first(where: {
+                $0.id == selection.versionID && $0.chapterID == selection.chapterID
+            }) else { continue }
+            tree["chapters/\(selection.chapterID)"] = NovelDocumentValidator.sha256(
+                version.title + "\n" + version.content
+            )
+        }
+        if let snapshot = document.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) {
+            tree["plot/summary"] = NovelDocumentValidator.sha256(snapshot.summary)
+            for module in snapshot.chapterPlots {
+                tree["plot/\(module.chapterID)"] = NovelDocumentValidator.sha256(
+                    (module.stale ? "1\n" : "0\n") + module.text
+                )
+            }
+        }
+        return tree
+    }
+
+    static func record(
+        _ document: NovelProjectDocumentV1,
+        into store: Store
+    ) -> Store {
+        var next = store
+        var heads = next.heads
+        for branch in document.branches where branch.lifecycle == .active {
+            let checkpoint = document.checkpoints.first { $0.id == branch.headCheckpointID }
+            let id = branch.headCheckpointID.description
+            heads[branch.id.description] = id
+            if next.commits.contains(where: { $0.id == id }) { continue }
+            let commit = makeCommit(
+                id: id,
+                parentID: checkpoint?.parentCheckpointID?.description
+                    ?? next.heads[branch.id.description]
+                    ?? next.head,
+                files: branchTree(branch: branch, in: document),
+                message: commitMessage(for: checkpoint?.kind),
+                now: checkpoint?.createdAt ?? document.project.updatedAt
+            )
+            next = appending(commit, to: next)
+        }
+        next.heads = heads
+        if let main = document.branches.first(where: { $0.id == document.project.mainBranchID }) {
+            next.head = heads[main.id.description]
+        } else {
+            next.head = heads.values.first ?? next.head
+        }
+        return next
     }
 
     static func appending(_ commit: Commit, to store: Store) -> Store {
@@ -120,66 +221,156 @@ enum NovelWorkspaceLedger {
     }
 
     static func highlight(title: String, content: String) -> String {
+        excerpt(title: title, content: content)
+    }
+
+    static func excerpt(title: String, content: String) -> String {
         let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let excerpt = content
+        let body = content
             .split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .first { !$0.isEmpty } ?? ""
-        let clipped = excerpt.count > 40 ? String(excerpt.prefix(40)) + "…" : excerpt
-        if trimmedTitle.isEmpty { return clipped }
-        if clipped.isEmpty { return trimmedTitle }
-        return "\(trimmedTitle)：\(clipped)"
+            .filter { !$0.isEmpty }
+            .prefix(3)
+            .joined(separator: "")
+        var text = trimmedTitle.isEmpty
+            ? body
+            : body.isEmpty ? trimmedTitle : "\(trimmedTitle)：\(body)"
+        let limit = NovelStateSnapshotRecord.maxHighlightCharacterCount
+        if text.count > limit {
+            text = String(text.prefix(limit))
+        }
+        return text
+    }
+
+    static func seedTexts(
+        working: [NovelChapterSelection],
+        in document: NovelProjectDocumentV1
+    ) -> [NovelChapterID: String] {
+        var seeds: [NovelChapterID: String] = [:]
+        for selection in working {
+            guard let version = document.chapterVersions.first(where: {
+                $0.id == selection.versionID && $0.chapterID == selection.chapterID
+            }) else { continue }
+            seeds[selection.chapterID] = excerpt(
+                title: version.title,
+                content: version.content
+            )
+        }
+        return seeds
+    }
+
+    static func alignedModules(
+        existing: [NovelChapterPlotModule],
+        working: [NovelChapterSelection],
+        seeds: [NovelChapterID: String],
+        markStaleAfterIndex: Int? = nil
+    ) -> [NovelChapterPlotModule] {
+        working.enumerated().map { index, selection in
+            let existingModule = existing.first { $0.chapterID == selection.chapterID }
+            let text = existingModule?.text.isEmpty == false
+                ? existingModule?.text ?? ""
+                : seeds[selection.chapterID] ?? existingModule?.text ?? ""
+            let stale = (existingModule?.stale ?? false)
+                || (markStaleAfterIndex.map { index > $0 } ?? false)
+            return NovelChapterPlotModule(
+                chapterID: selection.chapterID,
+                text: text,
+                stale: stale
+            )
+        }
     }
 
     static func relinkChapterPlots(
         existing: [NovelChapterPlotModule],
         working: [NovelChapterSelection],
-        previousHighlights: [String],
+        seeds: [NovelChapterID: String],
         updatedChapterID: NovelChapterID,
-        updatedText: String
+        updatedText: String,
+        markLaterStale: Bool
     ) -> [NovelChapterPlotModule] {
-        var byID: [NovelChapterID: String] = [:]
-        for module in existing {
-            if working.contains(where: { $0.chapterID == module.chapterID }) {
-                byID[module.chapterID] = module.text
-            }
-        }
-        if existing.isEmpty {
-            seedChapterPlots(
-                into: &byID,
-                working: working,
-                previousHighlights: previousHighlights,
-                updatedChapterID: updatedChapterID
+        let updatedIndex = working.firstIndex { $0.chapterID == updatedChapterID }
+        var modules = alignedModules(
+            existing: existing,
+            working: working,
+            seeds: seeds,
+            markStaleAfterIndex: markLaterStale ? updatedIndex : nil
+        )
+        if let index = modules.firstIndex(where: { $0.chapterID == updatedChapterID }) {
+            modules[index] = NovelChapterPlotModule(
+                chapterID: updatedChapterID,
+                text: updatedText,
+                stale: false
             )
         }
-        byID[updatedChapterID] = updatedText
-        return working.map { selection in
-            NovelChapterPlotModule(
+        return modules
+    }
+
+    static func reconcileModules(
+        existing: [NovelChapterPlotModule],
+        working: [NovelChapterSelection],
+        seeds: [NovelChapterID: String],
+        headSelections: [NovelChapterSelection]
+    ) -> [NovelChapterPlotModule] {
+        var modules = modulesAfterRemoval(
+            existing: existing,
+            working: working,
+            seeds: seeds
+        )
+        let headVersion = Dictionary(
+            uniqueKeysWithValues: headSelections.map { ($0.chapterID, $0.versionID) }
+        )
+        let lastID = working.last?.chapterID
+        for (index, selection) in working.enumerated() {
+            guard headVersion[selection.chapterID] != selection.versionID,
+                  let text = seeds[selection.chapterID],
+                  modules.indices.contains(index) else { continue }
+            modules[index] = NovelChapterPlotModule(
                 chapterID: selection.chapterID,
-                text: byID[selection.chapterID] ?? ""
+                text: text,
+                stale: false
+            )
+            if selection.chapterID != lastID {
+                for later in (index + 1)..<modules.count {
+                    let old = modules[later]
+                    modules[later] = NovelChapterPlotModule(
+                        chapterID: old.chapterID,
+                        text: old.text,
+                        stale: true
+                    )
+                }
+            }
+        }
+        return modules
+    }
+
+    static func modulesAfterRemoval(
+        existing: [NovelChapterPlotModule],
+        working: [NovelChapterSelection],
+        seeds: [NovelChapterID: String]
+    ) -> [NovelChapterPlotModule] {
+        let previousIDs = existing.map(\.chapterID)
+        let remainingIDs = Set(working.map(\.chapterID))
+        let cutoff = previousIDs.indices.first { !remainingIDs.contains(previousIDs[$0]) }
+        return working.map { selection in
+            let existingModule = existing.first { $0.chapterID == selection.chapterID }
+            let text = existingModule?.text.isEmpty == false
+                ? existingModule?.text ?? ""
+                : seeds[selection.chapterID] ?? existingModule?.text ?? ""
+            let oldIndex = previousIDs.firstIndex(of: selection.chapterID)
+            let stale = (existingModule?.stale ?? false)
+                || (cutoff.map { cut in oldIndex.map { $0 > cut } ?? false } ?? false)
+            return NovelChapterPlotModule(
+                chapterID: selection.chapterID,
+                text: text,
+                stale: stale
             )
         }
     }
 
-    private static func seedChapterPlots(
-        into byID: inout [NovelChapterID: String],
-        working: [NovelChapterSelection],
-        previousHighlights: [String],
-        updatedChapterID: NovelChapterID
-    ) {
-        let ids = working.map(\.chapterID)
-        guard !ids.isEmpty, !previousHighlights.isEmpty else { return }
-        if previousHighlights.count == ids.count {
-            for (id, text) in zip(ids, previousHighlights) where id != updatedChapterID {
-                byID[id] = text
-            }
-            return
-        }
-        let older = Array(previousHighlights.dropFirst())
-        for (index, id) in ids.dropLast().reversed().enumerated() where index < older.count {
-            if id != updatedChapterID {
-                byID[id] = older[index]
-            }
+    static func foldedHighlightTexts(_ modules: [NovelChapterPlotModule]) -> [String] {
+        Array(modules.suffix(highlightLimit)).compactMap { module in
+            let text = module.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : text
         }
     }
 
@@ -379,6 +570,8 @@ enum NovelWorkspacePlotCommit {
         chapterID: NovelChapterID,
         chapterTitle: String,
         chapterContent: String,
+        moduleText: String? = nil,
+        summaryOverride: String? = nil,
         now: Date = Date()
     ) throws -> NovelProjectDocumentV1 {
         guard let branch = document.branches.first(where: { $0.id == branchID }) else {
@@ -393,21 +586,24 @@ enum NovelWorkspacePlotCommit {
         guard working.contains(where: { $0.chapterID == chapterID }) else {
             throw NovelError.invalidInput("The edited chapter is not in the working manuscript.")
         }
-        let text = NovelWorkspaceLedger.highlight(
+        let text = moduleText ?? NovelWorkspaceLedger.excerpt(
             title: chapterTitle,
             content: chapterContent
         )
         let modules = NovelWorkspaceLedger.relinkChapterPlots(
             existing: old.chapterPlots,
             working: working,
-            previousHighlights: old.recentWrittenHighlights,
+            seeds: NovelWorkspaceLedger.seedTexts(working: working, in: document),
             updatedChapterID: chapterID,
-            updatedText: text
+            updatedText: text,
+            markLaterStale: !NovelWorkspaceLedger.isFastForward(
+                branch: branch,
+                chapterID: chapterID
+            )
         )
-        let highlights = modules.map(\.text).filter { !$0.isEmpty }
         let body = NovelWorkspaceLedger.plotCurrentBody(
-            summary: old.summary,
-            highlights: highlights
+            summary: summaryOverride ?? old.summary,
+            highlights: NovelWorkspaceLedger.foldedHighlightTexts(modules)
         )
         return try apply(
             to: document,
@@ -432,16 +628,145 @@ enum NovelWorkspacePlotCommit {
         }) else {
             throw NovelError.invalidInput("The branch has no current plot snapshot.")
         }
-        let working = NovelWorkspaceLedger.liveWorkingSelections(branch: branch, in: document)
-        let workingIDs = Set(working.map(\.chapterID))
-        let modules = old.chapterPlots.filter { workingIDs.contains($0.chapterID) }
-        let ordered = working.compactMap { selection in
-            modules.first { $0.chapterID == selection.chapterID }
+        let leftover = document.pendingOperations.filter {
+            $0.branchID == branchID && $0.kind == .manualSync
         }
-        let highlights = ordered.map(\.text).filter { !$0.isEmpty }
+        guard leftover.count <= 1 else {
+            throw NovelError.invalidInput("当前有多个未完成的同步任务，请重新打开项目后再试。")
+        }
+        let working = NovelWorkspaceLedger.liveWorkingSelections(branch: branch, in: document)
+        let headSelections = document.checkpoints.first {
+            $0.id == branch.headCheckpointID
+        }?.chapterSelections ?? branch.workingChapterSelections
+        let modules = NovelWorkspaceLedger.reconcileModules(
+            existing: old.chapterPlots,
+            working: working,
+            seeds: NovelWorkspaceLedger.seedTexts(working: working, in: document),
+            headSelections: headSelections
+        )
         let body = NovelWorkspaceLedger.plotCurrentBody(
             summary: old.summary,
-            highlights: highlights
+            highlights: NovelWorkspaceLedger.foldedHighlightTexts(modules)
+        )
+        if let pending = leftover.first {
+            return try completeLeftoverManualSync(
+                in: document,
+                pending: pending,
+                body: body,
+                chapterPlots: modules,
+                now: now
+            )
+        }
+        return try apply(
+            to: document,
+            branchID: branchID,
+            path: "plot/current.md",
+            body: body,
+            now: now,
+            chapterPlots: modules
+        )
+    }
+
+    /// Finish a leftover cancelled JSON extract as a pointer commit.
+    /// Stripping the pending alone orphans its factAttempts / receipts.
+    private static func completeLeftoverManualSync(
+        in document: NovelProjectDocumentV1,
+        pending: NovelPendingOperationRecord,
+        body: String,
+        chapterPlots: [NovelChapterPlotModule],
+        now: Date
+    ) throws -> NovelProjectDocumentV1 {
+        guard let branch = document.branches.first(where: { $0.id == pending.branchID }) else {
+            throw NovelError.branchNotFound(pending.branchID)
+        }
+        guard let old = document.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) else {
+            throw NovelError.invalidInput("The branch has no current plot snapshot.")
+        }
+        guard let checkpointID = pending.proposedCheckpointID,
+              let snapshotID = pending.proposedStateSnapshotID else {
+            throw NovelError.invalidInput("The leftover sync has no reserved record IDs.")
+        }
+        let split = NovelWorkspaceMarkdown.splitHighlights(body)
+        var next = document
+        next.stateSnapshots.append(
+            NovelStateSnapshotRecord(
+                id: snapshotID,
+                eventIDs: old.eventIDs,
+                summary: split.body,
+                branchOutline: old.branchOutline,
+                unresolvedEntityNames: old.unresolvedEntityNames,
+                createdAt: now,
+                settingProposalIDs: old.settingProposalIDs,
+                characterIdentityClarifications: old.characterIdentityClarifications,
+                recentWrittenHighlights: split.highlights ?? old.recentWrittenHighlights,
+                chapterPlots: chapterPlots
+            )
+        )
+        let finalRevision = document.project.revision + 1
+        let outcome = NovelOutcome.manualSyncCommitted(
+            projectID: document.project.id,
+            branchID: pending.branchID,
+            checkpointID: checkpointID,
+            revision: finalRevision
+        )
+        next.appliedOperations.append(
+            NovelAppliedOperationRecord(
+                operationID: pending.operationID,
+                kind: .syncManualEdits,
+                payloadSHA256: pending.payloadSHA256,
+                outcome: outcome,
+                appliedProjectRevision: finalRevision,
+                appliedAt: now
+            )
+        )
+        try NovelReducer.appendCheckpoint(
+            NovelBranchCheckpointRecord(
+                id: checkpointID,
+                kind: .manualSync,
+                createdOnBranchID: pending.branchID,
+                parentCheckpointID: pending.baseCheckpointID,
+                chapterSelections: branch.workingChapterSelections,
+                stateSnapshotID: snapshotID,
+                sessionCursor: pending.sessionCursor ?? .empty,
+                branchOverrideRevisionIDs: branch.overrideRevisionIDs,
+                sourceCandidateID: nil,
+                baseHeadRevision: pending.baseHeadRevision,
+                operationID: pending.operationID,
+                createdAt: now
+            ),
+            to: &next,
+            expectedHeadRevision: pending.baseHeadRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
+        next.pendingOperations.removeAll { $0.id == pending.id }
+        next.project.revision = finalRevision
+        next.project.updatedAt = now
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        return next
+    }
+
+    static func applyAcceptStale(
+        to document: NovelProjectDocumentV1,
+        branchID: NovelBranchID,
+        now: Date = Date()
+    ) throws -> NovelProjectDocumentV1 {
+        guard let branch = document.branches.first(where: { $0.id == branchID }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        guard let old = document.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) else {
+            throw NovelError.invalidInput("The branch has no current plot snapshot.")
+        }
+        let modules = old.chapterPlots.map {
+            NovelChapterPlotModule(chapterID: $0.chapterID, text: $0.text, stale: false)
+        }
+        let body = NovelWorkspaceLedger.plotCurrentBody(
+            summary: old.summary,
+            highlights: NovelWorkspaceLedger.foldedHighlightTexts(modules)
         )
         return try apply(
             to: document,
@@ -449,7 +774,77 @@ enum NovelWorkspacePlotCommit {
             path: "plot/current.md",
             body: body,
             now: now,
-            chapterPlots: ordered
+            chapterPlots: modules
         )
+    }
+}
+
+struct NovelWorkspacePlotDraft: Equatable, Sendable {
+    var chapterText: String
+    var summary: String
+
+    static let maxChapterCharacters = 400
+    static let maxSummaryCharacters = 800
+
+    static func parse(_ raw: String) throws -> NovelWorkspacePlotDraft {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            throw NovelError.invalidInput("Plot draft is empty.")
+        }
+        var chapterLines: [String] = []
+        var summaryLines: [String] = []
+        var section: Section?
+        for line in text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let next = Section(heading: trimmed) {
+                section = next
+                continue
+            }
+            switch section {
+            case .chapter:
+                chapterLines.append(String(line))
+            case .summary:
+                summaryLines.append(String(line))
+            case nil:
+                continue
+            }
+        }
+        let chapterText = clipped(
+            chapterLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+            maxChapterCharacters
+        )
+        let summary = clipped(
+            summaryLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
+            maxSummaryCharacters
+        )
+        guard !chapterText.isEmpty else {
+            throw NovelError.invalidInput("Plot draft is missing the chapter section.")
+        }
+        return NovelWorkspacePlotDraft(chapterText: chapterText, summary: summary)
+    }
+
+    private enum Section {
+        case chapter
+        case summary
+
+        init?(heading: String) {
+            let stripped = heading.replacingOccurrences(
+                of: #"^#{1,3}\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            switch stripped {
+            case "本章":
+                self = .chapter
+            case "当前":
+                self = .summary
+            default:
+                return nil
+            }
+        }
+    }
+
+    private static func clipped(_ text: String, _ limit: Int) -> String {
+        text.count > limit ? String(text.prefix(limit)) : text
     }
 }

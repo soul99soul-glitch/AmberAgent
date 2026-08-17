@@ -1714,6 +1714,10 @@ protocol NovelCreation: Sendable {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws
+    func applyWorkspacePlotAcceptStale(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws
     /// 项目文档每次成功 mutation 后广播事件。订阅方（UI VM）据此刷新快照，
     /// 让非 UI 写入源（如讨论工具 executor）的改动即时反映到界面。
     /// 默认实现为立即结束的空流，测试替身免实现。
@@ -1820,6 +1824,15 @@ extension NovelCreation {
     }
 
     func applyWorkspacePlotRelink(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        _ = projectID
+        _ = branchID
+        throw NovelError.invalidInput("Workspace plot write is unavailable.")
+    }
+
+    func applyWorkspacePlotAcceptStale(
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws {

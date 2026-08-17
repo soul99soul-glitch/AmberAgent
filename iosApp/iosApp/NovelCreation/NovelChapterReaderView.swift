@@ -236,6 +236,29 @@ struct NovelChapterReaderView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 9)
             .background(AmberTheme.accent.opacity(0.08))
+        } else if viewModel.hasStalePlot {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("改过前面的章节后，后面的剧情指针可能过期。后文以正文为准。", systemImage: "clock.arrow.circlepath")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("按正文接受") {
+                    Task { @MainActor in
+                        await viewModel.acceptStalePlot()
+                    }
+                }
+                .font(.footnote.weight(.semibold))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .disabled(
+                    viewModel.isPerforming || viewModel.requiresReload ||
+                        viewModel.projectSnapshot?.access != .readWrite
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+            .background(AmberTheme.accentAmber.opacity(0.10))
         } else if isCurrentChapterDiscarded {
             Label("已废弃 · 不进入后续生成上下文", systemImage: "archivebox.fill")
                 .font(.footnote.weight(.medium))
@@ -374,7 +397,7 @@ struct NovelChapterReaderView: View {
         }
         return currentStateSyncActivity?.phase == .analyzing
             ? "正在同步剧情状态"
-            : "正在准备剧情状态"
+            : "正在按正文对齐剧情指针"
     }
 
     private var currentStateSyncRecoveryMessage: String? {

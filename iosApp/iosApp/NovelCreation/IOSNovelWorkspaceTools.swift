@@ -71,13 +71,20 @@ extension IOSNovelProjectToolExecutor {
         let working = branch.workingChapterSelections.filter { selection in
             snapshot.chapters.first { $0.id == selection.chapterID }?.discardedAt == nil
         }
+        let state = snapshot.stateSnapshots.first {
+            $0.id == branch.currentStateSnapshotID
+        }
         var lines = [
             "project: \(snapshot.project.name)",
             "branch: \(branch.name)",
+            "head: \(branch.headCheckpointID)",
             "sync: \(branch.syncStatus.rawValue)",
             "chapters: \(working.count)",
             "mode: \(snapshot.project.collaborationMode.rawValue)",
         ]
+        if state?.hasStaleChapterPlots == true {
+            lines.append("plot_stale: true")
+        }
         if branch.syncStatus == .needsSync {
             lines.append("dirty: plot/")
         }
