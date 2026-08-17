@@ -1100,7 +1100,6 @@ final class NovelSessionViewModel {
                     promptMessageID: promptMessageID,
                     answer: trimmed
                 )
-                await syncRevisionPlotState(chapterID: revision.chapterID)
                 operationErrorMessage = nil
                 return true
             } else if trimmed != NovelChapterRevisionApproval.rejectOption {
@@ -1215,6 +1214,11 @@ final class NovelSessionViewModel {
             operationErrorMessage = workspace.errorMessage ?? "改正文保存失败，请重试。"
             return false
         }
+        await syncRevisionPlotState(
+            chapterID: proposal.chapterID,
+            title: version.title,
+            content: replaced.newContent
+        )
         return true
     }
 
@@ -1231,18 +1235,17 @@ final class NovelSessionViewModel {
         return true
     }
 
-    private func syncRevisionPlotState(chapterID: NovelChapterID) async {
+    private func syncRevisionPlotState(
+        chapterID: NovelChapterID,
+        title: String,
+        content: String
+    ) async {
         guard let branch = workspace.branchSnapshot else { return }
-        let isLastWorkingChapter = branch.branch.workingChapterSelections.last?.chapterID
-            == chapterID
-        if isLastWorkingChapter {
-            let synced = await workspace.syncWorkingManuscript(preferStateDelta: true)
-            if !synced {
-                workspace.scheduleAutomaticStateSync(
-                    projectID: branch.projectID,
-                    branchID: branch.branch.id
-                )
-            }
+        if await workspace.applyWorkspaceFastForwardPlot(
+            chapterID: chapterID,
+            title: title,
+            content: content
+        ) == nil {
             return
         }
         workspace.scheduleAutomaticStateSync(

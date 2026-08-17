@@ -71,13 +71,16 @@ extension IOSNovelProjectToolExecutor {
         let working = branch.workingChapterSelections.filter { selection in
             snapshot.chapters.first { $0.id == selection.chapterID }?.discardedAt == nil
         }
-        let lines = [
+        var lines = [
             "project: \(snapshot.project.name)",
             "branch: \(branch.name)",
             "sync: \(branch.syncStatus.rawValue)",
             "chapters: \(working.count)",
             "mode: \(snapshot.project.collaborationMode.rawValue)",
         ]
+        if branch.syncStatus == .needsSync {
+            lines.append("dirty: plot/")
+        }
         return .filled(lines.joined(separator: "\n"))
     }
 

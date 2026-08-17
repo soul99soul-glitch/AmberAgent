@@ -4,8 +4,7 @@ import XCTest
 
 final class NovelFactTransactionLifecycleTests: XCTestCase {
     func testCollectionCommitsImmediatelyWithoutStartingFactModel() async throws {
-        // 2026-08-16：共创点收录与代笔自动收录同一条 inline stateDelta。
-        // 旧契约是 user collect 0 请求、needsSync；现改为收录当时抽完并保持 synchronized。
+        // 续写/新章：host 写 plot/ 快进，不再抽 JSON。
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
             document: fixture.document,
@@ -27,10 +26,13 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.chapterVersions.last?.content, fixture.candidate.content)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
-        XCTAssertFalse(final.injectionReceipts.isEmpty)
-        XCTAssertFalse(final.generationReceipts.isEmpty)
+        XCTAssertTrue(
+            final.stateSnapshots.last?.recentWrittenHighlights.contains(where: {
+                $0.contains("Chapter One")
+            }) == true
+        )
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.count, 0)
     }
 
     func testSystemAutoCollectUsesInlineStateDeltaAndStaysSynchronized() async throws {
@@ -55,11 +57,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.candidates[0].status, .collected)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
-        XCTAssertFalse(final.injectionReceipts.isEmpty)
-        XCTAssertFalse(final.generationReceipts.isEmpty)
         XCTAssertEqual(final.stateSnapshots.count, fixture.document.stateSnapshots.count + 1)
         let requests = await harness.adapter.requests
-        XCTAssertFalse(requests.isEmpty)
+        XCTAssertTrue(requests.isEmpty)
     }
 
     func testSystemAutoCollectFallsBackToWithoutStateSyncWhenDeltaFails() async throws {
@@ -83,15 +83,13 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let final = try await harness.repository.document(command.projectID)
         XCTAssertEqual(final.candidates[0].status, .collected)
         XCTAssertTrue(final.pendingOperations.isEmpty)
-        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
-        // 回退后无成功 finalize 的 stateDelta receipts 也可；章已进书，后续 manual rebuild。
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         let requests = await harness.adapter.requests
-        XCTAssertFalse(requests.isEmpty, "应先尝试过 stateDelta 再回退")
+        XCTAssertTrue(requests.isEmpty, "续写快进不再尝试 stateDelta")
     }
 
     func testDeferredSyncRebuildsAnImmediatelyCollectedChapter() async throws {
-        // 2026-08-16：共创收录先走 inline delta；超时不回修，回退 without-sync
-        // 后再走既有 suffix rebuild。
+        // 续写收录已改为 host 写 plot/，不再进入 timeout→rebuild。
         var fixture = try candidateDocument()
         fixture.document.project.modelPolicy = .fixed(
             providerID: "creative-provider",
@@ -115,40 +113,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         )
         _ = try await harness.creation.perform(.collectCandidate(collect))
         let collected = try await harness.repository.document(collect.projectID)
-        XCTAssertEqual(collected.branches[0].syncStatus, .needsSync)
-        let branch = collected.branches[0]
-        let sync = NovelSyncManualEditsCommand(
-            context: NovelMutationContext(
-                operationID: NovelOperationID(),
-                expectedProjectRevision: collected.project.revision,
-                expectedConfigRevision: collected.project.configRevision,
-                expectedBranchHeadRevision: branch.headRevision
-            ),
-            projectID: collected.project.id,
-            branchID: branch.id,
-            pendingID: NovelPendingOperationID(),
-            checkpointID: NovelCheckpointID(),
-            stateSnapshotID: NovelStateSnapshotID(),
-            expectedWorkingRevision: branch.workingRevision
-        )
-
-        guard case .manualSyncCommitted = try await harness.creation.perform(
-            .syncManualEdits(sync)
-        ) else {
-            return XCTFail("Expected deferred material synchronization to complete")
-        }
-
-        let final = try await harness.repository.document(collect.projectID)
-        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
-        XCTAssertEqual(final.stateSnapshots.last?.summary, "Mara entered the archive and heard the bell.")
-        XCTAssertEqual(final.events.map(\.summary), ["Mara entered the archive."])
-        let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 2)
-        let policies = await harness.adapter.resolvedPolicies
-        XCTAssertEqual(policies, [
-            .fixed(providerID: "sync-provider", modelID: "sync-model"),
-            .fixed(providerID: "sync-provider", modelID: "sync-model"),
-        ])
+        XCTAssertEqual(collected.branches[0].syncStatus, .synchronized)
+        let collectRequests = await harness.adapter.requests
+        XCTAssertEqual(collectRequests.count, 0)
     }
 
     func testManualSyncRepairsTruncatedJSONUsingPreviousOutput() async throws {
@@ -265,7 +232,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 4)
+        XCTAssertEqual(requests.count, 3)
         XCTAssertFalse(
             final.events.contains(where: { $0.summary.contains("dragon") })
         )
@@ -312,12 +279,10 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 2)
-        let repairUser = requests[1].messages
-            .filter { $0.role == .user }
-            .map(\.content)
-            .joined(separator: "\n")
-        XCTAssertTrue(repairUser.contains("A dragon burst through the ceiling tiles."))
+        XCTAssertEqual(requests.count, 0)
+        XCTAssertFalse(
+            final.stateSnapshots.last?.summary.contains("dragon") == true
+        )
     }
 
     func testManualSyncDoesNotRepairTimeoutAfterARejectedDraft() async throws {
@@ -569,13 +534,11 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         _ = try await harness.creation.perform(.collectCandidate(command))
 
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests.count, 0)
         let durable = try await harness.repository.document(command.projectID)
         XCTAssertEqual(durable.candidates[0].status, .collected)
         XCTAssertTrue(durable.pendingOperations.isEmpty)
         XCTAssertEqual(durable.branches[0].syncStatus, .synchronized)
-        XCTAssertFalse(durable.injectionReceipts.isEmpty)
-        XCTAssertFalse(durable.generationReceipts.isEmpty)
     }
 
     func testRestartCanRetryDurablePendingWithoutTheOriginalProviderTask() async throws {
@@ -824,7 +787,6 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let harness = try await makeHarness(
             document: fixture.document,
             scripts: [
-                NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(rebuildJSON), .complete]),
             ]
         )
@@ -851,8 +813,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         _ = try await harness.creation.perform(.syncManualEdits(sync))
 
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 2)
-        let rebuildRequest = requests[1]
+        XCTAssertEqual(requests.count, 1)
+        let rebuildRequest = requests[0]
         let system = rebuildRequest.messages.first?.content ?? ""
         let user = rebuildRequest.messages.last?.content ?? ""
         XCTAssertTrue(user.contains("ORDERED MANUSCRIPT INPUT"))
@@ -864,8 +826,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let final = try await harness.repository.document(sync.projectID)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.branches[0].currentStateSnapshotID, sync.stateSnapshotID)
-        XCTAssertEqual(final.injectionReceipts.count, 2)
-        XCTAssertEqual(final.generationReceipts.count, 2)
+        XCTAssertEqual(final.injectionReceipts.count, 1)
+        XCTAssertEqual(final.generationReceipts.count, 1)
         let manualInjection = try XCTUnwrap(final.injectionReceipts.last)
         XCTAssertFalse(manualInjection.sections.contains {
             if case .sessionMessage = $0.kind { return true }
@@ -921,8 +883,8 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertTrue(final.pendingOperations.isEmpty)
         let requests = await harness.adapter.requests
-        XCTAssertEqual(requests.count, 2)
-        let deltaUser = requests[1].messages.last?.content ?? ""
+        XCTAssertEqual(requests.count, 1)
+        let deltaUser = requests[0].messages.last?.content ?? ""
         XCTAssertTrue(deltaUser.contains("NEWLY COLLECTED MANUSCRIPT"))
         XCTAssertFalse(deltaUser.contains("ORDERED MANUSCRIPT INPUT"))
         XCTAssertTrue(deltaUser.contains("Mara forced open the archive door."))

@@ -639,6 +639,13 @@ extension NovelOutcome {
                 checkpointID: checkpointID,
                 revision: revision
             )
+        case .workspacePlotCommitted(_, let branchID, let checkpointID, let revision):
+            return .workspacePlotCommitted(
+                projectID: projectID,
+                branchID: branchID,
+                checkpointID: checkpointID,
+                revision: revision
+            )
         case .projectImported(
             let sourceProjectID, _, let disposition, let interruptedRunCount, let revision
         ):

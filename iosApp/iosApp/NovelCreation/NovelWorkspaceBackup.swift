@@ -341,6 +341,7 @@ enum NovelWorkspaceBackup {
         exportedAt: Date = Date(),
         fileManager: FileManager = .default
     ) throws {
+        let existingLedger = NovelWorkspaceLedger.load(from: directory, fileManager: fileManager)
         let files = try export(document, exportedAt: exportedAt)
         if fileManager.fileExists(atPath: directory.path) {
             try fileManager.removeItem(at: directory)
@@ -354,6 +355,18 @@ enum NovelWorkspaceBackup {
             )
             try Data(file.contents.utf8).write(to: url, options: .atomic)
         }
+        let tree = NovelWorkspaceLedger.fileTree(from: files)
+        var store = existingLedger
+        if store.headCommit?.treeSHA256 != NovelWorkspaceLedger.treeSHA256(tree) {
+            let commit = NovelWorkspaceLedger.makeCommit(
+                parentID: store.head,
+                files: tree,
+                message: "r\(document.project.revision)",
+                now: exportedAt
+            )
+            store = NovelWorkspaceLedger.appending(commit, to: store)
+        }
+        try NovelWorkspaceLedger.save(store, to: directory, fileManager: fileManager)
     }
 
     static func exportPackage(

@@ -92,109 +92,62 @@ extension DefaultNovelCreation {
         guard loaded.access == .readWrite else {
             throw NovelError.degradedReadOnly(projectID: projectID)
         }
-        let document = loaded.document
-        guard let branch = document.branches.first(where: { $0.id == branchID }) else {
-            throw NovelError.branchNotFound(branchID)
-        }
-        guard let old = document.stateSnapshots.first(where: {
-            $0.id == branch.currentStateSnapshotID
-        }) else {
-            throw NovelError.invalidInput("The branch has no current plot snapshot.")
-        }
-        let now = Date()
-        var summary = old.summary
-        var outline = old.branchOutline
-        var eventIDs = old.eventIDs
-        var next = document
-        if path.hasSuffix("current.md") {
-            let split = NovelWorkspaceMarkdown.splitHighlights(body)
-            summary = split.body
-        } else if path.hasSuffix("outline.md") {
-            outline = body
-        } else if path.hasSuffix("events.md") {
-            let lines = NovelWorkspaceMarkdown.bullets(body)
-            var nextSequence = (document.events.map(\.sequence).max() ?? -1) + 1
-            var created: [NovelEventID] = []
-            for line in lines {
-                let event = NovelStoryEventRecord(
-                    id: NovelEventID(),
-                    sequence: nextSequence,
-                    kind: "workspace",
-                    summary: line,
-                    entityReferences: [],
-                    createdAt: now
-                )
-                nextSequence += 1
-                next.events.append(event)
-                created.append(event.id)
-            }
-            eventIDs = created
-        } else {
-            throw NovelError.invalidInput("Unsupported plot path \(path).")
-        }
-        let operationID = NovelOperationID()
-        let snapshotID = NovelStateSnapshotID()
-        let checkpointID = NovelCheckpointID()
-        next.stateSnapshots.append(
-            NovelStateSnapshotRecord(
-                id: snapshotID,
-                eventIDs: eventIDs,
-                summary: summary,
-                branchOutline: outline,
-                unresolvedEntityNames: old.unresolvedEntityNames,
-                createdAt: now,
-                settingProposalIDs: old.settingProposalIDs,
-                characterIdentityClarifications: old.characterIdentityClarifications,
-                recentWrittenHighlights: old.recentWrittenHighlights
-            )
-        )
-        let session = next.sessions.first { $0.id == branch.sessionID }
-        let cursor: NovelSessionCursor = session?.messages.last.map {
-            .through(sequence: $0.sequence)
-        } ?? .empty
-        let finalRevision = document.project.revision + 1
-        let outcome = NovelOutcome.manualSyncCommitted(
-            projectID: projectID,
+        let next = try NovelWorkspacePlotCommit.apply(
+            to: loaded.document,
             branchID: branchID,
-            checkpointID: checkpointID,
-            revision: finalRevision
+            path: path,
+            body: body,
+            now: now()
         )
-        next.appliedOperations.append(
-            NovelAppliedOperationRecord(
-                operationID: operationID,
-                kind: .syncManualEdits,
-                payloadSHA256: NovelDocumentValidator.sha256(path + "\n" + body),
-                outcome: outcome,
-                appliedProjectRevision: finalRevision,
-                appliedAt: now
-            )
-        )
-        try NovelReducer.appendCheckpoint(
-            NovelBranchCheckpointRecord(
-                id: checkpointID,
-                kind: .manualSync,
-                createdOnBranchID: branchID,
-                parentCheckpointID: branch.headCheckpointID,
-                chapterSelections: branch.workingChapterSelections,
-                stateSnapshotID: snapshotID,
-                sessionCursor: cursor,
-                branchOverrideRevisionIDs: branch.overrideRevisionIDs,
-                sourceCandidateID: nil,
-                baseHeadRevision: branch.headRevision,
-                operationID: operationID,
-                createdAt: now
-            ),
-            to: &next,
-            expectedHeadRevision: branch.headRevision,
-            advancesWorkingRevision: false,
-            now: now
-        )
-        next.project.revision = finalRevision
-        next.project.updatedAt = now
-        try NovelDocumentValidator.validateTransition(from: document, to: next)
         let committed = try await repository.commitProject(
             next,
-            expectedRevision: document.project.revision
+            expectedRevision: loaded.document.project.revision
+        )
+        _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
+    }
+
+    func applyWorkspaceFastForwardPlot(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        chapterID: NovelChapterID,
+        chapterTitle: String,
+        chapterContent: String
+    ) async throws {
+        let loaded = try await loadCommittedProject(id: projectID)
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: projectID)
+        }
+        let next = try NovelWorkspacePlotCommit.applyChapterModule(
+            to: loaded.document,
+            branchID: branchID,
+            chapterID: chapterID,
+            chapterTitle: chapterTitle,
+            chapterContent: chapterContent,
+            now: now()
+        )
+        let committed = try await repository.commitProject(
+            next,
+            expectedRevision: loaded.document.project.revision
+        )
+        _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
+    }
+
+    func applyWorkspacePlotRelink(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID
+    ) async throws {
+        let loaded = try await loadCommittedProject(id: projectID)
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: projectID)
+        }
+        let next = try NovelWorkspacePlotCommit.applyRelink(
+            to: loaded.document,
+            branchID: branchID,
+            now: now()
+        )
+        let committed = try await repository.commitProject(
+            next,
+            expectedRevision: loaded.document.project.revision
         )
         _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
     }

@@ -109,6 +109,7 @@ struct NovelWorkspaceFolderDocument: FileDocument {
         }
         var files: [NovelWorkspaceBackup.File] = []
         for (name, child) in children.sorted(by: { $0.key < $1.key }) {
+            if name.hasPrefix(".") { continue }
             let next = prefix.isEmpty ? name : "\(prefix)/\(name)"
             files.append(contentsOf: try flatten(child, prefix: next))
         }

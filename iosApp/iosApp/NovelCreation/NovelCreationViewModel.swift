@@ -2049,11 +2049,15 @@ final class NovelCreationViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )))
         if deleted {
-            // Same as saveManualRewrite: working diverged from head → kick auto plot sync.
-            scheduleAutomaticStateSync(
-                projectID: project.project.id,
-                branchID: branch.branch.id
-            )
+            do {
+                try await creation.applyWorkspacePlotRelink(
+                    projectID: project.project.id,
+                    branchID: branch.branch.id
+                )
+                errorMessage = nil
+            } catch {
+                report(error)
+            }
         }
         return deleted
     }
@@ -2121,9 +2125,10 @@ final class NovelCreationViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )))
         if saved, schedulesAutomaticSync {
-            scheduleAutomaticStateSync(
-                projectID: project.project.id,
-                branchID: branch.branch.id
+            _ = await applyWorkspaceFastForwardPlot(
+                chapterID: chapterID,
+                title: title,
+                content: content
             )
         }
         return saved
@@ -2940,6 +2945,30 @@ final class NovelCreationViewModel {
                 branchID: branchID,
                 path: path,
                 body: body
+            )
+            errorMessage = nil
+            return nil
+        } catch {
+            report(error)
+            return errorMessage ?? error.localizedDescription
+        }
+    }
+
+    func applyWorkspaceFastForwardPlot(
+        chapterID: NovelChapterID,
+        title: String,
+        content: String
+    ) async -> String? {
+        guard let projectID = selectedProjectID, let branchID = selectedBranchID else {
+            return "当前没有打开的小说项目。"
+        }
+        do {
+            try await creation.applyWorkspaceFastForwardPlot(
+                projectID: projectID,
+                branchID: branchID,
+                chapterID: chapterID,
+                chapterTitle: title,
+                chapterContent: content
             )
             errorMessage = nil
             return nil

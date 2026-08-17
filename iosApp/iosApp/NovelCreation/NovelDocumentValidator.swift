@@ -2088,6 +2088,19 @@ enum NovelDocumentValidator {
                     document: document,
                     issues: &issues
                 )
+            case let (
+                .workspacePlot,
+                .workspacePlotCommitted(_, branchID, checkpointID, revision)
+            ):
+                validateManualSyncOutcome(
+                    operation: operation,
+                    branchID: branchID,
+                    checkpointID: checkpointID,
+                    revision: revision,
+                    requiresMatchingOperationID: true,
+                    document: document,
+                    issues: &issues
+                )
             default:
                 issues.append("Operation \(operation.operationID) kind does not match its outcome.")
             }
@@ -2872,6 +2885,7 @@ extension NovelOutcome {
         case .candidateCollected(let projectID, _, _, _, _, _): projectID
         case .manualEditSaved(let projectID, _, _, _, _): projectID
         case .manualSyncCommitted(let projectID, _, _, _): projectID
+        case .workspacePlotCommitted(let projectID, _, _, _): projectID
         case .projectImported(_, let projectID, _, _, _): projectID
         case .previousProjectRestored(let projectID, _): projectID
         case .projectDeleted(let projectID): projectID
@@ -2902,7 +2916,8 @@ extension NovelOutcome {
              .runStarted(_, let branchID, _, _, _),
              .candidateCollected(_, let branchID, _, _, _, _),
              .manualEditSaved(_, let branchID, _, _, _),
-             .manualSyncCommitted(_, let branchID, _, _):
+             .manualSyncCommitted(_, let branchID, _, _),
+             .workspacePlotCommitted(_, let branchID, _, _):
             branchID
         case .branchForked(_, _, let branchID, _, _):
             branchID

@@ -48,4 +48,8 @@
 - [`IOS_AGENT_HARDENING_PLAN_2026-07-29.md`](IOS_AGENT_HARDENING_PLAN_2026-07-29.md)：iOS Agent 不变量补强设计稿；开始前必须重新核对当前代码是否已部分落地。
 - [`NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md`](NOVEL_CREATION_ANDROID_IMPLEMENTATION_PLAN.md)：跨仓 Android 草案，不得在本 iOS 仓直接开工。
 
+日期化交接（不是当前入口，只作时点快照）：
+
+- [`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)：2026-08-17 小说工作区五阶段；不取代 `PROJECT_STATE.md` 或规格。
+
 其余日期化计划、审计、评估和 `.workflow/` 结果默认视为历史材料。只有当前任务明确命中其主题时再读取，并以实时代码复核。

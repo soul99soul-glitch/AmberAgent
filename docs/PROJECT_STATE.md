@@ -1,6 +1,14 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-17（小说工作区五阶段落地）
+Last updated: 2026-08-17（薄 VCS：中间章按模块链接，不再抽 JSON）
+
+时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。
+
+## 小说薄 VCS（2026-08-17）
+
+每章一份剧情模块（snapshot `chapterPlots`）。改哪章只更新那一章再链接 `plot/current.md`，后章正文不动。收录、改末章、改中间章、删章都不再自动跑 `stateDelta`/`stateRebuild`。摘要仍保留，不整本重抽。JSON 包仍是权威。`checkout/.amber/commits.json` 记树哈希。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-workspace-vcs`）：`NovelWorkspaceLedgerTests` 6、`NovelWorkspaceBackupTests` 4、`NovelFactTransactionLifecycleTests` 全绿。未装真机。
 
 ## 小说工作区五阶段（2026-08-17）
 
@@ -9,12 +17,10 @@ Last updated: 2026-08-17（小说工作区五阶段落地）
 1. 导出工作区：`setting/world|outline|writing/` 分目录；设定页「导出工作区」；`NovelWorkspaceFolderDocument`。
 2. 导入：文件列表选文件夹 → 转成项目包 → 现有预览/导入。永远新建 projectID；只收 `mainBranch` 下的章/剧情。
 3. 讨论虚拟树：`novel_workspace_{list,read,grep,status,write}`。章/剧情写仍审批。
-4. 写 `plot/*.md` 经 `applyWorkspacePlot` 更新当前快照并标 synchronized。代笔自动 JSON 抽取仍在（不断开鬼写流水线）。
+4. 写 `plot/*.md` 经 `applyWorkspacePlot` 更新当前快照并标 synchronized。**收录/改正文按章模块链接**（见上一节）；手动点「同步剧情」仍可走旧 JSON 路径。
 5. 每次 sharded 落盘旁路写 `projects/{id}/checkout/`；无 layout 时从 checkout 恢复。权威仍是 JSON 包，禁止原地迁打开中的书。
 
-验证：`NovelWorkspaceBackupTests` + `NovelLiveModelAdapterTests` 定点。`IOSNovelProjectToolExecutorTests` 设定建议 4 例红是既有过滤基线，与本轮无关。
-
-2026-08-17 约 09:05 无线覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `B495C6A3-7694-4AB9-9613-391AFC6DEEE3`），`app.amber.ios` 1.0/1 已拉起（pid 59757）。导出/导入与 `workspace_write` 审批卡仍待真机点验。
+本轮与 `e2a9ebb5c` 之后的 VCS 改动一并提交。GitHub 若仍拦 push，是更早 `a8ded52c8` 的公开 Antigravity OAuth，不是本提交。真机安装仍是五阶段那一包，不含本轮 VCS。
 
 ## 设定建议闭环修补（2026-08-17，HEAD `7d95b8452`）
 

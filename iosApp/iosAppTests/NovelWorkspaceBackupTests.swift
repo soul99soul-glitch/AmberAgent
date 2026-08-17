@@ -4,7 +4,7 @@ import XCTest
 final class NovelWorkspaceBackupTests: XCTestCase {
     func testExportsWorkspaceTreeWithoutWrappingChapterHeadings() throws {
         let exportedAt = Date(timeIntervalSince1970: 1_787_011_200)
-        let document = try makeBackupFixture()
+        let document = try makeNovelWorkspaceBackupFixture()
         let files = Dictionary(
             uniqueKeysWithValues: try NovelWorkspaceBackup.export(
                 document,
@@ -66,7 +66,7 @@ final class NovelWorkspaceBackupTests: XCTestCase {
     }
 
     func testWorkspaceRoundTripPreservesChapterAndSetting() throws {
-        let original = try makeBackupFixture()
+        let original = try makeNovelWorkspaceBackupFixture()
         let files = try NovelWorkspaceBackup.export(original)
         let imported = try NovelWorkspaceImporter.makeDocument(from: files)
 
@@ -131,7 +131,7 @@ final class NovelWorkspaceBackupTests: XCTestCase {
     func testWriteCreatesReadableChapterFiles() throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
-        let document = try makeBackupFixture()
+        let document = try makeNovelWorkspaceBackupFixture()
         let destination = root.appendingPathComponent("workspace", isDirectory: true)
         try NovelWorkspaceBackup.write(document, to: destination, exportedAt: Date(timeIntervalSince1970: 1_787_011_200))
 
@@ -142,7 +142,9 @@ final class NovelWorkspaceBackupTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent("manifest.yaml").path))
     }
 
-    private func makeBackupFixture() throws -> NovelProjectDocumentV1 {
+}
+
+func makeNovelWorkspaceBackupFixture() throws -> NovelProjectDocumentV1 {
         var document = try NovelBranchTestFixtures.documentWithCollectedCandidate(
             content: "陈桥驿的风先到。"
         )
@@ -258,7 +260,6 @@ final class NovelWorkspaceBackupTests: XCTestCase {
         _ = chapterID
         try NovelDocumentValidator.validate(document)
         return document
-    }
 }
 
 private struct BackupIndex: Decodable {

@@ -1388,6 +1388,11 @@ struct NovelStoryEventRecord: Codable, Equatable, Sendable {
     let createdAt: Date
 }
 
+struct NovelChapterPlotModule: Codable, Equatable, Sendable {
+    var chapterID: NovelChapterID
+    var text: String
+}
+
 struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
     /// Cap for cross-chapter anti-repeat highlights carried on each snapshot.
     static let maxRecentWrittenHighlights = 24
@@ -1403,6 +1408,8 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
     let settingProposalIDs: [NovelProposalID]
     /// Bounded beat list derived from recent story-event summaries for anti-repeat injection.
     let recentWrittenHighlights: [String]
+    /// Per-chapter plot exports. `current.md` is the host-linked fold of these modules.
+    let chapterPlots: [NovelChapterPlotModule]
     let createdAt: Date
 
     init(
@@ -1414,7 +1421,8 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         createdAt: Date,
         settingProposalIDs: [NovelProposalID] = [],
         characterIdentityClarifications: [NovelCharacterIdentityClarificationRecord] = [],
-        recentWrittenHighlights: [String] = []
+        recentWrittenHighlights: [String] = [],
+        chapterPlots: [NovelChapterPlotModule] = []
     ) {
         self.id = id
         self.eventIDs = eventIDs
@@ -1424,6 +1432,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         self.characterIdentityClarifications = characterIdentityClarifications
         self.settingProposalIDs = settingProposalIDs
         self.recentWrittenHighlights = Self.normalizedHighlights(recentWrittenHighlights)
+        self.chapterPlots = chapterPlots
         self.createdAt = createdAt
     }
 
@@ -1436,6 +1445,7 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         case characterIdentityClarifications
         case settingProposalIDs
         case recentWrittenHighlights
+        case chapterPlots
         case createdAt
     }
 
@@ -1460,6 +1470,10 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         recentWrittenHighlights = Self.normalizedHighlights(
             try container.decodeIfPresent([String].self, forKey: .recentWrittenHighlights) ?? []
         )
+        chapterPlots = try container.decodeIfPresent(
+            [NovelChapterPlotModule].self,
+            forKey: .chapterPlots
+        ) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
     }
 
@@ -1476,6 +1490,9 @@ struct NovelStateSnapshotRecord: Codable, Equatable, Sendable {
         )
         try container.encode(settingProposalIDs, forKey: .settingProposalIDs)
         try container.encode(recentWrittenHighlights, forKey: .recentWrittenHighlights)
+        if !chapterPlots.isEmpty {
+            try container.encode(chapterPlots, forKey: .chapterPlots)
+        }
         try container.encode(createdAt, forKey: .createdAt)
     }
 
@@ -1841,6 +1858,7 @@ enum NovelOperationKind: String, Codable, Sendable {
     case collectCandidate
     case saveManualEdit
     case syncManualEdits
+    case workspacePlot
     case retryPending
     case importProject
     case restorePreviousProject

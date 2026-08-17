@@ -18,6 +18,16 @@ extension DefaultNovelCreation {
             return replay
         }
 
+        // 续写/末章：host 写 plot/ 并标 synchronized，不再抽 JSON。
+        // 改中间章仍走原 inline stateDelta / withoutSync。
+        if canWorkspaceFastForwardCollect(command, in: loaded.document) {
+            return try await executeWorkspaceFastForwardCollect(
+                command,
+                payloadSHA256: payloadSHA256,
+                loaded: loaded
+            )
+        }
+
         // 代笔自动收录且分支已同步：一次 stateDelta 直接落新 state，避免
         //「先无状态收录 → 多 chunk rebuild」的慢路径。失败再回退 withoutSync+rebuild。
         if prefersInlineStateDeltaCollect(command, in: loaded.document) {
@@ -198,6 +208,66 @@ extension DefaultNovelCreation {
 }
 
 private extension DefaultNovelCreation {
+    func canWorkspaceFastForwardCollect(
+        _ command: NovelCollectCandidateCommand,
+        in document: NovelProjectDocumentV1
+    ) -> Bool {
+        prefersInlineStateDeltaCollect(command, in: document)
+    }
+
+    func executeWorkspaceFastForwardCollect(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        loaded: NovelLoadedProject
+    ) async throws -> NovelOutcome {
+        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: loaded.document,
+            now: now()
+        )
+        let collectedLoaded: NovelLoadedProject
+        do {
+            collectedLoaded = try await commitFactDocument(committed.document, replacing: loaded)
+        } catch {
+            if let replay = try await reconcileFactOutcome(
+                projectID: command.projectID,
+                context: command.context,
+                kind: .collectCandidate,
+                payloadSHA256: payloadSHA256
+            ) {
+                return replay
+            }
+            throw error
+        }
+        let chapterID: NovelChapterID
+        switch command.target {
+        case .createNextChapter(let id, _):
+            chapterID = id
+        case .replaceChapter(let id), .appendToChapter(let id):
+            chapterID = id
+        }
+        guard let selection = collectedLoaded.document.branches
+            .first(where: { $0.id == command.branchID })?
+            .workingChapterSelections
+            .first(where: { $0.chapterID == chapterID }),
+              let version = collectedLoaded.document.chapterVersions.first(where: {
+                  $0.id == selection.versionID && $0.chapterID == chapterID
+              }) else {
+            throw NovelError.invalidInput("The collected chapter is missing from the working manuscript.")
+        }
+        let next = try NovelWorkspacePlotCommit.applyChapterModule(
+            to: collectedLoaded.document,
+            branchID: command.branchID,
+            chapterID: chapterID,
+            chapterTitle: version.title,
+            chapterContent: version.content,
+            now: now()
+        )
+        _ = try await commitFactDocument(next, replacing: collectedLoaded)
+        return committed.outcome
+    }
+
     /// 代笔自动收录或共创点收录：分支已同步、无挂起事务、无在途 run 时优先单章 stateDelta。
     func prefersInlineStateDeltaCollect(
         _ command: NovelCollectCandidateCommand,
