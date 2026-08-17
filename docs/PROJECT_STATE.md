@@ -1,8 +1,22 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-17（设定建议闭环修补）
+Last updated: 2026-08-17（小说工作区五阶段落地）
 
-## 设定建议闭环修补（2026-08-17，工作区未提交）
+## 小说工作区五阶段（2026-08-17）
+
+规格：`docs/superpowers/specs/2026-08-16-novel-markdown-workspace-design.md`。会话留账本（方案 A）。
+
+1. 导出工作区：`setting/world|outline|writing/` 分目录；设定页「导出工作区」；`NovelWorkspaceFolderDocument`。
+2. 导入：文件列表选文件夹 → 转成项目包 → 现有预览/导入。永远新建 projectID；只收 `mainBranch` 下的章/剧情。
+3. 讨论虚拟树：`novel_workspace_{list,read,grep,status,write}`。章/剧情写仍审批。
+4. 写 `plot/*.md` 经 `applyWorkspacePlot` 更新当前快照并标 synchronized。代笔自动 JSON 抽取仍在（不断开鬼写流水线）。
+5. 每次 sharded 落盘旁路写 `projects/{id}/checkout/`；无 layout 时从 checkout 恢复。权威仍是 JSON 包，禁止原地迁打开中的书。
+
+验证：`NovelWorkspaceBackupTests` + `NovelLiveModelAdapterTests` 定点。`IOSNovelProjectToolExecutorTests` 设定建议 4 例红是既有过滤基线，与本轮无关。
+
+2026-08-17 约 09:05 无线覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `B495C6A3-7694-4AB9-9613-391AFC6DEEE3`），`app.amber.ios` 1.0/1 已拉起（pid 59757）。导出/导入与 `workspace_write` 审批卡仍待真机点验。
+
+## 设定建议闭环修补（2026-08-17，HEAD `7d95b8452`）
 
 审查后的三处缺口，只补识别和文案，不改写路径、不加确认框：
 
@@ -11,15 +25,11 @@ Last updated: 2026-08-17（设定建议闭环修补）
 - 讨论提示升到 `novel.discussion.v12`：代笔中只许拒绝设定卡，不许 `novel_revise_material`。
 - 按钮改为「拒绝全部待确认」，写明会清当前分支全部分类。
 
-验证（iPhone 17 Pro，`/tmp/amber-dd-settings-filter`）：身份/场景家具过滤、已落盘粮仓不露出、讨论 v12 与 v11 旧回执，均绿。未装真机、未 commit。
+验证（iPhone 17 Pro，`/tmp/amber-dd-settings-filter`）：身份/场景家具过滤、已落盘粮仓不露出、讨论 v12 与 v11 旧回执，均绿。2026-08-17 约 00:22 无线覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `0EE93A1B-4EE7-42BB-8417-32242AC12A20`），`app.amber.ios` 1.0/1 已拉起。代码在 `7d95b8452`，未再 commit。
 
-## 小说工作区：先备份再谈重构（2026-08-16）
+## 小说工作区：先备份再谈重构（2026-08-16，已被上一节取代）
 
-北星：书是文件，agent 通用读写，host 守正史闸门和版本指针。磁盘目的地是 markdown 工作树，JSON 包是过渡。不内嵌真 git，不对正文做三路 merge。审批卡、身份卡、设定页等作者 UI 保留。
-
-现在不迁库。权威仍是 JSON 包。先做可往返的 markdown 工作区备份（目录/zip），导入只建新项目；会话、候选、检查点链不进备份。现有单文件成稿导出保留。
-
-规格：`docs/superpowers/specs/2026-08-16-novel-markdown-workspace-design.md`。未开工、未改代码。下手前按规格验收条款复核。
+北星与备份事实见上一节。本段不再当入口。
 
 ## 设定建议少提、可一次全拒（2026-08-16，工作区未提交）
 

@@ -1,54 +1,105 @@
 # 小说：文件工作区 + 薄版本控制
 
 日期：2026-08-16  
-状态：Proposed（先备份与导入，不改运行时存储）
+修订：2026-08-17（锁定方案 A：会话留在账本）  
+状态：Active（五阶段已落地最小闭环；代笔 JSON 抽取未拆除；磁盘权威仍是 JSON 包 + checkout 旁路）
 
 ## 问题
 
-讨论 agent 面对的是不透明的 JSON 包，所以每个作者意图都长成专用 `novel_*` 动词：读章、改正文、回退、拒设定建议……小说本质是能读能写的文稿，历史用指针管。现在的事实事务、段号补丁、检查点种类，是存储不透明之后的补偿层。
+讨论 agent 面对不透明的 JSON 包，每个作者意图都长成专用 `novel_*`。小说本质是能读能写的文稿，历史用指针管。事实事务、段号补丁、检查点种类，是存储不透明之后的补偿层。
 
-一次性把磁盘改成 markdown 工作树会破坏现有项目：章节版本、检查点、剧情快照、会话和回执缠在同一份 `NovelProjectDocumentV1` 里。所以运行时仓库先不动。
+《赵大来了》实证：工作区 markdown 约 684KB，原包约 62MB。书很小，会话和回执占了绝大部分。两者不该继续缠在一份 `NovelProjectDocumentV1` 里。
 
 ## 锁定决策
 
 1. **北星**：书是文件；agent 用通用读写；host 只守正史闸门和版本指针。版本控制借 git 的模型（工作树、commit、branch、checkout），不内嵌真 git，不对正文做三路文本 merge。
-2. **磁盘目的地是 markdown 工作树，不是 JSON 包。** `NovelProjectDocumentV1` 分片包是过渡权威，不是终点。迁库是换实现，不换作者看见的卡片和三入口。
-3. **现在不迁库。** 现有项目一行都不改格式。先备份/导入证明往返，再虚拟读写，最后才把打开中的书从包换成目录。禁止在用户设备上原地改格式。
-4. **先做可往返的 markdown 工作区备份**。给人看、可归档，也作为后续导入和重构的契约样本。它不是今天的「当前分支正文拼成一个 `.md`」。
-5. **导入只建新项目**，不原地替换正在用的包。历史会话、候选、回执、润色事务、旧检查点不进备份；丢历史、保内容。
-6. **专用动词冻住为默认增量**。缺能力先问：能否变成「投影路径上的 read/write」或「备份/导入」。不先加新的 `novel_*` RPC。
-7. **作者看见的界面不换皮。** 创作 / 正文 / 设定三入口、审批卡、身份卡、设定建议、本章计划、收录气泡都留。文件工作区是 agent 和备份的世界，不是把 App 改成文件浏览器。
+2. **两层存储。** 书是工作树；账本是会话、commit 指针、回执、run。agent 只看见书。
+3. **方案 A：会话留在账本。** 不把讨论气泡做成 `session/*.md`。聊天继续走现有 session 呈现。以后若要「把讨论当创作笔记带走」，另开规格。
+4. **磁盘目的地是 markdown 工作树，不是 JSON 包。** 分片包是过渡权威。迁库换实现，不换作者看见的卡片和三入口。
+5. **现在不迁库。** 现有项目一行都不改格式。禁止在用户设备上原地改格式。
+6. **导入只建新项目。** 备份保书、丢账本历史（会话、回执、旧检查点）。新项目空开 session。
+7. **专用动词冻住为默认增量。** 缺能力先问能否变成路径上的 `read`/`write`。
+8. **作者界面不换皮。** 创作 / 正文 / 设定、审批卡、身份卡、本章计划、收录气泡都留。
 
-## 和现有导出的差别
+## 书和账本
 
-| | 现有 `exportBranchMarkdown` | 本设计的工作区备份 |
+```text
+书（工作树，agent 能读能写）
+  chapters/031-入汴.md
+  setting/characters/赵匡胤.md
+  setting/world/*.md
+  plot/current.md
+  plan/this-chapter.md
+  drafts/              未收录候选
+  inbox/               待确认设定
+
+账本（host 自己用，不当工具）
+  commits / 分支指针 / 撤销
+  会话气泡、讨论归档
+  回执、run、润色事务
+```
+
+界面是视图：身份卡渲染 `setting/characters/*.md`；审批卡是往正史路径 `write` 的闸。
+
+## Agent 原语
+
+| 工具 | 作用 |
+|---|---|
+| `list` / `read` | 看目录和文件 |
+| `write` / `edit` | 改工作树 |
+| `grep` | 按需翻旧章，不再预装 6000 字尾巴 |
+| `status` | 脏文件、冲突范围、HEAD |
+
+`commit` / `revert` / `fork` 是 host 动作。模型可以提议，作者点卡才执行。
+
+正史闸只有一道：写已收录章，或写会让后文失效的 `plot/`，出审批卡再 commit。`drafts/`、`inbox/` 可直接写。候选气泡、讨论改正文、代笔收录共用这道闸。
+
+## 剧情
+
+收录或改正文之后，`plot/` 标脏。模型读章、自己改 `plot/`，与正文同一笔 commit。不再抽 JSON 事实，不再 delta/rebuild 自愈，不再把场景家具提成设定卡。
+
+设定建议：模型往 `inbox/` 写一篇 markdown；作者留则移进 `setting/`，拒则删。身份卡继续渲染 `setting/characters/`。
+
+现有 `plot/current.md` 里的「近期已写」是旧抽取回执。迁到文件权威后不再单独维护这类列表；需要防复读时，agent 自己 `grep` 近章。
+
+## 冲突
+
+借依赖失效，不借文本 merge。不要把 `<<<<<<<` 打进正文。
+
+| 改动 | 像 git | 结果 |
 |---|---|---|
-| 形态 | 单个 `.md` | 目录树（分享时打成 zip） |
-| 内容 | 当前分支未废弃章的标题+正文 | 项目元数据、共享设定、每条活动分支的正文、剧情、本章计划、往后几章；废弃章另放 |
-| 往返 | 不能导入 | 可导入为新项目 |
-| 用途 | 给人读成稿 | 备份、搬家、给后续重构当格式契约 |
+| 只续写 / 只改末章 | fast-forward | 一笔 commit：章 + `plot/` |
+| 从某章另开线 | checkout + branch | 旧线不动 |
+| 主线上改已有后续的旧章 | rebase 中间 commit | 允许；第 K 章之后的章和 `plot/` 标 unresolved |
 
-完整 Amber 项目包（JSON envelope）仍是「连历史一起搬走」的通道。两套并存，职责不混。
+解开之前只许讨论和读。解开：只修剧情、后章过闸重写、Fork、或显式接受后章不动。撤销 / 回退最近 N 章 / Fork = 挪账本指针。
 
-## 备份目录
+## 工作树布局
+
+真书不是一张 `world.md`。一张卡一个文件。章名可重复，身份是序号。
 
 ```text
 <project-stem>/
   manifest.yaml
   project.md
   setting/
-    world.md
-    master-outline.md
-    writing-requirements.md
+    world/<slug>.md
+    outline/<slug>.md
+    writing/<slug>.md
     characters/<slug>.md
     relationships/<slug>.md
     custom/<slug>.md
+  inbox/
+    <slug>.md
+  drafts/
+    <id>.md
   branches/
     <branch-slug>/
       branch.md
       chapters/
         001-<slug>.md
-        002-<slug>.md
+        024-山呼.md
+        030-山呼.md
       discarded/
         <slug>.md
       plot/
@@ -58,12 +109,12 @@
       plan/
         this-chapter.md
         upcoming.md
+      setting/                 # 分支覆盖，front matter override: true
 ```
 
-- 共享设定放根上 `setting/`，对应项目级 materials（当前修订）。分支覆盖若存在，写在该分支 `setting/` 下同名文件，并在 front matter 标 `override: true`。
-- 每条 **active** 分支各有一份当前工作稿（head 上未废弃章）和当前剧情快照。
-- 文件名 slug 来自标题，非法字符换成 `-`，空则用 id 前 8 位。序号三位，按工作稿顺序。
-- 正文文件 **不要** 再包一层 `# 标题`。标题只在 front matter / 文件名里，避免导入时和正文开头的标题重复。
+- 正文不要再包一层 `# 标题`。标题在 front matter / 文件名。
+- `001-山呼.md` 与 `030-山呼.md` 合法。导入以 `ordinal` 为准，不以 slug。
+- 当前导出器仍把多张世界卡写成 `setting/world-<slug>.md`。下一刀导出改成 `setting/world/`，旧树仍可读。
 
 ### `manifest.yaml`
 
@@ -73,125 +124,86 @@ formatVersion: 1
 exportedAt: 2026-08-16T12:00:00Z
 source:
   projectID: "..."
-  projectRevision: 193
+  projectRevision: 1112
   schemaVersion: 1
-mainBranch: main
+mainBranch: 主线
 ```
 
-`format` / `formatVersion` 是导入的唯一门闩。不认识就拒，不猜。
+`format` / `formatVersion` 是导入的唯一门闩。不认识就拒。
 
-### 文稿 front matter
-
-每篇内容文件以 YAML 开头，最少包含稳定身份，方便日后往返：
+### front matter
 
 ```yaml
 ---
 id: 3f2a0c1a-...
 kind: chapter          # chapter | material | plot | plan | project | branch
 title: 山呼
-ordinal: 3             # 仅 chapter
+ordinal: 24
 materialKind: character
 aliases: [赵大]
-injection: always      # always | smart | off
-sourceVersionID: "..." # 导出时的章节版本 / 资料修订，只读溯源
+injection: always
+sourceVersionID: "..." # 只读溯源，不当外键
 ---
 ```
 
-正文区是作者看到的 markdown，原样进出。不把 UUID 写进正文。
+正文原样进出。不把 UUID 写进正文。
 
-`plot/current.md` 的正文就是当前快照 `summary`。`plot/outline.md` 是 `branchOutline`。`plot/events.md` 按 sequence 列出当时快照引用的事件摘要（一项一段，前面可有 `- `）。近期已写要点若有，写在 `current.md` 文末的 `## 近期已写` 下；导入时有则读，无则空。
+## 备份与导入
 
-`plan/this-chapter.md` 用小标题还原合同字段（目标冲突、必须发生、不可发生、可见事实、收束），front matter 带 `status: draft|confirmed`。`upcoming.md` 每行一条 beat，最多 8 条。
+备份是书的快照，不是时间机器。不进备份：会话、讨论归档、回执、run、润色事务、检查点链、旧章节版本、已删资料。未收录候选和设定 inbox 进 `drafts/` / `inbox/`（导出下一刀补；现在的导出还没有）。
 
-`project.md` / `branch.md` 只放短元数据：名称、共创或代笔、润色偏好、同步状态。不把模型 key、run、receipt 写进去。
+完整 Amber 项目包仍是「连账本一起搬走」的通道。两套并存。
 
-### 明确不进备份
-
-会话消息、讨论归档、未收录候选、注入/生成回执、事实尝试、润色事务、pending/active run、设定建议 inbox、检查点链、旧章节版本、已删资料。
-
-这些仍只活在 JSON 包里。备份不是完整时间机器。
-
-## 导入
-
-入口：选一个工作区 zip 或目录。预览显示书名、分支数、章数；确认后 **新建** 一个项目（等同今天的 keepBoth），不覆盖同 id 的现有书。
-
-重建范围：
-
-- 项目记录 + 共享资料（各一篇当前修订）
-- 每条备份分支：工作稿章（每章一个版本）、一个当前剧情快照、可选本章计划与往后几章
-- 合成一条初始检查点 + 一条 head 检查点，足以让现有 reducer 认为分支合法
-- 新 session 空开
-
-身份：front matter 有 `id` 且与库内不撞则沿用；否则新生成。`sourceVersionID` 只作注释，不当外键。
-
-缺 `plot/`：分支标 `needsSync`，允许讨论，挡正式正文/润色/代笔整章——与今天手改后未同步相同。
-
-缺章、缺 manifest、format 不认识、正文不是 UTF-8：预览失败，不建项目。
-
-导入不是 git clone，不恢复历史指针。书能读能写能继续生成，就算成功。
+导入：选 zip 或目录，预览书名/分支/章数，**新建**项目。重建书 + 一条初始检查点 + 一条 head 检查点。session 空开。缺 `plot/` 则 `needsSync`。缺章、缺 manifest、非 UTF-8：预览失败，不建项目。
 
 ## 什么在变，什么不动
 
-这不是「把后端数据库换一种形式、前端重做」。更不是先改磁盘。
-
 | 层 | 现在 | 以后 |
 |---|---|---|
-| 作者 UI | 审批卡、身份卡、设定页、阅读器 | 原样留着，继续当产品 |
-| Agent 世界 | 14 个 `novel_*` + 预装摘要 | 看见与备份同构的文件树，通用读写 |
-| 正史闸门 | 各写各的审批工具 | 仍是审批卡；只是都走同一道 commit 闸 |
-| 身份卡 / 设定卡 | 资料记录的视图 | 仍是视图；底层多一个 `setting/characters/*.md` 投影 |
-| 运行时存储 | 分片 JSON 包 | **先不动**；目的地是同构的 markdown 目录，另开迁库规格，必须先有备份往返证据 |
+| 作者 UI | 审批卡、身份卡、设定页、阅读器 | 原样留着 |
+| Agent 世界 | 14 个 `novel_*` + 预装摘要 | 文件树 + 上表原语 |
+| 正史闸门 | 各写各的审批工具 | 仍是审批卡，同一道 commit |
+| 剧情 | JSON 事实抽取 / delta / rebuild | 模型改 `plot/` |
+| 会话 | document.sessions | **仍在账本**，不进工作树 |
+| 运行时存储 | 分片 JSON 包 | 先不动；目的地是工作树 + 旁路账本 |
 
-身份卡不是该删的复杂度。该削的是模型必须绕过卡片、再学一套 RPC 才能改同一份人设。
+## 重构顺序
 
-## 北星（后做，不在备份阶段开工）
+1. 导出工作区 — 已落地（`NovelWorkspaceBackup`；尚未 zip / App 按钮；目录仍是扁平 `world-*.md`）
+2. 导入为新项目 — 未做。真书导出再导回，核章序、正文、设定、剧情摘要。
+3. 讨论虚拟工作树：`list/read/write/grep/status` 映射现有 document。专用动词停增。磁盘仍是 JSON。
+4. 用「写 `plot/`」替换事实抽取。不过这一刀，不声称已经简单。
+5. 运行时权威换成目录；账本留下会话和指针。先导出 → 离线核对 → 再写新仓库。迁库当天完整项目包是回滚通道。
 
-agent 看见的世界与备份树同构。第一刀应是 **虚拟工作树**：`read/write` 映射到现有 document，`commit` 映射现有检查点，`revert` 映射 `undoBranchHead`。磁盘格式仍是 JSON 包。作者仍点卡片，不进文件树。
+1 没过不去 2。2 没过不去 3。
 
-正史闸门只有一道：改已收录章或会让后文失效的 `write`，先出 diff，作者确认才 commit。草稿 `write` 可直接落工作树。候选气泡、讨论改正文、代笔收录共用这道闸。
+## 刻意不做
 
-冲突借 git 的依赖失效，不借文本 merge：
-
-| 改动 | 像 git | 结果 |
-|---|---|---|
-| 只续写 / 只改末章 | fast-forward | 一笔 commit：章 + `plot/` |
-| 从某章另开线 | checkout + branch | 旧线不动 |
-| 主线上改已有后续的旧章 | rebase 中间 commit | 允许；第 K 章之后的章和 `plot/` 标 unresolved |
-
-解开之前只许讨论和读。解开方式：只修剧情、后章一起改（逐章过闸）、Fork、或显式接受后章不动。不要把 `<<<<<<<` 打进正文。
-
-真 git、iCloud 当 remote、自动合并两条剧情线：不做。
-
-## 重构怎么接
-
-备份格式先当契约样本，用真书导出再导入，核对章序、正文、设定、剧情摘要。过了再做虚拟工作树。虚拟读写用稳了，再把运行时权威从 JSON 包换成这棵目录树。
-
-迁库：先导出工作区 → 离线核对 → 再写新仓库。禁止在用户设备上原地把 JSON 包改成目录树。迁库当天完整项目包仍是回滚通道。会话等未进备份的东西，要么继续旁路存放，要么承认迁库后丢掉——那条在迁库规格里单开，不混进备份。
-
-## 刻意不做（本设计落地时）
-
-- 改 `NovelProjectShardedStorage` 或 document schema
+- 现在改 `NovelProjectShardedStorage` 或原地迁打开中的书
+- 把会话做成 markdown（否决方案 B）
+- 内嵌真 git / 正文三路 merge / iCloud remote
+- 自动合并两条剧情线
+- 把设定页改成文件浏览器
 - 替换现有单文件成稿导出
-- 讨论侧虚拟 `read/write`（下一阶段）
-- 把现有 14 个 `novel_*` 删掉
-- 备份进会话、候选、检查点链
-- 内嵌 git / 正文三路 merge
-- 用备份覆盖正在打开的项目
-- 把设定页、身份卡、审批卡改成通用文件浏览器
-- 为了迁库而重做作者可见信息架构
+- 为了迁库重做信息架构
+- 在 4 完成前删掉全部 `novel_*`（可先停增）
 
-## 验收（实施备份/导入时）
+## 验收
 
-- 真项目导出的树，人能直接打开 `chapters/*.md` 读完全文
-- 导出再导入得到新项目：活动分支的章序、标题、正文、未删设定、当前剧情摘要一致
+备份/导入：
+
+- 人能直接打开 `chapters/*.md` 读完全文
+- 导出再导入：活动分支章序、标题、正文、未删设定、当前剧情摘要一致
 - 原项目 revision、检查点、会话不受影响
-- 缺 plot 的树导入后是 `needsSync`，不是坏包
-- 现有单文件成稿导出行为不变
-- 本机无真书时，用最小 document fixture 做往返测试
+- 缺 plot 导入后是 `needsSync`
+- 现有单文件成稿导出不变
 
-## 实施顺序（未开工）
+虚拟工作树（阶段 3）：
 
-1. 导出工作区树 + zip（只读，不碰仓库）
-2. 导入为新项目
-3. 以后：讨论虚拟工作树（另开规格）
-4. 最后：把运行时权威从 JSON 包换成 markdown 目录（另开规格；必须先有 1+2 往返证据，且不改作者 UI）
+- 讨论能 `read` 任意工作章和设定卡，不必再加 `novel_read_*`
+- 改正文仍出审批卡，走现有 `saveManualEdit`
+- 普通 Chat 工具集不出现这棵树
+
+## 证据
+
+2026-08-17：从 iPhone Air 拷出《赵大来了》原包并转工作区。31 章、8 个人物、多张世界/总纲/笔法卡。原包约 62MB，工作区约 684KB。路径见 `docs/PROJECT_STATE.md`。

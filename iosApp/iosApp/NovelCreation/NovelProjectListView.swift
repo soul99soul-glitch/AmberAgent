@@ -105,7 +105,7 @@ struct NovelProjectListView: View {
                     Image(systemName: "square.and.arrow.down")
                         .foregroundStyle(AmberTheme.foreground)
                 }
-                .accessibilityLabel("导入小说项目")
+                .accessibilityLabel("导入小说项目或工作区")
                 .disabled(viewModel.isProjectSelectionBlocked || isPreparingImportPreview)
             }
 
@@ -150,7 +150,7 @@ struct NovelProjectListView: View {
         }
         .fileImporter(
             isPresented: $isImportingPackage,
-            allowedContentTypes: [.amberNovelProject],
+            allowedContentTypes: [.amberNovelProject, .folder],
             allowsMultipleSelection: false,
             onCompletion: handlePackageImport
         )
@@ -487,7 +487,18 @@ struct NovelProjectListView: View {
             defer { isPreparingImportPreview = false }
             do {
                 let data = try await Task.detached(priority: .userInitiated) {
-                    try NovelProjectFileReader.readPackage(from: url)
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if accessed {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    var isDirectory: ObjCBool = false
+                    FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+                    if isDirectory.boolValue {
+                        return try NovelWorkspaceImporter.packageData(fromDirectory: url)
+                    }
+                    return try NovelProjectFileReader.readPackage(from: url)
                 }.value
                 guard let preview = await viewModel.previewImport(data) else { return }
                 activeSheet = .importPackage(data: data, preview: preview)

@@ -18,6 +18,11 @@ private let novelDiscussionProjectToolNames: [String] = [
     "novel_revert_recent_chapters",
     "novel_list_setting_proposals",
     "novel_reject_setting_proposals",
+    "novel_workspace_list",
+    "novel_workspace_read",
+    "novel_workspace_grep",
+    "novel_workspace_status",
+    "novel_workspace_write",
 ]
 
 final class NovelLiveModelAdapterTests: XCTestCase {

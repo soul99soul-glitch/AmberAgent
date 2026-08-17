@@ -479,7 +479,7 @@ actor DefaultNovelCreation: NovelCreation {
             ))
         }
         let recoveryProjectID: NovelProjectID? = switch scope {
-        case .project(let projectID), .projectPackage(let projectID):
+        case .project(let projectID), .projectPackage(let projectID), .workspace(let projectID):
             projectID
         case .branch(let projectID, _), .branchMarkdown(let projectID, _):
             projectID
@@ -514,6 +514,8 @@ actor DefaultNovelCreation: NovelCreation {
             ))
         case .projectPackage(let projectID):
             return .package(try await exportProjectPackage(projectID: projectID))
+        case .workspace(let projectID):
+            return .workspace(try await exportWorkspace(projectID: projectID))
         case .branchMarkdown(let projectID, let branchID):
             return .markdown(try await exportBranchMarkdown(
                 projectID: projectID,

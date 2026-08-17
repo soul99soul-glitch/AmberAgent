@@ -1451,6 +1451,7 @@ enum NovelSnapshotScope: Equatable, Sendable {
     case project(NovelProjectID)
     case branch(projectID: NovelProjectID, branchID: NovelBranchID)
     case projectPackage(NovelProjectID)
+    case workspace(NovelProjectID)
     case branchMarkdown(projectID: NovelProjectID, branchID: NovelBranchID)
     case injectionPreview(NovelInjectionPreviewRequest)
     case projectImportPreview(Data)
@@ -1461,6 +1462,7 @@ enum NovelSnapshot: Equatable, Sendable {
     case project(NovelProjectSnapshot)
     case branch(NovelBranchSnapshot)
     case package(NovelProjectPackageArtifact)
+    case workspace(NovelWorkspaceExportArtifact)
     case markdown(NovelMarkdownExportArtifact)
     case injectionPreview(NovelInjectionPreviewSnapshot)
     case projectImportPreview(NovelProjectImportPreview)
@@ -1689,6 +1691,12 @@ struct NovelProjectMutationEvent: Sendable, Equatable {
 protocol NovelCreation: Sendable {
     func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot
     func perform(_ action: NovelAction) async throws -> NovelOutcome
+    func applyWorkspacePlot(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        path: String,
+        body: String
+    ) async throws
     /// 项目文档每次成功 mutation 后广播事件。订阅方（UI VM）据此刷新快照，
     /// 让非 UI 写入源（如讨论工具 executor）的改动即时反映到界面。
     /// 默认实现为立即结束的空流，测试替身免实现。
@@ -1766,6 +1774,19 @@ protocol NovelCreation: Sendable {
 }
 
 extension NovelCreation {
+    func applyWorkspacePlot(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        path: String,
+        body: String
+    ) async throws {
+        _ = projectID
+        _ = branchID
+        _ = path
+        _ = body
+        throw NovelError.invalidInput("Workspace plot write is unavailable.")
+    }
+
     func mutationEvents() async -> AsyncStream<NovelProjectMutationEvent> {
         AsyncStream { $0.finish() }
     }

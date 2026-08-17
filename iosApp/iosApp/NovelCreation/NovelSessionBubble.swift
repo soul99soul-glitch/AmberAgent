@@ -488,6 +488,12 @@ private struct NovelAskUserCard: View {
                 blocker: blocker,
                 onSubmit: onSubmit
             )
+        } else if presentation.prompt.workspacePlot != nil {
+            NovelWorkspacePlotCard(
+                presentation: presentation,
+                blocker: blocker,
+                onSubmit: onSubmit
+            )
         } else if presentation.prompt.manuscriptRevert != nil {
             NovelManuscriptRevertCard(
                 presentation: presentation,
@@ -760,6 +766,90 @@ private struct NovelChapterRevisionCard: View {
             AmberTheme.surface.opacity(0.72),
             in: RoundedRectangle(cornerRadius: 8, style: .continuous)
         )
+    }
+}
+
+private struct NovelWorkspacePlotCard: View {
+    let presentation: NovelAskUserPresentation
+    let blocker: NovelSessionActionBlocker?
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(statusTitle, systemImage: statusSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor)
+
+            Text(presentation.prompt.question)
+                .font(.body.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let reason = presentation.prompt.workspacePlot?.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if presentation.response == nil {
+                if let blocker {
+                    Text(blocker.displayName)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+                HStack(spacing: 10) {
+                    Button {
+                        onSubmit(NovelWorkspacePlotApproval.rejectOption)
+                    } label: {
+                        Text(NovelWorkspacePlotApproval.rejectOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .contentShape(Rectangle())
+
+                    Button {
+                        onSubmit(NovelWorkspacePlotApproval.approveOption)
+                    } label: {
+                        Text(NovelWorkspacePlotApproval.approveOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .contentShape(Rectangle())
+                }
+                .disabled(blocker != nil)
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var statusTitle: String {
+        guard let answer = presentation.response?.answer else { return "写剧情审批" }
+        if answer == NovelWorkspacePlotApproval.approveOption { return "已写入剧情" }
+        if answer == NovelWorkspacePlotApproval.rejectOption { return "已拒绝这次修改" }
+        return "已回答"
+    }
+
+    private var statusSymbol: String {
+        switch presentation.response?.answer {
+        case NovelWorkspacePlotApproval.approveOption: "checkmark.circle.fill"
+        case NovelWorkspacePlotApproval.rejectOption: "xmark.circle.fill"
+        default: "doc.text"
+        }
+    }
+
+    private var statusColor: Color {
+        switch presentation.response?.answer {
+        case NovelWorkspacePlotApproval.approveOption: AmberTheme.accentGreen
+        case NovelWorkspacePlotApproval.rejectOption: AmberTheme.foreground2
+        default: AmberTheme.accent
+        }
     }
 }
 

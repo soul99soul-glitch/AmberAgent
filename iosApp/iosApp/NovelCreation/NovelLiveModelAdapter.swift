@@ -1127,6 +1127,29 @@ extension NovelLiveModelAdapter {
                     return
                 }
                 if let approval = result.pendingApproval,
+                   approval.toolName == "novel_workspace_write" {
+                    guard let projectExecutor = executorMap["novel_workspace_write"]
+                            as? IOSNovelProjectToolExecutor else {
+                        callbacks.onFailure(failure(
+                            code: "discussion_workspace_write_unavailable",
+                            message: "当前讨论无法准备工作区写入审批，请重试。",
+                            isRetryable: true
+                        ))
+                        return
+                    }
+                    switch await projectExecutor.workspaceWriteApprovalPrompt(from: approval.arguments) {
+                    case .success(let prompt):
+                        callbacks.onAskUser(prompt, joinedAssistantText(in: result.messages))
+                    case .failure(let issue):
+                        callbacks.onFailure(failure(
+                            code: "discussion_workspace_write_invalid",
+                            message: issue.message,
+                            isRetryable: true
+                        ))
+                    }
+                    return
+                }
+                if let approval = result.pendingApproval,
                    approval.toolName == "novel_revert_recent_chapters" {
                     guard let projectExecutor = executorMap["novel_revert_recent_chapters"]
                             as? IOSNovelProjectToolExecutor else {
@@ -1256,6 +1279,11 @@ private extension NovelLiveModelAdapter {
                     ToolKt.createNovelRevertRecentChaptersToolDeclaration(),
                     ToolKt.createNovelListSettingProposalsToolDeclaration(),
                     ToolKt.createNovelRejectSettingProposalsToolDeclaration(),
+                    ToolKt.createNovelWorkspaceListToolDeclaration(),
+                    ToolKt.createNovelWorkspaceReadToolDeclaration(),
+                    ToolKt.createNovelWorkspaceGrepToolDeclaration(),
+                    ToolKt.createNovelWorkspaceStatusToolDeclaration(),
+                    ToolKt.createNovelWorkspaceWriteToolDeclaration(),
                 ] : []),
             reasoningLevel: supportsReasoning ? reasoningLevel(source.reasoningLevel) : .off,
             customHeaders: model.customHeaders,

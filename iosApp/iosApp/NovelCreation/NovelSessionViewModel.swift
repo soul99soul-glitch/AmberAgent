@@ -1108,6 +1108,25 @@ final class NovelSessionViewModel {
                 return false
             }
         }
+        if let plot = prompt.workspacePlot {
+            let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == NovelWorkspacePlotApproval.approveOption {
+                if let failure = await workspace.applyWorkspacePlot(path: plot.path, body: plot.body) {
+                    operationErrorMessage = failure
+                    return false
+                }
+                locallyResolvedAskUser[promptMessageID] = NovelAskUserResponse(
+                    promptMessageID: promptMessageID,
+                    answer: trimmed
+                )
+                operationErrorMessage = nil
+                await bindToCurrentSelection()
+                return true
+            } else if trimmed != NovelWorkspacePlotApproval.rejectOption {
+                operationErrorMessage = "请选择写入剧情或拒绝这次修改。"
+                return false
+            }
+        }
         if let revert = prompt.manuscriptRevert {
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed == NovelManuscriptRevertApproval.approveOption {

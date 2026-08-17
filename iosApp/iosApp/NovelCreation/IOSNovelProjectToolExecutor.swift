@@ -37,14 +37,19 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         "novel_revert_recent_chapters",
         "novel_list_setting_proposals",
         "novel_reject_setting_proposals",
+        "novel_workspace_list",
+        "novel_workspace_read",
+        "novel_workspace_grep",
+        "novel_workspace_status",
+        "novel_workspace_write",
     ]
 
     static let readOutputCharacterLimit = 24_000
     static let reviseNewTextCharacterLimit = 32_000
 
-    private weak var creation: DefaultNovelCreation?
-    private let projectID: NovelProjectID
-    private let branchID: NovelBranchID
+    weak var creation: DefaultNovelCreation?
+    let projectID: NovelProjectID
+    let branchID: NovelBranchID
 
     init(projectContext: NovelProjectToolRunContext, creation: DefaultNovelCreation?) {
         self.projectID = projectContext.projectID
@@ -80,6 +85,16 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return await listSettingProposals()
         case "novel_reject_setting_proposals":
             return await rejectSettingProposals(arguments)
+        case "novel_workspace_list":
+            return await workspaceList(arguments)
+        case "novel_workspace_read":
+            return await workspaceRead(arguments)
+        case "novel_workspace_grep":
+            return await workspaceGrep(arguments)
+        case "novel_workspace_status":
+            return await workspaceStatus()
+        case "novel_workspace_write":
+            return await workspaceWrite(arguments, isUserInitiated: isUserInitiated)
         default:
             return .failed("未知的小说项目工具：\(name)。")
         }
@@ -458,7 +473,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         return .filled(body)
     }
 
-    private func reviseChapter(
+    func reviseChapter(
         _ arguments: String,
         isUserInitiated: Bool
     ) async -> IOSAgentToolOutcome {
@@ -689,7 +704,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
     // MARK: - Helpers
 
     /// Returns nil on success; a human-readable failure reason otherwise.
-    private func perform(_ action: NovelAction) async -> String? {
+    func perform(_ action: NovelAction) async -> String? {
         guard let creation else {
             return "小说创作服务当前不可用。"
         }
@@ -703,7 +718,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         }
     }
 
-    private func loadSnapshot() async -> NovelProjectSnapshot? {
+    func loadSnapshot() async -> NovelProjectSnapshot? {
         guard let creation else { return nil }
         guard case .project(let snapshot) = try? await creation.snapshot(.project(projectID)) else {
             return nil
@@ -711,13 +726,13 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         return snapshot
     }
 
-    private struct WorkingChapter {
+    struct WorkingChapter {
         let ordinal: Int
         let chapterID: NovelChapterID
         let version: NovelChapterVersionRecord
     }
 
-    private func workingChapters(in snapshot: NovelProjectSnapshot) -> [WorkingChapter] {
+    func workingChapters(in snapshot: NovelProjectSnapshot) -> [WorkingChapter] {
         guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
             return []
         }
@@ -950,7 +965,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         return nil
     }
 
-    private func mutationContext(
+    func mutationContext(
         projectRevision: Int64? = nil,
         configRevision: Int64? = nil,
         branchHeadRevision: Int64? = nil
@@ -977,7 +992,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         }
     }
 
-    private func decode<T: Decodable>(_ arguments: String) -> T? {
+    func decode<T: Decodable>(_ arguments: String) -> T? {
         guard let data = arguments.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
@@ -1029,7 +1044,7 @@ private struct ReadChapterArguments: Decodable {
     let end_paragraph: Int?
 }
 
-private struct ReviseChapterArguments: Decodable {
+struct ReviseChapterArguments: Codable {
     let chapter_ordinal: Int?
     let chapter_id: String?
     let start_paragraph: Int

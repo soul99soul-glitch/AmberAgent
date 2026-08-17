@@ -411,18 +411,34 @@ struct NovelAskUserPrompt: Codable, Equatable, Sendable {
     let chapterRevision: NovelChapterRevisionProposal?
     /// Present only for `novel_revert_recent_chapters` approval cards.
     let manuscriptRevert: NovelManuscriptRevertProposal?
+    /// Present only for `novel_workspace_write` of plot files.
+    let workspacePlot: NovelWorkspacePlotProposal?
 
     init(
         question: String,
         options: [String],
         chapterRevision: NovelChapterRevisionProposal? = nil,
-        manuscriptRevert: NovelManuscriptRevertProposal? = nil
+        manuscriptRevert: NovelManuscriptRevertProposal? = nil,
+        workspacePlot: NovelWorkspacePlotProposal? = nil
     ) {
         self.question = question
         self.options = options
         self.chapterRevision = chapterRevision
         self.manuscriptRevert = manuscriptRevert
+        self.workspacePlot = workspacePlot
     }
+}
+
+struct NovelWorkspacePlotProposal: Codable, Equatable, Sendable {
+    let path: String
+    let body: String
+    let reason: String?
+}
+
+enum NovelWorkspacePlotApproval {
+    static let approveOption = "写入剧情"
+    static let rejectOption = "拒绝这次修改"
+    static let options = [approveOption, rejectOption]
 }
 
 enum NovelChapterRevisionApproval {

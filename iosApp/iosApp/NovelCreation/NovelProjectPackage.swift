@@ -55,6 +55,12 @@ struct NovelMarkdownExportArtifact: Equatable, Sendable {
     let markdown: String
 }
 
+struct NovelWorkspaceExportArtifact: Equatable, Sendable {
+    let projectID: NovelProjectID
+    let fileName: String
+    let files: [NovelWorkspaceBackup.File]
+}
+
 enum NovelProjectPackageCodec {
     static let format = "amber.novel.project"
     static let envelopeVersion = 1

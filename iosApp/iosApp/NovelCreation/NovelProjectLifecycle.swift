@@ -82,6 +82,136 @@ extension DefaultNovelCreation {
         return try NovelMarkdownExporter.export(loaded.document, branchID: branchID)
     }
 
+    func applyWorkspacePlot(
+        projectID: NovelProjectID,
+        branchID: NovelBranchID,
+        path: String,
+        body: String
+    ) async throws {
+        let loaded = try await loadCommittedProject(id: projectID)
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: projectID)
+        }
+        let document = loaded.document
+        guard let branch = document.branches.first(where: { $0.id == branchID }) else {
+            throw NovelError.branchNotFound(branchID)
+        }
+        guard let old = document.stateSnapshots.first(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) else {
+            throw NovelError.invalidInput("The branch has no current plot snapshot.")
+        }
+        let now = Date()
+        var summary = old.summary
+        var outline = old.branchOutline
+        var eventIDs = old.eventIDs
+        var next = document
+        if path.hasSuffix("current.md") {
+            let split = NovelWorkspaceMarkdown.splitHighlights(body)
+            summary = split.body
+        } else if path.hasSuffix("outline.md") {
+            outline = body
+        } else if path.hasSuffix("events.md") {
+            let lines = NovelWorkspaceMarkdown.bullets(body)
+            var nextSequence = (document.events.map(\.sequence).max() ?? -1) + 1
+            var created: [NovelEventID] = []
+            for line in lines {
+                let event = NovelStoryEventRecord(
+                    id: NovelEventID(),
+                    sequence: nextSequence,
+                    kind: "workspace",
+                    summary: line,
+                    entityReferences: [],
+                    createdAt: now
+                )
+                nextSequence += 1
+                next.events.append(event)
+                created.append(event.id)
+            }
+            eventIDs = created
+        } else {
+            throw NovelError.invalidInput("Unsupported plot path \(path).")
+        }
+        let operationID = NovelOperationID()
+        let snapshotID = NovelStateSnapshotID()
+        let checkpointID = NovelCheckpointID()
+        next.stateSnapshots.append(
+            NovelStateSnapshotRecord(
+                id: snapshotID,
+                eventIDs: eventIDs,
+                summary: summary,
+                branchOutline: outline,
+                unresolvedEntityNames: old.unresolvedEntityNames,
+                createdAt: now,
+                settingProposalIDs: old.settingProposalIDs,
+                characterIdentityClarifications: old.characterIdentityClarifications,
+                recentWrittenHighlights: old.recentWrittenHighlights
+            )
+        )
+        let session = next.sessions.first { $0.id == branch.sessionID }
+        let cursor: NovelSessionCursor = session?.messages.last.map {
+            .through(sequence: $0.sequence)
+        } ?? .empty
+        let finalRevision = document.project.revision + 1
+        let outcome = NovelOutcome.manualSyncCommitted(
+            projectID: projectID,
+            branchID: branchID,
+            checkpointID: checkpointID,
+            revision: finalRevision
+        )
+        next.appliedOperations.append(
+            NovelAppliedOperationRecord(
+                operationID: operationID,
+                kind: .syncManualEdits,
+                payloadSHA256: NovelDocumentValidator.sha256(path + "\n" + body),
+                outcome: outcome,
+                appliedProjectRevision: finalRevision,
+                appliedAt: now
+            )
+        )
+        try NovelReducer.appendCheckpoint(
+            NovelBranchCheckpointRecord(
+                id: checkpointID,
+                kind: .manualSync,
+                createdOnBranchID: branchID,
+                parentCheckpointID: branch.headCheckpointID,
+                chapterSelections: branch.workingChapterSelections,
+                stateSnapshotID: snapshotID,
+                sessionCursor: cursor,
+                branchOverrideRevisionIDs: branch.overrideRevisionIDs,
+                sourceCandidateID: nil,
+                baseHeadRevision: branch.headRevision,
+                operationID: operationID,
+                createdAt: now
+            ),
+            to: &next,
+            expectedHeadRevision: branch.headRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
+        next.project.revision = finalRevision
+        next.project.updatedAt = now
+        try NovelDocumentValidator.validateTransition(from: document, to: next)
+        let committed = try await repository.commitProject(
+            next,
+            expectedRevision: document.project.revision
+        )
+        _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
+    }
+
+    func exportWorkspace(
+        projectID: NovelProjectID
+    ) async throws -> NovelWorkspaceExportArtifact {
+        let loaded = try await loadCommittedProject(id: projectID)
+        let files = try NovelWorkspaceBackup.export(loaded.document)
+        let stem = NovelPresentation.fileName(loaded.document.project.name, fallback: "Novel")
+        return NovelWorkspaceExportArtifact(
+            projectID: projectID,
+            fileName: stem,
+            files: files
+        )
+    }
+
     func executeImportProject(
         _ command: NovelImportProjectCommand,
         prepared: NovelPreparedProjectImport

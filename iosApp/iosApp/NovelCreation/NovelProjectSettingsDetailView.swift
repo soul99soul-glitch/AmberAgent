@@ -54,6 +54,9 @@ struct NovelProjectSettingsDetailView: View {
     @State private var projectDocument: NovelProjectFileDocument?
     @State private var projectFileName = "Novel.ambernovel"
     @State private var isExportingProject = false
+    @State private var workspaceDocument: NovelWorkspaceFolderDocument?
+    @State private var workspaceFileName = "Novel"
+    @State private var isExportingWorkspace = false
     @State private var isLoadingProject = true
     @State private var projectLoadFailure: String?
     @State private var modelPolicyFailure: String?
@@ -122,11 +125,18 @@ struct NovelProjectSettingsDetailView: View {
                     Label("导出正文", systemImage: "square.and.arrow.up")
                 }
                 .disabled(currentProject == nil || viewModel.isPerforming)
+
+                Button(action: exportWorkspace) {
+                    Label("导出工作区", systemImage: "folder")
+                }
+                .disabled(currentProject == nil || viewModel.isPerforming)
             } header: {
                 Text("管理")
             } footer: {
                 if hasRunningRun {
-                    Text("生成结束后才能导出项目包；当前正文仍可导出。")
+                    Text("生成结束后才能导出项目包；正文和工作区仍可导出。")
+                } else {
+                    Text("工作区是章节和设定的 Markdown 目录，可再导入为新项目。")
                 }
             }
         }
@@ -147,6 +157,13 @@ struct NovelProjectSettingsDetailView: View {
             document: markdownDocument,
             contentType: .amberMarkdown,
             defaultFilename: markdownFileName,
+            onCompletion: handleExportResult
+        )
+        .fileExporter(
+            isPresented: $isExportingWorkspace,
+            document: workspaceDocument,
+            contentType: .folder,
+            defaultFilename: workspaceFileName,
             onCompletion: handleExportResult
         )
         .task(id: projectID) {
@@ -362,6 +379,15 @@ struct NovelProjectSettingsDetailView: View {
             markdownDocument = NovelMarkdownFileDocument(markdown: artifact.markdown)
             markdownFileName = artifact.fileName
             isExportingMarkdown = true
+        }
+    }
+
+    private func exportWorkspace() {
+        Task { @MainActor in
+            guard let artifact = await viewModel.exportWorkspace() else { return }
+            workspaceDocument = NovelWorkspaceFolderDocument(files: artifact.files)
+            workspaceFileName = artifact.fileName
+            isExportingWorkspace = true
         }
     }
 

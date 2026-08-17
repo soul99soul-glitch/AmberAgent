@@ -2930,6 +2930,41 @@ final class NovelCreationViewModel {
         }
     }
 
+    func applyWorkspacePlot(path: String, body: String) async -> String? {
+        guard let projectID = selectedProjectID, let branchID = selectedBranchID else {
+            return "当前没有打开的小说项目。"
+        }
+        do {
+            try await creation.applyWorkspacePlot(
+                projectID: projectID,
+                branchID: branchID,
+                path: path,
+                body: body
+            )
+            errorMessage = nil
+            return nil
+        } catch {
+            report(error)
+            return errorMessage ?? error.localizedDescription
+        }
+    }
+
+    func exportWorkspace() async -> NovelWorkspaceExportArtifact? {
+        guard let projectID = selectedProjectID else { return nil }
+        do {
+            guard case .workspace(let artifact) = try await creation.snapshot(
+                .workspace(projectID)
+            ) else {
+                throw NovelError.invalidInput("The workspace export returned an unexpected snapshot.")
+            }
+            errorMessage = nil
+            return artifact
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
     func clearError() {
         errorMessage = nil
         reloadNoticeMessage = nil

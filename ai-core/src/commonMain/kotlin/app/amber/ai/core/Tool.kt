@@ -242,6 +242,63 @@ fun createNovelListSettingProposalsToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createNovelWorkspaceListToolDeclaration(): Tool = Tool(
+    name = "novel_workspace_list",
+    description = """
+        List files in the novel workspace tree (chapters, setting, plot, plan, inbox, drafts).
+        Optional `prefix` limits to a subdirectory such as setting/characters or branches.
+        This is read-only and does not change the project.
+    """.trimIndent(),
+    parameters = { novelWorkspacePrefixParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelWorkspaceReadToolDeclaration(): Tool = Tool(
+    name = "novel_workspace_read",
+    description = """
+        Read one workspace file by path from novel_workspace_list.
+        Use this instead of inventing new novel_* verbs when you need the file contents.
+        This is read-only and does not change the project.
+    """.trimIndent(),
+    parameters = { novelWorkspacePathParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelWorkspaceGrepToolDeclaration(): Tool = Tool(
+    name = "novel_workspace_grep",
+    description = """
+        Search workspace files for a literal or simple substring `query`.
+        Optional `prefix` limits the search. Returns matching paths and a short excerpt.
+        This is read-only and does not change the project.
+    """.trimIndent(),
+    parameters = { novelWorkspaceGrepParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelWorkspaceStatusToolDeclaration(): Tool = Tool(
+    name = "novel_workspace_status",
+    description = """
+        Show workspace status: project name, branch, syncStatus, working chapter count,
+        and whether plot or manuscript is unresolved. This is read-only.
+    """.trimIndent(),
+    parameters = { emptyObjectParameters() },
+    execute = { emptyList() }
+)
+
+fun createNovelWorkspaceWriteToolDeclaration(): Tool = Tool(
+    name = "novel_workspace_write",
+    description = """
+        Write one workspace file by path. Setting, plan, and inbox writes save directly.
+        Writing an already collected chapter or plot/ file shows an approval card first.
+        `path` is a workspace path from novel_workspace_list. `content` is the new file body
+        (front matter optional; the host keeps identity from the path).
+    """.trimIndent(),
+    parameters = { novelWorkspaceWriteParameters() },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
 fun createNovelRejectSettingProposalsToolDeclaration(): Tool = Tool(
     name = "novel_reject_setting_proposals",
     description = """
@@ -2227,6 +2284,57 @@ private fun novelSetChapterTitleParameters(): InputSchema = InputSchema.Obj(
         })
     },
     required = listOf("title")
+)
+
+private fun novelWorkspacePrefixParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("prefix", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional subdirectory prefix such as setting/characters")
+        })
+    }
+)
+
+private fun novelWorkspacePathParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace-relative path from novel_workspace_list")
+        })
+    },
+    required = listOf("path")
+)
+
+private fun novelWorkspaceGrepParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("query", buildJsonObject {
+            put("type", "string")
+            put("description", "Substring to search for")
+        })
+        put("prefix", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional subdirectory prefix")
+        })
+    },
+    required = listOf("query")
+)
+
+private fun novelWorkspaceWriteParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("path", buildJsonObject {
+            put("type", "string")
+            put("description", "Workspace-relative path to write")
+        })
+        put("content", buildJsonObject {
+            put("type", "string")
+            put("description", "New file body")
+        })
+        put("reason", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional short note shown on the approval card")
+        })
+    },
+    required = listOf("path", "content")
 )
 
 private fun novelReadChapterParameters(): InputSchema = InputSchema.Obj(

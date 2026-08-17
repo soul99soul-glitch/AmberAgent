@@ -786,8 +786,9 @@ extension NovelGenerationReducer {
         guard !prompt.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NovelError.invalidInput("Ask User requires question text.")
         }
-        if prompt.chapterRevision != nil, prompt.manuscriptRevert != nil {
-            throw NovelError.invalidInput("Ask User cannot combine chapter revision and manuscript revert.")
+        if [prompt.chapterRevision != nil, prompt.manuscriptRevert != nil, prompt.workspacePlot != nil]
+            .filter({ $0 }).count > 1 {
+            throw NovelError.invalidInput("Ask User cannot combine chapter revision, manuscript revert, and plot write.")
         }
         if let revision = prompt.chapterRevision {
             guard prompt.options == NovelChapterRevisionApproval.options else {
@@ -814,6 +815,16 @@ extension NovelGenerationReducer {
                   revert.chapterOrdinals.count == revert.chapterCount,
                   Set(revert.chapterIDs).count == revert.chapterCount else {
                 throw NovelError.invalidInput("Manuscript revert approval is missing chapter targets.")
+            }
+            return
+        }
+        if let plot = prompt.workspacePlot {
+            guard prompt.options == NovelWorkspacePlotApproval.options else {
+                throw NovelError.invalidInput("Plot write approval must use the fixed confirm/reject options.")
+            }
+            guard !plot.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !plot.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw NovelError.invalidInput("Plot write approval is missing path or body.")
             }
             return
         }

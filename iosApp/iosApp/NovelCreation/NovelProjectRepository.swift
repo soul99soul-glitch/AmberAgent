@@ -1012,6 +1012,9 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         if fileManager.fileExists(atPath: monoPrevious.path) {
             try? fileManager.removeItem(at: monoPrevious)
         }
+        let checkout = packageURL(for: document.project.id)
+            .appendingPathComponent("checkout", isDirectory: true)
+        try? NovelWorkspaceBackup.write(document, to: checkout)
     }
 
     private func readInstalledProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {
@@ -1053,6 +1056,16 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         let mono = primaryURL(for: projectID)
         if fileManager.fileExists(atPath: mono.path) {
             return try readProjectDocument(at: mono, projectID: projectID)
+        }
+        let checkout = package.appendingPathComponent("checkout", isDirectory: true)
+        if fileManager.fileExists(atPath: checkout.appendingPathComponent("manifest.yaml").path) {
+            let files = try NovelWorkspaceFolderDocument.files(
+                fromDirectory: checkout,
+                fileManager: fileManager
+            )
+            let imported = try NovelWorkspaceImporter.makeDocument(from: files)
+            let remapped = try NovelProjectIdentityRemapper.remap(imported, to: projectID)
+            return try finalizeLoadedDocument(remapped, projectID: projectID)
         }
         throw NovelError.projectNotFound(projectID)
     }
