@@ -568,6 +568,10 @@ struct ChatToolStepModel: Identifiable {
         return "\(verb) \(widthCappedPrefix(oneLine, units: 28))"
     }
 
+    /// 搜索胶囊标题槽占位：与 `combinedLine("搜索", subject)` 同一截断预算，
+    /// 让空参 / 截断 JSON / 短 query / 长 query 共用同一理想宽，尾部转圈与对勾不左右挪。
+    static let searchTitleLayoutSentinel = combinedLine("搜索", String(repeating: "字", count: 20))
+
     /// 按显示宽度预算截断（CJK 计 2、ASCII 计 1）：纯按 Character 数会让
     /// ASCII subject 过短（14 个英文字母 ≈ 98pt，远低于列宽预算，信息白白损失），
     /// CJK 与混合文本仍守在 361pt 列宽内。
@@ -586,10 +590,15 @@ struct ChatToolStepModel: Identifiable {
         let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedInput.isEmpty else { return nil }
         if let data = trimmedInput.data(using: .utf8),
-           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let query = object["query"] as? String {
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            guard let query = object["query"] as? String else { return nil }
             let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmedQuery.isEmpty ? nil : trimmedQuery
+        }
+        // 解析失败（含流式未完成的截断 JSON）：不要把 `{"query"...` 回退进标题，
+        // 否则胶囊先被 JSON 撑宽、参数闭合后再缩回真实 query。
+        if trimmedInput.hasPrefix("{") || trimmedInput.hasPrefix("[") {
+            return nil
         }
         return trimmedInput
     }
@@ -896,11 +905,7 @@ struct ChatToolTimeline: View {
             }
             .frame(width: 16, height: 16)
 
-            Text(step.title)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(1)
-                .truncationMode(.tail)
+            titleLabel(for: step)
 
             trailingStatus(for: step.state)
 
@@ -924,6 +929,31 @@ struct ChatToolTimeline: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Capsule(style: .continuous))
         .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.84), value: step.state)
+    }
+
+    /// 搜索胶囊标题走固定槽：哨兵占用 `combinedLine` 预算宽，可见标题 overlay 进去。
+    /// 无界提案下 `lineLimit` 不截断，若标题自己参与理想宽，长 query 仍会把胶囊撑开。
+    @ViewBuilder
+    private func titleLabel(for step: ChatToolStepModel) -> some View {
+        let label = Text(step.title)
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(AmberTheme.foreground2)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        if step.visualKind == .search {
+            Text(ChatToolStepModel.searchTitleLayoutSentinel)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.clear)
+                .accessibilityHidden(true)
+                .overlay(alignment: .leading) {
+                    label
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(step.title)
+        } else {
+            label
+        }
     }
 
     @ViewBuilder

@@ -135,6 +135,93 @@ final class ChatToolTimelineWidthOverflowTests: XCTestCase {
         )
     }
 
+    /// 流式 tool 参数会按 `input + delta` 拼 JSON。未完成 JSON 不得回退成胶囊标题，
+    /// 否则「搜索 {\"query\":...」先撑宽、解析成功后再缩回短 query。
+    func testSearchCapsuleTitleIgnoresIncompleteJSONAndKeepsVerb() {
+        func title(input: String, output: [UIMessagePart] = []) -> String {
+            ChatToolStepModel(tool: UIMessagePart.Tool(
+                toolCallId: "call_search_stream_title",
+                toolName: "search_web",
+                input: input,
+                output: output,
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )).title
+        }
+
+        XCTAssertEqual(title(input: ""), "搜索")
+        XCTAssertEqual(title(input: "{"), "搜索")
+        XCTAssertEqual(title(input: #"{"query":"天气"#), "搜索")
+        XCTAssertEqual(title(input: "{}"), "搜索")
+        XCTAssertEqual(title(input: #"{"query":"天气"}"#), "搜索 天气")
+        XCTAssertEqual(
+            title(
+                input: #"{"query":"天气"}"#,
+                output: [UIMessagePart.Text(text: #"{"results":[]}"#, metadata: nil)]
+            ),
+            "搜索 天气"
+        )
+        for input in ["", "{", #"{"query":"天气"#, "{}", #"{"query":"天气"}"#] {
+            XCTAssertFalse(
+                title(input: input).contains("{"),
+                "搜索标题不应暴露原始 JSON，input=\(input) title=\(title(input: input))"
+            )
+        }
+    }
+
+    /// 搜索胶囊从空参 → 截断 JSON → 短 query → 长 query → 出结果，理想宽必须同一值。
+    /// 生产路径带详情 chevron；无界提案下 hug 标题会随流式参数跳变。
+    func testSearchCapsuleIdealWidthConstantAcrossStreamingInput() {
+        func capsuleIdealWidth(input: String, output: [UIMessagePart] = []) -> CGFloat {
+            let tool = UIMessagePart.Tool(
+                toolCallId: "call_search_stream_width",
+                toolName: "search_web",
+                input: input,
+                output: output,
+                approvalState: ToolApprovalState.Auto.shared,
+                streamIndex: nil,
+                metadata: nil
+            )
+            let host = UIHostingController(
+                rootView: ChatToolTimeline(
+                    steps: [ChatToolStepModel(tool: tool)],
+                    onTapStep: { _ in }
+                )
+            )
+            return host.sizeThatFits(in: CGSize(
+                width: CGFloat.greatestFiniteMagnitude,
+                height: UIView.layoutFittingExpandedSize.height
+            )).width
+        }
+
+        let empty = capsuleIdealWidth(input: "")
+        let brace = capsuleIdealWidth(input: "{")
+        let partial = capsuleIdealWidth(input: #"{"query":"天气"#)
+        let shortQuery = capsuleIdealWidth(input: #"{"query":"天气"}"#)
+        let longQuery = capsuleIdealWidth(input: #"{"query":"苹果公司2026年秋季新品发布会时间安排和产品阵容一览表"}"#)
+        let completed = capsuleIdealWidth(
+            input: #"{"query":"天气"}"#,
+            output: [UIMessagePart.Text(text: #"{"results":[{"title":"天气预报"}]}"#, metadata: nil)]
+        )
+
+        for (name, width) in [
+            ("empty", empty),
+            ("brace", brace),
+            ("partialJSON", partial),
+            ("shortQuery", shortQuery),
+            ("longQuery", longQuery),
+            ("completed", completed),
+        ] {
+            XCTAssertEqual(
+                width,
+                empty,
+                "搜索胶囊理想宽在 \(name) 阶段变化：empty=\(empty) \(name)=\(width)"
+            )
+        }
+        XCTAssertLessThanOrEqual(empty, columnWidth + 1, "搜索胶囊理想宽超出列宽：\(empty)")
+    }
+
     func testLongWebMountToolTitleFitsWhenColumnWidthIsProposed() {
         let input = """
         {"display_name":"GitHub","homepage_url":"https://github.com/openai/codex","site_id":"user_github","timeout_ms":15000}
