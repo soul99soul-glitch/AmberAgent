@@ -138,6 +138,18 @@ enum NovelGenerationReducer {
         guard branch.activeRunID == nil else {
             throw NovelError.projectBusy(document.project.id)
         }
+        // Contract v1.1 D-D: forward-writing runs (prose/polish/regenerate/
+        // character proposal) are gated while later chapters' plot modules
+        // are unresolved after a middle-chapter edit, matching the VM gate.
+        // Discussion stays open; rewriting existing chapters goes through
+        // manual edits / revision approvals, not generation runs.
+        if request.kind != .discussion,
+           NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+            branchID: request.branchID,
+            in: document
+           ) {
+            throw NovelError.invalidInput(NovelWorkspaceLedger.unresolvedPlotGateMessage)
+        }
 
         try validateShape(request, branch: branch, document: document)
         try validateUniqueIDs(request, document: document)

@@ -59,6 +59,7 @@ enum NovelProjectShardedStorage {
         case chapterPlans
         case upcomingArcs
         case appliedOperations
+        case workspacePassthrough
     }
 
     /// Cached encode of one section so unchanged append-only payloads are not
@@ -83,7 +84,13 @@ enum NovelProjectShardedStorage {
         .stateSnapshots,
         .checkpoints,
         .settingProposals,
+        .workspacePassthrough,
     ]
+
+    /// JSON used to synthesize the `workspacePassthrough` section when loading
+    /// a package written before the section existed (contract v1.1 §3.6).
+    static let emptyWorkspacePassthroughJSON =
+        "{\"frontmatterExtensions\":{},\"opaqueFiles\":{}}"
 
     static func checkoutSidecarNeedsRefresh(
         previous: SectionCache?,
@@ -157,6 +164,7 @@ enum NovelProjectShardedStorage {
         case .chapterPlans: try encoder.encode(document.chapterPlans)
         case .upcomingArcs: try encoder.encode(document.upcomingArcs)
         case .appliedOperations: try encoder.encode(document.appliedOperations)
+        case .workspacePassthrough: try encoder.encode(document.workspacePassthrough)
         }
     }
 
@@ -292,6 +300,14 @@ enum NovelProjectShardedStorage {
                 count: document.appliedOperations.count,
                 lastID: document.appliedOperations.last?.operationID.description
             )
+        case .workspacePassthrough:
+            let passthrough = document.workspacePassthrough
+            let extensionAnchors = passthrough.frontmatterExtensions.keys.sorted()
+                .joined(separator: ",")
+            let opaquePaths = passthrough.opaqueFiles.keys.sorted()
+                .joined(separator: ",")
+            return "e=\(passthrough.frontmatterExtensions.count):\(extensionAnchors)"
+                + "|o=\(passthrough.opaqueFiles.count):\(opaquePaths)"
         }
     }
 
@@ -331,7 +347,8 @@ enum NovelProjectShardedStorage {
              .activeRuns,
              .settingProposals,
              .chapterPlans,
-             .upcomingArcs:
+             .upcomingArcs,
+             .workspacePassthrough:
             return false
         }
     }
@@ -474,6 +491,18 @@ enum NovelProjectShardedStorage {
         var sectionData: [SectionKey: Data] = [:]
         for key in SectionKey.allCases {
             guard let ref = layout.sections[key.rawValue] else {
+                // Packages written before contract v1.1 have no passthrough
+                // section; synthesize an empty one instead of failing the load.
+                if key == .workspacePassthrough {
+                    let data = Data(emptyWorkspacePassthroughJSON.utf8)
+                    sectionData[key] = data
+                    cache[key.rawValue] = SectionCacheEntry(
+                        fingerprint: "",
+                        digest: digest(for: data),
+                        data: data
+                    )
+                    continue
+                }
                 throw NovelError.corruptedProject(
                     projectID: projectID,
                     details: "Sharded layout is missing section \(key.rawValue)."

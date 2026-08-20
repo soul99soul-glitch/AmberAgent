@@ -2560,13 +2560,16 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.collectionGranularity(for: clonedID), .continuation)
     }
 
-    func testManualRewriteSchedulesAutomaticStateSyncAfterSaving() async throws {
+    /// Contract v1.1 D-B: saving a manual rewrite commits the chapter and
+    /// its plot module atomically — the branch stays synchronized and no
+    /// follow-up automatic sync is scheduled (the previous contract let the
+    /// edit land as needsSync first).
+    func testManualRewriteCommitsPlotAtomicallyWithoutFollowUpSync() async throws {
         let fixture = try documentWithChapter()
         let harness = try await makeHarness(
             document: fixture.document,
             scripts: [NovelModelScript(steps: [
                 .delta(validRebuildJSON),
-                .pause,
                 .complete,
             ])]
         )
@@ -2578,27 +2581,62 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
         XCTAssertTrue(saved)
 
-        let syncStarted = await eventually {
-            await harness.adapter.requests.count == 1
-        }
-        XCTAssertTrue(syncStarted)
-        let progressPublished = await eventually(timeout: 3) {
-            harness.workspace.stateSyncActivity?.requestStartedAt != nil
-        }
-        XCTAssertTrue(progressPublished)
-        let duringSync = try await harness.repository.loadProject(id: harness.projectID).document
-        XCTAssertEqual(duringSync.branches[0].syncStatus, .needsSync)
-        XCTAssertEqual(duringSync.pendingOperations.first?.kind, .manualSync)
+        let after = try await harness.repository.loadProject(id: harness.projectID).document
+        XCTAssertEqual(after.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(after.checkpoints.last?.kind, .manualSync)
+        XCTAssertTrue(after.pendingOperations.isEmpty)
         XCTAssertTrue(harness.session.retryableBranchPendingOperations.isEmpty)
+        XCTAssertNil(harness.workspace.stateSyncActivity)
 
-        let rewriteRequests = await harness.adapter.requests
-        let syncRequest = try XCTUnwrap(rewriteRequests.first)
-        await harness.adapter.resume(runID: syncRequest.runID)
-        let syncCompleted = await eventually {
-            let document = try? await harness.repository.loadProject(id: harness.projectID).document
-            return document?.branches[0].syncStatus == .synchronized
+        // Only the edit's plot-draft model call fires; no automatic sync run.
+        try? await Task.sleep(for: .milliseconds(350))
+        let requests = await harness.adapter.requests
+        XCTAssertEqual(requests.count, 1)
+    }
+
+    /// Contract v1.1 D-D at the view-model layer: forward runs carry the
+    /// gate reason, ghostwrite cannot start, discussion stays open.
+    func testUnresolvedPlotGateBlocksForwardRunsInViewModel() async throws {
+        var fixture = try documentWithChapter()
+        let branch = fixture.document.branches[0]
+        let chapterID = branch.workingChapterSelections[0].chapterID
+        if let index = fixture.document.stateSnapshots.firstIndex(where: {
+            $0.id == branch.currentStateSnapshotID
+        }) {
+            let old = fixture.document.stateSnapshots[index]
+            fixture.document.stateSnapshots[index] = NovelStateSnapshotRecord(
+                id: old.id,
+                eventIDs: old.eventIDs,
+                summary: old.summary,
+                branchOutline: old.branchOutline,
+                unresolvedEntityNames: old.unresolvedEntityNames,
+                createdAt: old.createdAt,
+                settingProposalIDs: old.settingProposalIDs,
+                characterIdentityClarifications: old.characterIdentityClarifications,
+                recentWrittenHighlights: old.recentWrittenHighlights,
+                chapterPlots: [
+                    NovelChapterPlotModule(
+                        chapterID: chapterID,
+                        text: old.chapterPlots.first?.text ?? "山呼",
+                        stale: true
+                    )
+                ]
+            )
         }
-        XCTAssertTrue(syncCompleted)
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: []
+        )
+
+        // Forward prose is refused with the actionable gate reason.
+        harness.session.mode = .writeProse
+        let didStart = await harness.session.send(text: "写下一章")
+        XCTAssertFalse(didStart)
+        XCTAssertEqual(
+            harness.session.operationErrorMessage,
+            NovelWorkspaceLedger.unresolvedPlotGateMessage
+        )
+        XCTAssertFalse(harness.session.canStartGhostwriteChapter)
     }
 
     func testPersistedNeedsSyncWaitsForWorkspaceAppearanceBeforeAutomaticStateSync() async throws {
@@ -3183,17 +3221,23 @@ final class NovelSessionViewModelTests: XCTestCase {
                 answer: NovelChapterRevisionApproval.approveOption
             )
         }
-        let canStop = await eventually(timeout: 5) {
-            await harness.adapter.requests.count >= 2 &&
-                harness.workspace.canCancelAutomaticStateSync(
-                    projectID: harness.projectID,
-                    branchID: harness.workspace.selectedBranchID ?? fixture.document.branches[0].id
-                )
+        // Contract v1.1 D-B: approving the revision commits the chapter and
+        // its plot module atomically — the only model call is the plot draft
+        // (paused in the script), and no separate sync run exists to stop.
+        let draftStarted = await eventually(timeout: 5) {
+            await harness.adapter.requests.count >= 2
         }
-        XCTAssertTrue(canStop, "末章快路径同步必须露出已有的停止按钮")
+        XCTAssertTrue(draftStarted)
+        XCTAssertFalse(
+            harness.workspace.canCancelAutomaticStateSync(
+                projectID: harness.projectID,
+                branchID: harness.workspace.selectedBranchID ?? fixture.document.branches[0].id
+            ),
+            "原子提交没有后续同步，不应出现停止按钮"
+        )
         let pausedRequests = await harness.adapter.requests
-        let syncRunID = try XCTUnwrap(pausedRequests.last?.runID)
-        await harness.adapter.resume(runID: syncRunID)
+        let draftRunID = try XCTUnwrap(pausedRequests.last?.runID)
+        await harness.adapter.resume(runID: draftRunID)
         let didAnswer = await answerTask.value
         XCTAssertTrue(didAnswer)
         let synced = await eventually(timeout: 5) {
@@ -3210,14 +3254,16 @@ final class NovelSessionViewModelTests: XCTestCase {
         )
         XCTAssertEqual(persisted.branches[0].syncStatus, .synchronized)
         XCTAssertTrue(persisted.pendingOperations.isEmpty)
+        XCTAssertEqual(persisted.checkpoints.last?.kind, .manualSync)
         XCTAssertEqual(harness.session.durableMessages.count, messageCountBefore)
         XCTAssertFalse(harness.session.isRunning)
         let requests = await harness.adapter.requests
         XCTAssertEqual(requests.count, 2)
-        let syncUser = requests[1].messages.last?.content ?? ""
-        XCTAssertTrue(syncUser.contains("NEWLY COLLECTED MANUSCRIPT"))
-        XCTAssertFalse(syncUser.contains("ORDERED MANUSCRIPT INPUT"))
-        XCTAssertTrue(syncUser.contains("第二段已经改掉了那个矛盾。"))
+        let draftUser = requests[1].messages.last?.content ?? ""
+        XCTAssertTrue(
+            draftUser.contains("第二段已经改掉了那个矛盾。"),
+            "第二次调用应是携带新正文的剧情草稿请求"
+        )
     }
 
     func testAutomaticManualSyncDoesNotOuterRetryValidationFailures() async throws {
@@ -3672,7 +3718,7 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.batchPolishProgress?.failedCount, 0)
     }
 
-    func testIncompatiblePolishCanConvertToManualRewriteAndNeedsSync() async throws {
+    func testIncompatiblePolishCanConvertToManualRewriteAndStaysSynchronized() async throws {
         let fixture = try documentWithChapter()
         let rewritten = "Mara opened the gate and changed the plot."
         let harness = try await makeHarness(
@@ -3708,7 +3754,9 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertTrue(converted)
 
         let final = try await harness.repository.loadProject(id: harness.projectID).document
-        XCTAssertEqual(final.branches[0].syncStatus, .needsSync)
+        // Contract v1.1 D-B: the converted manual rewrite commits its plot
+        // module atomically, so the branch stays synchronized.
+        XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
         XCTAssertEqual(final.chapterVersions.last?.kind, .manualEdit)
         XCTAssertEqual(final.chapterVersions.last?.content, rewritten)
         XCTAssertEqual(

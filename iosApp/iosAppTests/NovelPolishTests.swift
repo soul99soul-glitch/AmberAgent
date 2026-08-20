@@ -206,7 +206,7 @@ final class NovelPolishTests: NovelPolishTestCase {
         XCTAssertEqual(requestCount, 2)
     }
 
-    func testIncompatibleVerdictSupersedesCandidateAndManualConversionRequiresSync() async throws {
+    func testIncompatibleVerdictSupersedesCandidateAndManualConversionStaysSynchronized() async throws {
         let harness = try await makeHarness(remainingScripts: [
             NovelModelScript(steps: [.delta(incompatibleDriftJSON), .complete]),
             NovelModelScript(steps: [.delta(manualRebuildJSON), .complete]),
@@ -251,31 +251,20 @@ final class NovelPolishTests: NovelPolishTestCase {
             expectedWorkingRevision: rejected.branches[0].workingRevision
         )
         _ = try await harness.creation.perform(.saveManualEdit(manual))
-        let needsSync = try await document(in: harness)
-        let manualVersion = try XCTUnwrap(needsSync.chapterVersions.first { $0.id == manualVersionID })
+        let saved = try await document(in: harness)
+        let manualVersion = try XCTUnwrap(saved.chapterVersions.first { $0.id == manualVersionID })
 
-        XCTAssertEqual(needsSync.branches[0].syncStatus, .needsSync)
-        XCTAssertEqual(needsSync.branches[0].workingRevision, rejected.branches[0].workingRevision + 1)
+        // Contract v1.1 D-B: the manual conversion commits its plot module
+        // atomically, so the branch is already synchronized.
+        XCTAssertEqual(saved.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(saved.branches[0].workingRevision, rejected.branches[0].workingRevision + 1)
         XCTAssertEqual(manualVersion.kind, .manualEdit)
         XCTAssertEqual(manualVersion.content, candidate.content)
         XCTAssertEqual(manualVersion.factCompatibilityID, compatibilityID)
         XCTAssertEqual(manualVersion.sourceChapterVersionID, source.id)
 
-        let sync = NovelSyncManualEditsCommand(
-            context: mutationContext(document: needsSync),
-            projectID: needsSync.project.id,
-            branchID: needsSync.branches[0].id,
-            pendingID: NovelPendingOperationID(),
-            checkpointID: NovelCheckpointID(),
-            stateSnapshotID: NovelStateSnapshotID(),
-            expectedWorkingRevision: needsSync.branches[0].workingRevision
-        )
-        _ = try await harness.creation.perform(.syncManualEdits(sync))
-        let synchronized = try await document(in: harness)
-        XCTAssertEqual(synchronized.branches[0].syncStatus, .synchronized)
-
         let restore = restoreCommand(
-            document: synchronized,
+            document: saved,
             targetVersionID: source.id
         )
         await NovelXCTAssertThrowsErrorAsync(
@@ -287,7 +276,7 @@ final class NovelPolishTests: NovelPolishTestCase {
             XCTAssertTrue(message.contains("manual edit"))
         }
         let afterRejectedRestore = try await document(in: harness)
-        XCTAssertEqual(afterRejectedRestore, synchronized)
+        XCTAssertEqual(afterRejectedRestore, saved)
     }
 
     func testInvalidJSONFailsClosedThenRestartRetryUsesFreshDurableAttempt() async throws {
@@ -466,7 +455,12 @@ final class NovelPolishTests: NovelPolishTestCase {
         XCTAssertEqual(restoredVersion.content, source.content)
         XCTAssertEqual(restoredVersion.factCompatibilityID, polished.factCompatibilityID)
         XCTAssertEqual(restoredVersion.sourceChapterVersionID, source.id)
-        XCTAssertEqual(try canonicalEvidence(in: restored), evidence)
+        // Contract v1.1 D-B/D-D: a restore relinks plot modules in a fresh
+        // snapshot, so only the snapshot identity differs from prior evidence.
+        let restoredEvidence = try canonicalEvidence(in: restored)
+        XCTAssertEqual(restoredEvidence.eventsSHA256, evidence.eventsSHA256)
+        XCTAssertEqual(restoredEvidence.stateSummarySHA256, evidence.stateSummarySHA256)
+        XCTAssertNotEqual(restoredEvidence.stateSnapshotID, evidence.stateSnapshotID)
 
         let replay = try await harness.creation.perform(.restoreChapterVersion(restore))
         XCTAssertEqual(replay, outcome)

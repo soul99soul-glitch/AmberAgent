@@ -1207,18 +1207,12 @@ final class NovelSessionViewModel {
         let saved = await workspace.saveManualRewrite(
             chapterID: proposal.chapterID,
             title: version.title,
-            content: replaced.newContent,
-            schedulesAutomaticSync: false
+            content: replaced.newContent
         )
         if !saved {
             operationErrorMessage = workspace.errorMessage ?? "改正文保存失败，请重试。"
             return false
         }
-        await syncRevisionPlotState(
-            chapterID: proposal.chapterID,
-            title: version.title,
-            content: replaced.newContent
-        )
         return true
     }
 
@@ -1233,18 +1227,6 @@ final class NovelSessionViewModel {
             return false
         }
         return true
-    }
-
-    private func syncRevisionPlotState(
-        chapterID: NovelChapterID,
-        title: String,
-        content: String
-    ) async {
-        _ = await workspace.applyWorkspaceFastForwardPlot(
-            chapterID: chapterID,
-            title: title,
-            content: content
-        )
     }
 
     @discardableResult
@@ -2537,6 +2519,13 @@ private extension NovelSessionViewModel {
         if branch.activeRunID != nil || activeRun != nil {
             return "分支上还有未结束的生成，请稍候或重新载入。"
         }
+        // Contract v1.1 D-D: forward runs are gated while later chapters'
+        // plot modules are unresolved after a middle-chapter edit.
+        // Discussion stays open (planning is allowed; writing is not).
+        if kind != .discussion,
+           workspace.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+            return NovelWorkspaceLedger.unresolvedPlotGateMessage
+        }
         switch kind {
         case .discussion:
             return nil
@@ -3746,6 +3735,11 @@ extension NovelSessionViewModel {
               let branchID = binding?.branchID,
               workspace.projectSnapshot?.project.collaborationMode == .ghostwrite
         else { return false }
+        // Contract v1.1 D-D: unresolved plot modules gate forward writing;
+        // the underlying prose run explains the reason via startBlockerMessage.
+        if workspace.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+            return false
+        }
         if canResumeGhostwriteWithoutPlan { return true }
         // 完批后开新批：允许没有确认计划（pipeline 自动拟定），与批内第 2～N 章同路径。
         if ghostwriteProgressStorage?.pauseReason == .batchCompleted
@@ -3784,6 +3778,9 @@ extension NovelSessionViewModel {
             if blocker == .ghostwriteRequirementsMissing,
                let readinessIssue = ghostwriteReadinessIssue {
                 operationErrorMessage = readinessIssue.displayName
+            } else if workspace.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+                // Contract v1.1 D-D gate: surface the actionable reason.
+                operationErrorMessage = NovelWorkspaceLedger.unresolvedPlotGateMessage
             } else {
                 operationErrorMessage = blocker?.displayName ?? "代笔暂时不能开始。"
             }

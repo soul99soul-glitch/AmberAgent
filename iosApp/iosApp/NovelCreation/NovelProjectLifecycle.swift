@@ -131,6 +131,74 @@ extension DefaultNovelCreation {
         _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
     }
 
+    /// Contract v1.1 D-B: a manual chapter edit and the plot module it
+    /// triggers persist in ONE atomic commit (single `.manualSync`
+    /// checkpoint) — no window where the text is on disk without its plot.
+    /// Runs as the dedicated `.saveManualEdit` executor so the standard
+    /// perform pipeline (guards, reload, error reporting) still applies.
+    func executeSaveManualEditWithPlot(
+        _ command: NovelSaveManualEditCommand
+    ) async throws -> NovelOutcome {
+        let loaded = try await loadCommittedProject(id: command.projectID)
+        let payloadSHA256 = try NovelAction.saveManualEdit(command).canonicalPayloadSHA256()
+        if let replay = try NovelReducer.replayOutcome(
+            context: command.context,
+            kind: .saveManualEdit,
+            payloadSHA256: payloadSHA256,
+            in: loaded.document
+        ) {
+            return replay
+        }
+        guard loaded.access == .readWrite else {
+            throw NovelError.degradedReadOnly(projectID: command.projectID)
+        }
+        guard let branch = loaded.document.branches
+            .first(where: { $0.id == command.branchID }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        // Contract v1.1 D-B: run the plot draft BEFORE the mutation so the
+        // edit and its plot module commit in one atomic revision step. The
+        // draft gets a tight silence budget: a user-typed edit must not wait
+        // the full fact timeout before the excerpt fallback commits it.
+        var moduleText: String?
+        var summaryOverride: String?
+        if NovelWorkspaceLedger.isFastForward(branch: branch, chapterID: command.chapterID),
+           let draft = try await writeWorkspacePlotDraft(
+            document: loaded.document,
+            previousSummary: loaded.document.stateSnapshots.first {
+                $0.id == branch.currentStateSnapshotID
+            }?.summary ?? "",
+            chapterTitle: command.title,
+            chapterContent: command.content,
+            noOutputTimeout: min(factRequestTimeout, 60)
+           ) {
+            moduleText = draft.chapterText
+            if !draft.summary.isEmpty {
+                summaryOverride = draft.summary
+            }
+        }
+        let reduced = try NovelFactTransactionReducer.saveManualEditWithPlot(
+            command,
+            payloadSHA256: payloadSHA256,
+            moduleText: moduleText,
+            summaryOverride: summaryOverride,
+            in: loaded.document,
+            now: now()
+        )
+        guard reduced.document != loaded.document else {
+            return reduced.outcome
+        }
+        let committed = try await repository.commitProject(
+            reduced.document,
+            expectedRevision: loaded.document.project.revision
+        )
+        guard committed.document == reduced.document else {
+            throw NovelError.storageIndeterminate(command.projectID)
+        }
+        _ = try installLoadedProject(committed, id: command.projectID, allowsRollback: false)
+        return reduced.outcome
+    }
+
     func applyChapterPlotPointer(
         to document: NovelProjectDocumentV1,
         branchID: NovelBranchID,
@@ -176,7 +244,8 @@ extension DefaultNovelCreation {
         document: NovelProjectDocumentV1,
         previousSummary: String,
         chapterTitle: String,
-        chapterContent: String
+        chapterContent: String,
+        noOutputTimeout: TimeInterval? = nil
     ) async throws -> NovelWorkspacePlotDraft? {
         do {
             let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
@@ -196,7 +265,7 @@ extension DefaultNovelCreation {
             )
             let evidence = try await executor.executePrepared(
                 try executor.prepareInvocation(request, preparation: preparation),
-                noOutputTimeout: factRequestTimeout
+                noOutputTimeout: noOutputTimeout ?? factRequestTimeout
             )
             guard case .workspacePlot(let draft) = evidence.output else {
                 return nil

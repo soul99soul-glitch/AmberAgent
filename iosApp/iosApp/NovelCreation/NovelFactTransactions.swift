@@ -144,9 +144,67 @@ enum NovelFactTransactionReducer {
         )
     }
 
+    /// Contract v1.1 D-B: the collected chapter and the plot module it
+    /// updates land in ONE atomic commit. The relinked plot snapshot is
+    /// computed by the caller before this transaction and carried by the
+    /// single `.collection` checkpoint — no follow-up pointer commit.
+    static func commitCollectionWithPlot(
+        _ command: NovelCollectCandidateCommand,
+        payloadSHA256: String,
+        moduleText: String?,
+        summaryOverride: String?,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> NovelFactTransactionResult {
+        try requireProject(command.projectID, in: document)
+        try requirePayloadHash(payloadSHA256)
+        guard let branch = document.branches.first(where: { $0.id == command.branchID }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        let chapterID: NovelChapterID
+        switch command.target {
+        case .createNextChapter(let id, _):
+            chapterID = id
+        case .replaceChapter(let id), .appendToChapter(let id):
+            chapterID = id
+        }
+        let pending = try makeCollectionPending(
+            command,
+            payloadSHA256: payloadSHA256,
+            in: document,
+            now: now
+        )
+        let plotUpdate = CollectionPlotUpdate(
+            chapterID: chapterID,
+            snapshotID: command.stateSnapshotID,
+            moduleText: moduleText,
+            summaryOverride: summaryOverride,
+            markLaterStale: !NovelWorkspaceLedger.isFastForwardCollect(
+                command.target,
+                branch: branch
+            )
+        )
+        return try commitPreparedCollection(
+            pending,
+            retryCommand: nil,
+            plotUpdate: plotUpdate,
+            in: document,
+            now: now
+        )
+    }
+
+    struct CollectionPlotUpdate {
+        let chapterID: NovelChapterID
+        let snapshotID: NovelStateSnapshotID
+        let moduleText: String?
+        let summaryOverride: String?
+        let markLaterStale: Bool
+    }
+
     private static func commitPreparedCollection(
         _ pending: NovelPendingOperationRecord,
         retryCommand: NovelRetryPendingCommand?,
+        plotUpdate: CollectionPlotUpdate? = nil,
         in document: NovelProjectDocumentV1,
         now: Date
     ) throws -> NovelFactTransactionResult {
@@ -206,13 +264,36 @@ enum NovelFactTransactionReducer {
             chapterVersionID: proposedVersion.id,
             revision: finalRevision
         )
+
+        if let chapterToAdd { next.chapters.append(chapterToAdd) }
+        next.chapterVersions.append(proposedVersion)
+
+        var snapshotID = baseCheckpoint.stateSnapshotID
+        if let plotUpdate {
+            let plotSnapshot = try NovelWorkspaceLedger.updatedPlotSnapshot(
+                id: plotUpdate.snapshotID,
+                replacing: baseCheckpoint.stateSnapshotID,
+                workingSelections: chapterSelections,
+                updatedChapterID: plotUpdate.chapterID,
+                updatedTitle: proposedVersion.title,
+                updatedContent: proposedVersion.content,
+                moduleText: plotUpdate.moduleText,
+                summaryOverride: plotUpdate.summaryOverride,
+                markLaterStale: plotUpdate.markLaterStale,
+                in: next,
+                now: now
+            )
+            next.stateSnapshots.append(plotSnapshot)
+            snapshotID = plotSnapshot.id
+        }
+
         let checkpoint = NovelBranchCheckpointRecord(
             id: checkpointID,
             kind: .collection,
             createdOnBranchID: branch.id,
             parentCheckpointID: pending.baseCheckpointID,
             chapterSelections: chapterSelections,
-            stateSnapshotID: baseCheckpoint.stateSnapshotID,
+            stateSnapshotID: snapshotID,
             sessionCursor: sessionCursor,
             branchOverrideRevisionIDs: branch.overrideRevisionIDs,
             sourceCandidateID: candidate.id,
@@ -221,8 +302,6 @@ enum NovelFactTransactionReducer {
             createdAt: now
         )
 
-        if let chapterToAdd { next.chapters.append(chapterToAdd) }
-        next.chapterVersions.append(proposedVersion)
         try appendLedger(
             pending: pending,
             outcome: outcome,
@@ -259,7 +338,7 @@ enum NovelFactTransactionReducer {
             expectedHeadRevision: pending.baseHeadRevision,
             now: now
         )
-        next.branches[branchIndex].syncStatus = .needsSync
+        next.branches[branchIndex].syncStatus = plotUpdate == nil ? .needsSync : .synchronized
         next.pendingOperations.removeAll { $0.id == pending.id }
         advanceProjectRevision(in: &next, now: now)
         guard next.project.revision == finalRevision else {
@@ -287,6 +366,29 @@ enum NovelFactTransactionReducer {
         }
         guard !document.pendingOperations.contains(where: { $0.branchID == branch.id }) else {
             throw NovelError.projectBusy(command.projectID)
+        }
+        // Contract v1.1 D-D: collecting NEW forward content is gated while
+        // later chapters' plot modules are unresolved after a middle-chapter
+        // edit. Replacing an already-stale chapter IS one of the sanctioned
+        // resolutions, so it stays open.
+        if NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+            branchID: command.branchID,
+            in: document
+        ) {
+            let replacesStaleChapter: Bool
+            if case .replaceChapter(let chapterID) = command.target {
+                replacesStaleChapter = document.stateSnapshots
+                    .first { $0.id == branch.currentStateSnapshotID }?
+                    .chapterPlots
+                    .contains { $0.chapterID == chapterID && $0.stale } == true
+            } else {
+                replacesStaleChapter = false
+            }
+            guard replacesStaleChapter else {
+                throw NovelError.invalidInput(
+                    NovelWorkspaceLedger.unresolvedPlotGateMessage
+                )
+            }
         }
         guard let candidate = document.candidates.first(where: {
             $0.id == command.candidateID
@@ -745,6 +847,161 @@ enum NovelFactTransactionReducer {
         next.branches[branchIndex].workingRevision = finalWorkingRevision
         next.branches[branchIndex].syncStatus = .needsSync
         next.branches[branchIndex].updatedAt = now
+        next.appliedOperations.append(NovelAppliedOperationRecord(
+            operationID: command.context.operationID,
+            kind: .saveManualEdit,
+            payloadSHA256: payloadSHA256,
+            outcome: outcome,
+            appliedProjectRevision: finalRevision,
+            appliedAt: now
+        ))
+        advanceProjectRevision(in: &next, now: now)
+        try validateTransition(from: document, to: next)
+        return (next, outcome)
+    }
+
+    /// Contract v1.1 D-B: the manual edit and the plot module it triggers
+    /// commit as ONE mutation (single revision step, single `.manualSync`
+    /// checkpoint carrying both the new version and the relinked snapshot).
+    /// `moduleText`/`summaryOverride` are precomputed by the lifecycle
+    /// (model draft) before this transaction runs.
+    static func saveManualEditWithPlot(
+        _ command: NovelSaveManualEditCommand,
+        payloadSHA256: String,
+        moduleText: String?,
+        summaryOverride: String?,
+        in document: NovelProjectDocumentV1,
+        now: Date = Date()
+    ) throws -> NovelFactTransactionResult {
+        try requireProject(command.projectID, in: document)
+        try requirePayloadHash(payloadSHA256)
+        if let outcome = try replayOutcome(
+            context: command.context,
+            kind: .saveManualEdit,
+            payloadSHA256: payloadSHA256,
+            in: document
+        ) {
+            return (document, outcome)
+        }
+        try requireUnusedOperation(command.context.operationID, in: document)
+        let branchIndex = try requireBranch(command.branchID, in: document)
+        let branch = document.branches[branchIndex]
+        try requireContext(command.context, branch: branch, document: document)
+        guard branch.lifecycle == .active else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        // Discussion field-write tools run inside a live discussion run. Block only
+        // non-discussion active runs (prose/polish/regenerate/…), not the discussion
+        // agent itself — otherwise chapter-title tools self-lock.
+        if let activeRunID = branch.activeRunID {
+            let activeKind = document.activeRuns.first(where: { $0.id == activeRunID })?.kind
+            guard activeKind == .discussion else {
+                throw NovelError.projectBusy(command.projectID)
+            }
+        }
+        guard branch.workingRevision == command.expectedWorkingRevision else {
+            throw NovelError.invalidInput(
+                "The working manuscript changed before this edit was saved."
+            )
+        }
+        guard !document.pendingOperations.contains(where: { $0.branchID == branch.id }) else {
+            throw NovelError.projectBusy(command.projectID)
+        }
+        guard let selectionIndex = branch.workingChapterSelections.firstIndex(where: {
+            $0.chapterID == command.chapterID
+        }), let sourceVersion = document.chapterVersions.first(where: {
+            $0.id == branch.workingChapterSelections[selectionIndex].versionID &&
+                $0.chapterID == command.chapterID
+        }) else {
+            throw NovelError.invalidInput("The edited chapter is not in the working manuscript.")
+        }
+        guard document.chapterVersions.allSatisfy({ $0.id != command.versionID }),
+              document.pendingOperations.allSatisfy({
+                  $0.proposedChapterVersion?.id != command.versionID
+              }) else {
+            throw NovelError.immutableRecordConflict("chapter version \(command.versionID)")
+        }
+        let title = try normalizedRequired(command.title, field: "Chapter title")
+        let content = normalizeLineEndings(command.content)
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw NovelError.invalidInput("Chapter content cannot be empty.")
+        }
+        guard title != sourceVersion.title || content != sourceVersion.content else {
+            throw NovelError.invalidInput("The manual edit does not change the chapter.")
+        }
+        try requireNewFactCompatibilityID(command.factCompatibilityID, in: document)
+
+        let version = NovelChapterVersionRecord(
+            id: command.versionID,
+            chapterID: command.chapterID,
+            kind: .manualEdit,
+            title: title,
+            content: content,
+            factCompatibilityID: command.factCompatibilityID,
+            sourceChapterVersionID: sourceVersion.id,
+            sourceCandidateID: nil,
+            createdAt: now,
+            operationID: command.context.operationID
+        )
+        var next = document
+        next.chapterVersions.append(version)
+        next.branches[branchIndex].workingChapterSelections[selectionIndex] = NovelChapterSelection(
+            chapterID: command.chapterID,
+            versionID: version.id
+        )
+        next.branches[branchIndex].workingRevision = branch.workingRevision + 1
+        next.branches[branchIndex].updatedAt = now
+
+        let plotSnapshot = try NovelWorkspaceLedger.updatedPlotSnapshot(
+            id: NovelStateSnapshotID(),
+            replacing: branch.currentStateSnapshotID,
+            workingSelections: next.branches[branchIndex].workingChapterSelections,
+            updatedChapterID: command.chapterID,
+            updatedTitle: title,
+            updatedContent: content,
+            moduleText: moduleText,
+            summaryOverride: summaryOverride,
+            markLaterStale: !NovelWorkspaceLedger.isFastForward(
+                branch: branch,
+                chapterID: command.chapterID
+            ),
+            in: next,
+            now: now
+        )
+        next.stateSnapshots.append(plotSnapshot)
+
+        let finalRevision = document.project.revision + 1
+        let outcome = NovelOutcome.manualEditSaved(
+            projectID: document.project.id,
+            branchID: branch.id,
+            chapterVersionID: version.id,
+            workingRevision: next.branches[branchIndex].workingRevision,
+            revision: finalRevision
+        )
+        let session = next.sessions.first { $0.id == branch.sessionID }
+        let cursor: NovelSessionCursor = session?.messages.last.map {
+            .through(sequence: $0.sequence)
+        } ?? .empty
+        try NovelReducer.appendCheckpoint(
+            NovelBranchCheckpointRecord(
+                id: NovelCheckpointID(),
+                kind: .manualSync,
+                createdOnBranchID: branch.id,
+                parentCheckpointID: branch.headCheckpointID,
+                chapterSelections: next.branches[branchIndex].workingChapterSelections,
+                stateSnapshotID: plotSnapshot.id,
+                sessionCursor: cursor,
+                branchOverrideRevisionIDs: branch.overrideRevisionIDs,
+                sourceCandidateID: nil,
+                baseHeadRevision: branch.headRevision,
+                operationID: command.context.operationID,
+                createdAt: now
+            ),
+            to: &next,
+            expectedHeadRevision: branch.headRevision,
+            advancesWorkingRevision: false,
+            now: now
+        )
         next.appliedOperations.append(NovelAppliedOperationRecord(
             operationID: command.context.operationID,
             kind: .saveManualEdit,

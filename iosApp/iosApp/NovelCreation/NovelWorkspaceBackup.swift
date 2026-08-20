@@ -16,6 +16,11 @@ enum NovelWorkspaceBackup {
         try NovelDocumentValidator.validate(document)
         var files: [File] = []
         var usedPaths: Set<String> = []
+        let passthrough = document.workspacePassthrough
+
+        func extensions(_ anchor: String) -> [String] {
+            passthrough.frontmatterExtensions[anchor] ?? []
+        }
 
         let activeBranches = document.branches.filter { $0.lifecycle == .active }
         let mainBranch = activeBranches.first { $0.id == document.project.mainBranchID }
@@ -51,7 +56,8 @@ enum NovelWorkspaceBackup {
                         "collaborationMode": document.project.collaborationMode.rawValue,
                         "polishPreference": document.project.polishPreference,
                     ],
-                    body: ""
+                    body: "",
+                    extensionLines: extensions("project:\(document.project.id)")
                 )
             )
         )
@@ -75,7 +81,8 @@ enum NovelWorkspaceBackup {
                     path: path,
                     contents: render(
                         fields: materialFields(material: material, revision: revision, override: false),
-                        body: revision.content
+                        body: revision.content,
+                        extensionLines: extensions(material.id.description)
                     )
                 )
             )
@@ -105,7 +112,8 @@ enum NovelWorkspaceBackup {
                             "title": branch.name,
                             "syncStatus": branch.syncStatus.rawValue,
                         ],
-                        body: ""
+                        body: "",
+                        extensionLines: extensions("branch:\(branch.id)")
                     )
                 )
             )
@@ -137,7 +145,8 @@ enum NovelWorkspaceBackup {
                                 "ordinal": String(ordinal),
                                 "sourceVersionID": version.id.description,
                             ],
-                            body: version.content
+                            body: version.content,
+                            extensionLines: extensions(selection.chapterID.description)
                         )
                     )
                 )
@@ -162,7 +171,8 @@ enum NovelWorkspaceBackup {
                                 "title": version.title,
                                 "sourceVersionID": version.id.description,
                             ],
-                            body: version.content
+                            body: version.content,
+                            extensionLines: extensions(chapter.id.description)
                         )
                     )
                 )
@@ -187,7 +197,8 @@ enum NovelWorkspaceBackup {
                                 "kind": "plot",
                                 "title": "当前状态",
                             ],
-                            body: currentBody
+                            body: currentBody,
+                            extensionLines: extensions("plot-current:\(branch.id)")
                         )
                     )
                 )
@@ -200,7 +211,8 @@ enum NovelWorkspaceBackup {
                                 "kind": "plot",
                                 "title": "分支大纲",
                             ],
-                            body: snapshot.branchOutline
+                            body: snapshot.branchOutline,
+                            extensionLines: extensions("plot-outline:\(branch.id)")
                         )
                     )
                 )
@@ -220,7 +232,8 @@ enum NovelWorkspaceBackup {
                                 "kind": "plot",
                                 "title": "事件",
                             ],
-                            body: eventLines.joined(separator: "\n")
+                            body: eventLines.joined(separator: "\n"),
+                            extensionLines: extensions("plot-events:\(branch.id)")
                         )
                     )
                 )
@@ -237,7 +250,8 @@ enum NovelWorkspaceBackup {
                                 "title": "本章计划",
                                 "status": plan.status.rawValue,
                             ],
-                            body: planMarkdown(plan)
+                            body: planMarkdown(plan),
+                            extensionLines: extensions(plan.id.description)
                         )
                     )
                 )
@@ -252,7 +266,8 @@ enum NovelWorkspaceBackup {
                                 "kind": "plan",
                                 "title": "往后几章",
                             ],
-                            body: arc.beats.map { "- \($0)" }.joined(separator: "\n")
+                            body: arc.beats.map { "- \($0)" }.joined(separator: "\n"),
+                            extensionLines: extensions("upcoming:\(branch.id)")
                         )
                     )
                 )
@@ -280,7 +295,8 @@ enum NovelWorkspaceBackup {
                                 revision: revision,
                                 override: true
                             ),
-                            body: revision.content
+                            body: revision.content,
+                            extensionLines: extensions(material.id.description)
                         )
                     )
                 )
@@ -304,7 +320,8 @@ enum NovelWorkspaceBackup {
                             "title": proposal.title,
                             "materialKind": "custom",
                         ],
-                        body: proposal.content
+                        body: proposal.content,
+                        extensionLines: extensions(proposal.id.description)
                     )
                 )
             )
@@ -330,6 +347,14 @@ enum NovelWorkspaceBackup {
                     )
                 )
             )
+        }
+
+        // Contract v1.1 §3.6: files this host has no semantic mapping for are
+        // written back exactly as they were imported (foreshadowing nodes,
+        // drafts, unknown directories).
+        let emittedPaths = Set(files.map(\.path))
+        for (path, contents) in passthrough.opaqueFiles where !emittedPaths.contains(path) {
+            files.append(File(path: path, contents: contents))
         }
 
         return files.sorted { $0.path < $1.path }
@@ -482,7 +507,11 @@ private extension NovelWorkspaceBackup {
         return sections.joined(separator: "\n\n")
     }
 
-    static func render(fields: [(String, String)], body: String) -> String {
+    static func render(
+        fields: [(String, String)],
+        body: String,
+        extensionLines: [String] = []
+    ) -> String {
         var lines = ["---"]
         for (key, value) in fields {
             if key == "aliases" {
@@ -508,6 +537,9 @@ private extension NovelWorkspaceBackup {
                 lines.append("  - \(yamlScalar(item))")
             }
         }
+        // Contract v1.1 §3.6: unknown frontmatter fields are written back
+        // verbatim after the known fields, in their original relative order.
+        lines.append(contentsOf: extensionLines)
         lines.append("---")
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -516,8 +548,16 @@ private extension NovelWorkspaceBackup {
         return lines.joined(separator: "\n") + "\n\n" + trimmed + "\n"
     }
 
-    static func render(fields: [String: String], body: String) -> String {
-        render(fields: fields.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }, body: body)
+    static func render(
+        fields: [String: String],
+        body: String,
+        extensionLines: [String] = []
+    ) -> String {
+        render(
+            fields: fields.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 },
+            body: body,
+            extensionLines: extensionLines
+        )
     }
 
     static func yamlMapping(_ pairs: [String: String]) -> String {

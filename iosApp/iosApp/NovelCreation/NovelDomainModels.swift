@@ -1870,6 +1870,31 @@ struct NovelSettingProposalRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// Opaque workspace content that iOS does not interpret but must preserve
+/// across import/export round trips. Novel workspace core contract v1.1 §3.6:
+/// unknown frontmatter fields and unknown files pass through, never dropped
+/// (Android node extensions such as `status`/`relations`/foreshadowing would
+/// otherwise be lost on an Android→iOS→Android round trip).
+struct NovelWorkspacePassthroughRecord: Codable, Equatable, Sendable {
+    /// Raw frontmatter lines kept verbatim, keyed by the anchor id used at
+    /// export time: bare entity ids for materials/chapters/proposals, and
+    /// role-prefixed ids for files that share an entity (e.g.
+    /// `project:<id>`, `branch:<id>`, `upcoming:<id>`, `plot-current:<id>`).
+    var frontmatterExtensions: [String: [String]]
+    /// Tree-relative path → raw file contents for files iOS has no semantic
+    /// mapping for (foreshadowing nodes, unknown directories, drafts, …).
+    var opaqueFiles: [String: String]
+
+    static let empty = NovelWorkspacePassthroughRecord(
+        frontmatterExtensions: [:],
+        opaqueFiles: [:]
+    )
+
+    var isEmpty: Bool {
+        frontmatterExtensions.isEmpty && opaqueFiles.isEmpty
+    }
+}
+
 enum NovelOperationKind: String, Codable, Sendable {
     case createProject
     case renameProject
@@ -1947,6 +1972,7 @@ struct NovelProjectDocumentV1: Codable, Equatable, Sendable {
     var chapterPlans: [NovelChapterPlanRecord] = []
     var upcomingArcs: [NovelUpcomingArcRecord] = []
     var appliedOperations: [NovelAppliedOperationRecord]
+    var workspacePassthrough: NovelWorkspacePassthroughRecord = NovelWorkspacePassthroughRecord.empty
 }
 
 extension NovelProjectDocumentV1 {
@@ -1975,6 +2001,7 @@ extension NovelProjectDocumentV1 {
         case chapterPlans
         case upcomingArcs
         case appliedOperations
+        case workspacePassthrough
     }
 
     init(from decoder: Decoder) throws {
@@ -2048,6 +2075,10 @@ extension NovelProjectDocumentV1 {
             [NovelAppliedOperationRecord].self,
             forKey: .appliedOperations
         )
+        workspacePassthrough = try values.decodeIfPresent(
+            NovelWorkspacePassthroughRecord.self,
+            forKey: .workspacePassthrough
+        ) ?? .empty
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2076,6 +2107,7 @@ extension NovelProjectDocumentV1 {
         try values.encode(chapterPlans, forKey: .chapterPlans)
         try values.encode(upcomingArcs, forKey: .upcomingArcs)
         try values.encode(appliedOperations, forKey: .appliedOperations)
+        try values.encode(workspacePassthrough, forKey: .workspacePassthrough)
     }
 }
 
@@ -2180,6 +2212,7 @@ struct NovelProjectSnapshot: Equatable, Sendable {
     let activeRuns: [NovelActiveRunRecord]
     let settingProposals: [NovelSettingProposalRecord]
     let appliedOperations: [NovelAppliedOperationRecord]
+    let workspacePassthrough: NovelWorkspacePassthroughRecord
     let access: NovelProjectLoadAccess
 
     init(loaded: NovelLoadedProject) {
@@ -2207,6 +2240,7 @@ struct NovelProjectSnapshot: Equatable, Sendable {
         activeRuns = document.activeRuns
         settingProposals = document.settingProposals
         appliedOperations = document.appliedOperations
+        workspacePassthrough = document.workspacePassthrough
         access = loaded.access
     }
 

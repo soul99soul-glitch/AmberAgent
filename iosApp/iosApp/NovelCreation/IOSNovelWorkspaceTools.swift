@@ -83,7 +83,9 @@ extension IOSNovelProjectToolExecutor {
             "mode: \(snapshot.project.collaborationMode.rawValue)",
         ]
         if state?.hasStaleChapterPlots == true {
+            // Contract v1.1 D-D: unresolved forward-writing gate.
             lines.append("plot_stale: true")
+            lines.append("unresolved: true（后续章节剧情指针未解开，写后续/收录/代笔被拦，直到确认无碍、Fork 或重写后续章节）")
         }
         if branch.syncStatus == .needsSync {
             lines.append("dirty: plot/")
@@ -169,6 +171,12 @@ extension IOSNovelProjectToolExecutor {
                 isUserInitiated: true,
                 reason: args.reason
             )
+        }
+        if path.contains("/plot/foreshadowing/") {
+            // Contract v1.1 D-F: iOS preserves foreshadowing nodes opaque but
+            // does not maintain them yet; never misroute them into the plot
+            // draft path.
+            return .failed("暂不支持写入伏笔节点（\(path)）：iOS 目前只按契约保留伏笔文件，节点维护能力尚未接入。")
         }
         if path.contains("/plot/") {
             if !isUserInitiated {
@@ -269,10 +277,16 @@ extension IOSNovelProjectToolExecutor {
             kind = .masterOutline
         } else if path.contains("/writing/") {
             kind = .writingRequirements
+        } else if path.contains("/log/") {
+            kind = .decisionLog
         } else if path.contains("/custom/") {
             kind = .custom(parsed.fields["customName"] ?? "自定义")
-        } else {
+        } else if path.contains("/world/") {
             kind = .world
+        } else {
+            // Unknown setting subfolders may be opaque cross-platform node
+            // directories (contract v1.1 §3.6); never reinterpret them.
+            return .failed("暂不支持写入 \(path)：未知设定目录按契约只透传保留，不能改写。")
         }
         let materialID: NovelMaterialID
         if let raw = parsed.fields["id"], let uuid = UUID(uuidString: raw) {
@@ -370,7 +384,8 @@ extension NovelProjectSnapshot {
             settingProposals: settingProposals,
             chapterPlans: chapterPlans,
             upcomingArcs: upcomingArcs,
-            appliedOperations: appliedOperations
+            appliedOperations: appliedOperations,
+            workspacePassthrough: workspacePassthrough
         )
     }
 }

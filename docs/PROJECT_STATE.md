@@ -1,8 +1,49 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-17（薄 VCS：中间章按模块链接，不再抽 JSON）
+Last updated: 2026-08-20（小说契约 v1.1：opaque 透传 + D-B 一笔提交 + D-D 闸门）
 
-时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。
+时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。跨端契约（唯一事实源，两端会话必读）：Android 主仓 `docs/novel-workspace-core-contract.md` v1.1。
+
+## 小说契约 v1.1 三阶段落地（2026-08-20，工作区未提交）
+
+按契约 D-B/D-D/D-F 完成 P0–P2。均经独立 checker 对抗复核（PASS_WITH_NOTES，全部发现已修复闭环）。
+
+**P0 · opaque 透传（D-F 底线）**：新增 document section `workspacePassthrough`（`frontmatterExtensions` 锚点键 + `opaqueFiles` 路径键）。importer 对未知 frontmatter 字段（节点 `status`/`relations`/任何新字段）、伏笔节点、未知目录、未知顶层文件、drafts 全部收进透传；exporter 按原相对顺序附回、原路径写回。inbox 语义化为 settingProposals（进快照 settingProposalIDs）；未知 `materialKind` 整文件 opaque（不再漂成 world）；`plan/upcoming.md` 空 beats 整文件 opaque。修契约欠账：导入缺 plot → `needsSync`（conventions §7）。写工具守卫：`plot/foreshadowing/` 拒写（防误路由）、`setting/` 未知子目录拒写。锚点：material/proposal/chapter/plan 裸 id，project/branch/upcoming/plot-* 带角色前缀；plot 锚用 branch id（快照轮换不孤儿）；remapper 同步重键 `project:` 锚。sharded 存储新 section（`workspacePassthrough`），旧包缺 section 合成空记录不拒载。新套件 `NovelWorkspaceContractTests` 12 例（结构断言/锚点族/往返无丢失/缺 plot needsSync/旧档解码/sharded 双向）。
+
+**P1 · 一笔提交（D-B）**：收录=单个 `.collection` checkpoint 同时携带正文与重链接剧情快照（`commitCollectionWithPlot`；模型草稿在提交**前**跑，失败回退确定性 excerpt；断点窗口消散）。手编/审批卡改章=单事务 `saveManualEditWithPlot`（单 revision 步 + 单 `.manualSync` checkpoint：新版本+selection+快照）；`.saveManualEdit` 在 `perform` 派发层改走合并执行器（所有调用方自动获益）。草稿静默预算收紧至 `min(factRequestTimeout, 60s)`；append 收录的草稿输入含既有章文本。润色采纳仍两笔（多阶段事务，已知缺口另切）；`applyWorkspaceFastForwardPlot` 仍服务润色跟进（非死码）。旧 needsSync 前置测试改为 `legacyCollectAndEditDocument` 纯 reducer 构建。
+
+**P2 · unresolved 闸门（D-D）**：unresolved 状态**派生**自当前快照 `chapterPlots.stale`（零 schema 变更；三种解开天然对齐：acceptStale 清标记 / fork 从检查点快照重建 / 重写后章经 relink 消减）。闸门四层：`NovelGenerationReducer.begin` 拦全部非 discussion run（域级兜底）+ `makeCollectionPending` 域闸（createNext/append 拦；replace 目标章自身 stale 放行=重写路径）+ VM `startBlockerMessage`（prose/regenerate/polish/characterProposal；讨论放行）+ `canStartGhostwriteChapter`（按钮禁用，开始时透出闸门原因）。版本回退（restore）补齐盲区：非末章回退同笔 relink（后章标 stale）；fact-preserving 校验放宽为「restore 允许仅剧情指针面的快照变化」（chapterPlots/highlights 外字段必须继承）。`novel_workspace_status` 输出 `unresolved: true` 行；工作区横幅升级为闸门语义（三解法+按钮「确认无碍，按正文接受」）。
+
+验证（iPhone 17 Pro 模拟器，`/tmp/amber-dd-contract`）：契约 12/12、事实事务 37/37、协作 48/48、手编同步 21/21、账本 15/15、生成 53/53、润色 7/7+16/16、仓库/包/校验/注入/分支/fork 全绿——合计 **209/209**（1 skip=真机专属）。既有基线（A/B 证据与本轮无交集）：`NovelSessionViewModelTests` 约 11 方法（relink 提交后漂移）、`IOSNovelProjectToolExecutorTests` 4 设定建议、`NovelCreationViewModelTests` 6、cursor detach flaky。按 D-B 契约更新的测试：手改调度→原子无后随、审批卡→无停止按钮单草稿请求、润色转手改×2→synchronized。未做：真机验收、Android 跨端往返实跑（fixture 语义已对齐）、代笔 readiness 枚举未加 unresolved 项（开始时文案已透出原因）。
+
+### 七场景语义清单（契约 §5.3 对拍，iOS 现行为）
+
+| 场景 | 行为一句话 |
+|---|---|
+| 写章（收录新章） | 单笔 `.collection` checkpoint：正文+剧情模块原子落盘，分支保持 synchronized |
+| 改末章 | 单笔 `.manualSync`：新版本+模块+摘要草稿原子提交，无 stale |
+| 改中间章 | 该章模块更新+后章标 stale → unresolved：写后续/收录/代笔全拦，直到确认无碍/fork/重写后章 |
+| 删章 | 删中间章=后章标 stale 进闸；删末章无 stale 放行 |
+| 回退 | 检查点回退/整包恢复解开闸；单章版本回退同笔 relink（非末章标后章 stale） |
+| fork | 从编辑前检查点 fork 无 stale；unresolved 头上 fork 继承闸 |
+| 收录 | createNext/append 在 unresolved 时拦；replace(stale 章) 放行且清该章、其后再标（逐章消减）；代笔 autoCollect 同闸 |
+
+### 契约增补草案（未决项 iOS 提案，待写入契约 §4）
+
+1. **扩展字段渲染位置**：未知 frontmatter 字段渲染在全部已知字段（含 aliases 块）之后、保持原相对顺序；iOS 已按此实现并用往返测试锁死，Android「旧 frontmatter 原样保留」需对齐。
+2. **D-C 人机分轨**：host 触发的正文写（收录/编辑器/审批确认）由 host 在同笔补剧情指针（已实现）；agent 逐文件写经各自原子提交+D-D 闸门兜底（正文已提交而 plot 未更新→分支处于 unresolved，写后续被拦）。「未更则拦」由 D-D 闸承担。
+3. **D-D 重写消减粒度**：重写一章消减一章（该章 relink 清 stale），全部消减或确认无碍后闸开。iOS 已按此实现。
+4. **导入 id 语义**（新增提案）：往返 diff 的豁免清单=时间戳（exportedAt）+ iOS 重新生成的 id（chapter id/sourceVersionID/plot 快照 id/project id）；material/proposal/plan id 保持稳定。Android 侧需确认接受该豁免集。
+
+## 搜索胶囊流式参数仍会变宽（2026-08-18）
+
+上次 `a4bc23cdf` 只锁了「正在搜索→已搜索」换词和对勾槽。真机仍会跳，是另一条路径：`MessageStreamAccumulator` 按 `input + delta` 拼参数，`searchQuery` 把未完成 JSON / `{}` 回退进标题（`搜索 {"query":...`），解析成功后再缩成短 query。无界提案下 `lineLimit` 不截断，长 query 还会比预算哨兵更宽。
+
+修复：
+- 截断 JSON / 无 query 的 JSON 不再进标题，只显示「搜索」直到 `query` 可解析。
+- 搜索胶囊标题用 `combinedLine` 预算哨兵定宽，可见标题 overlay 进去；空参、短词、长词、完成态理想宽相同，尾部转圈/对勾不再左右挪。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-search-width`）：`ChatToolTimelineWidthOverflowTests` **7/7** 绿（含新红测试 `testSearchCapsuleTitleIgnoresIncompleteJSONAndKeepsVerb`、`testSearchCapsuleIdealWidthConstantAcrossStreamingInput`）。2026-08-19 约 01:16 覆盖安装到 iPhone Air（Core Device `94918570-0680-5B93-8E38-7E6B355D4426`，容器 `82548ABE-03BA-4EF3-9C47-519FB9958B9B`），`app.amber.ios` 1.0/1 已拉起。数据未卸载。未 commit。
 
 ## 小说薄 VCS（2026-08-17）
 
@@ -249,7 +290,7 @@ Last updated: 2026-08-17（薄 VCS：中间章按模块链接，不再抽 JSON�
 - 红测试：`ChatToolTimelineWidthOverflowTests.testSearchCapsuleIdealWidthConstantAcrossLifecyclePhases`（20+ 字中文查询、同一 toolCallId 构造 toolCallStarted/执行中/toolResultAppended 三阶段，无界提案测理想宽 exact equality）——修复前 314.0 vs 301.0 红；修复后绿。
 - 门禁（iPhone 17 Pro 模拟器、隔离 DerivedData /tmp/amber-dd-fix4）：三套件 108 例，唯一失败 = 既有 perf 探针负载抖动（testPerfGrowingTableStreamingKeepsDisplayLinkResponsive：全套件 83.69>80 红、隔离复跑 42.85/111.33 红、再复跑 p95 16.67 过/max 95.86 单尖峰红——幅度波动=既有基线，阈值未放宽，探针路径无工具胶囊不达本轮改动）；ToolTimelineWidth 5/5 + Glyph 4/4 绿。
 - 残余（记录未改）：同机制残留于 mcp_call（差 2 单位）、memory_tool（1 单位）、workspace 系列（5 单位）等换词工具，不在本次真机报告范围；scrape_web/generate_image/webMount 动词等长无宽度差。
-- 未验证：真机搜索胶囊观感（宽度恒定已由无界提案契约锁死，逐帧复核留待用户）。
+- 未验证：真机搜索胶囊观感（完成换词宽度已由无界提案契约锁死；流式 JSON 撑宽见 2026-08-18 节，已另修）。
 
 ## 完成切换原子性·未渲染原文闪帧修复（2026-08-15，工作区未提交）
 

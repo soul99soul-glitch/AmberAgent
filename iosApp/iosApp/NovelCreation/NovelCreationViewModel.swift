@@ -2086,15 +2086,16 @@ final class NovelCreationViewModel {
     func saveManualRewrite(
         chapterID: NovelChapterID,
         title: String,
-        content: String,
-        schedulesAutomaticSync: Bool = true
+        content: String
     ) async -> Bool {
         guard let project = projectSnapshot,
               let branch = branchSnapshot,
               branch.chapterSelections.contains(where: { $0.chapterID == chapterID }) else {
             return false
         }
-        let saved = await perform(.saveManualEdit(NovelSaveManualEditCommand(
+        // Contract v1.1 D-B: the creation actor commits the edit and its
+        // plot module atomically; no separate plot-pointer follow-up.
+        return await perform(.saveManualEdit(NovelSaveManualEditCommand(
             context: mutationContext(
                 projectRevision: project.project.revision,
                 configRevision: project.project.configRevision,
@@ -2109,14 +2110,6 @@ final class NovelCreationViewModel {
             factCompatibilityID: UUID(),
             expectedWorkingRevision: branch.branch.workingRevision
         )))
-        if saved, schedulesAutomaticSync {
-            _ = await applyWorkspaceFastForwardPlot(
-                chapterID: chapterID,
-                title: title,
-                content: content
-            )
-        }
-        return saved
     }
 
     @discardableResult

@@ -481,13 +481,36 @@ enum NovelPolishTransactionReducer {
             chapterID: target.chapterID,
             versionID: restored.id
         )
+        var next = document
+        next.chapterVersions.append(restored)
+        next.branches[branchIndex].workingChapterSelections = selections
+        // Contract v1.1 D-D: restoring an older version rewrites the chapter,
+        // so its plot module updates in the same commit and later chapters
+        // are marked stale exactly like a manual edit (no gate blind spot).
+        let plotSnapshot = try NovelWorkspaceLedger.updatedPlotSnapshot(
+            id: NovelStateSnapshotID(),
+            replacing: branch.currentStateSnapshotID,
+            workingSelections: selections,
+            updatedChapterID: target.chapterID,
+            updatedTitle: target.title,
+            updatedContent: target.content,
+            moduleText: nil,
+            summaryOverride: nil,
+            markLaterStale: !NovelWorkspaceLedger.isFastForward(
+                branch: branch,
+                chapterID: target.chapterID
+            ),
+            in: next,
+            now: now
+        )
+        next.stateSnapshots.append(plotSnapshot)
         let checkpoint = NovelBranchCheckpointRecord(
             id: command.checkpointID,
             kind: .restore,
             createdOnBranchID: branch.id,
             parentCheckpointID: branch.headCheckpointID,
             chapterSelections: selections,
-            stateSnapshotID: branch.currentStateSnapshotID,
+            stateSnapshotID: plotSnapshot.id,
             sessionCursor: session.messages.last.map {
                 .through(sequence: $0.sequence)
             } ?? .empty,
@@ -497,8 +520,6 @@ enum NovelPolishTransactionReducer {
             operationID: command.context.operationID,
             createdAt: now
         )
-        var next = document
-        next.chapterVersions.append(restored)
         try NovelReducer.appendCheckpoint(
             checkpoint,
             to: &next,

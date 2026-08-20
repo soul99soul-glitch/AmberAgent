@@ -188,7 +188,28 @@ enum NovelPolishDocumentValidator {
         let changedChapterIDs = chapterIDs.filter {
             parentSelections[$0] != selections[$0]
         }
-        guard checkpoint.stateSnapshotID == parent.stateSnapshotID,
+        // Contract v1.1 D-D: a restore may swap the plot snapshot when the
+        // only differences are the plot-pointer surfaces (chapterPlots and
+        // the folded recent-written highlights); every other snapshot field
+        // must be inherited from the parent's snapshot.
+        func snapshotChangeIsPlotOnly() -> Bool {
+            guard let checkpointSnapshot = document.stateSnapshots.first(where: {
+                $0.id == checkpoint.stateSnapshotID
+            }), let parentSnapshot = document.stateSnapshots.first(where: {
+                $0.id == parent.stateSnapshotID
+            }), checkpointSnapshot.id != parentSnapshot.id else {
+                return false
+            }
+            return checkpointSnapshot.eventIDs == parentSnapshot.eventIDs &&
+                checkpointSnapshot.summary == parentSnapshot.summary &&
+                checkpointSnapshot.branchOutline == parentSnapshot.branchOutline &&
+                checkpointSnapshot.unresolvedEntityNames == parentSnapshot.unresolvedEntityNames &&
+                checkpointSnapshot.settingProposalIDs == parentSnapshot.settingProposalIDs &&
+                checkpointSnapshot.characterIdentityClarifications ==
+                    parentSnapshot.characterIdentityClarifications
+        }
+        let snapshotIsUnchanged = checkpoint.stateSnapshotID == parent.stateSnapshotID
+        guard (snapshotIsUnchanged || checkpoint.kind == .restore && snapshotChangeIsPlotOnly()),
               checkpoint.branchOverrideRevisionIDs == parent.branchOverrideRevisionIDs,
               chapterIDs == parentChapterIDs,
               changedChapterIDs.count == 1,

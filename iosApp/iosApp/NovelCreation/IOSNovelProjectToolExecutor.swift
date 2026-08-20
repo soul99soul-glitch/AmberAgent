@@ -412,7 +412,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         }
         return .filled(
             "已将第 \(chapter.ordinal) 章标题「\(oldTitle)」→「\(title)」。"
-                + " 正文未改；分支可能需要同步剧情状态。"
+                + " 正文未改。"
         )
     }
 
@@ -844,7 +844,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             : "第 \(proposal.startParagraph)–\(proposal.endParagraph) 段"
         return .filled(
             "已写入第 \(proposal.chapterOrdinal) 章《\(proposal.chapterTitle)》\(rangeLabel)。"
-                + " 分支需要同步剧情状态。"
+                + " 剧情要点已随正文同一笔更新。"
         )
     }
 

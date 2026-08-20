@@ -29,7 +29,7 @@ enum NovelWorkspaceImporter {
                 initialStateSnapshotID: NovelStateSnapshotID(),
                 initialCheckpointID: NovelCheckpointID(),
                 name: parsed.projectTitle,
-                branchName: parsed.mainBranchName,
+                branchName: parsed.branchTitle ?? parsed.mainBranchName,
                 creationMode: .blank,
                 quickStartSeed: nil
             ),
@@ -147,6 +147,16 @@ enum NovelWorkspaceImporter {
         }
 
         applyPlot(parsed, to: &document)
+        applyInboxProposals(parsed, to: &document, now: now)
+        applyWorkspacePassthrough(parsed, to: &document)
+        if !parsed.hasPlotFiles,
+           let branchIndex = document.branches.firstIndex(where: {
+               $0.id == document.project.mainBranchID
+           }) {
+            // Contract conventions §7: a workspace without plot/ imports as
+            // needsSync (previously every import claimed synchronized).
+            document.branches[branchIndex].syncStatus = .needsSync
+        }
         try NovelDocumentValidator.validate(document)
         return document
     }
@@ -330,6 +340,121 @@ private extension NovelWorkspaceImporter {
             chapterPlots: modules
         )
     }
+
+    /// Inbox files become pending setting proposals so imported books keep
+    /// their unconfirmed material visible (they were silently dropped before
+    /// contract v1.1). Frontmatter ids are preserved for export stability.
+    static func applyInboxProposals(
+        _ parsed: ParsedWorkspace,
+        to document: inout NovelProjectDocumentV1,
+        now: Date
+    ) {
+        guard !parsed.inboxProposals.isEmpty,
+              let branchIndex = document.branches.firstIndex(where: {
+                  $0.id == document.project.mainBranchID
+              }) else { return }
+        let branchID = document.branches[branchIndex].id
+        var proposalIDs: [NovelProposalID] = []
+        for proposal in parsed.inboxProposals {
+            document.settingProposals.append(NovelSettingProposalRecord(
+                id: proposal.id,
+                branchID: branchID,
+                title: proposal.title,
+                content: proposal.content,
+                createdAt: now,
+                isResolved: false
+            ))
+            proposalIDs.append(proposal.id)
+        }
+        let snapshotID = document.branches[branchIndex].currentStateSnapshotID
+        guard let snapshotIndex = document.stateSnapshots.firstIndex(where: {
+            $0.id == snapshotID
+        }) else { return }
+        let old = document.stateSnapshots[snapshotIndex]
+        document.stateSnapshots[snapshotIndex] = NovelStateSnapshotRecord(
+            id: old.id,
+            eventIDs: old.eventIDs,
+            summary: old.summary,
+            branchOutline: old.branchOutline,
+            unresolvedEntityNames: old.unresolvedEntityNames,
+            createdAt: old.createdAt,
+            settingProposalIDs: old.settingProposalIDs + proposalIDs,
+            characterIdentityClarifications: old.characterIdentityClarifications,
+            recentWrittenHighlights: old.recentWrittenHighlights,
+            chapterPlots: old.chapterPlots
+        )
+    }
+
+    /// Collects opaque content into the document passthrough section so the
+    /// exporter can write it back unchanged (core contract v1.1 §3.6).
+    static func applyWorkspacePassthrough(
+        _ parsed: ParsedWorkspace,
+        to document: inout NovelProjectDocumentV1
+    ) {
+        var passthrough = NovelWorkspacePassthroughRecord.empty
+        for material in parsed.materials where !material.extensionLines.isEmpty {
+            passthrough.frontmatterExtensions[material.id.description] =
+                material.extensionLines
+        }
+        for proposal in parsed.inboxProposals where !proposal.extensionLines.isEmpty {
+            passthrough.frontmatterExtensions[proposal.id.description] =
+                proposal.extensionLines
+        }
+        if let branch = document.branches.first(where: {
+            $0.id == document.project.mainBranchID
+        }) {
+            let selections = branch.workingChapterSelections
+            for (index, chapter) in parsed.workingChapters.enumerated()
+            where !chapter.extensionLines.isEmpty {
+                guard index < selections.count else { break }
+                passthrough.frontmatterExtensions[
+                    selections[index].chapterID.description
+                ] = chapter.extensionLines
+            }
+            for (offset, chapter) in parsed.discardedChapters.enumerated()
+            where !chapter.extensionLines.isEmpty {
+                let index = parsed.workingChapters.count + offset
+                guard index < selections.count else { break }
+                passthrough.frontmatterExtensions[
+                    selections[index].chapterID.description
+                ] = chapter.extensionLines
+            }
+            if !parsed.branchExtensionLines.isEmpty {
+                passthrough.frontmatterExtensions["branch:\(branch.id)"] =
+                    parsed.branchExtensionLines
+            }
+            if !parsed.upcomingExtensionLines.isEmpty {
+                passthrough.frontmatterExtensions["upcoming:\(branch.id)"] =
+                    parsed.upcomingExtensionLines
+            }
+            // Anchored to the branch (not the snapshot id): snapshots rotate
+            // on every write, which would orphan the extensions.
+            if !parsed.plotExtensionLines.isEmpty {
+                passthrough.frontmatterExtensions["plot-current:\(branch.id)"] =
+                    parsed.plotExtensionLines
+            }
+            if !parsed.outlineExtensionLines.isEmpty {
+                passthrough.frontmatterExtensions["plot-outline:\(branch.id)"] =
+                    parsed.outlineExtensionLines
+            }
+            if !parsed.eventsExtensionLines.isEmpty {
+                passthrough.frontmatterExtensions["plot-events:\(branch.id)"] =
+                    parsed.eventsExtensionLines
+            }
+        }
+        if let plan = parsed.plan, !plan.extensionLines.isEmpty {
+            passthrough.frontmatterExtensions[plan.id.description] =
+                plan.extensionLines
+        }
+        if !parsed.projectExtensionLines.isEmpty {
+            passthrough.frontmatterExtensions["project:\(document.project.id)"] =
+                parsed.projectExtensionLines
+        }
+        for (path, contents) in parsed.opaqueFiles {
+            passthrough.opaqueFiles[path] = contents
+        }
+        document.workspacePassthrough = passthrough
+    }
 }
 
 private struct ParsedWorkspace {
@@ -340,6 +465,9 @@ private struct ParsedWorkspace {
     let polishPreference: String
     let collaborationMode: NovelCollaborationMode
     let mainBranchName: String
+    /// Human-readable title from branch.md; the manifest only carries the
+    /// slug, so preferring it keeps branch names stable across round trips.
+    let branchTitle: String?
     let mainBranchID: NovelBranchID?
     let materials: [ParsedMaterial]
     let workingChapters: [ParsedChapter]
@@ -350,6 +478,17 @@ private struct ParsedWorkspace {
     let highlights: [String]?
     let plan: ParsedPlan?
     let upcomingBeats: [String]
+    let inboxProposals: [ParsedProposal]
+    /// Files iOS has no semantic mapping for; preserved verbatim so an
+    /// export after import never drops them (core contract v1.1 §3.6).
+    let opaqueFiles: [String: String]
+    let hasPlotFiles: Bool
+    let projectExtensionLines: [String]
+    let branchExtensionLines: [String]
+    let plotExtensionLines: [String]
+    let outlineExtensionLines: [String]
+    let eventsExtensionLines: [String]
+    let upcomingExtensionLines: [String]
 
     struct ParsedMaterial {
         let id: NovelMaterialID
@@ -358,12 +497,21 @@ private struct ParsedWorkspace {
         let content: String
         let injection: NovelInjectionMode
         let aliases: [String]
+        let extensionLines: [String]
     }
 
     struct ParsedChapter {
         let title: String
         let content: String
         let ordinal: Int
+        let extensionLines: [String]
+    }
+
+    struct ParsedProposal {
+        let id: NovelProposalID
+        let title: String
+        let content: String
+        let extensionLines: [String]
     }
 
     struct ParsedPlan {
@@ -375,6 +523,7 @@ private struct ParsedWorkspace {
         let mustNotHappen: [String]
         let endingHook: String
         let visibleFacts: [String]
+        let extensionLines: [String]
     }
 
     init(files: [NovelWorkspaceBackup.File]) throws {
@@ -405,56 +554,144 @@ private struct ParsedWorkspace {
         var plan: ParsedPlan?
         var upcoming: [String] = []
         var branchID: NovelBranchID?
+        var branchTitle: String?
+        var inboxProposals: [ParsedProposal] = []
+        var opaqueFiles: [String: String] = [:]
+        var hasPlotFiles = false
+        var projectExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+            in: byPath["project.md"] ?? "",
+            knownKeys: Self.projectKnownFrontmatterKeys
+        )
+        var branchExtensionLines: [String] = []
+        var plotExtensionLines: [String] = []
+        var outlineExtensionLines: [String] = []
+        var eventsExtensionLines: [String] = []
+        var upcomingExtensionLines: [String] = []
 
         let mainPrefix = "branches/\(mainBranchName)/"
         for file in files {
             let parsed = NovelWorkspaceMarkdown.parseFile(file.contents)
             let onMain = file.path.hasPrefix(mainPrefix)
-            if file.path.hasPrefix("setting/") && !file.path.hasPrefix("branches/") {
-                let kind = Self.materialKind(path: file.path, fields: parsed.fields)
+            if file.path == "manifest.yaml" || file.path == "project.md" {
+                continue
+            } else if file.path.hasPrefix("setting/") && !file.path.hasPrefix("branches/") {
+                guard let kind = Self.materialKind(path: file.path, fields: parsed.fields) else {
+                    // Unknown materialKind values stay opaque so a future or
+                    // cross-platform kind never silently becomes `world`.
+                    opaqueFiles[file.path] = file.contents
+                    continue
+                }
                 materials.append(ParsedMaterial(
                     id: NovelWorkspaceMarkdown.identifier(parsed.fields["id"]) ?? NovelMaterialID(),
                     kind: kind,
                     title: parsed.fields["title"] ?? Self.fileNameTitle(file.path),
                     content: parsed.body,
                     injection: NovelInjectionMode(rawValue: parsed.fields["injection"] ?? "") ?? .smart,
-                    aliases: parsed.lists["aliases"] ?? []
+                    aliases: parsed.lists["aliases"] ?? [],
+                    extensionLines: NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.materialKnownFrontmatterKeys
+                    )
+                ))
+            } else if file.path.hasPrefix("inbox/"), file.path.hasSuffix(".md") {
+                inboxProposals.append(ParsedProposal(
+                    id: NovelWorkspaceMarkdown.identifier(parsed.fields["id"]) ?? NovelProposalID(),
+                    title: parsed.fields["title"] ?? Self.fileNameTitle(file.path),
+                    content: parsed.body,
+                    extensionLines: NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.proposalKnownFrontmatterKeys
+                    )
                 ))
             } else if onMain, file.path.contains("/chapters/"), file.path.hasSuffix(".md") {
                 let ordinal = Self.chapterOrdinal(from: file.path) ?? (working.count + 1)
                 working.append(ParsedChapter(
                     title: parsed.fields["title"] ?? Self.fileNameTitle(file.path),
                     content: parsed.body,
-                    ordinal: ordinal
+                    ordinal: ordinal,
+                    extensionLines: NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.chapterKnownFrontmatterKeys
+                    )
                 ))
             } else if onMain, file.path.contains("/discarded/"), file.path.hasSuffix(".md") {
                 discarded.append(ParsedChapter(
                     title: parsed.fields["title"] ?? Self.fileNameTitle(file.path),
                     content: parsed.body,
-                    ordinal: discarded.count + 1
+                    ordinal: discarded.count + 1,
+                    extensionLines: NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.chapterKnownFrontmatterKeys
+                    )
                 ))
             } else if onMain, file.path.hasSuffix("/plot/current.md") {
+                hasPlotFiles = true
                 let split = NovelWorkspaceMarkdown.splitHighlights(parsed.body)
                 plotSummary = split.body
                 highlights = split.highlights
+                plotExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+                    in: file.contents,
+                    knownKeys: Self.plotKnownFrontmatterKeys
+                )
             } else if onMain, file.path.hasSuffix("/plot/outline.md") {
+                hasPlotFiles = true
                 plotOutline = parsed.body
+                outlineExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+                    in: file.contents,
+                    knownKeys: Self.plotKnownFrontmatterKeys
+                )
             } else if onMain, file.path.hasSuffix("/plot/events.md") {
+                hasPlotFiles = true
                 plotEvents = parsed.body
                     .split(whereSeparator: \.isNewline)
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .map { $0.hasPrefix("- ") ? String($0.dropFirst(2)) : $0 }
                     .filter { !$0.isEmpty }
+                eventsExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+                    in: file.contents,
+                    knownKeys: Self.plotKnownFrontmatterKeys
+                )
             } else if onMain, file.path.hasSuffix("/plan/this-chapter.md") {
-                plan = Self.parsePlan(parsed)
+                plan = Self.parsePlan(
+                    parsed,
+                    extensionLines: NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.plotKnownFrontmatterKeys.union(["status"])
+                    )
+                )
             } else if onMain, file.path.hasSuffix("/plan/upcoming.md") {
-                upcoming = parsed.body
+                let beats = parsed.body
                     .split(whereSeparator: \.isNewline)
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                     .map { $0.hasPrefix("- ") ? String($0.dropFirst(2)) : $0 }
                     .filter { !$0.isEmpty }
+                if beats.isEmpty {
+                    // No semantic arc content: keep the file verbatim so a
+                    // round trip never drops it (contract §3.6 no-drop).
+                    opaqueFiles[file.path] = file.contents
+                } else {
+                    upcoming = beats
+                    upcomingExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+                        in: file.contents,
+                        knownKeys: Self.plotKnownFrontmatterKeys
+                    )
+                }
             } else if onMain, file.path.hasSuffix("/branch.md") {
                 branchID = NovelWorkspaceMarkdown.identifier(parsed.fields["id"])
+                branchTitle = parsed.fields["title"].flatMap { $0.isEmpty ? nil : $0 }
+                branchExtensionLines = NovelWorkspaceMarkdown.extensionLines(
+                    in: file.contents,
+                    knownKeys: Self.branchKnownFrontmatterKeys
+                )
+            } else if file.path.hasPrefix("drafts/") {
+                // Candidate records carry generation-time references that a
+                // markdown file cannot express; keep drafts opaque instead of
+                // dropping them (they were silently lost before contract v1.1).
+                opaqueFiles[file.path] = file.contents
+            } else {
+                // Foreshadowing nodes, unknown setting subfolders on branches,
+                // unknown top-level entries: preserved verbatim (D-F).
+                opaqueFiles[file.path] = file.contents
             }
         }
 
@@ -468,10 +705,48 @@ private struct ParsedWorkspace {
         self.plan = plan
         self.upcomingBeats = upcoming
         self.mainBranchID = branchID
+        self.branchTitle = branchTitle
+        self.inboxProposals = inboxProposals
+        self.opaqueFiles = opaqueFiles
+        self.hasPlotFiles = hasPlotFiles
+        self.projectExtensionLines = projectExtensionLines
+        self.branchExtensionLines = branchExtensionLines
+        self.plotExtensionLines = plotExtensionLines
+        self.outlineExtensionLines = outlineExtensionLines
+        self.eventsExtensionLines = eventsExtensionLines
+        self.upcomingExtensionLines = upcomingExtensionLines
     }
 
-    private static func materialKind(path: String, fields: [String: String]) -> NovelMaterialKind {
+    static let materialKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title", "materialKind", "injection",
+        "sourceVersionID", "customName", "override", "aliases",
+    ]
+    static let chapterKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title", "ordinal", "sourceVersionID",
+    ]
+    static let proposalKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title", "materialKind",
+    ]
+    static let plotKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title",
+    ]
+    static let branchKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title", "syncStatus",
+    ]
+    static let projectKnownFrontmatterKeys: Set<String> = [
+        "id", "kind", "title", "collaborationMode", "polishPreference",
+    ]
+
+    private static let knownMaterialKindValues: Set<String> = [
+        "world", "character", "relationship", "masterOutline",
+        "writingRequirements", "decisionLog", "custom",
+    ]
+
+    /// Nil when an explicit `materialKind` value is unknown to this host:
+    /// such files stay opaque instead of being reinterpreted (contract §3.6).
+    private static func materialKind(path: String, fields: [String: String]) -> NovelMaterialKind? {
         if let raw = fields["materialKind"] {
+            guard knownMaterialKindValues.contains(raw) else { return nil }
             switch raw {
             case "world": return .world
             case "character": return .character
@@ -482,7 +757,7 @@ private struct ParsedWorkspace {
             case "custom":
                 return .custom(fields["customName"] ?? "自定义")
             default:
-                break
+                return nil
             }
         }
         if path.contains("/characters/") { return .character }
@@ -511,7 +786,10 @@ private struct ParsedWorkspace {
         return name
     }
 
-    private static func parsePlan(_ parsed: NovelWorkspaceMarkdown.ParsedFile) -> ParsedPlan {
+    private static func parsePlan(
+        _ parsed: NovelWorkspaceMarkdown.ParsedFile,
+        extensionLines: [String]
+    ) -> ParsedPlan {
         let sections = NovelWorkspaceMarkdown.sections(parsed.body)
         return ParsedPlan(
             id: NovelWorkspaceMarkdown.identifier(parsed.fields["id"]) ?? NovelChapterPlanID(),
@@ -521,7 +799,8 @@ private struct ParsedWorkspace {
             mustHappen: sections["必须发生"].map(NovelWorkspaceMarkdown.bullets) ?? [],
             mustNotHappen: sections["不可发生"].map(NovelWorkspaceMarkdown.bullets) ?? [],
             endingHook: sections["收束"] ?? "",
-            visibleFacts: sections["可见事实"].map(NovelWorkspaceMarkdown.bullets) ?? []
+            visibleFacts: sections["可见事实"].map(NovelWorkspaceMarkdown.bullets) ?? [],
+            extensionLines: extensionLines
         )
     }
 }
@@ -571,6 +850,42 @@ enum NovelWorkspaceMarkdown {
             }
         }
         return parsed
+    }
+
+    /// Frontmatter lines whose keys are not in `knownKeys`, preserved verbatim
+    /// and in original relative order (core contract v1.1 §3.6: unknown fields
+    /// such as node `status`/`relations` pass through opaque, never dropped).
+    /// List items follow their owning key; lines without a colon are kept.
+    static func extensionLines(in text: String, knownKeys: Set<String>) -> [String] {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("---") else { return [] }
+        let rest = trimmed.dropFirst(3).drop(while: { $0 == "\n" || $0 == "\r" })
+        guard let end = rest.range(of: "\n---") else { return [] }
+        let front = String(rest[..<end.lowerBound])
+        var result: [String] = []
+        var currentList: String?
+        for rawLine in front.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(rawLine)
+            if line.hasPrefix("  - ") || line.hasPrefix("- ") {
+                if currentList == nil || !knownKeys.contains(currentList!) {
+                    result.append(line)
+                }
+                continue
+            }
+            guard let colon = line.firstIndex(of: ":") else {
+                currentList = nil
+                result.append(line)
+                continue
+            }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            let value = String(line[line.index(after: colon)...])
+                .trimmingCharacters(in: .whitespaces)
+            currentList = value.isEmpty ? key : nil
+            if !knownKeys.contains(key) {
+                result.append(line)
+            }
+        }
+        return result
     }
 
     static func parseMapping(_ text: String) -> [String: String] {

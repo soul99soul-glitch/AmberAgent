@@ -309,6 +309,12 @@ enum NovelProjectIdentityRemapper {
                 appliedAt: $0.appliedAt
             )
         }
+        // Opaque frontmatter extensions anchored to the project id must follow
+        // the remapped identity or they would be dropped on export.
+        if let lines = next.workspacePassthrough.frontmatterExtensions
+            .removeValue(forKey: "project:\(project.id)") {
+            next.workspacePassthrough.frontmatterExtensions["project:\(projectID)"] = lines
+        }
         try NovelDocumentValidator.validate(next)
         return next
     }

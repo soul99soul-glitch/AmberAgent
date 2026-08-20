@@ -765,6 +765,9 @@ actor DefaultNovelCreation: NovelCreation {
             return try await executeCancelRun(command)
         case .collectCandidate(let command):
             return try await executeCollectCandidate(command)
+        case .saveManualEdit(let command):
+            // Contract v1.1 D-B: text + its plot module commit atomically.
+            return try await executeSaveManualEditWithPlot(command)
         case .syncManualEdits(let command):
             return try await executeSyncManualEdits(command)
         case .retryPending(let command):

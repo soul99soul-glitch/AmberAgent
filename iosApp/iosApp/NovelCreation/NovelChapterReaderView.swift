@@ -668,7 +668,7 @@ private struct NovelChapterEditSheet: View {
 
                 Section {
                     Label(
-                        "保存后需要同步剧情状态，正式生成前会先提醒你同步。",
+                        "保存时会把本章剧情要点一并写入，无需单独同步。",
                         systemImage: "arrow.triangle.2.circlepath"
                     )
                     .font(.footnote)

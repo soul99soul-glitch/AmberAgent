@@ -343,11 +343,14 @@ struct NovelProjectWorkspaceView: View {
         } else if section != .creation, viewModel.hasStalePlot {
             workspaceStatusStrip {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("改过前面的章节后，后面的剧情指针可能过期。后文以正文为准。", systemImage: "clock.arrow.circlepath")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(AmberTheme.foreground2)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Button("按正文接受") {
+                    Label(
+                        "改过前面的章节后，后续剧情指针未解开：写后续章节、收录和代笔暂时被拦。确认无碍、Fork，或重写后续章节即可继续。",
+                        systemImage: "clock.arrow.circlepath"
+                    )
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    Button("确认无碍，按正文接受") {
                         Task { @MainActor in
                             await viewModel.acceptStalePlot()
                         }

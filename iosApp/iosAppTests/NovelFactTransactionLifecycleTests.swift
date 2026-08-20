@@ -169,15 +169,16 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
     func testManualSyncRepairsTruncatedJSONUsingPreviousOutput() async throws {
         let fixture = try candidateDocument()
         let truncated = #"{"schemaVersion":1,"stateSummary":"Mara entered"#
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(truncated), .complete]),
                 NovelModelScript(steps: [.delta(validArchiveRebuildJSON()), .complete]),
             ]
         )
-        try await collectThenSync(fixture: fixture, harness: harness)
+        try await collectThenSync(edited: edited, harness: harness)
 
         let final = try await harness.repository.document(fixture.document.project.id)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
@@ -214,15 +215,16 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
           "settingProposals": []
         }
         """
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(invented), .complete]),
                 NovelModelScript(steps: [.delta(validArchiveRebuildJSON()), .complete]),
             ]
         )
-        try await collectThenSync(fixture: fixture, harness: harness)
+        try await collectThenSync(edited: edited, harness: harness)
 
         let final = try await harness.repository.document(fixture.document.project.id)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
@@ -265,8 +267,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
           "settingProposals": []
         }
         """
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(invented), .complete]),
@@ -274,7 +277,7 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
                 NovelModelScript(steps: [.delta(invented), .complete]),
             ]
         )
-        try await collectThenSync(fixture: fixture, harness: harness)
+        try await collectThenSync(edited: edited, harness: harness)
 
         let final = try await harness.repository.document(fixture.document.project.id)
         XCTAssertEqual(final.branches[0].syncStatus, .synchronized)
@@ -354,8 +357,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
           "settingProposals": []
         }
         """
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(invented), .complete]),
@@ -363,7 +367,6 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             ],
             factRequestTimeout: 0.15
         )
-        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
         let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -423,8 +426,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let first = rebuild.index(rebuild.startIndex, offsetBy: quarter)
         let second = rebuild.index(rebuild.startIndex, offsetBy: quarter * 2)
         let third = rebuild.index(rebuild.startIndex, offsetBy: quarter * 3)
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [
                     .delta(String(rebuild[..<first])),
@@ -439,7 +443,6 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
             ],
             factRequestTimeout: 0.3
         )
-        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
         let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -459,8 +462,10 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let syncTask = Task {
             try await harness.creation.perform(.syncManualEdits(sync))
         }
+        // The legacy fixture builds collect/edit with raw reducers, so the
+        // only model request is this sync's rebuild.
         let requestStarted = await eventually {
-            await harness.adapter.requests.count == 2
+            await harness.adapter.requests.count == 1
         }
         XCTAssertTrue(requestStarted)
         let requests = await harness.adapter.requests
@@ -484,15 +489,15 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         // 对照组：provider 完全静默挂起，证明超时保护没有被削弱——
         // 只是从「绝对墙钟」换成「连续无输出」，静默场景依然会在 noOutputTimeout 后失败。
         let fixture = try candidateDocument()
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.pause]),
             ],
             factRequestTimeout: 0.15
         )
-        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
         let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -788,6 +793,372 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         XCTAssertNoThrow(try NovelDocumentValidator.validate(final))
     }
 
+    /// Contract v1.1 D-B: a fast-forward collect lands the chapter AND its
+    /// plot module in ONE checkpoint — no follow-up pointer commit, no
+    /// needsSync window.
+    func testCollectCommitsChapterAndPlotInOneCheckpoint() async throws {
+        let fixture = try candidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [plotPointerScript()]
+        )
+        let command = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        let checkpointsBefore = fixture.document.checkpoints.count
+        _ = try await harness.creation.perform(.collectCandidate(command))
+
+        let after = try await harness.repository.document(command.projectID)
+        XCTAssertEqual(after.checkpoints.count, checkpointsBefore + 1)
+        let newCheckpoint = try XCTUnwrap(after.checkpoints.last)
+        XCTAssertEqual(newCheckpoint.kind, .collection)
+        XCTAssertEqual(after.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(after.branches[0].headCheckpointID, newCheckpoint.id)
+        XCTAssertTrue(after.pendingOperations.isEmpty)
+        let snapshot = try XCTUnwrap(
+            after.stateSnapshots.first { $0.id == newCheckpoint.stateSnapshotID }
+        )
+        XCTAssertNotEqual(
+            snapshot.id,
+            fixture.document.branches[0].currentStateSnapshotID,
+            "the merged checkpoint must carry a fresh plot snapshot"
+        )
+        XCTAssertTrue(snapshot.chapterPlots.contains { !$0.text.isEmpty })
+    }
+
+    /// Contract v1.1 D-B: a manual edit commits the new chapter version and
+    /// the plot module it triggers in one revision step with one checkpoint.
+    func testManualEditCommitsTextAndPlotInOneRevisionStep() async throws {
+        let fixture = try candidateDocument()
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [plotPointerScript(), plotPointerScript()]
+        )
+        let collect = collectCommand(
+            document: fixture.document,
+            candidate: fixture.candidate
+        )
+        _ = try await harness.creation.perform(.collectCandidate(collect))
+        let collected = try await harness.repository.document(collect.projectID)
+        let branch = collected.branches[0]
+        let version = try XCTUnwrap(collected.chapterVersions.last)
+        let revisionBefore = collected.project.revision
+        let checkpointsBefore = collected.checkpoints.count
+
+        let edit = NovelSaveManualEditCommand(
+            context: NovelMutationContext(
+                operationID: NovelOperationID(),
+                expectedProjectRevision: collected.project.revision,
+                expectedConfigRevision: collected.project.configRevision,
+                expectedBranchHeadRevision: branch.headRevision
+            ),
+            projectID: collected.project.id,
+            branchID: branch.id,
+            chapterID: version.chapterID,
+            versionID: NovelChapterVersionID(),
+            title: version.title,
+            content: version.content + "\n\nMara forced the archive door, again.",
+            factCompatibilityID: UUID(),
+            expectedWorkingRevision: branch.workingRevision
+        )
+        _ = try await harness.creation.perform(.saveManualEdit(edit))
+
+        let after = try await harness.repository.document(collect.projectID)
+        XCTAssertEqual(after.project.revision, revisionBefore + 1)
+        XCTAssertEqual(after.checkpoints.count, checkpointsBefore + 1)
+        let newCheckpoint = try XCTUnwrap(after.checkpoints.last)
+        XCTAssertEqual(newCheckpoint.kind, .manualSync)
+        XCTAssertEqual(after.branches[0].syncStatus, .synchronized)
+        XCTAssertTrue(after.pendingOperations.isEmpty)
+        XCTAssertEqual(
+            after.branches[0].workingChapterSelections.last?.versionID,
+            edit.versionID,
+            "the checkpoint carries the edited selection"
+        )
+        let snapshot = try XCTUnwrap(
+            after.stateSnapshots.first { $0.id == newCheckpoint.stateSnapshotID }
+        )
+        XCTAssertTrue(
+            snapshot.chapterPlots.contains {
+                $0.chapterID == version.chapterID && !$0.text.isEmpty
+            },
+            "the same checkpoint carries the relinked plot module"
+        )
+    }
+
+    /// Two-chapter manuscript plus an available prose candidate — the base
+    /// for D-D unresolved-plot gate tests, built through the regular fixture
+    /// chain so every invariant keeps validating.
+    func twoChapterDocumentWithCandidate() throws -> (
+        document: NovelProjectDocumentV1,
+        candidate: NovelCandidateRecord,
+        firstChapterID: NovelChapterID,
+        secondChapterID: NovelChapterID
+    ) {
+        var document = try NovelBranchTestFixtures.documentWithCollectedCandidate(
+            content: "陈桥驿的风先到。"
+        )
+        let firstID = document.branches[0].workingChapterSelections[0].chapterID
+        let secondRun = try NovelBranchTestFixtures.appendCompletedRun(
+            to: document,
+            branchID: document.branches[0].id,
+            kind: .prose,
+            content: "城门开了。"
+        )
+        document = try NovelBranchTestFixtures.collectCandidate(
+            try XCTUnwrap(secondRun.candidateID),
+            in: secondRun.document,
+            title: "入汴"
+        )
+        let secondID = try XCTUnwrap(
+            document.branches[0].workingChapterSelections.last?.chapterID
+        )
+        // Append (never replace) the candidate message so existing checkpoint
+        // cursors and runs keep validating.
+        let branch = document.branches[0]
+        let candidateID = NovelCandidateID()
+        let messageID = NovelMessageID()
+        let message = NovelSessionMessageRecord(
+            id: messageID,
+            sequence: (document.sessions[0].messages.map(\.sequence).max() ?? -1) + 1,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: "下一章的候选稿。",
+            createdAt: document.project.updatedAt,
+            runID: nil,
+            candidateID: candidateID
+        )
+        document.sessions[0].messages.append(message)
+        document.sessions[0].revision += 1
+        let candidate = NovelCandidateRecord(
+            id: candidateID,
+            kind: .prose,
+            branchID: branch.id,
+            sessionID: branch.sessionID,
+            sourceMessageID: messageID,
+            baseCheckpointID: branch.headCheckpointID,
+            baseHeadRevision: branch.headRevision,
+            status: .available,
+            content: "下一章的候选稿。",
+            sourceChapterVersionID: nil,
+            collectedCheckpointID: nil,
+            createdAt: document.project.updatedAt
+        )
+        document.candidates.append(candidate)
+        try NovelDocumentValidator.validate(document)
+        return (document, candidate, firstID, secondID)
+    }
+
+    /// Contract v1.1 D-D: after a middle-chapter edit leaves later chapters'
+    /// plot modules stale, forward progress (new-chapter collect) is gated.
+    /// Replacing the stale chapter itself stays open (sanctioned rewrite),
+    /// and accept-as-canonical reopens the gate.
+    func testUnresolvedPlotGateBlocksForwardCollectUntilResolved() throws {
+        let base = try twoChapterDocumentWithCandidate()
+        var document = base.document
+        // Middle-chapter edit: chapter 1 module updates, chapter 2 goes stale.
+        document = try NovelWorkspacePlotCommit.applyChapterModule(
+            to: document,
+            branchID: document.branches[0].id,
+            chapterID: base.firstChapterID,
+            chapterTitle: "第一章",
+            chapterContent: "改写后的第一章。",
+            now: Date()
+        )
+        XCTAssertTrue(NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+            branchID: document.branches[0].id,
+            in: document
+        ))
+
+        // Collecting a NEW next chapter is gated.
+        let collect = collectCommand(document: document, candidate: base.candidate)
+        XCTAssertThrowsError(
+            try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+                collect,
+                payloadSHA256: try NovelAction.collectCandidate(collect).canonicalPayloadSHA256(),
+                in: document
+            )
+        ) { error in
+            guard case NovelError.invalidInput(let message) = error,
+                  message == NovelWorkspaceLedger.unresolvedPlotGateMessage else {
+                return XCTFail("Expected unresolved-plot gate, got \(error)")
+            }
+        }
+
+        // Rewriting the STALE chapter itself (replace target) stays open —
+        // that is one of the sanctioned resolutions, and replacing the
+        // trailing chapter also clears its stale marker. The rewrite uses a
+        // fresh candidate based on the current head (real rewrites are
+        // generated after the middle-chapter edit moved the head).
+        let currentBranch = document.branches[0]
+        let freshCandidateID = NovelCandidateID()
+        let freshMessageID = NovelMessageID()
+        document.sessions[0].messages.append(NovelSessionMessageRecord(
+            id: freshMessageID,
+            sequence: (document.sessions[0].messages.map(\.sequence).max() ?? -1) + 1,
+            role: .assistant,
+            mode: .writeProse,
+            kind: .proseCandidate,
+            content: base.candidate.content,
+            createdAt: document.project.updatedAt,
+            runID: nil,
+            candidateID: freshCandidateID
+        ))
+        document.sessions[0].revision += 1
+        let freshCandidate = NovelCandidateRecord(
+            id: freshCandidateID,
+            kind: base.candidate.kind,
+            branchID: base.candidate.branchID,
+            sessionID: base.candidate.sessionID,
+            sourceMessageID: freshMessageID,
+            baseCheckpointID: currentBranch.headCheckpointID,
+            baseHeadRevision: currentBranch.headRevision,
+            status: .available,
+            content: base.candidate.content,
+            sourceChapterVersionID: document.branches[0].workingChapterSelections
+                .first(where: { $0.chapterID == base.secondChapterID })?.versionID,
+            clonedFromCandidateID: nil,
+            collectedCheckpointID: nil,
+            createdAt: document.project.updatedAt
+        )
+        document.candidates.append(freshCandidate)
+        let replaceCollect = NovelCollectCandidateCommand(
+            context: collect.context,
+            projectID: collect.projectID,
+            branchID: collect.branchID,
+            pendingID: NovelPendingOperationID(),
+            candidateID: freshCandidate.id,
+            selection: collect.selection,
+            target: .replaceChapter(base.secondChapterID),
+            proposedChapterVersionID: NovelChapterVersionID(),
+            checkpointID: NovelCheckpointID(),
+            stateSnapshotID: NovelStateSnapshotID(),
+            factCompatibilityID: UUID()
+        )
+        let replaced = try NovelFactTransactionReducer.commitCollectionWithPlot(
+            replaceCollect,
+            payloadSHA256: try NovelAction.collectCandidate(replaceCollect)
+                .canonicalPayloadSHA256(),
+            moduleText: nil,
+            summaryOverride: nil,
+            in: document,
+            now: Date()
+        ).document
+        XCTAssertFalse(
+            NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+                branchID: replaced.branches[0].id,
+                in: replaced
+            ),
+            "重写过时的末章本身就是解开路径"
+        )
+
+        // Accept-as-canonical independently clears stale markers: rebuild
+        // the unresolved state, then accept it.
+        let restaled = try NovelWorkspacePlotCommit.applyChapterModule(
+            to: replaced,
+            branchID: replaced.branches[0].id,
+            chapterID: base.firstChapterID,
+            chapterTitle: "第一章",
+            chapterContent: "再改一次第一章。",
+            now: Date()
+        )
+        XCTAssertTrue(NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+            branchID: restaled.branches[0].id,
+            in: restaled
+        ))
+        let cleared = try NovelWorkspacePlotCommit.applyAcceptStale(
+            to: restaled,
+            branchID: restaled.branches[0].id,
+            now: Date()
+        )
+        XCTAssertFalse(NovelWorkspaceLedger.hasUnresolvedChapterPlots(
+            branchID: cleared.branches[0].id,
+            in: cleared
+        ))
+    }
+
+    /// Contract v1.1 D-D: prose runs (which write forward content) refuse to
+    /// start while later chapters' plot modules are unresolved.
+    func testUnresolvedPlotGateBlocksProseRuns() throws {
+        let base = try twoChapterDocumentWithCandidate()
+        var document = base.document
+        document = try NovelWorkspacePlotCommit.applyChapterModule(
+            to: document,
+            branchID: document.branches[0].id,
+            chapterID: base.firstChapterID,
+            chapterTitle: "第一章",
+            chapterContent: "改写后的第一章。",
+            now: Date()
+        )
+        let branch = document.branches[0]
+        let request = NovelRunRequest(
+            id: NovelRunID(),
+            operationID: NovelOperationID(),
+            projectID: document.project.id,
+            branchID: branch.id,
+            kind: .prose,
+            mode: .writeProse,
+            granularity: .wholeChapter,
+            userText: "写下一章",
+            userMessageID: NovelMessageID(),
+            assistantMessageID: NovelMessageID(),
+            candidateID: NovelCandidateID(),
+            generationReceiptID: NovelReceiptID(),
+            injectionReceiptID: NovelReceiptID(),
+            sourceChapterVersionID: nil,
+            expectedProjectRevision: document.project.revision,
+            expectedConfigRevision: document.project.configRevision,
+            expectedBranchHeadRevision: branch.headRevision
+        )
+        let plan = try NovelInjectionPlanner.plan(
+            document: document,
+            request: NovelInjectionPlanningRequest(
+                branchID: request.branchID,
+                promptKind: .proseWholeChapter,
+                userText: request.userText
+            )
+        )
+        let injection = NovelInjectionReceiptRecord(
+            id: request.injectionReceiptID,
+            runID: request.id,
+            projectID: request.projectID,
+            branchID: request.branchID,
+            plan: plan,
+            overrides: request.injectionOverrides,
+            providerID: "gate-test",
+            modelID: "gate-test",
+            parameters: [:],
+            createdAt: document.project.updatedAt
+        )
+        let generation = NovelGenerationReceiptRecord(
+            id: request.generationReceiptID,
+            runID: request.id,
+            providerID: injection.providerID,
+            modelID: injection.modelID,
+            promptVersion: injection.promptVersion,
+            injectionReceiptID: injection.id,
+            parameters: injection.parameters,
+            requestSHA256: NovelDocumentValidator.sha256(
+                plan.canonicalInput + "\nMODEL REQUEST"
+            ),
+            createdAt: document.project.updatedAt
+        )
+        let artifacts = NovelGenerationStartArtifacts(
+            injectionReceipt: injection,
+            generationReceipt: generation
+        )
+        XCTAssertThrowsError(
+            try NovelGenerationReducer.begin(request, artifacts: artifacts, in: document)
+        ) { error in
+            guard case NovelError.invalidInput(let message) = error,
+                  message == NovelWorkspaceLedger.unresolvedPlotGateMessage else {
+                return XCTFail("Expected unresolved-plot gate, got \(error)")
+            }
+        }
+    }
+
     func testCollectionCommitFailureLeavesTheCandidateUnchanged() async throws {
         let fixture = try candidateDocument()
         let harness = try await makeHarness(
@@ -811,7 +1182,10 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         let durable = try await harness.repository.document(command.projectID)
         XCTAssertEqual(durable, fixture.document)
         let requests = await harness.adapter.requests
-        XCTAssertTrue(requests.isEmpty)
+        // Contract v1.1 D-B: the merged collect runs its plot draft BEFORE
+        // committing, so one draft request may be recorded even when the
+        // commit fails. No fact-sync work may happen.
+        XCTAssertTrue(factSyncRequests(in: requests).isEmpty)
     }
 
     func testManualRebuildPlannerUsesRebuildBaseState() async throws {
@@ -831,16 +1205,15 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
         fixture.document.sessions[0].revision = 2
         try NovelDocumentValidator.validate(fixture.document)
         let rebuildJSON = validRebuildJSON()
+        let edited = try legacyCollectAndEditDocument(
+            fixture: fixture,
+            editedContent: "Mara forced open the archive door."
+        )
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(rebuildJSON), .complete]),
             ]
-        )
-        let edited = try await collectAndEdit(
-            fixture: fixture,
-            harness: harness,
-            editedContent: "Mara forced open the archive door."
         )
         let editedBranch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
@@ -894,8 +1267,9 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
 
     func testLastChapterManualSyncUsesStateDeltaWhenPreferred() async throws {
         let fixture = try candidateDocument()
+        let edited = try legacyCollectAndEditDocument(fixture: fixture)
         let harness = try await makeHarness(
-            document: fixture.document,
+            document: edited,
             scripts: [
                 NovelModelScript(steps: [.delta(validDeltaJSON()), .complete]),
                 NovelModelScript(steps: [.delta(validDeltaJSON(
@@ -905,7 +1279,6 @@ final class NovelFactTransactionLifecycleTests: XCTestCase {
                 )), .complete]),
             ]
         )
-        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
         let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(
@@ -2123,21 +2496,29 @@ private extension NovelFactTransactionLifecycleTests {
         }
     }
 
-    func collectAndEdit(
+    /// Builds the legacy needsSync precondition with raw reducers only:
+    /// collect without plot sync (branch → needsSync) + a plot-less manual
+    /// edit (still needsSync). No model calls, no creation cache involved.
+    /// Contract v1.1 D-B made production collect/edit commit their plot
+    /// atomically, so the manual-sync engine tests fabricate the legacy
+    /// document before the harness is created.
+    func legacyCollectAndEditDocument(
         fixture: (document: NovelProjectDocumentV1, candidate: NovelCandidateRecord),
-        harness: Harness,
         editedContent: String? = nil
-    ) async throws -> NovelProjectDocumentV1 {
-        await harness.adapter.prepend(plotPointerScript())
+    ) throws -> NovelProjectDocumentV1 {
         let collect = collectCommand(
             document: fixture.document,
             candidate: fixture.candidate
         )
-        _ = try await harness.creation.perform(.collectCandidate(collect))
-        let collected = try await harness.repository.document(collect.projectID)
+        let collected = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
+            collect,
+            payloadSHA256: try NovelAction.collectCandidate(collect).canonicalPayloadSHA256(),
+            in: fixture.document,
+            now: Date()
+        ).document
         let collectedBranch = collected.branches[0]
         let version = try XCTUnwrap(collected.chapterVersions.last)
-        _ = try await harness.creation.perform(.saveManualEdit(NovelSaveManualEditCommand(
+        let edit = NovelSaveManualEditCommand(
             context: NovelMutationContext(
                 operationID: NovelOperationID(),
                 expectedProjectRevision: collected.project.revision,
@@ -2152,15 +2533,19 @@ private extension NovelFactTransactionLifecycleTests {
             content: editedContent ?? (version.content + "\n\nMara forced open the archive door."),
             factCompatibilityID: UUID(),
             expectedWorkingRevision: collectedBranch.workingRevision
-        )))
-        return try await harness.repository.document(collect.projectID)
+        )
+        return try NovelFactTransactionReducer.saveManualEdit(
+            edit,
+            payloadSHA256: try NovelAction.saveManualEdit(edit).canonicalPayloadSHA256(),
+            in: collected,
+            now: Date()
+        ).document
     }
 
     func collectThenSync(
-        fixture: (document: NovelProjectDocumentV1, candidate: NovelCandidateRecord),
+        edited: NovelProjectDocumentV1,
         harness: Harness
     ) async throws {
-        let edited = try await collectAndEdit(fixture: fixture, harness: harness)
         let branch = edited.branches[0]
         let sync = NovelSyncManualEditsCommand(
             context: NovelMutationContext(

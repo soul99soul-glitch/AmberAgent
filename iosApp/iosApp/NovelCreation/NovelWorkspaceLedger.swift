@@ -5,6 +5,27 @@ enum NovelWorkspaceLedger {
     static let storeFileName = "commits.json"
     static let highlightLimit = 8
 
+    /// Contract v1.1 D-D: editing a middle chapter leaves later chapters'
+    /// plot modules stale; until that is resolved (accept-as-canonical,
+    /// fork, or rewriting the affected chapters) forward progress is gated.
+    static let unresolvedPlotGateMessage =
+        "改过前面的章节后，后面的剧情指针还没解开。请先在项目工作区确认无碍、Fork，或重写后续章节，再继续写后续内容。"
+
+    /// True when the branch's current plot snapshot still carries stale
+    /// chapter modules — the D-D unresolved state.
+    static func hasUnresolvedChapterPlots(
+        branchID: NovelBranchID,
+        in document: NovelProjectDocumentV1
+    ) -> Bool {
+        guard let branch = document.branches.first(where: { $0.id == branchID }),
+              let snapshot = document.stateSnapshots.first(where: {
+                  $0.id == branch.currentStateSnapshotID
+              }) else {
+            return false
+        }
+        return snapshot.hasStaleChapterPlots
+    }
+
     struct Commit: Codable, Equatable, Sendable {
         var id: String
         var parentID: String?
@@ -303,6 +324,54 @@ enum NovelWorkspaceLedger {
             )
         }
         return modules
+    }
+
+    /// Relinked plot snapshot for a chapter update, computed **before** the
+    /// body change commits so both can land in one atomic checkpoint
+    /// (core contract v1.1 D-B). The caller supplies the fresh snapshot id
+    /// and commits it inside its own transaction.
+    static func updatedPlotSnapshot(
+        id: NovelStateSnapshotID,
+        replacing snapshotID: NovelStateSnapshotID,
+        workingSelections: [NovelChapterSelection],
+        updatedChapterID: NovelChapterID,
+        updatedTitle: String,
+        updatedContent: String,
+        moduleText: String?,
+        summaryOverride: String?,
+        markLaterStale: Bool,
+        in document: NovelProjectDocumentV1,
+        now: Date
+    ) throws -> NovelStateSnapshotRecord {
+        guard let old = document.stateSnapshots.first(where: { $0.id == snapshotID }) else {
+            throw NovelError.invalidInput("The branch has no current plot snapshot.")
+        }
+        let live = workingSelections.filter { selection in
+            document.chapters.first { $0.id == selection.chapterID }?.discardedAt == nil
+        }
+        let modules = relinkChapterPlots(
+            existing: old.chapterPlots,
+            working: live,
+            seeds: seedTexts(working: live, in: document),
+            updatedChapterID: updatedChapterID,
+            updatedText: moduleText ?? excerpt(
+                title: updatedTitle,
+                content: updatedContent
+            ),
+            markLaterStale: markLaterStale
+        )
+        return NovelStateSnapshotRecord(
+            id: id,
+            eventIDs: old.eventIDs,
+            summary: summaryOverride ?? old.summary,
+            branchOutline: old.branchOutline,
+            unresolvedEntityNames: old.unresolvedEntityNames,
+            createdAt: now,
+            settingProposalIDs: old.settingProposalIDs,
+            characterIdentityClarifications: old.characterIdentityClarifications,
+            recentWrittenHighlights: foldedHighlightTexts(modules),
+            chapterPlots: modules
+        )
     }
 
     static func reconcileModules(

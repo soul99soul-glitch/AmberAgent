@@ -220,15 +220,68 @@ private extension DefaultNovelCreation {
         payloadSHA256: String,
         loaded: NovelLoadedProject
     ) async throws -> NovelOutcome {
-        let committed = try NovelFactTransactionReducer.commitCollectionWithoutStateSync(
-            command,
-            payloadSHA256: payloadSHA256,
-            in: loaded.document,
-            now: now()
-        )
-        let collectedLoaded: NovelLoadedProject
+        guard let branch = loaded.document.branches
+            .first(where: { $0.id == command.branchID }) else {
+            throw NovelError.branchNotFound(command.branchID)
+        }
+        let chapterID: NovelChapterID
+        let chapterTitle: String
+        switch command.target {
+        case .createNextChapter(let id, let title):
+            chapterID = id
+            chapterTitle = title
+        case .replaceChapter(let id), .appendToChapter(let id):
+            chapterID = id
+            let selection = branch.workingChapterSelections
+                .first(where: { $0.chapterID == id })
+            chapterTitle = selection.flatMap { current in
+                loaded.document.chapterVersions.first(where: {
+                    $0.id == current.versionID && $0.chapterID == id
+                })?.title
+            } ?? ""
+        }
+        let candidateContent = loaded.document.candidates
+            .first(where: { $0.id == command.candidateID })?.content ?? ""
+        // The draft must summarize the chapter exactly as it will be
+        // collected: append merges the candidate onto the existing chapter.
+        var draftContent = candidateContent
+        if case .appendToChapter = command.target,
+           let selection = branch.workingChapterSelections
+               .first(where: { $0.chapterID == chapterID }),
+           let existing = loaded.document.chapterVersions.first(where: {
+               $0.id == selection.versionID && $0.chapterID == chapterID
+           }) {
+            draftContent = existing.content + "\n\n" + candidateContent
+        }
+        // Contract v1.1 D-B: run the plot draft BEFORE committing so the
+        // chapter and its plot module land in one atomic checkpoint. A draft
+        // failure falls back to the deterministic excerpt inside the reducer.
+        var moduleText: String?
+        var summaryOverride: String?
+        if NovelWorkspaceLedger.isFastForwardCollect(command.target, branch: branch),
+           let draft = try await writeWorkspacePlotDraft(
+            document: loaded.document,
+            previousSummary: loaded.document.stateSnapshots.first {
+                $0.id == branch.currentStateSnapshotID
+            }?.summary ?? "",
+            chapterTitle: chapterTitle,
+            chapterContent: draftContent
+           ) {
+            moduleText = draft.chapterText
+            if !draft.summary.isEmpty {
+                summaryOverride = draft.summary
+            }
+        }
+        let committed: NovelFactTransactionResult
         do {
-            collectedLoaded = try await commitFactDocument(committed.document, replacing: loaded)
+            committed = try NovelFactTransactionReducer.commitCollectionWithPlot(
+                command,
+                payloadSHA256: payloadSHA256,
+                moduleText: moduleText,
+                summaryOverride: summaryOverride,
+                in: loaded.document,
+                now: now()
+            )
         } catch {
             if let replay = try await reconcileFactOutcome(
                 projectID: command.projectID,
@@ -240,44 +293,19 @@ private extension DefaultNovelCreation {
             }
             throw error
         }
-        let chapterID: NovelChapterID
-        switch command.target {
-        case .createNextChapter(let id, _):
-            chapterID = id
-        case .replaceChapter(let id), .appendToChapter(let id):
-            chapterID = id
-        }
-        guard let selection = collectedLoaded.document.branches
-            .first(where: { $0.id == command.branchID })?
-            .workingChapterSelections
-            .first(where: { $0.chapterID == chapterID }),
-              let version = collectedLoaded.document.chapterVersions.first(where: {
-                  $0.id == selection.versionID && $0.chapterID == chapterID
-              }) else {
-            throw NovelError.invalidInput("The collected chapter is missing from the working manuscript.")
-        }
-        let next: NovelProjectDocumentV1
         do {
-            next = try await applyChapterPlotPointer(
-                to: collectedLoaded.document,
-                branchID: command.branchID,
-                chapterID: chapterID,
-                chapterTitle: version.title,
-                chapterContent: version.content
-            )
-        } catch is CancellationError {
-            throw CancellationError()
+            _ = try await commitFactDocument(committed.document, replacing: loaded)
         } catch {
-            next = try NovelWorkspacePlotCommit.applyChapterModule(
-                to: collectedLoaded.document,
-                branchID: command.branchID,
-                chapterID: chapterID,
-                chapterTitle: version.title,
-                chapterContent: version.content,
-                now: now()
-            )
+            if let replay = try await reconcileFactOutcome(
+                projectID: command.projectID,
+                context: command.context,
+                kind: .collectCandidate,
+                payloadSHA256: payloadSHA256
+            ) {
+                return replay
+            }
+            throw error
         }
-        _ = try await commitFactDocument(next, replacing: collectedLoaded)
         return committed.outcome
     }
 
