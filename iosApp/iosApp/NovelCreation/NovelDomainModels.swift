@@ -163,6 +163,7 @@ enum NovelGhostwriteReadinessIssue: String, Equatable, Hashable, Sendable, CaseI
     case missingCharacter
     case missingWritingRequirements
     case branchNeedsSync
+    case unresolvedPlot
     case pendingOperations
     case activeRun
     case missingChapterPlan
@@ -174,6 +175,7 @@ enum NovelGhostwriteReadinessIssue: String, Equatable, Hashable, Sendable, CaseI
         case .missingCharacter: "至少需要一名人物档案"
         case .missingWritingRequirements: "缺少写作要求"
         case .branchNeedsSync: "当前分支资料待同步"
+        case .unresolvedPlot: NovelWorkspaceLedger.unresolvedPlotGateMessage
         case .pendingOperations: "仍有未完成的正文或同步操作"
         case .activeRun: "当前还有进行中的生成"
         case .missingChapterPlan: "还没有确认的本章计划"
@@ -195,6 +197,7 @@ enum NovelGhostwriteReadiness {
             polishTransactions: document.polishTransactions,
             activeRuns: document.activeRuns,
             chapterPlans: document.chapterPlans,
+            stateSnapshots: document.stateSnapshots,
             mainBranchID: document.project.mainBranchID,
             branchID: branchID,
             requireChapterPlan: requireChapterPlan
@@ -209,6 +212,7 @@ enum NovelGhostwriteReadiness {
         polishTransactions: [NovelPendingPolishTransactionRecord],
         activeRuns: [NovelActiveRunRecord],
         chapterPlans: [NovelChapterPlanRecord],
+        stateSnapshots: [NovelStateSnapshotRecord] = [],
         mainBranchID: NovelBranchID,
         branchID: NovelBranchID,
         requireChapterPlan: Bool
@@ -243,6 +247,10 @@ enum NovelGhostwriteReadiness {
         }
         if branch.syncStatus != .synchronized {
             issues.append(.branchNeedsSync)
+        }
+        if let snapshot = stateSnapshots.first(where: { $0.id == branch.currentStateSnapshotID }),
+           snapshot.hasStaleChapterPlots {
+            issues.append(.unresolvedPlot)
         }
         if pendingOperations.contains(where: { $0.branchID == branchID }) ||
             polishTransactions.contains(where: {

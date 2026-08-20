@@ -466,6 +466,9 @@ struct NovelChapterReaderView: View {
         if sessionViewModel.isRunning || viewModel.branchSnapshot?.branch.activeRunID != nil {
             return "请先停止当前生成"
         }
+        if viewModel.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+            return NovelWorkspaceLedger.unresolvedPlotGateMessage
+        }
         if viewModel.branchSnapshot?.branch.syncStatus == .needsSync { return "请先同步剧情状态" }
         if !sessionViewModel.unresolvedBranchPolishTransactions.isEmpty {
             return "请先处理上次润色检查"

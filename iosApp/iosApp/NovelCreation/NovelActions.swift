@@ -1718,6 +1718,14 @@ protocol NovelCreation: Sendable {
         projectID: NovelProjectID,
         branchID: NovelBranchID
     ) async throws
+    /// Publish available candidates into `checkout/drafts/` without reprinting chapters.
+    func materializeWorktreeDrafts(projectID: NovelProjectID) async throws
+    /// Body of `drafts/*.md` for this candidate, or nil if the worktree is absent.
+    func worktreeDraftBody(
+        projectID: NovelProjectID,
+        candidateID: NovelCandidateID
+    ) async -> String?
+    func worktreeManifestExists(projectID: NovelProjectID) async -> Bool
     /// 项目文档每次成功 mutation 后广播事件。订阅方（UI VM）据此刷新快照，
     /// 让非 UI 写入源（如讨论工具 executor）的改动即时反映到界面。
     /// 默认实现为立即结束的空流，测试替身免实现。
@@ -1839,6 +1847,24 @@ extension NovelCreation {
         _ = projectID
         _ = branchID
         throw NovelError.invalidInput("Workspace plot write is unavailable.")
+    }
+
+    func materializeWorktreeDrafts(projectID: NovelProjectID) async throws {
+        _ = projectID
+    }
+
+    func worktreeDraftBody(
+        projectID: NovelProjectID,
+        candidateID: NovelCandidateID
+    ) async -> String? {
+        _ = projectID
+        _ = candidateID
+        return nil
+    }
+
+    func worktreeManifestExists(projectID: NovelProjectID) async -> Bool {
+        _ = projectID
+        return false
     }
 
     func mutationEvents() async -> AsyncStream<NovelProjectMutationEvent> {

@@ -345,6 +345,9 @@ struct NovelChapterVersionsSheet: View {
         if isProjectReadOnly { return "项目当前只读" }
         if viewModel.requiresReload { return "请先重新载入项目" }
         if viewModel.branchSnapshot?.branch.activeRunID != nil { return "请先停止当前生成" }
+        if viewModel.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+            return NovelWorkspaceLedger.unresolvedPlotGateMessage
+        }
         if viewModel.branchSnapshot?.branch.syncStatus != .synchronized { return "请先同步剧情状态" }
         if currentBranchHasPendingOperations { return "请先完成当前分支的正文操作" }
         if viewModel.isPerforming { return "项目正在处理其他操作" }

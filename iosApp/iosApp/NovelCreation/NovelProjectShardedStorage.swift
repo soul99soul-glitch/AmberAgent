@@ -20,6 +20,7 @@ enum NovelProjectShardedStorage {
     static let layoutFileName = "layout.json"
     static let previousLayoutFileName = "previous-layout.json"
     static let blobsDirectoryName = "blobs"
+    static let checkoutWriteFailureFileName = ".checkout-write-failed"
 
     struct LayoutV2: Codable, Equatable, Sendable {
         struct SectionRef: Codable, Equatable, Sendable {
@@ -102,10 +103,56 @@ enum NovelProjectShardedStorage {
         }
     }
 
+    /// Candidate list changes should refresh `drafts/` only — not 37 chapters.
+    static func checkoutDraftsNeedRefresh(
+        previous: SectionCache?,
+        next: SectionCache
+    ) -> Bool {
+        guard let previous else { return false }
+        return previous[SectionKey.candidates.rawValue]?.digest
+            != next[SectionKey.candidates.rawValue]?.digest
+    }
+
     // MARK: - Paths
 
     static func packageDirectory(projectDirectory: URL, projectID: NovelProjectID) -> URL {
         projectDirectory.appendingPathComponent(projectID.description, isDirectory: true)
+    }
+
+    static func checkoutWriteFailureURL(in packageDirectory: URL) -> URL {
+        packageDirectory.appendingPathComponent(checkoutWriteFailureFileName)
+    }
+
+    static func recordCheckoutWriteFailure(
+        _ message: String,
+        in packageDirectory: URL,
+        fileManager: FileManager
+    ) {
+        let url = checkoutWriteFailureURL(in: packageDirectory)
+        try? Data(message.utf8).write(to: url, options: .atomic)
+        _ = fileManager
+    }
+
+    static func clearCheckoutWriteFailure(
+        in packageDirectory: URL,
+        fileManager: FileManager
+    ) {
+        let url = checkoutWriteFailureURL(in: packageDirectory)
+        try? fileManager.removeItem(at: url)
+    }
+
+    static func checkoutWriteFailureMessage(
+        in packageDirectory: URL,
+        fileManager: FileManager = .default
+    ) -> String? {
+        let url = checkoutWriteFailureURL(in: packageDirectory)
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     static func layoutURL(in packageDirectory: URL) -> URL {

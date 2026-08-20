@@ -1,8 +1,29 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-20（小说契约 v1.1：opaque 透传 + D-B 一笔提交 + D-D 闸门）
+Last updated: 2026-08-20（代笔成稿落 drafts/，收录进 chapters/）
 
 时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。跨端契约（唯一事实源，两端会话必读）：Android 主仓 `docs/novel-workspace-core-contract.md` v1.1。
+
+## 工作树当书（2026-08-20 17:43，未卸数据）
+
+没有把《赵大来了》导出成新项目。讨论/撤销仍在 JSON 账本。打开书时若 `checkout/` 缺章或正文对不上，从账本整树印到 markdown，并写 `.amber/authority.json`（`book: worktree`）。之后改章/收录必须把工作树写成功；讨论 `list/read/grep` 读磁盘文件夹，不再每次从 JSON 现编一棵虚树。文件夹整目录替换，不再先删后写。
+
+代笔仍是 host 流水线（写候选→核对→收录），不是 agent 直接 `write` md。收录会把新章印进 `chapters/*.md`。sidecar 仍是 `paused` / `userPaused`。书 rev 1221。
+
+覆盖安装：bundle `3CD8B5DD-5F94-4A60-B69F-DE317BC0F8E0`。打开《赵大来了》那一次才会执行 heal。
+
+## 小说生产化覆盖安装（2026-08-20 17:23）
+
+B1–B4 未单独 commit，随当前工作树 Debug 包覆盖安装。未卸数据。
+
+- 设备：iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`，destination `00008150-000A594E0AF8401C`
+- 包：`app.amber.ios` 1.0/1，bundle 容器 `59CDDB92-E3C7-4EC2-83A2-1161F3F168A2`，数据容器 `918D9C98-B0BA-4423-B4F7-60D9248767E2`
+- 先 SIGKILL 停掉旧进程（pid 6579，代笔当时 `accepting` 第 3/6 章），sidecar 写成 `paused` / `userPaused`
+- 《赵大来了》仍在：`AE60366A-C41A-4117-B39E-A69678F165D9`，rev **1221**
+- 冷启动已拉起。未在真机点验：打开会话、改末章、改中间章进闸、长讨论不卡。打开书时代笔应停在暂停，不自动续写。
+- 备份：`research/novel-backups/zhaodalaile-20260820-150637/`
+
+代码（随本包）：润色采纳与剧情同一检查点；代笔 readiness 含 unresolved；打开书/重试走按章 relink；checkout 写失败留 `.checkout-write-failed` 并出横幅。整本 JSON 抽取只留作无模块旧书抢救。
 
 ## 小说契约 v1.1 三阶段落地（2026-08-20，工作区未提交）
 

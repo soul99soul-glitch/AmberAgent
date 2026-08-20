@@ -246,6 +246,33 @@ final class NovelWorkspaceLedgerTests: XCTestCase {
         )
     }
 
+    func testCheckoutWriteFailureMarkerIsVisibleThenCleared() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("checkout-write-failure-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertNil(
+            NovelProjectShardedStorage.checkoutWriteFailureMessage(in: directory)
+        )
+        NovelProjectShardedStorage.recordCheckoutWriteFailure(
+            "disk full",
+            in: directory,
+            fileManager: .default
+        )
+        XCTAssertEqual(
+            NovelProjectShardedStorage.checkoutWriteFailureMessage(in: directory),
+            "disk full"
+        )
+        NovelProjectShardedStorage.clearCheckoutWriteFailure(
+            in: directory,
+            fileManager: .default
+        )
+        XCTAssertNil(
+            NovelProjectShardedStorage.checkoutWriteFailureMessage(in: directory)
+        )
+    }
+
     func testCheckoutWritePreservesLedgerAndAppendsWhenTreeChanges() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("amber-ledger-\(UUID().uuidString)", isDirectory: true)
@@ -545,5 +572,155 @@ final class NovelWorkspaceLedgerTests: XCTestCase {
         XCTAssertEqual(next.stateSnapshots.last?.chapterPlots.map(\.stale), [false, false])
         XCTAssertEqual(next.branches[0].syncStatus, .synchronized)
         XCTAssertFalse(next.stateSnapshots.last?.hasStaleChapterPlots == true)
+    }
+
+    func testPublishMarksWorktreeAsBookAndCoversWorkingChapters() throws {
+        let document = try makeNovelWorkspaceBackupFixture()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("worktree-authority-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertFalse(
+            NovelWorkspaceAuthority.worktreeCoversWorkingManuscript(
+                document,
+                checkoutDirectory: directory
+            )
+        )
+        try NovelWorkspaceAuthority.publish(document, to: directory)
+        XCTAssertTrue(
+            NovelWorkspaceAuthority.worktreeCoversWorkingManuscript(
+                document,
+                checkoutDirectory: directory
+            )
+        )
+        XCTAssertTrue(NovelWorkspaceAuthority.isWorktreeBook(at: directory))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: directory.path + ".next")
+        )
+        let files = try XCTUnwrap(NovelWorkspaceAuthority.filesOnDisk(at: directory))
+        XCTAssertTrue(files.contains(where: { $0.path.hasSuffix("manifest.yaml") }))
+        XCTAssertTrue(files.contains(where: { $0.path.contains("/chapters/") }))
+    }
+
+    func testWorktreeCoverFailsWhenAChapterBodyDrifts() throws {
+        let document = try makeNovelWorkspaceBackupFixture()
+        let files = try NovelWorkspaceBackup.export(document)
+        XCTAssertTrue(
+            NovelWorkspaceAuthority.worktreeCoversWorkingManuscript(document, files: files)
+        )
+        var drifted = files
+        guard let index = drifted.firstIndex(where: { $0.path.contains("/chapters/") }) else {
+            return XCTFail("fixture must export a chapter file")
+        }
+        drifted[index] = NovelWorkspaceBackup.File(
+            path: drifted[index].path,
+            contents: drifted[index].contents + "\n被改过的复印件。"
+        )
+        XCTAssertFalse(
+            NovelWorkspaceAuthority.worktreeCoversWorkingManuscript(document, files: drifted)
+        )
+    }
+
+    func testPublishDraftsAddsAndRemovesDraftsWithoutTouchingChapters() throws {
+        var document = try makeNovelWorkspaceBackupFixture()
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("worktree-drafts-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try NovelWorkspaceAuthority.publish(document, to: directory)
+
+        let chapterRoot = directory.appendingPathComponent("branches", isDirectory: true)
+        let chapterFiles = try FileManager.default.subpathsOfDirectory(atPath: chapterRoot.path)
+            .filter { $0.contains("/chapters/") && $0.hasSuffix(".md") }
+            .map { chapterRoot.appendingPathComponent($0) }
+        let chapterBefore = try XCTUnwrap(chapterFiles.first)
+        let chapterBytes = try Data(contentsOf: chapterBefore)
+        let chapterModified = try chapterBefore.resourceValues(
+            forKeys: [.contentModificationDateKey]
+        ).contentModificationDate
+
+        let candidateID = NovelCandidateID()
+        document.candidates.append(
+            NovelCandidateRecord(
+                id: candidateID,
+                kind: .prose,
+                branchID: document.branches[0].id,
+                sessionID: document.sessions[0].id,
+                sourceMessageID: NovelMessageID(),
+                baseCheckpointID: document.branches[0].headCheckpointID,
+                baseHeadRevision: document.branches[0].headRevision,
+                status: .available,
+                content: "新草稿正文。",
+                sourceChapterVersionID: nil,
+                collectedCheckpointID: nil,
+                createdAt: Date()
+            )
+        )
+        try NovelWorkspaceAuthority.publishDrafts(document, to: directory)
+
+        XCTAssertEqual(try Data(contentsOf: chapterBefore), chapterBytes)
+        XCTAssertEqual(
+            try chapterBefore.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate,
+            chapterModified
+        )
+        let draftsDir = directory.appendingPathComponent("drafts")
+        let draftFiles = try FileManager.default.contentsOfDirectory(
+            at: draftsDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension == "md" }
+        XCTAssertEqual(draftFiles.count, 1)
+        let draftText = try String(contentsOf: try XCTUnwrap(draftFiles.first), encoding: .utf8)
+        XCTAssertTrue(draftText.contains("新草稿正文。"))
+        XCTAssertTrue(draftText.contains(candidateID.description))
+        XCTAssertEqual(
+            NovelWorkspaceAuthority.draftBody(candidateID: candidateID, in: directory),
+            "新草稿正文。"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: draftsDir.path + ".next")
+                || FileManager.default.fileExists(
+                    atPath: directory.appendingPathComponent("drafts.next").path
+                )
+        )
+
+        let index = try XCTUnwrap(document.candidates.firstIndex(where: { $0.id == candidateID }))
+        document.candidates[index].status = .adopted
+        try NovelWorkspaceAuthority.publishDrafts(document, to: directory)
+        let remaining = try FileManager.default.contentsOfDirectory(
+            at: draftsDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ).filter { $0.pathExtension == "md" }
+        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertNil(
+            NovelWorkspaceAuthority.draftBody(candidateID: candidateID, in: directory)
+        )
+    }
+
+    func testCheckoutDraftsNeedRefreshIgnoresUnchangedCandidateDigest() {
+        let entry = NovelProjectShardedStorage.SectionCacheEntry(
+            fingerprint: "c1",
+            digest: "same",
+            data: Data()
+        )
+        let previous = [NovelProjectShardedStorage.SectionKey.candidates.rawValue: entry]
+        var next = previous
+        XCTAssertFalse(
+            NovelProjectShardedStorage.checkoutDraftsNeedRefresh(previous: previous, next: next)
+        )
+        next[NovelProjectShardedStorage.SectionKey.candidates.rawValue] =
+            NovelProjectShardedStorage.SectionCacheEntry(
+                fingerprint: "c2",
+                digest: "changed",
+                data: Data()
+            )
+        XCTAssertTrue(
+            NovelProjectShardedStorage.checkoutDraftsNeedRefresh(previous: previous, next: next)
+        )
+        XCTAssertFalse(
+            NovelProjectShardedStorage.checkoutSidecarNeedsRefresh(previous: previous, next: next),
+            "candidate-only changes must not reprint the whole worktree"
+        )
     }
 }

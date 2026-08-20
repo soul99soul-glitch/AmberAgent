@@ -2637,6 +2637,16 @@ final class NovelSessionViewModelTests: XCTestCase {
             NovelWorkspaceLedger.unresolvedPlotGateMessage
         )
         XCTAssertFalse(harness.session.canStartGhostwriteChapter)
+        let readiness = NovelGhostwriteReadiness.issues(
+            in: try await harness.repository.loadProject(id: harness.projectID).document,
+            branchID: branch.id,
+            requireChapterPlan: false
+        )
+        XCTAssertTrue(readiness.contains(.unresolvedPlot))
+        XCTAssertEqual(
+            NovelGhostwriteReadinessIssue.unresolvedPlot.displayName,
+            NovelWorkspaceLedger.unresolvedPlotGateMessage
+        )
     }
 
     func testPersistedNeedsSyncWaitsForWorkspaceAppearanceBeforeAutomaticStateSync() async throws {

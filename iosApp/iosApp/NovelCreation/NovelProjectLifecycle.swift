@@ -318,6 +318,45 @@ extension DefaultNovelCreation {
         _ = try installLoadedProject(committed, id: projectID, allowsRollback: false)
     }
 
+    func materializeWorktreeDrafts(projectID: NovelProjectID) async throws {
+        guard let checkout = worktreeCheckoutDirectory(projectID: projectID) else { return }
+        let loaded = try await loadCommittedProject(id: projectID)
+        try NovelWorkspaceAuthority.publishDrafts(
+            loaded.document,
+            to: checkout
+        )
+    }
+
+    func worktreeDraftBody(
+        projectID: NovelProjectID,
+        candidateID: NovelCandidateID
+    ) async -> String? {
+        guard let checkout = worktreeCheckoutDirectory(projectID: projectID) else { return nil }
+        return NovelWorkspaceAuthority.draftBody(
+            candidateID: candidateID,
+            in: checkout
+        )
+    }
+
+    func worktreeManifestExists(projectID: NovelProjectID) async -> Bool {
+        worktreeCheckoutDirectory(projectID: projectID) != nil
+    }
+
+    private func worktreeCheckoutDirectory(projectID: NovelProjectID) -> URL? {
+        guard let root = try? NovelFileProjectRepository.defaultRootDirectory() else {
+            return nil
+        }
+        let checkout = NovelWorkspaceAuthority.checkoutDirectory(
+            in: NovelProjectShardedStorage.packageDirectory(
+                projectDirectory: root.appendingPathComponent("projects", isDirectory: true),
+                projectID: projectID
+            )
+        )
+        let manifest = checkout.appendingPathComponent("manifest.yaml")
+        guard FileManager.default.fileExists(atPath: manifest.path) else { return nil }
+        return checkout
+    }
+
     func exportWorkspace(
         projectID: NovelProjectID
     ) async throws -> NovelWorkspaceExportArtifact {

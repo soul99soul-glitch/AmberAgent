@@ -1791,23 +1791,6 @@ final class NovelSessionViewModel {
         adoptingPolishCandidateID = candidateID
         defer { adoptingPolishCandidateID = nil }
         await applyPolishAdoption(command)
-        if let adopted = workspace.projectSnapshot?.chapterVersions.first(where: {
-            $0.id == command.proposedChapterVersionID
-        }) {
-            _ = await workspace.applyWorkspaceFastForwardPlot(
-                chapterID: adopted.chapterID,
-                title: adopted.title,
-                content: adopted.content
-            )
-        } else if let source = workspace.projectSnapshot?.chapterVersions.first(where: {
-            $0.id == candidate.sourceChapterVersionID
-        }) {
-            _ = await workspace.applyWorkspaceFastForwardPlot(
-                chapterID: source.chapterID,
-                title: source.title,
-                content: candidate.content
-            )
-        }
     }
 
     func retryPolishTransaction(_ transactionID: NovelPendingOperationID) async {
@@ -1837,15 +1820,6 @@ final class NovelSessionViewModel {
             expectedWorkingRevision: branch.branch.workingRevision
         )
         await applyPolishAdoption(command)
-        if let adopted = workspace.projectSnapshot?.chapterVersions.first(where: {
-            $0.id == command.proposedChapterVersionID
-        }) {
-            _ = await workspace.applyWorkspaceFastForwardPlot(
-                chapterID: adopted.chapterID,
-                title: adopted.title,
-                content: adopted.content
-            )
-        }
         let durableStatus = workspace.projectSnapshot?.polishTransactions.first(where: {
             $0.id == transactionID
         })?.status
@@ -3719,6 +3693,7 @@ extension NovelSessionViewModel {
             polishTransactions: project.polishTransactions,
             activeRuns: project.activeRuns,
             chapterPlans: project.chapterPlans,
+            stateSnapshots: project.stateSnapshots,
             mainBranchID: project.project.mainBranchID,
             branchID: branchID,
             requireChapterPlan: !canResumeGhostwriteWithoutPlan
@@ -4976,7 +4951,26 @@ extension NovelSessionViewModel {
         mutateGhostwriteProgress(binding: expectedBinding) {
             $0.candidateID = candidateID
         }
+        try await requireWorktreeDraft(candidateID)
         return candidateID
+    }
+
+    /// Ghostwrite's unpublished chapter is the `drafts/*.md` file. JSON
+    /// candidate is the ledger handle; missing draft on a worktree book
+    /// means the chapter was not actually written onto the new path.
+    private func requireWorktreeDraft(
+        _ candidateID: NovelCandidateID
+    ) async throws {
+        try await workspace.materializeWorktreeDrafts()
+        let hasWorktree = await workspace.worktreeManifestExists()
+        guard hasWorktree else { return }
+        let body = await workspace.worktreeDraftBody(candidateID: candidateID)
+        let expected = candidate(id: candidateID)?.content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let file = body?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let file, let expected, file == expected else {
+            throw NovelError.invalidInput("代笔成稿没有落到 drafts/，无法进入核对。")
+        }
     }
 
     private func awaitGhostwriteCandidate(
@@ -5034,6 +5028,14 @@ extension NovelSessionViewModel {
 
         if ghostwriteProgressStorage?.autoCollectedCandidateIDs.contains(candidateID) == true {
             return true
+        }
+        if await workspace.worktreeManifestExists() {
+            do {
+                try await requireWorktreeDraft(candidateID)
+            } catch {
+                operationErrorMessage = describe(error)
+                return false
+            }
         }
         guard let candidate = candidate(id: candidateID),
               candidate.status == .available else {

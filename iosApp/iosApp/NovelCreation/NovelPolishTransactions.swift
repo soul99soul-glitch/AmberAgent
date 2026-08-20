@@ -613,13 +613,35 @@ private extension NovelPolishTransactionReducer {
             chapterID: source.chapterID,
             versionID: version.id
         )
+        document.chapterVersions.append(version)
+        // Contract v1.1 D-B: adopt the polished body and its relinked plot
+        // module in the same `.polish` checkpoint. Compatible polish keeps
+        // facts; excerpt the new wording. Middle-chapter adopts mark later
+        // modules stale — the D-D gate, not a second fast-forward commit.
+        let plotSnapshot = try NovelWorkspaceLedger.updatedPlotSnapshot(
+            id: NovelStateSnapshotID(),
+            replacing: branch.currentStateSnapshotID,
+            workingSelections: selections,
+            updatedChapterID: source.chapterID,
+            updatedTitle: source.title,
+            updatedContent: candidate.content,
+            moduleText: nil,
+            summaryOverride: nil,
+            markLaterStale: !NovelWorkspaceLedger.isFastForward(
+                branch: branch,
+                chapterID: source.chapterID
+            ),
+            in: document,
+            now: now
+        )
+        document.stateSnapshots.append(plotSnapshot)
         let checkpoint = NovelBranchCheckpointRecord(
             id: transaction.checkpointID,
             kind: .polish,
             createdOnBranchID: branch.id,
             parentCheckpointID: branch.headCheckpointID,
             chapterSelections: selections,
-            stateSnapshotID: branch.currentStateSnapshotID,
+            stateSnapshotID: plotSnapshot.id,
             sessionCursor: transaction.sessionCursor,
             branchOverrideRevisionIDs: branch.overrideRevisionIDs,
             sourceCandidateID: candidate.id,
@@ -627,7 +649,6 @@ private extension NovelPolishTransactionReducer {
             operationID: transaction.operationID,
             createdAt: now
         )
-        document.chapterVersions.append(version)
         document.candidates[candidateIndex].status = .adopted
         document.candidates[candidateIndex].collectedCheckpointID = checkpoint.id
         try NovelReducer.appendCheckpoint(

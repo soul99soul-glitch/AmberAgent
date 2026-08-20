@@ -327,7 +327,24 @@ enum NovelWorkspaceBackup {
             )
         }
 
+        files.append(contentsOf: draftFiles(from: document))
+
+        // Contract v1.1 §3.6: files this host has no semantic mapping for are
+        // written back exactly as they were imported (foreshadowing nodes,
+        // drafts, unknown directories).
+        let emittedPaths = Set(files.map(\.path))
+        for (path, contents) in passthrough.opaqueFiles where !emittedPaths.contains(path) {
+            files.append(File(path: path, contents: contents))
+        }
+
+        return files.sorted { $0.path < $1.path }
+    }
+
+    /// Available candidates as `drafts/*.md`. Ghostwrite publishes this
+    /// folder without reprinting the whole worktree.
+    static func draftFiles(from document: NovelProjectDocumentV1) -> [File] {
         var usedDraftNames: Set<String> = []
+        var files: [File] = []
         for candidate in document.candidates where candidate.status == .available {
             let name = reservedPath(
                 String(candidate.id.description.prefix(8)),
@@ -341,23 +358,26 @@ enum NovelWorkspaceBackup {
                         fields: [
                             "id": candidate.id.description,
                             "kind": "chapter",
-                            "title": "未收录草稿",
+                            "title": draftTitle(for: candidate, in: document),
                         ],
                         body: candidate.content
                     )
                 )
             )
         }
+        return files
+    }
 
-        // Contract v1.1 §3.6: files this host has no semantic mapping for are
-        // written back exactly as they were imported (foreshadowing nodes,
-        // drafts, unknown directories).
-        let emittedPaths = Set(files.map(\.path))
-        for (path, contents) in passthrough.opaqueFiles where !emittedPaths.contains(path) {
-            files.append(File(path: path, contents: contents))
+    static func draftTitle(
+        for candidate: NovelCandidateRecord,
+        in document: NovelProjectDocumentV1
+    ) -> String {
+        if let planID = candidate.ghostwritePlanID,
+           let plan = document.chapterPlans.first(where: { $0.id == planID }) {
+            let title = plan.outlinePlacement.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty { return title }
         }
-
-        return files.sorted { $0.path < $1.path }
+        return "未收录草稿"
     }
 
     static func write(
@@ -368,20 +388,49 @@ enum NovelWorkspaceBackup {
     ) throws {
         let existingLedger = NovelWorkspaceLedger.load(from: directory, fileManager: fileManager)
         let files = try export(document, exportedAt: exportedAt)
+        let parent = directory.deletingLastPathComponent()
+        let staging = parent.appendingPathComponent(
+            "\(directory.lastPathComponent).next",
+            isDirectory: true
+        )
+        if fileManager.fileExists(atPath: staging.path) {
+            try fileManager.removeItem(at: staging)
+        }
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+        do {
+            for file in files {
+                let url = staging.appendingPathComponent(file.path)
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try Data(file.contents.utf8).write(to: url, options: .atomic)
+            }
+            let store = NovelWorkspaceLedger.record(document, into: existingLedger)
+            try NovelWorkspaceLedger.save(store, to: staging, fileManager: fileManager)
+            try replaceDirectory(directory, with: staging, fileManager: fileManager)
+        } catch {
+            try? fileManager.removeItem(at: staging)
+            throw error
+        }
+    }
+
+    /// Swap `staging` into `directory` without deleting the live tree first.
+    private static func replaceDirectory(
+        _ directory: URL,
+        with staging: URL,
+        fileManager: FileManager
+    ) throws {
         if fileManager.fileExists(atPath: directory.path) {
-            try fileManager.removeItem(at: directory)
-        }
-        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
-        for file in files {
-            let url = directory.appendingPathComponent(file.path)
-            try fileManager.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
+            _ = try fileManager.replaceItemAt(
+                directory,
+                withItemAt: staging,
+                backupItemName: nil,
+                options: []
             )
-            try Data(file.contents.utf8).write(to: url, options: .atomic)
+        } else {
+            try fileManager.moveItem(at: staging, to: directory)
         }
-        let store = NovelWorkspaceLedger.record(document, into: existingLedger)
-        try NovelWorkspaceLedger.save(store, to: directory, fileManager: fileManager)
     }
 
     static func exportPackage(

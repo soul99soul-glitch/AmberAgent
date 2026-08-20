@@ -1677,6 +1677,7 @@ final class NovelCreationViewModel {
             polishTransactions: project.polishTransactions,
             activeRuns: project.activeRuns,
             chapterPlans: project.chapterPlans,
+            stateSnapshots: project.stateSnapshots,
             mainBranchID: project.project.mainBranchID,
             branchID: branchID,
             requireChapterPlan: requireChapterPlan
@@ -2548,6 +2549,11 @@ final class NovelCreationViewModel {
             queuedAutomaticStateSyncTarget = target
             return
         }
+        // Recovery only: books still on `.needsSync` without a plot module
+        // (import missing plot/, or a pre-relink edit). Collect / save /
+        // ghostwrite auto-collect must not call this — they commit plot in
+        // the same checkpoint. Load-path recovery uses
+        // `scheduleAutomaticStateSyncIfNeeded` → per-chapter relink.
         startAutomaticStateSync(target)
     }
 
@@ -2921,6 +2927,36 @@ final class NovelCreationViewModel {
 
     var hasStalePlot: Bool {
         branchSnapshot?.currentState.hasStaleChapterPlots == true
+    }
+
+    func materializeWorktreeDrafts() async throws {
+        guard let projectID = selectedProjectID else { return }
+        try await creation.materializeWorktreeDrafts(projectID: projectID)
+    }
+
+    func worktreeDraftBody(candidateID: NovelCandidateID) async -> String? {
+        guard let projectID = selectedProjectID else { return nil }
+        return await creation.worktreeDraftBody(
+            projectID: projectID,
+            candidateID: candidateID
+        )
+    }
+
+    func worktreeManifestExists() async -> Bool {
+        guard let projectID = selectedProjectID else { return false }
+        return await creation.worktreeManifestExists(projectID: projectID)
+    }
+
+    var checkoutSidecarFailure: String? {
+        guard let projectID = selectedProjectID,
+              let root = try? NovelFileProjectRepository.defaultRootDirectory() else {
+            return nil
+        }
+        let package = NovelProjectShardedStorage.packageDirectory(
+            projectDirectory: root.appendingPathComponent("projects", isDirectory: true),
+            projectID: projectID
+        )
+        return NovelProjectShardedStorage.checkoutWriteFailureMessage(in: package)
     }
 
     func acceptStalePlot() async {
@@ -3362,6 +3398,10 @@ final class NovelCreationViewModel {
                     self.automaticStateSyncPresentationTarget = nil
                 }
                 self.automaticStateSyncTask = nil
+                if let queued = self.queuedAutomaticStateSyncTarget {
+                    self.queuedAutomaticStateSyncTarget = nil
+                    self.startWorkspacePlotRelink(queued)
+                }
             }
             guard !Task.isCancelled else { return }
             do {

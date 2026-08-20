@@ -189,13 +189,29 @@ final class NovelPolishTests: NovelPolishTestCase {
         XCTAssertEqual(adoptedVersion.sourceChapterVersionID, source.id)
         XCTAssertEqual(adoptedVersion.sourceCandidateID, candidate.id)
         XCTAssertEqual(checkpoint.parentCheckpointID, baseline.branches[0].headCheckpointID)
-        XCTAssertEqual(checkpoint.stateSnapshotID, baseline.branches[0].currentStateSnapshotID)
+        XCTAssertNotEqual(checkpoint.stateSnapshotID, baseline.branches[0].currentStateSnapshotID)
         XCTAssertEqual(checkpoint.sessionCursor, .through(sequence: sourceMessage.sequence))
         XCTAssertEqual(adopted.polishTransactions[0].status, .completed)
         XCTAssertEqual(adopted.polishAssessments.first?.result?.compatible, true)
-        XCTAssertEqual(try canonicalEvidence(in: adopted), evidenceBefore)
+        let afterEvidence = try canonicalEvidence(in: adopted)
+        XCTAssertEqual(afterEvidence.eventsSHA256, evidenceBefore.eventsSHA256)
+        XCTAssertEqual(afterEvidence.stateSummarySHA256, evidenceBefore.stateSummarySHA256)
+        XCTAssertNotEqual(afterEvidence.stateSnapshotID, evidenceBefore.stateSnapshotID)
         XCTAssertEqual(adopted.events, baseline.events)
-        XCTAssertEqual(adopted.stateSnapshots, baseline.stateSnapshots)
+        XCTAssertEqual(adopted.branches[0].syncStatus, .synchronized)
+        XCTAssertEqual(adopted.checkpoints.filter { $0.kind == .polish }.count, 1)
+        let adoptedSnapshot = try XCTUnwrap(
+            adopted.stateSnapshots.first { $0.id == checkpoint.stateSnapshotID }
+        )
+        let baselineSnapshot = try XCTUnwrap(
+            baseline.stateSnapshots.first { $0.id == baseline.branches[0].currentStateSnapshotID }
+        )
+        XCTAssertEqual(adoptedSnapshot.eventIDs, baselineSnapshot.eventIDs)
+        XCTAssertEqual(adoptedSnapshot.summary, baselineSnapshot.summary)
+        XCTAssertFalse(adoptedSnapshot.hasStaleChapterPlots)
+        XCTAssertEqual(adoptedSnapshot.chapterPlots.last?.chapterID, source.chapterID)
+        XCTAssertEqual(adoptedSnapshot.chapterPlots.last?.stale, false)
+        XCTAssertFalse(adoptedSnapshot.chapterPlots.last?.text.isEmpty ?? true)
 
         let restarted = DefaultNovelCreation(repository: harness.repository)
         let replay = try await restarted.perform(.adoptPolishCandidate(command))

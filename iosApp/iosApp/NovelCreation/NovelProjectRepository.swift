@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 enum NovelRepositoryFailureStage: String, Hashable, Sendable {
     case afterTempWrite
@@ -18,6 +19,10 @@ enum NovelRepositoryFailureStage: String, Hashable, Sendable {
 
 actor NovelFileProjectRepository: NovelProjectPersisting {
     static let maximumProjectBytes = 100 * 1_024 * 1_024
+    private static let logger = Logger(
+        subsystem: "app.amber.ios",
+        category: "NovelProjectRepository"
+    )
 
     private struct IndexV1: Codable, Sendable {
         let schemaVersion: Int
@@ -1012,13 +1017,54 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         if fileManager.fileExists(atPath: monoPrevious.path) {
             try? fileManager.removeItem(at: monoPrevious)
         }
-        let checkout = packageURL(for: document.project.id)
-            .appendingPathComponent("checkout", isDirectory: true)
+        let package = packageURL(for: document.project.id)
+        let checkout = NovelWorkspaceAuthority.checkoutDirectory(in: package)
         if NovelProjectShardedStorage.checkoutSidecarNeedsRefresh(
             previous: cache,
             next: nextCache
         ) {
-            try? NovelWorkspaceBackup.write(document, to: checkout)
+            do {
+                try NovelWorkspaceAuthority.publish(
+                    document,
+                    to: checkout,
+                    fileManager: fileManager
+                )
+                NovelProjectShardedStorage.clearCheckoutWriteFailure(
+                    in: package,
+                    fileManager: fileManager
+                )
+            } catch {
+                Self.logger.error(
+                    "Novel worktree publish failed for \(document.project.id.description, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+                NovelProjectShardedStorage.recordCheckoutWriteFailure(
+                    error.localizedDescription,
+                    in: package,
+                    fileManager: fileManager
+                )
+                throw error
+            }
+        } else if NovelProjectShardedStorage.checkoutDraftsNeedRefresh(
+            previous: cache,
+            next: nextCache
+        ) {
+            do {
+                try NovelWorkspaceAuthority.publishDrafts(
+                    document,
+                    to: checkout,
+                    fileManager: fileManager
+                )
+            } catch {
+                Self.logger.error(
+                    "Novel drafts publish failed for \(document.project.id.description, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+                NovelProjectShardedStorage.recordCheckoutWriteFailure(
+                    error.localizedDescription,
+                    in: package,
+                    fileManager: fileManager
+                )
+                throw error
+            }
         }
     }
 
@@ -1107,7 +1153,48 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             )
         }
         try NovelDocumentValidator.validate(normalized)
+        try publishWorktreeIfNeeded(normalized, projectID: projectID)
         return normalized
+    }
+
+    /// First open after this cutover (and any later drift): print the ledger's
+    /// working manuscript onto `checkout/` so ghostwrite / discussion / export
+    /// all see the same markdown tree. Sessions stay in the JSON ledger.
+    private func publishWorktreeIfNeeded(
+        _ document: NovelProjectDocumentV1,
+        projectID: NovelProjectID
+    ) throws {
+        let checkout = NovelWorkspaceAuthority.checkoutDirectory(in: packageURL(for: projectID))
+        let covers = NovelWorkspaceAuthority.worktreeCoversWorkingManuscript(
+            document,
+            checkoutDirectory: checkout,
+            fileManager: fileManager
+        )
+        let marked = NovelWorkspaceAuthority.isWorktreeBook(
+            at: checkout,
+            fileManager: fileManager
+        )
+        guard !covers || !marked else { return }
+        do {
+            try NovelWorkspaceAuthority.publish(
+                document,
+                to: checkout,
+                fileManager: fileManager
+            )
+            NovelProjectShardedStorage.clearCheckoutWriteFailure(
+                in: packageURL(for: projectID),
+                fileManager: fileManager
+            )
+        } catch {
+            Self.logger.error(
+                "Novel worktree heal failed for \(projectID.description, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            NovelProjectShardedStorage.recordCheckoutWriteFailure(
+                error.localizedDescription,
+                in: packageURL(for: projectID),
+                fileManager: fileManager
+            )
+        }
     }
 
     private func readProjectDocument(

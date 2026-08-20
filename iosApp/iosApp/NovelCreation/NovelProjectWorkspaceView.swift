@@ -340,6 +340,16 @@ struct NovelProjectWorkspaceView: View {
                     }
                 }
             }
+        } else if section != .creation, let checkoutSidecarFailure = viewModel.checkoutSidecarFailure {
+            workspaceStatusStrip {
+                Label(
+                    "讨论用的文件副本没写上（\(checkoutSidecarFailure)）。书本身已保存，下次改书时会再试。",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.accentRed)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         } else if section != .creation, viewModel.hasStalePlot {
             workspaceStatusStrip {
                 VStack(alignment: .leading, spacing: 8) {

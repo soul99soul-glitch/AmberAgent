@@ -81,6 +81,8 @@ extension IOSNovelProjectToolExecutor {
             "sync: \(branch.syncStatus.rawValue)",
             "chapters: \(working.count)",
             "mode: \(snapshot.project.collaborationMode.rawValue)",
+            "book: worktree",
+            "ledger: sharded-json",
         ]
         if state?.hasStaleChapterPlots == true {
             // Contract v1.1 D-D: unresolved forward-writing gate.
@@ -89,6 +91,10 @@ extension IOSNovelProjectToolExecutor {
         }
         if branch.syncStatus == .needsSync {
             lines.append("dirty: plot/")
+        }
+        if let checkoutWriteFailure = checkoutWriteFailureMessage(for: snapshot.project.id) {
+            lines.append("checkout_write: failed")
+            lines.append(checkoutWriteFailure)
         }
         return .filled(lines.joined(separator: "\n"))
     }
@@ -315,8 +321,35 @@ extension IOSNovelProjectToolExecutor {
     }
 
     private func workspaceFiles() async -> [NovelWorkspaceBackup.File]? {
+        if let disk = diskWorkspaceFiles() {
+            return disk
+        }
         guard let snapshot = await loadSnapshot() else { return nil }
         return try? NovelWorkspaceBackup.export(snapshot.document)
+    }
+
+    private func diskWorkspaceFiles() -> [NovelWorkspaceBackup.File]? {
+        guard let root = try? NovelFileProjectRepository.defaultRootDirectory() else {
+            return nil
+        }
+        let checkout = NovelWorkspaceAuthority.checkoutDirectory(
+            in: NovelProjectShardedStorage.packageDirectory(
+                projectDirectory: root.appendingPathComponent("projects", isDirectory: true),
+                projectID: projectID
+            )
+        )
+        return NovelWorkspaceAuthority.filesOnDisk(at: checkout)
+    }
+
+    private func checkoutWriteFailureMessage(for projectID: NovelProjectID) -> String? {
+        guard let root = try? NovelFileProjectRepository.defaultRootDirectory() else {
+            return nil
+        }
+        let package = NovelProjectShardedStorage.packageDirectory(
+            projectDirectory: root.appendingPathComponent("projects", isDirectory: true),
+            projectID: projectID
+        )
+        return NovelProjectShardedStorage.checkoutWriteFailureMessage(in: package)
     }
 
     private func matchChapter(path: String, snapshot: NovelProjectSnapshot) -> WorkingChapter? {

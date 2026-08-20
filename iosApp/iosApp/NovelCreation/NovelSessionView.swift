@@ -1463,6 +1463,9 @@ struct NovelSessionView: View {
            workspace.projectSnapshot?.confirmedChapterPlan(for: branchID) == nil {
             return "代笔写整章前，请先在标题面板确认本章计划"
         }
+        if workspace.branchSnapshot?.currentState.hasStaleChapterPlots == true {
+            return NovelWorkspaceLedger.unresolvedPlotGateMessage
+        }
         if viewModel.needsSync {
             return "请先同步剧情状态，再写正文"
         }
