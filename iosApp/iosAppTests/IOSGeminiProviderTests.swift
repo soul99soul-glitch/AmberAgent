@@ -240,14 +240,13 @@ final class IOSGeminiProviderTests: XCTestCase {
         let inner = response?["response"] as? [String: Any]
         XCTAssertEqual(inner?["result"] as? String, "result-1")
 
-        let signedTool = UIMessagePart.Tool(
+        let signedTool = MessageKt.geminiToolPart(
             toolCallId: "c1",
             toolName: "search_web",
             input: #"{"query":"amber"}"#,
             output: [UIMessagePart.Text(text: "result-1", metadata: nil)],
-            approvalState: ToolApprovalState.Auto.shared,
             streamIndex: nil,
-            metadata: IOSGeminiPayloadBuilder.thoughtSignatureMetadata("sig-1")
+            thoughtSignature: "sig-1"
         )
         let signedAssistant = UIMessage(
             id: KotlinUuid.companion.random(),
@@ -263,6 +262,45 @@ final class IOSGeminiProviderTests: XCTestCase {
         let signedContents = IOSGeminiPayloadBuilder.makeContents([userMessage("hi"), signedAssistant])
         let signedModelParts = signedContents[1]["parts"] as? [[String: Any]]
         XCTAssertEqual(signedModelParts?.first?["thoughtSignature"] as? String, "sig-1")
+    }
+
+    func testToolDeltaWithThoughtSignatureAppendsWithoutCrashingAccumulator() {
+        // Device crash 2026-08-21 08:40: SIGSEGV in JsonObject.get →
+        // responsesItemId → MessageStreamAccumulator.appendTool when Gemini 3.7
+        // Flash streamed a functionCall with thoughtSignature. Swift dictionaries
+        // must not be passed as JsonObject metadata.
+        let user = userMessage("hi")
+        let acc = MessageStreamAccumulator(initialMessages: [user], model: nil)
+        let tool = MessageKt.geminiToolPart(
+            toolCallId: "gemini-1",
+            toolName: "search_web",
+            input: #"{"query":"x"}"#,
+            output: [],
+            streamIndex: KotlinInt(value: 0),
+            thoughtSignature: "sig-1"
+        )
+        let delta = UIMessage(
+            id: KotlinUuid.companion.random(),
+            role: MessageRole.assistant,
+            parts: [tool],
+            annotations: [],
+            createdAt: chatNowLocalDateTime(),
+            finishedAt: nil,
+            modelId: nil,
+            usage: nil,
+            translation: nil
+        )
+        acc.append(chunk: MessageChunk(
+            id: UUID().uuidString,
+            model: "gemini-3.7-flash",
+            choices: [UIMessageChoice(index: 0, delta: delta, message: nil, finishReason: nil)],
+            usage: nil
+        ))
+        let tools = acc.snapshot().last?.parts.compactMap { $0 as? UIMessagePart.Tool } ?? []
+        XCTAssertEqual(tools.count, 1)
+        XCTAssertEqual(tools.first?.toolName, "search_web")
+        XCTAssertEqual(tools.first?.thoughtSignature(), "sig-1")
+        XCTAssertNil(tools.first?.responsesItemId())
     }
 
     func testPayloadBuilderIncludesFunctionDeclarationsForToolCapableModel() {
@@ -391,6 +429,13 @@ final class IOSGeminiProviderTests: XCTestCase {
         XCTAssertEqual(url?.path, "/oauth/callback")
         XCTAssertEqual(URLComponents(url: url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "code" }?.value, "abc")
         XCTAssertNil(IOSLoopbackOAuthRequest.callbackURL(from: "GET /favicon.ico HTTP/1.1\r\n\r\n"))
+        XCTAssertNil(IOSLoopbackOAuthRequest.callbackURL(from: "GET /callback?code=abc HTTP/1.1\r\n\r\n"))
+        let grokCallback = IOSLoopbackOAuthRequest.callbackURL(
+            from: "GET /callback?code=abc HTTP/1.1\r\n\r\n",
+            port: 8787,
+            pathPrefix: "/callback"
+        )
+        XCTAssertEqual(grokCallback?.path, "/callback")
     }
 
     // MARK: - token store round trip

@@ -277,27 +277,10 @@ enum IOSGeminiPayloadBuilder {
     private static func functionCallPart(_ tool: UIMessagePart.Tool) -> [String: Any] {
         let args = parseJSON(tool.input)
         var part: [String: Any] = ["functionCall": ["name": tool.toolName, "args": args]]
-        if let signature = thoughtSignature(from: tool.metadata) {
+        if let signature = tool.thoughtSignature() {
             part["thoughtSignature"] = signature
         }
         return part
-    }
-
-    static func thoughtSignatureMetadata(_ signature: String?) -> [String: Kotlinx_serialization_jsonJsonElement]? {
-        guard let signature, !signature.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              let data = try? JSONSerialization.data(withJSONObject: [signature]),
-              let wrapped = String(data: data, encoding: .utf8),
-              wrapped.count >= 2 else {
-            return nil
-        }
-        let encoded = String(wrapped.dropFirst().dropLast())
-        return ["thoughtSignature": Kotlinx_serialization_jsonJson.companion.parseToJsonElement(string: encoded)]
-    }
-
-    static func thoughtSignature(from metadata: [String: Kotlinx_serialization_jsonJsonElement]?) -> String? {
-        guard let content = metadata?["thoughtSignature"]?.jsonPrimitiveOrNull?.content else { return nil }
-        let value = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        return value.isEmpty ? nil : value
     }
 
     private static func functionResponsePart(_ tool: UIMessagePart.Tool) -> [String: Any] {
@@ -990,14 +973,13 @@ final class IOSGeminiClient {
         args: String,
         thoughtSignature: String?
     ) -> MessageChunk {
-        let tool = UIMessagePart.Tool(
+        let tool = MessageKt.geminiToolPart(
             toolCallId: "gemini-\(UUID().uuidString)",
             toolName: name,
             input: args,
             output: [],
-            approvalState: ToolApprovalState.Auto.shared,
             streamIndex: KotlinInt(value: Int32(callId)),
-            metadata: IOSGeminiPayloadBuilder.thoughtSignatureMetadata(thoughtSignature)
+            thoughtSignature: thoughtSignature
         )
         let delta = UIMessage(
             id: KotlinUuid.companion.random(),

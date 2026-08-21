@@ -4,7 +4,7 @@ Last updated: 2026-08-21（真机覆盖安装完成：Gemini 3.7 Flash 闪退修
 
 时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。跨端契约（唯一事实源，两端会话必读）：Android 主仓 `docs/novel-workspace-core-contract.md` v1.1（本分支已带入副本）。
 
-## 小说全量迁移 Phase 3+4 完成（2026-08-21，工作区未提交；接下方 Phase 1+2a 条目）
+## 小说全量迁移 Phase 3+4 完成（2026-08-21；接下方 Phase 1+2a 条目）
 
 **新建即原生+全量迁移**：空白建书与文件夹导入经条件转型直接 `createProject(workspaceNative: true)`；`shouldMigrateLegacyProject` 恒真——所有旧书（含 monofile 抢救书）打开即迁移。canary：IOSNovelCreationWiringTests 两条源断言。
 
@@ -32,13 +32,13 @@ iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`（iOS 27.0 24A5418b）08:40 �
 
 2026-08-21 09:09 已覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`：先 SIGKILL 旧进程 pid 9420，再 `devicectl install` + `process launch --terminate-existing`。bundle `app.amber.ios`，容器 `1FD6BA1B-1F31-4E77-AA2A-B0849F6135B7`，冷启动 pid **9467**。未卸数据。待用户用 Gemini 3.7 Flash 打一条会调工具的消息确认不再闪退。
 
-## Grok Web 登录改系统浏览器（2026-08-21，工作区未提交）
+## Grok Web 登录改系统浏览器（2026-08-21）
 
 内嵌 `WKWebView` 登录 grok.com 无法用通行密钥 / 密码管理器。登录改为 `ASWebAuthenticationSession`（系统浏览器）走 SpaceXAI OAuth（`auth.x.ai`，grok-cli 公开 client + PKCE + `127.0.0.1:8787/callback`），请求带 `Authorization: Bearer`。旧 SSO Cookie 会话仍可用。
 
 验证（iPhone 17 Pro，`/tmp/amber-dd-grok-oauth`）：`IOSSettingsWiringTests` 4 例 + `IOSGeminiProviderTests.testLoopbackRequestParsesCallbackAndIgnoresOtherPaths` **5/5**。独立 review 后补了闭环：取消/失败停 loopback、OAuth 落盘 providerBackup、401 只废本次用的凭据、刷新失败不再伪装成未登录、WKWebView 跳离 grok.com 视为失败。未在真机点验系统浏览器登录。
 
-## 小说全量迁移 Phase 1+2a（2026-08-21，工作区未提交）
+## 小说全量迁移 Phase 1+2a（2026-08-21）
 
 用户拍板「《赵大来了》完全迁移新链路，账和笔也是」，D1–D4 随计划批准落定（`docs/2026-08-19-novel-workspace-migration-plan.md` 已标已批准）。本轮完成书+账+笔的存储倒置与自动切换：
 

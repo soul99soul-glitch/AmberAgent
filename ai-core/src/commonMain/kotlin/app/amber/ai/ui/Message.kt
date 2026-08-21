@@ -23,6 +23,7 @@ import kotlin.uuid.Uuid
 
 const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
 const val RESPONSES_ITEM_ID_METADATA_KEY = "responses_item_id"
+const val THOUGHT_SIGNATURE_METADATA_KEY = "thoughtSignature"
 const val LOCAL_GENERATION_ERROR_METADATA_KEY = "amber_local_kind"
 const val LOCAL_GENERATION_ERROR_METADATA_VALUE = "generation_error"
 const val LOCAL_OUTPUT_LIMIT_NOTICE_METADATA_VALUE = "output_limit_notice"
@@ -594,6 +595,36 @@ fun UIMessagePart.Tool.streamToolIndex(): Int? =
 
 fun UIMessagePart.Tool.responsesItemId(): String? =
     metadata?.get(RESPONSES_ITEM_ID_METADATA_KEY)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+fun thoughtSignatureMetadata(signature: String?): JsonObject? {
+    val value = signature?.trim().orEmpty()
+    if (value.isEmpty()) return null
+    return buildJsonObject { put(THOUGHT_SIGNATURE_METADATA_KEY, value) }
+}
+
+fun UIMessagePart.Tool.thoughtSignature(): String? =
+    metadata?.get(THOUGHT_SIGNATURE_METADATA_KEY)?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+/**
+ * Build a tool part whose metadata is a real Kotlin [JsonObject].
+ * Swift `[String: JsonElement]` is exported as NSDictionary and crashes
+ * `JsonObject.get` on Kotlin/Native (Gemini 3.x thoughtSignature path).
+ */
+fun geminiToolPart(
+    toolCallId: String,
+    toolName: String,
+    input: String,
+    output: List<UIMessagePart> = emptyList(),
+    streamIndex: Int? = null,
+    thoughtSignature: String? = null,
+): UIMessagePart.Tool = UIMessagePart.Tool(
+    toolCallId = toolCallId,
+    toolName = toolName,
+    input = input,
+    output = output,
+    streamIndex = streamIndex,
+    metadata = thoughtSignatureMetadata(thoughtSignature),
+)
 
 /**
  * Combine the tool name of an existing streaming part with that of a [delta].

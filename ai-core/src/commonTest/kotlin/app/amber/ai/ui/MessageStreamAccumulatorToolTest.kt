@@ -140,6 +140,24 @@ class MessageStreamAccumulatorToolTest {
     }
 
     @Test
+    fun thoughtSignatureMetadataDoesNotCrashResponsesItemLookup() {
+        // Gemini 3.x tool calls carry thoughtSignature in metadata and no
+        // responses_item_id. appendTool always asks responsesItemId(); that
+        // must stay null and must not treat the signature object as an item id.
+        val acc = MessageStreamAccumulator(baseMessages(), model = null)
+        acc.append(
+            chunk(
+                tool(id = "gemini-1", name = "search_web", input = """{"query":"x"}""", streamIndex = 0)
+                    .copy(metadata = thoughtSignatureMetadata("sig-1"))
+            )
+        )
+        val tools = acc.snapshot().last().parts.filterIsInstance<UIMessagePart.Tool>()
+        assertEquals(1, tools.size)
+        assertEquals(null, tools.single().responsesItemId())
+        assertEquals("sig-1", tools.single().thoughtSignature())
+    }
+
+    @Test
     fun streamToolIndexPrefersFieldAndKeepsMetadataFallback() {
         val fieldTool = tool(id = "field", name = "x", input = "{}", streamIndex = 2).copy(
             metadata = buildJsonObject { put(STREAM_TOOL_INDEX_METADATA_KEY, 9) }
