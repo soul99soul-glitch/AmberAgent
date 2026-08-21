@@ -671,7 +671,8 @@ private extension DefaultNovelCreation {
             expectedRevision: loaded.document.project.revision,
             authorization: authorization
         )
-        guard committed.document == document else {
+        guard committed.document == document ||
+              committed.document == NovelWorkspaceProjectStore.persistableAtRest(document) else {
             frozenProjectIDs.insert(document.project.id)
             throw NovelError.storageIndeterminate(document.project.id)
         }

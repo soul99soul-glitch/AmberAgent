@@ -609,7 +609,7 @@ enum NovelBranchTestFixtures {
     }
 }
 
-private extension NovelBranchTestFixtures {
+extension NovelBranchTestFixtures {
     static func runRequest(
         document: NovelProjectDocumentV1,
         branchID: NovelBranchID,

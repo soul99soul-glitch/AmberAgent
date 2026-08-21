@@ -36,7 +36,10 @@ enum NovelCreationComposition {
         toolRuntime: ChatToolRuntime?,
         rootDirectory: URL
     ) -> any NovelCreation {
-        let repository = NovelFileProjectRepository(rootDirectory: rootDirectory)
+        let repository = NovelFileProjectRepository(
+            rootDirectory: rootDirectory,
+            automaticWorkspaceMigration: true
+        )
         let modelAdapter = NovelLiveModelAdapter(
             sharedSettings: sharedSettings,
             toolRuntime: toolRuntime

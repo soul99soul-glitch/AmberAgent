@@ -74,6 +74,7 @@ extension IOSNovelProjectToolExecutor {
         let state = snapshot.stateSnapshots.first {
             $0.id == branch.currentStateSnapshotID
         }
+        let storage = workspaceStorageDescription(projectID: snapshot.project.id)
         var lines = [
             "project: \(snapshot.project.name)",
             "branch: \(branch.name)",
@@ -81,8 +82,8 @@ extension IOSNovelProjectToolExecutor {
             "sync: \(branch.syncStatus.rawValue)",
             "chapters: \(working.count)",
             "mode: \(snapshot.project.collaborationMode.rawValue)",
-            "book: worktree",
-            "ledger: sharded-json",
+            "book: \(storage.book)",
+            "ledger: \(storage.ledger)",
         ]
         if state?.hasStaleChapterPlots == true {
             // Contract v1.1 D-D: unresolved forward-writing gate.
@@ -183,6 +184,12 @@ extension IOSNovelProjectToolExecutor {
             // does not maintain them yet; never misroute them into the plot
             // draft path.
             return .failed("暂不支持写入伏笔节点（\(path)）：iOS 目前只按契约保留伏笔文件，节点维护能力尚未接入。")
+        }
+        if path.contains("/plot/chapters/") {
+            // Per-chapter plot modules are HOST-OWNED: they ride the same
+            // commit as the chapter body (contract D-B/D-D), so the agent
+            // must not hand-edit them.
+            return .failed("每章剧情指针由宿主随正文同笔维护（\(path)），不能单独写入。")
         }
         if path.contains("/plot/") {
             if !isUserInitiated {
@@ -350,6 +357,22 @@ extension IOSNovelProjectToolExecutor {
             projectID: projectID
         )
         return NovelProjectShardedStorage.checkoutWriteFailureMessage(in: package)
+    }
+
+    /// Truthful storage-mode line for `novel_workspace_status`: read the
+    /// actual authority marker instead of hardcoding the legacy description.
+    private func workspaceStorageDescription(projectID: NovelProjectID) -> (book: String, ledger: String) {
+        guard let root = try? NovelFileProjectRepository.defaultRootDirectory() else {
+            return ("worktree", "sharded-json")
+        }
+        let project = NovelProjectShardedStorage.packageDirectory(
+            projectDirectory: root.appendingPathComponent("projects", isDirectory: true),
+            projectID: projectID
+        )
+        if NovelWorkspaceProjectStore.isWorkspaceNative(projectDirectory: project) {
+            return (NovelWorkspaceProjectStore.bookWorkspace, NovelWorkspaceProjectStore.ledgerEngine)
+        }
+        return ("worktree", "sharded-json")
     }
 
     private func matchChapter(path: String, snapshot: NovelProjectSnapshot) -> WorkingChapter? {

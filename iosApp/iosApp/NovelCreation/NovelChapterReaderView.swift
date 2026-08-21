@@ -92,6 +92,7 @@ struct NovelChapterReaderView: View {
                 Text(currentChapterTitle)
                     .font(.headline)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.82)
             }
             .frame(minWidth: 180, maxWidth: 220, alignment: .leading)
         }
@@ -248,6 +249,10 @@ struct NovelChapterReaderView: View {
                     }
                 }
                 .font(.footnote.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                // Align with the Label's text (after the symbol inset).
+                .padding(.leading, 22)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
                 .disabled(

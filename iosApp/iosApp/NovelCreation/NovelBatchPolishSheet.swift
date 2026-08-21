@@ -211,6 +211,8 @@ struct NovelBatchPolishSheet: View {
                         : "正在润色第 \(min(completed + 1, total))/\(total) 章")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.foreground2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                     Spacer(minLength: 8)
                     Text("\(Int((fraction * 100).rounded(.down)))%")
                         .font(.footnote.weight(.semibold).monospacedDigit())

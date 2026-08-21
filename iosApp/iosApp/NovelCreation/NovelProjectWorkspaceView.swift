@@ -49,8 +49,12 @@ struct NovelProjectWorkspaceView: View {
                 VStack(spacing: 0) {
                     sectionPicker
                     accessBanner
-                    continuityOperationBanner
-                    stateSyncBanner
+                    // Degraded read-only already blocks every mutation; extra
+                    // strips under it just stack ~200pt of chrome.
+                    if viewModel.projectSnapshot?.access == .readWrite {
+                        continuityOperationBanner
+                        stateSyncBanner
+                    }
                     content
                 }
             } else if let routedProjectLoadFailure {
@@ -248,6 +252,7 @@ struct NovelProjectWorkspaceView: View {
                     Label("已从上一个有效版本恢复，当前项目只读", systemImage: "exclamationmark.triangle.fill")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(AmberTheme.foreground2)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button {
@@ -283,7 +288,9 @@ struct NovelProjectWorkspaceView: View {
                         viewModel.cancelContinuityAudit()
                     }
                     .font(.footnote.weight(.semibold))
-                    .frame(minWidth: 44, minHeight: 44)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
             }
@@ -325,6 +332,8 @@ struct NovelProjectWorkspaceView: View {
                     HStack(spacing: 12) {
                         Button("重试同步", action: retryCurrentStateSync)
                             .font(.footnote.weight(.semibold))
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                             .frame(minHeight: 44)
                             .contentShape(Rectangle())
                             .disabled(!canRetryCurrentStateSync)
@@ -334,13 +343,17 @@ struct NovelProjectWorkspaceView: View {
                             }
                         }
                         .font(.footnote.weight(.semibold))
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                         Spacer(minLength: 0)
                     }
                 }
             }
-        } else if section != .creation, let checkoutSidecarFailure = viewModel.checkoutSidecarFailure {
+        } else if let checkoutSidecarFailure = viewModel.checkoutSidecarFailure {
+            // Shown on every section: the 创作 tab is where writes happen and
+            // where a failed sidecar write matters most.
             workspaceStatusStrip {
                 Label(
                     "讨论用的文件副本没写上（\(checkoutSidecarFailure)）。书本身已保存，下次改书时会再试。",
@@ -350,7 +363,7 @@ struct NovelProjectWorkspaceView: View {
                 .foregroundStyle(AmberTheme.accentRed)
                 .fixedSize(horizontal: false, vertical: true)
             }
-        } else if section != .creation, viewModel.hasStalePlot {
+        } else if viewModel.hasStalePlot {
             workspaceStatusStrip {
                 VStack(alignment: .leading, spacing: 8) {
                     Label(
@@ -366,6 +379,11 @@ struct NovelProjectWorkspaceView: View {
                         }
                     }
                     .font(.footnote.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    // Align the button with the Label's TEXT, which starts
+                    // after the symbol inset.
+                    .padding(.leading, 22)
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                     .disabled(

@@ -811,8 +811,19 @@ actor DefaultNovelCreation: NovelCreation {
         }
 
         let reduced = try NovelReducer.createProject(command)
-        let loaded = try await repository.createProject(reduced.document)
-        guard loaded.document == reduced.document else {
+        // New books are workspace-native from birth (contract D-E). Test
+        // doubles on in-memory repositories keep the plain creation path.
+        let loaded: NovelLoadedProject
+        if let workspaceRepository = repository as? NovelFileProjectRepository {
+            loaded = try await workspaceRepository.createProject(
+                reduced.document,
+                workspaceNative: true
+            )
+        } else {
+            loaded = try await repository.createProject(reduced.document)
+        }
+        guard loaded.document == reduced.document ||
+              loaded.document == NovelWorkspaceProjectStore.persistableAtRest(reduced.document) else {
             throw NovelError.storageIndeterminate(command.projectID)
         }
         _ = try installLoadedProject(loaded, id: command.projectID, allowsRollback: false)
@@ -841,7 +852,8 @@ actor DefaultNovelCreation: NovelCreation {
             reduced.document,
             expectedRevision: loaded.document.project.revision
         )
-        guard committed.document == reduced.document else {
+        guard committed.document == reduced.document ||
+              committed.document == NovelWorkspaceProjectStore.persistableAtRest(reduced.document) else {
             throw NovelError.storageIndeterminate(action.projectID)
         }
         _ = try installLoadedProject(committed, id: action.projectID, allowsRollback: false)

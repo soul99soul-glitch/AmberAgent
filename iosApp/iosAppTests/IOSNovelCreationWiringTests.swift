@@ -22,6 +22,33 @@ final class IOSNovelCreationWiringTests: XCTestCase {
         XCTAssertTrue(composition.contains("toolRuntime: toolRuntime"))
     }
 
+    /// Canary: the production repository must construct with automatic
+    /// workspace migration enabled — removing the flag silently disables the
+    /// whole cutover while every unit test stays green (the flag defaults to
+    /// false for legacy-chain contract tests).
+    /// New books and folder imports must be created workspace-native at the
+    /// production assembly sites (contract D-E end state).
+    func testNewBooksAndImportsAreCreatedWorkspaceNative() throws {
+        let creation = try source("iosApp/NovelCreation/NovelCreation.swift")
+        XCTAssertTrue(
+            creation.contains("workspaceNative: true"),
+            "blank-book creation must be workspace-native"
+        )
+        let lifecycle = try source("iosApp/NovelCreation/NovelProjectLifecycle.swift")
+        XCTAssertTrue(
+            lifecycle.contains("workspaceNative: true"),
+            "folder import must be workspace-native"
+        )
+    }
+
+    func testProductionRepositoryEnablesAutomaticWorkspaceMigration() throws {
+        let composition = try source("iosApp/NovelCreation/NovelCreationComposition.swift")
+        XCTAssertTrue(
+            composition.contains("automaticWorkspaceMigration: true"),
+            "Production composition must opt in to the workspace cutover."
+        )
+    }
+
     func testBackgroundLeaseWaitsForExpirationBeforeInterrupting() async {
         var expirationHandler: (() -> Void)?
         var begunLeaseIds: [String] = []

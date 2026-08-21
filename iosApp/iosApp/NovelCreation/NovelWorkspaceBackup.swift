@@ -237,6 +237,38 @@ enum NovelWorkspaceBackup {
                         )
                     )
                 )
+                // Per-chapter plot modules (contract D-D carrier): one file
+                // per working chapter, `stale` marks the unresolved gate.
+                // Host-owned — the agent reads/greps them, host rewrites them.
+                let working = NovelWorkspaceLedger.liveWorkingSelections(
+                    branch: branch,
+                    in: document
+                )
+                for (index, module) in snapshot.chapterPlots.enumerated() {
+                    guard let ordinal = working.firstIndex(
+                        where: { $0.chapterID == module.chapterID }
+                    ).map({ $0 + 1 }) else { continue }
+                    let title = working.first(where: { $0.chapterID == module.chapterID })
+                        .flatMap { selection in
+                            document.chapterVersions.first {
+                                $0.id == selection.versionID && $0.chapterID == selection.chapterID
+                            }?.title
+                        } ?? "第\(index + 1)章"
+                    files.append(
+                        File(
+                            path: "\(prefix)/plot/chapters/\(String(format: "%03d", ordinal))-\(slug(title)).md",
+                            contents: render(
+                                fields: [
+                                    "id": module.chapterID.description,
+                                    "kind": "plot",
+                                    "title": title,
+                                    "stale": module.stale ? "true" : "false",
+                                ],
+                                body: module.text
+                            )
+                        )
+                    )
+                }
             }
 
             if let plan = document.chapterPlans.first(where: { $0.branchID == branch.id }) {
@@ -433,21 +465,61 @@ enum NovelWorkspaceBackup {
         }
     }
 
-    static func exportPackage(
-        at packageDirectory: URL,
-        projectID: NovelProjectID,
-        to destination: URL,
-        exportedAt: Date = Date(),
+    /// Print exactly these files into `directory` via staging + atomic swap,
+    /// with NO in-tree ledger — workspace-native projects keep their ledger
+    /// and objects beside the tree (`.amber/` at the project directory), not
+    /// inside it.
+    static func writeWorkspaceTree(
+        _ files: [File],
+        to directory: URL,
         fileManager: FileManager = .default
     ) throws {
-        let loaded = try NovelProjectShardedStorage.loadDocument(
-            packageDirectory: packageDirectory,
-            projectID: projectID,
-            decoder: JSONDecoder(),
-            fileManager: fileManager
+        let parent = directory.deletingLastPathComponent()
+        let staging = parent.appendingPathComponent(
+            "\(directory.lastPathComponent).next",
+            isDirectory: true
         )
-        try write(loaded.document, to: destination, exportedAt: exportedAt, fileManager: fileManager)
+        if fileManager.fileExists(atPath: staging.path) {
+            try fileManager.removeItem(at: staging)
+        }
+        try fileManager.createDirectory(at: staging, withIntermediateDirectories: true)
+        do {
+            for file in files {
+                let url = staging.appendingPathComponent(file.path)
+                try fileManager.createDirectory(
+                    at: url.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try Data(file.contents.utf8).write(to: url, options: .atomic)
+            }
+            try replaceDirectory(directory, with: staging, fileManager: fileManager)
+        } catch {
+            try? fileManager.removeItem(at: staging)
+            throw error
+        }
     }
+
+    /// Branch-directory slug; shared with workspace authority keying so the
+    /// document side and the printed path side derive the SAME slug.
+    static func slug(_ raw: String) -> String {
+        let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>")
+            .union(.newlines)
+            .union(.controlCharacters)
+        let mapped = raw.unicodeScalars.map { scalar -> String in
+            if forbidden.contains(scalar) || scalar == " " {
+                return "-"
+            }
+            return String(scalar)
+        }.joined()
+        let collapsed = mapped
+            .replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        if collapsed.unicodeScalars.allSatisfy({ $0.isASCII && ($0.properties.isAlphabetic || $0 == "-") }) {
+            return collapsed.lowercased()
+        }
+        return collapsed.isEmpty ? "" : collapsed
+    }
+
 }
 
 private extension NovelWorkspaceBackup {
@@ -664,25 +736,6 @@ private extension NovelWorkspaceBackup {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
-    }
-
-    static func slug(_ raw: String) -> String {
-        let forbidden = CharacterSet(charactersIn: "/\\:?%*|\"<>")
-            .union(.newlines)
-            .union(.controlCharacters)
-        let mapped = raw.unicodeScalars.map { scalar -> String in
-            if forbidden.contains(scalar) || scalar == " " {
-                return "-"
-            }
-            return String(scalar)
-        }.joined()
-        let collapsed = mapped
-            .replacingOccurrences(of: "-{2,}", with: "-", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        if collapsed.unicodeScalars.allSatisfy({ $0.isASCII && ($0.properties.isAlphabetic || $0 == "-") }) {
-            return collapsed.lowercased()
-        }
-        return collapsed.isEmpty ? "" : collapsed
     }
 
     static func reservedPath(_ preferred: String, used: inout Set<String>, fallback: String) -> String {

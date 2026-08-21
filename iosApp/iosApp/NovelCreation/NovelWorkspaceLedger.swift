@@ -461,10 +461,14 @@ enum NovelWorkspaceLedger {
             .appendingPathComponent(storeFileName)
         guard fileManager.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
-              let store = try? decoder.decode(Store.self, from: data) else {
+              let store = try? decodeStore(data) else {
             return Store(head: nil, commits: [])
         }
         return store
+    }
+
+    static func decodeStore(_ data: Data) throws -> Store {
+        try decoder.decode(Store.self, from: data)
     }
 
     static func save(

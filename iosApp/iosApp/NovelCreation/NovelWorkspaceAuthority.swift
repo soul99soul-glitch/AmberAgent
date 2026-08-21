@@ -184,9 +184,20 @@ enum NovelWorkspaceAuthority {
         )
     }
 
-    private struct ChapterBody: Equatable {
+    struct ChapterBody: Equatable {
         var title: String
         var content: String
+    }
+
+    /// Keyed `branchSlug|chapterID`. Forked branches SHARE chapter ids with
+    /// different bodies per branch; a bare chapter-id key is last-wins and
+    /// would cross-wire branches during cover checks and disk adoption.
+    static func chapterBodyKey(branchSlug: String, chapterID: NovelChapterID) -> String {
+        chapterBodyKey(branchSlug: branchSlug, chapterIDRaw: chapterID.description.lowercased())
+    }
+
+    static func chapterBodyKey(branchSlug: String, chapterIDRaw: String) -> String {
+        "\(branchSlug)|\(chapterIDRaw)"
     }
 
     private static func workingChapterBodies(
@@ -194,6 +205,7 @@ enum NovelWorkspaceAuthority {
     ) -> [String: ChapterBody] {
         var result: [String: ChapterBody] = [:]
         for branch in document.branches where branch.lifecycle == .active {
+            let branchSlug = NovelWorkspaceBackup.slug(branch.name)
             for selection in branch.workingChapterSelections {
                 guard document.chapters.first(where: { $0.id == selection.chapterID })?.discardedAt == nil,
                       let version = document.chapterVersions.first(where: {
@@ -201,7 +213,7 @@ enum NovelWorkspaceAuthority {
                       }) else {
                     continue
                 }
-                result[selection.chapterID.description.lowercased()] = ChapterBody(
+                result[chapterBodyKey(branchSlug: branchSlug, chapterID: selection.chapterID)] = ChapterBody(
                     title: version.title,
                     content: version.content
                 )
@@ -210,7 +222,7 @@ enum NovelWorkspaceAuthority {
         return result
     }
 
-    private static func diskChapterBodies(
+    static func diskChapterBodies(
         in files: [NovelWorkspaceBackup.File]
     ) -> [String: ChapterBody] {
         var result: [String: ChapterBody] = [:]
@@ -218,11 +230,26 @@ enum NovelWorkspaceAuthority {
             let parsed = NovelWorkspaceMarkdown.parseFile(file.contents)
             guard parsed.fields["kind"] == "chapter",
                   let id = parsed.fields["id"]?.lowercased(),
-                  let title = parsed.fields["title"] else {
+                  let title = parsed.fields["title"],
+                  let branchSlug = file.branchSlugFromPath else {
                 continue
             }
-            result[id] = ChapterBody(title: title, content: parsed.body)
+            result[chapterBodyKey(branchSlug: branchSlug, chapterIDRaw: id)] = ChapterBody(
+                title: title,
+                content: parsed.body
+            )
         }
         return result
+    }
+}
+
+extension NovelWorkspaceBackup.File {
+    /// `branches/<slug>/chapters/001-x.md` → `<slug>`; nil outside a branch
+    /// directory.
+    var branchSlugFromPath: String? {
+        guard let range = path.range(of: "branches/") else { return nil }
+        let rest = path[range.upperBound...]
+        guard let slash = rest.firstIndex(of: "/") else { return nil }
+        return String(rest[..<slash])
     }
 }

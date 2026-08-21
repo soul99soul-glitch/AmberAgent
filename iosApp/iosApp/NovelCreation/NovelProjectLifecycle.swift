@@ -152,36 +152,19 @@ extension DefaultNovelCreation {
         guard loaded.access == .readWrite else {
             throw NovelError.degradedReadOnly(projectID: command.projectID)
         }
-        guard let branch = loaded.document.branches
-            .first(where: { $0.id == command.branchID }) else {
+        guard loaded.document.branches
+            .first(where: { $0.id == command.branchID }) != nil else {
             throw NovelError.branchNotFound(command.branchID)
         }
-        // Contract v1.1 D-B: run the plot draft BEFORE the mutation so the
-        // edit and its plot module commit in one atomic revision step. The
-        // draft gets a tight silence budget: a user-typed edit must not wait
-        // the full fact timeout before the excerpt fallback commits it.
-        var moduleText: String?
-        var summaryOverride: String?
-        if NovelWorkspaceLedger.isFastForward(branch: branch, chapterID: command.chapterID),
-           let draft = try await writeWorkspacePlotDraft(
-            document: loaded.document,
-            previousSummary: loaded.document.stateSnapshots.first {
-                $0.id == branch.currentStateSnapshotID
-            }?.summary ?? "",
-            chapterTitle: command.title,
-            chapterContent: command.content,
-            noOutputTimeout: min(factRequestTimeout, 60)
-           ) {
-            moduleText = draft.chapterText
-            if !draft.summary.isEmpty {
-                summaryOverride = draft.summary
-            }
-        }
+        // Contract v1.1 D-B: the edit and its plot module commit in one atomic
+        // revision step. The module is the DETERMINISTIC excerpt — the model
+        // plot draft is retired for new writes (consistency now rides on the
+        // workspace brief); the manual full-sync tool remains as rescue.
         let reduced = try NovelFactTransactionReducer.saveManualEditWithPlot(
             command,
             payloadSHA256: payloadSHA256,
-            moduleText: moduleText,
-            summaryOverride: summaryOverride,
+            moduleText: nil,
+            summaryOverride: nil,
             in: loaded.document,
             now: now()
         )
@@ -192,7 +175,8 @@ extension DefaultNovelCreation {
             reduced.document,
             expectedRevision: loaded.document.project.revision
         )
-        guard committed.document == reduced.document else {
+        guard committed.document == reduced.document ||
+              committed.document == NovelWorkspaceProjectStore.persistableAtRest(reduced.document) else {
             throw NovelError.storageIndeterminate(command.projectID)
         }
         _ = try installLoadedProject(committed, id: command.projectID, allowsRollback: false)
@@ -209,25 +193,12 @@ extension DefaultNovelCreation {
         guard let branch = document.branches.first(where: { $0.id == branchID }) else {
             throw NovelError.branchNotFound(branchID)
         }
-        var moduleText = NovelWorkspaceLedger.excerpt(
+        // Deterministic module only — the model plot draft is retired for
+        // new writes.
+        let moduleText = NovelWorkspaceLedger.excerpt(
             title: chapterTitle,
             content: chapterContent
         )
-        var summaryOverride: String?
-        if NovelWorkspaceLedger.isFastForward(branch: branch, chapterID: chapterID),
-           let draft = try await writeWorkspacePlotDraft(
-            document: document,
-            previousSummary: document.stateSnapshots.first {
-                $0.id == branch.currentStateSnapshotID
-            }?.summary ?? "",
-            chapterTitle: chapterTitle,
-            chapterContent: chapterContent
-           ) {
-            moduleText = draft.chapterText
-            if !draft.summary.isEmpty {
-                summaryOverride = draft.summary
-            }
-        }
         return try NovelWorkspacePlotCommit.applyChapterModule(
             to: document,
             branchID: branchID,
@@ -235,47 +206,9 @@ extension DefaultNovelCreation {
             chapterTitle: chapterTitle,
             chapterContent: chapterContent,
             moduleText: moduleText,
-            summaryOverride: summaryOverride,
+            summaryOverride: nil,
             now: now()
         )
-    }
-
-    func writeWorkspacePlotDraft(
-        document: NovelProjectDocumentV1,
-        previousSummary: String,
-        chapterTitle: String,
-        chapterContent: String,
-        noOutputTimeout: TimeInterval? = nil
-    ) async throws -> NovelWorkspacePlotDraft? {
-        do {
-            let executor = NovelStructuredModelExecutor(modelRunner: modelRunner)
-            let preparation = try await executor.prepare(
-                modelPolicy: modelPolicy(for: .review, in: document),
-                taskKind: .workspacePlot,
-                requestedInputBudgetTokens: 16_000
-            )
-            let request = NovelStructuredModelExecutionRequest(
-                runID: NovelRunID(),
-                modelPolicy: preparation.modelPolicy,
-                task: .workspacePlot(
-                    previousSummary: previousSummary,
-                    chapterTitle: chapterTitle,
-                    chapterContent: chapterContent
-                )
-            )
-            let evidence = try await executor.executePrepared(
-                try executor.prepareInvocation(request, preparation: preparation),
-                noOutputTimeout: noOutputTimeout ?? factRequestTimeout
-            )
-            guard case .workspacePlot(let draft) = evidence.output else {
-                return nil
-            }
-            return draft
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
-            return nil
-        }
     }
 
     func applyWorkspacePlotRelink(
@@ -465,7 +398,14 @@ extension DefaultNovelCreation {
                     prepared.document,
                     allowsRollback: false
                 ) {
-                    try await self.repository.createProject(prepared.document)
+                    if let workspaceRepository = self.repository as? NovelFileProjectRepository {
+                        try await workspaceRepository.createProject(
+                            prepared.document,
+                            workspaceNative: true
+                        )
+                    } else {
+                        try await self.repository.createProject(prepared.document)
+                    }
                 }
             } catch {
                 if !requiresRepositoryReconciliation(error) {
@@ -851,7 +791,8 @@ private extension DefaultNovelCreation {
     ) async throws -> NovelLoadedProject {
         do {
             let loaded = try await operation()
-            guard loaded.document == document else {
+            guard loaded.document == document ||
+                  loaded.document == NovelWorkspaceProjectStore.persistableAtRest(document) else {
                 throw NovelError.storageIndeterminate(document.project.id)
             }
             return try installLoadedProject(

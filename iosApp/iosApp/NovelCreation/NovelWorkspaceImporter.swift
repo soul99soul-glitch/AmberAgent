@@ -320,11 +320,25 @@ private extension NovelWorkspaceImporter {
         }
         let branch = document.branches[branchIndex]
         let working = NovelWorkspaceLedger.liveWorkingSelections(branch: branch, in: document)
-        let modules = NovelWorkspaceLedger.alignedModules(
+        let seeded = NovelWorkspaceLedger.alignedModules(
             existing: old.chapterPlots,
             working: working,
             seeds: NovelWorkspaceLedger.seedTexts(working: working, in: document)
         )
+        // Round-trip: module files on disk override the deterministic seeds,
+        // preserving texts and the D-D stale flags exactly as exported. The
+        // export names modules by working-selection ordinal, so the merge is
+        // positional — chapter ids do not survive import.
+        let modules = seeded.enumerated().map { index, module in
+            guard let parsed = parsed.plotChapterModules[index + 1] else {
+                return module
+            }
+            return NovelChapterPlotModule(
+                chapterID: module.chapterID,
+                text: parsed.text.isEmpty ? module.text : parsed.text,
+                stale: parsed.stale
+            )
+        }
         let highlights = parsed.highlights
             ?? NovelWorkspaceLedger.foldedHighlightTexts(modules)
         document.stateSnapshots[snapshotIndex] = NovelStateSnapshotRecord(
@@ -475,6 +489,11 @@ private struct ParsedWorkspace {
     let plotSummary: String?
     let plotOutline: String?
     let plotEvents: [String]?
+    /// Per-chapter plot modules from the MAIN branch's `plot/chapters/*.md`,
+    /// keyed by chapter ORDINAL (chapter ids are regenerated on import) —
+    /// the round-trip carrier for the D-D stale flags. Non-main branch
+    /// module files stay opaque.
+    let plotChapterModules: [Int: (text: String, stale: Bool)]
     let highlights: [String]?
     let plan: ParsedPlan?
     let upcomingBeats: [String]
@@ -550,6 +569,7 @@ private struct ParsedWorkspace {
         var plotSummary: String?
         var plotOutline: String?
         var plotEvents: [String]?
+        var plotChapterModules: [Int: (text: String, stale: Bool)] = [:]
         var highlights: [String]?
         var plan: ParsedPlan?
         var upcoming: [String] = []
@@ -603,7 +623,10 @@ private struct ParsedWorkspace {
                         knownKeys: Self.proposalKnownFrontmatterKeys
                     )
                 ))
-            } else if onMain, file.path.contains("/chapters/"), file.path.hasSuffix(".md") {
+            } else if onMain,
+                      file.path.contains("/chapters/"),
+                      !file.path.contains("/plot/"),
+                      file.path.hasSuffix(".md") {
                 let ordinal = Self.chapterOrdinal(from: file.path) ?? (working.count + 1)
                 working.append(ParsedChapter(
                     title: parsed.fields["title"] ?? Self.fileNameTitle(file.path),
@@ -624,6 +647,15 @@ private struct ParsedWorkspace {
                         knownKeys: Self.chapterKnownFrontmatterKeys
                     )
                 ))
+            } else if onMain,
+                      file.path.contains("/plot/chapters/"),
+                      file.path.hasSuffix(".md"),
+                      parsed.fields["kind"] == "plot",
+                      let ordinal = Self.chapterOrdinal(from: file.path) {
+                plotChapterModules[ordinal] = (
+                    text: parsed.body,
+                    stale: parsed.fields["stale"] == "true"
+                )
             } else if onMain, file.path.hasSuffix("/plot/current.md") {
                 hasPlotFiles = true
                 let split = NovelWorkspaceMarkdown.splitHighlights(parsed.body)
@@ -701,6 +733,7 @@ private struct ParsedWorkspace {
         self.plotSummary = plotSummary
         self.plotOutline = plotOutline
         self.plotEvents = plotEvents
+        self.plotChapterModules = plotChapterModules
         self.highlights = highlights
         self.plan = plan
         self.upcomingBeats = upcoming

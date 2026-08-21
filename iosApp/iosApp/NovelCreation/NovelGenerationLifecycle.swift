@@ -304,7 +304,8 @@ extension DefaultNovelCreation {
             }
             throw error
         }
-        guard committed.document == reduced.document else {
+        guard committed.document == reduced.document ||
+                committed.document == NovelWorkspaceProjectStore.persistableAtRest(reduced.document) else {
             frozenProjectIDs.insert(request.projectID)
             throw NovelError.storageIndeterminate(request.projectID)
         }
@@ -2203,7 +2204,8 @@ private extension DefaultNovelCreation {
                     reduced.document,
                     expectedRevision: loaded.document.project.revision
                 )
-                guard committed.document == reduced.document else {
+                guard committed.document == reduced.document ||
+                    committed.document == NovelWorkspaceProjectStore.persistableAtRest(reduced.document) else {
                     throw NovelError.storageIndeterminate(projectID)
                 }
                 _ = try installLoadedProject(

@@ -682,6 +682,8 @@ struct NovelSessionView: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            // Align with the Label's text (after the symbol inset).
+            .padding(.leading, 22)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
             .disabled(
@@ -941,7 +943,7 @@ struct NovelSessionView: View {
             Text(message)
                 .font(.footnote)
                 .foregroundStyle(AmberTheme.foreground2)
-                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if viewModel.hasRefreshError

@@ -90,44 +90,6 @@ final class NovelWorkspaceBackupTests: XCTestCase {
         XCTAssertTrue(imported.chapters.contains { $0.discardedAt != nil })
     }
 
-    func testExportCopiedDevicePackageWhenAsked() throws {
-        let env = ProcessInfo.processInfo.environment
-        let defaultRoot = "/Users/arquiel/Downloads/amber-novel-backups/2026-08-17-raw/NovelCreation"
-        let rootPath = env["AMBER_NOVEL_BACKUP_ROOT"]?.isEmpty == false
-            ? env["AMBER_NOVEL_BACKUP_ROOT"]!
-            : defaultRoot
-        let root = URL(fileURLWithPath: rootPath)
-        guard FileManager.default.fileExists(atPath: root.appendingPathComponent("index.json").path) else {
-            throw XCTSkip("No copied novel package at \(rootPath).")
-        }
-        let index = try JSONDecoder().decode(
-            BackupIndex.self,
-            from: Data(contentsOf: root.appendingPathComponent("index.json"))
-        )
-        XCTAssertFalse(index.projects.isEmpty)
-        let outRoot = URL(
-            fileURLWithPath: env["AMBER_NOVEL_WORKSPACE_OUT"]
-                ?? root.deletingLastPathComponent().appendingPathComponent("workspace").path
-        )
-        try FileManager.default.createDirectory(at: outRoot, withIntermediateDirectories: true)
-        for project in index.projects {
-            let package = root
-                .appendingPathComponent("projects", isDirectory: true)
-                .appendingPathComponent(project.id.description, isDirectory: true)
-            let destination = outRoot.appendingPathComponent(project.name, isDirectory: true)
-            try NovelWorkspaceBackup.exportPackage(
-                at: package,
-                projectID: project.id,
-                to: destination
-            )
-            XCTAssertTrue(
-                FileManager.default.fileExists(
-                    atPath: destination.appendingPathComponent("manifest.yaml").path
-                )
-            )
-        }
-    }
-
     func testWriteCreatesReadableChapterFiles() throws {
         let root = try NovelTestFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -1,14 +1,60 @@
 # AmberAgent Current Project State
 
-Last updated: 2026-08-20（代笔成稿落 drafts/，收录进 chapters/）
+Last updated: 2026-08-21（真机覆盖安装完成：Gemini 3.7 Flash 闪退修复已上机，待点验工具调用）
 
-时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。跨端契约（唯一事实源，两端会话必读）：Android 主仓 `docs/novel-workspace-core-contract.md` v1.1。
+时点交接（非权威）：[`NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md`](NOVEL_MARKDOWN_WORKSPACE_HANDOFF_2026-08-17.md)。当前事实仍以本文件和代码为准。跨端契约（唯一事实源，两端会话必读）：Android 主仓 `docs/novel-workspace-core-contract.md` v1.1（本分支已带入副本）。
 
-## 工作树当书（2026-08-20 17:43，未卸数据）
+## 小说全量迁移 Phase 3+4 完成（2026-08-21，工作区未提交；接下方 Phase 1+2a 条目）
 
-没有把《赵大来了》导出成新项目。讨论/撤销仍在 JSON 账本。打开书时若 `checkout/` 缺章或正文对不上，从账本整树印到 markdown，并写 `.amber/authority.json`（`book: worktree`）。之后改章/收录必须把工作树写成功；讨论 `list/read/grep` 读磁盘文件夹，不再每次从 JSON 现编一棵虚树。文件夹整目录替换，不再先删后写。
+**新建即原生+全量迁移**：空白建书与文件夹导入经条件转型直接 `createProject(workspaceNative: true)`；`shouldMigrateLegacyProject` 恒真——所有旧书（含 monofile 抢救书）打开即迁移。canary：IOSNovelCreationWiringTests 两条源断言。
 
-代笔仍是 host 流水线（写候选→核对→收录），不是 agent 直接 `write` md。收录会把新章印进 `chapters/*.md`。sidecar 仍是 `paused` / `userPaused`。书 rev 1221。
+**Phase 3a stateDelta 退役（新写）**：收录/手编/审批卡改章全部确定性剧情模块；模型剧情草稿调用与 writeWorkspacePlotDraft、executeInlineStateDeltaCollect（v1.1 后已是死码）删除；手动全量同步保留为抢救链。副产品：既有基线红 testGhostwriteSingleChapterHappyPathCollectsAndSyncs 转绿。
+
+**Phase 3b 每章剧情模块落盘**：export 印 `branches/<slug>/plot/chapters/NNN-<slug>.md`（含 stale）；导入按**序数**位置合并（章 id 导入即重生成）；仅主线（fork 文件 opaque 透传）；章匹配排除 /plot/；agent 写 /plot/chapters/ 被拒。
+
+**Phase 3c 四段简报**：NovelWorkspaceContextAssembler（当前剧情状态/未回收伏笔(20 行上限)/本章相关节点(计划+别名命中材料+身份图)/已确认决定），6000 字预算尾删、第 1 段永不删；makeStateSection 委派（同一注入槽同一回执）。
+
+**Phase 3d 回执瘦身（保守版）**：persistableAtRest 仅当无 pending/润色/事实史/syncManualEdits 台账且**全部** run 为 completed/failed 才清回执+run+runStarted 台账（有任何 running/interrupted run 一律不剪）；commit/迁移/create 返回与磁盘一致的静息投影，8 处等值守卫接受投影。
+
+**Phase 4 删除**：exportPackage（+环境门控测试）、executeCollectionTransaction、executeCollectionWithoutStateSyncFallback（零引用，210 行）。旧链加载分支保留（迁移引导/失败回退）。
+
+**复核**：两轮 checker。第一轮 4 BLOCKER（剪枝产出校验器必拒文档/迁移返回不对称/模块导入旧 id 死码+fork 串台/ContextTests 未入工程幻影绿灯）+2 MAJOR 全修；第二轮 1 严重（混合 run 部分剪枝→仅全 completed 才剪）+2 一般全修，契约测试锁死（testInterruptedRunWithLaterCompletedRunStaysLoadable 等）。
+
+**验证**：**265/265 全绿**（iPhone 17 Pro 模拟器，2 skip=真机专属）：含 NovelWorkspaceContextTests 3（真入工程）、NovelWorkspaceRepositoryTests 17、契约 12、注入规划器 22（简报格式更新）、协作/生成生命周期/回放/呈现/仓库/账本/备份/事实事务/手编/fork/分支/润色全套。
+
+**残余（如实）**：真机点验清单未跑（本机签名阻塞记录在 ios-build-environment 记忆）；讨论提示词 v12 未提及 plot/chapters 只读文件（守卫文案自解释）；代笔→手动同步救援链失去 e2e 脚本覆盖；NovelSessionViewModelTests 既有红基线（约 11 方法）不在门禁；简报确定性摘录 vs 模型草稿无 A/B 证据（已批准取舍）。
+
+## Gemini 3.7 Flash 真机闪退（2026-08-21）
+
+iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`（iOS 27.0 24A5418b）08:40 复现。`iosApp-2026-08-21-084032.ips`：主线程 `EXC_BAD_ACCESS` / SIGSEGV @ 0，栈 `JsonObject.get` → `UIMessagePart.Tool.responsesItemId` → `MessageStreamAccumulator.appendTool` → `ChatGenerationCoordinator.startStreaming`。Gemini 3.x 工具调用带 `thoughtSignature`，Swift 把 `[String: JsonElement]` 当 metadata 传进 Kotlin；KMP 把它编成 NSDictionary，再 `JsonObject.get` 空指针。无签名的模型不走这条路径所以不崩。
+
+修复：Kotlin `geminiToolPart(...)` 在 KN 堆上建真实 `JsonObject`；Swift 流式工具 delta 不再自己拼 metadata。验证（模拟器 `/tmp/amber-dd-gemini-crash`）：`IOSGeminiProviderTests` 3 例含崩溃路径累加器 **3/3**。
+
+2026-08-21 09:09 已覆盖安装到 iPhone Air `94918570-0680-5B93-8E38-7E6B355D4426`：先 SIGKILL 旧进程 pid 9420，再 `devicectl install` + `process launch --terminate-existing`。bundle `app.amber.ios`，容器 `1FD6BA1B-1F31-4E77-AA2A-B0849F6135B7`，冷启动 pid **9467**。未卸数据。待用户用 Gemini 3.7 Flash 打一条会调工具的消息确认不再闪退。
+
+## Grok Web 登录改系统浏览器（2026-08-21，工作区未提交）
+
+内嵌 `WKWebView` 登录 grok.com 无法用通行密钥 / 密码管理器。登录改为 `ASWebAuthenticationSession`（系统浏览器）走 SpaceXAI OAuth（`auth.x.ai`，grok-cli 公开 client + PKCE + `127.0.0.1:8787/callback`），请求带 `Authorization: Bearer`。旧 SSO Cookie 会话仍可用。
+
+验证（iPhone 17 Pro，`/tmp/amber-dd-grok-oauth`）：`IOSSettingsWiringTests` 4 例 + `IOSGeminiProviderTests.testLoopbackRequestParsesCallbackAndIgnoresOtherPaths` **5/5**。独立 review 后补了闭环：取消/失败停 loopback、OAuth 落盘 providerBackup、401 只废本次用的凭据、刷新失败不再伪装成未登录、WKWebView 跳离 grok.com 视为失败。未在真机点验系统浏览器登录。
+
+## 小说全量迁移 Phase 1+2a（2026-08-21，工作区未提交）
+
+用户拍板「《赵大来了》完全迁移新链路，账和笔也是」，D1–D4 随计划批准落定（`docs/2026-08-19-novel-workspace-migration-plan.md` 已标已批准）。本轮完成书+账+笔的存储倒置与自动切换：
+
+**架构**：`projects/{id}/checkout/` = 书（markdown 树，运行时权威）；`.amber/` = 账（`commits.json` 真实文件树 commit、`objects/<sha256>` 内容寻址对象库 D1①、`engine/` 分片引擎区=会话/快照/回执）；`legacy-package/` = 迁移封存（改名非复制，回滚=移回+删 .amber）。笔 = 写路径倒置：引擎产出 document → `.amber/engine` 落盘 → 对象入库 → 树整目录换 → commit 封口（checkpoint id 键，undo=纯指针移动）。新文件 `NovelWorkspaceProjectStore.swift`；`NovelFileProjectRepository` 四原语（read/write/create/list）按 marker 路由两种模式，D2=不重建 UI/引擎只换持久层。
+
+**加载裁决（reconcileBookTree）**：树==引擎投影→无事；树==任一已知 commit 树 / 有 .checkout-write-failed / 期望章缺失 / 树不可读 → 引擎领先（发布失败或换树前崩溃）→ 从引擎重印，绝不把旧树采纳回来；树不匹配任何已知打印 → 真手改，磁盘胜出，走真实 `saveManualEdit` 事务采纳（分支 slug+章节 id 键，fork 不串内容）。
+
+**切换**：`automaticWorkspaceMigration`（默认关，生产组装点开）——旧项目打开时若 checkout 已有树则自动迁移（marker 先翻、封存幂等可续、失败 fail-open 回旧链下次重试）。工作区项目保留 degradedPrevious/restorePrevious 安全网（previous-layout 在 engine 内轮换）。
+
+**验证**（iPhone 17 Pro 模拟器，`/tmp/amber-dd-wsrepo`）：新套件 `NovelWorkspaceRepositoryTests` **14/14**（建书/收录+对象/undo 指针/重启往返/手改采纳+落盘闭环/采纳后可提交/引擎领先不回滚/manifest 丢失重印/空正文跳过不降级/fork 不串/账本损坏隔离/自动迁移/封存保留+迁后提交/monofile 时代封存）；全量受影响回归 **329/329**（含契约 12、协作、生成生命周期、回放、呈现、仓库、账本、备份、事实事务、手编同步；2 skip=真机专属）。首轮 checker 抓 1 BLOCKER+3 MAJOR 已修；三路 subagent 复核（逻辑闭环/调用链路/UI 细节）再抓 1 BLOCKER+5 MAJOR+3 UI-P1，全部修复：adoption 落盘闭环（原只在内存、每次载入换新 id、此后所有提交 invalidDocument）、adoption 抛错只跳过该章不降级整个 load、seal monofile 目录错位（monofile 在项目目录旁，已修+monofile 加载经 finalize）、生产 flag canary 测试、损坏账本重建基线保住防回滚护栏、rename 入指针指纹、status 工具 book/ledger 行按 marker 实况；UI：创作 tab 也显示 checkout 写失败横幅、三个闸门按钮统一 bordered+对齐 label 文本（原左偏 ~20pt）、降级只读不再叠多条状态条、同步失败/停止按钮统一 bordered、错误横幅可完整换行、阅读器标题与列表行缩放防截断。`NovelSessionViewModelTests` 不在本轮门禁内——带 2026-08-20 已登记既有红基线（约 11 方法，relink 提交后漂移，与存储无关；harness 走 InMemory 仓库不经本轮改动文件）。
+
+**未做/残余**：2026-08-21 09:09 真机覆盖安装已完成（签名证书吊销记录已过时；本次 `DeviceBuild` Debug 包装上并冷启动）。真机点验清单仍待用户操作：打开《赵大来了》看自动迁移/写一章/收录/撤一步/改中间章进闸/回滚。Phase 3（chapterPlots 落盘+四段简报一致性引擎+stateDelta 退役+回执删除）与 Phase 4（旧引擎删码）未动；代笔 readiness 未加 unresolved 项（旧有）。
+
+## 工作树当书（2026-08-20 17:43，已被上一节取代）
+
+北星升级为工作区原生存储；本节的 worktree-as-book 形态由自动迁移收编。以下保留为当时事实：《赵大来了》rev 1221、代笔 sidecar paused/userPaused、备份 `research/novel-backups/zhaodalaile-20260820-150637/`。
 
 覆盖安装：bundle `3CD8B5DD-5F94-4A60-B69F-DE317BC0F8E0`。打开《赵大来了》那一次才会执行 heal。
 

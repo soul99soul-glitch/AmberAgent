@@ -427,7 +427,8 @@ enum NovelInjectionPlanner {
             state: state,
             branch: branch,
             characterIdentities: characterIdentities,
-            includeUnsynchronizedWarning: request.includeUnsynchronizedStateWarning
+            includeUnsynchronizedWarning: request.includeUnsynchronizedStateWarning,
+            document: document
         )
         let seedSection = makeQuickStartSeedSection(document: document, request: request)
         let polishPreferenceSection: NovelInjectionSection?
@@ -913,51 +914,22 @@ private extension NovelInjectionPlanner {
         state: NovelStateSnapshotRecord,
         branch: NovelBranchRecord,
         characterIdentities: [NovelCharacterIdentity],
-        includeUnsynchronizedWarning: Bool
+        includeUnsynchronizedWarning: Bool,
+        document: NovelProjectDocumentV1?
     ) -> NovelInjectionSection {
-        let identityResolver = NovelCharacterIdentityResolver(identities: characterIdentities)
-        let clarifiedKeys = Set(
-            state.characterIdentityClarifications.map {
-                NovelCharacterIdentityResolver.normalize($0.mention)
-            }
+        // The four-section workspace brief (contract D-C): same section slot,
+        // same receipts — the content is now canonical CONSTRAINTS, not a
+        // plain summary. Identity map/clarifications/unresolved ride section 3.
+        let content = NovelWorkspaceContextAssembler.brief(
+            document: document,
+            state: state,
+            branch: branch,
+            characterIdentities: characterIdentities,
+            includeUnsynchronizedWarning: includeUnsynchronizedWarning
         )
-        let effectiveUnresolved = state.unresolvedEntityNames.filter {
-            NovelCharacterIdentityResolver.isLikelyCharacterIdentityCandidate($0) &&
-                !identityResolver.isKnown($0) &&
-                !clarifiedKeys.contains(NovelCharacterIdentityResolver.normalize($0))
-        }
-        let unresolved = effectiveUnresolved.isEmpty
-            ? "(none)"
-            : effectiveUnresolved.map { "- \($0)" }.joined(separator: "\n")
-        let clarifications = characterIdentityClarificationText(
-            state.characterIdentityClarifications
-        )
-        let identityMap = characterIdentities.isEmpty
-            ? "(none)"
-            : characterIdentities.map { identity in
-                let aliases = identity.aliases.isEmpty
-                    ? "(none)"
-                    : identity.aliases.joined(separator: ", ")
-                return "- \(identity.canonicalName) | aliases: \(aliases)"
-            }.joined(separator: "\n")
-        var content = "Current summary:\n\(state.summary)\n\n" +
-            "Branch outline:\n\(state.branchOutline)\n\n" +
-            "Character identity map (authoritative across branches; " +
-            "use canonical names in new output):\n\(identityMap)\n\n" +
-            "Author character identity clarifications (authoritative; do not list these " +
-            "mentions as unresolved unless the author changes the decision):\n\(clarifications)\n\n" +
-            "Unresolved entities:\n\(unresolved)"
-        if includeUnsynchronizedWarning, branch.syncStatus == .needsSync {
-            content += "\n\nWarning: the working manuscript has unsynchronized edits. " +
-                "Treat derived state as potentially stale."
-        }
-        if state.hasStaleChapterPlots {
-            content += "\n\nWarning: plot modules after an earlier-chapter edit may be stale. " +
-                "Prefer the later manuscript over later plot summaries."
-        }
         return makeSection(
             kind: .currentState(state.id),
-            label: "CURRENT BRANCH STATE",
+            label: NovelWorkspaceContextAssembler.label,
             content: content,
             reason: .requiredCurrentState
         )

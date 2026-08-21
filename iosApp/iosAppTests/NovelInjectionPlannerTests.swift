@@ -228,7 +228,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
                 userText: "Discuss the edit."
             )
         )
-        XCTAssertTrue(discussion.contextText.contains("potentially stale"))
+        XCTAssertTrue(discussion.contextText.contains("以正文为准"))
 
         XCTAssertThrowsError(try NovelInjectionPlanner.plan(
             document: document,
@@ -575,7 +575,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
         })
 
         XCTAssertTrue(state.content.contains("- 朱元璋 | aliases: 朱重八, 朱重九"))
-        XCTAssertTrue(state.content.contains("Unresolved entities:\n(none)"))
+        XCTAssertFalse(state.content.contains("未定身份提及"), "aliases resolve; nothing stays unresolved")
     }
 
     func testCharacterRenameUsesNewCanonicalNameAndTreatsHistoricalNameAsAlias() throws {
@@ -640,8 +640,8 @@ final class NovelInjectionPlannerTests: XCTestCase {
         })
 
         XCTAssertTrue(state.content.contains("- 赵大来 | aliases: 赵旧名"))
-        XCTAssertTrue(state.content.contains("Unresolved entities:\n(none)"))
-        XCTAssertTrue(state.content.contains("use canonical names in new output"))
+        XCTAssertFalse(state.content.contains("未定身份提及"), "aliases resolve; nothing stays unresolved")
+        XCTAssertTrue(state.content.contains("新输出用正名"))
         XCTAssertTrue(materialSection.content.contains("Title: 赵大来"))
         XCTAssertTrue(materialSection.content.contains("用户保存后的新人物设定。"))
     }
@@ -1296,7 +1296,7 @@ final class NovelInjectionPlannerTests: XCTestCase {
                 userText: "接下来呢"
             )
         )
-        XCTAssertTrue(plan.canonicalInput.contains("may be stale"))
+        XCTAssertTrue(plan.canonicalInput.contains("以正文为准"))
         XCTAssertTrue(plan.canonicalInput.contains("后章：城门已开（后续可能过期）") == false)
         XCTAssertTrue(
             document.stateSnapshots[index].injectionHighlightsText().contains("后续可能过期")

@@ -527,6 +527,9 @@ private struct NovelProjectRow: View {
                     .font(.body.weight(.semibold))
                     .foregroundStyle(AmberTheme.foreground)
                     .lineLimit(1)
+                    // Error rows share the line with a trailing button;
+                    // long names shrink before truncating.
+                    .minimumScaleFactor(0.85)
 
                 HStack(spacing: 6) {
                     if project.loadError != nil {

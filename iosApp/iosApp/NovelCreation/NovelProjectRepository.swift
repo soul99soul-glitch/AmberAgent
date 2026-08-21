@@ -77,18 +77,29 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     private let rootDirectory: URL
     private let fileManager: FileManager
     private let failingStages: Set<NovelRepositoryFailureStage>
+    /// Opt-in legacy→workspace cutover on first open (contract D-E). The
+    /// production composition enables it; legacy-chain contract tests keep it
+    /// off so the transitional machinery stays covered.
+    private let automaticWorkspaceMigration: Bool
     /// Per-project encode cache so unchanged heavy sections (injection receipts,
     /// snapshots, …) are not re-encoded on every small tool write.
     private var sectionCaches: [NovelProjectID: NovelProjectShardedStorage.SectionCache] = [:]
+    /// Last published book-pointer fingerprint per workspace project
+    /// (branch head checkpoint + working selections). The branches section
+    /// also churns on activeRunID/updatedAt, which must NOT trigger a full
+    /// tree publish.
+    private var pointerFingerprints: [NovelProjectID: String] = [:]
 
     init(
         rootDirectory: URL,
         fileManager: FileManager = .default,
-        failingStages: Set<NovelRepositoryFailureStage> = []
+        failingStages: Set<NovelRepositoryFailureStage> = [],
+        automaticWorkspaceMigration: Bool = false
     ) {
         self.rootDirectory = rootDirectory
         self.fileManager = fileManager
         self.failingStages = failingStages
+        self.automaticWorkspaceMigration = automaticWorkspaceMigration
     }
 
     static func defaultRootDirectory(fileManager: FileManager = .default) throws -> URL {
@@ -145,7 +156,7 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
                 fileManager.fileExists(atPath: previousURL(for: id).path) ||
                 fileManager.fileExists(
                     atPath: NovelProjectShardedStorage.previousLayoutURL(in: package).path
-                ) else {
+                ) || isWorkspaceNative(id) else {
             throw NovelError.projectNotFound(id)
         }
         do {
@@ -210,6 +221,60 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         return NovelLoadedProject(document: document, access: .readWrite)
     }
 
+    /// Workspace-native creation (contract D-E): engine sections into
+    /// `.amber/engine`, book tree printed to `checkout/`, baseline commit and
+    /// object library sealed in `.amber/`. No sharded package at the project
+    /// root is ever created for this project.
+    func createProject(
+        _ document: NovelProjectDocumentV1,
+        workspaceNative: Bool
+    ) async throws -> NovelLoadedProject {
+        guard workspaceNative else {
+            return try await createProject(document)
+        }
+        try ensureDirectories()
+        try NovelDocumentValidator.validate(document)
+        let projectID = document.project.id
+        let isReinstallingDeletedProject = isDeletionTombstoned(projectID)
+        if isReinstallingDeletedProject {
+            try cleanupProjectFiles(projectID: projectID, includingPrimary: true)
+        } else if isReplacementMarked(projectID) {
+            throw NovelError.storageIndeterminate(projectID)
+        }
+        guard !projectExistsOnDisk(projectID) else {
+            throw NovelError.projectAlreadyExists(projectID)
+        }
+        let project = packageURL(for: projectID)
+        do {
+            try NovelWorkspaceProjectStore.writeEngineSections(
+                document: document,
+                projectDirectory: project,
+                fileManager: fileManager
+            )
+            try NovelWorkspaceProjectStore.publish(
+                document: document,
+                projectDirectory: project,
+                fileManager: fileManager
+            )
+        } catch {
+            throw NovelError.repositoryFailure(
+                "Could not create workspace novel project: \(error)"
+            )
+        }
+        if isReinstallingDeletedProject {
+            do {
+                try fileManager.removeItem(at: tombstoneURL(for: projectID))
+            } catch {
+                throw NovelError.storageIndeterminate(projectID)
+            }
+        }
+        // Engine sections persist the pruned view; return it so callers and
+        // disk agree from birth.
+        let returned = NovelWorkspaceProjectStore.persistableAtRest(document)
+        upsertIndexBestEffort(document: returned)
+        return NovelLoadedProject(document: returned, access: .readWrite)
+    }
+
     func commitProject(
         _ document: NovelProjectDocumentV1,
         expectedRevision: Int64,
@@ -256,8 +321,13 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         } catch {
             throw NovelError.storageIndeterminate(projectID)
         }
-        upsertIndexBestEffort(document: document)
-        return NovelLoadedProject(document: document, access: .readWrite)
+        // At rest the persisted document is the PRUNED equivalent; return it
+        // so callers continue from exactly what is on disk.
+        let returned = isWorkspaceNative(projectID)
+            ? NovelWorkspaceProjectStore.persistableAtRest(document)
+            : document
+        upsertIndexBestEffort(document: returned)
+        return NovelLoadedProject(document: returned, access: .readWrite)
     }
 
     func replaceProject(
@@ -674,6 +744,26 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         rootDirectory.appendingPathComponent("projects", isDirectory: true)
     }
 
+    /// Workspace-native mode (contract D-E): the book tree at `checkout/` is
+    /// the runtime authority, engine sections live in `.amber/engine`, the
+    /// ledger and object library in `.amber/`. Legacy projects keep the
+    /// sharded package at the project root.
+    private func isWorkspaceNative(_ projectID: NovelProjectID) -> Bool {
+        NovelWorkspaceProjectStore.isWorkspaceNative(
+            projectDirectory: packageURL(for: projectID),
+            fileManager: fileManager
+        )
+    }
+
+    private func engineStorageDirectory(for projectID: NovelProjectID) -> URL {
+        let project = packageURL(for: projectID)
+        guard NovelWorkspaceProjectStore.isWorkspaceNative(
+            projectDirectory: project,
+            fileManager: fileManager
+        ) else { return project }
+        return NovelWorkspaceProjectStore.engineDirectory(in: project)
+    }
+
     private var recoveryDirectory: URL {
         rootDirectory.appendingPathComponent("recovery", isDirectory: true)
     }
@@ -729,6 +819,11 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             || fileManager.fileExists(atPath: previousURL(for: projectID).path)
             || fileManager.fileExists(
                 atPath: NovelProjectShardedStorage.previousLayoutURL(
+                    in: packageURL(for: projectID)
+                ).path
+            )
+            || fileManager.fileExists(
+                atPath: NovelWorkspaceProjectStore.markerURL(
                     in: packageURL(for: projectID)
                 ).path
             )
@@ -979,6 +1074,7 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             urls.append(packageURL(for: projectID))
             urls.append(replacementMarkerURL(for: projectID))
             sectionCaches[projectID] = nil
+            pointerFingerprints[projectID] = nil
         } else {
             // Replacement cleanup keeps the new primary package; drop legacy previous monofile only.
         }
@@ -997,27 +1093,86 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
 
     private func writeShardedProject(_ document: NovelProjectDocumentV1) throws {
         try failIfRequested(.afterTempWrite)
-        let cache = sectionCaches[document.project.id]
+        let projectID = document.project.id
+        let workspaceNative = isWorkspaceNative(projectID)
+        let cache = sectionCaches[projectID]
+        // Receipt slimming at quiet rest — see
+        // NovelWorkspaceProjectStore.persistableAtRest.
+        let persistable = workspaceNative
+            ? NovelWorkspaceProjectStore.persistableAtRest(document)
+            : document
         let nextCache = try NovelProjectShardedStorage.writePackage(
-            document: document,
-            packageDirectory: packageURL(for: document.project.id),
+            document: persistable,
+            packageDirectory: engineStorageDirectory(for: projectID),
             encoder: makeEncoder(),
             fileManager: fileManager,
             cache: cache
         )
         try failIfRequested(.afterTempValidation)
-        sectionCaches[document.project.id] = nextCache
+        sectionCaches[projectID] = nextCache
+        let package = packageURL(for: projectID)
+        if workspaceNative {
+            // Workspace-native: the tree IS the destination of the write —
+            // objects retained, tree swapped, commit sealed. Engine sections
+            // are host state beside it, never the book.
+            if NovelProjectShardedStorage.checkoutSidecarNeedsRefresh(previous: cache, next: nextCache)
+                || pointerFingerprints[projectID] != pointerFingerprint(document) {
+                do {
+                    try NovelWorkspaceProjectStore.publish(
+                        document: document,
+                        projectDirectory: package,
+                        fileManager: fileManager
+                    )
+                    pointerFingerprints[projectID] = pointerFingerprint(document)
+                    NovelProjectShardedStorage.clearCheckoutWriteFailure(
+                        in: package,
+                        fileManager: fileManager
+                    )
+                } catch {
+                    Self.logger.error(
+                        "Workspace publish failed for \(projectID.description, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                    NovelProjectShardedStorage.recordCheckoutWriteFailure(
+                        error.localizedDescription,
+                        in: package,
+                        fileManager: fileManager
+                    )
+                    throw error
+                }
+            } else if NovelProjectShardedStorage.checkoutDraftsNeedRefresh(
+                previous: cache,
+                next: nextCache
+            ) {
+                do {
+                    try NovelWorkspaceAuthority.publishDrafts(
+                        document,
+                        to: NovelWorkspaceAuthority.checkoutDirectory(in: package),
+                        fileManager: fileManager
+                    )
+                } catch {
+                    Self.logger.error(
+                        "Workspace drafts publish failed for \(projectID.description, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                    NovelProjectShardedStorage.recordCheckoutWriteFailure(
+                        error.localizedDescription,
+                        in: package,
+                        fileManager: fileManager
+                    )
+                    throw error
+                }
+            }
+            return
+        }
         // Drop legacy monofiles after a successful sharded write so inventory and
         // loads prefer the incremental package.
-        let mono = primaryURL(for: document.project.id)
+        let mono = primaryURL(for: projectID)
         if fileManager.fileExists(atPath: mono.path) {
             try? fileManager.removeItem(at: mono)
         }
-        let monoPrevious = previousURL(for: document.project.id)
+        let monoPrevious = previousURL(for: projectID)
         if fileManager.fileExists(atPath: monoPrevious.path) {
             try? fileManager.removeItem(at: monoPrevious)
         }
-        let package = packageURL(for: document.project.id)
         let checkout = NovelWorkspaceAuthority.checkoutDirectory(in: package)
         if NovelProjectShardedStorage.checkoutSidecarNeedsRefresh(
             previous: cache,
@@ -1069,6 +1224,17 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     }
 
     private func readInstalledProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {
+        if isWorkspaceNative(projectID) {
+            let engine = engineStorageDirectory(for: projectID)
+            let loaded = try NovelProjectShardedStorage.loadDocument(
+                packageDirectory: engine,
+                projectID: projectID,
+                decoder: makeDecoder(),
+                fileManager: fileManager
+            )
+            sectionCaches[projectID] = loaded.cache
+            return try finalizeLoadedDocument(loaded.document, projectID: projectID)
+        }
         let package = packageURL(for: projectID)
         let hasCurrentLayout = fileManager.fileExists(
             atPath: NovelProjectShardedStorage.layoutURL(in: package).path
@@ -1106,7 +1272,12 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         }
         let mono = primaryURL(for: projectID)
         if fileManager.fileExists(atPath: mono.path) {
-            return try readProjectDocument(at: mono, projectID: projectID)
+            // Monofile loads run the same finalize as package loads: the
+            // worktree print/heal and the workspace cutover apply to them too
+            // (they are the oldest rescue format, and their checkout tree may
+            // exist from the worktree era).
+            let monofile = try readProjectDocument(at: mono, projectID: projectID)
+            return try finalizeLoadedDocument(monofile, projectID: projectID)
         }
         let checkout = package.appendingPathComponent("checkout", isDirectory: true)
         if fileManager.fileExists(atPath: checkout.appendingPathComponent("manifest.yaml").path) {
@@ -1122,6 +1293,32 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     }
 
     private func readPreviousProjectDocument(projectID: NovelProjectID) throws -> NovelProjectDocumentV1 {
+        if isWorkspaceNative(projectID) {
+            // Workspace safety net: the engine keeps rotating its own previous
+            // layout inside `.amber/engine`, so degraded loads and explicit
+            // restores keep working after the legacy package is sealed.
+            let engine = engineStorageDirectory(for: projectID)
+            if fileManager.fileExists(
+                atPath: NovelProjectShardedStorage.previousLayoutURL(in: engine).path
+            ) {
+                let loaded = try NovelProjectShardedStorage.loadDocument(
+                    packageDirectory: engine,
+                    projectID: projectID,
+                    decoder: makeDecoder(),
+                    fileManager: fileManager,
+                    layoutFileName: NovelProjectShardedStorage.previousLayoutFileName
+                )
+                return try finalizeLoadedDocument(
+                    loaded.document,
+                    projectID: projectID,
+                    reconcileWorkspace: false
+                )
+            }
+            throw NovelError.corruptedProject(
+                projectID: projectID,
+                details: "Workspace engine has no previous layout to fall back to."
+            )
+        }
         let package = packageURL(for: projectID)
         if fileManager.fileExists(
             atPath: NovelProjectShardedStorage.previousLayoutURL(in: package).path
@@ -1141,7 +1338,8 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
 
     private func finalizeLoadedDocument(
         _ document: NovelProjectDocumentV1,
-        projectID: NovelProjectID
+        projectID: NovelProjectID,
+        reconcileWorkspace: Bool = true
     ) throws -> NovelProjectDocumentV1 {
         let generationNormalized = NovelGenerationReducer
             .normalizingLegacyInterruptedProseCandidates(document)
@@ -1153,8 +1351,95 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             )
         }
         try NovelDocumentValidator.validate(normalized)
+        if isWorkspaceNative(projectID) {
+            // The markdown tree is the runtime book. Reconcile decides which
+            // side is ahead (a failed publish reprints from the engine; a
+            // genuine hand edit on disk wins), then the ledger catches up.
+            // Degraded (previous) loads skip this: a recovery read must not
+            // mutate the tree.
+            let project = packageURL(for: projectID)
+            if reconcileWorkspace {
+                let reconciled = try NovelWorkspaceProjectStore.reconcileBookTree(
+                    document: normalized,
+                    projectDirectory: project,
+                    fileManager: fileManager
+                )
+                NovelWorkspaceProjectStore.healLedgerIfNeeded(
+                    document: reconciled,
+                    projectDirectory: project,
+                    fileManager: fileManager
+                )
+                // Complete a seal interrupted by a crash between marker and moves.
+                if NovelWorkspaceProjectStore.hasUnsealedLegacyArtifacts(
+                    projectDirectory: project,
+                    fileManager: fileManager
+                ) {
+                    try? NovelWorkspaceProjectStore.sealLegacyPackage(
+                        projectDirectory: project,
+                        fileManager: fileManager
+                    )
+                }
+                return reconciled
+            }
+            return normalized
+        }
+        // Legacy chain cutover (contract D-E): a legacy project that already
+        // has its book printed on disk migrates to workspace-native on first
+        // open. Failure fails open back to the legacy chain and retries next
+        // open; rollback keeps `legacy-package/` beside the workspace.
+        if automaticWorkspaceMigration, shouldMigrateLegacyProject(projectID) {
+            let project = packageURL(for: projectID)
+            do {
+                try NovelWorkspaceProjectStore.migrateLegacyProject(
+                    document: normalized,
+                    projectDirectory: project,
+                    fileManager: fileManager
+                )
+                sectionCaches[projectID] = nil
+                Self.logger.error(
+                    "Legacy novel project migrated to workspace-native: \(projectID.description, privacy: .public)"
+                )
+            } catch {
+                Self.logger.error(
+                    "Legacy→workspace migration failed, staying on legacy chain: \(String(describing: error), privacy: .public)"
+                )
+                try publishWorktreeIfNeeded(normalized, projectID: projectID)
+                // The failure may land AFTER the marker flipped (e.g. a seal
+                // error): return whichever view matches the chain that now
+                // owns the disk.
+                if NovelWorkspaceProjectStore.isWorkspaceNative(
+                    projectDirectory: packageURL(for: projectID),
+                    fileManager: fileManager
+                ) {
+                    return NovelWorkspaceProjectStore.persistableAtRest(normalized)
+                }
+                // The legacy chain persists the FULL document — return it.
+                return normalized
+            }
+            // The migration persisted the pruned projection — return it.
+            return NovelWorkspaceProjectStore.persistableAtRest(normalized)
+        }
         try publishWorktreeIfNeeded(normalized, projectID: projectID)
         return normalized
+    }
+
+    /// Book-affecting branch state only: branch name (its slug IS a tree
+    /// path), head checkpoint + working chapter selections per active branch.
+    /// activeRunID / updatedAt / syncStatus churn deliberately excluded.
+    private func pointerFingerprint(_ document: NovelProjectDocumentV1) -> String {
+        document.branches
+            .filter { $0.lifecycle == .active }
+            .map {
+                "\($0.name):\($0.id):\($0.headCheckpointID):\($0.workingChapterSelections.map { "\($0.chapterID)=\($0.versionID)" }.joined(separator: ","))"
+            }
+            .joined(separator: ";")
+    }
+
+    /// Every legacy project is migration-ready — the migrator prints the
+    /// book tree itself, so no pre-existing checkout is required. Monofile
+    /// rescue books included.
+    private func shouldMigrateLegacyProject(_ projectID: NovelProjectID) -> Bool {
+        true
     }
 
     /// First open after this cutover (and any later drift): print the ledger's
@@ -1319,7 +1604,11 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
             let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isRegularFileKey])
             if values?.isDirectory == true {
                 guard let uuid = UUID(uuidString: name),
-                      NovelProjectShardedStorage.isPackage(at: url, fileManager: fileManager) else {
+                      NovelProjectShardedStorage.isPackage(at: url, fileManager: fileManager)
+                          || NovelWorkspaceProjectStore.isWorkspaceNative(
+                              projectDirectory: url,
+                              fileManager: fileManager
+                          ) else {
                     continue
                 }
                 let projectID = NovelProjectID(uuid)
@@ -1350,6 +1639,29 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
 
     private func fileSignatureEntry(for projectID: NovelProjectID) -> IndexManifestV1.Entry {
         let package = packageURL(for: projectID)
+        // Workspace check first: a half-sealed migration may briefly leave the
+        // legacy layout.json beside a live workspace — the workspace files are
+        // the ones that keep changing.
+        if isWorkspaceNative(projectID) {
+            // Engine layout changes on every engine write; the external ledger
+            // changes on every commit — together they detect out-of-band edits.
+            let primary = fileSignature(
+                at: NovelProjectShardedStorage.layoutURL(
+                    in: engineStorageDirectory(for: projectID)
+                )
+            )
+            let previous = fileSignature(
+                at: package.appendingPathComponent(NovelWorkspaceLedger.directoryName, isDirectory: true)
+                    .appendingPathComponent(NovelWorkspaceLedger.storeFileName)
+            )
+            return IndexManifestV1.Entry(
+                projectID: projectID,
+                primaryByteCount: primary.byteCount,
+                primaryModifiedAt: primary.modifiedAt,
+                previousByteCount: previous.byteCount,
+                previousModifiedAt: previous.modifiedAt
+            )
+        }
         if NovelProjectShardedStorage.isPackage(at: package, fileManager: fileManager) {
             let primary = fileSignature(
                 at: NovelProjectShardedStorage.layoutURL(in: package)
