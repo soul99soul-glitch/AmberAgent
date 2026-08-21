@@ -1,4 +1,5 @@
 import XCTest
+@preconcurrency import Shared
 @testable import iosApp
 
 final class IOSSettingsWiringTests: XCTestCase {
@@ -350,7 +351,115 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(detail.contains("if shouldSeedModels"))
         XCTAssertTrue(grokProvider.contains("IOSGrokWebBrowserTransport"))
         XCTAssertTrue(grokProvider.contains(#"credentials: "include""#))
+        XCTAssertTrue(grokProvider.contains("Authorization"))
+        XCTAssertTrue(grokProvider.contains("IOSGrokOAuthClients.shared(providerId: providerId).resolveAccessToken()"))
+        XCTAssertTrue(grokProvider.contains("@escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void"))
+        XCTAssertTrue(grokProvider.contains("Grok Web 未能停留在 grok.com"))
+        XCTAssertTrue(grokProvider.contains("if oauthToken != nil"))
         XCTAssertFalse(grokProvider.contains("session.bytes(for:"))
+        XCTAssertTrue(detail.contains("用 Grok 账号登录"))
+        XCTAssertFalse(detail.contains("已通过系统浏览器授权"))
+
+        let grokLogin = try source("iosApp/GrokWebLoginView.swift")
+        XCTAssertTrue(grokLogin.contains("ASWebAuthenticationSession("))
+        XCTAssertTrue(grokLogin.contains("prefersEphemeralWebBrowserSession = false"))
+        XCTAssertTrue(grokLogin.contains("开始登录"))
+        XCTAssertTrue(grokLogin.contains("loopback?.stop()"))
+        XCTAssertTrue(grokLogin.contains("attachProviderBackup"))
+        XCTAssertTrue(grokLogin.contains(".onDisappear { model.cancelLogin() }"))
+        XCTAssertFalse(grokLogin.contains("GrokWebLoginWebView"))
+        XCTAssertFalse(grokLogin.contains("WKWebView"))
+        XCTAssertTrue(grokLogin.contains("IOSGrokOAuthPKCE.buildAuthorizationURL"))
+    }
+
+    func testGrokOAuthAuthorizationURLUsesLoopbackAndPKCE() {
+        let verifier = IOSGrokOAuthPKCE.generateCodeVerifier()
+        XCTAssertEqual(verifier.count, 64)
+        let challenge = IOSGrokOAuthPKCE.s256Challenge(verifier: verifier)
+        XCTAssertFalse(challenge.contains("+"))
+        XCTAssertFalse(challenge.contains("/"))
+        XCTAssertFalse(challenge.contains("="))
+
+        let url = IOSGrokOAuthPKCE.buildAuthorizationURL(state: "st", nonce: "nn", codeChallenge: "ch")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
+        let values = Dictionary(uniqueKeysWithValues: components.queryItems!.map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(values["client_id"], IOSGrokOAuthConstants.clientId)
+        XCTAssertEqual(values["redirect_uri"], IOSGrokOAuthConstants.redirectUri)
+        XCTAssertEqual(values["state"], "st")
+        XCTAssertEqual(values["nonce"], "nn")
+        XCTAssertEqual(values["code_challenge"], "ch")
+        XCTAssertEqual(values["code_challenge_method"], "S256")
+        XCTAssertTrue(values["scope"]?.contains("offline_access") == true)
+        XCTAssertTrue(values["scope"]?.contains("grok-cli:access") == true)
+
+        let callback = "GET /callback?code=abc&state=st HTTP/1.1\r\nHost: 127.0.0.1:8787\r\n\r\n"
+        let callbackURL = IOSLoopbackOAuthRequest.callbackURL(
+            from: callback,
+            port: Int(IOSGrokOAuthConstants.loopbackPort),
+            pathPrefix: IOSGrokOAuthConstants.callbackPath
+        )
+        XCTAssertEqual(callbackURL?.host, "127.0.0.1")
+        XCTAssertEqual(callbackURL?.path, "/callback")
+        XCTAssertEqual(
+            URLComponents(url: callbackURL!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "code" }?.value,
+            "abc"
+        )
+        XCTAssertNil(
+            IOSLoopbackOAuthRequest.callbackURL(
+                from: "GET /oauth/callback?code=abc HTTP/1.1\r\n\r\n",
+                port: 8787,
+                pathPrefix: "/callback"
+            )
+        )
+    }
+
+    func testGrokOAuthTokenStoreRoundTripAndSignsInWithoutSSOCookie() {
+        let id = KotlinUuid.companion.random()
+        let providerId = id.description()
+        defer {
+            IOSGrokOAuthAuthStore.clear(providerId: providerId)
+            IOSGrokWebAuthStore.clear(providerId: providerId)
+        }
+        XCTAssertNil(IOSGrokOAuthAuthStore.load(providerId: providerId))
+
+        let backup = IOSGrokWebProviderBackup(
+            baseUrl: "https://api.x.ai/v1",
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: false
+        )
+        let tokens = IOSGrokOAuthTokens(
+            accessToken: "at",
+            refreshToken: "rt",
+            expiresAtMillis: 1_800_000_000_000,
+            idToken: nil,
+            email: "user@example.com",
+            providerBackup: backup
+        )
+        XCTAssertTrue(IOSGrokOAuthAuthStore.save(providerId: providerId, tokens: tokens))
+        XCTAssertEqual(IOSGrokOAuthAuthStore.load(providerId: providerId), tokens)
+        XCTAssertEqual(IOSGrokOAuthAuthStore.load(providerId: providerId)?.providerBackup?.baseUrl, "https://api.x.ai/v1")
+
+        let provider = ProviderSetting.OpenAI(
+            id: id,
+            enabled: true,
+            name: "xAI",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "",
+            baseUrl: IOSGrokWebConstants.webBaseUrl,
+            chatCompletionsPath: "/conversations/new",
+            useResponseApi: true,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        XCTAssertTrue(IOSGrokWebProviderResolver.isSignedIn(provider))
+
+        IOSGrokOAuthAuthStore.clear(providerId: providerId)
+        XCTAssertNil(IOSGrokOAuthAuthStore.load(providerId: providerId))
+        XCTAssertFalse(IOSGrokWebProviderResolver.isSignedIn(provider))
     }
 
     func testGrokWebAuthenticationRequiresSSOAndRestoresReadWriteCookies() {

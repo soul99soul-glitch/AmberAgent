@@ -630,7 +630,7 @@ struct ProviderDetailView: View {
                     }
                 } label: {
                     ProviderRowContent(
-                        title: grokSignedIn ? "已登录 Grok" : "用 grok.com 登录",
+                        title: grokSignedIn ? "已登录 Grok" : "用 Grok 账号登录",
                         subtitle: grokSubtitle,
                         value: grokSignedIn ? "管理" : "登录",
                         valueStyle: .accent,
@@ -644,16 +644,18 @@ struct ProviderDetailView: View {
 
     private var grokSignedIn: Bool {
         _ = sharedSettings.revision
-        guard let session = IOSGrokWebAuthStore.load(providerId: providerId) else { return false }
-        return session.isInvalidated != true
-            && IOSGrokWebCookieValidator.hasSSOCookie(in: session.cookieHeader)
+        guard let provider else { return false }
+        return IOSGrokWebProviderResolver.isSignedIn(provider)
     }
 
     private var grokSubtitle: String {
-        if grokSignedIn {
-            return "使用 grok.com Cookie 私有链路，仅支持文本聊天"
+        if let email = IOSGrokOAuthAuthStore.load(providerId: providerId)?.email, !email.isEmpty {
+            return email
         }
-        return "使用 Grok Web 账号，无需 xAI API Key"
+        if grokSignedIn {
+            return "已登录"
+        }
+        return "用 Grok 账号登录，无需 xAI API Key"
     }
 
     private var grokProviderBackup: IOSGrokWebProviderBackup? {

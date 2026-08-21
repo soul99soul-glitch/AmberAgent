@@ -142,7 +142,12 @@ enum IOSGrokWebProviderResolver {
 
     static func isSignedIn(_ provider: ProviderSetting) -> Bool {
         guard let openAI = provider as? ProviderSetting.OpenAI else { return false }
-        guard let session = IOSGrokWebAuthStore.load(providerId: providerKey(openAI)) else { return false }
+        let providerId = providerKey(openAI)
+        if let tokens = IOSGrokOAuthAuthStore.load(providerId: providerId),
+           !tokens.accessToken.isEmpty {
+            return true
+        }
+        guard let session = IOSGrokWebAuthStore.load(providerId: providerId) else { return false }
         return session.isInvalidated != true
             && IOSGrokWebCookieValidator.hasSSOCookie(in: session.cookieHeader)
     }
@@ -391,6 +396,32 @@ private final class IOSGrokWebBrowserTransport: NSObject, WKNavigationDelegate, 
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        let host = navigationAction.request.url?.host?.lowercased() ?? ""
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame != false
+        let isGrok = host.isEmpty || host == "grok.com" || host.hasSuffix(".grok.com")
+        if !isMainFrame || isGrok {
+            decisionHandler(.allow)
+            return
+        }
+        // OAuth-only sessions have no grok.com SSO cookie; the login page would
+        // otherwise bounce the hidden webview to accounts.x.ai and break same-origin fetch.
+        decisionHandler(.cancel)
+        if let continuation = loadContinuation {
+            loadContinuation = nil
+            let current = webView.url?.host?.lowercased() ?? ""
+            if current == "grok.com" || current.hasSuffix(".grok.com") {
+                continuation.resume()
+            } else {
+                continuation.resume(throwing: IOSGrokWebError.browser("Grok Web 未能停留在 grok.com，请重新登录。"))
+            }
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard let continuation = loadContinuation else { return }
         loadContinuation = nil
@@ -583,9 +614,23 @@ struct IOSGrokWebClient {
         options: IOSGrokWebRequestOptions,
         onToken: @escaping (String) -> Void
     ) async throws {
-        guard let auth = IOSGrokWebAuthStore.load(providerId: providerId),
-              auth.isInvalidated != true,
-              IOSGrokWebCookieValidator.hasSSOCookie(in: auth.cookieHeader) else {
+        let cookieSession = IOSGrokWebAuthStore.load(providerId: providerId)
+        let cookieHeader = {
+            guard let cookieSession,
+                  cookieSession.isInvalidated != true,
+                  IOSGrokWebCookieValidator.hasSSOCookie(in: cookieSession.cookieHeader) else {
+                return ""
+            }
+            return cookieSession.cookieHeader
+        }()
+        let oauthToken: String?
+        do {
+            oauthToken = try await IOSGrokOAuthClients.shared(providerId: providerId).resolveAccessToken()
+        } catch {
+            if cookieHeader.isEmpty { throw error }
+            oauthToken = nil
+        }
+        guard oauthToken != nil || !cookieHeader.isEmpty else {
             throw IOSGrokWebError.notSignedIn
         }
         let transport = IOSGrokWebBrowserTransport()
@@ -597,8 +642,8 @@ struct IOSGrokWebClient {
                     wireModel: wireModel,
                     options: options
                 ),
-                headers: headers(),
-                cookieHeader: auth.cookieHeader
+                headers: headers(accessToken: oauthToken),
+                cookieHeader: cookieHeader
             ) { rawLine in
                 guard let frame = IOSGrokWebStreamParser.parse(rawLine) else { return false }
                 if let message = frame.errorMessage {
@@ -610,20 +655,29 @@ struct IOSGrokWebClient {
                 return frame.isFinished
             }
         } catch let error as IOSGrokWebError {
-            if case .httpStatus(let status) = error, status == 401 || status == 403 {
-                IOSGrokWebAuthStore.invalidate(providerId: providerId)
+            if case .httpStatus(let status) = error, status == 401 {
+                if oauthToken != nil {
+                    IOSGrokOAuthClients.logout(providerId: providerId)
+                } else {
+                    IOSGrokWebAuthStore.invalidate(providerId: providerId)
+                }
             }
             throw error
         }
     }
 
-    private func headers() -> [String: String] {
-        [
+    private func headers(accessToken: String?) -> [String: String] {
+        var values = [
             "Accept": "*/*",
             "Content-Type": "application/json",
             "x-statsig-id": Self.dynamicStatsigId(),
             "x-xai-request-id": UUID().uuidString,
         ]
+        if let accessToken, !accessToken.isEmpty {
+            values["Authorization"] = "Bearer \(accessToken)"
+            values["X-XAI-Token-Auth"] = IOSGrokOAuthConstants.tokenAuthHeader
+        }
+        return values
     }
 
     private func prompt(from messages: [UIMessage]) -> String {

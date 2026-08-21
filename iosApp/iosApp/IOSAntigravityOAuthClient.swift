@@ -170,13 +170,20 @@ enum IOSAntigravityPKCE {
 
 /// Parses the first line of an HTTP request into the loopback callback URL.
 enum IOSLoopbackOAuthRequest {
-    static func callbackURL(from request: String, port: Int = 8085) -> URL? {
+    static func callbackURL(
+        from request: String,
+        port: Int = 8085,
+        pathPrefix: String = "/oauth/callback"
+    ) -> URL? {
         let firstLine = request.split(separator: "\r\n", maxSplits: 1, omittingEmptySubsequences: false)
             .first.map(String.init) ?? ""
         let parts = firstLine.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" else { return nil }
         let path = String(parts[1])
-        guard path.hasPrefix("/oauth/callback") else { return nil }
+        let matches = path == pathPrefix
+            || path.hasPrefix(pathPrefix + "?")
+            || path.hasPrefix(pathPrefix + "/")
+        guard matches else { return nil }
         return URL(string: "http://127.0.0.1:\(port)\(path)")
     }
 }
@@ -189,11 +196,15 @@ final class IOSLoopbackOAuthCallbackServer {
     private var listenFD: Int32 = -1
     private var source: DispatchSourceRead?
     private var delivered = false
+    private var port: UInt16 = 8085
+    private var pathPrefix = "/oauth/callback"
     var onCallback: ((URL) -> Void)?
 
-    func start(port: UInt16 = 8085) throws {
+    func start(port: UInt16 = 8085, pathPrefix: String = "/oauth/callback") throws {
         stop()
         delivered = false
+        self.port = port
+        self.pathPrefix = pathPrefix
         let fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         guard fd >= 0 else {
             throw IOSAntigravityOAuthError(message: "无法创建本机回调套接字（errno \(errno)）。")
@@ -245,7 +256,11 @@ final class IOSLoopbackOAuthCallbackServer {
         var buffer = [UInt8](repeating: 0, count: 16_384)
         let readCount = recv(client, &buffer, buffer.count, 0)
         let request = readCount > 0 ? String(bytes: buffer.prefix(Int(readCount)), encoding: .utf8) : nil
-        if let request, let url = IOSLoopbackOAuthRequest.callbackURL(from: request) {
+        if let request, let url = IOSLoopbackOAuthRequest.callbackURL(
+            from: request,
+            port: Int(port),
+            pathPrefix: pathPrefix
+        ) {
             let html = "<!doctype html><meta charset=utf-8><title>已登录</title><body>可以关闭此页并回到 Amber。</body>"
             Self.reply(client, status: "200 OK", body: Data(html.utf8), contentType: "text/html; charset=utf-8")
             if !delivered {
