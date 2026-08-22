@@ -19,6 +19,8 @@ final class IOSProviderConfigToolService {
             return status(argumentsJSON: argumentsJSON)
         case "provider_config_apply":
             return apply(argumentsJSON: argumentsJSON)
+        case "provider_config_create":
+            return create(argumentsJSON: argumentsJSON)
         case "provider_refresh_models":
             return await refreshModels(argumentsJSON: argumentsJSON)
         case "settings_set_model_slot":
@@ -58,6 +60,7 @@ final class IOSProviderConfigToolService {
             let imageModels = provider.models.filter { $0.type == ModelType.image }
             let hasKey = ChatProviderConfiguration.hasUsableCredential(provider)
             let host = Self.host(of: provider)
+            let chatCapable = ChatProviderConfiguration.supportsChatStreaming(provider)
             var entry: [String: Any] = [
                 "id": id,
                 "name": name,
@@ -68,7 +71,12 @@ final class IOSProviderConfigToolService {
                 "auth_mode": Self.authMode(of: provider),
                 "chat_model_count": chatModels.count,
                 "image_model_count": imageModels.count,
+                // false for placeholder brands (e.g. MiMo) — still listed in settings.
+                "chat_streaming_supported": chatCapable,
             ]
+            if let openAI = provider as? ProviderSetting.OpenAI {
+                entry["brand"] = openAI.brand.name
+            }
             if includeModels {
                 entry["chat_models"] = chatModels.prefix(20).map { model -> [String: Any] in
                     let display = model.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -100,7 +108,94 @@ final class IOSProviderConfigToolService {
             "tool": "provider_config_status",
             "providers": providersOut,
             "slots": slots,
+            "available_slots": Self.availableSlots,
             "issues": issues,
+        ])
+    }
+
+    // MARK: - create
+
+    /// Create a user-owned OpenAI-compatible provider shell (brand=generic).
+    /// Does not create/enable bundled brands (MiMo/OpenAI/…) — apply those by id.
+    private func create(argumentsJSON: String) -> String {
+        let args = Self.jsonObject(argumentsJSON) ?? [:]
+        let name = (args["name"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !name.isEmpty else {
+            return fail("provider_config_create", "需要 name。")
+        }
+        guard let baseUrl = (args["base_url"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !baseUrl.isEmpty else {
+            return fail("provider_config_create", "需要 base_url。")
+        }
+        guard let url = URL(string: baseUrl), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return fail("provider_config_create", "base_url 必须是合法的 http(s) URL。")
+        }
+        let host = (url.host ?? "").lowercased()
+        let isLocal = host == "localhost" || host == "127.0.0.1" || host.hasPrefix("192.168.")
+        if scheme != "https", !isLocal {
+            return fail("provider_config_create", "非本机 base_url 必须使用 https。")
+        }
+        let path = (args["chat_completions_path"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiKeyRaw = args["api_key"]
+        let apiKey: String?
+        if apiKeyRaw == nil {
+            apiKey = nil
+        } else if let s = apiKeyRaw as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                if Self.looksLikePlaceholderKey(trimmed) {
+                    return fail("provider_config_create", "api_key 看起来是占位符，已拒绝写入。")
+                }
+                if trimmed.count < 8 {
+                    return fail("provider_config_create", "api_key 过短，已拒绝写入。")
+                }
+            }
+            apiKey = trimmed
+        } else {
+            return fail("provider_config_create", "api_key 必须是字符串。")
+        }
+
+        // Shell first (empty key); then optional key via the same Keychain path as apply.
+        let shell = IosSettingsMutations.shared.buildBlankOpenAIProvider(
+            name: name,
+            apiKey: "",
+            baseUrl: baseUrl
+        )
+        _ = sharedSettings.addProvider(shell)
+        let providerId = shell.id.description() as String
+        var changed: [String] = ["created"]
+        if let path, !path.isEmpty {
+            _ = sharedSettings.updateProviderEndpoint(
+                providerId: providerId,
+                baseUrl: baseUrl,
+                chatCompletionsPath: path,
+                useResponseApi: false,
+                promptCaching: false
+            )
+            changed.append("chat_completions_path")
+        }
+        if let apiKey, !apiKey.isEmpty {
+            _ = sharedSettings.updateProviderApiKey(providerId: providerId, apiKey: apiKey)
+            changed.append("api_key")
+        }
+        let updated = sharedSettings.snapshot.providers.first {
+            ($0.id.description() as String) == providerId
+        }
+        return Self.ok([
+            "tool": "provider_config_create",
+            "provider_id": providerId,
+            "name": updated?.name ?? name,
+            "type": "openai",
+            "brand": "generic",
+            "enabled": updated?.enabled ?? true,
+            "has_api_key": !(apiKey ?? "").isEmpty,
+            "chat_streaming_supported": true,
+            "changed": changed,
+            "next": "provider_refresh_models then settings_set_model_slot(slot=chat, …)",
         ])
     }
 
@@ -254,8 +349,31 @@ final class IOSProviderConfigToolService {
                         providerOverwrite: nil
                     )
                 }
-            } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
-                models = provider.models.filter { $0.type == ModelType.chat }
+            } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider),
+                      let openAI = provider as? ProviderSetting.OpenAI {
+                let providerKey = IOSGrokWebProviderResolver.providerKey(openAI)
+                if IOSGrokOAuthAuthStore.load(providerId: providerKey) != nil {
+                    let discovered = try await IOSGrokOAuthClients.shared(providerId: providerKey)
+                        .fetchGrokModelsOrThrow()
+                    models = discovered.map { item in
+                        Model(
+                            modelId: item.modelId,
+                            displayName: item.displayName,
+                            id: KotlinUuid.companion.random(),
+                            type: ModelType.chat,
+                            customHeaders: [],
+                            customBodies: [],
+                            inputModalities: [],
+                            outputModalities: [],
+                            abilities: [],
+                            tools: Set<BuiltInTools>(),
+                            contextWindowTokens: nil,
+                            providerOverwrite: nil
+                        )
+                    }
+                } else {
+                    models = provider.models.filter { $0.type == ModelType.chat }
+                }
             } else if let google = provider as? ProviderSetting.Google {
                 models = try await IOSGeminiClient(provider: google).listModelsOrThrow()
             } else if let openAI = provider as? ProviderSetting.OpenAI {
@@ -473,6 +591,19 @@ final class IOSProviderConfigToolService {
         ChatProviderConfiguration.hasUsableCredential(provider)
     }
 
+    /// Fixed global model roles — not free-form provider names (e.g. "mimo" is a brand, not a slot).
+    static let availableSlots: [String] = [
+        "chat", "assistant_chat", "title", "ocr", "compress", "suggestion", "image_generation",
+    ]
+
+    private static func looksLikePlaceholderKey(_ value: String) -> Bool {
+        let lower = value.lowercased()
+        if lower.contains("your") && lower.contains("key") { return true }
+        if lower.contains("placeholder") || lower.contains("example") { return true }
+        if lower == "sk-xxx" || lower == "sk-..." || lower.hasPrefix("sk-xxxx") { return true }
+        return false
+    }
+
     private static func apiKey(of provider: ProviderSetting) -> String {
         if let openAI = provider as? ProviderSetting.OpenAI {
             return openAI.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -536,17 +667,20 @@ enum IOSProviderConfigToolCatalog {
     static let toolNames: Set<String> = [
         "provider_config_status",
         "provider_config_apply",
+        "provider_config_create",
         "provider_refresh_models",
         "settings_set_model_slot",
     ]
     static let mutatingToolNames: Set<String> = [
         "provider_config_apply",
+        "provider_config_create",
         "provider_refresh_models",
         "settings_set_model_slot",
     ]
-    /// Apply always requires a foreground human approval card (secrets path).
+    /// Writes that touch credentials or create providers need a foreground approval card.
     static let highRiskToolNames: Set<String> = [
         "provider_config_apply",
+        "provider_config_create",
     ]
     static let backgroundAllowedToolNames: Set<String> = [
         "provider_config_status",

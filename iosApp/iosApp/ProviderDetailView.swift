@@ -93,19 +93,34 @@ struct ProviderDetailView: View {
                 providerId: providerId,
                 providerBackup: grokProviderBackup,
                 onSignedIn: {
-                    let shouldSeedModels = provider?.models.contains { $0.type == ModelType.chat } != true
+                    let previousUuid = currentModel?.id.description()
+                    let previousModelId = currentModel?.modelId
+                    let currentWasThisProvider = provider?.models.contains {
+                        $0.id.description() == previousUuid
+                    } == true
                     _ = sharedSettings.updateProviderEndpoint(
                         providerId: providerId,
-                        baseUrl: IOSGrokWebConstants.webBaseUrl,
-                        chatCompletionsPath: "/conversations/new",
+                        baseUrl: IOSGrokWebConstants.cliProxyBaseUrl,
+                        chatCompletionsPath: "/chat/completions",
                         useResponseApi: true,
                         promptCaching: false
                     )
-                    if shouldSeedModels {
-                        _ = sharedSettings.updateProviderChatModels(
-                            providerId: providerId,
-                            models: IOSGrokWebConstants.fallbackModels
-                        )
+                    let updated = sharedSettings.adoptGrokOAuthChatCatalog(
+                        providerId: providerId,
+                        models: IOSGrokWebConstants.fallbackModels,
+                        dropModelIds: Array(IOSGrokWebConstants.legacyWebModelIds)
+                    )
+                    if currentWasThisProvider {
+                        let stillThere = updated?.models.contains {
+                            $0.id.description() == previousUuid
+                        } == true
+                        let wasLegacy = IOSGrokWebConstants.legacyWebModelIds.contains(previousModelId ?? "")
+                        if !stillThere || wasLegacy,
+                           let grok46 = updated?.models.first(where: {
+                               $0.type == ModelType.chat && $0.modelId == "grok-4.6"
+                           }) {
+                            sharedSettings.setCurrentChatModelId(grok46.id.description())
+                        }
                     }
                     if isCurrentProvider {
                         sharedSettings.syncLegacySettingsStoreForCurrentChat(settingsStore)
@@ -259,8 +274,6 @@ struct ProviderDetailView: View {
                     protocolRow
                 }
 
-                grokSection
-
                 AmberSectionLabel(text: "连接")
                 AmberFormGroup {
                     if let openAI = provider as? ProviderSetting.OpenAI,
@@ -311,6 +324,8 @@ struct ProviderDetailView: View {
                 }
 
                 legacyKeyImportSection
+
+                grokSection
 
                 codexSection
 
@@ -621,7 +636,7 @@ struct ProviderDetailView: View {
     @ViewBuilder
     private var grokSection: some View {
         if IOSGrokWebProviderResolver.isXAIProvider(provider) {
-            AmberSectionLabel(text: "Grok 登录 (Web)")
+            AmberSectionLabel(text: "Grok 登录")
             AmberFormGroup {
                 Button {
                     commitPendingTextInput {
@@ -655,10 +670,16 @@ struct ProviderDetailView: View {
         if grokSignedIn {
             return "已登录"
         }
-        return "用 Grok 账号登录，无需 xAI API Key"
+        return "用 SuperGrok 账号登录，调用 Grok 4.6，无需 API Key"
     }
 
     private var grokProviderBackup: IOSGrokWebProviderBackup? {
+        if let stored = IOSGrokOAuthAuthStore.loadBackup(providerId: providerId) {
+            return stored
+        }
+        if let fromTokens = IOSGrokOAuthAuthStore.load(providerId: providerId)?.providerBackup {
+            return fromTokens
+        }
         guard let openAI = provider as? ProviderSetting.OpenAI else { return nil }
         return IOSGrokWebProviderBackup(
             baseUrl: openAI.baseUrl,
@@ -1071,9 +1092,32 @@ struct ProviderDetailView: View {
                         )
                     }
                     successMessage = nil
+                } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider),
+                          let openAI = provider as? ProviderSetting.OpenAI,
+                          IOSGrokOAuthAuthStore.load(providerId: IOSGrokWebProviderResolver.providerKey(openAI)) != nil {
+                    let discovered = try await IOSGrokOAuthClients.shared(
+                        providerId: IOSGrokWebProviderResolver.providerKey(openAI)
+                    ).fetchGrokModelsOrThrow()
+                    models = discovered.map { item in
+                        Model(
+                            modelId: item.modelId,
+                            displayName: item.displayName,
+                            id: KotlinUuid.companion.random(),
+                            type: ModelType.chat,
+                            customHeaders: [],
+                            customBodies: [],
+                            inputModalities: [],
+                            outputModalities: [],
+                            abilities: [],
+                            tools: Set<BuiltInTools>(),
+                            contextWindowTokens: nil,
+                            providerOverwrite: nil
+                        )
+                    }
+                    successMessage = nil
                 } else if IOSGrokWebProviderResolver.isGrokWebProvider(provider) {
                     models = provider.models.filter { $0.type == ModelType.chat }
-                    successMessage = "Grok Web 登录凭据已就绪；服务器可用性会在发送消息时验证。"
+                    successMessage = "Grok 登录凭据已就绪；服务器可用性会在发送消息时验证。"
                 } else if let google = provider as? ProviderSetting.Google {
                     if IOSGeminiProviderResolver.isAntigravityOAuth(google) {
                         models = try await IOSGeminiClient(provider: google).listModelsOrThrow()

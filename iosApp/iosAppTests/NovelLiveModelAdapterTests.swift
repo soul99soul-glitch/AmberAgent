@@ -87,18 +87,36 @@ final class NovelLiveModelAdapterTests: XCTestCase {
         }
     }
 
-    func testMissingFixedModelDoesNotFallBackToGlobalModel() async throws {
+    func testMissingFixedModelFallsBackToGlobalWhenGlobalExists() async throws {
         let fixture = makeFixture(apiKey: "test-key")
         let adapter = makeAdapter(fixture: fixture)
+
+        let resolved = try await adapter.resolveModel(for: .fixed(
+            providerID: fixture.provider.id.description(),
+            modelID: KotlinUuid.companion.random().description()
+        ))
+        XCTAssertEqual(resolved.modelID, fixture.model.id.description())
+        XCTAssertEqual(resolved.wireModelID, "novel-live")
+    }
+
+    func testMissingFixedProviderFailsWhenGlobalAlsoMissing() async throws {
+        let fixture = makeFixture(apiKey: "test-key")
+        let adapter = NovelLiveModelAdapter(
+            catalogProvider: {
+                // Provider list empty and no current chat model — no fallback target.
+                NovelLiveModelCatalog(currentModel: nil, providers: [])
+            },
+            kmpTransport: { _, _ in nil }
+        )
 
         do {
             _ = try await adapter.resolveModel(for: .fixed(
                 providerID: fixture.provider.id.description(),
-                modelID: KotlinUuid.companion.random().description()
+                modelID: fixture.model.id.description()
             ))
-            XCTFail("Expected strict fixed-model resolution to fail.")
+            XCTFail("Expected fixed-provider resolution to fail without global fallback.")
         } catch let failure as NovelModelFailure {
-            XCTAssertEqual(failure.code, "fixed_model_missing")
+            XCTAssertEqual(failure.code, "fixed_provider_missing")
         }
     }
 
@@ -1334,7 +1352,8 @@ final class NovelLiveModelAdapterTests: XCTestCase {
                 promptTokens: 21,
                 completionTokens: 8,
                 cachedTokens: 5,
-                totalTokens: 29
+                totalTokens: 29,
+                generationDurationMs: 0
             )
         )
     }

@@ -125,6 +125,10 @@ class ReasoningPolicyTest {
             listOf(ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH, ReasoningLevel.XHIGH),
             options("grok-4.6", xai()),
         )
+        assertEquals(
+            listOf(ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH, ReasoningLevel.XHIGH),
+            options("grok-4.6", grokCliProxy()),
+        )
     }
 
     @Test
@@ -199,6 +203,10 @@ class ReasoningPolicyTest {
     private fun claude() = ProviderSetting.Claude()
     private fun xai() = ProviderSetting.OpenAI(name = "xAI", baseUrl = "https://api.x.ai/v1")
     private fun grokWeb() = ProviderSetting.OpenAI(name = "Grok", baseUrl = "https://grok.com/rest/app-chat")
+    private fun grokCliProxy() = ProviderSetting.OpenAI(
+        name = "Grok",
+        baseUrl = "https://cli-chat-proxy.grok.com/v1",
+    )
     private fun minimax() = ProviderSetting.OpenAI(brand = OpenAIBrand.MINIMAX, baseUrl = "https://api.minimaxi.com/v1")
     private fun mimo() = ProviderSetting.OpenAI(brand = OpenAIBrand.MIMO, baseUrl = "https://api.xiaomimimo.com/v1")
     private fun dashscope() = ProviderSetting.OpenAI(baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1")

@@ -9,25 +9,61 @@ import SwiftUI
 
 private let chatLedgerLogger = Logger(subsystem: "app.amber.ios", category: "chat-ledger")
 
+struct ChatContextUsageMetrics: Equatable {
+    var promptTokens: Int = 0
+    var completionTokens: Int = 0
+    var cachedTokens: Int = 0
+    var currentContextTokens: Int = 0
+    var tokensPerSecond: Double?
+
+    /// Last completed assistant turn. Occupancy for the ring is computed separately.
+    static func lastAssistantTurn(in messages: [UIMessage]) -> ChatContextUsageMetrics {
+        guard let message = messages.last(where: { message in
+            guard message.role == MessageRole.assistant, let usage = message.usage else {
+                return false
+            }
+            return usage.promptTokens > 0 || usage.completionTokens > 0 || usage.cachedTokens > 0
+        }), let usage = message.usage else {
+            return ChatContextUsageMetrics()
+        }
+
+        let prompt = Int(usage.promptTokens)
+        let completion = Int(usage.completionTokens)
+        let decodeSeconds: TimeInterval?
+        if usage.generationDurationMs > 0 {
+            decodeSeconds = Double(usage.generationDurationMs) / 1000.0
+        } else {
+            decodeSeconds = ChatContextSnapshot.durationSeconds(from: message.createdAt, to: message.finishedAt)
+        }
+        return ChatContextUsageMetrics(
+            promptTokens: prompt,
+            completionTokens: completion,
+            cachedTokens: Int(usage.cachedTokens),
+            currentContextTokens: prompt,
+            tokensPerSecond: {
+                guard let decodeSeconds, decodeSeconds > 0, completion > 0 else { return nil }
+                return Double(completion) / decodeSeconds
+            }()
+        )
+    }
+}
+
 struct ChatContextSnapshot {
     let messageCount: Int
     let modelId: String
     let supportsReasoning: Bool
     let pendingSelectedFileName: String?
     let pendingSelectedFileBytesText: String?
-    // [Slice 5] Real token aggregation from messages.usage (TokenUsage on
-    // each UIMessage; aggregated by reduce over messages). 0 when no usage
-    // recorded (e.g. no API key / no completed runs yet) — honest, not faked.
+    /// Last assistant turn. 0 when no usage has been recorded yet.
     let promptTokens: Int
     let completionTokens: Int
     let totalTokens: Int
     let cachedTokens: Int
     let tokensPerSecond: Double?
-    /// 当前模型的真实上下文窗口(token)。模型未声明时为 nil。
+    /// Resolved context window: explicit model setting, then ModelRegistry.
     let contextWindowTokens: Int?
-    /// 当前上下文实际占用(token):取最近一轮的 promptTokens + completionTokens。
-    /// 每轮的 promptTokens 已含到该轮为止的全部历史,所以这就是"现在窗口里有多少",
-    /// 用它驱动用量环 —— 不能用 totalTokens(那是逐轮累加和,会严重重复计数)。
+    /// Next-turn load estimate: last fresh prompt+completion, or a compact-aware
+    /// estimate plus the current draft/attachments.
     let currentContextTokens: Int
 }
 
@@ -56,16 +92,92 @@ struct ChatContextCompactState: Equatable {
 }
 
 extension ChatContextSnapshot {
-    /// 未声明上下文窗口的模型的默认兜底(token)。当下主流模型基本都 ≥100万,
-    /// 几乎不存在比 20万更小的,故用 20万作保守默认 —— 比旧的 8K 合理得多。
+    /// Fallback only when the model and registry both omit a window.
     static let defaultContextWindowTokens: Double = 200_000
 
-    /// 上下文用量比例 [0,1],驱动用量环与上下文面板的填充。分子是"当前占用"
-    /// (currentContextTokens,非累加和);分母优先用模型真实 contextWindow,模型未声明
-    /// 窗口时回退到 defaultContextWindowTokens(20万)。
+    /// 上下文用量比例 [0,1]。分子是下一轮预计装载量。
     var contextFillFraction: CGFloat {
-        let ceiling = contextWindowTokens.flatMap { $0 > 0 ? Double($0) : nil } ?? Self.defaultContextWindowTokens
-        return min(CGFloat(Double(currentContextTokens) / ceiling), 1.0)
+        let ceiling = Double(resolvedWindowTokens)
+        guard ceiling > 0 else { return 0 }
+        return min(CGFloat(Double(max(currentContextTokens, 0)) / ceiling), 1.0)
+    }
+
+    var occupancyText: String {
+        "\(Self.formatTokenCount(currentContextTokens)) / \(Self.formatTokenCount(resolvedWindowTokens))"
+    }
+
+    var cacheHitRateText: String {
+        guard promptTokens > 0, cachedTokens > 0 else { return "—" }
+        let percent = (Double(cachedTokens) / Double(promptTokens) * 100).rounded()
+        return "\(Int(min(max(percent, 0), 100)))%"
+    }
+
+    var speedText: String {
+        guard let tokensPerSecond, tokensPerSecond.isFinite, tokensPerSecond > 0 else {
+            return "暂无"
+        }
+        return String(format: "%.1f token/s", tokensPerSecond)
+    }
+
+    var resolvedWindowTokens: Int {
+        contextWindowTokens.flatMap { $0 > 0 ? $0 : nil } ?? Int(Self.defaultContextWindowTokens)
+    }
+
+    static func formatTokenCount(_ tokens: Int) -> String {
+        ComposerProviderGroup.formatContextWindow(max(tokens, 0))
+    }
+
+    static func resolvedContextWindowTokens(modelWindow: Int?, modelId: String) -> Int? {
+        if let modelWindow, modelWindow > 0 {
+            return modelWindow
+        }
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let data = ModelRegistry.shared.MODEL_CONTEXT_WINDOW.getData(modelId: trimmed)
+        if let value = data as? KotlinInt {
+            let tokens = Int(truncating: value)
+            return tokens > 0 ? tokens : nil
+        }
+        if let value = data as? Int, value > 0 {
+            return value
+        }
+        if let value = data as? NSNumber {
+            let tokens = value.intValue
+            return tokens > 0 ? tokens : nil
+        }
+        return nil
+    }
+
+    static func epochMillis(from localDateTime: Kotlinx_datetimeLocalDateTime) -> Int64? {
+        guard let date = date(from: localDateTime) else { return nil }
+        return Int64((date.timeIntervalSince1970 * 1000.0).rounded())
+    }
+
+    static func durationSeconds(
+        from start: Kotlinx_datetimeLocalDateTime,
+        to end: Kotlinx_datetimeLocalDateTime?
+    ) -> TimeInterval? {
+        guard let end,
+              let startDate = date(from: start),
+              let endDate = date(from: end) else {
+            return nil
+        }
+        let duration = endDate.timeIntervalSince(startDate)
+        return duration > 0 ? duration : nil
+    }
+
+    private static func date(from localDateTime: Kotlinx_datetimeLocalDateTime) -> Date? {
+        var components = DateComponents()
+        components.calendar = Calendar.current
+        components.timeZone = TimeZone.current
+        components.year = Int(localDateTime.year)
+        components.month = Int(localDateTime.month.ordinal) + 1
+        components.day = Int(localDateTime.day)
+        components.hour = Int(localDateTime.hour)
+        components.minute = Int(localDateTime.minute)
+        components.second = Int(localDateTime.second)
+        components.nanosecond = Int(localDateTime.nanosecond)
+        return components.date
     }
 }
 
@@ -232,7 +344,7 @@ final class ChatViewModel {
         if let hit = cachedTokenSnapshot, cachedTokenRevision == tokenRevision {
             cached = hit
         } else {
-            cached = Self.aggregateTokenSnapshot(messages)
+            cached = Self.snapshot(from: ChatContextUsageMetrics.lastAssistantTurn(in: messages))
             cachedTokenSnapshot = cached
             cachedTokenRevision = tokenRevision
         }
@@ -247,70 +359,56 @@ final class ChatViewModel {
             totalTokens: cached.totalTokens,
             cachedTokens: cached.cachedTokens,
             tokensPerSecond: cached.tokensPerSecond,
-            contextWindowTokens: currentModel?.contextWindowTokens.map { Int(truncating: $0) },
-            currentContextTokens: cached.currentContextTokens
+            contextWindowTokens: ChatContextSnapshot.resolvedContextWindowTokens(
+                modelWindow: currentModel?.contextWindowTokens.map { Int(truncating: $0) },
+                modelId: currentModelId
+            ),
+            currentContextTokens: occupancyTokens()
         )
     }
 
-    private static func aggregateTokenSnapshot(_ messages: [UIMessage]) -> ChatContextSnapshot {
-        var prompt = 0
-        var completion = 0
-        var cached = 0
-        var timedCompletionTokens = 0
-        var generationDuration = 0.0
-        var latestContextTokens = 0
-        for message in messages {
-            guard let usage = message.usage else { continue }
-            prompt += Int(usage.promptTokens)
-            completion += Int(usage.completionTokens)
-            cached += Int(usage.cachedTokens)
-            latestContextTokens = Int(usage.promptTokens) + Int(usage.completionTokens)
-            if let duration = durationSeconds(from: message.createdAt, to: message.finishedAt),
-               duration > 0 {
-                timedCompletionTokens += Int(usage.completionTokens)
-                generationDuration += duration
-            }
+    private func occupancyTokens() -> Int {
+        IOSContextCompactionCoordinator.shared.nextTurnOccupancyTokens(
+            messages: messages,
+            conversationId: currentConversationId,
+            draftText: inputText,
+            extraWeightedChars: occupancyExtraWeightedChars,
+            systemOverheadText: occupancySystemOverheadText
+        )
+    }
+
+    private var occupancyExtraWeightedChars: Int {
+        var extra = pendingImages.count * 4_500
+        if let file = pendingSelectedFilePreview {
+            extra += max(Int(file.characterCount), file.preview.count)
         }
-        return ChatContextSnapshot(
-            messageCount: messages.count,
+        return extra
+    }
+
+    private var occupancySystemOverheadText: String {
+        let systemPrompt = sharedSettings.snapshot.getCurrentAssistant().systemPrompt
+        let soul = sharedSettings.agentRuntime.agentSoulMarkdown
+        return [systemPrompt, soul]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    private static func snapshot(from metrics: ChatContextUsageMetrics) -> ChatContextSnapshot {
+        ChatContextSnapshot(
+            messageCount: 0,
             modelId: "",
             supportsReasoning: false,
             pendingSelectedFileName: nil,
             pendingSelectedFileBytesText: nil,
-            promptTokens: prompt,
-            completionTokens: completion,
-            totalTokens: prompt + completion,
-            cachedTokens: cached,
-            tokensPerSecond: generationDuration > 0 ? Double(timedCompletionTokens) / generationDuration : nil,
+            promptTokens: metrics.promptTokens,
+            completionTokens: metrics.completionTokens,
+            totalTokens: metrics.promptTokens + metrics.completionTokens,
+            cachedTokens: metrics.cachedTokens,
+            tokensPerSecond: metrics.tokensPerSecond,
             contextWindowTokens: nil,
-            currentContextTokens: latestContextTokens
+            currentContextTokens: metrics.currentContextTokens
         )
-    }
-
-    private static func durationSeconds(
-        from start: Kotlinx_datetimeLocalDateTime,
-        to end: Kotlinx_datetimeLocalDateTime?
-    ) -> TimeInterval? {
-        guard let end,
-              let startDate = date(from: start),
-              let endDate = date(from: end) else {
-            return nil
-        }
-        return endDate.timeIntervalSince(startDate)
-    }
-
-    private static func date(from localDateTime: Kotlinx_datetimeLocalDateTime) -> Date? {
-        var components = DateComponents()
-        components.calendar = Calendar.current
-        components.timeZone = TimeZone.current
-        components.year = Int(localDateTime.year)
-        components.month = Int(localDateTime.month.ordinal) + 1
-        components.day = Int(localDateTime.day)
-        components.hour = Int(localDateTime.hour)
-        components.minute = Int(localDateTime.minute)
-        components.second = Int(localDateTime.second)
-        components.nanosecond = Int(localDateTime.nanosecond)
-        return components.date
     }
 
     var currentModelSupportsReasoning: Bool {

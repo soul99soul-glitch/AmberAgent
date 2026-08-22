@@ -1,9 +1,9 @@
 import Foundation
 import CryptoKit
 
-/// Native SpaceXAI OAuth (auth.x.ai) for Grok Web. Same public grok-cli client
+/// Native SpaceXAI OAuth (auth.x.ai) for Grok. Same public grok-cli client
 /// the desktop CLI uses: authorization-code + PKCE, loopback redirect, then a
-/// Bearer token against grok.com/rest. The browser step runs in
+/// Bearer token against `cli-chat-proxy.grok.com`. The browser step runs in
 /// `ASWebAuthenticationSession` so passkeys / password managers work.
 enum IOSGrokOAuthConstants {
     /// Public grok-cli installed-app client. Token endpoint allows `none`.
@@ -20,10 +20,47 @@ enum IOSGrokOAuthConstants {
         "offline_access",
         "grok-cli:access",
         "api:access",
+        "conversations:read",
+        "conversations:write",
     ].joined(separator: " ")
     static let tokenAuthHeader = "xai-grok-cli"
+    static let cliProxyBaseUrl = "https://cli-chat-proxy.grok.com/v1"
+    static let cliProxyHost = "cli-chat-proxy.grok.com"
     static let refreshSkewMillis: Int64 = 2 * 60 * 1000
     static let fallbackTokenLifetimeMillis: Int64 = 60 * 60 * 1000
+    static let fallbackModels: [(modelId: String, displayName: String)] = [
+        (modelId: "grok-4.6", displayName: "Grok 4.6"),
+        (modelId: "grok-4.5", displayName: "Grok 4.5"),
+        (modelId: "grok-4.20-0309-reasoning", displayName: "Grok 4.20 Reasoning"),
+        (modelId: "grok-build", displayName: "Grok Build"),
+    ]
+}
+
+/// Identity headers the CLI chat proxy admits. Copied from grok-cli / pi-grok;
+/// a mismatch yields HTTP 426.
+enum IOSGrokCliProxyIdentity {
+    static let clientVersion = "0.2.101"
+    static let clientIdentifier = "grok-shell"
+    static let clientMode = "interactive"
+    static let authenticateResponse = "authenticate-response"
+
+    static func headers(modelId: String? = nil) -> [String: String] {
+        var values = [
+            "User-Agent": "\(clientIdentifier)/\(clientVersion) (ios; arm64)",
+            "x-grok-client-identifier": clientIdentifier,
+            "x-grok-client-version": clientVersion,
+            "x-grok-client-mode": clientMode,
+            "X-XAI-Token-Auth": IOSGrokOAuthConstants.tokenAuthHeader,
+            "x-authenticateresponse": authenticateResponse,
+        ]
+        if let modelId {
+            let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                values["x-grok-model-override"] = trimmed
+            }
+        }
+        return values
+    }
 }
 
 struct IOSGrokOAuthTokens: Codable, Equatable {
@@ -37,6 +74,7 @@ struct IOSGrokOAuthTokens: Codable, Equatable {
 
 enum IOSGrokOAuthAuthStore {
     static func credentialKey(providerId: String) -> String { "grokweb.\(providerId).oauth" }
+    static func backupKey(providerId: String) -> String { "grokweb.\(providerId).oauth.backup" }
 
     static func load(providerId: String) -> IOSGrokOAuthTokens? {
         guard let raw = IOSCredentialSideTable.load(key: credentialKey(providerId: providerId)),
@@ -54,8 +92,29 @@ enum IOSGrokOAuthAuthStore {
         return IOSCredentialSideTable.store(key: credentialKey(providerId: providerId), value: raw)
     }
 
+    static func loadBackup(providerId: String) -> IOSGrokWebProviderBackup? {
+        guard let raw = IOSCredentialSideTable.load(key: backupKey(providerId: providerId)),
+              let data = raw.data(using: .utf8),
+              let backup = try? JSONDecoder().decode(IOSGrokWebProviderBackup.self, from: data) else {
+            return nil
+        }
+        return backup
+    }
+
+    @discardableResult
+    static func saveBackup(providerId: String, backup: IOSGrokWebProviderBackup) -> Bool {
+        guard loadBackup(providerId: providerId) == nil else { return true }
+        guard let data = try? JSONEncoder().encode(backup),
+              let raw = String(data: data, encoding: .utf8) else { return false }
+        return IOSCredentialSideTable.store(key: backupKey(providerId: providerId), value: raw)
+    }
+
     static func clear(providerId: String) {
         IOSCredentialSideTable.delete(key: credentialKey(providerId: providerId))
+    }
+
+    static func clearBackup(providerId: String) {
+        IOSCredentialSideTable.delete(key: backupKey(providerId: providerId))
     }
 }
 
@@ -146,6 +205,25 @@ actor IOSGrokOAuthClient {
         IOSGrokOAuthClients.logout(providerId: providerId)
     }
 
+    /// Fetches the OAuth-visible model catalog from the CLI proxy.
+    func fetchGrokModels() async -> [(modelId: String, displayName: String)] {
+        (try? await fetchGrokModelsOrThrow()) ?? IOSGrokOAuthConstants.fallbackModels
+    }
+
+    func fetchGrokModelsOrThrow() async throws -> [(modelId: String, displayName: String)] {
+        let token = try await getValidAccessToken()
+        var attempt = try await modelsRequest(bearer: token)
+        if attempt.status == 401 {
+            let retry = try await getValidAccessToken(forceRefresh: true)
+            attempt = try await modelsRequest(bearer: retry)
+        }
+        guard (200..<300).contains(attempt.status) else {
+            throw IOSGrokOAuthError(message: "Grok 模型请求失败：HTTP \(attempt.status)")
+        }
+        let models = Self.parseModels(attempt.data)
+        return models.isEmpty ? IOSGrokOAuthConstants.fallbackModels : models
+    }
+
     /// Returns a usable access token, refreshing if needed. `nil` when this
     /// provider has never completed SpaceXAI OAuth (cookie sessions still apply).
     /// Refresh/network failures throw so the chat path does not masquerade as
@@ -157,6 +235,9 @@ actor IOSGrokOAuthClient {
 
     @discardableResult
     func attachProviderBackup(_ backup: IOSGrokWebProviderBackup?) -> IOSGrokOAuthTokens? {
+        if let backup {
+            _ = IOSGrokOAuthAuthStore.saveBackup(providerId: providerId, backup: backup)
+        }
         guard let backup, var current = cached(), current.providerBackup == nil else {
             return cached()
         }
@@ -241,6 +322,47 @@ actor IOSGrokOAuthClient {
             email: idToken.flatMap { Self.jwtPayload($0)?["email"] as? String } ?? fallback?.email,
             providerBackup: fallback?.providerBackup
         )
+    }
+
+    private func modelsRequest(bearer: String) async throws -> (data: Data, status: Int) {
+        guard let url = URL(string: IOSGrokOAuthConstants.cliProxyBaseUrl + "/models") else {
+            throw IOSGrokOAuthError(message: "Grok 模型地址无效。")
+        }
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in IOSGrokCliProxyIdentity.headers() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        let (data, urlResponse) = try await session.data(for: request)
+        return (data, (urlResponse as? HTTPURLResponse)?.statusCode ?? 0)
+    }
+
+    static func parseModels(_ data: Data) -> [(modelId: String, displayName: String)] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) else { return [] }
+        let array: [Any]
+        if let obj = root as? [String: Any] {
+            if let dataArray = obj["data"] as? [Any] {
+                array = dataArray
+            } else if let modelsArray = obj["models"] as? [Any] {
+                array = modelsArray
+            } else {
+                return []
+            }
+        } else if let rootArray = root as? [Any] {
+            array = rootArray
+        } else {
+            return []
+        }
+        return array.compactMap { item -> (modelId: String, displayName: String)? in
+            guard let object = item as? [String: Any] else { return nil }
+            let rawId = (object["id"] as? String) ?? (object["model"] as? String) ?? ""
+            let modelId = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty else { return nil }
+            let name = ((object["name"] as? String) ?? (object["display_name"] as? String))
+                .flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+            return (modelId: modelId, displayName: name ?? modelId)
+        }
     }
 
     private func postForm(form: String) async throws -> (Data, Int) {

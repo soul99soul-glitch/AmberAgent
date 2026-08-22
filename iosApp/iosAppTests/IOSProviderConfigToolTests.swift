@@ -433,6 +433,24 @@ final class IOSProviderConfigToolTests: XCTestCase {
         let payload = bridge.executeToolSearch(argumentsJson: #"{"query":"配置提供商","limit":12}"#)
         XCTAssertTrue(payload.contains("provider_config_status"), payload)
         XCTAssertTrue(payload.contains("provider_config_apply"), payload)
+        XCTAssertTrue(payload.contains("provider_config_create"), payload)
+    }
+
+    func testCreateAddsGenericProviderVisibleInStatus() async {
+        let store = makeStore()
+        let service = makeService(store)
+        let before = store.snapshot.providers.count
+        let createOut = await service.execute(
+            toolName: "provider_config_create",
+            argumentsJSON: #"{"name":"Agent Custom Endpoint","base_url":"https://api.example.test/v1","api_key":"sk-create-test-key"}"#
+        )
+        XCTAssertTrue(createOut.contains("provider_config_create"), createOut)
+        XCTAssertTrue(createOut.contains("\"brand\":\"generic\"") || createOut.contains("generic"), createOut)
+        XCTAssertEqual(store.snapshot.providers.count, before + 1)
+        let status = await service.execute(toolName: "provider_config_status", argumentsJSON: #"{"include_models":false}"#)
+        XCTAssertTrue(status.contains("available_slots"), status)
+        XCTAssertTrue(status.contains("assistant_chat"), status)
+        XCTAssertTrue(status.contains("Agent Custom Endpoint"), status)
     }
 
     func testBackgroundRegistersStatusOnlyDeniesMutations() async {

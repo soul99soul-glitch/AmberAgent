@@ -428,7 +428,7 @@ struct ContextRingButton: View {
             rotates = compactState.isActive && !shouldReduceMotion
         }
         .accessibilityLabel("上下文统计")
-        .accessibilityValue(compactState.isActive ? "正在压缩上下文" : "\(snapshot.messageCount) 条消息，\(snapshot.totalTokens) tokens")
+        .accessibilityValue(compactState.isActive ? "正在压缩上下文" : snapshot.occupancyText)
     }
 }
 
@@ -895,9 +895,7 @@ struct ComposerContextPanel: View {
                             Circle()
                                 .stroke(AmberTheme.surface2, lineWidth: 8)
                             Circle()
-                                // 用量环按已用/上限比例填充。上限按模型真实 contextWindow 计算,
-                                // 模型未声明时回退 8K 视觉参考(见 snapshot.contextFillFraction)。
-                                // 0 token 时环为空（诚实）。
+                                // 下一轮预计装载量 / 模型窗口。0 时空环。
                                 .trim(from: 0, to: snapshot.contextFillFraction)
                                 .stroke(
                                     AmberTheme.accent,
@@ -915,11 +913,11 @@ struct ComposerContextPanel: View {
                             value: "\(snapshot.messageCount)"
                         )
                         ComposerContextCompactStatRow(
-                            label: "总 token",
-                            value: "\(snapshot.totalTokens)"
+                            label: "上下文",
+                            value: snapshot.occupancyText
                         )
-                        ComposerContextCompactStatRow(label: "速度", value: speedText)
-                        ComposerContextCompactStatRow(label: "缓存命中率", value: cacheHitRateText)
+                        ComposerContextCompactStatRow(label: "速度", value: snapshot.speedText)
+                        ComposerContextCompactStatRow(label: "缓存命中率", value: snapshot.cacheHitRateText)
                     }
                     .frame(maxWidth: .infinity)
                 }
@@ -932,21 +930,6 @@ struct ComposerContextPanel: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 18)
         }
-    }
-
-    private var cacheHitRateText: String {
-        guard snapshot.promptTokens > 0 else {
-            return "0%"
-        }
-        let rate = Double(snapshot.cachedTokens) / Double(snapshot.promptTokens)
-        return "\(Int((rate * 100).rounded()))%"
-    }
-
-    private var speedText: String {
-        guard let tokensPerSecond = snapshot.tokensPerSecond else {
-            return "暂无"
-        }
-        return String(format: "%.1f token/s", tokensPerSecond)
     }
 }
 

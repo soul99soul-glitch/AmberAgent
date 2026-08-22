@@ -123,7 +123,10 @@ struct ProvidersView: View {
 
     private var sharedProviders: [ProviderSetting] {
         _ = sharedSettings.revision
-        return sharedSettings.snapshot.providers.filter(ChatProviderConfiguration.supportsChatStreaming)
+        // Settings list must show every stored provider (including MiMo shells).
+        // Chat streaming eligibility is enforced at chat/model-picker time, not here —
+        // otherwise agent-configured or placeholder brands "disappear" while still in settings.
+        return sharedSettings.snapshot.providers
     }
 
     private var savedProvidersList: some View {

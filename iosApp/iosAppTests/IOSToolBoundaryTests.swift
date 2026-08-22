@@ -498,7 +498,8 @@ final class IOSToolBoundaryTests: XCTestCase {
             "skill_disable", "subagent_dispatch", "model_council_run",
             "spawn_agent", "interrupt_agent", "send_message", "followup_task",
             "exec", "wait",
-            "provider_config_apply", "provider_refresh_models", "settings_set_model_slot",
+            "provider_config_apply", "provider_config_create",
+            "provider_refresh_models", "settings_set_model_slot",
             "theme_pack_import",
         ]
         for toolName in sideEffects {

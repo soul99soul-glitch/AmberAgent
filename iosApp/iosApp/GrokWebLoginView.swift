@@ -119,10 +119,12 @@ final class GrokWebLoginModel: ObservableObject {
         authSession = nil
         loopback?.stop()
         loopback = nil
-        let backup = IOSGrokOAuthAuthStore.load(providerId: providerId)?.providerBackup
+        let backup = IOSGrokOAuthAuthStore.loadBackup(providerId: providerId)
+            ?? IOSGrokOAuthAuthStore.load(providerId: providerId)?.providerBackup
             ?? IOSGrokWebAuthStore.load(providerId: providerId)?.providerBackup
             ?? providerBackup
         client.logout()
+        IOSGrokOAuthAuthStore.clearBackup(providerId: providerId)
         IOSGrokWebAuthStore.clear(providerId: providerId)
         phase = .idle
         onLoggedOut(backup)
@@ -137,11 +139,7 @@ final class GrokWebLoginModel: ObservableObject {
             return
         }
         if let error {
-            loopback?.stop()
-            loopback = nil
             authSession = nil
-            pendingVerifier = nil
-            pendingState = nil
             if (error as NSError).code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
                 restorePersistedPhase()
             } else {
@@ -189,10 +187,6 @@ final class GrokWebLoginModel: ObservableObject {
         loginTask = Task { [client] in
             do {
                 let tokens = try await client.exchangeCode(code: code, codeVerifier: verifier)
-                if Task.isCancelled {
-                    self.restorePersistedPhase()
-                    return
-                }
                 _ = await client.attachProviderBackup(self.providerBackup)
                 self.phase = .signedIn(email: tokens.email)
                 onSignedIn()
@@ -298,14 +292,16 @@ struct GrokWebLoginView: View {
             Text("用 Grok 账号登录")
                 .font(.headline)
                 .multilineTextAlignment(.center)
-            Text("登录后无需 xAI API Key，即可在聊天里调用 Grok。")
+            Text("登录 SuperGrok / X Premium 后即可用 Grok 4.6，无需 xAI API Key。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Text("会打开系统浏览器完成 xAI 授权。")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            if !model.isSignedIn {
+                Text("会打开系统浏览器完成 xAI 授权。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
     }
 

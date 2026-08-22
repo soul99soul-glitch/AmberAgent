@@ -4,6 +4,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
@@ -492,6 +493,63 @@ object IosSettingsMutations {
             }
         }
         return settings.copy(providers = providers)
+    }
+
+    /**
+     * Grok OAuth login catalog: drop leftover grok.com web ids, merge the
+     * CLI-proxy list, and stamp TOOL+REASONING on those catalog rows only.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun adoptGrokOAuthChatCatalog(
+        settings: Settings,
+        providerId: String,
+        catalog: List<Pair<String, String>>,
+        dropModelIds: List<String>,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val drop = dropModelIds.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val discovered = catalog
+            .map { it.first.trim() to it.second.trim() }
+            .filter { it.first.isNotEmpty() }
+            .distinctBy { it.first }
+        val catalogIds = discovered.map { it.first }.toSet()
+        val namesByModelId = discovered.toMap()
+        val abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) return@map provider
+                val kept = provider.models.filterNot {
+                    it.type == ModelType.CHAT && it.modelId in drop
+                }
+                val existingChatIds = kept
+                    .asSequence()
+                    .filter { it.type == ModelType.CHAT }
+                    .mapTo(mutableSetOf()) { it.modelId }
+                val renamed = kept.map { model ->
+                    val displayName = namesByModelId[model.modelId]
+                    if (model.type == ModelType.CHAT && displayName != null) {
+                        model.copy(
+                            displayName = displayName.ifBlank { model.modelId },
+                            abilities = if (model.modelId in catalogIds) abilities else model.abilities,
+                        )
+                    } else {
+                        model
+                    }
+                }
+                val appended = discovered
+                    .filterNot { (modelId, _) -> modelId in existingChatIds }
+                    .map { (modelId, displayName) ->
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = ModelType.CHAT,
+                            abilities = abilities,
+                        )
+                    }
+                provider.copyProvider(models = renamed + appended)
+            }
+        )
     }
 
     /**

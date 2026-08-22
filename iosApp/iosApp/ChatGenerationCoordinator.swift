@@ -904,6 +904,7 @@ final class ChatGenerationCoordinator {
     private var streamEventTask: Task<Void, Never>?
     private var streamEventSink: ChatStreamEventSink?
     private var activeStreamSession: ChatStreamAccumulatorSession?
+    private var streamClock = ChatGenerationSpeedClock()
     /// 流式 UI 快照的发布间隔。每次发布都会让整个消息列表子树跑一轮 SwiftUI
     /// 事务(采样实测:子树全部短路后,事务图遍历本身仍是长内容流式的主线程
     /// 地板)。因此 48ms(≈20Hz)把事务频率从 60Hz 降到 20Hz；它不是屏幕或
@@ -1498,6 +1499,7 @@ final class ChatGenerationCoordinator {
             )
         }
         let writeBaselineAtCancellation = bindings.capturePersistMessagesBaseline(conversationId)
+        messagesAtCancellation = snapshotByStampingGenerationDuration(messagesAtCancellation)
         bindings.setMessages(messagesAtCancellation)
         cancelStreamEventConsumer()
         cancelForegroundToolExecutions()
@@ -1735,7 +1737,8 @@ final class ChatGenerationCoordinator {
             }
             return false
         }
-        guard !IOSGrokWebProviderResolver.isGrokWebProvider(handoff.providerSetting) else {
+        if let grokOpenAI = handoff.providerSetting as? ProviderSetting.OpenAI,
+           IOSGrokWebProviderResolver.isGrokWebConfiguration(grokOpenAI) {
             return false
         }
         // Gemini 的 iOS 传输是原生 Swift 流（无服务端 durable cursor），与 Grok
@@ -1928,7 +1931,9 @@ final class ChatGenerationCoordinator {
         )
         let effectiveProvider: ProviderSetting
         do {
-            effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
+            effectiveProvider = try await IOSGrokWebProviderResolver.resolved(
+                try await IOSCodexProviderResolver.resolved(providerSetting)
+            )
         } catch {
             await presentStreamError(
                 rawMessage: (error as NSError).localizedDescription,
@@ -1948,7 +1953,10 @@ final class ChatGenerationCoordinator {
         // run-scoped state (currentRunSnapshot via settingsSnapshot(forRun:)
         // below, applyCompactEvent, etc).
         guard currentRunId == runId else { return }
-        let codexParams = IOSCodexProviderResolver.augmentParamsForCodex(params, provider: effectiveProvider)
+        let codexParams = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            IOSCodexProviderResolver.augmentParamsForCodex(params, provider: effectiveProvider),
+            provider: effectiveProvider
+        )
         let runSettings = settingsSnapshot(forRun: runId)
         let generativeUiPlan = IOSGenerativeUiRequestPolicy.plan(
             setting: runSettings.agentRuntime.generativeUi,
@@ -2049,7 +2057,7 @@ final class ChatGenerationCoordinator {
             conversationId: conversationId,
             // P1-b: 本轮头已消费的 mailbox 信封折入 upload（先于 startStreaming 头追加的 steer）。
             uploadMessages: finalUploadMessages + drainedMailboxMessages,
-            backgroundProviderSetting: providerSetting,
+            backgroundProviderSetting: effectiveProvider,
             generativeUiRequirement: effectiveGenerativeUiRequirement,
             generativeUiFallbackAttempted: generativeUiFallbackAttempted,
             displayMessagesOverride: displayMessagesOverride
@@ -2169,8 +2177,9 @@ final class ChatGenerationCoordinator {
                 return
             }
         }
+        streamClock.resetRound()
         let accumulator = MessageStreamAccumulator(
-            initialMessages: displayMessages,
+            initialMessages: displayMessages.clearingLastAssistantGenerationDuration(),
             model: params.model
         )
         let eventSink = ChatStreamEventSink()
@@ -2202,6 +2211,9 @@ final class ChatGenerationCoordinator {
                             subtitle: "正在接收回复"
                         )
                     }
+                    if ChatGenerationSpeedClock.chunkHasVisibleContent(chunk) {
+                        self.streamClock.noteVisibleDelta()
+                    }
                     accumulator.append(chunk: chunk)
                     if Self.reachedOutputLimit(chunk) {
                         streamSession.hitOutputLimit = true
@@ -2229,6 +2241,7 @@ final class ChatGenerationCoordinator {
                     self.cancelPendingStreamSnapshotPublish()
                     var snapshot = accumulator.snapshot()
                     snapshot = self.flushingCitationTracker(of: streamSession, messages: snapshot)
+                    snapshot = self.snapshotByStampingGenerationDuration(snapshot)
                     // Terminal hands authority to bindings/tool execution. Keeping this
                     // accumulator reachable would let a later cancel restore a stale pre-tool snapshot.
                     self.activeStreamSession = nil
@@ -2254,6 +2267,7 @@ final class ChatGenerationCoordinator {
                     self.cancelPendingStreamSnapshotPublish()
                     var snapshot = accumulator.snapshot()
                     snapshot = self.flushingCitationTracker(of: streamSession, messages: snapshot)
+                    snapshot = self.snapshotByStampingGenerationDuration(snapshot)
                     // The terminal snapshot is published below; it is no longer a cancel fallback.
                     self.activeStreamSession = nil
                     ChatStreamRecorder.shared.record(runId: runId, snapshot: snapshot)
@@ -2516,6 +2530,10 @@ final class ChatGenerationCoordinator {
             print("[AmberChat] Failed to persist foreground error terminal run=\(runId)")
         }
         finishStreaming(runId: runId, terminalEvent: .generationFailed)
+    }
+
+    private func snapshotByStampingGenerationDuration(_ messages: [UIMessage]) -> [UIMessage] {
+        messages.applyingLastAssistantGenerationDuration(streamClock.duration())
     }
 
     private func handleCompletedStream(

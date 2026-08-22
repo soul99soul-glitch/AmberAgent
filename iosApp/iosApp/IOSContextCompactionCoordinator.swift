@@ -90,6 +90,30 @@ final class IOSContextCompactionCoordinator {
         estimateTokens(messages)
     }
 
+    /// Tokens the next send is expected to load: last fresh usage (prompt+completion)
+    /// when it is newer than the latest compact, otherwise a compact-aware estimate.
+    func nextTurnOccupancyTokens(
+        messages: [UIMessage],
+        conversationId: KotlinUuid?,
+        draftText: String,
+        extraWeightedChars: Int = 0,
+        systemOverheadText: String = ""
+    ) -> Int {
+        let compacts: [IOSConversationCompact]
+        if let conversationId {
+            compacts = store.load(conversationId: String(describing: conversationId))
+        } else {
+            compacts = []
+        }
+        return Self.nextTurnOccupancyTokens(
+            messages: messages,
+            activeCompacts: compacts,
+            draftText: draftText,
+            extraWeightedChars: extraWeightedChars,
+            systemOverheadText: systemOverheadText
+        )
+    }
+
     func prepareMessagesForRequest(
         uploadMessages: [UIMessage],
         conversationId: KotlinUuid?,
@@ -470,17 +494,22 @@ final class IOSContextCompactionCoordinator {
         model: Model,
         prompt: String
     ) async throws -> String {
-        let provider = try await IOSCodexProviderResolver.resolved(rawProvider)
-        let params = IOSCodexProviderResolver.augmentParamsForCodex(
-            TextGenerationParams(
-                model: model,
-                temperature: nil,
-                topP: nil,
-                maxTokens: nil,
-                tools: [],
-                reasoningLevel: ReasoningLevel.off,
-                customHeaders: [],
-                customBody: []
+        let provider = try await IOSGrokWebProviderResolver.resolved(
+            try await IOSCodexProviderResolver.resolved(rawProvider)
+        )
+        let params = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            IOSCodexProviderResolver.augmentParamsForCodex(
+                TextGenerationParams(
+                    model: model,
+                    temperature: nil,
+                    topP: nil,
+                    maxTokens: nil,
+                    tools: [],
+                    reasoningLevel: ReasoningLevel.off,
+                    customHeaders: [],
+                    customBody: []
+                ),
+                provider: provider
             ),
             provider: provider
         )
@@ -558,6 +587,69 @@ private extension IOSContextCompactionCoordinator {
             total + message.role.name.count + message.parts.reduce(0) { $0 + estimatedChars($1) }
         }
         return max(chars / 4, messages.count * 4)
+    }
+
+    static func nextTurnOccupancyTokens(
+        messages: [UIMessage],
+        activeCompacts: [IOSConversationCompact],
+        draftText: String,
+        extraWeightedChars: Int,
+        systemOverheadText: String
+    ) -> Int {
+        let existingIds = Set(messages.map(messageId))
+        let completed = validCompletedCompacts(activeCompacts, existingMessageIds: existingIds)
+        let lastAssistant = messages.last { message in
+            guard message.role == MessageRole.assistant, let usage = message.usage else {
+                return false
+            }
+            return usage.promptTokens > 0 || usage.completionTokens > 0
+        }
+        let lastCompactAt = completed.map(\.createdAt).max()
+        let usageIsFresh = lastAssistant.map { assistant in
+            guard let lastCompactAt else { return true }
+            guard let assistantMillis = ChatContextSnapshot.epochMillis(from: assistant.createdAt) else {
+                return false
+            }
+            return assistantMillis >= lastCompactAt
+        } ?? false
+
+        let base: Int
+        if usageIsFresh, let lastAssistant, let usage = lastAssistant.usage {
+            let tail: [UIMessage]
+            if let index = messages.lastIndex(where: { $0.id == lastAssistant.id }) {
+                tail = Array(messages.suffix(from: index + 1))
+            } else {
+                tail = []
+            }
+            base = Int(usage.promptTokens) + Int(usage.completionTokens)
+                + (tail.isEmpty ? 0 : estimateTokens(tail))
+        } else {
+            base = estimatePreparedMessages(messages, activeCompacts: completed)
+                + estimateDraftTokens(text: systemOverheadText, extraWeightedChars: 0)
+        }
+        return base + estimateDraftTokens(text: draftText, extraWeightedChars: extraWeightedChars)
+    }
+
+    static func estimatePreparedMessages(
+        _ messages: [UIMessage],
+        activeCompacts: [IOSConversationCompact]
+    ) -> Int {
+        guard !activeCompacts.isEmpty else { return estimateTokens(messages) }
+        let existingIds = Set(messages.map(messageId))
+        let selected = selectCompactsForInjection(
+            activeCompacts: activeCompacts,
+            existingMessageIds: existingIds
+        )
+        let summaries = selected.map { UIMessage.companion.system(prompt: injectionText($0)) }
+        let covered = Set(activeCompacts.flatMap(\.sourceMessageIds))
+        let recent = messages.filter { !covered.contains(messageId($0)) }
+        return estimateTokens(summaries + recent)
+    }
+
+    static func estimateDraftTokens(text: String, extraWeightedChars: Int) -> Int {
+        let weighted = text.weightedTokenChars + max(extraWeightedChars, 0)
+        guard weighted > 0 else { return 0 }
+        return max(weighted / 4, 1)
     }
 
     static func estimateContextWindow(_ modelContextWindowTokens: Int?) -> Int {
@@ -1678,6 +1770,48 @@ enum ContextCompactionEditTestSupport {
     }
 
     static let compactedToolOutputMarker = IOSContextCompactionCoordinator.compactedToolOutputMarker
+
+    static func nextTurnOccupancyTokens(
+        messages: [UIMessage],
+        compactSourceIds: [String],
+        compactCreatedAt: Int64,
+        compactSummary: String = "handoff",
+        draftText: String = "",
+        extraWeightedChars: Int = 0,
+        systemOverheadText: String = ""
+    ) -> Int {
+        let compacts: [IOSConversationCompact]
+        if compactSourceIds.isEmpty {
+            compacts = []
+        } else {
+            compacts = [
+                IOSConversationCompact(
+                    id: "compact-test",
+                    conversationId: "conv",
+                    summary: compactSummary,
+                    level: 1,
+                    sourceStartIndex: 0,
+                    sourceEndIndex: max(compactSourceIds.count - 1, 0),
+                    sourceMessageIds: compactSourceIds,
+                    tokenEstimate: 256,
+                    createdAt: compactCreatedAt,
+                    updatedAt: compactCreatedAt,
+                    status: "completed"
+                ),
+            ]
+        }
+        return IOSContextCompactionCoordinator.nextTurnOccupancyTokens(
+            messages: messages,
+            activeCompacts: compacts,
+            draftText: draftText,
+            extraWeightedChars: extraWeightedChars,
+            systemOverheadText: systemOverheadText
+        )
+    }
+
+    static func estimatedTokens(_ messages: [UIMessage]) -> Int {
+        IOSContextCompactionCoordinator.estimateTokens(messages)
+    }
 }
 #endif
 

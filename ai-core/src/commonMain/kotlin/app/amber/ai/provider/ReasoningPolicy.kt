@@ -475,7 +475,7 @@ internal fun ProviderSetting?.isXaiApiEndpoint(): Boolean {
     val openAI = this as? ProviderSetting.OpenAI ?: return false
     val host = openAI.baseUrl.hostOfBaseUrl()
     val name = openAI.name.lowercase()
-    return host == "api.x.ai" || name == "xai" || name == "x.ai"
+    return host == "api.x.ai" || host == "cli-chat-proxy.grok.com" || name == "xai" || name == "x.ai"
 }
 
 internal fun String.hostOfBaseUrl(): String {

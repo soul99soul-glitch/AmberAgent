@@ -396,6 +396,13 @@ enum NovelGenerationDocumentValidator {
                     !uniqueIndices.isEmpty &&
                     uniqueIndices == Array(0...uniqueIndices.last!)
                 if !validSingle && !validChunks {
+                    // Quiet rest drops receipts while keeping the
+                    // `syncManualEdits` ledger row. A later generation then
+                    // adds unrelated receipts; this row still has none.
+                    // Partial chunks for THIS owner are still corruption.
+                    if matchingInjections.isEmpty {
+                        continue
+                    }
                     issues.append("A successful manual sync has incomplete chunk receipts.")
                 }
             default:

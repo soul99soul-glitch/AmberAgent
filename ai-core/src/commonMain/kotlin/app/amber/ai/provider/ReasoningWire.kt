@@ -41,7 +41,8 @@ fun planOpenAICompatibleThinking(
         id.isQwen38Max() -> qwen38Fields(level)
         id.isMiniMaxM3() -> miniMaxM3Fields(level)
         id.isMiniMaxM2() -> OpenAICompatibleThinkingFields(thinkingType = "adaptive")
-        id.isGrok46() || id.isGrok45() || host == "api.x.ai" -> grokFields(id, level)
+        id.isGrok46() || id.isGrok45() || host == "api.x.ai" || host == "cli-chat-proxy.grok.com" ->
+            grokFields(id, level)
         isMiMoHost(host, brand, id) -> OpenAICompatibleThinkingFields(
             thinkingType = if (level.isEnabled) "enabled" else "disabled",
         )

@@ -1052,6 +1052,7 @@ private val IOS_TOOL_DECLARATION_PROVIDERS: Map<String, () -> Tool> = mapOf(
     "session_read" to ::createSessionReadToolDeclaration,
     "provider_config_status" to ::createProviderConfigStatusToolDeclaration,
     "provider_config_apply" to ::createProviderConfigApplyToolDeclaration,
+    "provider_config_create" to ::createProviderConfigCreateToolDeclaration,
     "provider_refresh_models" to ::createProviderRefreshModelsToolDeclaration,
     "settings_set_model_slot" to ::createSettingsSetModelSlotToolDeclaration,
     "theme_pack_status" to ::createThemePackStatusToolDeclaration,
@@ -1277,13 +1278,49 @@ fun createProviderConfigStatusToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createProviderConfigCreateToolDeclaration(): Tool = Tool(
+    name = "provider_config_create",
+    description = """
+        Create a new user-owned OpenAI-compatible provider shell (brand generic, not a bundled
+        brand like MiMo). Requires name and https base_url. Optional api_key and chat_completions_path.
+        Host shows an approval card. After create, call provider_refresh_models then
+        settings_set_model_slot. Do not invent bundled brands — configure those via provider_config_apply.
+    """.trimIndent().replace("\n", " "),
+    parameters = {
+        InputSchema.Obj(
+            properties = buildJsonObject {
+                put("name", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Display name for the new provider.")
+                })
+                put("base_url", buildJsonObject {
+                    put("type", "string")
+                    put("description", "HTTPS OpenAI-compatible base URL.")
+                })
+                put("api_key", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional API key. Omit to create a key-less shell.")
+                })
+                put("chat_completions_path", buildJsonObject {
+                    put("type", "string")
+                    put("description", "Optional path, e.g. /chat/completions.")
+                })
+            },
+            required = listOf("name", "base_url")
+        )
+    },
+    needsApproval = true,
+    execute = { emptyList() }
+)
+
 fun createProviderConfigApplyToolDeclaration(): Tool = Tool(
     name = "provider_config_apply",
     description = """
         Apply configuration to one existing LLM provider (enable/name/base URL/API key).
         The host shows an approval card before writing. API keys are stored in the secure
         key store and are never echoed in the tool result. Prefer provider_id when known.
-        Do not clear a key unless the user explicitly asked.
+        Do not clear a key unless the user explicitly asked. Cannot create providers — use
+        provider_config_create for new OpenAI-compatible shells.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(
@@ -1361,9 +1398,10 @@ fun createProviderRefreshModelsToolDeclaration(): Tool = Tool(
 fun createSettingsSetModelSlotToolDeclaration(): Tool = Tool(
     name = "settings_set_model_slot",
     description = """
-        Set a global model slot (chat, title, ocr, compress, suggestion, image_generation)
-        to an already-configured model by UUID or fuzzy model_ref. Fails if the reference
-        is ambiguous or the model type does not match the slot.
+        Set a fixed model role slot to an already-configured model by UUID or fuzzy model_ref.
+        Allowed slots only: chat, assistant_chat, title, ocr, compress, suggestion, image_generation.
+        Provider names (e.g. mimo) are not slots. Fails if the reference is ambiguous or the
+        model type does not match the slot. Prefer models whose provider has chat_streaming_supported=true.
     """.trimIndent().replace("\n", " "),
     parameters = {
         InputSchema.Obj(

@@ -140,6 +140,23 @@ class OpenAIKmpProviderRequestTest {
     }
 
     @Test
+    fun grokCliProxyResponsesOmitsEncryptedContentAndUsesGrokEffort() {
+        val body = provider.buildResponsesRequestBody(
+            providerSetting = setting.copy(baseUrl = "https://cli-chat-proxy.grok.com/v1"),
+            messages = listOf(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("hi")))),
+            params = TextGenerationParams(
+                model = reasoningModel("grok-4.6"),
+                reasoningLevel = ReasoningLevel.XHIGH,
+            ),
+            stream = true,
+        )
+        val reasoning = body.getValue("reasoning").jsonObject
+        assertEquals("xhigh", reasoning.getValue("effort").jsonPrimitive.content)
+        assertFalse("summary" in reasoning)
+        assertFalse("include" in body)
+    }
+
+    @Test
     fun openAiChatCompletionsKeepsXhigh() {
         val body = provider.buildChatCompletionRequest(
             providerSetting = setting,

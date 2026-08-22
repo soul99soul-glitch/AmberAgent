@@ -3,6 +3,7 @@ package shared
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.OpenAIBrand
@@ -227,5 +228,31 @@ class IosSettingsMutationsProviderTest {
         assertEquals("GPT 5.3 Codex", refreshed.displayName)
         assertEquals(123_456, refreshed.contextWindowTokens)
         assertEquals("kept", refreshed.customHeaders.single().value)
+    }
+
+    @Test
+    fun adoptGrokOAuthCatalogDropsWebIdsAndStampsAbilities() {
+        val keptId = Uuid.random()
+        val webId = Uuid.random()
+        val provider = ProviderSetting.OpenAI(
+            models = listOf(
+                Model(id = keptId, modelId = "custom-keep", displayName = "Keep"),
+                Model(id = webId, modelId = "grok-4.20-fast", displayName = "Web Fast"),
+            ),
+        )
+
+        val updated = IosSettingsMutations.adoptGrokOAuthChatCatalog(
+            settings = Settings(providers = listOf(provider)),
+            providerId = provider.id.toString(),
+            catalog = listOf("grok-4.6" to "Grok 4.6", "grok-4.5" to "Grok 4.5"),
+            dropModelIds = listOf("grok-4.20-fast", "grok-4.20-auto"),
+        ).providers.single()
+
+        assertEquals(setOf("custom-keep", "grok-4.6", "grok-4.5"), updated.models.map { it.modelId }.toSet())
+        assertEquals(keptId, updated.models.single { it.modelId == "custom-keep" }.id)
+        assertTrue(updated.models.none { it.modelId == "grok-4.20-fast" })
+        val grok46 = updated.models.single { it.modelId == "grok-4.6" }
+        assertEquals(listOf(ModelAbility.TOOL, ModelAbility.REASONING), grok46.abilities)
+        assertTrue(updated.models.single { it.modelId == "custom-keep" }.abilities.isEmpty())
     }
 }

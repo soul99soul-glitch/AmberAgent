@@ -325,10 +325,14 @@ final class IOSSettingsWiringTests: XCTestCase {
         let configuration = try source("iosApp/ChatProviderConfiguration.swift")
         let coordinator = try source("iosApp/ChatGenerationCoordinator.swift")
         let grokProvider = try source("iosApp/IOSGrokWebProvider.swift")
+        let grokOAuth = try source("iosApp/IOSGrokOAuthClient.swift")
 
         XCTAssertTrue(detail.contains("GrokWebLoginView("))
-        XCTAssertTrue(detail.contains("IOSGrokWebConstants.webBaseUrl"))
-        XCTAssertTrue(detail.contains("updateProviderChatModels"))
+        XCTAssertTrue(detail.contains("IOSGrokWebConstants.cliProxyBaseUrl"))
+        XCTAssertTrue(detail.contains("adoptGrokOAuthChatCatalog"))
+        XCTAssertTrue(detail.contains("legacyWebModelIds"))
+        XCTAssertTrue(detail.contains("setCurrentChatModelId(grok46.id.description())"))
+        XCTAssertTrue(detail.contains("IOSGrokOAuthAuthStore.loadBackup"))
         XCTAssertTrue(detail.contains("grokSection"))
         XCTAssertTrue(detail.contains("tokenPlanSection"))
         XCTAssertTrue(detail.contains("headerDisguiseSection"))
@@ -343,12 +347,13 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(configuration.contains("credentialStatusTitle"))
 
         XCTAssertTrue(coordinator.contains("IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)"))
+        XCTAssertTrue(coordinator.contains("IOSGrokWebProviderResolver.resolved("))
         XCTAssertTrue(coordinator.contains("IOSGrokWebClient(providerId: providerId).streamText"))
         XCTAssertTrue(coordinator.contains("grokWebStreamTask?.cancel()"))
-        XCTAssertTrue(coordinator.contains("!IOSGrokWebProviderResolver.isGrokWebProvider(handoff.providerSetting)"))
+        XCTAssertTrue(coordinator.contains("IOSGrokWebProviderResolver.isGrokWebConfiguration(grokOpenAI)"))
+        XCTAssertTrue(coordinator.contains("backgroundProviderSetting: effectiveProvider"))
         XCTAssertTrue(detail.contains("providerBackup: grokProviderBackup"))
         XCTAssertTrue(detail.contains("baseUrl: backup.baseUrl"))
-        XCTAssertTrue(detail.contains("if shouldSeedModels"))
         XCTAssertTrue(grokProvider.contains("IOSGrokWebBrowserTransport"))
         XCTAssertTrue(grokProvider.contains(#"credentials: "include""#))
         XCTAssertTrue(grokProvider.contains("Authorization"))
@@ -356,6 +361,9 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertTrue(grokProvider.contains("@escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void"))
         XCTAssertTrue(grokProvider.contains("Grok Web 未能停留在 grok.com"))
         XCTAssertTrue(grokProvider.contains("if oauthToken != nil"))
+        XCTAssertTrue(grokProvider.contains("cliProxyBaseUrl"))
+        XCTAssertTrue(grokOAuth.contains("cli-chat-proxy.grok.com"))
+        XCTAssertTrue(grokOAuth.contains("grok-4.6"))
         XCTAssertFalse(grokProvider.contains("session.bytes(for:"))
         XCTAssertTrue(detail.contains("用 Grok 账号登录"))
         XCTAssertFalse(detail.contains("已通过系统浏览器授权"))
@@ -370,6 +378,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertFalse(grokLogin.contains("GrokWebLoginWebView"))
         XCTAssertFalse(grokLogin.contains("WKWebView"))
         XCTAssertTrue(grokLogin.contains("IOSGrokOAuthPKCE.buildAuthorizationURL"))
+        XCTAssertTrue(grokLogin.contains("if !model.isSignedIn"))
+        XCTAssertTrue(grokOAuth.contains("oauth.backup"))
     }
 
     func testGrokOAuthAuthorizationURLUsesLoopbackAndPKCE() {
@@ -391,6 +401,8 @@ final class IOSSettingsWiringTests: XCTestCase {
         XCTAssertEqual(values["code_challenge_method"], "S256")
         XCTAssertTrue(values["scope"]?.contains("offline_access") == true)
         XCTAssertTrue(values["scope"]?.contains("grok-cli:access") == true)
+        XCTAssertTrue(values["scope"]?.contains("conversations:read") == true)
+        XCTAssertTrue(values["scope"]?.contains("api:access") == true)
 
         let callback = "GET /callback?code=abc&state=st HTTP/1.1\r\nHost: 127.0.0.1:8787\r\n\r\n"
         let callbackURL = IOSLoopbackOAuthRequest.callbackURL(
@@ -460,6 +472,95 @@ final class IOSSettingsWiringTests: XCTestCase {
         IOSGrokOAuthAuthStore.clear(providerId: providerId)
         XCTAssertNil(IOSGrokOAuthAuthStore.load(providerId: providerId))
         XCTAssertFalse(IOSGrokWebProviderResolver.isSignedIn(provider))
+    }
+
+    func testGrokOAuthResolvedRewritesToCliProxyAndAttachesIdentityHeaders() async throws {
+        let id = KotlinUuid.companion.random()
+        let providerId = id.description()
+        defer { IOSGrokOAuthAuthStore.clear(providerId: providerId) }
+
+        let tokens = IOSGrokOAuthTokens(
+            accessToken: "grok-access",
+            refreshToken: "grok-refresh",
+            expiresAtMillis: 3_000_000_000_000,
+            idToken: nil,
+            email: "grok@example.com",
+            providerBackup: nil
+        )
+        XCTAssertTrue(IOSGrokOAuthAuthStore.save(providerId: providerId, tokens: tokens))
+
+        let original = ProviderSetting.OpenAI(
+            id: id,
+            enabled: true,
+            name: "xAI",
+            models: [],
+            balanceOption: BalanceOption(enabled: false, apiPath: "", resultPath: ""),
+            builtIn: false,
+            descriptionText: nil,
+            shortDescriptionText: nil,
+            apiKey: "",
+            baseUrl: IOSGrokWebConstants.webBaseUrl,
+            chatCompletionsPath: "/conversations/new",
+            useResponseApi: true,
+            authMode: OpenAIAuthMode.apiKey,
+            brand: OpenAIBrand.generic
+        )
+        XCTAssertTrue(IOSGrokWebProviderResolver.isGrokWebConfiguration(original))
+        XCTAssertFalse(IOSGrokWebProviderResolver.isGrokCliProxyConfiguration(original))
+
+        let resolved = try await IOSGrokWebProviderResolver.resolved(original)
+        let openAI = try XCTUnwrap(resolved as? ProviderSetting.OpenAI)
+        XCTAssertEqual(openAI.apiKey, "grok-access")
+        XCTAssertEqual(openAI.baseUrl, IOSGrokWebConstants.cliProxyBaseUrl)
+        XCTAssertTrue(openAI.useResponseApi)
+        XCTAssertTrue(IOSGrokWebProviderResolver.isGrokCliProxyConfiguration(openAI))
+        XCTAssertFalse(IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI))
+        XCTAssertTrue(IOSGrokWebProviderResolver.isXAIProvider(openAI))
+
+        let model = Model(
+            modelId: "grok-4.6",
+            displayName: "Grok 4.6",
+            id: KotlinUuid.companion.random(),
+            type: ModelType.chat,
+            customHeaders: [],
+            customBodies: [],
+            inputModalities: [],
+            outputModalities: [],
+            abilities: [],
+            tools: Set<BuiltInTools>(),
+            contextWindowTokens: nil,
+            providerOverwrite: nil
+        )
+        let params = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            TextGenerationParams(
+                model: model,
+                temperature: nil,
+                topP: nil,
+                maxTokens: nil,
+                tools: [],
+                reasoningLevel: ReasoningLevel.off,
+                customHeaders: [],
+                customBody: []
+            ),
+            provider: openAI
+        )
+        let headers = Dictionary(uniqueKeysWithValues: params.customHeaders.map { ($0.name, $0.value) })
+        XCTAssertEqual(headers["x-grok-client-identifier"], "grok-shell")
+        XCTAssertEqual(headers["x-grok-client-version"], IOSGrokCliProxyIdentity.clientVersion)
+        XCTAssertEqual(headers["X-XAI-Token-Auth"], "xai-grok-cli")
+        XCTAssertEqual(headers["x-authenticateresponse"], "authenticate-response")
+        XCTAssertEqual(headers["x-grok-model-override"], "grok-4.6")
+        XCTAssertEqual(IOSGrokWebConstants.fallbackModels.first?.modelId, "grok-4.6")
+    }
+
+    func testGrokCliProxyModelListParserReadsOpenAIShape() {
+        let json = """
+        {"data":[{"id":"grok-4.6","name":"Grok 4.6"},{"id":"grok-build"}]}
+        """.data(using: .utf8)!
+        let models = IOSGrokOAuthClient.parseModels(json)
+        XCTAssertEqual(models.map(\.modelId), ["grok-4.6", "grok-build"])
+        XCTAssertEqual(models.first?.displayName, "Grok 4.6")
+        XCTAssertEqual(models.last?.displayName, "grok-build")
     }
 
     func testGrokWebAuthenticationRequiresSSOAndRestoresReadWriteCookies() {

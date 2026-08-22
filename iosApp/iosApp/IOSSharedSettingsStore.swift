@@ -637,6 +637,25 @@ final class IOSSharedSettingsStore {
         return merged.providers.first { ($0.id.description() as String) == providerId }
     }
 
+    @discardableResult
+    func adoptGrokOAuthChatCatalog(
+        providerId: String,
+        models: [(modelId: String, displayName: String)],
+        dropModelIds: [String]
+    ) -> ProviderSetting? {
+        let pairs = models.map {
+            KotlinPair(first: $0.modelId as NSString, second: $0.displayName as NSString)
+        }
+        let merged = IosSettingsMutations.shared.adoptGrokOAuthChatCatalog(
+            settings: snapshot,
+            providerId: providerId,
+            catalog: pairs,
+            dropModelIds: dropModelIds
+        )
+        restoreSnapshot(merged)
+        return merged.providers.first { ($0.id.description() as String) == providerId }
+    }
+
     /// Merge discovered chat models without deleting private/manual models or
     /// replacing existing model UUIDs and metadata.
     @discardableResult

@@ -1195,7 +1195,7 @@ final class NovelCreationPresentationTests: XCTestCase {
                 message: "The configured model no longer exists.",
                 isRetryable: false
             )),
-            "项目模型当前不可用，请在右上角“设置”的“项目模型覆盖”中重新选择。"
+            "项目绑定的模型已失效（服务商或模型 ID 已变）。请在右上角「项目模型覆盖」重新选择，或改回跟随全局。"
         )
     }
 

@@ -516,36 +516,37 @@ enum NovelWorkspaceProjectStore {
 
     // MARK: - Engine sections
 
+    @discardableResult
     static func writeEngineSections(
         document: NovelProjectDocumentV1,
         projectDirectory: URL,
-        fileManager: FileManager = .default
-    ) throws {
+        fileManager: FileManager = .default,
+        cache: NovelProjectShardedStorage.SectionCache? = nil
+    ) throws -> NovelProjectShardedStorage.SectionCache {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        _ = try NovelProjectShardedStorage.writePackage(
+        return try NovelProjectShardedStorage.writePackage(
             document: persistableAtRest(document),
             packageDirectory: engineDirectory(in: projectDirectory),
             encoder: encoder,
             fileManager: fileManager,
-            cache: nil
+            cache: cache
         )
     }
 
     /// At quiet rest the bulky receipt evidence and completed run records
     /// are dropped from persistence: transitions only need an unchanged
     /// prefix, and replay identity lives in appliedOperations, which is
-    /// kept. The projection is deliberately CONSERVATIVE — the load-time
-    /// validator requires receipts for manual-sync ledger entries, polish
-    /// attempts and fact attempts, and interrupted runs back interrupted
-    /// prose candidates, so any document carrying that history keeps
-    /// everything and prunes nothing.
+    /// kept. Running and interrupted runs pin the whole history (they
+    /// back an in-flight receipt or an interrupted-draft candidate).
+    /// Pending fact transactions and polish attempts do the same.
+    /// Completed-run origin IDs on setting proposals, and historical
+    /// `syncManualEdits` ledger rows, stay — the load-time validator
+    /// accepts those without the pruned runs/receipts.
     static func persistableAtRest(_ document: NovelProjectDocumentV1) -> NovelProjectDocumentV1 {
         var persistable = document
         guard document.pendingOperations.isEmpty,
-              document.polishAttempts.isEmpty,
-              document.factAttempts.isEmpty,
-              !document.appliedOperations.contains(where: { $0.kind == .syncManualEdits })
+              document.polishAttempts.isEmpty
         else { return persistable }
         // Prune ONLY when every run is completed/failed. Any running or
         // interrupted run anchors receipts, its startRun ledger entry, or an
@@ -557,6 +558,7 @@ enum NovelWorkspaceProjectStore {
         persistable.activeRuns = []
         persistable.injectionReceipts = []
         persistable.generationReceipts = []
+        persistable.factAttempts = []
         // Pruned runs take their ledger entries with them — the validator
         // requires every startRun operation to point at a run that still
         // exists. Collect/edit operations stay.

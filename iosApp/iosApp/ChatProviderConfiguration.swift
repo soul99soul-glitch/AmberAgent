@@ -79,7 +79,7 @@ enum ChatConfigurationIssue: Equatable {
         case .codexNotSignedIn:
             "请先在服务商设置里用 ChatGPT 账号登录 Codex，再发送消息。"
         case .grokNotSignedIn:
-            "请先在 xAI 服务商设置里登录 grok.com，再发送消息。"
+            "请先在 xAI 服务商设置里用 Grok 账号登录，再发送消息。"
         case .geminiNotSignedIn:
             "请先在 Gemini 服务商设置里用 Google 账号登录 Antigravity，再发送消息。"
         }

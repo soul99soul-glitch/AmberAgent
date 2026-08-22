@@ -1343,14 +1343,42 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
     ) throws -> NovelProjectDocumentV1 {
         let generationNormalized = NovelGenerationReducer
             .normalizingLegacyInterruptedProseCandidates(document)
-        let normalized = NovelBranchSemantics.normalizingDecodedSyncStatus(generationNormalized)
+        var normalized = NovelBranchSemantics.normalizingDecodedSyncStatus(generationNormalized)
         guard normalized.project.id == projectID else {
             throw NovelError.corruptedProject(
                 projectID: projectID,
                 details: "Document project ID does not match its filename."
             )
         }
-        try NovelDocumentValidator.validate(normalized)
+        if isWorkspaceNative(projectID) {
+            // Disk may still carry residues from an older prune that dropped
+            // runs/receipts but left factAttempts. Load equals the quiet-rest
+            // projection the next commit would persist.
+            let persistable = NovelWorkspaceProjectStore.persistableAtRest(normalized)
+            // Count-only: a full document == walks 12MB snapshots on this book.
+            let droppedResidues =
+                persistable.factAttempts.count != normalized.factAttempts.count ||
+                persistable.activeRuns.count != normalized.activeRuns.count ||
+                persistable.injectionReceipts.count != normalized.injectionReceipts.count ||
+                persistable.generationReceipts.count != normalized.generationReceipts.count ||
+                persistable.appliedOperations.count != normalized.appliedOperations.count
+            normalized = persistable
+            try NovelDocumentValidator.validate(normalized)
+            if droppedResidues, reconcileWorkspace {
+                // Keep the encode cache. Nilling it makes the next user commit
+                // treat checkout as never published and rewrite all 37 chapters.
+                if let cache = try? NovelWorkspaceProjectStore.writeEngineSections(
+                    document: normalized,
+                    projectDirectory: packageURL(for: projectID),
+                    fileManager: fileManager,
+                    cache: sectionCaches[projectID]
+                ) {
+                    sectionCaches[projectID] = cache
+                }
+            }
+        } else {
+            try NovelDocumentValidator.validate(normalized)
+        }
         if isWorkspaceNative(projectID) {
             // The markdown tree is the runtime book. Reconcile decides which
             // side is ahead (a failed publish reprints from the engine; a
@@ -1578,6 +1606,9 @@ actor NovelFileProjectRepository: NovelProjectPersisting {
         let expectedEntries = Set(manifest.entries)
         let actualEntries = Set(diskInventory.entries)
         guard expectedEntries == actualEntries else { return nil }
+        // A degraded row is last scan's failure. Signatures can stay
+        // identical after a load-time heal, so never treat those as fresh.
+        if cachedProjects.contains(where: \.isDegraded) { return nil }
         return cachedProjects.sorted(by: NovelProjectSummary.listOrder)
     }
 

@@ -984,4 +984,245 @@ final class NovelWorkspaceRepositoryTests: XCTestCase {
         XCTAssertFalse(reloaded.document.activeRuns.isEmpty)
         _ = project
     }
+
+    // MARK: - Over-pruned quiet rest (赵大来了 load)
+
+    func testPersistableAtRestDropsOrphanFactAttemptsAtQuietRest() throws {
+        var document = try NovelTestFixtures.document()
+        document.factAttempts.append(Self.orphanFactAttempt(in: document))
+        XCTAssertFalse(document.factAttempts.isEmpty)
+
+        let pruned = NovelWorkspaceProjectStore.persistableAtRest(document)
+        XCTAssertTrue(pruned.factAttempts.isEmpty)
+        XCTAssertTrue(pruned.activeRuns.isEmpty)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(pruned))
+    }
+
+    func testQuietRestAcceptsPrunedOriginProposalsAndInterruptedDraft() throws {
+        var document = try NovelTestFixtures.document()
+        document.settingProposals.append(Self.orphanQuickStartProposal(in: document))
+        Self.attachInterruptedDraftWithoutRun(to: &document)
+
+        XCTAssertTrue(document.activeRuns.isEmpty)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(document))
+        XCTAssertNoThrow(
+            try NovelDocumentValidator.validate(
+                NovelWorkspaceProjectStore.persistableAtRest(document)
+            )
+        )
+    }
+
+    func testQuietRestHistoricalManualSyncAllowsStartingARun() async throws {
+        let root = try makeRoot()
+        let document = try NovelBranchTestFixtures.documentWithCollectedCandidate(
+            content: "陈桥驿的风先到。"
+        )
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        _ = try await repository.createProject(document, workspaceNative: true)
+
+        var quiet = try await repository.loadProject(id: document.project.id).document
+        Self.attachHistoricalManualSync(to: &quiet)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(quiet))
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let project = projectDirectory(root, document.project.id)
+        _ = try NovelProjectShardedStorage.writePackage(
+            document: quiet,
+            packageDirectory: NovelWorkspaceProjectStore.engineDirectory(in: project),
+            encoder: encoder,
+            fileManager: .default,
+            cache: nil
+        )
+
+        let loaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: document.project.id)
+        XCTAssertTrue(loaded.document.injectionReceipts.isEmpty)
+        XCTAssertTrue(
+            loaded.document.appliedOperations.contains(where: { $0.kind == .syncManualEdits })
+        )
+
+        let request = try NovelBranchTestFixtures.runRequest(
+            document: loaded.document,
+            branchID: loaded.document.branches[0].id,
+            kind: .prose,
+            userText: "下一章。"
+        )
+        let started = try NovelGenerationReducer.begin(
+            request,
+            artifacts: try NovelBranchTestFixtures.generationArtifacts(
+                document: loaded.document,
+                request: request
+            ),
+            in: loaded.document,
+            now: NovelBranchTestFixtures.timestamp(for: loaded.document, offset: 1)
+        ).document
+        XCTAssertFalse(started.injectionReceipts.isEmpty)
+        XCTAssertNoThrow(try NovelDocumentValidator.validate(started))
+        XCTAssertNoThrow(
+            try NovelDocumentValidator.validateTransition(from: loaded.document, to: started)
+        )
+        _ = try await NovelFileProjectRepository(rootDirectory: root).commitProject(
+            started,
+            expectedRevision: loaded.document.project.revision
+        )
+    }
+
+    func testOverPrunedEngineLoadsReadWrite() async throws {
+        let root = try makeRoot()
+        let document = try NovelTestFixtures.document()
+        let repository = NovelFileProjectRepository(rootDirectory: root)
+        _ = try await repository.createProject(document, workspaceNative: true)
+
+        var broken = try await repository.loadProject(id: document.project.id).document
+        broken.factAttempts.append(Self.orphanFactAttempt(in: broken))
+        broken.settingProposals.append(Self.orphanQuickStartProposal(in: broken))
+        Self.attachInterruptedDraftWithoutRun(to: &broken)
+        XCTAssertThrowsError(try NovelDocumentValidator.validate(broken)) {
+            guard case .invalidDocument(let issues) = $0 as? NovelError else {
+                return XCTFail("Expected invalidDocument, got \($0)")
+            }
+            XCTAssertTrue(
+                issues.contains(where: { $0.contains("progress-attempt") }),
+                "unhealed engine must still fail factAttempts: \(issues)"
+            )
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let project = projectDirectory(root, document.project.id)
+        _ = try NovelProjectShardedStorage.writePackage(
+            document: broken,
+            packageDirectory: NovelWorkspaceProjectStore.engineDirectory(in: project),
+            encoder: encoder,
+            fileManager: .default,
+            cache: nil
+        )
+
+        let loaded = try await NovelFileProjectRepository(rootDirectory: root)
+            .loadProject(id: document.project.id)
+        XCTAssertEqual(loaded.access, .readWrite)
+        XCTAssertEqual(loaded.document.project.name, document.project.name)
+        XCTAssertTrue(loaded.document.factAttempts.isEmpty)
+        XCTAssertEqual(loaded.document.settingProposals.count, 1)
+        XCTAssertEqual(loaded.document.candidates.count, 1)
+        XCTAssertEqual(loaded.document.candidates[0].status, .interrupted)
+    }
+
+    private static func attachHistoricalManualSync(
+        to document: inout NovelProjectDocumentV1
+    ) {
+        let operationID = NovelOperationID()
+        let checkpointID = NovelCheckpointID()
+        let branch = document.branches[0]
+        let head = document.checkpoints.first { $0.id == branch.headCheckpointID }
+        let revision = document.project.revision + 1
+        document.checkpoints.append(
+            NovelBranchCheckpointRecord(
+                id: checkpointID,
+                kind: .manualSync,
+                createdOnBranchID: branch.id,
+                parentCheckpointID: branch.headCheckpointID,
+                chapterSelections: head?.chapterSelections ?? branch.workingChapterSelections,
+                stateSnapshotID: branch.currentStateSnapshotID,
+                sessionCursor: head?.sessionCursor ?? .empty,
+                branchOverrideRevisionIDs: head?.branchOverrideRevisionIDs ?? branch.overrideRevisionIDs,
+                sourceCandidateID: nil,
+                baseHeadRevision: branch.headRevision,
+                operationID: operationID,
+                createdAt: document.project.updatedAt
+            )
+        )
+        document.appliedOperations.append(
+            NovelAppliedOperationRecord(
+                operationID: operationID,
+                kind: .syncManualEdits,
+                payloadSHA256: NovelDocumentValidator.sha256("quiet-rest-historical-sync"),
+                outcome: .manualSyncCommitted(
+                    projectID: document.project.id,
+                    branchID: branch.id,
+                    checkpointID: checkpointID,
+                    revision: revision
+                ),
+                appliedProjectRevision: revision,
+                appliedAt: document.project.updatedAt
+            )
+        )
+        document.branches[0].headCheckpointID = checkpointID
+        document.branches[0].headRevision = branch.headRevision + 1
+        document.project.revision = revision
+    }
+
+    private static func orphanFactAttempt(
+        in document: NovelProjectDocumentV1
+    ) -> NovelFactAttemptRecord {
+        NovelFactAttemptRecord(
+            pendingID: NovelPendingOperationID(),
+            ownerOperationID: NovelOperationID(),
+            attemptOperationID: NovelOperationID(),
+            attemptPayloadSHA256: NovelDocumentValidator.sha256("quiet-rest-residue"),
+            branchID: document.branches[0].id,
+            kind: .manualRebuild,
+            firstChunkIndex: 0,
+            createdAt: document.project.updatedAt
+        )
+    }
+
+    private static func orphanQuickStartProposal(
+        in document: NovelProjectDocumentV1
+    ) -> NovelSettingProposalRecord {
+        NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: document.branches[0].id,
+            title: "世界",
+            content: "迁徙后留下的设定提案。",
+            createdAt: document.project.updatedAt,
+            isResolved: false,
+            origin: .quickStart(runID: NovelRunID(), suggestedKind: .world)
+        )
+    }
+
+    private static func attachInterruptedDraftWithoutRun(
+        to document: inout NovelProjectDocumentV1
+    ) {
+        let messageID = NovelMessageID()
+        let candidateID = NovelCandidateID()
+        let checkpointID = document.checkpoints.first(where: { $0.kind == .initial })?.id
+            ?? document.checkpoints.first?.id
+        guard let checkpointID,
+              let sessionIndex = document.sessions.firstIndex(where: {
+                  $0.branchID == document.branches[0].id
+              }) else {
+            return
+        }
+        document.sessions[sessionIndex].messages = [
+            NovelSessionMessageRecord(
+                id: messageID,
+                sequence: 0,
+                role: .assistant,
+                mode: .writeProse,
+                kind: .interruptedDraft,
+                content: "被中断的半章。",
+                createdAt: document.project.updatedAt,
+                runID: NovelRunID(),
+                candidateID: candidateID
+            )
+        ]
+        document.candidates.append(
+            NovelCandidateRecord(
+                id: candidateID,
+                kind: .prose,
+                branchID: document.branches[0].id,
+                sessionID: document.sessions[sessionIndex].id,
+                sourceMessageID: messageID,
+                baseCheckpointID: checkpointID,
+                baseHeadRevision: 0,
+                status: .interrupted,
+                content: "被中断的半章。",
+                sourceChapterVersionID: nil,
+                collectedCheckpointID: nil,
+                createdAt: document.project.updatedAt
+            )
+        )
+    }
 }

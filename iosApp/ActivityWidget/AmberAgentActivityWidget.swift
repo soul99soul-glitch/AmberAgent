@@ -273,22 +273,29 @@ private struct AgentActivityStatusGlint: ViewModifier {
             content
                 .foregroundStyle(.white.opacity(baseOpacity))
                 .overlay {
+                    // WidgetKit archives Live Activity views with unstable/zero
+                    // proposals; GeometryReader + place asserts (EXC_BREAKPOINT)
+                    // when width/height are non-finite or ~0. Skip the band then.
                     GeometryReader { proxy in
-                        let bandWidth = max(proxy.size.width * 0.30, 14)
-                        LinearGradient(
-                            stops: [
-                                .init(color: .clear, location: 0),
-                                .init(color: .white.opacity(overlayOpacity), location: 0.5),
-                                .init(color: .clear, location: 1)
-                            ],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                        .frame(width: bandWidth)
-                        .phaseAnimator([false, true], trigger: trigger) { band, phase in
-                            band.offset(x: phase ? proxy.size.width + bandWidth : -bandWidth)
-                        } animation: { _ in
-                            .linear(duration: 2.0)
+                        let width = proxy.size.width
+                        let height = proxy.size.height
+                        if width.isFinite, height.isFinite, width > 1, height > 0 {
+                            let bandWidth = max(width * 0.30, 14)
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .clear, location: 0),
+                                    .init(color: .white.opacity(overlayOpacity), location: 0.5),
+                                    .init(color: .clear, location: 1)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: bandWidth, height: height)
+                            .phaseAnimator([false, true], trigger: trigger) { band, phase in
+                                band.offset(x: phase ? width + bandWidth : -bandWidth)
+                            } animation: { _ in
+                                .linear(duration: 2.0)
+                            }
                         }
                     }
                     .mask(content.foregroundStyle(.white))

@@ -645,8 +645,11 @@ enum NovelPresentation {
         switch failure.code {
         case "cancelled", "polish_abandoned":
             return "生成已取消。"
-        case "global_model_missing", "global_provider_missing", "fixed_provider_missing",
-             "fixed_model_missing", "effective_provider_missing", "provider_disabled",
+        case "global_model_missing", "global_provider_missing":
+            return "还没有可用的全局聊天模型，请先在设置里配好服务商和默认模型。"
+        case "fixed_provider_missing", "fixed_model_missing":
+            return "项目绑定的模型已失效（服务商或模型 ID 已变）。请在右上角「项目模型覆盖」重新选择，或改回跟随全局。"
+        case "effective_provider_missing", "provider_disabled",
              "model_not_chat", "model_unavailable", "grok_isolation_missing",
              "grok_isolation_unavailable", "grok_provider_invalid":
             return "项目模型当前不可用，请在右上角“设置”的“项目模型覆盖”中重新选择。"

@@ -181,6 +181,17 @@ enum NovelDocumentValidator {
         }
     }
 
+    /// Quiet rest drops completed origin runs while leaving the proposals
+    /// that named them. A later completed run of a different id must not
+    /// resurrect the check. A run ID that is still present (wrong
+    /// kind/status) is still a validator failure.
+    private static func quietRestDroppedCompletedOriginRun(
+        _ runID: NovelRunID,
+        in document: NovelProjectDocumentV1
+    ) -> Bool {
+        !document.activeRuns.contains(where: { $0.id == runID })
+    }
+
     static func sha256(_ value: String) -> String {
         SHA256.hash(data: Data(value.utf8))
             .map { String(format: "%02x", $0) }
@@ -739,7 +750,11 @@ enum NovelDocumentValidator {
                         $0.kind == .characterProposal &&
                         $0.status == .completed
                 }) else {
-                    issues.append("Contextual character proposal \(proposal.id) has no completed source run.")
+                    if !quietRestDroppedCompletedOriginRun(runID, in: document) {
+                        issues.append(
+                            "Contextual character proposal \(proposal.id) has no completed source run."
+                        )
+                    }
                     continue
                 }
                 if NovelCharacterIdentityResolver.normalize(sourceMention) !=
@@ -784,7 +799,9 @@ enum NovelDocumentValidator {
                     $0.kind == .quickStart &&
                     $0.status == .completed
             }) else {
-                issues.append("Quick-start proposal \(proposal.id) has no completed source run.")
+                if !quietRestDroppedCompletedOriginRun(runID, in: document) {
+                    issues.append("Quick-start proposal \(proposal.id) has no completed source run.")
+                }
                 continue
             }
             if proposal.isResolved && proposal.supersededByRunID != nil {
@@ -1204,15 +1221,19 @@ enum NovelDocumentValidator {
                 for: candidate,
                 candidatesByID: candidateByID
             )
+            let matchingInterruptedRun = message.runID.flatMap { runID in
+                document.activeRuns.first {
+                    $0.id == runID &&
+                        $0.status == .interrupted &&
+                        ($0.kind == .prose || $0.kind == .regenerate) &&
+                        $0.candidateID == rootCandidateID
+                }
+            } != nil
+            // Quiet rest that over-pruned the interrupted run still leaves the
+            // interrupted-draft candidate; the draft is collectable without a
+            // live run to retry.
             let isInterruptedProseMessage = message.kind == .interruptedDraft &&
-                message.runID.flatMap { runID in
-                    document.activeRuns.first {
-                        $0.id == runID &&
-                            $0.status == .interrupted &&
-                            ($0.kind == .prose || $0.kind == .regenerate) &&
-                            $0.candidateID == rootCandidateID
-                    }
-                } != nil
+                (candidate.status == .interrupted || matchingInterruptedRun)
             if candidate.kind == .prose &&
                 message.kind != .proseCandidate &&
                 !isInterruptedProseMessage {

@@ -119,8 +119,17 @@ struct NovelLiveCodexHooks: @unchecked Sendable {
 
     static let production = NovelLiveCodexHooks(
         isCodex: { IOSCodexProviderResolver.isCodexProvider($0) },
-        resolve: { try await IOSCodexProviderResolver.resolved($0) },
-        augment: { IOSCodexProviderResolver.augmentParamsForCodex($0, provider: $1) },
+        resolve: {
+            try await IOSGrokWebProviderResolver.resolved(
+                try await IOSCodexProviderResolver.resolved($0)
+            )
+        },
+        augment: { params, provider in
+            IOSGrokWebProviderResolver.augmentParamsForGrok(
+                IOSCodexProviderResolver.augmentParamsForCodex(params, provider: provider),
+                provider: provider
+            )
+        },
         diagnose: {
             IOSCodexProviderResolver.writeRequestDiagnostic(
                 originalProvider: $0,
@@ -260,7 +269,12 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
             try ensureRoute(route, stillMatches: request.model)
             try ensureRunStillActive(request.runID)
 
-            let isGrokWeb = IOSGrokWebProviderResolver.isGrokWebProvider(route.provider)
+            let effectiveProvider = try await codex.resolve(route.provider)
+            try ensureRunStillActive(request.runID)
+            let isGrokWeb = {
+                guard let openAI = effectiveProvider as? ProviderSetting.OpenAI else { return false }
+                return IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)
+            }()
             let userEnabledSearch: Bool
             if request.purpose == .discussion {
                 userEnabledSearch = await discussionSearchEnabled()
@@ -290,13 +304,8 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
                 includeProjectTools: novelProjectContext != nil &&
                     discussionTransport != nil
             )
-            var effectiveProvider = route.provider
-            if codex.isCodex(route.provider) {
-                effectiveProvider = try await codex.resolve(route.provider)
-                try ensureRunStillActive(request.runID)
-                parameters = codex.augment(parameters, effectiveProvider)
-                codex.diagnose(route.provider, effectiveProvider, parameters)
-            }
+            parameters = codex.augment(parameters, effectiveProvider)
+            codex.diagnose(route.provider, effectiveProvider, parameters)
 
             let callbackSink = NovelLiveCallbackSink(
                 runID: request.runID,
@@ -511,24 +520,36 @@ actor NovelLiveModelAdapter: NovelDurableModelRunning {
             model = currentModel
 
         case .fixed(let providerID, let modelID):
-            guard let fixedProvider = catalog.providers.first(where: {
+            let fixedProvider = catalog.providers.first(where: {
                 Self.sameStableID($0.id.description(), providerID)
-            }) else {
+            })
+            let fixedModel = fixedProvider?.models.first(where: {
+                Self.sameStableID($0.id.description(), modelID)
+            })
+            if let fixedProvider, let fixedModel {
+                ownerProvider = fixedProvider
+                model = fixedModel
+            } else if let currentModel = catalog.currentModel,
+                      let currentProvider = Self.ownerProvider(
+                        for: currentModel,
+                        providers: catalog.providers
+                      ) {
+                // Project override still holds UUIDs from an old settings seed
+                // (reinstall / re-add provider / refresh models). Global chat is
+                // configured — use it rather than hard-failing "模型不可用".
+                ownerProvider = currentProvider
+                model = currentModel
+            } else if fixedProvider == nil {
                 throw Self.failure(
                     code: "fixed_provider_missing",
-                    message: "项目固定的服务商已不存在，请重新选择模型。"
+                    message: "项目绑定的服务商已不存在（设置可能已重建）。请在「项目模型覆盖」重新选择，或先配置全局聊天模型。"
                 )
-            }
-            guard let fixedModel = fixedProvider.models.first(where: {
-                Self.sameStableID($0.id.description(), modelID)
-            }) else {
+            } else {
                 throw Self.failure(
                     code: "fixed_model_missing",
-                    message: "项目固定的模型已不存在，请重新选择模型。"
+                    message: "项目绑定的模型已不存在（列表可能已刷新）。请在「项目模型覆盖」重新选择，或先配置全局聊天模型。"
                 )
             }
-            ownerProvider = fixedProvider
-            model = fixedModel
         }
 
         guard let provider = ChatProviderConfiguration.provider(

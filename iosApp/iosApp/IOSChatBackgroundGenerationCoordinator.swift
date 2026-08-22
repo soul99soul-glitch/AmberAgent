@@ -148,6 +148,7 @@ final class IOSChatBackgroundRunState: @unchecked Sendable {
     private var terminalFinalized = false
     private var systemTaskCompletionClaimed = false
     private var operationTask: Task<IOSAgentToolEngineResult, Never>?
+    private var speedClock = ChatGenerationSpeedClock()
 
     var isExpired: Bool {
         lock.lock()
@@ -194,6 +195,24 @@ final class IOSChatBackgroundRunState: @unchecked Sendable {
         lock.unlock()
         task?.cancel()
         return true
+    }
+
+    func resetGenerationRound() {
+        lock.lock()
+        speedClock.resetRound()
+        lock.unlock()
+    }
+
+    func noteVisibleDelta() {
+        lock.lock()
+        speedClock.noteVisibleDelta()
+        lock.unlock()
+    }
+
+    func generationDuration() -> TimeInterval? {
+        lock.lock()
+        defer { lock.unlock() }
+        return speedClock.duration()
     }
 
     func installOperationTask(_ task: Task<IOSAgentToolEngineResult, Never>) {
@@ -859,6 +878,7 @@ final class IOSChatBackgroundGenerationCoordinator {
         }
         let runState = activeRunStates[requestId] ?? IOSChatBackgroundRunState()
         activeRunStates[requestId] = runState
+        runState.resetGenerationRound()
         let accumulator = IOSChatDurableResponseAccumulator(
             displayMessages: job.displayMessages,
             model: job.params.model
@@ -875,6 +895,9 @@ final class IOSChatBackgroundGenerationCoordinator {
                     startingAfter: 0,
                     customHeaders: job.params.customHeaders,
                     onChunk: { chunk in
+                        if ChatGenerationSpeedClock.chunkHasVisibleContent(chunk) {
+                            runState.noteVisibleDelta()
+                        }
                         job.messagesSnapshot.replace(with: accumulator.append(chunk))
                     },
                     onCheckpoint: { _, _ in },
@@ -1047,10 +1070,11 @@ final class IOSChatBackgroundGenerationCoordinator {
         messages: [UIMessage],
         runState: IOSChatBackgroundRunState
     ) async {
-        let miniAppApplication = job.saveMiniAppIfPresent?(messages, job.conversationId)
+        let stamped = messages.applyingLastAssistantGenerationDuration(runState.generationDuration())
+        let miniAppApplication = job.saveMiniAppIfPresent?(stamped, job.conversationId)
         let didSave = await job.conversationStore.saveBackgroundCompletion(
             baseMessages: job.displayMessages,
-            completedMessages: messages,
+            completedMessages: stamped,
             to: job.conversationId
         )
         if didSave {
@@ -1067,11 +1091,11 @@ final class IOSChatBackgroundGenerationCoordinator {
         )
         guard runState.finalizeTerminal() else { return }
         if didSave {
-            notifyRunTerminal(job: job, runId: job.runId, finalMessages: messages)
+            notifyRunTerminal(job: job, runId: job.runId, finalMessages: stamped)
             WatchTaskCoordinator.shared.publishCompleted(
                 runId: job.runId,
                 conversationId: job.conversationId.toHexDashString(),
-                summary: Self.backgroundSummary(from: messages)
+                summary: Self.backgroundSummary(from: stamped)
             )
             await job.liveActivityController.end(runId: job.runId, presentation: .completed())
             finish(runId: job.runId, requestId: requestId)
@@ -1178,8 +1202,13 @@ final class IOSChatBackgroundGenerationCoordinator {
         let requestProvider: ProviderSetting
         let requestParams: TextGenerationParams
         do {
-            requestProvider = try await IOSCodexProviderResolver.resolved(job.providerSetting)
-            requestParams = IOSCodexProviderResolver.augmentParamsForCodex(job.params, provider: requestProvider)
+            requestProvider = try await IOSGrokWebProviderResolver.resolved(
+                try await IOSCodexProviderResolver.resolved(job.providerSetting)
+            )
+            requestParams = IOSGrokWebProviderResolver.augmentParamsForGrok(
+                IOSCodexProviderResolver.augmentParamsForCodex(job.params, provider: requestProvider),
+                provider: requestProvider
+            )
         } catch {
             await fail(
                 job: job,
@@ -1282,6 +1311,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                     toolExposureBridge: job.toolExposureBridge,
                     mailboxDrain: mailboxDrain,
                     onAssistantTurnStarted: {
+                        runState.resetGenerationRound()
                         assistantTextSnapshot.replace(with: "")
                         presentationEvents.continuation.yield(
                             AgentActivityPresentation.response(
@@ -1295,11 +1325,17 @@ final class IOSChatBackgroundGenerationCoordinator {
                         )
                     },
                     onAssistantStage: { stage in
+                        if stage == .thinking || stage == .generating {
+                            runState.noteVisibleDelta()
+                        }
                         presentationEvents.continuation.yield(
                             AgentActivityPresentation.response(stage: stage)
                         )
                     },
                     onAssistantText: { text in
+                        if !text.isEmpty {
+                            runState.noteVisibleDelta()
+                        }
                         assistantTextSnapshot.replace(with: text)
                     },
                     onMessagesUpdated: { messages in
@@ -1363,6 +1399,7 @@ final class IOSChatBackgroundGenerationCoordinator {
                     toolExposureBridge: job.toolExposureBridge,
                     mailboxDrain: mailboxDrain,
                     onAssistantTurnStarted: {
+                        runState.resetGenerationRound()
                         assistantTextSnapshot.replace(with: "")
                         presentationEvents.continuation.yield(
                             AgentActivityPresentation.response(
@@ -1376,11 +1413,17 @@ final class IOSChatBackgroundGenerationCoordinator {
                         )
                     },
                     onAssistantStage: { stage in
+                        if stage == .thinking || stage == .generating {
+                            runState.noteVisibleDelta()
+                        }
                         presentationEvents.continuation.yield(
                             AgentActivityPresentation.response(stage: stage)
                         )
                     },
                     onAssistantText: { text in
+                        if !text.isEmpty {
+                            runState.noteVisibleDelta()
+                        }
                         assistantTextSnapshot.replace(with: text)
                     },
                     onMessagesUpdated: { messages in
@@ -1465,7 +1508,9 @@ final class IOSChatBackgroundGenerationCoordinator {
             return
         }
 
-        var finalMessages = reconciledMessages
+        var finalMessages = reconciledMessages.applyingLastAssistantGenerationDuration(
+            runState.generationDuration()
+        )
         if job.mode == .continueModel,
            job.toolRuntime.hasUnresolvedToolCall(in: finalMessages) {
             finalMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
@@ -1628,7 +1673,9 @@ final class IOSChatBackgroundGenerationCoordinator {
         runState: IOSChatBackgroundRunState,
         reconciledMessages: [UIMessage]
     ) async {
-        var finalMessages = reconciledMessages
+        var finalMessages = reconciledMessages.applyingLastAssistantGenerationDuration(
+            runState.generationDuration()
+        )
         if job.toolRuntime.hasUnresolvedToolCall(in: finalMessages) {
             finalMessages = job.toolRuntime.messagesByFailingPendingToolCalls(
                 in: finalMessages,

@@ -620,7 +620,7 @@ description: 当用户要画 SVG、矢量图、流程图、架构图、示意图
 name: provider-setup
 version: 1.0.0
 description: 当用户要配置 LLM 提供商、API Key、默认模型、刷新模型列表，或说「帮我把 OpenRouter/DeepSeek 也配上」时使用。先盘点再写入，密钥须用户批准。
-allowed-tools: tool_search provider_config_status provider_config_apply provider_refresh_models settings_set_model_slot ask_user
+allowed-tools: tool_search provider_config_status provider_config_apply provider_config_create provider_refresh_models settings_set_model_slot ask_user
 ---
 
 # 提供商配置助手（provider-setup）
@@ -629,18 +629,20 @@ allowed-tools: tool_search provider_config_status provider_config_apply provider
 
 ## 强制流程
 
-1. `provider_config_status`（可选 `provider_name_contains`）— 看壳是否在、有无 key、chat 模型数、默认槽位是否可解析。
-2. 缺 key 时用 `ask_user` 或请用户在本轮消息里粘贴；**不要编造 key**。
-3. `provider_config_apply`（优先 `provider_id`）— 等用户审批卡；结果只有 `has_api_key` / `api_key_status`，**永不回显密钥**。
-4. 若 `chat_model_count` 为 0：`provider_refresh_models`（默认 `merge`）。
-5. `settings_set_model_slot` 设 `chat`（或 title/ocr 等）；`model_ref` 多匹配时改用 `model_id`。
-6. 再 `provider_config_status` 复核，用自然语言汇报。
+1. `provider_config_status`（可选 `provider_name_contains`）— 看壳是否在、有无 key、`chat_streaming_supported`、chat 模型数、槽位是否可解析。
+2. **没有壳**且用户要新 OpenAI 兼容端点：`provider_config_create`（name + base_url，可选 key）— 等审批；不要拿 bundled 品牌名硬当 slot。
+3. **已有壳**（含 MiMo 等）：`provider_config_apply`（优先 `provider_id`）— 等审批；结果只有 `has_api_key`，**永不回显密钥**。
+4. 缺 key 时用 `ask_user` 或请用户本轮粘贴；**不要编造 key**。
+5. 若 `chat_model_count` 为 0：`provider_refresh_models`（默认 `merge`）。
+6. `settings_set_model_slot` 只能用固定槽：`chat` / `assistant_chat` / `title` / `ocr` / `compress` / `suggestion` / `image_generation`。**mimo 是 brand 不是 slot**。`model_ref` 多匹配时改用 `model_id`。优先 `chat_streaming_supported=true` 的模型。
+7. 再 `provider_config_status` 复核，用自然语言汇报。
 
 ## 规则
 
 - **禁止**用 `workspace_file_write` 改 plist / 设置文件。
 - **禁止**跨 provider 默认复制 key，除非用户明确说「同一个 key 也用于 X」。
 - **禁止**打开 high-risk 自动批准、exec JS、沙箱 root 等高风险开关。
+- MiMo 等 `chat_streaming_supported=false` 的壳可配置/出现在设置列表，但当前 iOS 聊天链仍不能当主对话引擎。
 - 写密钥必须等用户批准；后台 run 不能写配置。
 - 声称「无法改设置」之前先 `tool_search`「配置提供商」。
 """#

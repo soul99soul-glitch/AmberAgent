@@ -741,7 +741,8 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
         params: TextGenerationParams,
         stream: Boolean,
     ): JsonObject {
-        val capabilities = resolveResponseProviderCapabilities(hostOf(providerSetting.baseUrl))
+        val host = hostOf(providerSetting.baseUrl)
+        val capabilities = resolveResponseProviderCapabilities(host)
         return buildJsonObject {
             put("model", params.model.modelId)
             put("stream", stream)
@@ -768,7 +769,16 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
 
             // reasoning
             if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                val effort = openAIResponsesReasoningEffort(params.reasoningLevel)
+                val effort = if (host == "cli-chat-proxy.grok.com") {
+                    planOpenAICompatibleThinking(
+                        host,
+                        providerSetting.brand,
+                        params.model.modelId,
+                        params.reasoningLevel,
+                    ).reasoningEffort
+                } else {
+                    openAIResponsesReasoningEffort(params.reasoningLevel)
+                }
                 if (effort != null || params.reasoningLevel == ReasoningLevel.AUTO) {
                     put("reasoning", buildJsonObject {
                         if (capabilities.supportsReasoningSummary && params.reasoningLevel.isEnabled) {
@@ -1331,6 +1341,10 @@ class OpenAIKmpProvider : Provider<ProviderSetting.OpenAI> {
     private fun resolveResponseProviderCapabilities(host: String): ResponseProviderCapabilities =
         when (host) {
             "ark.cn-beijing.volces.com" -> ResponseProviderCapabilities(
+                supportsReasoningSummary = false,
+                supportEncryptedContent = false,
+            )
+            "cli-chat-proxy.grok.com" -> ResponseProviderCapabilities(
                 supportsReasoningSummary = false,
                 supportEncryptedContent = false,
             )

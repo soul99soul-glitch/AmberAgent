@@ -6,12 +6,20 @@ enum IOSGrokWebConstants {
     static let origin = "https://grok.com"
     static let webBaseUrl = "https://grok.com/rest/app-chat"
     static let conversationUrl = "https://grok.com/rest/app-chat/conversations"
-
+    static let cliProxyBaseUrl = "https://cli-chat-proxy.grok.com/v1"
+    static let cliProxyHost = "cli-chat-proxy.grok.com"
     static let fallbackModels: [(modelId: String, displayName: String)] = [
-        (modelId: "grok-4.20-fast", displayName: "Grok 4.20 Fast"),
-        (modelId: "grok-4.20-auto", displayName: "Grok 4.20 Auto"),
-        (modelId: "grok-4.20-expert", displayName: "Grok 4.20 Expert"),
-        (modelId: "grok-4.20-heavy", displayName: "Grok 4.20 Heavy"),
+        (modelId: "grok-4.6", displayName: "Grok 4.6"),
+        (modelId: "grok-4.5", displayName: "Grok 4.5"),
+        (modelId: "grok-4.20-0309-reasoning", displayName: "Grok 4.20 Reasoning"),
+        (modelId: "grok-build", displayName: "Grok Build"),
+    ]
+
+    static let legacyWebModelIds: Set<String> = [
+        "grok-4.20-fast",
+        "grok-4.20-auto",
+        "grok-4.20-expert",
+        "grok-4.20-heavy",
     ]
 }
 
@@ -137,7 +145,7 @@ enum IOSGrokWebProviderResolver {
 
     static func isGrokWebProvider(_ provider: ProviderSetting) -> Bool {
         guard let openAI = provider as? ProviderSetting.OpenAI else { return false }
-        return isGrokWebConfiguration(openAI)
+        return isGrokWebConfiguration(openAI) || isGrokCliProxyConfiguration(openAI)
     }
 
     static func isSignedIn(_ provider: ProviderSetting) -> Bool {
@@ -152,6 +160,7 @@ enum IOSGrokWebProviderResolver {
             && IOSGrokWebCookieValidator.hasSSOCookie(in: session.cookieHeader)
     }
 
+    /// Legacy grok.com webpage chat. Cookie sessions still use WKWebView.
     static func isGrokWebConfiguration(_ openAI: ProviderSetting.OpenAI) -> Bool {
         let value = openAI.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let components = URLComponents(string: value),
@@ -163,6 +172,15 @@ enum IOSGrokWebProviderResolver {
         return path == "rest/app-chat" || path == "rest/app-chat/conversations"
     }
 
+    static func isGrokCliProxyConfiguration(_ openAI: ProviderSetting.OpenAI) -> Bool {
+        guard let components = URLComponents(string: openAI.baseUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
+              components.scheme?.lowercased() == "https",
+              let host = components.host?.lowercased() else {
+            return false
+        }
+        return host == IOSGrokWebConstants.cliProxyHost
+    }
+
     static func isXAIProvider(_ provider: ProviderSetting?) -> Bool {
         guard let openAI = provider as? ProviderSetting.OpenAI else { return false }
         let name = openAI.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -172,7 +190,58 @@ enum IOSGrokWebProviderResolver {
               let host = components.host?.lowercased() else {
             return false
         }
-        return host == "api.x.ai" || host == "grok.com"
+        return host == "api.x.ai"
+            || host == "grok.com"
+            || host == IOSGrokWebConstants.cliProxyHost
+    }
+
+    /// Injects a live OAuth bearer and rewrites the endpoint to the CLI proxy
+    /// so KMP Responses can run Grok 4.6 on the SuperGrok quota. Cookie-only
+    /// grok.com sessions pass through unchanged.
+    static func resolved(_ provider: ProviderSetting) async throws -> ProviderSetting {
+        guard let openAI = provider as? ProviderSetting.OpenAI else { return provider }
+        let key = providerKey(openAI)
+        guard IOSGrokOAuthAuthStore.load(providerId: key) != nil else { return provider }
+        let token = try await IOSGrokOAuthClients.shared(providerId: key).getValidAccessToken()
+        return ProviderSetting.OpenAI(
+            id: openAI.id,
+            enabled: openAI.enabled,
+            name: openAI.name,
+            models: openAI.models,
+            balanceOption: openAI.balanceOption,
+            builtIn: openAI.builtIn,
+            descriptionText: openAI.descriptionText,
+            shortDescriptionText: openAI.shortDescriptionText,
+            apiKey: token,
+            baseUrl: IOSGrokWebConstants.cliProxyBaseUrl,
+            chatCompletionsPath: "/chat/completions",
+            useResponseApi: true,
+            authMode: openAI.authMode,
+            brand: openAI.brand
+        )
+    }
+
+    static func augmentParamsForGrok(
+        _ params: TextGenerationParams,
+        provider: ProviderSetting
+    ) -> TextGenerationParams {
+        guard let openAI = provider as? ProviderSetting.OpenAI else { return params }
+        let hasOAuth = IOSGrokOAuthAuthStore.load(providerId: providerKey(openAI)) != nil
+        guard isGrokCliProxyConfiguration(openAI) || hasOAuth else { return params }
+        var headers = params.customHeaders
+        for (name, value) in IOSGrokCliProxyIdentity.headers(modelId: params.model.modelId) {
+            headers.upsertGrokHeader(name: name, value: value)
+        }
+        return TextGenerationParams(
+            model: params.model,
+            temperature: params.temperature,
+            topP: params.topP,
+            maxTokens: params.maxTokens,
+            tools: params.tools,
+            reasoningLevel: params.reasoningLevel,
+            customHeaders: headers,
+            customBody: params.customBody
+        )
     }
 }
 
@@ -317,7 +386,7 @@ enum IOSGrokWebError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notSignedIn:
-            "尚未登录 Grok，请先在 xAI 服务商设置里登录 grok.com。"
+            "尚未登录 Grok，请先在 xAI 服务商设置里用 Grok 账号登录。"
         case .unsupportedModel(let modelId):
             "\(modelId) 是 xAI API 模型或尚未适配的网页模型，不能通过 Grok Web 登录调用。请改用已列出的 Grok Web 模型，或单独配置 xAI API / sub2api。"
         case .httpStatus(let status):
@@ -719,5 +788,12 @@ struct IOSGrokWebClient {
         let random = String((0..<8).map { _ in symbols.randomElement() ?? "a" })
         let message = "e:TypeError: Cannot read properties of undefined (reading '\(random)')"
         return Data(message.utf8).base64EncodedString()
+    }
+}
+
+private extension Array where Element == CustomHeader {
+    mutating func upsertGrokHeader(name: String, value: String) {
+        removeAll { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        append(CustomHeader(name: name, value: value))
     }
 }

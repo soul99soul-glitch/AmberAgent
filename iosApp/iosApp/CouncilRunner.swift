@@ -880,9 +880,14 @@ final class IOSCouncilTextStreamer: IOSCouncilTextStreaming {
         params: TextGenerationParams,
         onUpdate: @escaping @MainActor (String, CGFloat) -> Void
     ) async throws -> String {
-        let effectiveProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
-        let effectiveParams = IOSCodexProviderResolver.augmentParamsForCodex(
-            params,
+        let effectiveProvider = try await IOSGrokWebProviderResolver.resolved(
+            try await IOSCodexProviderResolver.resolved(providerSetting)
+        )
+        let effectiveParams = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            IOSCodexProviderResolver.augmentParamsForCodex(
+                params,
+                provider: effectiveProvider
+            ),
             provider: effectiveProvider
         )
         let accumulator = MessageStreamAccumulator(initialMessages: messages, model: effectiveParams.model)

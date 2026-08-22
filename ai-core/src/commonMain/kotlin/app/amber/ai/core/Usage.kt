@@ -8,6 +8,9 @@ data class TokenUsage(
     val completionTokens: Int = 0,
     val cachedTokens: Int = 0,
     val totalTokens: Int = 0,
+    /// Visible decode time for the last LLM round, excluding tool/approval waits.
+    /// 0 means unknown (older messages, or no visible delta was observed).
+    val generationDurationMs: Int = 0,
 )
 
 fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
@@ -27,10 +30,16 @@ fun TokenUsage?.merge(other: TokenUsage): TokenUsage {
     } else {
         this?.cachedTokens ?: 0
     }
+    val generationDurationMs = if (other.generationDurationMs > 0) {
+        other.generationDurationMs
+    } else {
+        this?.generationDurationMs ?: 0
+    }
     return TokenUsage(
         promptTokens = promptTokens,
         completionTokens = completionTokens,
         totalTokens = totalTokens,
-        cachedTokens = cachedTokens
+        cachedTokens = cachedTokens,
+        generationDurationMs = generationDurationMs,
     )
 }

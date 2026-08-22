@@ -149,15 +149,20 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
         messages: [UIMessage],
         params: TextGenerationParams
     ) async throws -> MessageChunk {
-        if let openAI = providerSetting as? ProviderSetting.OpenAI,
+        let resolvedProvider = try await IOSGrokWebProviderResolver.resolved(
+            try await IOSCodexProviderResolver.resolved(providerSetting)
+        )
+        let resolvedParams = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            IOSCodexProviderResolver.augmentParamsForCodex(
+                params,
+                provider: resolvedProvider
+            ),
+            provider: resolvedProvider
+        )
+        if let openAI = resolvedProvider as? ProviderSetting.OpenAI,
            IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI) {
             return try await grokGenerator(openAI, messages, params)
         }
-        let resolvedProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
-        let resolvedParams = IOSCodexProviderResolver.augmentParamsForCodex(
-            params,
-            provider: providerSetting
-        )
         if let openAI = resolvedProvider as? ProviderSetting.OpenAI {
             return try await openAIProvider.generateText(
                 providerSetting: openAI,
@@ -183,16 +188,22 @@ public struct OpenAIKmpProviderAdapter: IOSAgentTextProvider, IOSAgentStreamingP
         providerSetting: ProviderSetting,
         params: TextGenerationParams
     ) async throws -> (ProviderSetting, TextGenerationParams) {
-        let resolvedProvider = try await IOSCodexProviderResolver.resolved(providerSetting)
-        let resolvedParams = IOSCodexProviderResolver.augmentParamsForCodex(
-            params,
-            provider: providerSetting
+        let resolvedProvider = try await IOSGrokWebProviderResolver.resolved(
+            try await IOSCodexProviderResolver.resolved(providerSetting)
+        )
+        let resolvedParams = IOSGrokWebProviderResolver.augmentParamsForGrok(
+            IOSCodexProviderResolver.augmentParamsForCodex(
+                params,
+                provider: resolvedProvider
+            ),
+            provider: resolvedProvider
         )
         return (resolvedProvider, resolvedParams)
     }
 
     public func supportsStreaming(providerSetting: ProviderSetting) -> Bool {
-        !IOSGrokWebProviderResolver.isGrokWebProvider(providerSetting)
+        guard let openAI = providerSetting as? ProviderSetting.OpenAI else { return true }
+        return !IOSGrokWebProviderResolver.isGrokWebConfiguration(openAI)
     }
 
     public func streamText(
