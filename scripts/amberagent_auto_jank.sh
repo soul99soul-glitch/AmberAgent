@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ADB="${ADB:-/Users/arquiel/Library/Android/sdk/platform-tools/adb}"
+if [[ -z "${ADB:-}" ]]; then
+  if [[ -n "${ANDROID_HOME:-}" ]]; then
+    ADB="$ANDROID_HOME/platform-tools/adb"
+  elif [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+    ADB="$ANDROID_SDK_ROOT/platform-tools/adb"
+  else
+    ADB="adb"
+  fi
+fi
 SERIAL="${SERIAL:-c9a8a837}"
 PACKAGE="${PACKAGE:-app.amber.agent}"
 REPEATS="${REPEATS:-3}"
