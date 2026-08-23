@@ -798,9 +798,15 @@ extension NovelGenerationReducer {
         guard !prompt.question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw NovelError.invalidInput("Ask User requires question text.")
         }
-        if [prompt.chapterRevision != nil, prompt.manuscriptRevert != nil, prompt.workspacePlot != nil]
-            .filter({ $0 }).count > 1 {
-            throw NovelError.invalidInput("Ask User cannot combine chapter revision, manuscript revert, and plot write.")
+        if [
+            prompt.chapterRevision != nil,
+            prompt.manuscriptRevert != nil,
+            prompt.manuscriptDelete != nil,
+            prompt.workspacePlot != nil,
+        ].filter({ $0 }).count > 1 {
+            throw NovelError.invalidInput(
+                "Ask User cannot combine chapter revision, manuscript revert, manuscript delete, and plot write."
+            )
         }
         if let revision = prompt.chapterRevision {
             guard prompt.options == NovelChapterRevisionApproval.options else {
@@ -827,6 +833,18 @@ extension NovelGenerationReducer {
                   revert.chapterOrdinals.count == revert.chapterCount,
                   Set(revert.chapterIDs).count == revert.chapterCount else {
                 throw NovelError.invalidInput("Manuscript revert approval is missing chapter targets.")
+            }
+            return
+        }
+        if let deletion = prompt.manuscriptDelete {
+            guard prompt.options == NovelManuscriptDeleteApproval.options else {
+                throw NovelError.invalidInput("Manuscript delete approval must use the fixed confirm/reject options.")
+            }
+            guard !deletion.chapterIDs.isEmpty,
+                  deletion.chapterIDs.count == deletion.chapterTitles.count,
+                  deletion.chapterTitles.count == deletion.chapterOrdinals.count,
+                  Set(deletion.chapterIDs).count == deletion.chapterIDs.count else {
+                throw NovelError.invalidInput("Manuscript delete approval is missing chapter targets.")
             }
             return
         }

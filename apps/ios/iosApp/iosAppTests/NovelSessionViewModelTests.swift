@@ -700,6 +700,59 @@ final class NovelSessionViewModelTests: XCTestCase {
         XCTAssertEqual(harness.session.durableMessages[3].content, "那就先强化他保护家人的选择。")
     }
 
+    func testStaleManuscriptDeleteApprovalDoesNotDeleteChapter() async throws {
+        let fixture = try documentWithChapter()
+        let branch = fixture.document.branches[0]
+        let prompt = NovelAskUserPrompt(
+            question: "将第 1 章《第一章》从正文目录删除？",
+            options: NovelManuscriptDeleteApproval.options,
+            manuscriptDelete: NovelManuscriptDeleteProposal(
+                chapterIDs: [fixture.chapterID],
+                chapterTitles: ["第一章"],
+                chapterOrdinals: [1],
+                expectedHeadRevision: branch.headRevision,
+                expectedWorkingRevision: branch.workingRevision,
+                reason: nil
+            )
+        )
+        let harness = try await makeHarness(
+            document: fixture.document,
+            scripts: [
+                NovelModelScript(steps: [.askUser(prompt, preface: "请确认是否抽掉这一章。")]),
+                NovelModelScript(steps: [.delta(validRebuildJSON), .complete]),
+            ]
+        )
+        harness.session.mode = .discussPlan
+
+        let didStart = await harness.session.send(text: "删掉第一章")
+        XCTAssertTrue(didStart)
+        let didAsk = await eventually {
+            !harness.session.isRunning &&
+                harness.session.durableMessages.last?.interaction == .askUser(prompt)
+        }
+        XCTAssertTrue(didAsk)
+        let promptMessage = try XCTUnwrap(harness.session.durableMessages.last)
+
+        let saved = await harness.workspace.saveManualRewrite(
+            chapterID: fixture.chapterID,
+            title: "第一章",
+            content: "Mara opened the archive."
+        )
+        XCTAssertTrue(saved)
+
+        let didAnswer = await harness.session.answerAskUser(
+            promptMessageID: promptMessage.id,
+            answer: NovelManuscriptDeleteApproval.approveOption
+        )
+        XCTAssertFalse(didAnswer)
+        XCTAssertEqual(harness.session.operationErrorMessage, "当前分支已经变化，请重新发起删除。")
+        XCTAssertTrue(
+            harness.workspace.branchSnapshot?.branch.workingChapterSelections.contains {
+                $0.chapterID == fixture.chapterID
+            } == true
+        )
+    }
+
     func testAskUserAppearsOnTransientTailBeforeQuietWindowRetire() async throws {
         let prompt = NovelAskUserPrompt(
             question: "他此刻更害怕失去谁？",

@@ -1147,6 +1147,21 @@ final class NovelSessionViewModel {
                 return false
             }
         }
+        if let deletion = prompt.manuscriptDelete {
+            let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed == NovelManuscriptDeleteApproval.approveOption {
+                guard await applyManuscriptDelete(deletion) else { return false }
+                locallyResolvedAskUser[promptMessageID] = NovelAskUserResponse(
+                    promptMessageID: promptMessageID,
+                    answer: trimmed
+                )
+                operationErrorMessage = nil
+                return true
+            } else if trimmed != NovelManuscriptDeleteApproval.rejectOption {
+                operationErrorMessage = "请选择从正文目录删除或取消这次删除。"
+                return false
+            }
+        }
         let response = NovelAskUserResponse(
             promptMessageID: promptMessageID,
             answer: answer
@@ -1231,6 +1246,32 @@ final class NovelSessionViewModel {
         if !reverted {
             operationErrorMessage = workspace.errorMessage ?? "回退章节失败，请重试。"
             return false
+        }
+        return true
+    }
+
+    private func applyManuscriptDelete(_ proposal: NovelManuscriptDeleteProposal) async -> Bool {
+        if isGhostwriting {
+            operationErrorMessage = "代笔正在推进本章，暂时不能从正文目录删除章节。"
+            return false
+        }
+        guard let binding,
+              let snapshot = workspace.projectSnapshot,
+              let branch = snapshot.branches.first(where: { $0.id == binding.branchID }) else {
+            operationErrorMessage = "当前分支不可用，无法从正文目录删除章节。"
+            return false
+        }
+        guard branch.headRevision == proposal.expectedHeadRevision,
+              branch.workingRevision == proposal.expectedWorkingRevision else {
+            operationErrorMessage = "当前分支已经变化，请重新发起删除。"
+            return false
+        }
+        for chapterID in proposal.chapterIDs {
+            let deleted = await workspace.deleteChapterFromManuscript(chapterID: chapterID)
+            if !deleted {
+                operationErrorMessage = workspace.errorMessage ?? "从正文目录删除失败，请重试。"
+                return false
+            }
         }
         return true
     }

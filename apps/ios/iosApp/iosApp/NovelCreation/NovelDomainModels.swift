@@ -419,6 +419,8 @@ struct NovelAskUserPrompt: Codable, Equatable, Sendable {
     let chapterRevision: NovelChapterRevisionProposal?
     /// Present only for `novel_revert_recent_chapters` approval cards.
     let manuscriptRevert: NovelManuscriptRevertProposal?
+    /// Present only for `novel_delete_chapters` approval cards.
+    let manuscriptDelete: NovelManuscriptDeleteProposal?
     /// Present only for `novel_workspace_write` of plot files.
     let workspacePlot: NovelWorkspacePlotProposal?
 
@@ -427,12 +429,14 @@ struct NovelAskUserPrompt: Codable, Equatable, Sendable {
         options: [String],
         chapterRevision: NovelChapterRevisionProposal? = nil,
         manuscriptRevert: NovelManuscriptRevertProposal? = nil,
+        manuscriptDelete: NovelManuscriptDeleteProposal? = nil,
         workspacePlot: NovelWorkspacePlotProposal? = nil
     ) {
         self.question = question
         self.options = options
         self.chapterRevision = chapterRevision
         self.manuscriptRevert = manuscriptRevert
+        self.manuscriptDelete = manuscriptDelete
         self.workspacePlot = workspacePlot
     }
 }
@@ -478,6 +482,21 @@ struct NovelManuscriptRevertProposal: Codable, Equatable, Sendable {
     let chapterTitles: [String]
     let chapterOrdinals: [Int]
     let targetCheckpointID: NovelCheckpointID
+    let expectedHeadRevision: Int64
+    let expectedWorkingRevision: Int64
+    let reason: String?
+}
+
+enum NovelManuscriptDeleteApproval {
+    static let approveOption = "从正文目录删除"
+    static let rejectOption = "取消这次删除"
+    static let options = [approveOption, rejectOption]
+}
+
+struct NovelManuscriptDeleteProposal: Codable, Equatable, Sendable {
+    let chapterIDs: [NovelChapterID]
+    let chapterTitles: [String]
+    let chapterOrdinals: [Int]
     let expectedHeadRevision: Int64
     let expectedWorkingRevision: Int64
     let reason: String?

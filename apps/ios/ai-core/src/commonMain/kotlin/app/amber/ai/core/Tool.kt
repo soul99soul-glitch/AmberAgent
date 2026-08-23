@@ -230,6 +230,25 @@ fun createNovelRevertRecentChaptersToolDeclaration(): Tool = Tool(
     execute = { emptyList() }
 )
 
+fun createNovelDeleteChaptersToolDeclaration(): Tool = Tool(
+    name = "novel_delete_chapters",
+    description = """
+        Propose removing specific working manuscript chapters from the current branch directory,
+        including middle chapters. The host shows an approval card listing the titles; chapters
+        are removed only after the author approves. Provide `chapter_ordinals` (1-based working
+        order) and/or `chapter_ids`. This is not a suffix rewind: plot-state snapshots stay,
+        the branch is marked needsSync, and later chapter plots become unresolved until sync.
+        Use novel_revert_recent_chapters only when the latest N chapters and their plot
+        snapshots should roll back together. `reason` is an optional short note shown on the
+        card. Refused while ghostwriting is advancing. Do not use ask_user to ask whether to
+        apply.
+    """.trimIndent(),
+    parameters = { novelDeleteChaptersParameters() },
+    needsApproval = true,
+    allowsAutoApproval = false,
+    execute = { emptyList() }
+)
+
 fun createNovelListSettingProposalsToolDeclaration(): Tool = Tool(
     name = "novel_list_setting_proposals",
     description = """
@@ -2446,6 +2465,32 @@ private fun novelRevertRecentChaptersParameters(): InputSchema = InputSchema.Obj
         })
     },
     required = listOf("chapter_count")
+)
+
+private fun novelDeleteChaptersParameters(): InputSchema = InputSchema.Obj(
+    properties = buildJsonObject {
+        put("chapter_ordinals", buildJsonObject {
+            put("type", "array")
+            put("description", "1-based working-manuscript ordinals to remove, including middle chapters")
+            put("items", buildJsonObject {
+                put("type", "integer")
+                put("minimum", 1)
+            })
+            put("minItems", 1)
+            put("maxItems", 64)
+        })
+        put("chapter_ids", buildJsonObject {
+            put("type", "array")
+            put("description", "Working chapter UUIDs to remove; combined with chapter_ordinals when both are set")
+            put("items", buildJsonObject { put("type", "string") })
+            put("minItems", 1)
+            put("maxItems", 64)
+        })
+        put("reason", buildJsonObject {
+            put("type", "string")
+            put("description", "Optional short note shown on the approval card")
+        })
+    }
 )
 
 private fun novelRejectSettingProposalsParameters(): InputSchema = InputSchema.Obj(

@@ -491,6 +491,12 @@ private struct NovelAskUserCard: View {
                 blocker: blocker,
                 onSubmit: onSubmit
             )
+        } else if presentation.prompt.manuscriptDelete != nil {
+            NovelManuscriptDeleteCard(
+                presentation: presentation,
+                blocker: blocker,
+                onSubmit: onSubmit
+            )
         } else {
             askUserBody
         }
@@ -923,6 +929,90 @@ private struct NovelManuscriptRevertCard: View {
         switch presentation.response?.answer {
         case NovelManuscriptRevertApproval.approveOption: AmberTheme.accentGreen
         case NovelManuscriptRevertApproval.rejectOption: AmberTheme.foreground2
+        default: AmberTheme.accent
+        }
+    }
+}
+
+private struct NovelManuscriptDeleteCard: View {
+    let presentation: NovelAskUserPresentation
+    let blocker: NovelSessionActionBlocker?
+    let onSubmit: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(statusTitle, systemImage: statusSymbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(statusColor)
+
+            Text(presentation.prompt.question)
+                .font(.body.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let reason = presentation.prompt.manuscriptDelete?.reason, !reason.isEmpty {
+                Text(reason)
+                    .font(.subheadline)
+                    .foregroundStyle(AmberTheme.foreground2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if presentation.response == nil {
+                if let blocker {
+                    Text(blocker.displayName)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.foreground2)
+                }
+                HStack(spacing: 10) {
+                    Button {
+                        onSubmit(NovelManuscriptDeleteApproval.rejectOption)
+                    } label: {
+                        Text(NovelManuscriptDeleteApproval.rejectOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                    .contentShape(Rectangle())
+
+                    Button {
+                        onSubmit(NovelManuscriptDeleteApproval.approveOption)
+                    } label: {
+                        Text(NovelManuscriptDeleteApproval.approveOption)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .contentShape(Rectangle())
+                }
+                .disabled(blocker != nil)
+            }
+        }
+        .padding(16)
+        .amberGlass(cornerRadius: 18, interactive: false)
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(AmberTheme.accent.opacity(0.18), lineWidth: 0.75)
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var statusTitle: String {
+        guard let answer = presentation.response?.answer else { return "抽章审批" }
+        if answer == NovelManuscriptDeleteApproval.approveOption { return "已从正文目录删除" }
+        if answer == NovelManuscriptDeleteApproval.rejectOption { return "已取消这次删除" }
+        return "已回答"
+    }
+
+    private var statusSymbol: String {
+        switch presentation.response?.answer {
+        case NovelManuscriptDeleteApproval.approveOption: "checkmark.circle.fill"
+        case NovelManuscriptDeleteApproval.rejectOption: "xmark.circle.fill"
+        default: "trash"
+        }
+    }
+
+    private var statusColor: Color {
+        switch presentation.response?.answer {
+        case NovelManuscriptDeleteApproval.approveOption: AmberTheme.accentGreen
+        case NovelManuscriptDeleteApproval.rejectOption: AmberTheme.foreground2
         default: AmberTheme.accent
         }
     }

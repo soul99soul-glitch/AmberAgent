@@ -1302,6 +1302,12 @@ private extension NovelInjectionPlanner {
                     .joined(separator: ", ")
                 interaction = "Question: \(prompt.question)\n" +
                     "Manuscript revert proposal: last \(revert.chapterCount) chapters (\(chapters))"
+            } else if let deletion = prompt.manuscriptDelete {
+                let chapters = zip(deletion.chapterOrdinals, deletion.chapterTitles)
+                    .map { "chapter \($0) 《\($1)》" }
+                    .joined(separator: ", ")
+                interaction = "Question: \(prompt.question)\n" +
+                    "Manuscript delete proposal: \(chapters)"
             } else {
                 interaction = "Question: \(prompt.question)"
             }

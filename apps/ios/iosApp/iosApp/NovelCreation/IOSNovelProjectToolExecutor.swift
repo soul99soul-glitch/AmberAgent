@@ -35,6 +35,7 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         "novel_read_chapter",
         "novel_revise_chapter",
         "novel_revert_recent_chapters",
+        "novel_delete_chapters",
         "novel_list_setting_proposals",
         "novel_reject_setting_proposals",
         "novel_workspace_list",
@@ -81,6 +82,8 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
             return await reviseChapter(arguments, isUserInitiated: isUserInitiated)
         case "novel_revert_recent_chapters":
             return await revertRecentChapters(arguments, isUserInitiated: isUserInitiated)
+        case "novel_delete_chapters":
+            return await deleteChapters(arguments, isUserInitiated: isUserInitiated)
         case "novel_list_setting_proposals":
             return await listSettingProposals()
         case "novel_reject_setting_proposals":
@@ -701,6 +704,176 @@ final class IOSNovelProjectToolExecutor: IOSToolExecutor {
         }
     }
 
+    private func deleteChapters(
+        _ arguments: String,
+        isUserInitiated: Bool
+    ) async -> IOSAgentToolOutcome {
+        switch await deleteApprovalPrompt(from: arguments) {
+        case .failure(let issue):
+            return .failed(issue.message)
+        case .success(let prompt):
+            if isUserInitiated {
+                return await applyDelete(prompt.manuscriptDelete)
+            }
+            return .needsApproval("等待作者确认从正文目录删除")
+        }
+    }
+
+    func deleteApprovalPrompt(from arguments: String) async -> Result<NovelAskUserPrompt, NovelProjectToolIssue> {
+        guard let args: DeleteChaptersArguments = decode(arguments) else {
+            return .failure(.init(
+                "novel_delete_chapters 参数无效：需要 chapter_ordinals 或 chapter_ids。"
+            ))
+        }
+        let hasOrdinals = args.chapter_ordinals?.isEmpty == false
+        let hasIDs = args.chapter_ids?.isEmpty == false
+        guard hasOrdinals || hasIDs else {
+            return .failure(.init(
+                "novel_delete_chapters 参数无效：需要 chapter_ordinals 或 chapter_ids。"
+            ))
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failure(.init("当前小说项目不可用，无法从正文目录删除章节。"))
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failure(.init(reason))
+        }
+        switch resolveDeleteTargets(args, snapshot: snapshot) {
+        case .failure(let issue):
+            return .failure(issue)
+        case .success(let chapters):
+            guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+                return .failure(.init("当前分支不可用，无法从正文目录删除章节。"))
+            }
+            let reason = args.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let titles = chapters.map { "第 \($0.ordinal) 章《\($0.version.title)》" }
+            let question = titles.count == 1
+                ? "将\(titles[0])从正文目录删除？后章剧情要点会待同步。"
+                : "将\(titles.joined(separator: "、"))从正文目录删除？目录不再包含它们，后章剧情要点会待同步。"
+            let prompt = NovelAskUserPrompt(
+                question: question,
+                options: NovelManuscriptDeleteApproval.options,
+                manuscriptDelete: NovelManuscriptDeleteProposal(
+                    chapterIDs: chapters.map(\.chapterID),
+                    chapterTitles: chapters.map(\.version.title),
+                    chapterOrdinals: chapters.map(\.ordinal),
+                    expectedHeadRevision: branch.headRevision,
+                    expectedWorkingRevision: branch.workingRevision,
+                    reason: reason?.isEmpty == true ? nil : reason
+                )
+            )
+            return .success(prompt)
+        }
+    }
+
+    private func applyDelete(_ proposal: NovelManuscriptDeleteProposal?) async -> IOSAgentToolOutcome {
+        guard let proposal else {
+            return .failed("抽章审批缺少章节目标。")
+        }
+        guard let snapshot = await loadSnapshot() else {
+            return .failed("当前小说项目不可用，无法从正文目录删除章节。")
+        }
+        if let reason = await ghostwriteBlockReason(snapshot: snapshot) {
+            return .failed(reason)
+        }
+        guard let branch = snapshot.branches.first(where: { $0.id == branchID }) else {
+            return .failed("当前分支不可用，无法从正文目录删除章节。")
+        }
+        guard branch.headRevision == proposal.expectedHeadRevision,
+              branch.workingRevision == proposal.expectedWorkingRevision else {
+            return .failed("当前分支已经变化，请重新发起删除。")
+        }
+        for (index, chapterID) in proposal.chapterIDs.enumerated() {
+            guard let current = await loadSnapshot(),
+                  let currentBranch = current.branches.first(where: { $0.id == branchID }) else {
+                return .failed("删除进行到第 \(index + 1) 章时项目不可用。")
+            }
+            guard currentBranch.workingChapterSelections.contains(where: { $0.chapterID == chapterID }) else {
+                return .failed("目标章节已不在工作正文里，无法删除。")
+            }
+            let command = NovelDeleteChapterFromManuscriptCommand(
+                context: mutationContext(
+                    projectRevision: current.project.revision,
+                    configRevision: current.project.configRevision,
+                    branchHeadRevision: currentBranch.headRevision
+                ),
+                projectID: projectID,
+                branchID: branchID,
+                chapterID: chapterID,
+                expectedWorkingRevision: currentBranch.workingRevision
+            )
+            if let failure = await perform(.deleteChapterFromManuscript(command)) {
+                return .failed("已删除 \(index)/\(proposal.chapterIDs.count) 章后失败：\(failure)")
+            }
+        }
+        if let creation {
+            do {
+                try await creation.applyWorkspacePlotRelink(
+                    projectID: projectID,
+                    branchID: branchID
+                )
+            } catch {
+                let titles = proposal.chapterTitles.enumerated().map { index, title in
+                    "第 \(proposal.chapterOrdinals[index]) 章《\(title)》"
+                }
+                return .filled(
+                    "已从正文目录删除\(titles.joined(separator: "、"))。剧情重链未完成：\(error.localizedDescription)"
+                )
+            }
+        }
+        let titles = proposal.chapterTitles.enumerated().map { index, title in
+            "第 \(proposal.chapterOrdinals[index]) 章《\(title)》"
+        }
+        return .filled(
+            "已从正文目录删除\(titles.joined(separator: "、"))。后章剧情要点待同步。"
+        )
+    }
+
+    private func resolveDeleteTargets(
+        _ args: DeleteChaptersArguments,
+        snapshot: NovelProjectSnapshot
+    ) -> Result<[WorkingChapter], NovelProjectToolIssue> {
+        let chapters = workingChapters(in: snapshot)
+        guard !chapters.isEmpty else {
+            return .failure(.init("当前分支还没有收录正文，无法使用 novel_delete_chapters。"))
+        }
+        var requested: [WorkingChapter] = []
+        var seen = Set<NovelChapterID>()
+        func append(_ chapter: WorkingChapter) {
+            if seen.insert(chapter.chapterID).inserted {
+                requested.append(chapter)
+            }
+        }
+        if let ordinals = args.chapter_ordinals, !ordinals.isEmpty {
+            for ordinal in ordinals {
+                guard let match = chapters.first(where: { $0.ordinal == ordinal }) else {
+                    return .failure(.init(
+                        "novel_delete_chapters 的 chapter_ordinal 越界：当前共 \(chapters.count) 章，收到 \(ordinal)。"
+                    ))
+                }
+                append(match)
+            }
+        }
+        if let rawIDs = args.chapter_ids, !rawIDs.isEmpty {
+            for raw in rawIDs {
+                guard let uuid = UUID(uuidString: raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+                    return .failure(.init("novel_delete_chapters 的 chapter_id 不是合法 UUID：\(raw)。"))
+                }
+                let id = NovelChapterID(uuid)
+                guard let match = chapters.first(where: { $0.chapterID == id }) else {
+                    return .failure(.init("找不到 chapter_id=\(raw) 的工作章节。"))
+                }
+                append(match)
+            }
+        }
+        guard !requested.isEmpty else {
+            return .failure(.init(
+                "novel_delete_chapters 参数无效：需要 chapter_ordinals 或 chapter_ids。"
+            ))
+        }
+        return .success(requested)
+    }
+
     // MARK: - Helpers
 
     /// Returns nil on success; a human-readable failure reason otherwise.
@@ -1055,6 +1228,12 @@ struct ReviseChapterArguments: Codable {
 
 private struct RevertRecentChaptersArguments: Decodable {
     let chapter_count: Int
+    let reason: String?
+}
+
+private struct DeleteChaptersArguments: Decodable {
+    let chapter_ordinals: [Int]?
+    let chapter_ids: [String]?
     let reason: String?
 }
 

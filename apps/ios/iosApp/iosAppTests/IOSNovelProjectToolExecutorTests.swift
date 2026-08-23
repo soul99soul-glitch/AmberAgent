@@ -649,6 +649,124 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
         XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .undoBranchHead })
     }
 
+    func testDeleteChaptersPausesForApprovalThenRemovesMiddleChaptersOnConfirm() async throws {
+        let (harness, chapterIDs) = try await makeHarnessWithChapters([
+            (title: "留一", content: "第一章留下。"),
+            (title: "重复甲", content: "第二章重复。"),
+            (title: "留三", content: "第三章留下。"),
+            (title: "重复乙", content: "第四章重复。"),
+            (title: "留五", content: "第五章留下。"),
+        ])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let arguments = jsonArgs([
+            "chapter_ordinals": [2, 4],
+            "reason": "夹在正稿中间的重复稿",
+        ])
+        let paused = await harness.execute("novel_delete_chapters", arguments)
+        guard case .needsApproval(let reason) = paused else {
+            XCTFail("模型发起抽章应停在审批卡，实际 \(paused)")
+            return
+        }
+        XCTAssertTrue(reason.contains("确认"))
+
+        var snapshot = try await harness.snapshot()
+        XCTAssertEqual(snapshot.branches.first?.workingChapterSelections.count, 5)
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .deleteChapterFromManuscript })
+
+        let prompt = try await harness.executor.deleteApprovalPrompt(from: arguments).get()
+        XCTAssertEqual(prompt.options, NovelManuscriptDeleteApproval.options)
+        XCTAssertEqual(prompt.manuscriptDelete?.chapterTitles, ["重复甲", "重复乙"])
+        XCTAssertEqual(prompt.manuscriptDelete?.chapterOrdinals, [2, 4])
+        XCTAssertEqual(prompt.manuscriptDelete?.chapterIDs, [chapterIDs[1], chapterIDs[3]])
+
+        let written = await harness.executor.execute(
+            name: "novel_delete_chapters",
+            arguments: arguments,
+            isUserInitiated: true
+        )
+        guard case .filled(let receipt) = written else {
+            XCTFail("作者确认后应从正文目录抽章，实际 \(written)")
+            return
+        }
+        XCTAssertTrue(receipt.contains("重复甲"))
+        XCTAssertTrue(receipt.contains("重复乙"))
+
+        snapshot = try await harness.snapshot()
+        let remaining = snapshot.branches.first?.workingChapterSelections.map(\.chapterID)
+        XCTAssertEqual(remaining, [chapterIDs[0], chapterIDs[2], chapterIDs[4]])
+        XCTAssertEqual(
+            snapshot.appliedOperations.filter { $0.kind == .deleteChapterFromManuscript }.count,
+            2
+        )
+    }
+
+    func testDeleteChaptersRejectsMissingTargetsWithoutWriting() async throws {
+        let (harness, _) = try await makeHarnessWithChapters([
+            (title: "留一", content: "第一章。"),
+        ])
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let outcome = await harness.execute(
+            "novel_delete_chapters",
+            jsonArgs(["chapter_ordinals": [2]])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("越界抽章应失败，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("越界") || message.contains("章"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .deleteChapterFromManuscript })
+    }
+
+    func testGhostwriteBlocksChapterDelete() async throws {
+        let (harness, _) = try await makeHarnessWithCollectedLineage(
+            additionalChapters: [(title: "山呼", content: "第二章。")]
+        )
+        defer { try? FileManager.default.removeItem(at: harness.root) }
+
+        let startedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        try await harness.creation.saveGhostwriteBatchProgress(NovelGhostwriteBatchProgressRecord(
+            schemaVersion: NovelGhostwriteBatchProgressRecord.currentSchemaVersion,
+            projectID: harness.projectID,
+            branchID: harness.branchID,
+            phase: .writing,
+            pauseReason: nil,
+            detailMessage: nil,
+            candidateID: nil,
+            chapterPlanDigest: nil,
+            autoCollectedCandidateIDs: [],
+            startedAt: startedAt,
+            updatedAt: startedAt,
+            targetChapterCount: 1,
+            completedChapterCount: 0,
+            currentChapterIndex: 1,
+            lastCompletedPlanSummary: nil,
+            pendingSyncChapterCredit: false,
+            qualityAttemptIndex: 0,
+            maxQualityAttempts: 3,
+            lastFailureReceipt: nil,
+            supersededCandidateIDs: [],
+            recentFailureFingerprints: [],
+            revisionBriefOverride: nil,
+            didThinContractAmendThisChapter: false,
+            contractAmendments: []
+        ))
+
+        let outcome = await harness.execute(
+            "novel_delete_chapters",
+            jsonArgs(["chapter_ordinals": [1]])
+        )
+        guard case .failed(let message) = outcome else {
+            XCTFail("代笔中抽章应被拒绝，实际 \(outcome)")
+            return
+        }
+        XCTAssertTrue(message.contains("代笔正在推进本章"))
+        let snapshot = try await harness.snapshot()
+        XCTAssertFalse(snapshot.appliedOperations.contains { $0.kind == .deleteChapterFromManuscript })
+    }
+
     func testProposeChapterPlanSavesDraftAndReusesExistingPlanID() async throws {
         let harness = try await makeHarness()
         defer { try? FileManager.default.removeItem(at: harness.root) }
@@ -715,6 +833,7 @@ final class IOSNovelProjectToolExecutorTests: XCTestCase {
                 "start_paragraph": 1, "end_paragraph": 1, "new_text": "   ",
             ]), "不能为空"),
             ("novel_revert_recent_chapters", "{}", "chapter_count"),
+            ("novel_delete_chapters", "{}", "chapter_ordinals"),
         ]
         for (name, arguments, expectedFragment) in cases {
             let outcome = await harness.execute(name, arguments)

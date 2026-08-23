@@ -16,8 +16,9 @@ final class NovelPromptCatalogTests: XCTestCase {
         // 2026-08-16: 追加最近 N 章回退 + 审批卡，discussion 升到 v10。
         // 2026-08-16: 讨论可列出/一次拒绝设定建议，discussion 升到 v11。
         // 2026-08-17: 代笔中设定卡只许拒绝、不许 revise_material，升到 v12。
+        // 2026-08-23: 讨论可审批抽中间章，升到 v13。
         let discussion = NovelPromptCatalog.template(for: .discussion)
-        XCTAssertEqual(discussion.version, "novel.discussion.v12")
+        XCTAssertEqual(discussion.version, "novel.discussion.v13")
         let normalizedDiscussion = discussion.systemText.split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
         XCTAssertTrue(normalizedDiscussion.contains("While ghostwriting is advancing"))
@@ -27,6 +28,7 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertTrue(discussion.systemText.contains("novel_read_chapter"))
         XCTAssertTrue(discussion.systemText.contains("novel_revise_chapter"))
         XCTAssertTrue(discussion.systemText.contains("novel_revert_recent_chapters"))
+        XCTAssertTrue(discussion.systemText.contains("novel_delete_chapters"))
         XCTAssertTrue(discussion.systemText.contains("novel_list_setting_proposals"))
         XCTAssertTrue(discussion.systemText.contains("novel_reject_setting_proposals"))
         XCTAssertNotNil(
@@ -38,6 +40,9 @@ final class NovelPromptCatalogTests: XCTestCase {
         XCTAssertNotNil(
             NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v11")
         )
+        XCTAssertNotNil(
+            NovelPromptCatalog.systemText(for: .discussion, version: "novel.discussion.v12")
+        )
         XCTAssertTrue(
             NovelPromptCatalog.acceptedVersions(for: .discussion)
                 .isSuperset(of: [
@@ -47,6 +52,7 @@ final class NovelPromptCatalogTests: XCTestCase {
                     "novel.discussion.v10",
                     "novel.discussion.v11",
                     "novel.discussion.v12",
+                    "novel.discussion.v13",
                 ])
         )
         XCTAssertEqual(Set(templates.map(\.version)).count, NovelPromptKind.allCases.count)
@@ -136,6 +142,7 @@ final class NovelPromptCatalogTests: XCTestCase {
             "novel_read_chapter",
             "novel_revise_chapter",
             "novel_revert_recent_chapters",
+            "novel_delete_chapters",
             "novel_list_setting_proposals",
             "novel_reject_setting_proposals",
         ] {

@@ -203,6 +203,27 @@ class NovelProjectToolDeclarationsTest {
     }
 
     @Test
+    fun deleteChaptersDeclarationRequiresTargetsAndApprovalCard() {
+        val tool = createNovelDeleteChaptersToolDeclaration()
+        assertEquals("novel_delete_chapters", tool.name)
+        assertTrue(tool.needsApproval, "从正文目录抽章必须走审批卡")
+        assertFalse(tool.allowsAutoApproval, "抽章不得自动批准")
+
+        val params = tool.parameters()
+        assertIs<InputSchema.Obj>(params)
+        assertTrue(params.required.isNullOrEmpty(), "chapter_ordinals 与 chapter_ids 二选一，不能都标 required")
+        assertTrue("chapter_ordinals" in params.properties)
+        assertTrue("chapter_ids" in params.properties)
+        assertTrue("reason" in params.properties)
+        val ordinals = params.properties["chapter_ordinals"]!!.jsonObject
+        assertEquals("array", ordinals["type"]?.jsonPrimitive?.contentOrNull)
+        val description = tool.description
+        assertTrue("approval" in description, "描述必须写明审批卡")
+        assertTrue("middle" in description, "描述必须写明可抽中间章")
+        assertTrue("needsSync" in description || "sync" in description)
+    }
+
+    @Test
     fun novelDeclarationsAreNotPartOfTheIosToolCatalog() {
         val novelNames = listOf(
             "novel_rename_project",
@@ -216,6 +237,7 @@ class NovelProjectToolDeclarationsTest {
             "novel_read_chapter",
             "novel_revise_chapter",
             "novel_revert_recent_chapters",
+            "novel_delete_chapters",
             "novel_list_setting_proposals",
             "novel_reject_setting_proposals",
         )
