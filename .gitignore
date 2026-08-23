@@ -1,0 +1,25 @@
+.DS_Store
+.migration/snapshots/
+.worktrees/
+**/.gradle/
+**/build/
+**/DerivedData/
+**/local.properties
+**/*.xcuserstate
+**/xcuserdata/
+**/.tmp-*
+**/tmp-iphone-*
+
+# Local credentials and signing material
+**/.env
+**/.env.*
+!**/.env.example
+**/secrets.properties
+**/keystore.properties
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pfx
+**/*.mobileprovision
+**/google-services.json
+**/GoogleService-Info.plist

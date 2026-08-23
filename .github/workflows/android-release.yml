@@ -1,0 +1,107 @@
+name: Android Release Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/android
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Rust and Android target
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked --version 3.5.4
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        run: |
+          set -euo pipefail
+          ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="${ANDROID_SDK}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "${ANDROID_SDK}" -path '*/cmdline-tools/*/bin/sdkmanager' -type f | sort -r | head -n 1)"
+          fi
+          test -x "$SDKMANAGER"
+          "$SDKMANAGER" --install "ndk;27.0.12077973"
+          NDK_PATH="${ANDROID_SDK}/ndk/27.0.12077973"
+          echo "ndk-path=${NDK_PATH}" >> "$GITHUB_OUTPUT"
+          echo "${NDK_PATH}" >> "$GITHUB_PATH"
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-android-gradle-${{ hashFiles('apps/android/**/*.gradle*', 'apps/android/**/gradle-wrapper.properties') }}
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/android/native/target
+          key: ${{ runner.os }}-android-cargo-${{ hashFiles('apps/android/native/**/Cargo.lock', 'apps/android/native/**/Cargo.toml') }}
+
+      - name: Prepare signed build files
+        run: |
+          echo "${{ secrets.KEY_BASE64 }}" | base64 -d > app/app.key
+          echo "${{ secrets.SIGNING_CONFIG }}" > local.properties
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > app/google-services.json
+
+      - name: Gradle release build
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease -PuploadCrashlyticsMapping=false
+
+      - name: Verify native libraries in release APK
+        run: |
+          set -euo pipefail
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          APK_ENTRIES="$(unzip -Z1 "$APK")"
+          expected=(
+            "lib/arm64-v8a/liboffice_parsers.so"
+            "lib/arm64-v8a/libmarkdown_parser.so"
+            "lib/arm64-v8a/libhighlight_parser.so"
+            "lib/arm64-v8a/libregex_transformer.so"
+          )
+          missing=()
+          for so in "${expected[@]}"; do
+            if ! grep -Fxq "$so" <<< "$APK_ENTRIES"; then
+              missing+=("$so")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing native library: %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: android-release-apk
+          path: apps/android/app/build/outputs/apk/release/*.apk

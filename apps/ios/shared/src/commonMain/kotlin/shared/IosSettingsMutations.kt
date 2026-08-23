@@ -1,0 +1,1600 @@
+package shared
+
+import app.amber.ai.core.MessageRole
+import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.CustomHeader
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
+import app.amber.ai.provider.ModelType
+import app.amber.ai.provider.OpenAIBrand
+import app.amber.ai.provider.OpenAIAuthMode
+import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.GOOGLE_API_KEY_DEFAULT_BASE_URL
+import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.defaultApiBaseUrl
+import app.amber.ai.provider.fixedBaseUrl
+import app.amber.ai.provider.coerceToReasoningOptions
+import app.amber.ai.provider.defaultReasoningLevel
+import app.amber.ai.provider.reasoningOptions
+import app.amber.core.model.reasoningLevelForModel
+import app.amber.core.model.withChatModelReasoningMemory
+import app.amber.core.model.withReasoningLevelForModel
+import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
+import app.amber.core.settings.DEFAULT_PROVIDERS
+import app.amber.core.model.InjectionPosition
+import app.amber.core.model.Lorebook
+import app.amber.core.model.PromptInjection
+import app.amber.core.settings.Settings
+import app.amber.core.settings.isLegacyFactoryAgentSoul
+import app.amber.core.settings.migratedAgentSoulMarkdown
+import app.amber.core.settings.defaultReasoningLevelForModel
+import app.amber.core.settings.findModelById
+import app.amber.core.settings.findProvider
+import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.getCurrentChatModel
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
+import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
+import app.amber.feature.board.TodayBoardHotListFilterMode
+import app.amber.feature.board.TodayBoardReadingFontMode
+import app.amber.feature.modelcouncil.ModelCouncilSeat
+import app.amber.feature.modelcouncil.ModelCouncilSeatRunner
+import app.amber.feature.subagent.SubAgentOverride
+import app.amber.search.SearchServiceOptions
+import app.amber.tts.provider.TTSProviderSetting
+
+/**
+ * Swift-facing typed mutations over the real KMP [Settings] data class.
+ *
+ * Rationale: KMP data-class `copy()` is not exposed to ObjC/Swift by the
+ * framework generator, and the relevant fields (providers / ttsProviders /
+ * searchServices / agentRuntime.modelCouncil.defaultSeats) involve sealed
+ * classes that are awkward to reconstruct from Swift. Keeping the `.copy()`
+ * logic here (native Kotlin) lets the iOS side call one typed function per
+ * mutation and get back a new snapshot, which it then persists via
+ * [IosSettingsJsonBridge].
+ *
+ * These are pure functions: they take a snapshot and return a new snapshot;
+ * they never touch UserDefaults. The iOS store owns durability.
+ */
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+object IosSettingsMutations {
+
+    // ---- Council seats (agentRuntime.modelCouncil.defaultSeats) ----
+
+    /**
+     * Append a council seat to `agentRuntime.modelCouncil.defaultSeats`.
+     * [modelId] must already be a valid Uuid string (parsed here). Returns a
+     * new [Settings]; caller persists via restoreSnapshot.
+     */
+    fun addCouncilSeat(
+        settings: Settings,
+        seatId: String,
+        name: String,
+        role: String,
+        modelId: String,
+        runnerType: String,
+        systemPrompt: String = "",
+        outputBudgetChars: Int = DEFAULT_OUTPUT_BUDGET_CHARS,
+    ): Settings {
+        val parsedModelId = kotlin.uuid.Uuid.parse(modelId)
+        val seat = ModelCouncilSeat(
+            seatId = seatId,
+            name = name,
+            role = role,
+            modelId = parsedModelId,
+            runnerType = parseRunnerType(runnerType),
+            systemPrompt = systemPrompt,
+            outputBudgetChars = outputBudgetChars,
+        )
+        val council = settings.agentRuntime.modelCouncil
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                modelCouncil = council.copy(defaultSeats = council.defaultSeats + seat)
+            )
+        )
+    }
+
+    /** Remove a council seat by [seatId]; no-op if not found. */
+    fun removeCouncilSeat(settings: Settings, seatId: String): Settings {
+        val council = settings.agentRuntime.modelCouncil
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                modelCouncil = council.copy(
+                    defaultSeats = council.defaultSeats.filterNot { it.seatId == seatId }
+                )
+            )
+        )
+    }
+
+    // ---- Providers (settings.providers: List<ProviderSetting>) ----
+
+    /**
+     * Append a fully-constructed [provider] to `settings.providers`. Returns a
+     * new [Settings]. The caller (Swift) passes a pre-built
+     * `ProviderSetting.OpenAI` (or another subtype) — building the sealed
+     * subtype is exposed via [buildOpenAIProvider] below.
+     */
+    fun addProvider(settings: Settings, provider: ProviderSetting): Settings {
+        return settings.copy(providers = settings.providers + provider)
+    }
+
+    /** Whether [id] belongs to the bundled provider catalog. */
+    fun isDefaultProvider(id: String): Boolean {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return false
+        return DEFAULT_PROVIDERS.any { it.id == parsed }
+    }
+
+    /** Remove a provider by [id] and keep chat-model references valid. */
+    fun removeProvider(settings: Settings, id: String): Settings {
+        val parsed = kotlin.uuid.Uuid.parse(id)
+        val removed = settings.providers.firstOrNull { it.id == parsed } ?: return settings
+        val remaining = settings.providers.filterNot { it.id == parsed }
+        val removedModelIds = removed.models.mapTo(mutableSetOf()) { it.id }
+        val replacementModelId = remaining
+            .asSequence()
+            .flatMap { it.models.asSequence() }
+            .firstOrNull { it.type == ModelType.CHAT }
+            ?.id
+
+        // The replacementModelId!! force-unwrap below only guards the top-level
+        // chatModelId. Assistant references are nulled out (Assistant.chatModelId
+        // is nullable) and need no replacement, so they must NOT abort the removal
+        // — otherwise removing a provider whose model is referenced only by an
+        // assistant silently no-ops when no other CHAT model remains.
+        val needsReplacement = settings.chatModelId in removedModelIds
+        if (needsReplacement && replacementModelId == null) return settings
+
+        return settings.copy(
+            providers = remaining,
+            chatModelId = if (settings.chatModelId in removedModelIds) replacementModelId!! else settings.chatModelId,
+            titleModelId = settings.titleModelId.clearedIfRemoved(removedModelIds),
+            suggestionModelId = settings.suggestionModelId.clearedIfRemoved(removedModelIds),
+            ocrModelId = settings.ocrModelId.clearedIfRemoved(removedModelIds),
+            compressModelId = settings.compressModelId.clearedIfRemoved(removedModelIds),
+            imageGenerationModelId = settings.imageGenerationModelId.clearedIfRemoved(removedModelIds),
+            assistants = settings.assistants.map { assistant ->
+                assistant.copy(
+                    chatModelId = assistant.chatModelId.takeUnless { it in removedModelIds },
+                    imageGenerationModelId = assistant.imageGenerationModelId.takeUnless { it in removedModelIds },
+                )
+            },
+        )
+    }
+
+    private fun kotlin.uuid.Uuid.clearedIfRemoved(removedModelIds: Set<kotlin.uuid.Uuid>): kotlin.uuid.Uuid =
+        if (this in removedModelIds) DEFAULT_AUTO_MODEL_ID else this
+
+    /**
+     * Switch a provider between the OpenAI-compatible and Anthropic-compatible
+     * protocol subtypes while preserving the user-facing provider identity.
+     *
+     * This is intentionally scoped to the two iOS chat executors that exist today.
+     * Google, Response API, and unknown values are returned unchanged.
+     */
+    fun switchProviderProtocol(
+        settings: Settings,
+        providerId: String,
+        protocolType: String,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val target = protocolType.lowercase()
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                when (target) {
+                    "openai", "openai-compatible", "open_ai" -> provider.asOpenAICompatible()
+                    "anthropic", "claude" -> provider.asClaudeCompatible()
+                    else -> provider
+                }
+            }
+        }
+        return settings.copy(providers = providers)
+    }
+
+    fun convertProviderProtocol(
+        settings: Settings,
+        providerId: String,
+        target: String,
+    ): Settings = switchProviderProtocol(settings, providerId, target)
+
+    fun updateProviderBasics(
+        settings: Settings,
+        providerId: String,
+        name: String,
+        enabled: Boolean,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id == parsed) {
+                    provider.copyProvider(name = name, enabled = enabled)
+                } else {
+                    provider
+                }
+            }
+        )
+    }
+
+    fun updateProviderEndpoint(
+        settings: Settings,
+        providerId: String,
+        baseUrl: String,
+        chatCompletionsPath: String,
+        useResponseApi: Boolean,
+        promptCaching: Boolean,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) {
+                    provider
+                } else {
+                    when (provider) {
+                        is ProviderSetting.OpenAI -> provider.copy(
+                            baseUrl = baseUrl,
+                            chatCompletionsPath = chatCompletionsPath,
+                            useResponseApi = useResponseApi,
+                        )
+                        is ProviderSetting.Google -> provider.copy(baseUrl = baseUrl)
+                        is ProviderSetting.Claude -> provider.copy(
+                            baseUrl = baseUrl,
+                            promptCaching = promptCaching,
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    /**
+     * Sets the persisted auth mode for provider [providerId].
+     *
+     * Codex OAuth still only flips [ProviderSetting.OpenAI.authMode]: request-time
+     * endpoint/Responses overrides belong to IOSCodexProviderResolver, so
+     * login/logout never destroys the user's API-key endpoint configuration.
+     *
+     * Coding Plan / Token Plan modes pin the brand's official coding base URL.
+     * Switching back to API_KEY restores the brand default only when the current
+     * URL is still that pinned coding URL, so a user proxy is kept.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun setOpenAIAuthMode(
+        settings: Settings,
+        providerId: String,
+        authMode: OpenAIAuthMode,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
+                    provider
+                } else {
+                    provider.copy(
+                        authMode = authMode,
+                        baseUrl = resolvedBaseUrlForAuthMode(provider, authMode),
+                    )
+                }
+            }
+        )
+    }
+
+    private fun resolvedBaseUrlForAuthMode(
+        provider: ProviderSetting.OpenAI,
+        mode: OpenAIAuthMode,
+    ): String {
+        if (mode == OpenAIAuthMode.CODEX_OAUTH) {
+            return provider.baseUrl
+        }
+        val pinned = mode.fixedBaseUrl()
+        if (pinned != null) {
+            return pinned
+        }
+        val previousPinned = provider.authMode.fixedBaseUrl()
+        if (previousPinned != null && provider.baseUrl == previousPinned) {
+            return provider.brand.defaultApiBaseUrl()
+        }
+        return provider.baseUrl
+    }
+
+    /**
+     * Sets the persisted auth mode for a Google [providerId].
+     *
+     * OAuth modes (Antigravity / Code Assist) pin the cloudcode-pa base URL
+     * (token-managed, apiKey unused at request time). Switching back to
+     * API_KEY restores the brand default generative-language base URL only
+     * when the current URL is still the pinned OAuth URL. Note: the URL the
+     * user had *before* entering OAuth mode is not retained — a custom
+     * pre-OAuth proxy is lost on the way back (a proxy edited while in OAuth
+     * mode is kept, but the settings UI renders that row read-only). Mirrors
+     * [setOpenAIAuthMode]'s non-destructive endpoint policy.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun setGoogleAuthMode(
+        settings: Settings,
+        providerId: String,
+        authMode: GoogleAuthMode,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.Google) {
+                    provider
+                } else {
+                    provider.copy(
+                        authMode = authMode,
+                        baseUrl = resolvedBaseUrlForGoogleAuthMode(provider, authMode),
+                    )
+                }
+            }
+        )
+    }
+
+    private fun resolvedBaseUrlForGoogleAuthMode(
+        provider: ProviderSetting.Google,
+        mode: GoogleAuthMode,
+    ): String {
+        val pinned = mode.fixedBaseUrl()
+        if (pinned != null) {
+            return pinned
+        }
+        val previousPinned = provider.authMode.fixedBaseUrl()
+        if (previousPinned != null && provider.baseUrl == previousPinned) {
+            return GOOGLE_API_KEY_DEFAULT_BASE_URL
+        }
+        return provider.baseUrl
+    }
+
+    /**
+     * Construct an Anthropic Claude [ProviderSetting.Claude] with a single model.
+     * iOS counterpart of [buildOpenAIProvider] for the Anthropic protocol.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun buildClaudeProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+        modelName: String,
+        modelId: String,
+    ): ProviderSetting.Claude {
+        val model = Model(
+            modelId = modelId,
+            displayName = modelName,
+            id = kotlin.uuid.Uuid.random(),
+            type = ModelType.CHAT,
+        )
+        return ProviderSetting.Claude(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            builtIn = false,
+        )
+    }
+
+    fun buildBlankClaudeProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.Claude {
+        return ProviderSetting.Claude(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+        )
+    }
+
+    /**
+     * Construct a Gemini [ProviderSetting.Google] with a single chat model.
+     * iOS counterpart of [buildOpenAIProvider] / [buildClaudeProvider] for the
+     * Gemini protocol (Generative Language API, API_KEY auth mode).
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun buildGoogleProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+        modelName: String,
+        modelId: String,
+    ): ProviderSetting.Google {
+        val model = Model(
+            modelId = modelId,
+            displayName = modelName,
+            id = kotlin.uuid.Uuid.random(),
+            type = ModelType.CHAT,
+        )
+        return ProviderSetting.Google(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            builtIn = false,
+            authMode = GoogleAuthMode.API_KEY,
+        )
+    }
+
+    fun buildBlankGoogleProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.Google {
+        return ProviderSetting.Google(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+            authMode = GoogleAuthMode.API_KEY,
+        )
+    }
+
+    /**
+     * Write an API key onto the provider identified by [providerId] inside
+     * `settings.providers`, preserving every other field. Works for OpenAI,
+     * Google, and Claude provider subtypes (dispatched by sealed type). Returns
+     * the original snapshot unchanged if the id is not found. This is the
+     * Swift-facing equivalent of `provider.copy(apiKey = ...)` (KMP data-class
+     * copy is not exposed to ObjC).
+     */
+    fun updateProviderApiKey(settings: Settings, providerId: String, apiKey: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                when (provider) {
+                    is ProviderSetting.OpenAI -> provider.copy(apiKey = apiKey)
+                    is ProviderSetting.Google -> provider.copy(apiKey = apiKey)
+                    is ProviderSetting.Claude -> provider.copy(apiKey = apiKey)
+                }
+            }
+        }
+        return settings.copy(providers = providers)
+    }
+
+    /**
+     * Replace the chat-typed models on the provider identified by [providerId].
+     * Used by the iOS provider editor's model field to set/update the models a
+     * provider exposes. Non-chat models on the provider are preserved.
+     * Returns the original snapshot unchanged if the id is not found.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun updateProviderChatModels(
+        settings: Settings,
+        providerId: String,
+        modelIds: List<Pair<String, String>>,  // (modelId, displayName)
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val newChatModels = modelIds.map { (modelId, displayName) ->
+            Model(
+                modelId = modelId,
+                displayName = displayName,
+                id = kotlin.uuid.Uuid.random(),
+                type = ModelType.CHAT,
+            )
+        }
+        val providers = settings.providers.map { provider ->
+            if (provider.id != parsed) {
+                provider
+            } else {
+                val nonChat = provider.models.filter { it.type != ModelType.CHAT }
+                val merged = nonChat + newChatModels
+                when (provider) {
+                    is ProviderSetting.OpenAI -> provider.copy(models = merged)
+                    is ProviderSetting.Google -> provider.copy(models = merged)
+                    is ProviderSetting.Claude -> provider.copy(models = merged)
+                }
+            }
+        }
+        return settings.copy(providers = providers)
+    }
+
+    /**
+     * Grok OAuth login catalog: drop leftover grok.com web ids, merge the
+     * CLI-proxy list, and stamp TOOL+REASONING on those catalog rows only.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun adoptGrokOAuthChatCatalog(
+        settings: Settings,
+        providerId: String,
+        catalog: List<Pair<String, String>>,
+        dropModelIds: List<String>,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val drop = dropModelIds.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val discovered = catalog
+            .map { it.first.trim() to it.second.trim() }
+            .filter { it.first.isNotEmpty() }
+            .distinctBy { it.first }
+        val catalogIds = discovered.map { it.first }.toSet()
+        val namesByModelId = discovered.toMap()
+        val abilities = listOf(ModelAbility.TOOL, ModelAbility.REASONING)
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) return@map provider
+                val kept = provider.models.filterNot {
+                    it.type == ModelType.CHAT && it.modelId in drop
+                }
+                val existingChatIds = kept
+                    .asSequence()
+                    .filter { it.type == ModelType.CHAT }
+                    .mapTo(mutableSetOf()) { it.modelId }
+                val renamed = kept.map { model ->
+                    val displayName = namesByModelId[model.modelId]
+                    if (model.type == ModelType.CHAT && displayName != null) {
+                        model.copy(
+                            displayName = displayName.ifBlank { model.modelId },
+                            abilities = if (model.modelId in catalogIds) abilities else model.abilities,
+                        )
+                    } else {
+                        model
+                    }
+                }
+                val appended = discovered
+                    .filterNot { (modelId, _) -> modelId in existingChatIds }
+                    .map { (modelId, displayName) ->
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = ModelType.CHAT,
+                            abilities = abilities,
+                        )
+                    }
+                provider.copyProvider(models = renamed + appended)
+            }
+        )
+    }
+
+    /**
+     * Merge a discovered chat-model list into one provider. Existing models are
+     * updated in place by wire model id, preserving UUID and user metadata;
+     * models absent from discovery are retained.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun mergeProviderChatModels(
+        settings: Settings,
+        providerId: String,
+        modelIds: List<Pair<String, String>>,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val discovered = modelIds
+            .filter { it.first.isNotBlank() }
+            .distinctBy { it.first }
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed) return@map provider
+
+                val namesByModelId = discovered.toMap()
+                val existingChatIds = provider.models
+                    .asSequence()
+                    .filter { it.type == ModelType.CHAT }
+                    .mapTo(mutableSetOf()) { it.modelId }
+                val updatedExisting = provider.models.map { model ->
+                    val displayName = namesByModelId[model.modelId]
+                    if (model.type == ModelType.CHAT && displayName != null) {
+                        model.copy(displayName = displayName.ifBlank { model.modelId })
+                    } else {
+                        model
+                    }
+                }
+                val appended = discovered
+                    .filterNot { (modelId, _) -> modelId in existingChatIds }
+                    .map { (modelId, displayName) ->
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = ModelType.CHAT,
+                        )
+                    }
+                provider.copyProvider(models = updatedExisting + appended)
+            }
+        )
+    }
+
+    /**
+     * Upserts a single IMAGE-typed model on an OpenAI provider (used for the
+     * synthetic codex image model `codex-oauth-image`). Replaces any existing
+     * model with the same modelId; preserves all other models. No-op for non-
+     * OpenAI providers.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun upsertProviderImageModel(
+        settings: Settings,
+        providerId: String,
+        modelId: String,
+        displayName: String,
+    ): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsed || provider !is ProviderSetting.OpenAI) {
+                    provider
+                } else {
+                    val others = provider.models.filter { it.modelId != modelId }
+                    val imageModel = Model(
+                        modelId = modelId,
+                        displayName = displayName,
+                        id = kotlin.uuid.Uuid.random(),
+                        type = ModelType.IMAGE,
+                    )
+                    provider.copy(models = others + imageModel)
+                }
+            }
+        )
+    }
+
+    fun upsertProviderChatModel(
+        settings: Settings,
+        providerId: String,
+        modelUuid: String?,
+        modelId: String,
+        displayName: String,
+        contextWindowTokens: Int?,
+        modelType: ModelType,
+        headerPairs: List<Pair<String, String>>,
+    ): Settings {
+        val parsedProvider = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val parsedModel = modelUuid?.takeIf { it.isNotBlank() }?.let {
+            runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
+        }
+        val headers = headerPairs
+            .filter { (name, _) -> name.isNotBlank() }
+            .map { (name, value) -> CustomHeader(name = name, value = value) }
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id != parsedProvider) {
+                    provider
+                } else {
+                    val existing = provider.models.firstOrNull { model ->
+                        (parsedModel != null && model.id == parsedModel) ||
+                            (parsedModel == null && model.modelId == modelId && model.type == modelType)
+                    }
+                    val updated = if (existing != null) {
+                        existing.copy(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            type = modelType,
+                            contextWindowTokens = contextWindowTokens,
+                            customHeaders = headers,
+                        )
+                    } else {
+                        Model(
+                            modelId = modelId,
+                            displayName = displayName.ifBlank { modelId },
+                            id = kotlin.uuid.Uuid.random(),
+                            type = modelType,
+                            customHeaders = headers,
+                            contextWindowTokens = contextWindowTokens,
+                        )
+                    }
+                    val models = if (existing != null) {
+                        provider.models.map { if (it.id == existing.id) updated else it }
+                    } else {
+                        provider.models + updated
+                    }
+                    provider.copyProvider(models = models)
+                }
+            }
+        )
+    }
+
+    fun removeProviderChatModel(
+        settings: Settings,
+        providerId: String,
+        modelUuid: String,
+    ): Settings {
+        val parsedProvider = runCatching { kotlin.uuid.Uuid.parse(providerId) }.getOrNull() ?: return settings
+        val parsedModel = runCatching { kotlin.uuid.Uuid.parse(modelUuid) }.getOrNull() ?: return settings
+        return settings.copy(
+            providers = settings.providers.map { provider ->
+                if (provider.id == parsedProvider) {
+                    provider.copyProvider(models = provider.models.filterNot { it.id == parsedModel })
+                } else {
+                    provider
+                }
+            }
+        )
+    }
+
+    /**
+     * Set the global `settings.chatModelId` to a specific model UUID string. iOS
+     * uses this when the user picks the current chat model. Returns a new snapshot.
+     */
+    fun setChatModelId(settings: Settings, modelId: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull() ?: return settings
+        return settings.copy(chatModelId = parsed)
+    }
+
+    /**
+     * Android parity for chat-surface model switching: update the current
+     * assistant, preserve the level used by the model being left, and restore the
+     * remembered/default reasoning level for the selected model.
+     */
+    fun setCurrentAssistantChatModelId(settings: Settings, modelId: String): Settings {
+        val selectedModelId = runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull() ?: return settings
+        val selectedModel = settings.findModelById(selectedModelId)
+        val currentAssistant = settings.getCurrentAssistant()
+        val currentModelId = currentAssistant.chatModelId ?: settings.chatModelId
+        val currentModel = settings.findModelById(currentModelId)
+        val updatedAssistant = if (selectedModel != null) {
+            currentAssistant.withChatModelReasoningMemory(
+                currentModelId = currentModelId,
+                currentDefaultReasoningLevel = currentModel
+                    ?.let { settings.defaultReasoningLevelForModel(it) }
+                    ?: settings.defaultReasoningLevelForModel(selectedModel),
+                selectedModelId = selectedModelId,
+                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(selectedModel),
+            )
+        } else {
+            currentAssistant.copy(chatModelId = selectedModelId)
+        }
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistant.id) updatedAssistant else assistant
+            }
+        )
+    }
+
+    fun currentAssistantReasoningLevels(settings: Settings): List<ReasoningLevel> {
+        val model = settings.getCurrentChatModel()
+        val provider = model?.findProvider(settings.providers)
+        return model.reasoningOptions(provider).map { it.level }
+    }
+
+    fun currentAssistantReasoningLevel(settings: Settings): ReasoningLevel {
+        val model = settings.getCurrentChatModel() ?: return settings.getCurrentAssistant().reasoningLevel
+        val provider = model.findProvider(settings.providers)
+        val defaultLevel = settings.defaultReasoningLevelForModel(model)
+        val level = settings.getCurrentAssistant().reasoningLevelForModel(model.id, defaultLevel)
+        return level.coerceToReasoningOptions(
+            model.reasoningOptions(provider),
+            model.defaultReasoningLevel(provider),
+        )
+    }
+
+    fun updateCurrentAssistantReasoningLevel(
+        settings: Settings,
+        reasoningLevel: ReasoningLevel,
+    ): Settings {
+        val model = settings.getCurrentChatModel()
+        val provider = model?.findProvider(settings.providers)
+        val options = model.reasoningOptions(provider)
+        val coerced = reasoningLevel.coerceToReasoningOptions(
+            options,
+            model?.defaultReasoningLevel(provider),
+        )
+        val currentAssistant = settings.getCurrentAssistant()
+        val updatedAssistant = currentAssistant.withReasoningLevelForModel(model?.id, coerced)
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistant.id) updatedAssistant else assistant
+            }
+        )
+    }
+
+    /**
+     * iOS-only identity rebrand applied on every snapshot load: the shared defaults
+     * call the assistant "AmberAgent" and describe it as an "Android assistant"; on iOS
+     * it should introduce itself simply as "Amber" and not claim to run on Android.
+     * Idempotent (running it again is a no-op). Android keeps the shared defaults.
+     */
+    fun rebrandAmberIdentity(settings: Settings): Settings {
+        fun String.rebranded(): String = this
+            .replace("AmberAgent", "Amber")
+            .replace("an agent-only Android assistant", "an agent-only iOS assistant")
+            .replace("Android System WebView", "the system WebView")
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                agentSoulMarkdown = migratedAgentSoulMarkdown(
+                    settings.agentRuntime.agentSoulMarkdown
+                )
+            ),
+            assistants = settings.assistants.map { assistant ->
+                assistant.copy(
+                    name = if (assistant.name == "AmberAgent" || assistant.name == "Amberagent") {
+                        "Amber"
+                    } else {
+                        assistant.name
+                    },
+                    systemPrompt = assistant.systemPrompt.rebranded(),
+                )
+            },
+        )
+    }
+
+    /// Auxiliary-task model slots (title / suggestion / vision-OCR / compress). A blank
+    /// modelId "clears" the slot to a fresh random Uuid that resolves to no model, which
+    /// the resolvers treat as "unset → fall back to the current chat model".
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    private fun resolveAuxModelId(modelId: String): kotlin.uuid.Uuid? =
+        if (modelId.isBlank()) kotlin.uuid.Uuid.random()
+        else runCatching { kotlin.uuid.Uuid.parse(modelId) }.getOrNull()
+
+    fun setTitleModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(titleModelId = parsed)
+    }
+
+    fun setSuggestionModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(suggestionModelId = parsed)
+    }
+
+    fun setOcrModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(ocrModelId = parsed)
+    }
+
+    fun setCompressModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(compressModelId = parsed)
+    }
+
+    /// Designated image-generation model. Unlike the other aux slots, a blank/unresolved
+    /// id means "no image-generation model" (image generation is OFF) rather than falling
+    /// back to the chat model — a chat model can't serve /images/generations.
+    fun setImageGenerationModelId(settings: Settings, modelId: String): Settings {
+        val parsed = resolveAuxModelId(modelId) ?: return settings
+        return settings.copy(imageGenerationModelId = parsed)
+    }
+
+    /**
+     * Construct an OpenAI-compatible [ProviderSetting.OpenAI] with a single
+     * model. This is what iOS "add custom model" maps to: a user-added model
+     * lives in its own OpenAI-compatible provider entry (builtIn=false,
+     * brand=GENERIC), matching the Android PreferencesStore convention.
+     */
+    @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+    fun buildOpenAIProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+        modelName: String,
+        modelId: String,
+    ): ProviderSetting.OpenAI {
+        val model = Model(
+            modelId = modelId,
+            displayName = modelName,
+            id = kotlin.uuid.Uuid.random(),
+            type = ModelType.CHAT,
+        )
+        return ProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = listOf(model),
+            builtIn = false,
+        )
+    }
+
+    fun buildBlankOpenAIProvider(
+        name: String,
+        apiKey: String,
+        baseUrl: String,
+    ): ProviderSetting.OpenAI {
+        return ProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+            brand = OpenAIBrand.GENERIC,
+        )
+    }
+
+    /**
+     * Construct a key-less OpenAI-compatible provider with a stable id supplied
+     * by iOS. Used by the Provider registry so a custom provider can survive
+     * app restarts while its API key remains in the matching iOS Keychain slot.
+     */
+    fun buildOpenAIProviderWithId(
+        id: String,
+        name: String,
+        baseUrl: String,
+    ): ProviderSetting.OpenAI {
+        return ProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.parse(id),
+            name = name,
+            apiKey = "",
+            baseUrl = baseUrl,
+            models = emptyList(),
+            builtIn = false,
+        )
+    }
+
+    private fun ProviderSetting.asOpenAICompatible(): ProviderSetting {
+        if (this is ProviderSetting.OpenAI && !useResponseApi) return this
+        val defaultOpenAI = DEFAULT_PROVIDERS.firstOrNull { it.id == id } as? ProviderSetting.OpenAI
+        val apiKey = when (this) {
+            is ProviderSetting.OpenAI -> apiKey
+            is ProviderSetting.Google -> apiKey
+            is ProviderSetting.Claude -> apiKey
+        }
+        val sourceBaseUrl = when (this) {
+            is ProviderSetting.OpenAI -> baseUrl
+            is ProviderSetting.Google -> baseUrl
+            is ProviderSetting.Claude -> baseUrl
+        }
+        val targetDefaultBaseUrl = defaultOpenAI?.baseUrl ?: ProviderSetting.OpenAI().baseUrl
+        return ProviderSetting.OpenAI(
+            id = id,
+            enabled = enabled,
+            name = name,
+            models = models,
+            balanceOption = defaultOpenAI?.balanceOption ?: balanceOption,
+            builtIn = builtIn,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
+            apiKey = apiKey,
+            baseUrl = sourceBaseUrl.convertToTargetBaseUrl(targetDefaultBaseUrl),
+            chatCompletionsPath = defaultOpenAI?.chatCompletionsPath ?: "/chat/completions",
+            useResponseApi = false,
+            authMode = defaultOpenAI?.authMode ?: OpenAIAuthMode.API_KEY,
+            brand = defaultOpenAI?.brand ?: OpenAIBrand.GENERIC,
+        )
+    }
+
+    private fun ProviderSetting.asClaudeCompatible(): ProviderSetting {
+        if (this is ProviderSetting.Claude) return this
+        val apiKey = when (this) {
+            is ProviderSetting.OpenAI -> apiKey
+            is ProviderSetting.Google -> apiKey
+            is ProviderSetting.Claude -> apiKey
+        }
+        val sourceBaseUrl = when (this) {
+            is ProviderSetting.OpenAI -> baseUrl
+            is ProviderSetting.Google -> baseUrl
+            is ProviderSetting.Claude -> baseUrl
+        }
+        return ProviderSetting.Claude(
+            id = id,
+            enabled = enabled,
+            name = name,
+            models = models,
+            balanceOption = balanceOption,
+            builtIn = builtIn,
+            descriptionText = descriptionText,
+            shortDescriptionText = shortDescriptionText,
+            apiKey = apiKey,
+            baseUrl = sourceBaseUrl.convertToTargetBaseUrl(ProviderSetting.Claude().baseUrl),
+        )
+    }
+
+    private fun String.convertToTargetBaseUrl(targetDefaultBaseUrl: String): String {
+        val source = parseBaseUrl(trim().trimEnd('/')) ?: return this
+        if (source.host in OFFICIAL_PROVIDER_HOSTS) {
+            return targetDefaultBaseUrl
+        }
+        val target = parseBaseUrl(targetDefaultBaseUrl) ?: return this
+        val convertedPath = source.path.convertToTargetPath(target.path)
+        return source.origin + convertedPath
+    }
+
+    private fun String.convertToTargetPath(targetPath: String): String {
+        val source = normalizePath()
+        val target = targetPath.normalizePath()
+        val replaced = when {
+            source.lowercase().endsWith(V1_BETA_SUFFIX) -> source.dropLast(V1_BETA_SUFFIX.length) + target
+            source.lowercase().endsWith(V1_SUFFIX) -> source.dropLast(V1_SUFFIX.length) + target
+            source.isBlank() -> target
+            else -> source + target
+        }
+        return replaced.normalizePath()
+    }
+
+    private fun String.normalizePath(): String {
+        val value = trim()
+        if (value.isEmpty() || value == "/") return ""
+        val path = if (value.startsWith("/")) value else "/$value"
+        return path.trimEnd('/')
+    }
+
+    private data class ParsedBaseUrl(
+        val origin: String,
+        val host: String,
+        val path: String,
+    )
+
+    private fun parseBaseUrl(value: String): ParsedBaseUrl? {
+        val match = Regex("^([A-Za-z][A-Za-z0-9+.-]*://([^/?#]+))([^?#]*)").find(value) ?: return null
+        val origin = match.groupValues[1].trimEnd('/')
+        val host = match.groupValues[2].substringBefore(':').lowercase()
+        val path = match.groupValues[3]
+        return ParsedBaseUrl(origin = origin, host = host, path = path)
+    }
+
+    private const val OPENAI_OFFICIAL_HOST = "api.openai.com"
+    private const val GOOGLE_OFFICIAL_HOST = "generativelanguage.googleapis.com"
+    private const val CLAUDE_OFFICIAL_HOST = "api.anthropic.com"
+    private const val V1_SUFFIX = "/v1"
+    private const val V1_BETA_SUFFIX = "/v1beta"
+    private val OFFICIAL_PROVIDER_HOSTS = setOf(
+        OPENAI_OFFICIAL_HOST,
+        GOOGLE_OFFICIAL_HOST,
+        CLAUDE_OFFICIAL_HOST,
+    )
+
+    // ---- TTS providers (settings.ttsProviders: List<TTSProviderSetting>) ----
+
+    /** Append a fully-constructed [provider] to `settings.ttsProviders`. */
+    fun addTtsProvider(settings: Settings, provider: TTSProviderSetting): Settings {
+        return settings.copy(ttsProviders = settings.ttsProviders + provider)
+    }
+
+    /** Remove a TTS provider by [id] (Uuid string); no-op if not found. */
+    fun removeTtsProvider(settings: Settings, id: String): Settings {
+        val parsed = kotlin.uuid.Uuid.parse(id)
+        return settings.copy(ttsProviders = settings.ttsProviders.filterNot { it.id == parsed })
+    }
+
+    /**
+     * Construct an OpenAI-compatible [TTSProviderSetting.OpenAI]. The iOS
+     * "add TTS engine" form collects (name, engineType, apiKey, model); this
+     * factory builds the OpenAI subtype when engineType == "openai". Other
+     * engine types are not built from the iOS form in this slice (their markers
+     * stay 待接 honestly).
+     */
+    fun buildOpenAITtsProvider(
+        name: String,
+        apiKey: String,
+        model: String,
+    ): TTSProviderSetting.OpenAI {
+        return TTSProviderSetting.OpenAI(
+            id = kotlin.uuid.Uuid.random(),
+            name = name,
+            apiKey = apiKey,
+            model = model,
+        )
+    }
+
+    // ---- Search services (settings.searchServices: List<SearchServiceOptions>) ----
+
+    /**
+     * Append [service], make it the selected search service, and mark it
+     * enabled. Mirrors Android's add-provider sheet behavior so iOS additions
+     * are immediately visible to the search execution route.
+     */
+    fun addSearchServiceAndSelect(settings: Settings, service: SearchServiceOptions): Settings {
+        val services = settings.searchServices + service
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = services.lastIndex,
+            searchEnabledServiceIds = (settings.searchEnabledServiceIds + service.id).distinct(),
+        )
+    }
+
+    /** Remove a search service by [id] (Uuid string); no-op if not found. */
+    fun removeSearchService(settings: Settings, id: String): Settings {
+        val parsed = kotlin.uuid.Uuid.parse(id)
+        val services = settings.searchServices.filterNot { it.id == parsed }
+        val selected = if (services.isEmpty()) {
+            0
+        } else {
+            settings.searchServiceSelected.coerceIn(0, services.lastIndex)
+        }
+        val enabledIds = settings.searchEnabledServiceIds
+            .filterNot { it == parsed }
+            .filter { id -> services.any { service -> service.id == id } }
+            .ifEmpty { services.getOrNull(selected)?.let { listOf(it.id) }.orEmpty() }
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = selected,
+            searchEnabledServiceIds = enabledIds,
+        )
+    }
+
+    /** Select a search service by [index], clamped to the current service list. */
+    fun selectSearchService(settings: Settings, index: Int): Settings {
+        val selected = if (settings.searchServices.isEmpty()) {
+            0
+        } else {
+            index.coerceIn(0, settings.searchServices.lastIndex)
+        }
+        return settings.copy(searchServiceSelected = selected)
+    }
+
+    /** Enable or disable one search service by [id] (Uuid string). */
+    fun setSearchServiceEnabled(settings: Settings, id: String, enabled: Boolean): Settings {
+        val parsed = kotlin.uuid.Uuid.parse(id)
+        if (settings.searchServices.none { it.id == parsed }) return settings
+        val enabledIds = if (enabled) {
+            (settings.searchEnabledServiceIds + parsed).distinct()
+        } else {
+            settings.searchEnabledServiceIds.filterNot { it == parsed }
+        }
+        return settings.copy(searchEnabledServiceIds = enabledIds)
+    }
+
+    /** Update a search service apiKey by [id] without changing subtype-specific options. */
+    fun updateSearchServiceApiKey(settings: Settings, id: String, apiKey: String): Settings {
+        val parsed = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(
+            searchServices = settings.searchServices.map { service ->
+                if (service.id != parsed) {
+                    service
+                } else {
+                    when (service) {
+                        is SearchServiceOptions.ZhipuOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.TavilyOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.ExaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.LinkUpOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.BraveOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.SerperOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.SerpApiOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.MetasoOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.OllamaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.PerplexityOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.FirecrawlOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.JinaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.BochaOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.AmberAgentSearchOptions -> service.copy(apiKey = apiKey)
+                        is SearchServiceOptions.GrokOptions -> service.copy(apiKey = apiKey)
+                        else -> service
+                    }
+                }
+            }
+        )
+    }
+
+    /** Toggle the master web-search gate consumed by iOS ChatViewModel. */
+    fun setEnableWebSearch(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(enableWebSearch = enabled)
+    }
+
+    /** Enable or disable the built-in DuckDuckGo Lite fallback source. */
+    fun setSearchBuiltinDuckDuckGoEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinDuckDuckGoEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Bing HTML fallback source. */
+    fun setSearchBuiltinBingEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinBingEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Jina Search / Reader source. */
+    fun setSearchBuiltinJinaEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinJinaEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Wikipedia source. */
+    fun setSearchBuiltinWikipediaEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinWikipediaEnabled = enabled)
+    }
+
+    /** Enable or disable the built-in Hacker News source. */
+    fun setSearchBuiltinHackerNewsEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchBuiltinHackerNewsEnabled = enabled)
+    }
+
+    /** Enable or disable the Google WebView visible-search fallback. */
+    fun setSearchGoogleWebViewFallbackEnabled(settings: Settings, enabled: Boolean): Settings {
+        return settings.copy(searchGoogleWebViewFallbackEnabled = enabled)
+    }
+
+    /** Set the per-search max result count (clamped to 1..50, mirrors Android). */
+    fun setSearchResultSize(settings: Settings, size: Int): Settings {
+        val clamped = size.coerceIn(1, 50)
+        return settings.copy(
+            searchCommonOptions = settings.searchCommonOptions.copy(resultSize = clamped)
+        )
+    }
+
+    /**
+     * Reorder a configured search service from [fromIndex] to [toIndex] (priority
+     * is the list order, first = highest). Keeps the currently-selected service
+     * pointing at the same item after the move. Mirrors Android's drag-to-reorder.
+     */
+    fun moveSearchService(settings: Settings, fromIndex: Int, toIndex: Int): Settings {
+        val services = settings.searchServices.toMutableList()
+        if (fromIndex !in services.indices) return settings
+        val target = toIndex.coerceIn(0, services.lastIndex)
+        if (fromIndex == target) return settings
+        val selectedId = services.getOrNull(settings.searchServiceSelected)?.id
+        val moved = services.removeAt(fromIndex)
+        services.add(target, moved)
+        val newSelected = selectedId
+            ?.let { sid -> services.indexOfFirst { it.id == sid } }
+            ?.takeIf { it >= 0 }
+            ?: settings.searchServiceSelected.coerceIn(0, services.lastIndex)
+        return settings.copy(
+            searchServices = services,
+            searchServiceSelected = newSelected,
+        )
+    }
+
+    /**
+     * Construct a [SearchServiceOptions] by [serviceType] (the @SerialName wire
+     * name, e.g. "bing_local"/"tavily"/"zhipu"/"exa"/"brave"/"serper"/
+     * "serpapi"/"metaso"/"perplexity"/"firecrawl"/"jina"/"bocha"/"grok"/
+     * "linkup"). Sets [apiKey] where the subtype supports it. Unknown types
+     * fall back to Tavily (which has an apiKey field) so the entry is still
+     * persisted + editable; the iOS form is responsible for offering only
+     * known types.
+     */
+    fun buildSearchService(serviceType: String, apiKey: String): SearchServiceOptions {
+        val id = kotlin.uuid.Uuid.random()
+        return when (serviceType.lowercase()) {
+            "bing", "bing_local" -> SearchServiceOptions.BingLocalOptions(id = id)
+            "zhipu" -> SearchServiceOptions.ZhipuOptions(id = id, apiKey = apiKey)
+            "exa" -> SearchServiceOptions.ExaOptions(id = id, apiKey = apiKey)
+            "searxng" -> SearchServiceOptions.SearXNGOptions(id = id)
+            "brave" -> SearchServiceOptions.BraveOptions(id = id, apiKey = apiKey)
+            "serper" -> SearchServiceOptions.SerperOptions(id = id, apiKey = apiKey)
+            "serpapi" -> SearchServiceOptions.SerpApiOptions(id = id, apiKey = apiKey)
+            "metaso" -> SearchServiceOptions.MetasoOptions(id = id, apiKey = apiKey)
+            "ollama" -> SearchServiceOptions.OllamaOptions(id = id, apiKey = apiKey)
+            "perplexity" -> SearchServiceOptions.PerplexityOptions(id = id, apiKey = apiKey)
+            "firecrawl" -> SearchServiceOptions.FirecrawlOptions(id = id, apiKey = apiKey)
+            "jina" -> SearchServiceOptions.JinaOptions(id = id, apiKey = apiKey)
+            "bocha" -> SearchServiceOptions.BochaOptions(id = id, apiKey = apiKey)
+            "amber_agent" -> SearchServiceOptions.AmberAgentSearchOptions(id = id, apiKey = apiKey)
+            "grok" -> SearchServiceOptions.GrokOptions(id = id, apiKey = apiKey)
+            "linkup" -> SearchServiceOptions.LinkUpOptions(id = id, apiKey = apiKey)
+            "tavily" -> SearchServiceOptions.TavilyOptions(id = id, apiKey = apiKey)
+            // Unknown type: default to Tavily (has apiKey) so the entry is
+            // persisted and editable. Honest — the iOS form offers known types.
+            else -> SearchServiceOptions.TavilyOptions(id = id, apiKey = apiKey)
+        }
+    }
+
+    // ---- SubAgent overrides (settings.agentRuntime.subAgent.overrides) ----
+    // NOTE: the path is agentRuntime.subAgent (subAgent is a field of
+    // AgentRuntimeSetting, not of Settings directly — Settings only carries
+    // agentRuntime). This compiles fine from :shared.
+
+    /**
+     * Put a [SubAgentOverride] for [roleId] into
+     * `agentRuntime.subAgent.overrides`. Only [systemPrompt] is writable from
+     * iOS in this slice; other override fields keep their defaults. Returns a
+     * new [Settings]; caller persists via restoreSnapshot.
+     */
+    fun putSubAgentOverride(
+        settings: Settings,
+        roleId: String,
+        systemPrompt: String,
+    ): Settings {
+        val sub = settings.agentRuntime.subAgent
+        val existing = sub.overrides[roleId]
+        val merged = (existing ?: SubAgentOverride()).copy(systemPrompt = systemPrompt)
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                subAgent = sub.copy(overrides = sub.overrides + (roleId to merged))
+            )
+        )
+    }
+
+    /** Remove a sub-agent override for [roleId]; no-op if not found. */
+    fun removeSubAgentOverride(settings: Settings, roleId: String): Settings {
+        val sub = settings.agentRuntime.subAgent
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                subAgent = sub.copy(
+                    overrides = sub.overrides.filterKeys { it != roleId }
+                )
+            )
+        )
+    }
+
+    // ---- Memory runtime switches (settings.agentRuntime.enable*Memory) ----
+
+    fun setMemoryRuntimeEnabled(
+        settings: Settings,
+        enableCoreMemory: Boolean,
+        enableShortTermMemory: Boolean,
+        enableLongTermMemory: Boolean,
+    ): Settings {
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                enableCoreMemory = enableCoreMemory,
+                enableShortTermMemory = enableShortTermMemory,
+                enableLongTermMemory = enableLongTermMemory,
+            )
+        )
+    }
+
+    fun setAgentSoulMarkdown(settings: Settings, markdown: String): Settings {
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                agentSoulMarkdown = markdown,
+            )
+        )
+    }
+
+    fun isLegacyFactoryAgentSoulMarkdown(value: String): Boolean =
+        isLegacyFactoryAgentSoul(value)
+
+    // ---- Today Board / Deep Read settings (agentRuntime.todayBoard) ----
+
+    /**
+     * Replace the iOS-editable TodayBoard fields while preserving the rest of
+     * [TodayBoardSetting]. Swift cannot safely reconstruct the Kotlin data class,
+     * so it submits the complete editable surface here, then persists via
+     * IOSSharedSettingsStore.restoreSnapshot.
+     */
+    fun setTodayBoardOptions(
+        settings: Settings,
+        boardModelId: String?,
+        clearBoardModelId: Boolean,
+        hotListRefreshIntervalMinutes: Int,
+        hotListWifiOnly: Boolean,
+        hotListEnabledSources: List<String>,
+        hotListFocusKeywords: List<String>,
+        hotListFilterModeWireName: String,
+        boardReadingFontModeWireName: String,
+        boardReadingFontPackId: String?,
+        clearBoardReadingFontPackId: Boolean,
+        deepReadFontScale: Float,
+        deepReadTemplateId: String,
+        hotListTranslateToChinese: Boolean,
+    ): Settings {
+        val runtime = settings.agentRuntime
+        val board = runtime.todayBoard
+        val nextBoardModelId = when {
+            clearBoardModelId -> null
+            boardModelId != null -> boardModelId.trim().takeIf { it.isNotBlank() }
+            else -> board.boardModelId
+        }
+        val nextPackId = when {
+            clearBoardReadingFontPackId -> null
+            boardReadingFontPackId != null -> boardReadingFontPackId.trim().takeIf { it.isNotBlank() }
+            else -> board.boardReadingFontPackId
+        }
+        val nextSources = hotListEnabledSources
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+        val nextKeywords = hotListFocusKeywords
+            .flatMap { raw -> raw.split(',', '，', '、', ';', '；', '\n', '\t') }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(80)
+        val nextTemplateId = deepReadTemplateId.trim().takeIf { it.isNotBlank() }
+            ?: board.deepReadTemplateId
+
+        return settings.copy(
+            agentRuntime = runtime.copy(
+                todayBoard = board.copy(
+                    boardModelId = nextBoardModelId,
+                    hotListRefreshIntervalMinutes = hotListRefreshIntervalMinutes.coerceAtLeast(30),
+                    hotListWifiOnly = hotListWifiOnly,
+                    hotListEnabledSources = nextSources,
+                    hotListFocusKeywords = nextKeywords,
+                    hotListFilterMode = TodayBoardHotListFilterMode.fromWireName(hotListFilterModeWireName),
+                    boardReadingFontMode = TodayBoardReadingFontMode.fromWireName(boardReadingFontModeWireName),
+                    boardReadingFontPackId = nextPackId,
+                    deepReadFontScale = deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX),
+                    deepReadTemplateId = nextTemplateId,
+                    hotListTranslateToChinese = hotListTranslateToChinese,
+                )
+            )
+        )
+    }
+
+    // ---- MiniApp host access switches (settings.agentRuntime.miniApp) ----
+
+    fun setMiniAppHostAccess(
+        settings: Settings,
+        hostContextEnabled: Boolean,
+        hostWriteEnabled: Boolean,
+    ): Settings {
+        val miniApp = settings.agentRuntime.miniApp
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                miniApp = miniApp.copy(
+                    hostContextEnabled = hostContextEnabled,
+                    hostWriteEnabled = hostWriteEnabled,
+                )
+            )
+        )
+    }
+
+    fun setMiniAppRuntimeOptions(
+        settings: Settings,
+        enabled: Boolean,
+        networkEnabled: Boolean,
+        externalImagesEnabled: Boolean,
+        searchEnabled: Boolean,
+        clipboardCopyEnabled: Boolean,
+        boardSummaryUpdateEnabled: Boolean,
+        hostContextEnabled: Boolean,
+        hostWriteEnabled: Boolean,
+        aiEnabled: Boolean,
+        sharedStoreEnabled: Boolean,
+        eventBusEnabled: Boolean,
+        launchEnabled: Boolean,
+        sensorEnabled: Boolean,
+        locationEnabled: Boolean,
+        clipboardReadEnabled: Boolean,
+        webViewDebugEnabled: Boolean,
+        showSourceButton: Boolean,
+    ): Settings {
+        val miniApp = settings.agentRuntime.miniApp
+        return settings.copy(
+            agentRuntime = settings.agentRuntime.copy(
+                miniApp = miniApp.copy(
+                    enabled = enabled,
+                    networkEnabled = networkEnabled,
+                    externalImagesEnabled = externalImagesEnabled,
+                    searchEnabled = searchEnabled,
+                    clipboardCopyEnabled = clipboardCopyEnabled,
+                    boardSummaryUpdateEnabled = boardSummaryUpdateEnabled,
+                    hostContextEnabled = hostContextEnabled,
+                    hostWriteEnabled = hostWriteEnabled,
+                    aiEnabled = aiEnabled,
+                    sharedStoreEnabled = sharedStoreEnabled,
+                    eventBusEnabled = eventBusEnabled,
+                    launchEnabled = launchEnabled,
+                    sensorEnabled = sensorEnabled,
+                    locationEnabled = locationEnabled,
+                    clipboardReadEnabled = clipboardReadEnabled,
+                    webViewDebugEnabled = webViewDebugEnabled,
+                    showSourceButton = showSourceButton,
+                )
+            )
+        )
+    }
+
+    // ---- Skills (assistant.enabledSkills) ----
+
+    /** Swift-friendly read for the current assistant's enabled skill names. */
+    fun currentAssistantEnabledSkillNames(settings: Settings): List<String> {
+        return settings.getCurrentAssistant().enabledSkills.sorted()
+    }
+
+    /** Enable or disable one skill for the current assistant. */
+    fun setSkillEnabledForCurrentAssistant(
+        settings: Settings,
+        skillName: String,
+        enabled: Boolean,
+    ): Settings {
+        val normalized = skillName.trim()
+        if (normalized.isBlank()) return settings
+        val currentAssistantId = settings.getCurrentAssistant().id
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (assistant.id == currentAssistantId) {
+                    val next = if (enabled) {
+                        assistant.enabledSkills + normalized
+                    } else {
+                        assistant.enabledSkills - normalized
+                    }
+                    assistant.copy(enabledSkills = next)
+                } else {
+                    assistant
+                }
+            }
+        )
+    }
+
+    /** Remove a deleted skill from every assistant so it cannot resurrect. */
+    fun removeSkillFromAllAssistants(settings: Settings, skillName: String): Settings {
+        val normalized = skillName.trim()
+        if (normalized.isBlank()) return settings
+        return settings.copy(
+            assistants = settings.assistants.map { assistant ->
+                if (normalized in assistant.enabledSkills) {
+                    assistant.copy(enabledSkills = assistant.enabledSkills - normalized)
+                } else {
+                    assistant
+                }
+            }
+        )
+    }
+
+    /**
+     * Update the current user's nickname (`displaySetting.userNickname`). Android
+     * edits this in ChatDrawer; iOS AccountView was preview-only. iOS-only
+     * bridge helper (same pattern as [setSkillEnabledForCurrentAssistant]).
+     */
+    fun updateUserNickname(settings: Settings, nickname: String): Settings {
+        val trimmed = nickname.trim()
+        return settings.copy(
+            displaySetting = settings.displaySetting.copy(userNickname = trimmed)
+        )
+    }
+
+    // ---- Mode injections (PromptInjection.ModeInjection) CRUD ----
+    // Android extensions/PromptPage parity. iOS-only bridge helpers.
+
+    /** Upsert a mode injection by id (insert if absent). */
+    fun upsertModeInjection(
+        settings: Settings,
+        id: String,
+        name: String,
+        content: String,
+        enabled: Boolean,
+        priority: Int,
+        position: String,
+        role: String,
+    ): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrElse { kotlin.uuid.Uuid.random() }
+        val injection = PromptInjection.ModeInjection(
+            id = parsedId,
+            name = name.trim(),
+            content = content,
+            enabled = enabled,
+            priority = priority,
+            position = parseInjectionPosition(position),
+            role = parseMessageRole(role),
+        )
+        val existing = settings.modeInjections.toMutableList()
+        val idx = existing.indexOfFirst { it.id == parsedId }
+        if (idx >= 0) existing[idx] = injection else existing.add(injection)
+        return settings.copy(modeInjections = existing)
+    }
+
+    /** Delete a mode injection by id string. */
+    fun deleteModeInjection(settings: Settings, id: String): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(
+            modeInjections = settings.modeInjections.filterNot { it.id == parsedId }
+        )
+    }
+
+    // ---- Lorebooks CRUD ----
+
+    /** Upsert a lorebook by id (insert if absent). A lorebook holds keyword
+     *  entries; pass an empty entries list to create a placeholder. */
+    fun upsertLorebook(
+        settings: Settings,
+        id: String,
+        name: String,
+        description: String,
+        enabled: Boolean,
+    ): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrElse { kotlin.uuid.Uuid.random() }
+        val existing = settings.lorebooks.toMutableList()
+        val idx = existing.indexOfFirst { it.id == parsedId }
+        val lorebook = if (idx >= 0) {
+            existing[idx].copy(name = name.trim(), description = description, enabled = enabled)
+        } else {
+            Lorebook(id = parsedId, name = name.trim(), description = description, enabled = enabled)
+        }
+        if (idx >= 0) existing[idx] = lorebook else existing.add(lorebook)
+        return settings.copy(lorebooks = existing)
+    }
+
+    /** Delete a lorebook by id string. */
+    fun deleteLorebook(settings: Settings, id: String): Settings {
+        val parsedId = runCatching { kotlin.uuid.Uuid.parse(id) }.getOrNull() ?: return settings
+        return settings.copy(lorebooks = settings.lorebooks.filterNot { it.id == parsedId })
+    }
+
+    private fun parseInjectionPosition(raw: String): InjectionPosition = when (raw.lowercase()) {
+        "before_system_prompt", "before" -> InjectionPosition.BEFORE_SYSTEM_PROMPT
+        "top_of_chat", "top" -> InjectionPosition.TOP_OF_CHAT
+        "bottom_of_chat", "after_user", "bottom" -> InjectionPosition.BOTTOM_OF_CHAT
+        "at_depth" -> InjectionPosition.AT_DEPTH
+        else -> InjectionPosition.AFTER_SYSTEM_PROMPT
+    }
+
+    private fun parseMessageRole(raw: String): MessageRole = when (raw.lowercase()) {
+        "assistant" -> MessageRole.ASSISTANT
+        "system" -> MessageRole.SYSTEM
+        else -> MessageRole.USER
+    }
+
+    // ---- helpers ----
+
+    private fun parseRunnerType(raw: String): ModelCouncilSeatRunner {
+        // Accept the legacy iOS shorthand ("provider"/"external") and the
+        // serial name ("provider_model"/"external_cli"); default to PROVIDER_MODEL.
+        return when (raw.lowercase()) {
+            "external", "external_cli" -> ModelCouncilSeatRunner.EXTERNAL_CLI
+            else -> ModelCouncilSeatRunner.PROVIDER_MODEL
+        }
+    }
+
+    private const val DEFAULT_OUTPUT_BUDGET_CHARS = 4096
+}

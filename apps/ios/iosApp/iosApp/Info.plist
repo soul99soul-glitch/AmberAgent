@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleDisplayName</key>
+    <string>Amber</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Amber</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>CFBundleURLName</key>
+            <string>$(PRODUCT_BUNDLE_IDENTIFIER).activity</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>$(AGENT_ACTIVITY_URL_SCHEME)</string>
+            </array>
+        </dict>
+    </array>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Amber Novel Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>app.amber.ios.novel-project</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.data</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>Amber Novel Project</string>
+            <key>UTTypeIdentifier</key>
+            <string>app.amber.ios.novel-project</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>ambernovel</string>
+                </array>
+                <key>public.mime-type</key>
+                <string>application/vnd.amberagent.novel+json</string>
+            </dict>
+        </dict>
+    </array>
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <false/>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>CADisableMinimumFrameDurationOnPhone</key>
+    <true/>
+    <key>NSSupportsLiveActivities</key>
+    <true/>
+    <key>BGTaskSchedulerPermittedIdentifiers</key>
+    <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).chat.*</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).deepread.*</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER).keepalive.*</string>
+    </array>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>AmberAgent can request access to Apple Music and the media library when you choose to enable media capabilities.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>AmberAgent can request Bluetooth access when you choose to enable nearby device capabilities.</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_amberagent._tcp</string>
+    </array>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>AmberAgent can request full calendar access when you choose to enable calendar capabilities.</string>
+    <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+    <string>AmberAgent can request write-only calendar access when you choose to create calendar events.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>AmberAgent can request camera access when you choose to enable camera capabilities.</string>
+    <key>NSContactsUsageDescription</key>
+    <string>AmberAgent can request contacts access when you choose to enable contact capabilities.</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>AmberAgent can request Face ID authentication when you choose to verify local identity.</string>
+    <key>NSGKFriendListUsageDescription</key>
+    <string>AmberAgent can request Game Center friend list access when you choose to enable Game Center capabilities.</string>
+    <key>NSHealthShareUsageDescription</key>
+    <string>AmberAgent can request HealthKit read access for health data types you choose.</string>
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>AmberAgent can request HealthKit write access for health data types you choose.</string>
+    <key>NSHomeKitUsageDescription</key>
+    <string>AmberAgent can request HomeKit access when you choose to enable home capabilities.</string>
+    <key>NSIdentityUsageDescription</key>
+    <string>AmberAgent can request identity capabilities when you choose to enable supported identity features.</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>AmberAgent can request local network access when you choose to discover or connect to nearby services.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>0.0.0.0/0</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+            <key>::/0</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>AmberAgent can request always-on location access when you choose to enable background location capabilities.</string>
+    <key>NSLocationTemporaryUsageDescriptionDictionary</key>
+    <dict>
+        <key>AmberAgentPreciseLocation</key>
+        <string>AmberAgent can request temporary precise location when you choose a location capability that needs higher accuracy.</string>
+    </dict>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>AmberAgent can request location access while you use the app when you choose to enable location capabilities.</string>
+    <key>NSLocationWildernessSafetyUsageDescription</key>
+    <string>AmberAgent can request wilderness safety location capabilities when you choose to enable supported safety features.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>AmberAgent can request microphone access when you choose to enable audio capabilities.</string>
+    <key>NSMotionUsageDescription</key>
+    <string>AmberAgent can request motion and fitness access when you choose to enable movement capabilities.</string>
+    <key>NSNearbyInteractionUsageDescription</key>
+    <string>AmberAgent can request Nearby Interaction access when you choose to enable nearby ranging capabilities.</string>
+    <key>NFCReaderUsageDescription</key>
+    <string>AmberAgent can open NFC reader sessions when you choose to enable NFC capabilities.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>AmberAgent can request add-only photo library access when you choose to save media.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>AmberAgent can request photo library access when you choose to enable photo capabilities.</string>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>AmberAgent can request reminders access when you choose to enable reminder capabilities.</string>
+    <key>NSSiriUsageDescription</key>
+    <string>AmberAgent can integrate with Siri and Shortcuts when you choose to enable voice shortcuts.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>AmberAgent can request speech recognition access when you choose to enable speech-to-text capabilities.</string>
+    <key>NSSystemExtensionUsageDescription</key>
+    <string>AmberAgent can request system-extension capabilities when you choose to enable supported extensions.</string>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>AmberAgent can request tracking authorization when you choose to enable tracking-related capabilities.</string>
+    <key>NSVideoSubscriberAccountUsageDescription</key>
+    <string>AmberAgent can request TV provider account access when you choose to enable video subscriber capabilities.</string>
+    <key>AmberAgentConfiguredEntitlements</key>
+    <array/>
+    <key>UILaunchScreen</key>
+    <dict/>
+    <key>UIApplicationSupportsMultipleScenes</key>
+    <false/>
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>processing</string>
+    </array>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>MinimumOSVersion</key>
+    <string>26.0</string>
+</dict>
+</plist>

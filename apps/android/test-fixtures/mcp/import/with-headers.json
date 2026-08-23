@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "secure-fetch": {
+      "type": "streamable_http",
+      "url": "https://mcp.example.com/secure",
+      "headers": {
+        "Authorization": "Bearer placeholder-token",
+        "X-Custom-Header": "custom-value"
+      }
+    }
+  }
+}

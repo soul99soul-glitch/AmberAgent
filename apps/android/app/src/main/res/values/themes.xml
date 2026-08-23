@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      去掉 Android 12+ 系统 splash 闪屏（白底+图标）：
+      用应用背景色作为 windowBackground，冷启动窗口直接显示该底色，
+      系统不再插入 SplashScreen 图标窗口。不带 windowIsTranslucent，
+      避免透明启动导致的桌面穿透/输入穿透副作用。
+    -->
+    <style name="Theme.amberagent" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/splash_bg</item>
+    </style>
+</resources>

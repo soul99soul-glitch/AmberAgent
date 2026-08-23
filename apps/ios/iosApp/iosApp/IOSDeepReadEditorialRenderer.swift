@@ -1,0 +1,528 @@
+import Foundation
+import Shared
+
+/// Renders a Deep Read article as a self-contained HTML "editorial" magazine
+/// page for the WKWebView reader — a Swift port of the Android
+/// `DeepReadTemplateRenderer.renderEditorialSlant` plus its BASE / runtime / dark
+/// CSS (kept verbatim so both platforms share one visual language).
+///
+/// Shell-first scope: a magazine headline (with an OPTIONAL diagonal hero image —
+/// the `.hero-cut` clip-path slant) over a magazine-typeset Markdown body, plus a
+/// sources list. The Markdown is parsed by the SAME `MarkdownBridge` the SwiftUI
+/// `MarkdownView` uses, then walked to HTML here (no second parser, no drift).
+/// The structured timeline / core-points / diagram cards Android renders from a
+/// typed `DeepReadOutput` are a later increment (their CSS is already included).
+enum IOSDeepReadEditorialRenderer {
+
+    struct SourceLink {
+        let title: String
+        let url: String
+        var source: String? = nil
+    }
+
+    struct Input {
+        let title: String
+        let markdown: String
+        var kicker: String = "DEEP READ"
+        /// When non-nil/non-empty, renders the diagonal hero figure. Degrades to a
+        /// kicker headline when absent.
+        var heroImageURL: String? = nil
+        var heroCaption: String? = nil
+        var sourceLabel: String? = nil
+        var sources: [SourceLink] = []
+        var dark: Bool = false
+        /// Structured Android-parity output. When present (and non-empty), the reader
+        /// renders the rich editorial cards (timeline / core-points / diagram /
+        /// analysis / reading-links); otherwise it falls back to the flat Markdown body.
+        var structured: IOSDeepReadOutput? = nil
+        /// When false, the body renders WITHOUT the kicker + `<h1>` headline (the native
+        /// SwiftUI masthead owns those); the summary/lead is kept as the body's opener.
+        var showHeadline: Bool = true
+        /// App accent color as a CSS hex ("#RRGGBB"). Drives every accent in the reader
+        /// (timeline markers, blockquote rule, diagram indices, links) via the injected
+        /// `--deep-read-accent` variable, so the editorial palette follows the user's swatch.
+        var accentHex: String = "#C8402F"
+        /// Reading font mode wire name: "serif" (bundled Noto Serif SC) or "system"
+        /// (the platform sans). Mirrors the board's 阅读字体 setting.
+        var fontMode: String = "serif"
+        /// Resolved canvas palette (the app theme's colors for the current appearance) as
+        /// CSS hex, injected as --deep-read-bg/fg/surface/muted/border so the reader follows
+        /// the chosen background theme. Defaults to the warm-paper palette.
+        var bgHex: String = "#fbf7f1"
+        var fgHex: String = "#2a2320"
+        var surfaceHex: String = "#f2eade"
+        var mutedHex: String = "#6e6254"
+        var borderHex: String = "#dbcebc"
+    }
+
+    // MARK: - Entry point
+
+    static func renderHTML(_ input: Input) -> String {
+        let hero = input.heroImageURL?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasHero = !(hero ?? "").isEmpty
+        let structured = input.structured.flatMap { $0.hasStructuredBody ? $0 : nil }
+
+        var b = "<!doctype html><html><head>"
+        b += #"<meta name="viewport" content="width=device-width, initial-scale=1"/>"#
+        b += "<style>\n"
+        b += defaultFontCSS + "\n" + baseCSS + "\n" + runtimeCSS + "\n"
+        // After the base/runtime CSS so the :root + code overrides win the cascade.
+        b += bundledFontCSS + "\n"
+        // User accent + canvas palette drive every var(--deep-read-*) in the CSS, injected
+        // last so they win. The palette is already resolved for the current appearance by
+        // the caller, so the reader follows the chosen background theme (paper or immersive,
+        // light or dark) with no baked light/dark stylesheet. "system" font mode swaps the
+        // serif body stack for the platform sans.
+        b += ":root{"
+            + "--deep-read-accent:" + input.accentHex + ";"
+            + "--deep-read-bg:" + input.bgHex + ";"
+            + "--deep-read-fg:" + input.fgHex + ";"
+            + "--deep-read-surface:" + input.surfaceHex + ";"
+            + "--deep-read-muted:" + input.mutedHex + ";"
+            + "--deep-read-border:" + input.borderHex + ";"
+            + "}\n"
+        if input.fontMode == "system" {
+            b += #":root{--deep-read-serif:"PingFang SC","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;}"# + "\n"
+        }
+        b += emptyImageFallbackCSS + "\n</style></head><body><article>"
+
+        if hasHero, let hero {
+            b += #"<figure class="hero"><img src=""# + esc(hero) + #""/><div class="hero-cut"><div>"#
+            b += #"<span class="hero-type">"# + esc(input.kicker) + "</span>"
+            if let sl = input.sourceLabel, !sl.isEmpty {
+                b += #"<span class="hero-source">"# + esc(sl) + "</span>"
+            }
+            b += "</div>"
+            if let cap = input.heroCaption, !cap.isEmpty {
+                b += "<figcaption>" + esc(cap) + "</figcaption>"
+            }
+            b += "</div></figure>"
+        }
+
+        if input.showHeadline {
+            b += #"<section class="headline">"#
+            if !hasHero {
+                b += #"<p class="kicker">"# + esc(input.kicker) + "</p>"
+            }
+            b += "<h1>" + esc(input.title) + "</h1>"
+            // Android puts the summary inside the headline section.
+            if let s = structured, !s.summary.isEmpty {
+                b += IOSDeepReadStructuredRenderer.summaryHTML(s.summary)
+            }
+            b += "</section>"
+        } else if let s = structured, !s.summary.isEmpty {
+            // Body-only: native masthead owns kicker + h1; keep the summary as the lead.
+            b += #"<section class="headline">"# + IOSDeepReadStructuredRenderer.summaryHTML(s.summary) + "</section>"
+        }
+
+        if let s = structured {
+            // Rich editorial sections from the typed output (timeline / core-points /
+            // diagram / analysis / extended-reading) — Android parity.
+            b += IOSDeepReadStructuredRenderer.sectionsHTML(s)
+        } else {
+            // Fallback: magazine-typeset flat Markdown body + the raw sources list.
+            b += #"<section><div class="markdown-body">"# + markdownToHTML(stripLeadingH1(input.markdown)) + "</div></section>"
+            if !input.sources.isEmpty {
+                b += #"<section><p class="section">来源</p>"#
+                for s in input.sources where !s.url.isEmpty {
+                    b += #"<a class="reading-link" href=""# + esc(s.url) + #"">"#
+                    b += "<p>" + esc(s.title) + "</p>"
+                    if let src = s.source, !src.isEmpty {
+                        b += "<small>" + esc(src) + "</small>"
+                    }
+                    b += "</a>"
+                }
+                b += "</section>"
+            }
+        }
+
+        b += "</article></body></html>"
+        return b
+    }
+
+    // MARK: - Markdown -> HTML (same parser as MarkdownView)
+
+    /// Block Markdown → HTML — internal so IOSDeepReadStructuredRenderer reuses it.
+    static func markdownToHTML(_ md: String) -> String {
+        let source = md.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return "" }
+        guard let data = MarkdownBridge.parse(source),
+              let reader = PackedAstReader(data: data),
+              let root = reader.root() else {
+            // Parser unavailable → degrade to escaped paragraphs split on blank lines.
+            return source
+                .components(separatedBy: "\n\n")
+                .map { "<p>" + esc($0.trimmingCharacters(in: .whitespacesAndNewlines)) + "</p>" }
+                .joined()
+        }
+        return root.children.map { blockHTML($0, source: source) }.joined()
+    }
+
+    /// Inline Markdown → HTML: strip a single surrounding `<p>…</p>` so the result can
+    /// sit inside an `<h2>`/`<h3>` (mirrors Android's markdownInlineHtml).
+    static func markdownToInlineHTML(_ md: String) -> String {
+        var html = markdownToHTML(md).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Collapse to inline so heading text keeps the heading's own font/size/weight:
+        // always drop the outer <p> wrapper (Android strips ^<p>(.*)</p>$ unconditionally)
+        // and fold any interior paragraph breaks into spaces, instead of leaking nested
+        // <p> (which would re-impose body 15px/1.68 inside an <h2>/<h3>).
+        if html.hasPrefix("<p>"), html.hasSuffix("</p>") {
+            html = String(html.dropFirst(3).dropLast(4))
+        }
+        html = html.replacingOccurrences(of: "</p><p>", with: " ")
+        return html
+    }
+
+    private static func blockHTML(_ node: PackedAstNode, source: String) -> String {
+        switch node.type {
+        case .paragraph:
+            return "<p>" + inlineHTML(node.children, source: source) + "</p>"
+        case .heading:
+            let level = min(max(node.headingLevel() ?? 2, 1), 6)
+            return "<h\(level)>" + inlineHTML(node.children, source: source) + "</h\(level)>"
+        case .blockquote:
+            return "<blockquote>" + node.children.map { blockHTML($0, source: source) }.joined() + "</blockquote>"
+        case .listUnordered:
+            return "<ul>" + node.children.map { "<li>" + listItemHTML($0, source: source) + "</li>" }.joined() + "</ul>"
+        case .listOrdered:
+            return "<ol>" + node.children.map { "<li>" + listItemHTML($0, source: source) + "</li>" }.joined() + "</ol>"
+        case .listItem:
+            return "<li>" + listItemHTML(node, source: source) + "</li>"
+        case .codeBlock:
+            return "<pre><code>" + esc(codeBlockBody(node, source: source)) + "</code></pre>"
+        case .horizontalRule:
+            return "<hr/>"
+        case .table:
+            return tableHTML(node, source: source)
+        default:
+            if !node.children.isEmpty {
+                return inlineHTML(node.children, source: source)
+            }
+            let raw = sliceSource(source, start: node.startOffset, end: node.endOffset)
+            return raw.isEmpty ? "" : "<p>" + esc(resolveBackslashEscapes(raw)) + "</p>"
+        }
+    }
+
+    /// A list item is usually a loose paragraph or a tight run of inline nodes;
+    /// coalesce inline runs and keep genuine block children (nested lists, code).
+    private static func listItemHTML(_ node: PackedAstNode, source: String) -> String {
+        let children = node.children.filter { $0.type != .taskListMarker }
+        if !children.isEmpty, children.allSatisfy({ $0.type == .paragraph }) {
+            return children.map { inlineHTML($0.children, source: source) }.joined(separator: "<br/>")
+        }
+        var out = ""
+        var inlineRun: [PackedAstNode] = []
+        func flush() {
+            if !inlineRun.isEmpty { out += inlineHTML(inlineRun, source: source); inlineRun.removeAll() }
+        }
+        for child in children {
+            if child.type.isBlockLevelForHTML {
+                flush()
+                out += blockHTML(child, source: source)
+            } else {
+                inlineRun.append(child)
+            }
+        }
+        flush()
+        return out
+    }
+
+    private static func tableHTML(_ node: PackedAstNode, source: String) -> String {
+        var head = ""
+        var body = ""
+        for child in node.children {
+            switch child.type {
+            case .tableHead:
+                let cells = child.children.flatMap { $0.type == .tableRow ? $0.children : [$0] }
+                head += "<tr>" + cells.map { "<th>" + inlineHTML($0.children, source: source) + "</th>" }.joined() + "</tr>"
+            case .tableRow:
+                body += "<tr>" + child.children.map { "<td>" + inlineHTML($0.children, source: source) + "</td>" }.joined() + "</tr>"
+            default:
+                break
+            }
+        }
+        var t = "<table>"
+        if !head.isEmpty { t += "<thead>" + head + "</thead>" }
+        if !body.isEmpty { t += "<tbody>" + body + "</tbody>" }
+        return t + "</table>"
+    }
+
+    private static func inlineHTML(_ nodes: [PackedAstNode], source: String) -> String {
+        var out = ""
+        for node in nodes {
+            switch node.type {
+            case .softBreak:
+                // CommonMark soft break = space; but no space between CJK characters.
+                if let last = out.last, !last.isWhitespace, !isCJK(last) { out += " " }
+            case .hardBreak:
+                out += "<br/>"
+            case .text:
+                out += esc(resolveBackslashEscapes(sliceSource(source, start: node.startOffset, end: node.endOffset)))
+            case .emphasis:
+                out += "<em>" + inlineHTML(node.children, source: source) + "</em>"
+            case .strong:
+                out += "<strong>" + inlineHTML(node.children, source: source) + "</strong>"
+            case .strikethrough:
+                out += "<s>" + inlineHTML(node.children, source: source) + "</s>"
+            case .inlineCode:
+                out += "<code>" + esc(stripInlineCodeFence(sliceSource(source, start: node.startOffset, end: node.endOffset))) + "</code>"
+            case .link:
+                let inner = inlineHTML(node.children, source: source)
+                if let href = node.linkHref(), href.hasPrefix("http") {
+                    out += #"<a href=""# + esc(href) + #"">"# + inner + "</a>"
+                } else {
+                    out += inner
+                }
+            case .image:
+                break // hero / inline images are handled out-of-band; skip in body text
+            default:
+                if !node.children.isEmpty {
+                    out += inlineHTML(node.children, source: source)
+                } else {
+                    out += esc(sliceSource(source, start: node.startOffset, end: node.endOffset))
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: - Helpers
+
+    /// The generated markdown leads with `# <title>`; the headline already shows the
+    /// title, so drop a single leading level-1 heading to avoid duplication.
+    private static func stripLeadingH1(_ md: String) -> String {
+        var lines = md.components(separatedBy: "\n")
+        while let first = lines.first, first.trimmingCharacters(in: .whitespaces).isEmpty {
+            lines.removeFirst()
+        }
+        if let first = lines.first, first.hasPrefix("# ") {
+            lines.removeFirst()
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    static func esc(_ s: String) -> String {
+        var r = ""
+        r.reserveCapacity(s.count)
+        for c in s {
+            switch c {
+            case "&": r += "&amp;"
+            case "<": r += "&lt;"
+            case ">": r += "&gt;"
+            case "\"": r += "&quot;"
+            case "'": r += "&#39;"
+            default: r.append(c)
+            }
+        }
+        return r
+    }
+
+    /// Strip the backtick delimiters (and one optional surrounding space) from an
+    /// inline-code slice — the AST range includes them. Mirrors Android's `trim('`')`.
+    private static func stripInlineCodeFence(_ s: String) -> String {
+        var t = Substring(s)
+        while t.first == "`" { t = t.dropFirst() }
+        while t.last == "`" { t = t.dropLast() }
+        // CommonMark strips one space on each side iff the content isn't all spaces.
+        if t.count >= 2, t.first == " ", t.last == " ", t.contains(where: { $0 != " " }) {
+            t = t.dropFirst().dropLast()
+        }
+        return String(t)
+    }
+
+    /// The code body of a fenced/indented block. The AST range covers the ``` fences +
+    /// info string, but the block's child text node carries just the body — prefer it.
+    private static func codeBlockBody(_ node: PackedAstNode, source: String) -> String {
+        let body = node.children
+            .map { sliceSource(source, start: $0.startOffset, end: $0.endOffset) }
+            .joined()
+        return body.isEmpty ? sliceSource(source, start: node.startOffset, end: node.endOffset) : body
+    }
+
+    /// Resolve CommonMark backslash escapes (`\*` → `*`) in a text slice — the AST text
+    /// range can keep the backslash. Only a backslash before ASCII punctuation is an
+    /// escape. NOT applied to code slices (where backslashes are literal).
+    private static func resolveBackslashEscapes(_ s: String) -> String {
+        guard s.contains("\\") else { return s }
+        var out = ""
+        out.reserveCapacity(s.count)
+        let chars = Array(s)
+        var i = 0
+        while i < chars.count {
+            if chars[i] == "\\", i + 1 < chars.count, chars[i + 1].isDeepReadASCIIPunctuation {
+                out.append(chars[i + 1])
+                i += 2
+            } else {
+                out.append(chars[i])
+                i += 1
+            }
+        }
+        return out
+    }
+
+    /// Slice the source using UTF-8 byte offsets from the AST (same as MarkdownView).
+    private static func sliceSource(_ source: String, start: Int, end: Int) -> String {
+        guard start < end else { return "" }
+        guard let s = source.utf8.index(source.utf8.startIndex, offsetBy: start, limitedBy: source.utf8.endIndex),
+              let e = source.utf8.index(source.utf8.startIndex, offsetBy: end, limitedBy: source.utf8.endIndex) else {
+            return ""
+        }
+        return String(source[s..<e])
+    }
+
+    private static func isCJK(_ c: Character) -> Bool {
+        for scalar in c.unicodeScalars {
+            switch scalar.value {
+            case 0x3000...0x303F, 0x3040...0x30FF, 0x3400...0x4DBF,
+                 0x4E00...0x9FFF, 0xF900...0xFAFF, 0xFF00...0xFFEF:
+                return true
+            default:
+                continue
+            }
+        }
+        return false
+    }
+
+    // MARK: - CSS (verbatim port of Android DeepReadTemplateRenderer constants)
+
+    private static let defaultFontCSS = """
+    :root{
+      --deep-read-serif:"Noto Serif SC","Source Han Serif SC","Songti SC",serif;
+      --deep-read-sans:"PingFang SC","Source Han Sans SC","Noto Sans SC",system-ui,sans-serif;
+      --deep-read-font-scale:1;
+    }
+    """
+
+    private static let baseCSS = """
+    html,body{margin:0;padding:0;background:var(--deep-read-bg);color:var(--deep-read-fg);font-family:var(--deep-read-serif);-webkit-user-select:text;}
+    /* Tight bottom pad — height is measured from article; avoid phantom whitespace. */
+    article{padding-bottom:12px;display:block;}
+    .hero{margin:0 0 8px 0;position:relative;background:var(--deep-read-surface);overflow:hidden;}
+    .hero img{display:block;width:100%;height:265px;object-fit:cover;}
+    .hero-cut{height:106px;background:var(--deep-read-bg);clip-path:polygon(0 24%,100% 0,100% 100%,0 100%);margin-top:-54px;position:relative;padding:46px 22px 0;box-sizing:border-box;}
+    .hero-cut>div{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+    .hero-type{font-family:var(--deep-read-sans);letter-spacing:.24em;color:var(--deep-read-accent);font-size:10px;}
+    .hero-source{font-family:var(--deep-read-sans);letter-spacing:.18em;color:var(--deep-read-muted);font-size:10px;white-space:nowrap;}
+    figcaption{font-size:9px;color:var(--deep-read-muted);line-height:1.45;margin:10px 0 0;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    .headline,section{padding:0 22px;}
+    .kicker,.section,.date,.holder,small{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:var(--deep-read-muted);font-size:10px;}
+    h1{font-weight:500;font-size:32px;line-height:1.13;margin:12px 0 16px;}
+    h2{font-weight:650;font-size:18px;line-height:1.34;margin:0 0 6px;}
+    p{font-size:15px;line-height:1.68;margin:0 0 13px;}
+    .summary{font-size:15px;line-height:1.68;}
+    section{margin-top:28px;}
+    .timeline{display:grid;grid-template-columns:32px 1fr;gap:10px;padding:11px 0;border-top:1px solid var(--deep-read-border);}
+    .num{font-family:var(--deep-read-sans);color:var(--deep-read-accent);letter-spacing:.12em;font-size:12px;padding-top:4px;}
+    .timeline-item{display:grid;grid-template-columns:32px minmax(0,1fr);gap:10px;padding:11px 0;border-top:1px solid var(--deep-read-border);}
+    .timeline-marker{width:18px;height:18px;border-radius:50%;border:1px solid var(--deep-read-accent);margin-top:3px;}
+    .timeline-body{min-width:0;}
+    .timeline-date{font-family:var(--deep-read-sans);letter-spacing:.18em;text-transform:uppercase;color:var(--deep-read-accent);font-size:10px;margin-bottom:4px;}
+    .core-point{padding:12px 0;border-top:1px solid var(--deep-read-border);}
+    .inline{margin:12px 0 4px;background:var(--deep-read-surface);}
+    .inline img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
+    .inline figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .timeline-item figure,.core-point figure{margin:12px 0 4px;background:var(--deep-read-surface);}
+    .timeline-item img,.core-point img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;}
+    .timeline-item figcaption,.core-point figcaption{text-align:left;margin:7px 9px 9px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .diagram-block{padding:0 22px;margin-top:30px;}
+    .diagram-block h2{margin:4px 0 14px;font-size:18px;}
+    .diagram-frame{background:var(--deep-read-surface);border-top:1px solid var(--deep-read-border);border-bottom:1px solid var(--deep-read-border);padding:8px 12px 10px;}
+    .diagram-steps{list-style:none;margin:0;padding:0;}
+    .diagram-step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;padding:12px 0;border-top:1px solid rgba(107,114,128,.18);}
+    .diagram-step:first-child{border-top:0;}
+    .diagram-step-index{font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.12em;color:var(--deep-read-accent);padding-top:2px;}
+    .diagram-grid{display:grid;grid-template-columns:1fr;gap:8px;margin:0;}
+    .diagram-card{background:var(--deep-read-bg);border:1px solid var(--deep-read-border);padding:11px 12px;}
+    .diagram-step h3,.diagram-card h3{font-size:15px;line-height:1.42;margin:0 0 5px;font-weight:500;}
+    .diagram-step p,.diagram-card p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:var(--deep-read-muted);margin:0;}
+    .diagram-group{display:block;font-family:var(--deep-read-sans);letter-spacing:.14em;text-transform:uppercase;color:var(--deep-read-accent);font-size:9px;margin-bottom:4px;}
+    .diagram-relations{list-style:none;margin:10px 0 0;padding:8px 0 0;border-top:1px solid rgba(107,114,128,.18);}
+    .diagram-relations li{font-family:var(--deep-read-sans);font-size:11px;line-height:1.55;color:var(--deep-read-muted);margin:4px 0;}
+    .diagram-relations b{font-weight:500;color:var(--deep-read-accent);margin:0 5px;}
+    .diagram-caption{font-family:var(--deep-read-sans);font-size:11px;line-height:1.5;color:var(--deep-read-muted);margin:10px 0 0;}
+    blockquote{font-size:18px;line-height:1.48;margin:0 0 16px;padding-left:12px;border-left:3px solid var(--deep-read-accent);}
+    .perspective{margin:0 0 26px;}
+    .perspective .holder{display:block;margin:0 0 13px;}
+    .quote{margin:0 0 18px;padding:0 0 0 14px;border-left:2px solid var(--deep-read-border);}
+    .quote .quote-text{font-size:15px;line-height:1.68;margin:0;color:inherit;}
+    .quote .quote-attribution{display:block;font-family:var(--deep-read-sans);font-size:11px;letter-spacing:.06em;color:var(--deep-read-muted);margin-top:6px;}
+    .reading{display:grid;grid-template-columns:30px 1fr;gap:10px;border-top:1px solid var(--deep-read-border);padding:10px 0;text-decoration:none;color:inherit;}
+    .reading span{font-family:var(--deep-read-sans);color:var(--deep-read-accent);font-size:12px;letter-spacing:.12em;}
+    .reading p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .reading small{letter-spacing:.08em;font-size:9px;}
+    .reading-link{display:block;border-top:1px solid var(--deep-read-border);padding:10px 0;text-decoration:none;color:inherit;}
+    .reading-link p{font-size:13px;line-height:1.45;margin-bottom:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+    .reading-link small{font-family:var(--deep-read-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--deep-read-muted);font-size:9px;}
+    """
+
+    private static let runtimeCSS = """
+    @keyframes deepReadPulse{0%,100%{opacity:.36}50%{opacity:.76}}
+    .markdown-body>:first-child{margin-top:0;}
+    .markdown-body>:last-child{margin-bottom:0;}
+    .markdown-body strong,.markdown-body b{font-weight:650;color:inherit;}
+    .markdown-body em,.markdown-body i{font-style:italic;}
+    .markdown-body s,.markdown-body del{text-decoration:line-through;}
+    .markdown-body h2,.markdown-body h3,.markdown-body h4{font-weight:500;line-height:1.35;margin:14px 0 7px;}
+    .markdown-body h2{font-size:18px;}
+    .markdown-body h3{font-size:16px;}
+    .markdown-body h4{font-size:15px;}
+    .markdown-body ul,.markdown-body ol{font-size:15px;line-height:1.68;margin:0 0 13px 1.25em;padding:0;}
+    .markdown-body li{margin:0 0 6px;padding-left:2px;}
+    .markdown-body li>p{margin:0 0 6px;}
+    .markdown-body code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em;background:rgba(107,114,128,.12);padding:0 .22em;border-radius:4px;}
+    .markdown-body pre{overflow:auto;background:var(--deep-read-surface);padding:10px 12px;border-radius:10px;margin:0 0 13px;}
+    .markdown-body pre code{background:transparent;padding:0;border-radius:0;}
+    .markdown-body a{color:var(--deep-read-accent);text-decoration:none;border-bottom:1px solid currentColor;}
+    .markdown-body table{width:100%;border-collapse:collapse;font-family:var(--deep-read-sans);font-size:12px;line-height:1.5;margin:0 0 13px;}
+    .markdown-body th,.markdown-body td{border-top:1px solid var(--deep-read-border);padding:7px 6px;text-align:left;vertical-align:top;}
+    .markdown-body blockquote{margin:0 0 13px;padding-left:10px;border-left:2px solid var(--deep-read-accent);font-size:15px;line-height:1.68;}
+    blockquote.markdown-body p{font-size:18px;line-height:1.48;}
+    .diagram-note.markdown-body p{font-family:var(--deep-read-sans);font-size:12px;line-height:1.58;color:var(--deep-read-muted);margin:0;}
+    """
+
+    /// App-bundled fonts served via the `amberfont://` scheme handler
+    /// (IOSDeepReadFontSchemeHandler): Noto Serif SC for the body (matches Android),
+    /// JetBrains Mono for code. Prepended to the serif / code font stacks; the system
+    /// fonts remain as fallbacks.
+    private static let bundledFontCSS = """
+    @font-face{font-family:"AmberDeepReadSerif";src:url("amberfont://deepread/serif.otf") format("opentype");font-weight:200 900;font-style:normal;font-display:swap;}
+    @font-face{font-family:"AmberDeepReadMono";src:url("amberfont://deepread/mono.ttf") format("truetype");font-weight:400;font-style:normal;font-display:swap;}
+    :root{--deep-read-serif:"AmberDeepReadSerif","Noto Serif SC","Source Han Serif SC","Songti SC",serif;}
+    .markdown-body code,.markdown-body pre code{font-family:"AmberDeepReadMono",ui-monospace,SFMono-Regular,Menlo,monospace;}
+    """
+
+    // (No separate dark stylesheet: the injected canvas palette — already resolved for the
+    //  current appearance by the caller — drives every var(--deep-read-*), light or dark.)
+
+    private static let emptyImageFallbackCSS = """
+    img:not([src]),img[src=""]{display:none!important;}
+    figure:has(> img:not([src])),figure:has(> img[src=""]){display:none!important;}
+    """
+}
+
+private extension Character {
+    /// ASCII punctuation per CommonMark — the only characters a backslash escapes.
+    var isDeepReadASCIIPunctuation: Bool {
+        guard let a = asciiValue else { return false }
+        switch a {
+        case 0x21...0x2F, 0x3A...0x40, 0x5B...0x60, 0x7B...0x7E: return true
+        default: return false
+        }
+    }
+}
+
+private extension NodeType {
+    /// Block-level nodes get their own HTML element; everything else is inline
+    /// content coalesced into a flowing run (see `listItemHTML`).
+    var isBlockLevelForHTML: Bool {
+        switch self {
+        case .paragraph, .heading, .blockquote, .codeBlock,
+             .listOrdered, .listUnordered, .listItem,
+             .table, .tableHead, .tableRow, .tableCell,
+             .horizontalRule, .htmlBlock, .mathBlock:
+            return true
+        default:
+            return false
+        }
+    }
+}

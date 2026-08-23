@@ -1,0 +1,51 @@
+name: iOS Shared Export Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/ios/shared/**'
+      - 'apps/ios/ai-core/**'
+      - 'apps/ios/ai-provider-openai/**'
+      - 'apps/ios/ai-provider-claude/**'
+      - 'apps/ios/core/**'
+      - 'apps/ios/feature/**'
+      - 'apps/ios/iosApp/iosApp/**/*.swift'
+      - 'apps/ios/scripts/check_shared_export_reachability.py'
+      - 'core/**'
+      - '.github/workflows/ios-shared-export-check.yml'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: apps/ios
+
+jobs:
+  shared-export-check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-ios-gradle-${{ hashFiles('apps/ios/**/*.gradle*', 'apps/ios/**/gradle-wrapper.properties') }}
+
+      - name: Build Shared framework
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:linkDebugFrameworkIosSimulatorArm64
+
+      - name: Verify Shared export reachability
+        run: python3 scripts/check_shared_export_reachability.py

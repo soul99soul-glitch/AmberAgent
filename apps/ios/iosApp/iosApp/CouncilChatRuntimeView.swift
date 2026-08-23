@@ -1,0 +1,3850 @@
+import SwiftUI
+import Observation
+import PhotosUI
+import SwiftStreamingMarkdown
+import UIKit
+import UniformTypeIdentifiers
+@preconcurrency import Shared
+
+struct CouncilTranscriptScrollGeometry: Equatable {
+    let contentHeight: CGFloat
+    let visibleHeight: CGFloat
+    let isNearBottom: Bool
+    let isAtBottom: Bool
+}
+
+enum CouncilTranscriptFollowPolicy {
+    static let bottomAnchorID = "council-transcript-bottom-anchor"
+    static let liveGrowthAnimationDuration = 0.08
+    private static let minimumMeasuredGrowth: CGFloat = 0.5
+
+    static func shouldResumeFollowing(distanceToBottom: CGFloat) -> Bool {
+        distanceToBottom <= ChatLayout.nearBottomResumeThreshold
+    }
+
+    /// Council is bounded and serial: only one row speaks at a time. `followPaused`
+    /// owns scrolling only and does not prove that row is outside the viewport, so
+    /// it must not freeze visible Markdown or force a later catch-up replacement.
+    static let liveRenderingEnabled = true
+
+    static func shouldFollowMeasuredGrowth(
+        previousContentHeight: CGFloat,
+        currentContentHeight: CGFloat,
+        followEnabled: Bool,
+        followPaused: Bool,
+        userDragging: Bool,
+        alreadyAtBottom: Bool
+    ) -> Bool {
+        followEnabled &&
+            !followPaused &&
+            !userDragging &&
+            !alreadyAtBottom &&
+            currentContentHeight > previousContentHeight + minimumMeasuredGrowth
+    }
+
+    static func shouldFollowViewportShrink(
+        previousVisibleHeight: CGFloat,
+        currentVisibleHeight: CGFloat,
+        followEnabled: Bool,
+        followPaused: Bool,
+        userDragging: Bool,
+        alreadyAtBottom: Bool
+    ) -> Bool {
+        followEnabled &&
+            !followPaused &&
+            !userDragging &&
+            !alreadyAtBottom &&
+            currentVisibleHeight < previousVisibleHeight - minimumMeasuredGrowth
+    }
+}
+
+private struct CouncilModeCapsuleGlass: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            // Match ChatToolbarIconButton: a light glass pad + Liquid Glass.
+            // Full AmberTheme.glass (warm paper @ ~72%) reads as a yellow blob
+            // on cream transcript; opacity 0.16 keeps the chip neutral/opaque.
+            content
+                .background(AmberTheme.glass.opacity(0.16), in: Capsule())
+                .glassEffect(.regular.interactive(), in: Capsule())
+        } else {
+            content.background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+}
+
+struct CouncilChatRuntimeView: View {
+    let settingsStore: SettingsStore
+    let sharedSettings: IOSSharedSettingsStore
+    let providerRegistry: ProviderRegistryStore?
+    let permissionStore: IOSPermissionStore
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var viewModel: CouncilChatViewModel
+    @FocusState private var isComposerFocused: Bool
+    // 底部跟随状态(与 Chat 页同款):`userDragging` 只在用户「主动拖动」时为真,
+    // `followPaused` 也只在用户拖离底部时才置真——内容增长(流式/阶段衔接)导致的几何变化
+    // 不会误暂停跟随。跟随本身遵循全局「跟随生成」偏好,与聊天页一致。
+    @State private var userDragging = false
+    @State private var followPaused = false
+    @State private var transcriptNearBottom = true
+    @State private var scrollPosition = ScrollPosition()
+    @State private var measuredGrowthFollowTask: Task<Void, Never>?
+    @State private var measuredGrowthFollowPending = false
+    @State private var terminalSettleTask: Task<Void, Never>?
+    @State private var scrollDriver = NativeTimelineScrollDriver()
+    @State private var nativeScrollFallbackReason: NativeTimelineScrollFallbackReason?
+    @State private var isNativeScrollSurfaceVisible = false
+    @AppStorage(IOSDisplayPreferenceKeys.followGeneration) private var followGeneration = true
+    @State private var isAttachExpanded = false
+    @State private var isImportingSelectedFile = false
+    @State private var isPhotoPickerPresented = false
+    @State private var photoPickerItems: [PhotosPickerItem] = []
+    @State private var isCameraPresented = false
+
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        providerRegistry: ProviderRegistryStore? = nil,
+        permissionStore: IOSPermissionStore = IOSPermissionStore(),
+        viewModel: CouncilChatViewModel? = nil
+    ) {
+        self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
+        self.providerRegistry = providerRegistry
+        self.permissionStore = permissionStore
+        self._viewModel = State(initialValue: viewModel ?? CouncilChatViewModel(
+            settingsStore: settingsStore,
+            sharedSettings: sharedSettings,
+            providerRegistry: providerRegistry,
+            permissionStore: permissionStore
+        ))
+    }
+
+    var body: some View {
+        ZStack {
+            AmberThemePageBackground(surface: .app)
+
+            transcript
+
+            if let archiveErrorMessage = viewModel.archiveErrorMessage {
+                VStack(spacing: 0) {
+                    Label(archiveErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(AmberTheme.surface)
+                    Spacer()
+                }
+            }
+        }
+        .safeAreaBar(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                // 透明延伸只扩大 safeAreaBar 几何，不画自定义材质；模糊走原生 soft edge。
+                Color.clear
+                    .frame(height: ChatTopBarLayout.softEdgeExtension)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onAppear {
+            isNativeScrollSurfaceVisible = true
+            // 重新进入页面时清除上一次的 fallback 粘连，给原生滚动 driver 一次重试机会；
+            // 开关移除后已无手动恢复入口，否则一次 fallback 会让 driver 对该视图实例永久禁用。
+            nativeScrollFallbackReason = nil
+        }
+        // 离开页面(返回/切走)时立即存一份当前 transcript,避免运行中退出导致刚流式出的内容
+        // 在下次进入前丢失(运行任务仍会在后台跑完并再存一次,以更完整的为准)。
+        .onDisappear {
+            isNativeScrollSurfaceVisible = false
+            cancelPendingMeasuredGrowthFollow()
+            terminalSettleTask?.cancel()
+            scrollDriver.invalidate()
+            viewModel.runtimeDidDisappear()
+            viewModel.persistTranscript()
+        }
+        .onChange(of: followGeneration) { _, enabled in
+            scrollDriver.setAutomaticFollowEnabled(enabled)
+        }
+        .onChange(of: viewModel.isRunning) { _, running in
+            if running {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
+        .onChange(of: viewModel.isPreparingMaterials) { _, preparing in
+            if preparing {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
+        .onChange(of: viewModel.isReplay) { _, replay in
+            if replay {
+                withAnimation(.easeOut(duration: 0.2)) { isAttachExpanded = false }
+            }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            composer
+        }
+        .fileImporter(
+            isPresented: $isImportingSelectedFile,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            handleSelectedFileImport(result)
+        }
+        .photosPicker(
+            isPresented: $isPhotoPickerPresented,
+            selection: $photoPickerItems,
+            maxSelectionCount: CouncilMaterialLimits.maxImages,
+            matching: .images
+        )
+        .onChange(of: photoPickerItems) { _, items in
+            handlePhotoPickerSelection(items)
+        }
+        .fullScreenCover(isPresented: $isCameraPresented) {
+            CameraPicker { image in
+                if let image { attachPickedImage(image) }
+                isCameraPresented = false
+            }
+            .ignoresSafeArea()
+        }
+        .sheet(item: $viewModel.activeSheet) { sheet in
+            switch sheet {
+            case .detail(let detail):
+                CouncilDiscussionDetailSheet(detail: detail)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            case .members:
+                CouncilMembersSheet(
+                    selectedMode: Binding(
+                        get: { viewModel.selectedMode },
+                        set: { viewModel.selectedMode = $0 }
+                    ),
+                    participants: viewModel.participants,
+                    currentModelId: viewModel.currentModelId,
+                    stateProvider: { viewModel.state(for: $0) },
+                    failedSpeakerIds: viewModel.failedSpeakerIds,
+                    isRunning: viewModel.isRunning,
+                    dynamicSeatGeneration: viewModel.roomSettingsStore.dynamicSeatGeneration,
+                    restartAction: { viewModel.startFreshRoom() }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                // 固定 sheet 底色,避免拉伸到不同高度时系统在不同材质/灰阶间切换导致整体变色。
+                .presentationBackground(AmberTheme.background)
+            case .settings:
+                CouncilRoomSettingsSheet(
+                    roomSettingsStore: viewModel.roomSettingsStore,
+                    sharedSettings: sharedSettings,
+                    availableModelIds: viewModel.availableModelIds,
+                    currentModelId: viewModel.currentModelId,
+                    isReadOnly: viewModel.isRunning
+                )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+            case .history:
+                CouncilHistorySheet(
+                    tasks: IOSAdvancedTaskStore.shared.recent(kind: .modelCouncil, limit: 30)
+                        .filter { CouncilRoomArchiveStore.shared.exists(taskId: $0.id) },
+                    activeTaskId: viewModel.activeReplayTaskId,
+                    onSelect: { taskId in viewModel.openArchive(taskId: taskId) }
+                )
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(AmberTheme.background)
+            }
+        }
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+    }
+
+    private var header: some View {
+        ZStack(alignment: .bottom) {
+            HStack(spacing: 12) {
+                ChatToolbarIconButton(
+                    systemImage: "chevron.left",
+                    accessibilityLabel: "返回",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 18
+                ) {
+                    dismiss()
+                }
+
+                Spacer(minLength: 0)
+                    .allowsHitTesting(false)
+
+                ChatToolbarIconButton(
+                    systemImage: "clock.arrow.circlepath",
+                    accessibilityLabel: "历史议会",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 16
+                ) {
+                    viewModel.showHistory()
+                }
+                .disabled(viewModel.isRunning)
+                .accessibilityHint(viewModel.isRunning ? "讨论结束后可查看历史议会" : "")
+
+                ChatToolbarIconButton(
+                    systemImage: "gearshape",
+                    accessibilityLabel: "议会设置",
+                    size: ChatTopBarLayout.toolbarButtonDiameter,
+                    symbolSize: 16
+                ) {
+                    viewModel.showSettings()
+                }
+            }
+
+            // Hug-sized capsule centered by ZStack — gutter is clearance only.
+            modeCapsuleButton
+                .fixedSize(horizontal: true, vertical: false)
+                .padding(.horizontal, ChatTopBarLayout.islandSideGutter)
+        }
+        .padding(.horizontal, 18)
+        .frame(height: ChatTopBarLayout.controlsHeight, alignment: .bottom)
+    }
+
+    private var modeCapsuleButton: some View {
+        Button {
+            viewModel.showMembers()
+        } label: {
+            // Hug on the label before glass — Button + glassEffect otherwise fill
+            // the ZStack proposal and paint a full-gutter-width capsule.
+            VStack(spacing: 1) {
+                HStack(spacing: 3) {
+                    Text(viewModel.selectedMode.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(AmberTheme.muted)
+                }
+                Text("\(viewModel.participants.count) 位成员 · 第 \(viewModel.discussionRound) 轮")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+            .fixedSize(horizontal: true, vertical: false)
+            .modifier(CouncilModeCapsuleGlass())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(AmberPressFeedbackStyle(pressedScale: 0.96, haptic: .lightImpact))
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityLabel(
+            "\(viewModel.selectedMode.title)，\(viewModel.participants.count) 位成员，第 \(viewModel.discussionRound) 轮"
+        )
+    }
+
+    private var transcript: some View {
+        ScrollView {
+            // 用非 lazy 的 VStack:议会转录是有界的(轮数 1-5 × 席位数),一次性渲染可接受,
+            // 也避免 LazyVStack 回收行导致的重解析/高度跳变。
+            VStack(spacing: 12) {
+                ForEach(viewModel.messages) { message in
+                    CouncilMessageRow(
+                        message: message,
+                        onTapDetail: { viewModel.showCurrentDetail() },
+                        onRestart: { viewModel.restart(withObjective: $0) }
+                    )
+                    // Equatable:流式逐 token 改的是最后一条,只让那一行重渲染,
+                    // 其余已完成气泡不再随整个 messages 数组变化而重算 body。
+                    .equatable()
+                    .id(message.id)
+                }
+
+                // 永久存在的物理底锚。留白只改变自身高度,不会在消息切换时从旧行
+                // 删除再插到新行；异步 Markdown 二次增高也始终以同一个内容尾部为目标。
+                Color.clear
+                    .frame(height: viewModel.isRunning
+                        ? ChatLayout.followBottomGap
+                        : ChatLayout.bottomRestGap)
+                    .id(CouncilTranscriptFollowPolicy.bottomAnchorID)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 18)
+            .frame(maxWidth: .infinity, minHeight: 0)
+            .scrollTargetLayout()
+            .background {
+                if isNativeScrollDriverDesired {
+                    NativeTimelineScrollViewResolver(
+                        onResolve: handleNativeScrollViewResolved,
+                        onMetricsChanged: {
+                            guard isNativeScrollDriverActive else { return }
+                            scrollDriver.handleLayoutMetricsChanged()
+                        }
+                    )
+                }
+            }
+        }
+        .modifier(CouncilSizeChangesPinModifier(
+            enabled: followGeneration && !isNativeScrollDriverDesired
+        ))
+        .scrollPosition($scrollPosition)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .scrollEdgeEffectStyle(.soft, for: .top)
+        .scrollIndicators(.hidden)
+        // 区分「用户主动拖动」与「程序/内容增长引起的滚动」:只有前者才允许改 followPaused。
+        .onScrollPhaseChange { _, phase in
+            switch phase {
+            case .tracking, .interacting:
+                userDragging = true
+                if isNativeScrollDriverActive {
+                    scrollDriver.submit(.userDragBegan)
+                }
+                cancelPendingMeasuredGrowthFollow()
+                terminalSettleTask?.cancel()
+            case .idle:
+                let endedUserDrag = userDragging
+                userDragging = false
+                if endedUserDrag {
+                    let returnedToBottom = NativeTimelineScrollReturnPolicy.returnedToBottom(
+                        liveDistanceToBottom: isNativeScrollDriverActive
+                            ? scrollDriver.distanceToBottomNow()
+                            : nil,
+                        cachedNearBottom: transcriptNearBottom,
+                        threshold: ChatLayout.nearBottomResumeThreshold
+                    )
+                    followPaused = !returnedToBottom
+                    if isNativeScrollDriverActive {
+                        scrollDriver.submit(.userDragEnded(isAtBottom: returnedToBottom))
+                    }
+                    if returnedToBottom, followGeneration {
+                        scheduleMeasuredGrowthFollowToBottom()
+                    }
+                }
+            case .animating, .decelerating:
+                break
+            @unknown default:
+                break
+            }
+        }
+        // 跟随真实内容高度而非 body 信号。流式 Markdown 会异步发布 renderable,
+        // 其二次自撑高度没有新的文本回调；正向高度变化是唯一可靠的布局完成证据。
+        .onScrollGeometryChange(for: CouncilTranscriptScrollGeometry.self) { geometry in
+            let distanceToBottom = geometry.contentSize.height - geometry.visibleRect.maxY
+            return CouncilTranscriptScrollGeometry(
+                contentHeight: geometry.contentSize.height,
+                visibleHeight: geometry.visibleRect.height,
+                isNearBottom: CouncilTranscriptFollowPolicy.shouldResumeFollowing(
+                    distanceToBottom: distanceToBottom
+                ),
+                isAtBottom: distanceToBottom <= 1
+            )
+        } action: { previous, current in
+            transcriptNearBottom = current.isNearBottom
+            if userDragging {
+                followPaused = !current.isNearBottom
+            }
+            let shouldFollowMeasuredGrowth = CouncilTranscriptFollowPolicy.shouldFollowMeasuredGrowth(
+                previousContentHeight: previous.contentHeight,
+                currentContentHeight: current.contentHeight,
+                followEnabled: followGeneration,
+                followPaused: followPaused,
+                userDragging: userDragging,
+                alreadyAtBottom: current.isAtBottom
+            )
+            let shouldFollowViewportShrink = CouncilTranscriptFollowPolicy.shouldFollowViewportShrink(
+                previousVisibleHeight: previous.visibleHeight,
+                currentVisibleHeight: current.visibleHeight,
+                followEnabled: followGeneration,
+                followPaused: followPaused,
+                userDragging: userDragging,
+                alreadyAtBottom: current.isAtBottom
+            )
+            // sizeChanges pin owns live height growth alone. A residual scrollTo
+            // snap fights the pin and produces continuous jump/flicker — same
+            // anti-pattern as dual 0.08s chase. Viewport shrink / native driver
+            // still need an explicit write.
+            //
+            // 实测增长分支：driver 未激活时由 sizeChanges pin 独占增长跟随
+            // （pin 开启 = followGeneration && !isNativeScrollDriverDesired，与
+            // 下方条件互补），不在此再发第二条 scrollTo 命令。旧条件
+            // `!pinOwns || driverActive` 在 shouldFollowMeasuredGrowth（隐含
+            // followGeneration）下恒等于 `isNativeScrollDriverDesired`——
+            // 冗余分支已删，行为不变。
+            if shouldFollowViewportShrink {
+                scheduleMeasuredGrowthFollowToBottom()
+            } else if shouldFollowMeasuredGrowth, isNativeScrollDriverDesired {
+                scheduleMeasuredGrowthFollowToBottom()
+            }
+        }
+        .onChange(of: viewModel.isRunning) { wasRunning, isRunning in
+            if wasRunning, !isRunning {
+                scheduleTerminalBottomSettle()
+            }
+        }
+        .onChange(of: viewModel.messages.first?.id) { _, _ in
+            // 新房间/历史重放不继承上一房间的“用户暂停跟随”状态。
+            followPaused = false
+            if isNativeScrollDriverActive {
+                scrollDriver.submit(.conversationReset)
+            }
+            scheduleTerminalBottomSettle(terminalRun: false)
+        }
+    }
+
+    private func scheduleMeasuredGrowthFollowToBottom() {
+        guard followGeneration, !followPaused, !userDragging else { return }
+        if isNativeScrollDriverActive {
+            // 跟随拍携带当前 lagAllowance：流式期为 1，终态排空期随剩余积压
+            // 连续衰减（1→0），driver 据此收紧 τ_eff——完成瞬间钉底不再需要
+            // 一次性清掉跟随滞后。排空期即使是被动/几何恢复提交也必须携带
+            // 收紧值，否则默认 1 会把同拍先发的收紧逐拍打回（与 Chat/小说
+            // 语义一致，Novel 侧同类 bug 已修）。
+            scrollDriver.submit(.streamContentGrew(lagAllowance: viewModel.activeTailLagAllowance))
+            return
+        }
+        // A 48ms text presentation flush can be followed by multiple asynchronous
+        // Markdown height publications. Keep ownership for the full 80ms animation
+        // so later geometry callbacks cannot restart it mid-flight.
+        guard measuredGrowthFollowTask == nil else {
+            measuredGrowthFollowPending = true
+            return
+        }
+        measuredGrowthFollowPending = false
+        measuredGrowthFollowTask = Task { @MainActor in
+            defer {
+                let shouldReplay = measuredGrowthFollowPending &&
+                    followGeneration &&
+                    !followPaused &&
+                    !userDragging
+                measuredGrowthFollowPending = false
+                measuredGrowthFollowTask = nil
+                if shouldReplay {
+                    scheduleMeasuredGrowthFollowToBottom()
+                }
+            }
+            await Task.yield()
+            guard !Task.isCancelled,
+                  followGeneration,
+                  !followPaused,
+                  !userDragging else { return }
+            guard !reduceMotion else {
+                scrollToTranscriptBottom()
+                return
+            }
+            withAnimation(.linear(duration: CouncilTranscriptFollowPolicy.liveGrowthAnimationDuration)) {
+                scrollPosition.scrollTo(edge: .bottom)
+            }
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(
+                        CouncilTranscriptFollowPolicy.liveGrowthAnimationDuration * 1_000_000_000
+                    )
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
+    private func cancelPendingMeasuredGrowthFollow() {
+        measuredGrowthFollowPending = false
+        measuredGrowthFollowTask?.cancel()
+    }
+
+    /// `terminalRun`：整轮结束（isRunning 翻转）走 driver 的 `.generationTerminated`
+    /// （与 Chat/小说终态同构：逐帧钉底 + 静默交还 + idle 近底重锚）；新房间/历史
+    /// 重放保持显式无动画锚底（Chat 的 conversationLoaded 同款语义）。
+    private func scheduleTerminalBottomSettle(terminalRun: Bool = true) {
+        cancelPendingMeasuredGrowthFollow()
+        terminalSettleTask?.cancel()
+        terminalSettleTask = Task { @MainActor in
+            // Give the 96pt→26pt sentinel change and the terminal Markdown parse a
+            // layout turn before the exact, non-animated bottom settle.
+            await Task.yield()
+            guard !Task.isCancelled,
+                  followGeneration,
+                  !followPaused,
+                  !userDragging else { return }
+            if isNativeScrollDriverActive {
+                if terminalRun {
+                    scrollDriver.submit(.generationTerminated)
+                } else {
+                    scrollDriver.submit(
+                        .explicitBottom(source: .streamGrowth, animated: false, keyboardToken: nil)
+                    )
+                }
+                return
+            }
+            scrollToTranscriptBottom()
+        }
+    }
+
+    private func scrollToTranscriptBottom() {
+        if isNativeScrollDriverActive {
+            scrollDriver.submit(
+                .explicitBottom(source: .streamGrowth, animated: false, keyboardToken: nil)
+            )
+            return
+        }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        transaction.animation = nil
+        withTransaction(transaction) {
+            scrollPosition.scrollTo(edge: .bottom)
+        }
+    }
+
+    private var isNativeScrollDriverDesired: Bool {
+        nativeScrollFallbackReason == nil &&
+            isNativeScrollSurfaceVisible
+    }
+
+    private var isNativeScrollDriverActive: Bool {
+        isNativeScrollDriverDesired && scrollDriver.isAttached
+    }
+
+    private func handleNativeScrollViewResolved(_ scrollView: UIScrollView) {
+        guard isNativeScrollDriverDesired else { return }
+        scrollView.topEdgeEffect.style = .soft
+        scrollDriver.setAutomaticFollowEnabled(followGeneration)
+        scrollDriver.onFallback = { reason, shouldReplayBottom in
+            guard nativeScrollFallbackReason == nil else { return }
+            nativeScrollFallbackReason = reason
+            guard shouldReplayBottom, !userDragging else { return }
+            scrollToTranscriptBottom()
+        }
+        let didAttach = scrollDriver.attach(scrollView)
+        guard didAttach, scrollDriver.isAttached else { return }
+        if userDragging || followPaused {
+            scrollDriver.submit(.userDragBegan)
+        } else {
+            scrollDriver.submit(
+                .explicitBottom(source: .button, animated: false, keyboardToken: nil)
+            )
+        }
+    }
+
+    // 输入条与 Chat 页保持完全一致:复用 Chat 的原生 Liquid Glass 组件
+    // —— 左侧输入胶囊(`composerDockGlass`)+ 右侧分离的圆形发送键
+    // (`ComposerDockSendButton`)。胶囊内左侧 `@` 键沿用 Chat 的「+」位,
+    // 与 Chat 一致的原生输入胶囊 + 分离圆形发送键。去掉了原来无实际作用的 @ 键
+    // （runner 并不解析 @host 提及）和此前黏连成一团的玻璃操作 chips。
+    @ViewBuilder
+    private var composer: some View {
+        if viewModel.isReplay {
+            replayBanner
+        } else {
+            liveComposer
+        }
+    }
+
+    // 只读重放历史议会时的底部条:提示「只读」+ 一键开新议会(退出重放、清空房间)。
+    private var replayBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(AmberTheme.muted)
+            Text("历史议会 · 只读")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+            Spacer(minLength: 8)
+            Button {
+                viewModel.startFreshRoom()
+            } label: {
+                Text("开新议会")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(AmberTheme.accent)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(AmberTheme.accentTint, in: Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background {
+            LinearGradient(
+                colors: [AmberTheme.background.opacity(0.78), AmberTheme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    /// 与 Chat 同构的输入区：pending 图/文件 → 错误 → 附件玻璃菜单 → dock。
+    private var liveComposer: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.pendingImages.isEmpty {
+                ComposerPendingImageStrip(
+                    items: viewModel.pendingImages.map {
+                        .init(id: $0.id, previewData: $0.previewData)
+                    },
+                    onRemove: { viewModel.removePendingImage($0) },
+                    status: councilImageAttachmentStatus
+                )
+            }
+
+            ForEach(viewModel.pendingFiles) { file in
+                ComposerPendingFileCard(
+                    fileName: file.fileName,
+                    byteSummary: Self.byteSummary(for: file),
+                    isTruncated: file.isTruncated,
+                    footnote: "发送后，解析文本会注入议题完善与调研。",
+                    onRemove: { viewModel.removePendingFile(file.id) }
+                )
+            }
+
+            if let error = viewModel.attachmentErrorMessage {
+                ComposerAttachmentStatusLabel(status: .error(error))
+            }
+
+            if let error = viewModel.configurationErrorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accentAmber)
+                    .lineLimit(3)
+            }
+
+            if viewModel.isPreparingMaterials {
+                ComposerAttachmentStatusLabel(
+                    status: .preparing(viewModel.materialsPreparationStatus)
+                )
+            }
+
+            if isAttachExpanded {
+                ComposerAttachmentGlassPanel(
+                    isDisabled: viewModel.isRunning || viewModel.isPreparingMaterials,
+                    onCamera: presentCamera,
+                    onPhotos: { isPhotoPickerPresented = true },
+                    onFiles: { isImportingSelectedFile = true },
+                    onDismiss: { isAttachExpanded = false }
+                )
+                .transition(.scale(scale: 0.75, anchor: .bottomLeading).combined(with: .opacity))
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                HStack(alignment: .center, spacing: 6) {
+                    ComposerAttachToggleButton(
+                        isExpanded: isAttachExpanded,
+                        isBusy: viewModel.isPreparingMaterials,
+                        isDisabled: viewModel.isRunning
+                            || viewModel.isPreparingMaterials
+                            || !viewModel.canAttachMaterials
+                    ) {
+                        withAnimation(.bouncy(duration: 0.42, extraBounce: 0.14)) {
+                            isAttachExpanded.toggle()
+                        }
+                    }
+
+                    TextField(viewModel.composerPlaceholder, text: $viewModel.inputText, axis: .vertical)
+                        .lineLimit(1...5)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                        .foregroundStyle(AmberTheme.foreground)
+                        .frame(minHeight: 40)
+                        .focused($isComposerFocused)
+                        .disabled(viewModel.isRunning || viewModel.isPreparingMaterials)
+                }
+                .padding(.leading, 8)
+                .padding(.trailing, 18)
+                // 与 Chat 一致：附件 44 + 上下 5 → 外高 54，对齐发送键。
+                .padding(.vertical, 5)
+                .composerDockGlass(cornerRadius: 27)
+
+                ComposerDockSendButton(
+                    isLoading: viewModel.isRunning || viewModel.isPreparingMaterials,
+                    sendEnabled: viewModel.canSend,
+                    diameter: 54,
+                    onSend: { viewModel.send() },
+                    onStop: {
+                        if viewModel.isPreparingMaterials {
+                            viewModel.cancelMaterialsPreparation()
+                        } else {
+                            viewModel.cancelDiscussion()
+                        }
+                    }
+                )
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .background {
+            LinearGradient(
+                colors: [AmberTheme.background.opacity(0.78), AmberTheme.background],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+
+    private var councilImageAttachmentStatus: ComposerAttachmentStatus? {
+        // Council always recognizes images into text (runner is text-only).
+        guard !viewModel.pendingImages.isEmpty else { return nil }
+        return .muted("图片将先经视觉模型识别，再注入议题", systemImage: "wand.and.stars")
+    }
+
+    private static func byteSummary(for file: CouncilPendingFile) -> String {
+        let bytes = file.totalBytes
+        if bytes >= 1024 * 1024 {
+            return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+        }
+        if bytes >= 1024 {
+            return String(format: "%.0f KB", Double(bytes) / 1024)
+        }
+        return "\(bytes) B"
+    }
+
+    private func presentCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            viewModel.attachmentErrorMessage = "此设备不支持相机。"
+            return
+        }
+        isCameraPresented = true
+    }
+
+    private func attachPickedImage(_ image: UIImage) {
+        guard let encoded = ChatImageEncoder.encode(image) else {
+            viewModel.attachmentErrorMessage = "图片处理失败。"
+            return
+        }
+        viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+    }
+
+    private func handlePhotoPickerSelection(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            var failed = 0
+            for item in items {
+                let encoded: (dataUrl: String, previewData: Data)?
+                do {
+                    if let data = try await item.loadTransferable(type: Data.self),
+                       let image = UIImage(data: data) {
+                        encoded = ChatImageEncoder.encode(image)
+                    } else {
+                        encoded = nil
+                    }
+                } catch {
+                    encoded = nil
+                }
+                guard let encoded else {
+                    failed += 1
+                    continue
+                }
+                viewModel.addPendingImage(dataUrl: encoded.dataUrl, previewData: encoded.previewData)
+            }
+            photoPickerItems = []
+            if failed > 0 {
+                viewModel.attachmentErrorMessage = "有 \(failed) 张图片处理失败。"
+            }
+        }
+    }
+
+    private func handleSelectedFileImport(_ result: Result<[URL], Error>) {
+        switch result {
+        case .success(let urls):
+            guard let url = urls.first else {
+                viewModel.attachmentErrorMessage = "没有选择文件。"
+                return
+            }
+            viewModel.attachPickedFile(url: url)
+        case .failure(let error):
+            viewModel.attachmentErrorMessage = "文件选择失败：\(error.localizedDescription)"
+        }
+    }
+
+}
+
+private struct CouncilMessageRow: View, Equatable {
+    let message: CouncilChatMessage
+    let onTapDetail: () -> Void
+    /// 以指定议题重开议会(供用户气泡的「以此为题重开 / 编辑重开」)。
+    let onRestart: (String) -> Void
+
+    @State private var editing = false
+    @State private var editDraft = ""
+
+    // 只比较影响渲染的字段(闭包每次父刷新都新建但语义不变,忽略)。内部 @State
+    // (editing/editDraft)变化不受此 == 影响,SwiftUI 仍会照常更新本行。
+    nonisolated static func == (lhs: CouncilMessageRow, rhs: CouncilMessageRow) -> Bool {
+        lhs.message.id == rhs.message.id
+            && lhs.message.body == rhs.message.body
+            && lhs.message.status == rhs.message.status
+            && lhs.message.author == rhs.message.author
+            && lhs.message.subtitle == rhs.message.subtitle
+    }
+
+    var body: some View {
+        content
+            .sheet(isPresented: $editing) { editSheet }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch message.kind {
+        case .divider:
+            Text(message.body)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(AmberTheme.surface, in: Capsule())
+                .frame(maxWidth: .infinity)
+        case .user:
+            userRow
+        case .host, .guest, .system:
+            assistantRow
+        }
+    }
+
+    // 用户消息复用 Chat 页样式:右对齐的 accent 气泡(ChatUserBubble),无头像、无「你」标签。
+    private var userRow: some View {
+        HStack {
+            Spacer(minLength: 48)
+            ChatUserBubble(text: message.body)
+                // 长按高亮平台裁成气泡形状(与 Chat 页一致),消除灰角。
+                .contentShape(
+                    .contextMenuPreview,
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 18,
+                        bottomLeadingRadius: 18,
+                        bottomTrailingRadius: 6,
+                        topTrailingRadius: 18,
+                        style: .continuous
+                    )
+                )
+                .contextMenu { messageActions }
+        }
+    }
+
+    // 长按菜单。复制 / 分享对两类气泡通用;「以此为题重开 / 编辑重开」仅用户气泡(议题)有。
+    @ViewBuilder
+    private var messageActions: some View {
+        Button {
+            UIPasteboard.general.string = message.body
+        } label: {
+            Label("复制", systemImage: "doc.on.doc")
+        }
+        ShareLink(item: message.body) {
+            Label("分享", systemImage: "square.and.arrow.up")
+        }
+        if message.kind == .user {
+            Divider()
+            Button {
+                onRestart(message.body)
+            } label: {
+                Label("以此为题重开", systemImage: "arrow.counterclockwise")
+            }
+            Button {
+                editDraft = message.body
+                editing = true
+            } label: {
+                Label("编辑重开", systemImage: "square.and.pencil")
+            }
+        }
+    }
+
+    // 编辑议题后重开:预填原文,提交即清空当前画面并用改写后的议题重跑。
+    private var editSheet: some View {
+        NavigationStack {
+            VStack {
+                TextEditor(text: $editDraft)
+                    .font(.body)
+                    .padding(8)
+                    .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .padding(16)
+            }
+            .navigationTitle("编辑议题")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { editing = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("重开") {
+                        editing = false
+                        onRestart(editDraft)
+                    }
+                    .disabled(editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    // Agent 消息:头像 + 元信息在顶部一行,气泡落到下一行占满整行宽度
+    // ——气泡左缘对齐头像左缘,右边距 = 左边距(整体复用滚动内容的 16pt 水平内边距,左右对称)。
+    private var assistantRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .center, spacing: 10) {
+                avatar
+                metaLine
+            }
+            bubble
+        }
+    }
+
+    private var metaLine: some View {
+        HStack(spacing: 6) {
+            Text(message.author)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(message.kind == .host ? AmberTheme.accent : AmberTheme.muted)
+            if let subtitle = message.subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(AmberTheme.muted2)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var bubble: some View {
+        // host/guest 都由 runner 的累计流式文本产生。稳定 namespace + 明确的 live/ever
+        // 标记让 Council 与标准 Chat 共用同一套增量 Markdown、完成态 renderer latch 和缓存。
+        Group {
+            if let markdown = message.streamingMarkdownBody {
+                ChatAssistantMarkdownView(
+                    markdown: markdown,
+                    renderCacheNamespace: message.markdownRenderCacheNamespace,
+                    isStreaming: message.isStreamingMarkdown,
+                    hasEverStreamed: message.hasEverStreamedMarkdown,
+                    liveRenderingEnabled: CouncilTranscriptFollowPolicy.liveRenderingEnabled
+                )
+            } else {
+                HStack(spacing: 8) {
+                    Text(message.displayBody)
+                    if message.status == .speaking {
+                        TypingDots()
+                    }
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AmberTheme.foreground2)
+            }
+        }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(message.backgroundColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .foregroundStyle(message.foregroundColor)
+            .overlay {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(message.borderColor, lineWidth: message.kind == .host ? 0.8 : 0.4)
+            }
+            // 长按高亮平台裁成气泡圆角形状,避免方角灰底。
+            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // 轻点看详情,长按出「复制」菜单(两者共存)。
+            .onTapGesture(perform: onTapDetail)
+            .contextMenu { messageActions }
+    }
+
+    private var avatar: some View {
+        Image(systemName: message.systemImage)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(message.tint)
+            .frame(width: 30, height: 30)
+            .background(message.tint.opacity(0.13), in: Circle())
+    }
+}
+
+private struct CouncilDiscussionDetailSheet: View {
+    let detail: CouncilDiscussionDetail
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("议会详情")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(detail.statusLine)
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                CouncilDetailGroup(title: "目标", bodyText: detail.objective)
+                CouncilDetailGroup(title: "席位", bodyText: detail.participantSummary)
+                CouncilDetailGroup(title: "运行", bodyText: detail.budgetSummary)
+                CouncilDetailGroup(title: "记录", bodyText: detail.transcript)
+            }
+            .padding(20)
+        }
+        .background(AmberTheme.background)
+    }
+}
+
+private struct CouncilDetailGroup: View {
+    let title: String
+    let bodyText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+            Text(bodyText.isEmpty ? "暂无" : bodyText)
+                .font(.footnote)
+                .foregroundStyle(AmberTheme.foreground2)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+    }
+}
+
+enum CouncilMembersCopy {
+    static func seatSectionFooter(isRunning: Bool, dynamicSeatGeneration: Bool) -> String {
+        if isRunning {
+            return "本轮议会运行中，模式与席位下一轮生效。"
+        }
+        if dynamicSeatGeneration {
+            return "席位由主持人按议题联网调研后动态组建。"
+        }
+        return "席位来自设置中已添加的固定角色。"
+    }
+}
+
+private struct CouncilMembersSheet: View {
+    @Binding var selectedMode: CouncilDiscussionMode
+    let participants: [CouncilParticipant]
+    let currentModelId: String
+    let stateProvider: (CouncilParticipant) -> CouncilParticipantState
+    let failedSpeakerIds: Set<String>
+    let isRunning: Bool
+    let dynamicSeatGeneration: Bool
+    let restartAction: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Picker("讨论模式", selection: $selectedMode) {
+                        ForEach(CouncilDiscussionMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(isRunning)
+                    .listRowBackground(AmberTheme.surface)
+                } header: {
+                    Text("模式")
+                } footer: {
+                    Text(selectedMode.intent)
+                }
+
+                Section {
+                    ForEach(participants) { participant in
+                        HStack(spacing: 12) {
+                            Image(systemName: participant.systemImage)
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(participant.tint)
+                                .frame(width: 32, height: 32)
+                                .background(participant.tint.opacity(0.13), in: Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(participant.displayName)
+                                    .font(.body.weight(.semibold))
+                                Text(participant.isHost ? "主持 · \(currentModelId)" : participant.roleDescription)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Text(failedSpeakerIds.contains(participant.id) ? "失败" : stateProvider(participant).label)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(failedSpeakerIds.contains(participant.id) ? Color.red : .secondary)
+                        }
+                        .padding(.vertical, 2)
+                        .listRowBackground(AmberTheme.surface)
+                    }
+                } header: {
+                    Text("席位成员（\(participants.count)）")
+                } footer: {
+                    Text(CouncilMembersCopy.seatSectionFooter(
+                        isRunning: isRunning,
+                        dynamicSeatGeneration: dynamicSeatGeneration
+                    ))
+                }
+            }
+            // 隐藏系统 grouped 背景(那层会随 sheet 拉伸在冷灰之间切换,与暖色主题冲突),
+            // 统一用主题底色,颜色不再随高度变化。
+            .scrollContentBackground(.hidden)
+            .background(AmberTheme.background)
+            .navigationTitle("模型议会")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("完成") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    // 纯文字「重开」:清空当前议会、回到空白开场(即便正在运行也先停掉再清),
+                    // 不再用刷新图标,也不再是「重跑上一题」(那个会因 lastRunObjective 为空而点了没反应)。
+                    Button("重开", role: .destructive) {
+                        restartAction()
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct CouncilRoomSettingsSheet: View {
+    @Bindable var roomSettingsStore: IOSCouncilRoomSettingsStore
+    let sharedSettings: IOSSharedSettingsStore
+    let availableModelIds: [String]
+    let currentModelId: String
+    let isReadOnly: Bool
+
+    @State private var connectivityState: CouncilModelConnectivityViewState = .idle
+    @State private var connectivityTask: Task<Void, Never>?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("议会设置")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(AmberTheme.foreground)
+                    Text(isReadOnly ? "运行中只读，下一轮生效。" : "设置会保存到本机，下一轮议会使用。")
+                        .font(.caption)
+                        .foregroundStyle(AmberTheme.muted)
+                }
+
+                settingsGroup(title: "模型连通性") {
+                    Button(action: testCurrentCouncilModels) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(AmberTheme.accent)
+                                .frame(width: 28)
+                            Text(connectivityState.isTesting ? "正在测试当前议会模型" : "测试当前议会模型")
+                                .font(.body.weight(.medium))
+                                .foregroundStyle(AmberTheme.foreground)
+                            Spacer(minLength: 8)
+                            Text(connectivityState.summary)
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(connectivityState.isTesting)
+
+                    switch connectivityState {
+                    case .idle, .testing:
+                        EmptyView()
+                    case .failure(let message):
+                        Divider().overlay(AmberTheme.borderSoft)
+                        Text(message)
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.accentRed)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    case .results(let results):
+                        ForEach(results) { result in
+                            Divider().overlay(AmberTheme.borderSoft)
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: result.isReachable ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                    .foregroundStyle(result.isReachable ? Color.green : AmberTheme.accentRed)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(result.configuredModelId)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    Text(result.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(result.isReachable ? AmberTheme.muted : AmberTheme.accentRed)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                        }
+                    }
+                }
+
+                settingsGroup(title: "主持人") {
+                    modelMenu(
+                        title: "主持模型",
+                        value: roomSettingsStore.settings.host.modelId,
+                        setValue: { roomSettingsStore.updateHost(modelId: $0) }
+                    )
+                    Divider().overlay(AmberTheme.borderSoft)
+                    reasoningMenu(
+                        title: "思考档位",
+                        value: roomSettingsStore.settings.host.reasoning,
+                        setValue: { roomSettingsStore.updateHost(reasoning: $0) }
+                    )
+                    Divider().overlay(AmberTheme.borderSoft)
+                    TextField("主持人提示词", text: Binding(
+                        get: { roomSettingsStore.settings.host.prompt },
+                        set: { roomSettingsStore.updateHost(prompt: $0) }
+                    ), axis: .vertical)
+                    .lineLimit(2...5)
+                    .font(.footnote)
+                    .foregroundStyle(AmberTheme.foreground)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "动态席位生成") {
+                    Toggle(isOn: Binding(
+                        get: { roomSettingsStore.dynamicSeatGeneration },
+                        set: { roomSettingsStore.dynamicSeatGeneration = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("主持人动态生成席位")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(roomSettingsStore.dynamicSeatGeneration
+                                 ? "开：主持人按议题联网调研后自由组建席位。"
+                                 : "关：只在下方你添加的席位中选择角色。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(AmberTheme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "席位联网查证") {
+                    Toggle(isOn: Binding(
+                        get: { roomSettingsStore.seatWebSearch },
+                        set: { roomSettingsStore.seatWebSearch = $0 }
+                    )) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("允许席位联网搜索")
+                                .font(.body)
+                                .foregroundStyle(AmberTheme.foreground)
+                            Text(roomSettingsStore.seatWebSearch
+                                 ? "开：每位议员发言前先联网查证一轮，更慢更耗；需同时开启全局联网搜索。"
+                                 : "关：议员纯推理发言（推荐，速度更快）。")
+                                .font(.caption)
+                                .foregroundStyle(AmberTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .tint(AmberTheme.accent)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "席位（\(roomSettingsStore.settings.seats.count)）") {
+                    if roomSettingsStore.settings.seats.isEmpty {
+                        Text(roomSettingsStore.dynamicSeatGeneration
+                             ? "未添加固定席位。动态生成开启时由主持人按议题组建。"
+                             : "还没有添加席位。点下方「添加席位」从预制角色中选择。")
+                            .font(.caption)
+                            .foregroundStyle(AmberTheme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    } else {
+                        ForEach(roomSettingsStore.settings.seats) { seat in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(seat.name)
+                                        .font(.body.weight(.medium))
+                                        .foregroundStyle(AmberTheme.foreground)
+                                    Text(seat.rolePrompt)
+                                        .font(.caption)
+                                        .foregroundStyle(AmberTheme.muted)
+                                        .lineLimit(2)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Button {
+                                    roomSettingsStore.removeSeat(id: seat.id)
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .font(.system(size: 20))
+                                        .foregroundStyle(AmberTheme.accentRed)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(isReadOnly)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            Divider().overlay(AmberTheme.borderSoft)
+                        }
+                    }
+
+                    Menu {
+                        if availablePresets.isEmpty {
+                            Text("预制角色已全部添加")
+                        } else {
+                            ForEach(availablePresets) { preset in
+                                Button {
+                                    roomSettingsStore.addOrUpdateSeat(preset.asSeat(), currentModelId: currentModelId)
+                                } label: {
+                                    Text("\(preset.name) · \(preset.rolePrompt)")
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("添加席位", systemImage: "plus.circle.fill")
+                            .font(.body.weight(.medium))
+                            .foregroundStyle(AmberTheme.accent)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 12)
+                    }
+                    .disabled(isReadOnly)
+                }
+
+                settingsGroup(title: "功能限制") {
+                    Stepper(
+                        "最大席位 \(roomSettingsStore.settings.limits.maxSeats)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.maxSeats },
+                            set: { roomSettingsStore.updateLimits(maxSeats: $0) }
+                        ),
+                        in: 2...8
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "默认轮数 \(roomSettingsStore.settings.limits.defaultRounds)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.defaultRounds },
+                            set: { roomSettingsStore.updateLimits(defaultRounds: $0) }
+                        ),
+                        in: 1...5
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "单次模型无输出超时 \(roomSettingsStore.settings.limits.seatTimeoutSeconds)s",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.seatTimeoutSeconds },
+                            set: { roomSettingsStore.updateLimits(seatTimeoutSeconds: $0) }
+                        ),
+                        in: 15...180,
+                        step: 15
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+
+                    Divider().overlay(AmberTheme.borderSoft)
+
+                    Stepper(
+                        "输出预算 \(roomSettingsStore.settings.limits.outputBudgetCharacters)",
+                        value: Binding(
+                            get: { roomSettingsStore.settings.limits.outputBudgetCharacters },
+                            set: { roomSettingsStore.updateLimits(outputBudgetCharacters: $0) }
+                        ),
+                        in: 2_000...40_000,
+                        step: 2_000
+                    )
+                    .disabled(isReadOnly)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                }
+            }
+            .padding(20)
+        }
+        .background(AmberTheme.background)
+        .onDisappear {
+            connectivityTask?.cancel()
+            connectivityTask = nil
+        }
+    }
+
+    @ViewBuilder
+    /// 预制角色里尚未添加的部分(按 id 和名称去重),供「添加席位」菜单展示。
+    private var availablePresets: [IOSCouncilSeatPreset] {
+        let addedIds = Set(roomSettingsStore.settings.seats.map(\.id))
+        let addedNames = Set(roomSettingsStore.settings.seats.map { $0.name.lowercased() })
+        return IOSCouncilSeatPreset.all.filter {
+            !addedIds.contains($0.id) && !addedNames.contains($0.name.lowercased())
+        }
+    }
+
+    private func settingsGroup<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted)
+            VStack(spacing: 0) {
+                content()
+            }
+            .background(AmberTheme.surface, in: RoundedRectangle(cornerRadius: AmberTheme.radiusLarge, style: .continuous))
+        }
+    }
+
+    private func modelMenu(title: String, value: String, setValue: @escaping (String) -> Void) -> some View {
+        Menu {
+            ForEach(availableModelIds, id: \.self) { modelId in
+                Button(modelId) { setValue(modelId) }
+            }
+        } label: {
+            settingsRow(title: title, value: value.trimmedOr(currentModelId), systemImage: "cpu")
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly || availableModelIds.isEmpty)
+    }
+
+    private func reasoningMenu(title: String, value: IOSCouncilReasoningPreset, setValue: @escaping (IOSCouncilReasoningPreset) -> Void) -> some View {
+        Menu {
+            ForEach(IOSCouncilReasoningPreset.allCases) { option in
+                Button(option.title) { setValue(option) }
+            }
+        } label: {
+            settingsRow(title: title, value: value.title, systemImage: "brain.head.profile")
+        }
+        .buttonStyle(.plain)
+        .disabled(isReadOnly)
+    }
+
+    private func settingsRow(title: String, value: String, systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(AmberTheme.accent)
+                .frame(width: 30, height: 30)
+            Text(title)
+                .font(.body)
+                .foregroundStyle(AmberTheme.foreground)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.medium))
+                .foregroundStyle(AmberTheme.muted)
+                .lineLimit(1)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AmberTheme.muted2)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 52)
+        .contentShape(Rectangle())
+    }
+
+    private func testCurrentCouncilModels() {
+        connectivityTask?.cancel()
+        guard let provider = sharedSettings.resolveCurrentProviderSetting() else {
+            connectivityState = .failure("当前没有可用的聊天服务商或模型。")
+            return
+        }
+        let settings = roomSettingsStore.settings
+        let dynamicSeatGeneration = roomSettingsStore.dynamicSeatGeneration
+        let modelId = currentModelId
+        connectivityState = .testing
+        connectivityTask = Task { @MainActor in
+            let tester = IOSCouncilModelConnectivityTester()
+            do {
+                let results = try await tester.test(
+                    settings: settings,
+                    dynamicSeatGeneration: dynamicSeatGeneration,
+                    providerSetting: provider,
+                    currentModelId: modelId
+                )
+                guard !Task.isCancelled else { return }
+                connectivityState = .results(results)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard !Task.isCancelled else { return }
+                connectivityState = .failure(error.localizedDescription)
+            }
+            connectivityTask = nil
+        }
+    }
+}
+
+enum CouncilRuntimeSheet: Identifiable {
+    case detail(CouncilDiscussionDetail)
+    case members
+    case settings
+    case history
+
+    var id: String {
+        switch self {
+        case .detail(let detail): "detail-\(detail.id)"
+        case .members: "members"
+        case .settings: "settings"
+        case .history: "history"
+        }
+    }
+}
+
+struct CouncilHomeResumeContext: Equatable {
+    let id: String
+    let title: String
+    let status: IOSAdvancedTaskStatus
+    let updatedAt: Date
+    let canContinue: Bool
+}
+
+@MainActor
+@Observable
+final class CouncilChatViewModel {
+    var inputText = ""
+    var selectedMode: CouncilDiscussionMode = .freeChat
+    var messages: [CouncilChatMessage]
+    var isRunning = false
+    /// 流式拍恒为 1；终态排空拍随剩余积压连续衰减到 0（与 Chat/小说同源）。
+    /// 视图在提交 `streamContentGrew(lagAllowance:)` 时携带，驱动据此收紧 τ_eff。
+    var activeTailLagAllowance: CGFloat = 1
+    var activeSheet: CouncilRuntimeSheet?
+    var participants: [CouncilParticipant] = []
+    var failedSpeakerIds: Set<String> = []
+    var archiveErrorMessage: String?
+    /// 只读重放:从「最近讨论」重开一场历史议会时为 true,隐藏输入条、不再归档/覆盖草稿。
+    var isReplay = false
+
+    /// Pending file/image materials for the next opening discussion (not follow-ups).
+    var pendingFiles: [CouncilPendingFile] = []
+    var pendingImages: [CouncilPendingImage] = []
+    var attachmentErrorMessage: String?
+    var isPreparingMaterials = false
+    var materialsPreparationStatus = ""
+
+    let roomSettingsStore: IOSCouncilRoomSettingsStore
+
+    @ObservationIgnored private let settingsStore: SettingsStore
+    @ObservationIgnored private let sharedSettings: IOSSharedSettingsStore
+    @ObservationIgnored private let providerRegistry: ProviderRegistryStore?
+    @ObservationIgnored private let runner: IOSCouncilRoomRunner
+    @ObservationIgnored private let transcriptDefaults: UserDefaults
+    @ObservationIgnored private let archiveStore: CouncilRoomArchiveStore
+    @ObservationIgnored private let visionRecognizer: CouncilVisionMaterialRecognizer
+    @ObservationIgnored private var discussionTask: Task<Void, Never>?
+    @ObservationIgnored private var materialsPreparationTask: Task<Void, Never>?
+    /// Bumped on cancel / reset / openArchive so late file/vision completions cannot start a discussion.
+    @ObservationIgnored private var materialsPrepGeneration: UInt64 = 0
+    /// 后台期间等讨论跑完、跑完就还执行权的那个任务。
+    @ObservationIgnored private var keepAliveReleaseTask: Task<Void, Never>?
+    @ObservationIgnored private var activeDiscussionID: UUID?
+    @ObservationIgnored private var activeDurableRunID: String?
+    @ObservationIgnored private let durableRunStore: IOSDurableRunStore?
+    private var currentObjective = ""
+    private var currentFinalTopic = ""
+    private var currentTaskId: String?
+    @ObservationIgnored private var pendingObjective = ""
+    @ObservationIgnored private var pendingSourceMaterials: String?
+    @ObservationIgnored private var pendingResearchObjective: String?
+    @ObservationIgnored private var lastRunObjective = ""
+    @ObservationIgnored private var lastResearchAllowed = false
+    /// 中段检查点节流:roster/append/消息完结等事件密集到达时,每个 300ms 窗口
+    /// 最多触发一次离主线程写入,避免每条消息都触发 encode+write。终态检查点
+    /// (结束/取消/切后台/恢复)不走节流,直接同步写以保证 load-after-save 顺序。
+    @ObservationIgnored private var archiveThrottleTask: Task<Void, Never>?
+
+    private var roomStateOverride: String?
+    private var activeSpeakerId: String?
+    private var invitedSpeakerIds: Set<String> = []
+
+    init(
+        settingsStore: SettingsStore,
+        sharedSettings: IOSSharedSettingsStore,
+        providerRegistry: ProviderRegistryStore?,
+        permissionStore: IOSPermissionStore,
+        roomSettingsStore: IOSCouncilRoomSettingsStore = .shared,
+        runner: IOSCouncilRoomRunner? = nil,
+        transcriptDefaults: UserDefaults = .standard,
+        archiveStore: CouncilRoomArchiveStore = .shared,
+        visionRecognizer: CouncilVisionMaterialRecognizer = CouncilVisionMaterialRecognizer(),
+        durableRunStore: IOSDurableRunStore? = nil
+    ) {
+        let restoredRoom = CouncilTranscriptStore.load(defaults: transcriptDefaults)
+        self.settingsStore = settingsStore
+        self.sharedSettings = sharedSettings
+        self.providerRegistry = providerRegistry
+        self.roomSettingsStore = roomSettingsStore
+        self.runner = runner ?? IOSCouncilRoomRunner(permissionStore: permissionStore)
+        self.transcriptDefaults = transcriptDefaults
+        self.archiveStore = archiveStore
+        self.visionRecognizer = visionRecognizer
+        self.durableRunStore = durableRunStore
+        self.messages = restoredRoom?.messages.map { $0.restored() } ?? []
+        if let restoredRoom {
+            currentTaskId = restoredRoom.taskId.trimmedNilIfBlank
+            currentObjective = restoredRoom.objective
+            currentFinalTopic = restoredRoom.finalTopic ?? ""
+            lastRunObjective = restoredRoom.objective
+            selectedMode = CouncilDiscussionMode(rawValue: restoredRoom.modeRaw) ?? .freeChat
+            participants = restoredRoom.participants.map { $0.restored() }
+            failedSpeakerIds = Set(restoredRoom.failedSpeakerIds)
+            invitedSpeakerIds = Set(participants.filter { !$0.isHost }.map(\.id))
+            roomStateOverride = restoredRoom.statusRaw.trimmedNilIfBlank
+        }
+        if participants.isEmpty {
+            refreshSettingsBackedParticipants()
+        }
+    }
+
+    func persistTranscript() {
+        // 重放历史议会时不要把只读快照写回单房间草稿,否则会覆盖实时房间的进度。
+        guard !isReplay else { return }
+        CouncilTranscriptStore.save(
+            persistedRoom(taskId: currentTaskId ?? ""),
+            defaults: transcriptDefaults
+        )
+    }
+
+    func runtimeDidDisappear() {
+        // 离开议会界面时做一次离主线程检查点,让「最近讨论」尽快看到当前进度;
+        // 先取消节流任务,避免它在切走后再次触发写入。
+        cancelScheduledArchive()
+        archiveCurrentRoom(deferred: true)
+    }
+
+    func runtimeWillEnterBackground() {
+        persistTranscript()
+        // 落盘是终止路径:取消节流任务并同步落盘,同步写会使在途延迟写失效。
+        // 但讨论本身不再终止——下面拿后台执行权让它自己跑完。
+        cancelScheduledArchive()
+        archiveCurrentRoom()
+        beginBackgroundKeepAliveIfRunning()
+    }
+
+    /// 讨论还在跑就拿后台执行权，跑完自动还回去。
+    /// 议会没有「后台重跑」那一路，执行权被系统收走时取消当前 owner 并保留可重试快照。
+    private func beginBackgroundKeepAliveIfRunning() {
+        guard let discussionID = activeDiscussionID else { return }
+        beginBackgroundKeepAlive(for: discussionID)
+    }
+
+    private func keepAliveLeaseId(for discussionID: UUID) -> String {
+        "council-\(discussionID.uuidString)"
+    }
+
+    private func beginBackgroundKeepAlive(for discussionID: UUID) {
+        guard isRunning,
+              activeDiscussionID == discussionID,
+              let discussionTask else { return }
+        let leaseId = keepAliveLeaseId(for: discussionID)
+        keepAliveReleaseTask?.cancel()
+        BackgroundGenerationKeepAlive.shared.begin(
+            leaseId,
+            title: "Amber 议会讨论中",
+            subtitle: currentObjective.isEmpty ? "模型议会" : currentObjective,
+            onExpire: { [weak self] in
+                self?.handleBackgroundKeepAliveExpiration(for: discussionID)
+            },
+            onSystemTaskExpiration: { [weak self] in
+                self?.handleBackgroundKeepAliveExpiration(for: discussionID)
+            }
+        )
+        keepAliveReleaseTask = Task { @MainActor [weak self] in
+            await discussionTask.value
+            // `Task<_, Never>.value` 不理会「等待方被取消」，所以上一轮遗留的
+            // 这个任务照样会醒过来。醒来时租约可能已经属于新一轮讨论了——
+            // 没这道 guard，旧任务会把新一轮的执行权还掉，新讨论在后台静默断流。
+            guard !Task.isCancelled else { return }
+            guard let self, self.activeDiscussionID == discussionID else { return }
+            self.endBackgroundKeepAlive(for: discussionID)
+        }
+    }
+
+    private func endBackgroundKeepAlive(for discussionID: UUID?) {
+        guard let discussionID else { return }
+        keepAliveReleaseTask?.cancel()
+        keepAliveReleaseTask = nil
+        BackgroundGenerationKeepAlive.shared.end(keepAliveLeaseId(for: discussionID))
+    }
+
+    private func updateBackgroundProgress(completed: Int64, subtitle: String? = nil) {
+        guard let discussionID = activeDiscussionID else { return }
+        BackgroundGenerationKeepAlive.shared.updateProgress(
+            keepAliveLeaseId(for: discussionID),
+            completed: completed,
+            total: 4,
+            subtitle: subtitle
+        )
+    }
+
+    private func handleBackgroundKeepAliveExpiration(for discussionID: UUID) {
+        guard activeDiscussionID == discussionID, isRunning else { return }
+        // `run()` may already have returned and cleared its private activeTaskId
+        // while this ViewModel is still between the summary and lease-release
+        // statements. A terminal ledger means the generation won; only release
+        // the stale lease and let the summary path finish.
+        if runner.taskStatus(taskId: currentTaskId)?.isTerminal == true {
+            endBackgroundKeepAlive(for: discussionID)
+            return
+        }
+        stopAndCheckpointActiveDiscussion(
+            taskStatus: .interrupted,
+            terminalMessage: "后台执行已停止，可以重试。"
+        )
+    }
+
+    var hasPendingMaterials: Bool {
+        !pendingFiles.isEmpty || !pendingImages.isEmpty
+    }
+
+    /// Attachments only apply to a new opening discussion; follow-ups stay text-only.
+    var canAttachMaterials: Bool {
+        !isReplay && !isRunning && !isPreparingMaterials && !canContinueCurrentCouncil
+    }
+
+    var canSend: Bool {
+        guard !isRunning, !isPreparingMaterials, currentConfigurationIssue == nil else { return false }
+        let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if canContinueCurrentCouncil {
+            return hasText
+        }
+        return hasText || hasPendingMaterials
+    }
+
+    /// Composer 旁展示；与 `canSend` 共用同一配置判定，避免灰掉发送却无说明。
+    var configurationErrorMessage: String? {
+        currentConfigurationIssue?.message
+    }
+
+    var composerPlaceholder: String {
+        if canContinueCurrentCouncil {
+            return "输入补充或追问，再讨论一轮"
+        }
+        if hasPendingMaterials {
+            return "补充说明（可选），或直接发送从材料生成议题"
+        }
+        return "输入议题开始，或上传文件/图片"
+    }
+
+    var currentModelId: String {
+        let trimmed = sharedSettings.resolveCurrentModelId()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "gpt-4o" : trimmed
+    }
+
+    var hostDisplayName: String {
+        participants.first(where: \.isHost)?.displayName ?? Self.hostName(for: currentModelId)
+    }
+
+    /// 当前若处于只读重放,返回被重放那场的 taskId(供历史列表高亮),否则 nil。
+    var activeReplayTaskId: String? {
+        isReplay ? currentTaskId : nil
+    }
+
+    /// 首页只读投影当前房间；历史归档不参与，避免点“继续”后落到另一场议会。
+    var homeResumeContext: CouncilHomeResumeContext? {
+        guard !isReplay,
+              let currentTaskId,
+              archiveStore.load(taskId: currentTaskId) != nil,
+              let task = runner.taskRecord(taskId: currentTaskId) else {
+            return nil
+        }
+
+        let effectiveStatus: IOSAdvancedTaskStatus
+        if task.status == .completed,
+           let rawStatus = task.metadata["continuation_status"],
+           let continuationStatus = IOSAdvancedTaskStatus(rawValue: rawStatus) {
+            switch continuationStatus {
+            case .failed, .cancelled, .timedOut, .interrupted:
+                effectiveStatus = continuationStatus
+            case .queued, .running, .approvalRequired, .completed:
+                effectiveStatus = task.status
+            }
+        } else {
+            effectiveStatus = task.status
+        }
+        let canContinue = canContinueCurrentCouncil
+        switch effectiveStatus {
+        case .queued, .running, .approvalRequired:
+            break
+        case .failed, .cancelled, .timedOut, .interrupted:
+            guard canContinue else { return nil }
+        case .completed:
+            return nil
+        }
+
+        return CouncilHomeResumeContext(
+            id: task.id,
+            title: currentObjective.trimmedNilIfBlank ?? task.title,
+            status: effectiveStatus,
+            updatedAt: task.updatedAt,
+            canContinue: canContinue
+        )
+    }
+
+    func recoverInterruptedTasks(_ taskIds: [String]) {
+        guard let currentTaskId, taskIds.contains(currentTaskId) else { return }
+        // 恢复即终止路径:先取消节流任务,尾部再同步写一份「已中断」快照( bump 代数使
+        // 任何在途延迟写失效),保证 load 之后看到的是恢复后的最新事实。
+        cancelScheduledArchive()
+        if let room = archiveStore.load(taskId: currentTaskId) {
+            currentObjective = room.objective
+            currentFinalTopic = room.finalTopic ?? ""
+            lastRunObjective = room.objective
+            selectedMode = CouncilDiscussionMode(rawValue: room.modeRaw) ?? selectedMode
+            participants = room.participants.map { $0.restored() }
+            failedSpeakerIds = Set(room.failedSpeakerIds)
+            messages = room.messages.map { $0.restored() }
+        }
+        if currentFinalTopic.trimmedNilIfBlank == nil {
+            currentFinalTopic = currentObjective
+        }
+        finishStreamingMessages(as: .failed)
+        isRunning = false
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        roomStateOverride = IOSAdvancedTaskStatus.interrupted.title
+        appendMessage(
+            kind: .system,
+            author: "议会",
+            body: "上次讨论已中断，可以继续补充或重新发起。",
+            systemImage: "pause.circle",
+            tint: AmberTheme.accentRed,
+            subtitle: IOSAdvancedTaskStatus.interrupted.title,
+            status: .failed
+        )
+        persistTranscript()
+        archiveCurrentRoom()
+    }
+
+    func reconcileDurableRuns() async {
+        guard let durableRunStore,
+              let runs = try? await durableRunStore.recoverableRuns(
+            descriptorIds: [IOSDurableRunStore.Descriptor.council]
+        ) else { return }
+        for run in runs where run.runId != activeDurableRunID {
+            guard let ref = run.inputSnapshotRef, ref.hasPrefix("council:") else { continue }
+            let taskId = String(ref.dropFirst("council:".count))
+            let record = runner.taskRecord(taskId: taskId)
+            let status: AgentRunStatus
+            if record?.metadata["continuation_status"] == "interrupted" ||
+                record?.metadata["interruption_reason"] == "process_terminated" {
+                status = .interrupted
+            } else {
+                status = Self.durableStatus(for: record?.status ?? .interrupted)
+            }
+            _ = try? await durableRunStore.transitionFromAnyActive(
+                runId: run.runId,
+                to: status,
+                detail: record?.compactSummary ?? "process_restarted"
+            )
+        }
+    }
+
+    /// 当前讨论轮次：只数真正的「第 N 轮」轮次分隔，不把开场 / 主持调研 / 席位组建 /
+    /// 轮末点评 / 主持总结等阶段胶囊也算进轮次（否则开场阶段就会误显示「第 6 轮」）。
+    var discussionRound: Int {
+        let roundMarkers = messages.filter {
+            $0.kind == .divider
+                && $0.body.range(of: #"^第\s*\d+\s*轮$"#, options: .regularExpression) != nil
+        }
+        return max(1, roundMarkers.count)
+    }
+
+    var availableModelIds: [String] {
+        var seen = Set<String>()
+        var ids: [String] = []
+        for model in sharedSettings.resolveCurrentProviderSetting()?.models ?? []
+            where model.type == ModelType.chat {
+            let modelId = model.modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !modelId.isEmpty, seen.insert(modelId).inserted else { continue }
+            ids.append(modelId)
+        }
+        let current = currentModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !current.isEmpty, seen.insert(current).inserted {
+            ids.insert(current, at: 0)
+        }
+        return ids
+    }
+
+    func state(for participant: CouncilParticipant) -> CouncilParticipantState {
+        if failedSpeakerIds.contains(participant.id) {
+            return .failed
+        }
+        if activeSpeakerId == participant.id {
+            return .speaking
+        }
+        if invitedSpeakerIds.contains(participant.id) {
+            return .invited
+        }
+        return .idle
+    }
+
+    func addPendingImage(dataUrl: String, previewData: Data, displayName: String = "图片") {
+        guard canAttachMaterials else {
+            attachmentErrorMessage = "当前只能在新议题里附加材料；追问请用文字补充。"
+            return
+        }
+        guard pendingImages.count < CouncilMaterialLimits.maxImages else {
+            attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxImages) 张图片"
+            return
+        }
+        pendingImages.append(
+            CouncilPendingImage(dataUrl: dataUrl, previewData: previewData, displayName: displayName)
+        )
+        attachmentErrorMessage = nil
+    }
+
+    func removePendingImage(_ id: CouncilPendingImage.ID) {
+        pendingImages.removeAll { $0.id == id }
+    }
+
+    func removePendingFile(_ id: CouncilPendingFile.ID) {
+        pendingFiles.removeAll { $0.id == id }
+    }
+
+    func clearPendingMaterials() {
+        pendingFiles.removeAll()
+        pendingImages.removeAll()
+    }
+
+    /// Cancel in-flight file parse / vision prep and drop late completions via generation bump.
+    func cancelMaterialsPreparation(showCancelledMessage: Bool = true) {
+        invalidateMaterialsPreparation(showCancelledMessage: showCancelledMessage)
+    }
+
+    func attachPickedFile(url: URL) {
+        guard canAttachMaterials else {
+            attachmentErrorMessage = "当前只能在新议题里附加材料；追问请用文字补充。"
+            return
+        }
+        guard pendingFiles.count < CouncilMaterialLimits.maxFiles else {
+            attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxFiles) 个文件"
+            return
+        }
+        let generation = beginMaterialsPreparation(status: "正在解析文件…")
+        materialsPreparationTask = Task { [weak self] in
+            let outcome = await CouncilFileMaterialLoader.load(url: url)
+            await MainActor.run {
+                guard let self else { return }
+                guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                switch outcome {
+                case .success(let file):
+                    // Re-check caps after async gap (another file may have landed).
+                    if self.pendingFiles.count >= CouncilMaterialLimits.maxFiles {
+                        self.attachmentErrorMessage = "一次最多附加 \(CouncilMaterialLimits.maxFiles) 个文件"
+                        return
+                    }
+                    self.pendingFiles.append(file)
+                    self.attachmentErrorMessage = nil
+                case .failure(let message):
+                    self.attachmentErrorMessage = message
+                }
+            }
+        }
+    }
+
+    func send() {
+        guard canSend, !isRunning, !isPreparingMaterials, !isReplay, activeDiscussionID == nil else { return }
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let continuation = makeContinuationContext()
+        if continuation != nil {
+            // Follow-ups are text-only.
+            clearPendingMaterials()
+            pendingObjective = text
+            pendingSourceMaterials = nil
+            pendingResearchObjective = nil
+            startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+            return
+        }
+
+        if !hasPendingMaterials {
+            pendingObjective = text
+            pendingSourceMaterials = nil
+            pendingResearchObjective = nil
+            startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+            return
+        }
+
+        // Opening discussion with materials: parse images first, then start.
+        let files = pendingFiles
+        let images = pendingImages
+        let generation = beginMaterialsPreparation(
+            status: images.isEmpty ? "正在整理材料…" : "正在识别图片…"
+        )
+        materialsPreparationTask = Task { [weak self] in
+            guard let self else { return }
+            let resolved: CouncilResolvedMaterials
+            if images.isEmpty {
+                resolved = CouncilResolvedMaterials(files: files, imageContexts: [])
+            } else {
+                let vision = await self.visionRecognizer.recognize(
+                    images: images,
+                    settings: self.sharedSettings.snapshot
+                )
+                if Task.isCancelled {
+                    await MainActor.run {
+                        _ = self.finishMaterialsPreparation(ifGeneration: generation)
+                    }
+                    return
+                }
+                switch vision {
+                case .failure(let error):
+                    await MainActor.run {
+                        guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                        self.attachmentErrorMessage = error.localizedDescription
+                    }
+                    return
+                case .success(let contexts):
+                    resolved = CouncilResolvedMaterials(files: files, imageContexts: contexts)
+                }
+            }
+            if Task.isCancelled {
+                await MainActor.run {
+                    _ = self.finishMaterialsPreparation(ifGeneration: generation)
+                }
+                return
+            }
+            await MainActor.run {
+                guard self.finishMaterialsPreparation(ifGeneration: generation) else { return }
+                // Late completion after openArchive / reset / cancel must not start a run.
+                guard !self.isReplay, !self.isRunning, self.activeDiscussionID == nil else { return }
+                self.pendingObjective = CouncilMaterialsComposer.displayObjective(
+                    userText: text,
+                    hasMaterials: !resolved.isEmpty
+                )
+                let materialsBlock = resolved.promptBlock()
+                self.pendingSourceMaterials = materialsBlock.isEmpty ? nil : materialsBlock
+                self.pendingResearchObjective = CouncilMaterialsComposer.researchObjective(
+                    userText: text,
+                    materials: resolved
+                )
+                // Replace raw pending chips with a bubble summary; keep resolved for bubble body.
+                self.clearPendingMaterials()
+                self.startPendingDiscussion(
+                    researchAllowed: self.sharedSettings.snapshot.enableWebSearch,
+                    bubbleBody: CouncilMaterialsComposer.userBubbleBody(
+                        userText: text,
+                        materials: resolved
+                    )
+                )
+            }
+        }
+    }
+
+    func startPendingDiscussion(
+        researchAllowed: Bool,
+        bubbleBody: String? = nil
+    ) {
+        let text = pendingObjective.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceMaterials = pendingSourceMaterials
+        let researchObjective = pendingResearchObjective
+        pendingObjective = ""
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        // Replay / archive views are read-only; never start a live run from late materials prep.
+        guard !isReplay, !text.isEmpty, !isRunning, activeDiscussionID == nil else { return }
+        let continuation = makeContinuationContext()
+        if continuation == nil, currentTaskId != nil || !messages.isEmpty {
+            resetRoom()
+        }
+        inputText = ""
+        if continuation == nil {
+            currentObjective = text
+            lastRunObjective = text
+            lastResearchAllowed = researchAllowed
+        }
+        roomStateOverride = nil
+        failedSpeakerIds.removeAll()
+        appendMessage(
+            kind: .user,
+            author: "你",
+            body: bubbleBody ?? text,
+            systemImage: "person.fill",
+            tint: AmberTheme.accent,
+            subtitle: continuation.map { "追问 · 第 \($0.nextRound) 轮" }
+                ?? (sourceMaterials == nil ? nil : "含上传材料")
+        )
+
+        let discussionID = UUID()
+        let taskId = continuation?.taskId ?? UUID().uuidString
+        let durableRunId = "\(taskId):\(discussionID.uuidString)"
+        activeDiscussionID = discussionID
+        activeDurableRunID = durableRunId
+        currentTaskId = taskId
+        isRunning = true
+        // 先保存用户已经提交的议题，再把 runner 交给异步任务；进程若在
+        // `.taskStarted` 之前被终止，重载仍能看到这条输入。
+        persistTranscript()
+        archiveCurrentRoom()
+        discussionTask = Task { [weak self] in
+            await self?.runDiscussion(
+                objective: text,
+                researchAllowed: researchAllowed,
+                discussionID: discussionID,
+                taskId: taskId,
+                durableRunId: durableRunId,
+                continuation: continuation,
+                sourceMaterials: continuation == nil ? sourceMaterials : nil,
+                researchObjective: continuation == nil ? researchObjective : nil
+            )
+        }
+        // 用户点击开始时就提交 continued processing；等 scenePhase 切到后台再提交已太晚。
+        beginBackgroundKeepAlive(for: discussionID)
+    }
+
+    func cancelDiscussion() {
+        // 用户主动停止也是终止路径:取消节流任务,尾部同步写会使在途延迟写失效。
+        cancelScheduledArchive()
+        runner.markActiveTaskTerminal(
+            taskId: currentTaskId,
+            status: .cancelled,
+            summary: "本轮议会已停止。",
+            retryable: true
+        )
+        settleActiveDurableRun(to: .cancelled, detail: "user_cancelled")
+        stopActiveDiscussion()
+        finishStreamingMessages(as: .failed)
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        failedSpeakerIds.removeAll()
+        isRunning = false
+        roomStateOverride = "已取消"
+        appendDivider("已停止")
+        appendMessage(
+            kind: .system,
+            author: "议会",
+            body: "本轮议会已停止。",
+            systemImage: "stop.circle",
+            tint: AmberTheme.accentRed,
+            subtitle: "已取消"
+        )
+        updateDetail(status: "已停止")
+        persistTranscript()
+        archiveCurrentRoom()
+    }
+
+    func showCurrentDetail() {
+        activeSheet = .detail(makeDetail(status: isRunning ? selectedMode.runningState : "就绪"))
+    }
+
+    func showMembers() {
+        activeSheet = .members
+    }
+
+    func showSettings() {
+        activeSheet = .settings
+    }
+
+    func showHistory() {
+        guard !isRunning else { return }
+        activeSheet = .history
+    }
+
+    /// 从「最近讨论」重开一场历史议会,把归档快照还原成只读对话。
+    func openArchive(taskId: String) {
+        // 切换到只读重放前,先取消节流任务,避免它在 currentTaskId 切换后再次触发写入;
+        // stopAndCheckpoint 会对仍在进行的讨论做一次同步检查点。
+        // 同时作废材料准备世代,防止「识别中点开历史」后迟到 vision 结果开跑。
+        cancelScheduledArchive()
+        invalidateMaterialsPreparation(showCancelledMessage: false)
+        clearPendingMaterials()
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        pendingObjective = ""
+        guard var room = archiveStore.load(taskId: taskId) else { return }
+        stopAndCheckpointActiveDiscussion()
+        if let checkpointedRoom = archiveStore.load(taskId: taskId) {
+            room = checkpointedRoom
+        }
+        isRunning = false
+        isReplay = true
+        currentTaskId = taskId
+        currentObjective = room.objective
+        currentFinalTopic = room.finalTopic ?? ""
+        lastRunObjective = room.objective
+        if let mode = CouncilDiscussionMode(rawValue: room.modeRaw) { selectedMode = mode }
+        participants = room.participants.map { $0.restored() }
+        failedSpeakerIds = Set(room.failedSpeakerIds)
+        activeSpeakerId = nil
+        invitedSpeakerIds = Set(participants.filter { !$0.isHost }.map(\.id))
+        messages = room.messages.map { $0.restored() }
+        roomStateOverride = "历史议会 · 只读"
+        activeSheet = nil
+    }
+
+    /// 退出只读重放,清空房间、恢复默认席位,准备开新议会。
+    func startFreshRoom() {
+        isReplay = false
+        resetRoom()
+        refreshSettingsBackedParticipants()
+        roomStateOverride = nil
+    }
+
+    /// 把当前房间快照按 taskId 归档(供「最近讨论」重开)。在名册/新消息/消息完结/结束等
+    /// 检查点调用;不在 per-token 的 updateMessage 上调用,避免每个 token 写一次文件。
+    /// - Parameter deferred: true 走离主线程的延迟写入泵(中段检查点);false 同步落盘
+    ///   (终态检查点),同步写会 bump 代数,使在途的旧延迟写自动失效。
+    private func archiveCurrentRoom(deferred: Bool = false) {
+        guard !isReplay, let taskId = currentTaskId, !messages.isEmpty else { return }
+        let room = persistedRoom(taskId: taskId)
+        if deferred {
+            archiveStore.saveDeferred(room)
+        } else {
+            archiveErrorMessage = archiveStore.save(room)
+                ? nil
+                : "议会已完成，但归档失败：\(archiveStore.lastErrorDescription ?? "未知错误")"
+        }
+    }
+
+    /// 中段检查点节流:事件密集到达时每个 300ms 窗口最多发起一次延迟写入。
+    /// 已有节流任务在等待时直接复用(latest-wins 由 store 的 pendingRoom 保证)。
+    private func scheduleArchive() {
+        guard !isReplay, currentTaskId != nil, !messages.isEmpty else { return }
+        guard archiveThrottleTask == nil else { return }
+        archiveThrottleTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            self?.archiveThrottleTask = nil
+            self?.archiveCurrentRoom(deferred: true)
+        }
+    }
+
+    private func cancelScheduledArchive() {
+        archiveThrottleTask?.cancel()
+        archiveThrottleTask = nil
+    }
+
+    /// 以指定议题重开一场议会:清空当前画面(含只读重放),再用该议题重新开跑。
+    /// 供长按用户消息的「以此为题重开」/「编辑重开」复用。
+    func restart(withObjective objective: String) {
+        let text = objective.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isReplay = false
+        resetRoom()
+        pendingObjective = text
+        startPendingDiscussion(researchAllowed: sharedSettings.snapshot.enableWebSearch)
+    }
+
+    private func runDiscussion(
+        objective: String,
+        researchAllowed: Bool,
+        discussionID: UUID,
+        taskId: String,
+        durableRunId: String,
+        continuation: IOSCouncilRoomContinuation?,
+        sourceMaterials: String? = nil,
+        researchObjective: String? = nil
+    ) async {
+        guard activeDiscussionID == discussionID else { return }
+        isRunning = true
+        invitedSpeakerIds.removeAll()
+        activeSheet = nil
+        let didStartDurably: Bool
+        if let durableRunStore {
+            didStartDurably = (try? await durableRunStore.ensureRunning(
+                runId: durableRunId,
+                descriptorId: IOSDurableRunStore.Descriptor.council,
+                startedAt: Int64(Date().timeIntervalSince1970 * 1_000),
+                inputDigest: IOSDurableRunStore.inputDigest(
+                    "\(selectedMode.rawValue)\n\(objective)"
+                ),
+                inputSnapshotRef: "council:\(taskId)"
+            )) == true
+        } else {
+            didStartDurably = true
+        }
+        guard didStartDurably else {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: "无法保存运行状态，本轮议会未启动。",
+                systemImage: "exclamationmark.triangle",
+                tint: AmberTheme.accentRed,
+                subtitle: "启动失败",
+                status: .failed
+            )
+            endBackgroundKeepAlive(for: discussionID)
+            isRunning = false
+            activeDiscussionID = nil
+            activeDurableRunID = nil
+            discussionTask = nil
+            roomStateOverride = "失败"
+            persistTranscript()
+            archiveCurrentRoom()
+            return
+        }
+        guard activeDiscussionID == discussionID, !Task.isCancelled else {
+            _ = try? await durableRunStore?.transitionFromAnyActive(
+                runId: durableRunId,
+                to: .cancelled,
+                detail: "owner_released_before_start"
+            )
+            return
+        }
+        appendDivider(continuation.map { "追问 · 第 \($0.nextRound) 轮" } ?? selectedMode.openingDivider)
+        roomSettingsStore.bootstrapLegacySeatsIfNeeded(
+            sharedSettings.savedCouncilSeats,
+            currentModelId: currentModelId
+        )
+        refreshSettingsBackedParticipants()
+        guard let currentModel = sharedSettings.snapshot.getCurrentChatModel(),
+              let providerSetting = ChatProviderConfiguration.provider(
+                  for: currentModel,
+                  providers: sharedSettings.snapshot.providers
+              ) else {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: ChatConfigurationIssue.missingProvider.message,
+                systemImage: "exclamationmark.triangle",
+                tint: AmberTheme.accentRed,
+                subtitle: "配置阻塞",
+                status: .failed
+            )
+            _ = try? await durableRunStore?.transitionFromAnyActive(
+                runId: durableRunId,
+                to: .failed,
+                detail: ChatConfigurationIssue.missingProvider.message
+            )
+            endBackgroundKeepAlive(for: discussionID)
+            isRunning = false
+            activeDiscussionID = nil
+            discussionTask = nil
+            roomStateOverride = "失败"
+            activeDurableRunID = nil
+            persistTranscript()
+            return
+        }
+        let request = IOSCouncilRoomRunRequest(
+            taskId: taskId,
+            objective: objective,
+            mode: selectedMode.runMode,
+            settings: roomSettingsStore.settings,
+            currentModelId: currentModel.modelId,
+            currentModel: currentModel,
+            providerSetting: providerSetting,
+            providerSettings: sharedSettings.snapshot.providers,
+            searchSettings: sharedSettings.snapshot,
+            researchConsent: continuation == nil && researchAllowed ? .allowed : .unavailable,
+            dynamicSeatGeneration: continuation == nil && roomSettingsStore.dynamicSeatGeneration,
+            seatWebSearch: continuation == nil && roomSettingsStore.seatWebSearch,
+            continuation: continuation,
+            sourceMaterials: sourceMaterials,
+            researchObjective: researchObjective
+        )
+        let summary = await runner.run(request: request, onEvent: { [weak self] event in
+            guard let self, self.activeDiscussionID == discussionID else { return }
+            self.handle(event)
+        })
+        guard activeDiscussionID == discussionID else { return }
+        if currentTaskId == nil {
+            currentTaskId = summary.taskId
+        }
+        if let finalTopic = summary.finalTopic.trimmedNilIfBlank {
+            currentFinalTopic = finalTopic
+        }
+        _ = try? await durableRunStore?.transitionFromAnyActive(
+            runId: durableRunId,
+            to: Self.durableStatus(for: summary.status),
+            detail: summary.failureReason
+        )
+        finishStreamingMessages(as: summary.status == .completed ? .completed : .failed)
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        updateBackgroundProgress(
+            completed: summary.status == .completed ? 4 : 3,
+            subtitle: summary.status == .completed ? "议会已完成" : summary.status.title
+        )
+        endBackgroundKeepAlive(for: discussionID)
+        isRunning = false
+        activeDiscussionID = nil
+        activeDurableRunID = nil
+        discussionTask = nil
+        roomStateOverride = summary.status == .completed ? "就绪" : summary.status.title
+        updateDetail(status: roomStateOverride ?? "就绪")
+        persistTranscript()
+        // 终态:取消节流任务 → 排空在途延迟写 → 同步落最终快照。同步写严格最后,
+        // 保证「写后立即 load」看到完成态,也不会被旧延迟写覆盖。
+        cancelScheduledArchive()
+        await archiveStore.flushDeferred()
+        archiveCurrentRoom()
+    }
+
+    private func appendToken(_ token: String) {
+        if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            inputText = "\(token) "
+        } else if inputText.hasSuffix(" ") {
+            inputText += "\(token) "
+        } else {
+            inputText += " \(token) "
+        }
+    }
+
+    private var currentConfigurationIssue: ChatConfigurationIssue? {
+        guard let model = sharedSettings.snapshot.getCurrentChatModel() else {
+            return .missingModel
+        }
+        let provider = ChatProviderConfiguration.provider(
+            for: model,
+            providers: sharedSettings.snapshot.providers
+        )
+        return ChatProviderConfiguration.issue(for: model, provider: provider)
+    }
+
+    private func persistedRoom(taskId: String) -> CouncilPersistedRoom {
+        CouncilPersistedRoom(
+            taskId: taskId,
+            objective: currentObjective,
+            finalTopic: currentFinalTopic.trimmedNilIfBlank,
+            modeRaw: selectedMode.rawValue,
+            statusRaw: roomStateOverride ?? "",
+            failedSpeakerIds: Array(failedSpeakerIds),
+            participants: participants.map(CouncilPersistedParticipant.init),
+            messages: messages.map(CouncilPersistedMessage.init),
+            updatedAtMs: Date().timeIntervalSince1970 * 1000
+        )
+    }
+
+    @discardableResult
+    private func appendMessage(
+        kind: CouncilMessageKind,
+        author: String,
+        body: String,
+        systemImage: String,
+        tint: Color,
+        subtitle: String?,
+        status: CouncilMessageStatus = .completed
+    ) -> UUID {
+        let message = CouncilChatMessage(
+            kind: kind,
+            author: author,
+            body: body,
+            systemImage: systemImage,
+            tint: tint,
+            subtitle: subtitle,
+            status: status
+        )
+        messages.append(message)
+        updateDetail(status: isRunning ? selectedMode.runningState : "就绪")
+        return message.id
+    }
+
+    private func appendDivider(_ text: String) {
+        messages.append(
+            CouncilChatMessage(
+                kind: .divider,
+                author: "议会",
+                body: text,
+                systemImage: "circle.grid.cross",
+                tint: AmberTheme.muted,
+                subtitle: nil
+            )
+        )
+    }
+
+    private func updateMessage(_ id: UUID, body: String, status: CouncilMessageStatus) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].body = body
+        messages[index].status = status
+    }
+
+    private func finishStreamingMessages(as status: CouncilMessageStatus) {
+        for index in messages.indices where messages[index].status == .speaking {
+            messages[index].status = status
+        }
+    }
+
+    private func handle(_ event: IOSCouncilRoomEvent) {
+        switch event {
+        case .taskStarted(let id):
+            currentTaskId = id
+            updateBackgroundProgress(completed: 0, subtitle: "准备议会")
+            persistTranscript()
+            archiveCurrentRoom()
+        case .state(let state):
+            roomStateOverride = state
+            updateDetail(status: state)
+            let lowercased = state.lowercased()
+            let completed: Int64
+            if state == "就绪" {
+                completed = 4
+            } else if lowercased.contains("总结") {
+                completed = 3
+            } else if lowercased.contains("发言") || lowercased.contains("点评") {
+                completed = 2
+            } else {
+                completed = 1
+            }
+            updateBackgroundProgress(completed: completed, subtitle: state)
+        case .roster(let speakers, let activeId, let failedIds):
+            participants = speakers.map(CouncilParticipant.init(speaker:))
+            activeSpeakerId = activeId
+            failedSpeakerIds = failedIds
+            invitedSpeakerIds = Set(speakers.filter { !$0.isHost }.map(\.id))
+            updateDetail(status: roomStateOverride ?? selectedMode.runningState)
+            updateBackgroundProgress(
+                completed: 1
+            )
+            scheduleArchive()
+        case .append(let event):
+            appendMessage(event)
+            scheduleArchive()
+        case .updateMessage(let id, let body, let status, let lagAllowance):
+            let mapped = CouncilMessageStatus(status)
+            activeTailLagAllowance = lagAllowance
+            updateMessage(id, body: body, status: mapped)
+            // 流式中途也按既有 300ms 窗口归档最新尾部；不做逐 token 同步写，
+            // 但进程在席位发言中断时仍能恢复最近一段已接受正文。
+            scheduleArchive()
+        }
+    }
+
+    private func appendMessage(_ event: IOSCouncilRoomMessageEvent) {
+        // 新消息开始 = 新的流式上下文：排空收紧值不跨消息残留（与 Chat 语义一致）。
+        activeTailLagAllowance = 1
+        let participant = event.speakerId.flatMap { id in participants.first(where: { $0.id == id }) }
+        let kind = CouncilMessageKind(event.kind)
+        let tint = participant?.tint ?? (kind == .system ? AmberTheme.accentIndigo : AmberTheme.muted)
+        let image = participant?.systemImage ?? (kind == .divider ? "circle.grid.cross" : "person.3.sequence")
+        messages.append(CouncilChatMessage(
+            id: event.id,
+            kind: kind,
+            author: event.author,
+            body: event.body,
+            systemImage: image,
+            tint: tint,
+            subtitle: event.subtitle,
+            status: CouncilMessageStatus(event.status)
+        ))
+        updateDetail(status: roomStateOverride ?? (isRunning ? selectedMode.runningState : "就绪"))
+    }
+
+    private func roomTranscript(limit: Int) -> String {
+        messages
+            .suffix(limit)
+            .filter { !$0.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { "[\($0.author)] \($0.body)" }
+            .joined(separator: "\n\n")
+    }
+
+    private func makeContinuationContext() -> IOSCouncilRoomContinuation? {
+        guard canContinueCurrentCouncil,
+              let taskId = currentTaskId,
+              let originalObjective = currentObjective.trimmedNilIfBlank,
+              !messages.isEmpty else { return nil }
+        let settings = roomSettingsStore.settings.normalized(currentModelId: currentModelId)
+        let seatSettings = Dictionary(uniqueKeysWithValues: settings.seats.map { ($0.id, $0) })
+        let speakers = participants.map { participant in
+            let configuredSeat = seatSettings[participant.id]
+            return IOSCouncilRoomSpeaker(
+                id: participant.id,
+                name: participant.isHost ? "主持人" : participant.displayName,
+                rolePrompt: participant.roleDescription,
+                modelId: modelId(for: participant),
+                providerId: participant.providerId,
+                reasoning: participant.isHost
+                    ? settings.host.reasoning
+                    : configuredSeat?.reasoning ?? .medium,
+                prompt: participant.isHost
+                    ? settings.host.prompt
+                    : configuredSeat?.prompt ?? "",
+                isHost: participant.isHost
+            )
+        }
+        guard speakers.contains(where: \.isHost), speakers.contains(where: { !$0.isHost }) else {
+            return nil
+        }
+        return IOSCouncilRoomContinuation(
+            taskId: taskId,
+            originalObjective: originalObjective,
+            finalTopic: currentFinalTopic.trimmedOr(originalObjective),
+            priorTranscript: roomTranscript(limit: 80),
+            speakers: speakers,
+            nextRound: discussionRound + 1
+        )
+    }
+
+    private var canContinueCurrentCouncil: Bool {
+        !isReplay
+            && (roomStateOverride == "就绪" || currentFinalTopic.trimmedNilIfBlank != nil)
+            && currentTaskId != nil
+            && currentObjective.trimmedNilIfBlank != nil
+            && !messages.isEmpty
+    }
+
+    private func makeDetail(status: String) -> CouncilDiscussionDetail {
+        CouncilDiscussionDetail(
+            statusLine: "\(status) · \(selectedMode.title) · host \(hostDisplayName)",
+            objective: currentObjective,
+            participantSummary: participants
+                .filter { $0.isHost || invitedSpeakerIds.contains($0.id) }
+                .map { participant in
+                    participant.isHost
+                        ? "主持：\(participant.displayName)（\(currentModelId)）"
+                        : "\(participant.displayName)：\(participant.roleDescription)（\(modelLabel(for: participant))）"
+                }
+                .joined(separator: "\n"),
+            budgetSummary: "模式：\(selectedMode.title)\n最大席位：\(roomSettingsStore.settings.limits.maxSeats)\n默认轮数：\(roomSettingsStore.settings.limits.defaultRounds)\n单次模型无输出超时：\(roomSettingsStore.settings.limits.seatTimeoutSeconds)s\n输出预算：\(roomSettingsStore.settings.limits.outputBudgetCharacters)\n提供商：\(sharedSettings.resolveCurrentProviderSetting()?.name ?? "未配置")\n主持模型：\(roomSettingsStore.settings.host.modelId.trimmedOr(currentModelId))",
+            transcript: roomTranscript(limit: 80)
+        )
+    }
+
+    private func updateDetail(status: String) {
+        if case .detail = activeSheet {
+            activeSheet = .detail(makeDetail(status: status))
+        }
+    }
+
+    private func modelId(for participant: CouncilParticipant) -> String {
+        participant.modelId?.trimmedNilIfBlank ?? currentModelId
+    }
+
+    private func modelLabel(for participant: CouncilParticipant) -> String {
+        participant.modelId?.trimmedNilIfBlank ?? participant.modelHint
+    }
+
+    private static func hostName(for modelId: String) -> String {
+        let lowercased = modelId.lowercased()
+        if lowercased.contains("claude") { return "Claude" }
+        if lowercased.contains("deepseek") { return "DeepSeek" }
+        if lowercased.contains("gemini") { return "Gemini" }
+        if lowercased.contains("glm") { return "GLM" }
+        if lowercased.contains("qwen") { return "Qwen" }
+        if lowercased.contains("kimi") { return "Kimi" }
+        return "GPT"
+    }
+
+    private func refreshSettingsBackedParticipants() {
+        roomSettingsStore.bootstrapLegacySeatsIfNeeded(sharedSettings.savedCouncilSeats, currentModelId: currentModelId)
+        let settings = roomSettingsStore.settings.normalized(currentModelId: currentModelId)
+        let host = IOSCouncilRoomSpeaker(
+            id: "host",
+            name: "主持人",
+            rolePrompt: settings.host.prompt,
+            modelId: settings.host.modelId,
+            reasoning: settings.host.reasoning,
+            prompt: settings.host.prompt,
+            isHost: true
+        )
+        let seats = settings.defaultSeats(currentModelId: currentModelId).map {
+            IOSCouncilRoomSpeaker(
+                id: $0.id,
+                name: $0.name,
+                rolePrompt: $0.rolePrompt,
+                modelId: $0.modelId,
+                reasoning: $0.reasoning,
+                prompt: $0.prompt,
+                isHost: false
+            )
+        }
+        participants = ([host] + seats).map(CouncilParticipant.init(speaker:))
+    }
+
+    private func resetRoom() {
+        stopAndCheckpointActiveDiscussion()
+        // 取消运行中的议会后,被 cancel 的 async 任务不会再走到末尾的 isRunning=false,
+        // 这里显式复位,确保「重开」后输入框/发送键立刻回到就绪态。
+        isRunning = false
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        failedSpeakerIds.removeAll()
+        currentTaskId = nil
+        roomStateOverride = nil
+        currentObjective = ""
+        currentFinalTopic = ""
+        invalidateMaterialsPreparation(showCancelledMessage: false)
+        clearPendingMaterials()
+        attachmentErrorMessage = nil
+        pendingSourceMaterials = nil
+        pendingResearchObjective = nil
+        pendingObjective = ""
+        // 重开 = 把画面清成真正空白(和首次进入议会一致:只剩「输入议题开始」占位),
+        // 不再自动发一条「已重新开始」系统消息(画蛇添足)。
+        messages = []
+        activeTailLagAllowance = 1
+        // 重新开始即清空历史(存盘也同步为空白开场),避免退出后又载回旧 transcript。
+        persistTranscript()
+        refreshSettingsBackedParticipants()
+    }
+
+    /// Start a materials prep epoch; cancels any previous prep task.
+    @discardableResult
+    private func beginMaterialsPreparation(status: String) -> UInt64 {
+        materialsPrepGeneration &+= 1
+        materialsPreparationTask?.cancel()
+        materialsPreparationTask = nil
+        isPreparingMaterials = true
+        materialsPreparationStatus = status
+        attachmentErrorMessage = nil
+        return materialsPrepGeneration
+    }
+
+    /// Clear preparing UI only if this completion still owns the current generation.
+    @discardableResult
+    private func finishMaterialsPreparation(ifGeneration generation: UInt64) -> Bool {
+        guard materialsPrepGeneration == generation else { return false }
+        materialsPreparationTask = nil
+        isPreparingMaterials = false
+        materialsPreparationStatus = ""
+        return true
+    }
+
+    private func invalidateMaterialsPreparation(showCancelledMessage: Bool) {
+        materialsPrepGeneration &+= 1
+        materialsPreparationTask?.cancel()
+        materialsPreparationTask = nil
+        isPreparingMaterials = false
+        materialsPreparationStatus = ""
+        if showCancelledMessage {
+            attachmentErrorMessage = "已取消材料解析"
+        }
+    }
+
+    private func stopAndCheckpointActiveDiscussion(
+        taskStatus: IOSAdvancedTaskStatus = .cancelled,
+        terminalMessage: String? = nil
+    ) {
+        // 取消即终止路径:无论是否要 checkpoint 都先取消节流任务,避免切走后再次写入。
+        cancelScheduledArchive()
+        let shouldCheckpoint = activeDiscussionID != nil || isRunning
+        let discussionID = activeDiscussionID
+        if shouldCheckpoint {
+            runner.markActiveTaskTerminal(
+                taskId: currentTaskId,
+                status: taskStatus,
+                summary: terminalMessage ?? taskStatus.title,
+                retryable: taskStatus == .interrupted || taskStatus == .cancelled
+            )
+            settleActiveDurableRun(
+                to: Self.durableStatus(for: taskStatus),
+                detail: terminalMessage ?? taskStatus.title
+            )
+        }
+        // 到期/切换页时先把取消后的内存尾部写入快照，再释放后台执行权；系统
+        // 可能在租约结束后立即终止进程，不能让 archive 落盘排在 lease 之后。
+        stopActiveDiscussion(releaseBackgroundLease: false)
+        guard shouldCheckpoint else { return }
+
+        finishStreamingMessages(as: .failed)
+        activeSpeakerId = nil
+        invitedSpeakerIds.removeAll()
+        isRunning = false
+        roomStateOverride = taskStatus.title
+        updateDetail(status: taskStatus.title)
+        if let terminalMessage {
+            appendMessage(
+                kind: .system,
+                author: "议会",
+                body: terminalMessage,
+                systemImage: "pause.circle",
+                tint: AmberTheme.accentRed,
+                subtitle: taskStatus.title,
+                status: .failed
+            )
+        }
+        persistTranscript()
+        archiveCurrentRoom()
+        endBackgroundKeepAlive(for: discussionID)
+    }
+
+    private func stopActiveDiscussion(releaseBackgroundLease: Bool = true) {
+        discussionTask?.cancel()
+        // The concrete streamer synchronously drains accepted FIFO chunks here.
+        // Keep ownership valid until that exact tail has reached the current bubble.
+        runner.cancel()
+        let discussionID = activeDiscussionID
+        keepAliveReleaseTask?.cancel()
+        keepAliveReleaseTask = nil
+        if releaseBackgroundLease {
+            endBackgroundKeepAlive(for: discussionID)
+        }
+        activeDiscussionID = nil
+        activeDurableRunID = nil
+        discussionTask = nil
+    }
+
+    private func settleActiveDurableRun(to status: AgentRunStatus, detail: String?) {
+        guard let runId = activeDurableRunID, let durableRunStore else { return }
+        Task { [durableRunStore] in
+            _ = try? await durableRunStore.transitionFromAnyActive(
+                runId: runId,
+                to: status,
+                detail: detail
+            )
+        }
+    }
+
+    private static func durableStatus(for status: IOSAdvancedTaskStatus) -> AgentRunStatus {
+        switch status {
+        case .completed:
+            .completed
+        case .cancelled:
+            .cancelled
+        case .interrupted, .timedOut:
+            .interrupted
+        case .failed:
+            .failed
+        case .queued, .running, .approvalRequired:
+            .interrupted
+        }
+    }
+}
+
+enum CouncilDiscussionMode: String, CaseIterable, Identifiable {
+    case freeChat = "free_chat"
+    case debate
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .freeChat: "自由群聊"
+        case .debate: "辩论"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .freeChat: "自由群聊模式"
+        case .debate: "辩论模式"
+        }
+    }
+
+    var intent: String {
+        switch self {
+        case .freeChat: "扩展信息面、发现选项、形成早期方向"
+        case .debate: "挑战假设、发现盲区、降低决策风险"
+        }
+    }
+
+    var runningState: String {
+        switch self {
+        case .freeChat: "群聊中"
+        case .debate: "辩论中"
+        }
+    }
+
+    var openingDivider: String {
+        switch self {
+        case .freeChat: "自由群聊 · 开场"
+        case .debate: "辩论 · 交叉回应"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .freeChat: "bubble.left.and.bubble.right"
+        case .debate: "scale.3d"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .freeChat: AmberTheme.accentCyan
+        case .debate: AmberTheme.accentRed
+        }
+    }
+
+    var runMode: IOSCouncilRoomRunMode {
+        switch self {
+        case .freeChat: .freeChat
+        case .debate: .debate
+        }
+    }
+}
+
+struct CouncilParticipant: Identifiable {
+    let id: String
+    let handle: String
+    let displayName: String
+    let roleDescription: String
+    let shortLens: String
+    let systemImage: String
+    let tint: Color
+    let isHost: Bool
+    let modelHint: String
+    let modelId: String?
+    let providerId: String?
+
+    init(
+        id: String,
+        handle: String,
+        displayName: String,
+        roleDescription: String,
+        shortLens: String,
+        systemImage: String,
+        tint: Color,
+        isHost: Bool,
+        modelHint: String,
+        modelId: String? = nil,
+        providerId: String? = nil
+    ) {
+        self.id = id
+        self.handle = handle
+        self.displayName = displayName
+        self.roleDescription = roleDescription
+        self.shortLens = shortLens
+        self.systemImage = systemImage
+        self.tint = tint
+        self.isHost = isHost
+        self.modelHint = modelHint
+        self.modelId = modelId?.trimmedNilIfBlank
+        self.providerId = providerId?.trimmedNilIfBlank
+    }
+
+    init(speaker: IOSCouncilRoomSpeaker) {
+        self.init(
+            id: speaker.id,
+            handle: Self.makeHandle(from: speaker.name, fallback: speaker.isHost ? "host" : speaker.id),
+            displayName: speaker.isHost ? "Host · \(speaker.modelId)" : speaker.name,
+            roleDescription: speaker.rolePrompt,
+            shortLens: speaker.shortLens,
+            systemImage: speaker.isHost ? "crown" : Self.icon(for: speaker.id),
+            tint: speaker.isHost ? AmberTheme.accent : Self.tint(for: speaker.id),
+            isHost: speaker.isHost,
+            modelHint: speaker.modelId,
+            modelId: speaker.modelId,
+            providerId: speaker.providerId
+        )
+    }
+
+    static func defaults(hostName: String) -> [CouncilParticipant] {
+        [
+            CouncilParticipant(
+                id: "host",
+                handle: "host",
+                displayName: "Host · \(hostName)",
+                roleDescription: "主持、串联、追问和综合",
+                shortLens: "主持与综合",
+                systemImage: "crown",
+                tint: AmberTheme.accent,
+                isHost: true,
+                modelHint: "主模型"
+            ),
+            CouncilParticipant(
+                id: "deepseek",
+                handle: "DeepSeek",
+                displayName: "DeepSeek",
+                roleDescription: "结构化推理、假设拆解和第一性原理分析",
+                shortLens: "结构化推理",
+                systemImage: "brain.head.profile",
+                tint: AmberTheme.accentIndigo,
+                isHost: false,
+                modelHint: "推理视角"
+            ),
+            CouncilParticipant(
+                id: "glm",
+                handle: "GLM",
+                displayName: "GLM",
+                roleDescription: "中文用户直觉、表达和产品叙事",
+                shortLens: "中文用户心智",
+                systemImage: "text.bubble",
+                tint: AmberTheme.accentGreen,
+                isHost: false,
+                modelHint: "语言视角"
+            ),
+            CouncilParticipant(
+                id: "gemini",
+                handle: "Gemini",
+                displayName: "Gemini",
+                roleDescription: "多模态、用户体验和移动端交互视角",
+                shortLens: "多模态与交互",
+                systemImage: "camera.metering.matrix",
+                tint: AmberTheme.accentCyan,
+                isHost: false,
+                modelHint: "多模态视角"
+            ),
+            CouncilParticipant(
+                id: "risk",
+                handle: "Risk",
+                displayName: "Risk",
+                roleDescription: "风险复核、失败模式、隐私、成本、循环和安全边界",
+                shortLens: "风险与边界",
+                systemImage: "exclamationmark.shield",
+                tint: AmberTheme.accentRed,
+                isHost: false,
+                modelHint: "风险视角"
+            ),
+            CouncilParticipant(
+                id: "opponent",
+                handle: "Opponent",
+                displayName: "Opponent",
+                roleDescription: "反方质询、反例和取舍压力测试",
+                shortLens: "反方质询",
+                systemImage: "hand.raised",
+                tint: AmberTheme.accentAmber,
+                isHost: false,
+                modelHint: "质询视角"
+            )
+        ]
+    }
+
+    private static func makeHandle(from name: String, fallback: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutSpaces = trimmed.filter { !$0.isWhitespace }
+        return withoutSpaces.isEmpty ? fallback : withoutSpaces
+    }
+
+    private static func icon(for id: String) -> String {
+        if id.contains("risk") { return "exclamationmark.shield" }
+        if id.contains("opponent") { return "hand.raised" }
+        if id.contains("product") { return "rectangle.3.group.bubble" }
+        if id.contains("engineering") { return "hammer" }
+        return "person.crop.circle.badge.checkmark"
+    }
+
+    private static func tint(for id: String) -> Color {
+        let palette = [
+            AmberTheme.accentCyan,
+            AmberTheme.accentGreen,
+            AmberTheme.accentAmber,
+            AmberTheme.accentIndigo,
+            AmberTheme.accentRed
+        ]
+        let value = abs(id.unicodeScalars.reduce(0) { ($0 &* 31) &+ Int($1.value) })
+        return palette[value % palette.count]
+    }
+}
+
+enum CouncilParticipantState: String {
+    case idle
+    case invited
+    case speaking
+    case failed
+
+    var label: String {
+        switch self {
+        case .idle: "待命"
+        case .invited: "已邀请"
+        case .speaking: "发言中"
+        case .failed: "失败"
+        }
+    }
+}
+
+struct CouncilChatMessage: Identifiable {
+    private static let pendingPhaseLabels: Set<String> = [
+        "思考中...", "调研和完善议题中...", "点评中...", "总结中...",
+    ]
+
+    let id: UUID
+    let kind: CouncilMessageKind
+    let author: String
+    var body: String
+    let systemImage: String
+    let tint: Color
+    let subtitle: String?
+    var status: CouncilMessageStatus
+
+    init(
+        id: UUID = UUID(),
+        kind: CouncilMessageKind,
+        author: String,
+        body: String,
+        systemImage: String,
+        tint: Color,
+        subtitle: String?,
+        status: CouncilMessageStatus = .completed
+    ) {
+        self.id = id
+        self.kind = kind
+        self.author = author
+        self.body = body
+        self.systemImage = systemImage
+        self.tint = tint
+        self.subtitle = subtitle
+        self.status = status
+    }
+
+    var displayBody: String {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if status == .speaking && trimmed.isEmpty {
+            return "思考中..."
+        }
+        if Self.pendingPhaseLabels.contains(trimmed), status != .speaking {
+            return "未生成内容"
+        }
+        return body
+    }
+
+    /// Runner phase labels are UI chrome, not generated Markdown. Keeping them
+    /// outside the incremental renderer makes the first model text an initial
+    /// document instead of a non-prefix replacement of "思考中..." / "总结中...".
+    var streamingMarkdownBody: String? {
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if Self.pendingPhaseLabels.contains(trimmed) || (status == .speaking && trimmed.isEmpty) {
+            return nil
+        }
+        return displayBody
+    }
+
+    var usesStreamingMarkdown: Bool {
+        kind == .host || kind == .guest
+    }
+
+    var isStreamingMarkdown: Bool {
+        usesStreamingMarkdown && status == .speaking
+    }
+
+    /// Every host/guest message enters through a `.speaking` runner event, so this
+    /// remains true after completion and after archive restoration without adding a
+    /// persistence field or changing the generation protocol.
+    var hasEverStreamedMarkdown: Bool {
+        usesStreamingMarkdown
+    }
+
+    var markdownRenderCacheNamespace: String {
+        "council:\(id.uuidString)"
+    }
+
+    var backgroundColor: Color {
+        if status == .failed {
+            return AmberTheme.accentRed.opacity(0.08)
+        }
+        switch kind {
+        case .user: return AmberTheme.accent
+        case .host: return AmberTheme.surface
+        case .guest: return AmberTheme.surface2
+        case .system: return AmberTheme.surface2.opacity(0.65)
+        case .divider: return .clear
+        }
+    }
+
+    var foregroundColor: Color {
+        kind == .user ? .white : AmberTheme.foreground
+    }
+
+    var borderColor: Color {
+        if status == .failed {
+            return AmberTheme.accentRed.opacity(0.42)
+        }
+        switch kind {
+        case .host: return AmberTheme.accent.opacity(0.24)
+        case .guest: return AmberTheme.borderSoft
+        case .system: return AmberTheme.borderSoft
+        default: return .clear
+        }
+    }
+}
+
+enum CouncilMessageKind {
+    case user
+    case host
+    case guest
+    case system
+    case divider
+
+    init(_ kind: IOSCouncilRoomMessageKind) {
+        switch kind {
+        case .host: self = .host
+        case .seat: self = .guest
+        case .system: self = .system
+        case .divider: self = .divider
+        }
+    }
+
+    var rawKey: String {
+        switch self {
+        case .user: "user"; case .host: "host"; case .guest: "guest"; case .system: "system"; case .divider: "divider"
+        }
+    }
+
+    init(rawKey: String) {
+        switch rawKey {
+        case "host": self = .host
+        case "guest": self = .guest
+        case "system": self = .system
+        case "divider": self = .divider
+        default: self = .user
+        }
+    }
+}
+
+enum CouncilMessageStatus {
+    case speaking
+    case completed
+    case failed
+
+    init(_ status: IOSCouncilRoomMessageStatus) {
+        switch status {
+        case .speaking: self = .speaking
+        case .completed: self = .completed
+        case .failed: self = .failed
+        }
+    }
+
+    var rawKey: String {
+        switch self {
+        case .speaking: "speaking"; case .completed: "completed"; case .failed: "failed"
+        }
+    }
+
+    init(rawKey: String) {
+        switch rawKey {
+        case "failed": self = .failed
+        case "speaking": self = .failed
+        default: self = .completed
+        }
+    }
+}
+
+/// Codable 快照,用于把上一轮议会的 transcript 存盘,退出后再进默认载回。颜色用 hex
+/// 保留(席位/主持的色彩在重载后仍准确);backgroundColor/foregroundColor/borderColor 由
+/// kind+status 派生,无需存。
+struct CouncilPersistedMessage: Codable, Equatable {
+    let id: String
+    let kind: String
+    let author: String
+    let body: String
+    let systemImage: String
+    let tintHex: String
+    let subtitle: String?
+    let status: String
+
+    init(
+        id: String,
+        kind: String,
+        author: String,
+        body: String,
+        systemImage: String,
+        tintHex: String,
+        subtitle: String?,
+        status: String
+    ) {
+        self.id = id
+        self.kind = kind
+        self.author = author
+        self.body = body
+        self.systemImage = systemImage
+        self.tintHex = tintHex
+        self.subtitle = subtitle
+        self.status = status
+    }
+
+    init(_ message: CouncilChatMessage) {
+        self.id = message.id.uuidString
+        self.kind = message.kind.rawKey
+        self.author = message.author
+        self.body = message.body
+        self.systemImage = message.systemImage
+        self.tintHex = message.tint.councilHexString
+        self.subtitle = message.subtitle
+        self.status = message.status.rawKey
+    }
+
+    func restored() -> CouncilChatMessage {
+        CouncilChatMessage(
+            id: UUID(uuidString: id) ?? UUID(),
+            kind: CouncilMessageKind(rawKey: kind),
+            author: author,
+            body: body,
+            systemImage: systemImage,
+            tint: Color(councilHexString: tintHex),
+            subtitle: subtitle,
+            status: CouncilMessageStatus(rawKey: status)
+        )
+    }
+}
+
+/// UserDefaults 持久化当前房间快照。旧版只保存消息数组，读取时原样迁移。
+enum CouncilTranscriptStore {
+    private static let key = "app.amber.ios.councilTranscript.v1"
+
+    static func save(_ room: CouncilPersistedRoom, defaults: UserDefaults) {
+        if let data = try? JSONEncoder().encode(room) {
+            defaults.set(data, forKey: key)
+        }
+    }
+
+    static func load(defaults: UserDefaults) -> CouncilPersistedRoom? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        let decoder = JSONDecoder()
+        if let room = try? decoder.decode(CouncilPersistedRoom.self, from: data) {
+            return room
+        }
+        guard let messages = try? decoder.decode([CouncilPersistedMessage].self, from: data) else {
+            return nil
+        }
+        return CouncilPersistedRoom(
+            taskId: "",
+            objective: "",
+            modeRaw: CouncilDiscussionMode.freeChat.rawValue,
+            statusRaw: "",
+            failedSpeakerIds: [],
+            participants: [],
+            messages: messages,
+            updatedAtMs: 0
+        )
+    }
+
+    static func clear(defaults: UserDefaults) {
+        defaults.removeObject(forKey: key)
+    }
+}
+
+// MARK: - 历史议会归档(按 taskId 一场一文件,支持「最近讨论」重开成只读对话)
+
+/// 单个席位/主持在重开时还原所需的展示信息。颜色用 hex 保留;派生色由 kind 重新计算。
+struct CouncilPersistedParticipant: Codable, Equatable {
+    let id: String
+    let handle: String
+    let displayName: String
+    let roleDescription: String
+    let shortLens: String
+    let systemImage: String
+    let tintHex: String
+    let isHost: Bool
+    let modelHint: String
+    let modelId: String?
+    let providerId: String?
+
+    init(_ participant: CouncilParticipant) {
+        self.id = participant.id
+        self.handle = participant.handle
+        self.displayName = participant.displayName
+        self.roleDescription = participant.roleDescription
+        self.shortLens = participant.shortLens
+        self.systemImage = participant.systemImage
+        self.tintHex = participant.tint.councilHexString
+        self.isHost = participant.isHost
+        self.modelHint = participant.modelHint
+        self.modelId = participant.modelId
+        self.providerId = participant.providerId
+    }
+
+    func restored() -> CouncilParticipant {
+        CouncilParticipant(
+            id: id,
+            handle: handle,
+            displayName: displayName,
+            roleDescription: roleDescription,
+            shortLens: shortLens,
+            systemImage: systemImage,
+            tint: Color(councilHexString: tintHex),
+            isHost: isHost,
+            modelHint: modelHint,
+            modelId: modelId,
+            providerId: providerId
+        )
+    }
+}
+
+/// 一场议会的完整快照:消息流 + 席位名册 + 失败席位 + 议题/模式/状态。
+/// 与单房间 `CouncilTranscriptStore`(只存当前 transcript)不同,这里按 taskId 归档每一场,
+/// 用于从「最近讨论」重开任意历史议会,渲染成只读对话(深读式重开)。
+struct CouncilPersistedRoom: Codable, Equatable {
+    let taskId: String
+    let objective: String
+    var finalTopic: String? = nil
+    let modeRaw: String
+    let statusRaw: String
+    let failedSpeakerIds: [String]
+    let participants: [CouncilPersistedParticipant]
+    let messages: [CouncilPersistedMessage]
+    let updatedAtMs: Double
+}
+
+/// 文件持久化:每场议会一份 `Documents/council/<taskId>.json`。镜像 `IOSBoardPersistence`
+/// 的「一 id 一文件」范式,避免把大段 transcript 塞进 UserDefaults(80 条上限),也让每场
+/// 历史互不覆盖。
+@MainActor
+final class CouncilRoomArchiveStore {
+    static let shared = CouncilRoomArchiveStore()
+
+    private let directory: URL
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+    private let fileManager: FileManager
+
+    /// 测试缝:累计成功写入次数(同步 + 延迟)。
+    private(set) var completedWriteCount = 0
+    private(set) var lastErrorDescription: String?
+
+    /// 延迟写入的最新快照与串行泵:saveDeferred 只保留最新快照(latest-wins),
+    /// 后台泵写完上一份再写最新一份,encode+write 不占主线程。
+    private var pendingRoom: CouncilPersistedRoom?
+    private var pendingGeneration: UInt64 = 0
+    private var writePump: Task<Void, Never>?
+    /// 同步 save 时 bump;延迟写入落盘前校验它,期间发生过同步写就说明这份
+    /// 延迟快照已过时(终态同步写才是最新事实),跳过落盘避免旧快照覆盖新状态。
+    private let syncWriteGeneration = CouncilArchiveWriteGeneration()
+
+    init(baseDirectory: URL? = nil, fileManager: FileManager = .default) {
+        self.fileManager = fileManager
+        let base = baseDirectory
+            ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        self.directory = base.appendingPathComponent("council", isDirectory: true)
+    }
+
+    @discardableResult
+    func save(_ room: CouncilPersistedRoom) -> Bool {
+        do {
+            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            let data = try encoder.encode(room)
+            try syncWriteGeneration.performSynchronousWrite {
+                try data.write(to: fileURL(for: room.taskId), options: .atomic)
+            }
+            completedWriteCount += 1
+            lastErrorDescription = nil
+            return true
+        } catch {
+            lastErrorDescription = error.localizedDescription
+            return false
+        }
+    }
+
+    /// 延迟写入:中段检查点经 ViewModel 节流合并后调用;encode+write 在后台线程,
+    /// 同一时刻只保留最新快照。终态检查点继续用同步 save() 保证 load-after-save 顺序。
+    func saveDeferred(_ room: CouncilPersistedRoom) {
+        pendingRoom = room
+        pendingGeneration = syncWriteGeneration.value
+        guard writePump == nil else { return }
+        let gate = syncWriteGeneration
+        writePump = Task { [weak self] in
+            while let next = self?.takePendingWrite() {
+                let outcome = await Self.writeRoom(
+                    next.room,
+                    to: next.url,
+                    gate: gate,
+                    takenGeneration: next.generation
+                )
+                if outcome.written {
+                    self?.noteDeferredWriteCompleted()
+                } else if let errorDescription = outcome.errorDescription {
+                    self?.noteDeferredWriteFailed(errorDescription)
+                }
+            }
+            self?.clearWritePump()
+        }
+    }
+
+    /// 等待写入泵排空(在途那份与 pending 的最新一份)。「写后立即 load」的检查点
+    /// (openArchive 的 reload)在 load 之前先调用,保证看到最新快照。
+    func flushDeferred() async {
+        while let pump = writePump {
+            await pump.value
+        }
+    }
+
+    private func takePendingWrite() -> (room: CouncilPersistedRoom, url: URL, generation: UInt64)? {
+        guard let room = pendingRoom else { return nil }
+        pendingRoom = nil
+        return (room, fileURL(for: room.taskId), pendingGeneration)
+    }
+
+    private func noteDeferredWriteCompleted() {
+        completedWriteCount += 1
+        lastErrorDescription = nil
+    }
+
+    private func noteDeferredWriteFailed(_ errorDescription: String) {
+        lastErrorDescription = errorDescription
+    }
+
+    private func clearWritePump() {
+        writePump = nil
+    }
+
+    private nonisolated static func writeRoom(
+        _ room: CouncilPersistedRoom,
+        to url: URL,
+        gate: CouncilArchiveWriteGeneration,
+        takenGeneration: UInt64
+    ) async -> CouncilArchiveWriteOutcome {
+        do {
+            let data = try JSONEncoder().encode(room)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let written = try gate.performDeferredWrite(ifCurrent: takenGeneration) {
+                try data.write(to: url, options: .atomic)
+            }
+            return CouncilArchiveWriteOutcome(written: written, errorDescription: nil)
+        } catch {
+            return CouncilArchiveWriteOutcome(written: false, errorDescription: error.localizedDescription)
+        }
+    }
+
+    func load(taskId: String) -> CouncilPersistedRoom? {
+        let url = fileURL(for: taskId)
+        guard fileManager.fileExists(atPath: url.path),
+              let data = try? Data(contentsOf: url),
+              let room = try? decoder.decode(CouncilPersistedRoom.self, from: data),
+              room.taskId == taskId else {
+            return nil
+        }
+        return room
+    }
+
+    func exists(taskId: String) -> Bool {
+        fileManager.fileExists(atPath: fileURL(for: taskId).path)
+    }
+
+    func delete(taskId: String) {
+        try? fileManager.removeItem(at: fileURL(for: taskId))
+    }
+
+    func markInterrupted(taskIds: [String]) {
+        for taskId in taskIds {
+            guard let room = load(taskId: taskId) else { continue }
+            let messages = room.messages.map { message -> CouncilPersistedMessage in
+                guard message.status == "speaking" else { return message }
+                // W3 council 轻对齐(docs/IOS_AGENT_HARDENING_PLAN_2026-07-29.md
+                // §W3):机制不变,仍标 failed;只在 subtitle 本来就空时补一句可见
+                // 的"发言未完成"文案,复用既有 subtitle 渲染面(metaLine),不新增
+                // UI。不这样区分的话,用户看到的和"模型报错"完全一样。
+                let subtitle = (message.subtitle?.isEmpty ?? true) ? "发言未完成（应用中断）" : message.subtitle
+                return CouncilPersistedMessage(
+                    id: message.id,
+                    kind: message.kind,
+                    author: message.author,
+                    body: message.body,
+                    systemImage: message.systemImage,
+                    tintHex: message.tintHex,
+                    subtitle: subtitle,
+                    status: "failed"
+                )
+            }
+            save(CouncilPersistedRoom(
+                taskId: room.taskId,
+                objective: room.objective,
+                finalTopic: room.finalTopic,
+                modeRaw: room.modeRaw,
+                statusRaw: IOSAdvancedTaskStatus.interrupted.title,
+                failedSpeakerIds: room.failedSpeakerIds,
+                participants: room.participants,
+                messages: messages,
+                updatedAtMs: Date().timeIntervalSince1970 * 1000
+            ))
+        }
+    }
+
+    private func fileURL(for taskId: String) -> URL {
+        let safe = taskId.replacingOccurrences(of: "/", with: "_")
+        return directory.appendingPathComponent("\(safe).json", isDirectory: false)
+    }
+}
+
+private struct CouncilArchiveWriteOutcome: Sendable {
+    let written: Bool
+    let errorDescription: String?
+}
+
+/// 同步写入代数闸:延迟提交的「代数检查 + atomic replace」和终态的「代数 bump +
+/// atomic replace」共享同一临界区。无论谁先进入,终态同步提交都不会被旧延迟快照覆盖。
+/// `@unchecked Sendable` + NSLock:它要跨 MainActor 与后台写入任务共享,自身用锁串行化。
+final class CouncilArchiveWriteGeneration: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation: UInt64 = 0
+
+    func performSynchronousWrite(_ write: () throws -> Void) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        generation &+= 1
+        try write()
+    }
+
+    func performDeferredWrite(
+        ifCurrent expectedGeneration: UInt64,
+        _ write: () throws -> Void
+    ) throws -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard generation == expectedGeneration else { return false }
+        try write()
+        return true
+    }
+
+    var value: UInt64 {
+        lock.lock()
+        defer { lock.unlock() }
+        return generation
+    }
+}
+
+/// 按语义开关与滚动所有权切换 `.sizeChanges` 底锚,与小说创作和标准 Chat 统一。
+private struct CouncilSizeChangesPinModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.defaultScrollAnchor(.bottom, for: .sizeChanges)
+        } else {
+            content
+        }
+    }
+}
+
+private extension Color {
+    /// `#RRGGBB`。SwiftUI Color → UIColor 取分量;转换失败回退中性灰。
+    var councilHexString: String {
+        let ui = UIColor(self)
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return "#999999" }
+        return String(format: "#%02X%02X%02X", Int((r * 255).rounded()), Int((g * 255).rounded()), Int((b * 255).rounded()))
+    }
+
+    init(councilHexString: String) {
+        let hex = councilHexString.trimmingCharacters(in: CharacterSet(charactersIn: "# "))
+        var value: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&value)
+        self = Color(
+            red: Double((value >> 16) & 0xFF) / 255,
+            green: Double((value >> 8) & 0xFF) / 255,
+            blue: Double(value & 0xFF) / 255
+        )
+    }
+}
+
+struct CouncilDiscussionDetail: Identifiable {
+    let id = UUID()
+    let statusLine: String
+    let objective: String
+    let participantSummary: String
+    let budgetSummary: String
+    let transcript: String
+}
+
+private extension String {
+    func trimmedOr(_ fallback: String) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    var trimmedNilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - 历史议会 sheet
+
+/// 列出可重开的历史议会(仅含已归档快照的任务),点任意一场以只读方式重开。
+private struct CouncilHistorySheet: View {
+    let tasks: [IOSAdvancedTaskRecord]
+    let activeTaskId: String?
+    let onSelect: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                AmberTheme.background.ignoresSafeArea()
+                if tasks.isEmpty {
+                    emptyState
+                } else {
+                    ScrollView {
+                        AmberFormGroup {
+                            ForEach(Array(tasks.enumerated()), id: \.element.id) { index, task in
+                                Button {
+                                    onSelect(task.id)
+                                    dismiss()
+                                } label: {
+                                    row(task)
+                                }
+                                .buttonStyle(.plain)
+                                if index < tasks.count - 1 {
+                                    Divider()
+                                        .overlay(AmberTheme.borderSoft)
+                                        .padding(.leading, 14)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 10)
+                        .padding(.bottom, 24)
+                    }
+                    .scrollIndicators(.hidden)
+                }
+            }
+            .navigationTitle("历史议会")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(AmberTheme.muted2)
+            Text("暂无可重开的历史议会")
+                .font(.subheadline)
+                .foregroundStyle(AmberTheme.muted)
+            Text("完成一场议会后，这里会列出可重开的讨论。")
+                .font(.caption)
+                .foregroundStyle(AmberTheme.muted2)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 32)
+    }
+
+    private func row(_ task: IOSAdvancedTaskRecord) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon(for: task.status))
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(iconColor(for: task.status))
+                .frame(width: 28, height: 28)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(AmberTheme.foreground)
+                    .lineLimit(1)
+                Text("\(task.status.title) · \(task.objective)")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if task.id == activeTaskId {
+                Image(systemName: "eye.fill")
+                    .font(.caption)
+                    .foregroundStyle(AmberTheme.accent)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AmberTheme.muted2)
+            }
+        }
+        .frame(minHeight: 56)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    private func icon(for status: IOSAdvancedTaskStatus) -> String {
+        switch status {
+        case .completed: "checkmark.seal.fill"
+        case .failed, .timedOut, .interrupted: "exclamationmark.triangle.fill"
+        case .cancelled: "xmark.circle.fill"
+        default: "bubble.left.and.bubble.right.fill"
+        }
+    }
+
+    private func iconColor(for status: IOSAdvancedTaskStatus) -> Color {
+        switch status {
+        case .completed: AmberTheme.accentGreen
+        case .failed, .timedOut, .interrupted: AmberTheme.accentRed
+        case .cancelled: AmberTheme.muted2
+        default: AmberTheme.accent
+        }
+    }
+}
+
+#Preview {
+    NavigationStack {
+        CouncilChatRuntimeView(settingsStore: SettingsStore(), sharedSettings: IOSSharedSettingsStore())
+            .environment(RouterPath())
+    }
+}

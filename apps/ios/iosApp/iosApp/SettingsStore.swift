@@ -1,0 +1,228 @@
+import Foundation
+import Observation
+import Security
+
+private struct SettingsData: Codable {
+    var baseUrl: String
+    var apiKey: String  // kept for Codable compatibility; always empty now (real key lives in Keychain)
+    var modelId: String
+    var terminalDefaultRuntime: IOSTerminalRuntimeKind?
+    var terminalExperimentalRuntimesEnabled: Bool?
+    var sshProfiles: [IOSSSHProfile]?
+    var sshDefaultProfileId: String?
+}
+
+protocol SettingsAPIKeyStore {
+    func loadApiKey() -> String?
+    @discardableResult
+    func saveApiKey(_ key: String) -> Bool
+}
+
+private struct KeychainSettingsAPIKeyStore: SettingsAPIKeyStore {
+    let account: String
+
+    func loadApiKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    @discardableResult
+    func saveApiKey(_ key: String) -> Bool {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        guard !key.isEmpty else { return true }
+        var attributes = query
+        attributes[kSecValueData as String] = Data(key.utf8)
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
+    }
+}
+
+@Observable
+final class SettingsStore {
+
+    var baseUrl: String {
+        didSet { save() }
+    }
+    var apiKey: String {
+        didSet { saveApiKey() }
+    }
+    var modelId: String {
+        didSet { save() }
+    }
+    var terminalDefaultRuntime: IOSTerminalRuntimeKind {
+        didSet { save() }
+    }
+    var terminalExperimentalRuntimesEnabled: Bool {
+        didSet { save() }
+    }
+    var sshProfiles: [IOSSSHProfile] {
+        didSet {
+            if let defaultId = sshDefaultProfileId,
+               !sshProfiles.contains(where: { $0.id == defaultId }) {
+                sshDefaultProfileId = sshProfiles.first?.id
+            }
+            save()
+        }
+    }
+    var sshDefaultProfileId: String? {
+        didSet { save() }
+    }
+
+    /// G7: 前台单轮工具循环上限。UserDefaults 独立 key 直读直写（与
+    /// ExecutionSettingsView 的 @AppStorage 共用），不进 SettingsData blob，
+    /// 避免两处写同一 blob 互相覆盖。默认 12，clamp 4-24。
+    var chatMaxToolResumeCount: Int {
+        get {
+            guard defaults.object(forKey: Self.chatMaxToolResumeCountKey) != nil else {
+                return Self.defaultChatMaxToolResumeCount
+            }
+            return Self.clampChatMaxToolResumeCount(defaults.integer(forKey: Self.chatMaxToolResumeCountKey))
+        }
+        set {
+            defaults.set(Self.clampChatMaxToolResumeCount(newValue), forKey: Self.chatMaxToolResumeCountKey)
+        }
+    }
+
+    static let defaultChatMaxToolResumeCount = 12
+    static let chatMaxToolResumeCountRange = 4...24
+
+    static func clampChatMaxToolResumeCount(_ value: Int) -> Int {
+        min(max(value, chatMaxToolResumeCountRange.lowerBound), chatMaxToolResumeCountRange.upperBound)
+    }
+
+    /// P3-a: exec 纯求值工具总开关（默认关）。UserDefaults 独立 key 直读直写
+    /// （与 ExecutionSettingsView 的 @AppStorage 共用），不进 SettingsData blob，
+    /// 避免两处写同一 blob 互相覆盖。开时 exec 声明进桥输入 deferred 池
+    /// （tool_search 命中后可调用）；关时声明与执行路径零痕迹。
+    var execJavaScriptEnabled: Bool {
+        get { defaults.bool(forKey: Self.execJavaScriptEnabledKey) }
+        set { defaults.set(newValue, forKey: Self.execJavaScriptEnabledKey) }
+    }
+
+    private static let storageKey = "app.amber.ios.settings"
+    private static let apiKeyKeychainAccount = "app.amber.ios.apiKey"
+    @ObservationIgnored private let defaults: UserDefaults
+    @ObservationIgnored private let storageKey: String
+    @ObservationIgnored private let apiKeyStore: any SettingsAPIKeyStore
+    private static let chatMaxToolResumeCountKey = IOSExecutionPreferenceKeys.chatMaxToolResumeCount
+    private static let execJavaScriptEnabledKey = IOSExecutionPreferenceKeys.execJavaScriptEnabled
+
+    init(
+        userDefaults: UserDefaults = .standard,
+        storageKey: String = SettingsStore.storageKey,
+        apiKeyStore: (any SettingsAPIKeyStore)? = nil
+    ) {
+        self.defaults = userDefaults
+        self.storageKey = storageKey
+        self.apiKeyStore = apiKeyStore ?? KeychainSettingsAPIKeyStore(account: Self.apiKeyKeychainAccount)
+
+        // Load non-sensitive settings from UserDefaults.
+        if let data = userDefaults.data(forKey: storageKey),
+           let decoded = try? JSONDecoder().decode(SettingsData.self, from: data) {
+            baseUrl = decoded.baseUrl
+            modelId = decoded.modelId
+            terminalDefaultRuntime = IOSTerminalBuildPolicy.normalizedDefaultRuntime(
+                decoded.terminalDefaultRuntime ?? .remoteSSH
+            )
+            terminalExperimentalRuntimesEnabled = IOSTerminalBuildPolicy.experimentalRuntimesLinked &&
+                (decoded.terminalExperimentalRuntimesEnabled ?? false)
+            let decodedSSHProfiles = decoded.sshProfiles ?? []
+            sshProfiles = decodedSSHProfiles
+            if let decodedDefault = decoded.sshDefaultProfileId,
+               decodedSSHProfiles.contains(where: { $0.id == decodedDefault }) {
+                sshDefaultProfileId = decodedDefault
+            } else {
+                sshDefaultProfileId = decodedSSHProfiles.first?.id
+            }
+        } else {
+            baseUrl = "https://api.openai.com/v1"
+            modelId = "gpt-4o"
+            terminalDefaultRuntime = .remoteSSH
+            terminalExperimentalRuntimesEnabled = false
+            sshProfiles = []
+            sshDefaultProfileId = nil
+        }
+        // Load the API key from Keychain (empty string if not found).
+        apiKey = self.apiKeyStore.loadApiKey() ?? ""
+    }
+
+    private func save() {
+        let data = SettingsData(
+            baseUrl: baseUrl,
+            apiKey: "",  // never persist the key to UserDefaults
+            modelId: modelId,
+            terminalDefaultRuntime: terminalDefaultRuntime,
+            terminalExperimentalRuntimesEnabled: terminalExperimentalRuntimesEnabled,
+            sshProfiles: sshProfiles,
+            sshDefaultProfileId: sshDefaultProfileId
+        )
+        if let encoded = try? JSONEncoder().encode(data) {
+            defaults.set(encoded, forKey: storageKey)
+        }
+    }
+
+    private func saveApiKey() {
+        apiKeyStore.saveApiKey(apiKey)
+    }
+
+    var defaultSSHProfile: IOSSSHProfile? {
+        guard let sshDefaultProfileId else { return nil }
+        return sshProfiles.first { $0.id == sshDefaultProfileId }
+    }
+
+    func upsertSSHProfile(_ profile: IOSSSHProfile, password: String?) throws {
+        let validated = try profile.validated()
+        if let password {
+            try IOSSSHSecretStore.savePassword(password, profileId: validated.id)
+        }
+        if let index = sshProfiles.firstIndex(where: { $0.id == validated.id }) {
+            sshProfiles[index] = validated
+        } else {
+            sshProfiles.append(validated)
+        }
+        if sshDefaultProfileId == nil {
+            sshDefaultProfileId = validated.id
+        }
+    }
+
+    func deleteSSHProfile(id: String) {
+        sshProfiles.removeAll { $0.id == id }
+        IOSSSHSecretStore.deletePassword(profileId: id)
+        if sshDefaultProfileId == id {
+            sshDefaultProfileId = sshProfiles.first?.id
+        }
+    }
+
+    func trustHost(profileId: String, fingerprint: String) throws {
+        guard let index = sshProfiles.firstIndex(where: { $0.id == profileId }) else {
+            throw IOSSSHError.invalidProfile("SSH profile was not found.")
+        }
+        var profile = sshProfiles[index]
+        profile.knownHostSHA256 = fingerprint.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.knownHostHost = profile.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.knownHostPort = profile.port
+        sshProfiles[index] = try profile.validated()
+    }
+
+    func passwordForSSHProfile(id: String) -> String? {
+        IOSSSHSecretStore.loadPassword(profileId: id)
+    }
+
+    func clearSSHPassword(profileId: String) {
+        IOSSSHSecretStore.deletePassword(profileId: profileId)
+    }
+
+    /// Public read-only access to the Keychain-stored API key.
+    var currentApiKey: String { apiKeyStore.loadApiKey() ?? "" }
+}

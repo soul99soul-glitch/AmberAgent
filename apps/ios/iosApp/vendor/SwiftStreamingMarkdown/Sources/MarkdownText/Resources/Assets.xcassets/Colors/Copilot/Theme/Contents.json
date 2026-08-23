@@ -1,0 +1,9 @@
+{
+  "info" : {
+    "author" : "design-system-importer",
+    "version" : 1
+  },
+  "properties" : {
+    "provides-namespace" : true
+  }
+}

@@ -1,0 +1,1538 @@
+import XCTest
+@testable import iosApp
+
+@MainActor
+final class NovelCreationPresentationTests: XCTestCase {
+    func testCompendiumRoutesTheDisplayedEffectiveRevisionToItsOwningEditor() throws {
+        let initial = try NovelTestFixtures.document()
+        let withMaterial = try NovelReducer.apply(
+            NovelTestFixtures.materialAction(
+                document: initial,
+                title: "项目世界观",
+                content: "项目共享规则。"
+            ),
+            to: initial
+        ).document
+        let material = try XCTUnwrap(withMaterial.materials.first)
+        let overrideRevisionID = NovelMaterialRevisionID()
+        let overridden = try NovelReducer.apply(.setBranchMaterialOverride(
+            NovelSetBranchMaterialOverrideCommand(
+                context: NovelTestFixtures.context(
+                    projectRevision: withMaterial.project.revision,
+                    configRevision: withMaterial.project.configRevision,
+                    branchHeadRevision: withMaterial.branches[0].headRevision
+                ),
+                projectID: withMaterial.project.id,
+                branchID: withMaterial.branches[0].id,
+                materialID: material.id,
+                change: .createRevision(
+                    revisionID: overrideRevisionID,
+                    title: "当前分支世界观",
+                    content: "仅当前分支采用的规则。",
+                    tags: [],
+                    injectionMode: .smart
+                )
+            )
+        ), to: withMaterial).document
+        let project = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: overridden,
+            access: .readWrite
+        ))
+        let branch = overridden.branches[0]
+        let branchSnapshot = NovelBranchSnapshot(
+            projectID: overridden.project.id,
+            projectRevision: overridden.project.revision,
+            configRevision: overridden.project.configRevision,
+            branch: branch,
+            session: try XCTUnwrap(overridden.sessions.first { $0.id == branch.sessionID }),
+            headCheckpoint: try XCTUnwrap(overridden.checkpoints.first {
+                $0.id == branch.headCheckpointID
+            }),
+            currentState: try XCTUnwrap(overridden.stateSnapshots.first {
+                $0.id == branch.currentStateSnapshotID
+            }),
+            chapterSelections: branch.workingChapterSelections,
+            activeSettingProposals: [],
+            access: .readWrite
+        )
+
+        XCTAssertEqual(
+            NovelCompendiumMaterialEditTarget.resolve(
+                material: material,
+                project: project,
+                branch: branchSnapshot
+            ),
+            .branchOverride
+        )
+        XCTAssertEqual(
+            NovelCompendiumMaterialEditTarget.resolve(
+                material: material,
+                project: project,
+                branch: nil
+            ),
+            .projectRevision
+        )
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.targetMaterialTitle(
+                for: material,
+                in: project
+            ),
+            "项目世界观",
+            "接纳建议会写项目全局 revision，目标标题也必须显示全局版本"
+        )
+    }
+
+    func testWorkspacePromotesManuscriptToTheMiddleTopLevelTab() {
+        XCTAssertEqual(
+            NovelWorkspaceSection.allCases,
+            [.creation, .manuscript, .compendium]
+        )
+        XCTAssertEqual(
+            NovelWorkspaceSection.allCases.map(\.title),
+            ["创作", "正文", "设定"]
+        )
+        XCTAssertEqual(
+            NovelCompendiumSection.allCases.map(\.title),
+            ["角色", "世界观", "剧情", "更多"]
+        )
+    }
+
+    func testFactValidationErrorsExplainTheActualReason() {
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "Unknown entity '朱重八' must be listed as unresolved."
+            )),
+            "模型提取的人物称谓没有和资料对齐，候选正文仍然保留，可以重新同步。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "A derived fact contains evidence outside the authoritative manuscript."
+            )),
+            "模型提取的事实依据与正文不一致，候选正文仍然保留，可以重新同步。"
+        )
+    }
+
+    func testChinesePipelineErrorPassesThroughInsteadOfGenericReload() {
+        // 回归：代笔等链路直接抛中文 invalidInput，曾被统一抹成「请重新载入后再试」。
+        // 中文详情原样透传；英文未知详情仍走兜底。
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "本章已收录，但未能清除计划。请手动清除后再继续。"
+            )),
+            "本章已收录，但未能清除计划。请手动清除后再继续。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "Some unmatched invariants."
+            )),
+            "当前操作的内容或项目状态不匹配，请重新载入后再试。"
+        )
+    }
+
+    func testStateSyncFailureMessageKeepsActionableDetail() {
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: NovelError.invalidInput(
+                "The working manuscript does not form a valid manual-edit suffix."
+            )),
+            "剧情同步失败：目录结构已变（如删过章节），正在按新规则处理。请再点重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("状态不符，请重试。"),
+            "剧情同步失败：正文与检查点不一致（常见于删章后）。请点重试；仍失败再点「重新载入」。"
+        )
+        XCTAssertEqual(
+            NovelError.invalidInput("本章计划未确认。").errorDescription,
+            "本章计划未确认。"
+        )
+    }
+
+    func testAskUserAlreadyAnsweredMapsToActionableCopy() {
+        XCTAssertEqual(
+            NovelPresentation.operationErrorMessage(NovelError.invalidInput(
+                "This Ask User prompt has already been answered."
+            )),
+            "这个问题已经回答过了。请直接发送新消息继续，或换个问法。"
+        )
+    }
+
+    func testNetworkNSURLErrorDumpIsHumanizedNotShownRaw() {
+        let dump = """
+        Exception in http request: Error Domain=NSURLErrorDomain Code=-1005 "网络连接已中断。" \
+        UserInfo={_kCFStreamErrorCodeKey=-4, NSErrorFailingURLKey=https://api.deepseek.com/v1/chat/completions}
+        """
+        XCTAssertTrue(NovelPresentation.looksLikeTechnicalFailureDump(dump))
+        XCTAssertTrue(NovelPresentation.looksLikeTransportFailure(dump))
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "provider_stream_failed",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，已保留当前回复，可以重试。若反复出现，请换一个创作模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "discussion_provider_failed",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "unknown_transport",
+                message: dump,
+                isRetryable: true
+            )),
+            "网络连接中断，请重试。若反复出现，请到小说设置换一个创作模型。"
+        )
+        // Short plain Chinese without dump markers still passes through.
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "custom",
+                message: "上游限流，请稍后再试。",
+                isRetryable: true
+            )),
+            "上游限流，请稍后再试。"
+        )
+    }
+
+    func testMalformedPersistedStateSyncFailureHasActionableCopy() {
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("The model returned malformed JSON."),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The model output is missing required fields: stateSummary, events."
+            ),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The fact synchronization was cancelled and can be retried."
+            ),
+            "剧情状态同步已取消，可以重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "Manual-sync receipt input evidence is incomplete."
+            ),
+            "剧情状态同步失败，请重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage("请求失败：upstream timeout"),
+            "剧情状态同步失败，请重试。"
+        )
+        // "revision accounting" must not be misread as a stale-reload guard.
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "Manual synchronization revision accounting failed."
+            ),
+            "剧情状态同步失败，请重试。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The working chapter revision is stale."
+            ),
+            "项目版本已更新，请点「重新载入」后再同步。"
+        )
+    }
+
+    func testPendingPresentationDistinguishesWaitingFromStreaming() {
+        let waitingEarly = NovelSessionPendingPresentation.label(
+            for: .waitingForFirstToken,
+            elapsed: 1
+        )
+        let waitingLate = NovelSessionPendingPresentation.label(
+            for: .waitingForFirstToken,
+            elapsed: 12
+        )
+        let streaming = NovelSessionPendingPresentation.label(
+            for: .streaming,
+            elapsed: 12
+        )
+
+        XCTAssertEqual(waitingEarly, "正在连接模型")
+        XCTAssertEqual(waitingLate, "模型思考中 12 秒")
+        XCTAssertNotEqual(
+            waitingLate,
+            streaming,
+            "waitingForFirstToken and streaming must render visibly different copy."
+        )
+        XCTAssertNotEqual(
+            waitingEarly,
+            streaming,
+            "waitingForFirstToken and streaming must render visibly different copy."
+        )
+    }
+
+    func testTextInputCommitterUnmarksBeforeDeferredAction() async {
+        let textField = UITextField()
+        textField.text = "赵"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("大来", selectedRange: NSRange(location: 2, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+        XCTAssertTrue(NovelTextInputCommitter.hasMarkedText(firstResponder: textField))
+        let action = expectation(description: "committed action runs after binding flush turns")
+        var ranSynchronously = false
+
+        NovelTextInputCommitter.perform(firstResponder: textField) {
+            XCTAssertNil(textField.markedTextRange)
+            XCTAssertEqual(textField.text, "赵大来")
+            XCTAssertFalse(
+                NovelTextInputCommitter.hasMarkedText(firstResponder: textField)
+            )
+            ranSynchronously = true
+            action.fulfill()
+        }
+
+        XCTAssertNil(textField.markedTextRange)
+        XCTAssertFalse(
+            ranSynchronously,
+            "Action must wait for yield flush so SwiftUI bindings can catch unmarkText"
+        )
+        await fulfillment(of: [action], timeout: 1)
+        XCTAssertTrue(ranSynchronously)
+    }
+
+    func testTextInputCommitterCommitMarkedTextDoesNotRequireAction() {
+        let textField = UITextField()
+        textField.text = "李"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("雷", selectedRange: NSRange(location: 1, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+
+        NovelTextInputCommitter.commitMarkedText(in: textField)
+
+        XCTAssertNil(textField.markedTextRange)
+        XCTAssertEqual(textField.text, "李雷")
+    }
+
+    func testCommitAndReadActiveUIKitTextReturnsUnmarkedValue() {
+        let textField = UITextField()
+        textField.text = "第"
+        let end = textField.endOfDocument
+        textField.selectedTextRange = textField.textRange(from: end, to: end)
+        textField.setMarkedText("3章", selectedRange: NSRange(location: 2, length: 0))
+        XCTAssertNotNil(textField.markedTextRange)
+
+        let committed = NovelTextInputCommitter.commitAndReadActiveUIKitText(
+            firstResponder: textField
+        )
+
+        XCTAssertEqual(committed, "第3章")
+        XCTAssertNil(textField.markedTextRange)
+    }
+
+    @MainActor
+    func testIMEFieldBankCommitAllFlushesMarkedTextIntoBinding() {
+        final class Host: NovelIMEFieldHosting {
+            var text: String
+            var marked: String?
+            init(text: String, marked: String?) {
+                self.text = text
+                self.marked = marked
+            }
+            var hasMarkedText: Bool { marked != nil }
+            func flushMarkedTextIntoBinding() {
+                if let marked {
+                    text += marked
+                    self.marked = nil
+                }
+            }
+        }
+
+        let bank = NovelIMEFieldBank()
+        let placement = Host(text: "第", marked: "3章")
+        let goal = Host(text: "冲突", marked: nil)
+        bank.register(placement)
+        bank.register(goal)
+        XCTAssertTrue(bank.hasAnyMarkedText)
+
+        bank.commitAll()
+
+        XCTAssertEqual(placement.text, "第3章")
+        XCTAssertNil(placement.marked)
+        XCTAssertEqual(goal.text, "冲突")
+        XCTAssertFalse(bank.hasAnyMarkedText)
+    }
+
+    func testPresentationUsesHistoricalCharacterNamesAsEffectiveAliases() throws {
+        var document = try NovelTestFixtures.document()
+        let materialID = NovelMaterialID()
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵旧名",
+            content: "旧的人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+        document = try NovelReducer.apply(.reviseMaterial(NovelReviseMaterialCommand(
+            context: NovelTestFixtures.context(configRevision: document.project.configRevision),
+            projectID: document.project.id,
+            materialID: materialID,
+            revisionID: NovelMaterialRevisionID(),
+            kind: .character,
+            title: "赵大来",
+            content: "当前人物设定。",
+            tags: [],
+            injectionMode: .smart,
+            aliases: []
+        )), to: document).document
+        let project = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: document,
+            access: .readWrite
+        ))
+        let material = try XCTUnwrap(document.materials.first { $0.id == materialID })
+
+        XCTAssertEqual(
+            NovelPresentation.effectiveAliases(
+                for: material,
+                project: project,
+                branch: nil
+            ),
+            ["赵旧名"]
+        )
+    }
+
+    func testPendingPresentationFallsBackToDefaultCopyForNonQuickStartPhases() {
+        // Phases outside the quickStart streaming disclosure (or no phase at all) must keep
+        // rendering the exact same copy ChatAssistantPendingResponseView already used, so
+        // Chat/Council callers that never pass a phase see zero behavior change.
+        for elapsed in [0, 1, 2, 9] {
+            XCTAssertEqual(
+                NovelSessionPendingPresentation.label(for: nil, elapsed: elapsed),
+                ChatAssistantPendingResponseView.defaultLabel(elapsed: elapsed)
+            )
+            XCTAssertEqual(
+                NovelSessionPendingPresentation.label(for: .terminalAwaitingRefresh, elapsed: elapsed),
+                ChatAssistantPendingResponseView.defaultLabel(elapsed: elapsed)
+            )
+        }
+    }
+
+    func testStateSyncOnlyShowsPercentageAfterDurableProgressExists() {
+        let projectID = NovelProjectID()
+        let branchID = NovelBranchID()
+        let pendingID = NovelPendingOperationID()
+        let waiting = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 0,
+            totalCharacters: 12_800,
+            completedChunks: 0
+        )
+        let progressed = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 40,
+            totalCharacters: 100,
+            completedChunks: 1
+        )
+        let preparing = NovelStateSyncActivity.preparing(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            startedAt: Date()
+        )
+
+        XCTAssertEqual(waiting.completionFraction, 0)
+        XCTAssertNil(waiting.displayedCompletionFraction)
+        XCTAssertNil(waiting.displayedPercent)
+        XCTAssertEqual(waiting.estimatedTotalSegments, 2)
+        XCTAssertEqual(
+            waiting.progressDetail(elapsedSeconds: 42),
+            "正文共 12800 字 · 约 2 段 · 正在处理第 1 段 · 已等待 42 秒 · 本段完成后才会更新进度"
+        )
+        XCTAssertEqual(
+            waiting.progressDetail(elapsedSeconds: 42, streamedCharacters: 517),
+            "正文共 12800 字 · 约 2 段 · 正在处理第 1 段 · 已等待 42 秒 · 本段已生成 517 字"
+        )
+        XCTAssertEqual(progressed.displayedCompletionFraction, 0.4)
+        XCTAssertEqual(progressed.displayedPercent, 40)
+        XCTAssertEqual(
+            progressed.progressDetail(elapsedSeconds: 90),
+            "正文已处理 40% · 已完成 1 段 · 已等待 90 秒"
+        )
+        let multiProgressed = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 10_000,
+            totalCharacters: 25_000,
+            completedChunks: 1
+        )
+        XCTAssertEqual(
+            multiProgressed.progressDetail(elapsedSeconds: 120),
+            "正文已处理 40% · 已完成 1 段 / 约 4 段 · 已等待 120 秒"
+        )
+        XCTAssertEqual(preparing.statusTitle, "正在准备剧情状态")
+        XCTAssertEqual(
+            preparing.progressDetail(elapsedSeconds: 5),
+            "已等待 5 秒 · 正在准备请求"
+        )
+
+        let singleChunk = NovelStateSyncActivity(
+            projectID: projectID,
+            branchID: branchID,
+            pendingID: pendingID,
+            phase: .analyzing,
+            startedAt: Date(),
+            requestStartedAt: Date(),
+            completedCharacters: 0,
+            totalCharacters: 4_000,
+            completedChunks: 0
+        )
+        XCTAssertEqual(singleChunk.estimatedTotalSegments, 1)
+        XCTAssertEqual(
+            singleChunk.progressDetail(elapsedSeconds: 12),
+            "正文共 4000 字 · 全文分析中 · 已等待 12 秒 · 模型返回后才会更新进度"
+        )
+        XCTAssertEqual(
+            singleChunk.progressDetail(elapsedSeconds: 12, streamedCharacters: 88),
+            "正文共 4000 字 · 全文分析中 · 已等待 12 秒 · 本段已生成 88 字"
+        )
+        XCTAssertEqual(
+            progressed.progressDetail(elapsedSeconds: 90, streamedCharacters: 12),
+            "正文已处理 40% · 已完成 1 段 · 已等待 90 秒 · 本段已生成 12 字"
+        )
+        let streamProgress = NovelStateSyncStreamProgress()
+        let streamPendingID = NovelPendingOperationID()
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 0)
+        streamProgress.set(pendingID: streamPendingID, characters: 640)
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 640)
+        streamProgress.clear(pendingID: streamPendingID)
+        XCTAssertEqual(streamProgress.count(pendingID: streamPendingID), 0)
+        XCTAssertEqual(
+            NovelManualSyncChunker.estimatedSegmentCount(manuscriptCharacterCount: 25_000),
+            4
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "The model returned more than one JSON object.",
+                completedChunkCount: 2
+            ),
+            "剧情同步模型返回的格式无法读取，请重试；若反复出现，请更换剧情同步模型。 已保存 2 段进度，重试从第 3 段继续。"
+        )
+
+        // 结构化输出失败按类别透出具体原因，不再折叠成通用文案。
+        let duplicateKeyFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model output contains a duplicate key.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .duplicateKey,
+                path: "$.events[0]",
+                message: "The model output contains a duplicate key."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: duplicateKeyFailure),
+            "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。"
+        )
+        let missingFieldFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model output is missing required field 'evidence'.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .missingField,
+                path: "$.events[0]",
+                message: "The model output is missing required field 'evidence'."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: missingFieldFailure),
+            "剧情同步模型返回的 JSON 缺少必需字段；若反复出现，请更换剧情同步模型。"
+        )
+        let malformedFailure = NovelStructuredModelExecutionFailure(
+            code: "invalid_structured_output",
+            message: "The model returned malformed JSON.",
+            isRetryable: true,
+            structuredOutputFailure: NovelStructuredOutputFailure(
+                category: .malformedJSON,
+                path: "$",
+                message: "The model returned malformed JSON."
+            )
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: malformedFailure),
+            "剧情同步模型返回的 JSON 无法解析，输出可能被截断；若反复出现，请更换剧情同步模型。"
+        )
+        // 分类文案经字符串路径（durable lastError → banner）原样透出，不加双重前缀。
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(
+                "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。",
+                completedChunkCount: 0
+            ),
+            "剧情同步模型返回的 JSON 存在重复字段；若反复出现，请更换剧情同步模型。"
+        )
+        // 无结构化详情的失败仍走原有 message 映射。
+        let plainFailure = NovelStructuredModelExecutionFailure(
+            code: "structured_no_output_timeout",
+            message: "模型持续无输出，请稍后重试。",
+            isRetryable: true
+        )
+        XCTAssertEqual(
+            NovelPresentation.stateSyncFailureMessage(for: plainFailure),
+            "模型持续无输出，请稍后重试。"
+        )
+    }
+
+    func testChapterTitleUsesTheGeneratedMarkdownHeadingInsteadOfAGenericStoredTitle() {
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第 1 章",
+                content: "# 第一章 破庙里的活人气\n\n雨是昨夜才停的。",
+                ordinal: 1
+            ),
+            "破庙里的活人气"
+        )
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第二章",
+                content: "## 第二章：风雪夜归人\n\n城门将闭。",
+                ordinal: 2
+            ),
+            "风雪夜归人"
+        )
+    }
+
+    func testChapterTitlePreservesAnExplicitStoredTitleAndFallsBackWithoutAHeading() {
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "夜雨入城",
+                content: "# 第一章 破庙里的活人气",
+                ordinal: 1
+            ),
+            "夜雨入城"
+        )
+        XCTAssertEqual(
+            NovelPresentation.chapterDisplayTitle(
+                storedTitle: "第 3 章",
+                content: "雨是昨夜才停的。",
+                ordinal: 3
+            ),
+            "第 3 章"
+        )
+    }
+
+    func testCharacterEventMatcherPrefersNormalizedNameMatches() {
+        XCTAssertTrue(NovelCharacterEventMatcher.matches(
+            characterName: "沈 雾",
+            entityReferences: ["沈雾"]
+        ))
+        XCTAssertTrue(NovelCharacterEventMatcher.matches(
+            characterName: "沈雾",
+            entityReferences: ["年轻时的沈雾"]
+        ))
+        XCTAssertFalse(NovelCharacterEventMatcher.matches(
+            characterName: "沈雾",
+            entityReferences: []
+        ))
+    }
+
+    func testCharacterEventMatcherSupportsOneEventReferencingMultipleCharacters() {
+        let event = NovelStoryEventRecord(
+            id: NovelEventID(),
+            sequence: 1,
+            kind: "关系变化",
+            summary: "沈雾与林澈达成同盟",
+            entityReferences: ["沈雾", "林澈"],
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NovelCharacterEventMatcher.events(for: "沈雾", in: [event]).map(\.id),
+            [event.id]
+        )
+        XCTAssertEqual(
+            NovelCharacterEventMatcher.events(for: "林澈", in: [event]).map(\.id),
+            [event.id]
+        )
+    }
+
+    func testComposerIntentMapsToTheExistingRequestContract() {
+        XCTAssertEqual(NovelComposerIntent.discussionOptions, [.discuss])
+        XCTAssertEqual(
+            NovelComposerIntent.proseOptions,
+            [.continueProse, .wholeChapter]
+        )
+        XCTAssertEqual(NovelComposerIntent.discuss.title, "讨论")
+        XCTAssertEqual(NovelComposerIntent.continueProse.title, "写一段")
+        XCTAssertEqual(NovelComposerIntent.wholeChapter.title, "写整章")
+        XCTAssertEqual(NovelComposerIntent.discuss.requestValues.mode, .discussPlan)
+        XCTAssertEqual(NovelComposerIntent.continueProse.requestValues.mode, .writeProse)
+        XCTAssertEqual(
+            NovelComposerIntent.continueProse.requestValues.granularity,
+            .continuation
+        )
+        XCTAssertEqual(NovelComposerIntent.wholeChapter.requestValues.mode, .writeProse)
+        XCTAssertEqual(
+            NovelComposerIntent.wholeChapter.requestValues.granularity,
+            .wholeChapter
+        )
+    }
+
+    func testComposerIntentProjectsCurrentSessionState() {
+        XCTAssertEqual(
+            NovelComposerIntent(mode: .discussPlan, granularity: .continuation),
+            .discuss
+        )
+        XCTAssertEqual(
+            NovelComposerIntent(mode: .writeProse, granularity: .continuation),
+            .continueProse
+        )
+        XCTAssertEqual(
+            NovelComposerIntent(mode: .writeProse, granularity: .wholeChapter),
+            .wholeChapter
+        )
+    }
+
+    func testComposerIntentDefaultsToDiscussionAndRemembersWriteAPassage() {
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: nil,
+                collaborationMode: .cocreation,
+                hasConfirmedChapterPlan: false
+            ),
+            .discuss
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .continueProse,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: false
+            ),
+            .continueProse
+        )
+    }
+
+    func testComposerIntentFallsBackFromWholeChapterWhenGhostwriteHasNoPlan() {
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: false
+            ),
+            .discuss
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .ghostwrite,
+                hasConfirmedChapterPlan: true
+            ),
+            .wholeChapter
+        )
+        XCTAssertEqual(
+            NovelComposerIntentPreference.resolve(
+                stored: .wholeChapter,
+                collaborationMode: .cocreation,
+                hasConfirmedChapterPlan: false
+            ),
+            .wholeChapter
+        )
+    }
+
+    func testComposerIntentPreferenceRoundTripsPerProject() {
+        let defaults = UserDefaults(suiteName: "composer-intent-\(UUID().uuidString)")!
+        let projectID = NovelProjectID()
+        XCTAssertNil(NovelComposerIntentPreference.stored(for: projectID, defaults: defaults))
+        NovelComposerIntentPreference.store(.continueProse, for: projectID, defaults: defaults)
+        XCTAssertEqual(
+            NovelComposerIntentPreference.stored(for: projectID, defaults: defaults),
+            .continueProse
+        )
+        XCTAssertNil(
+            NovelComposerIntentPreference.stored(for: NovelProjectID(), defaults: defaults)
+        )
+    }
+
+    func testGhostwriteSheetChromeKeepsToolbarLabelsShort() {
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.leadingActionTitle(canAbandonBatch: true),
+            "结束"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.leadingActionTitle(canAbandonBatch: false),
+            "关闭"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.trailingActionTitle(
+                isGhostwriting: true,
+                pauseReason: nil,
+                shouldContinueSameBatch: true
+            ),
+            "暂停"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.trailingActionTitle(
+                isGhostwriting: false,
+                pauseReason: .planProposedForNewBatch,
+                shouldContinueSameBatch: true
+            ),
+            "确认"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.trailingActionTitle(
+                isGhostwriting: false,
+                pauseReason: .acceptanceFailed,
+                shouldContinueSameBatch: true
+            ),
+            "继续"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.trailingActionTitle(
+                isGhostwriting: false,
+                pauseReason: .batchCompleted,
+                shouldContinueSameBatch: false
+            ),
+            "下一批"
+        )
+        XCTAssertEqual(
+            NovelGhostwriteSheetChrome.trailingActionTitle(
+                isGhostwriting: false,
+                pauseReason: nil,
+                shouldContinueSameBatch: false
+            ),
+            "开始"
+        )
+    }
+
+    func testComposerSubmissionUsesTheSameGateForButtonAndKeyboard() {
+        XCTAssertTrue(NovelSessionComposerPolicy.canSubmit(canSend: true, text: "继续写"))
+        XCTAssertFalse(NovelSessionComposerPolicy.canSubmit(canSend: false, text: "继续写"))
+        XCTAssertFalse(NovelSessionComposerPolicy.canSubmit(canSend: true, text: " \n "))
+    }
+
+    func testAskUserExplainsWhyItCannotBeAnswered() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .degradedPrevious(primaryFailure: "primary unavailable"),
+                requiresReload: false,
+                isBusy: false
+            ),
+            .projectReadOnly
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .readWrite,
+                requiresReload: true,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.askUserBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.askUserBlocker(
+            access: .readWrite,
+            requiresReload: false,
+            isBusy: false
+        ))
+    }
+
+    func testPolishTransactionActionsExplainTheFirstBlockingCondition() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .degradedPrevious(primaryFailure: "corrupt"),
+                requiresReload: true,
+                isRunning: true,
+                isBusy: true
+            ),
+            .projectReadOnly
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: true,
+                isRunning: true,
+                isBusy: true
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isRunning: true,
+                isBusy: true
+            ),
+            .generationRunning
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.polishTransactionBlocker(
+                access: .readWrite,
+                requiresReload: false,
+                isRunning: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.polishTransactionBlocker(
+            access: .readWrite,
+            requiresReload: false,
+            isRunning: false,
+            isBusy: false
+        ))
+    }
+
+    func testGenerationStatusFollowsTheActiveRunInsteadOfTheComposerSelection() {
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .prose
+        ))
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .regenerate
+        ))
+        XCTAssertTrue(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .polish
+        ))
+        XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: true,
+            activeRunKind: .discussion
+        ))
+        XCTAssertFalse(NovelSessionComposerPolicy.showsGenerationStatus(
+            isRunning: false,
+            activeRunKind: .prose
+        ))
+        XCTAssertFalse(
+            NovelSessionComposerPolicy.showsGenerationStatus(
+                isRunning: true,
+                activeRunKind: .prose,
+                hasGhostwriteProgress: true
+            ),
+            "Ghostwrite chrome owns the dock; co-create strip must not stack above it."
+        )
+    }
+
+    func testRuntimeRowActionsExposeTheirBlockingReasonInsteadOfDroppingTaps() {
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: true,
+                hasRefreshError: false,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: false,
+                hasRefreshError: true,
+                isBusy: false
+            ),
+            .reloadRequired
+        )
+        XCTAssertEqual(
+            NovelSessionComposerPolicy.runtimeActionBlocker(
+                requiresReload: false,
+                hasRefreshError: false,
+                isBusy: true
+            ),
+            .transactionInProgress
+        )
+        XCTAssertNil(NovelSessionComposerPolicy.runtimeActionBlocker(
+            requiresReload: false,
+            hasRefreshError: false,
+            isBusy: false
+        ))
+    }
+
+    func testDerivedProposalRequiresAnExplicitMaterialKindAndRoutesToMore() {
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "新增线索",
+            content: "旧港口可能藏有一条密道。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .derivedState
+        )
+
+        XCTAssertNil(NovelProposalAcceptanceSheet.initialKindChoice(for: proposal))
+        XCTAssertEqual(
+            NovelSettingProposalRoute(kind: proposal.suggestedMaterialKind),
+            .more
+        )
+    }
+
+    func testQuickStartProposalKeepsItsSuggestedMaterialKind() {
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "潮汐城",
+            content: "退潮会暴露旧城区。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .quickStart(runID: NovelRunID(), suggestedKind: .world)
+        )
+
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.initialKindChoice(for: proposal),
+            NovelMaterialKindChoice(kind: .world)
+        )
+    }
+
+    func testContextualCharacterProposalKeepsItsSuggestedMaterialKind() {
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "郭威",
+            content: "后汉枢密使，后来建立后周。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .contextualCharacter(
+                runID: NovelRunID(),
+                sourceMention: "郭威",
+                suggestedKind: .character
+            ),
+            suggestedCharacterAliases: ["郭威", "郭雀儿"]
+        )
+
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.initialKindChoice(for: proposal),
+            NovelMaterialKindChoice(kind: .character)
+        )
+    }
+
+    func testWritingRequirementsProposalDefaultsToTheExistingManagedMaterial() {
+        let existingID = NovelMaterialID()
+        let existingRevisionID = NovelMaterialRevisionID()
+        let existing = NovelMaterialRecord(
+            id: existingID,
+            kind: .writingRequirements,
+            currentRevisionID: existingRevisionID,
+            revisionIDs: [existingRevisionID]
+        )
+        let otherID = NovelMaterialID()
+        let otherRevisionID = NovelMaterialRevisionID()
+        let other = NovelMaterialRecord(
+            id: otherID,
+            kind: .world,
+            currentRevisionID: otherRevisionID,
+            revisionIDs: [otherRevisionID]
+        )
+        let proposal = NovelSettingProposalRecord(
+            id: NovelProposalID(),
+            branchID: NovelBranchID(),
+            title: "写作要求",
+            content: "克制叙述，保持线索公平。",
+            createdAt: Date(),
+            isResolved: false,
+            origin: .quickStart(runID: NovelRunID(), suggestedKind: .writingRequirements)
+        )
+
+        XCTAssertEqual(
+            NovelProposalAcceptanceSheet.initialTargetMaterialID(
+                for: proposal,
+                activeMaterials: [other, existing]
+            ),
+            existingID
+        )
+    }
+
+    func testEnglishGenerationFailuresUseAChinesePresentationMessage() {
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "invalid_quick_start_output",
+                message: "The quick-start output was invalid.",
+                isRetryable: true
+            )),
+            "模型返回的创作建议格式不完整，请重新生成。"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "network",
+                message: "网络连接已断开",
+                isRetryable: true
+            )),
+            "网络连接已断开"
+        )
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "provider_stream_failed",
+                message: #"OpenAI stream error: {"type":"upstream_error","message":"Upstream request failed"}"#,
+                isRetryable: true
+            )),
+            "模型上游服务在生成过程中中断，已保留当前回复，可以重试。"
+        )
+    }
+
+    func testCollectionTargetDefaultsToNewChapterForWholeChapterCandidate() {
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .wholeChapter, hasRegenerationTarget: false),
+            .createNext
+        )
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .wholeChapter, hasRegenerationTarget: false),
+            .createNext
+        )
+    }
+
+    /// 重新生成的候选默认就该替换来源章——那是发起这次生成的本意;
+    /// 这条优先级高于按粒度推断的默认值。
+    func testCollectionTargetDefaultsToReplaceForRegeneratedCandidate() {
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(
+                chapterCount: 3,
+                granularity: .wholeChapter,
+                hasRegenerationTarget: true
+            ),
+            .replaceChapter
+        )
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(
+                chapterCount: 3,
+                granularity: .continuation,
+                hasRegenerationTarget: true
+            ),
+            .replaceChapter
+        )
+    }
+
+    func testCollectionTargetDefaultsToCurrentChapterForContinuationCandidate() {
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(chapterCount: 3, granularity: .continuation, hasRegenerationTarget: false),
+            .appendCurrent
+        )
+        XCTAssertEqual(
+            NovelCollectionTargetChoice.initial(chapterCount: 0, granularity: .continuation, hasRegenerationTarget: false),
+            .createNext
+        )
+    }
+
+    func testCompositionCreatesAFileBackedViewModelAndReloadsIt() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("NovelCompositionTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let suite = "NovelCompositionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+
+        let first = try NovelCreationComposition.makeViewModel(
+            sharedSettings: settings,
+            rootDirectory: root
+        )
+        let createdProjectID = await first.createProject(name: "测试路由", mode: .blank)
+        let projectID = try XCTUnwrap(createdProjectID)
+
+        let restarted = try NovelCreationComposition.makeViewModel(
+            sharedSettings: settings,
+            rootDirectory: root
+        )
+        await restarted.loadProjects(selecting: projectID)
+
+        XCTAssertEqual(restarted.projectSnapshot?.project.name, "测试路由")
+        XCTAssertEqual(restarted.selectedBranchID, restarted.projectSnapshot?.project.mainBranchID)
+        XCTAssertNil(restarted.errorMessage)
+    }
+
+    func testModelSelectionResolvesStableOwnerWithoutChangingGlobalChatModel() async throws {
+        let suite = "NovelModelPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let globalModelIDBefore = settings.snapshot.getCurrentChatModel()?.id.description()
+        let provider = try XCTUnwrap(settings.snapshot.providers.first { !$0.models.isEmpty })
+        let model = try XCTUnwrap(provider.models.first)
+        let providerID = provider.id.description()
+        let modelID = model.id.description()
+
+        XCTAssertEqual(
+            NovelPresentation.providerID(forModelID: modelID, sharedSettings: settings),
+            providerID
+        )
+
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        )
+        _ = await viewModel.createProject(name: "模型隔离", mode: .blank)
+        await viewModel.setModelPolicy(.fixed(providerID: providerID, modelID: modelID))
+
+        XCTAssertEqual(
+            viewModel.projectSnapshot?.project.modelPolicy,
+            .fixed(providerID: providerID, modelID: modelID)
+        )
+        XCTAssertEqual(settings.snapshot.getCurrentChatModel()?.id.description(), globalModelIDBefore)
+    }
+
+    func testDisabledOrMismatchedProviderDoesNotPresentItsFixedModelAsAvailable() throws {
+        let suite = "NovelModelAvailabilityPresentationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = IOSSharedSettingsStore(userDefaults: defaults)
+        let option = try XCTUnwrap(settings.availableChatModels().first)
+        let provider = try XCTUnwrap(settings.snapshot.providers.first { provider in
+            provider.models.contains { $0.id.description() == option.id }
+        })
+        let providerID = provider.id.description()
+        let modelID = option.id
+
+        _ = settings.updateProviderBasics(
+            providerId: providerID,
+            name: provider.name,
+            enabled: true
+        )
+        settings.setCurrentChatModelId(modelID)
+        let selectedModel = try XCTUnwrap(provider.models.first {
+            $0.id.description() == modelID
+        })
+        let selectedName = selectedModel.displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(for: .global, sharedSettings: settings),
+            selectedName.isEmpty ? selectedModel.modelId : selectedName
+        )
+
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(
+                for: .fixed(providerID: "missing-provider", modelID: modelID),
+                sharedSettings: settings
+            ),
+            "固定模型不可用"
+        )
+
+        _ = settings.updateProviderBasics(
+            providerId: providerID,
+            name: provider.name,
+            enabled: false
+        )
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(
+                for: .fixed(providerID: providerID, modelID: modelID),
+                sharedSettings: settings
+            ),
+            "固定模型不可用"
+        )
+
+        settings.setCurrentChatModelId(modelID)
+        XCTAssertEqual(
+            NovelPresentation.modelDisplayName(for: .global, sharedSettings: settings),
+            "全局模型不可用"
+        )
+    }
+
+    func testNovelContextRingUsesModelWindowNotInjectionBudget() {
+        let snapshot = NovelSessionContextRing.snapshot(
+            messageCount: 10,
+            modelId: "muse-spark-1.2-contributor",
+            modelWindowTokens: 1_000_000,
+            estimatedInjectionTokens: 16_000,
+            supportsReasoning: false
+        )
+        XCTAssertEqual(snapshot.occupancyText, "16K / 1M")
+        XCTAssertEqual(snapshot.resolvedWindowTokens, 1_000_000)
+        XCTAssertEqual(snapshot.currentContextTokens, 16_000)
+        XCTAssertEqual(snapshot.contextFillFraction, 0.016, accuracy: 0.0001)
+    }
+
+    func testNovelContextRingFallsBackToRegistryWhenModelOmitsWindow() {
+        let snapshot = NovelSessionContextRing.snapshot(
+            messageCount: 1,
+            modelId: "claude-sonnet-4-5",
+            modelWindowTokens: nil,
+            estimatedInjectionTokens: 16_000,
+            supportsReasoning: false
+        )
+        XCTAssertEqual(snapshot.occupancyText, "16K / 1M")
+        XCTAssertEqual(snapshot.resolvedWindowTokens, 1_000_000)
+    }
+
+    func testUnavailableModelFailurePointsToTheLiveSettingsEntry() {
+        XCTAssertEqual(
+            NovelPresentation.failureMessage(NovelFailure(
+                code: "fixed_model_missing",
+                message: "The configured model no longer exists.",
+                isRetryable: false
+            )),
+            "项目绑定的模型已失效（服务商或模型 ID 已变）。请在右上角「项目模型覆盖」重新选择，或改回跟随全局。"
+        )
+    }
+
+    func testCheckpointLineageIsHeadToRootAndStopsAtInitialCheckpoint() throws {
+        let document = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let snapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: document,
+            access: .readWrite
+        ))
+
+        let lineage = NovelPresentation.checkpointLineage(
+            for: document.branches[0],
+            in: snapshot
+        )
+
+        let parentCheckpointID = try XCTUnwrap(lineage.first?.parentCheckpointID)
+        XCTAssertEqual(lineage.map(\.id), [
+            document.branches[0].headCheckpointID,
+            parentCheckpointID,
+        ])
+        XCTAssertEqual(lineage.last?.kind, .initial)
+        let forkable = NovelPresentation.forkableCheckpoints(
+            for: document.branches[0],
+            in: snapshot
+        )
+        XCTAssertEqual(forkable.map(\.id), [document.branches[0].headCheckpointID])
+        XCTAssertFalse(forkable.contains(where: { $0.kind == .initial }))
+    }
+
+    func testActionCheckpointLineageStopsAtForkBoundaryAndIncludesLocalHistory() throws {
+        let source = try NovelTestFixtures.documentWithForkableCheckpoint()
+        let sourceBranch = source.branches[0]
+        let childID = NovelBranchID()
+        let command = NovelBranchTestFixtures.forkCommand(
+            document: source,
+            sourceBranchID: sourceBranch.id,
+            checkpointID: sourceBranch.headCheckpointID,
+            branchID: childID,
+            name: "支线"
+        )
+        let forked = try NovelReducer.apply(.forkBranch(command), to: source).document
+        let child = try XCTUnwrap(forked.branches.first(where: { $0.id == childID }))
+        let freshSnapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: forked,
+            access: .readWrite
+        ))
+
+        XCTAssertEqual(
+            NovelPresentation.actionCheckpointLineage(for: child, in: freshSnapshot).map(\.id),
+            [sourceBranch.headCheckpointID]
+        )
+        XCTAssertEqual(
+            NovelPresentation.forkableCheckpoints(for: child, in: freshSnapshot).map(\.id),
+            [sourceBranch.headCheckpointID]
+        )
+
+        var advanced = forked
+        let localCheckpoint = NovelBranchCheckpointRecord(
+            id: NovelCheckpointID(),
+            kind: .manualSync,
+            createdOnBranchID: childID,
+            parentCheckpointID: child.headCheckpointID,
+            chapterSelections: child.workingChapterSelections,
+            stateSnapshotID: child.currentStateSnapshotID,
+            sessionCursor: .empty,
+            branchOverrideRevisionIDs: child.overrideRevisionIDs,
+            sourceCandidateID: nil,
+            baseHeadRevision: child.headRevision,
+            operationID: NovelOperationID(),
+            createdAt: Date()
+        )
+        advanced.checkpoints.append(localCheckpoint)
+        let childIndex = try XCTUnwrap(advanced.branches.firstIndex(where: { $0.id == childID }))
+        advanced.branches[childIndex].headCheckpointID = localCheckpoint.id
+        advanced.branches[childIndex].headRevision += 1
+        let advancedSnapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: advanced,
+            access: .readWrite
+        ))
+
+        XCTAssertEqual(
+            NovelPresentation.actionCheckpointLineage(
+                for: advanced.branches[childIndex],
+                in: advancedSnapshot
+            ).map(\.id),
+            [localCheckpoint.id, sourceBranch.headCheckpointID]
+        )
+    }
+
+    func testCheckpointChapterOrdinalUsesTheBranchSelectionOrder() {
+        let branchID = NovelBranchID()
+        let projectChapterIDs = [NovelChapterID(), NovelChapterID(), NovelChapterID()]
+        let branchChapterIDs = [projectChapterIDs[0], projectChapterIDs[2]]
+        let parent = NovelBranchCheckpointRecord(
+            id: NovelCheckpointID(),
+            kind: .collection,
+            createdOnBranchID: branchID,
+            parentCheckpointID: nil,
+            chapterSelections: branchChapterIDs.map {
+                NovelChapterSelection(chapterID: $0, versionID: NovelChapterVersionID())
+            },
+            stateSnapshotID: NovelStateSnapshotID(),
+            sessionCursor: .empty,
+            branchOverrideRevisionIDs: [],
+            sourceCandidateID: nil,
+            baseHeadRevision: 0,
+            operationID: NovelOperationID(),
+            createdAt: Date()
+        )
+        var selections = parent.chapterSelections
+        selections[1] = NovelChapterSelection(
+            chapterID: branchChapterIDs[1],
+            versionID: NovelChapterVersionID()
+        )
+        let child = NovelBranchCheckpointRecord(
+            id: NovelCheckpointID(),
+            kind: .collection,
+            createdOnBranchID: branchID,
+            parentCheckpointID: parent.id,
+            chapterSelections: selections,
+            stateSnapshotID: NovelStateSnapshotID(),
+            sessionCursor: .empty,
+            branchOverrideRevisionIDs: [],
+            sourceCandidateID: nil,
+            baseHeadRevision: 1,
+            operationID: NovelOperationID(),
+            createdAt: Date()
+        )
+
+        XCTAssertEqual(
+            NovelCheckpointLabel.chapterOrdinal(
+                for: child,
+                checkpoints: [parent, child]
+            ),
+            2
+        )
+    }
+
+    func testDirectChapterRestoreRequiresTheSameFactCompatibilityLineage() {
+        let chapterID = NovelChapterID()
+        let compatibilityID = UUID()
+        let current = NovelChapterVersionRecord(
+            id: NovelChapterVersionID(),
+            chapterID: chapterID,
+            kind: .polish,
+            title: "Current",
+            content: "Current",
+            factCompatibilityID: compatibilityID,
+            sourceCandidateID: nil,
+            createdAt: Date(),
+            operationID: NovelOperationID()
+        )
+        let compatible = NovelChapterVersionRecord(
+            id: NovelChapterVersionID(),
+            chapterID: chapterID,
+            kind: .restore,
+            title: "Compatible",
+            content: "Compatible",
+            factCompatibilityID: compatibilityID,
+            sourceCandidateID: nil,
+            createdAt: Date(),
+            operationID: NovelOperationID()
+        )
+        let incompatible = NovelChapterVersionRecord(
+            id: NovelChapterVersionID(),
+            chapterID: chapterID,
+            kind: .manualEdit,
+            title: "Incompatible",
+            content: "Incompatible",
+            factCompatibilityID: UUID(),
+            sourceCandidateID: nil,
+            createdAt: Date(),
+            operationID: NovelOperationID()
+        )
+
+        XCTAssertTrue(NovelPresentation.canDirectlyRestore(compatible, from: current))
+        XCTAssertFalse(NovelPresentation.canDirectlyRestore(incompatible, from: current))
+        XCTAssertFalse(NovelPresentation.canDirectlyRestore(current, from: current))
+    }
+
+    func testDegradedSnapshotDisablesViewModelMutations() throws {
+        let document = try NovelTestFixtures.document()
+        let viewModel = NovelCreationViewModel(
+            creation: DefaultNovelCreation(repository: InMemoryNovelProjectRepository())
+        )
+        viewModel.projectSnapshot = NovelProjectSnapshot(loaded: NovelLoadedProject(
+            document: document,
+            access: .degradedPrevious(primaryFailure: "corrupt primary")
+        ))
+
+        XCTAssertFalse(viewModel.canMutate)
+    }
+
+    func testLateProjectSnapshotCannotReplaceNewerSelection() async throws {
+        let repository = InMemoryNovelProjectRepository()
+        let firstDocument = try NovelTestFixtures.document()
+        let secondDocument = try NovelTestFixtures.document()
+        _ = try await repository.createProject(firstDocument)
+        _ = try await repository.createProject(secondDocument)
+        let base = DefaultNovelCreation(repository: repository)
+        let delayed = DelayedProjectSnapshotNovelCreation(
+            base: base,
+            delayedProjectID: firstDocument.project.id
+        )
+        let viewModel = NovelCreationViewModel(creation: delayed)
+
+        let firstSelection = Task { @MainActor in
+            _ = await viewModel.selectProject(firstDocument.project.id)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        await viewModel.selectProject(secondDocument.project.id)
+        await firstSelection.value
+
+        XCTAssertEqual(viewModel.selectedProjectID, secondDocument.project.id)
+        XCTAssertEqual(viewModel.projectSnapshot?.project.id, secondDocument.project.id)
+        XCTAssertEqual(viewModel.branchSnapshot?.projectID, secondDocument.project.id)
+    }
+}
+
+private actor DelayedProjectSnapshotNovelCreation: NovelCreation {
+    let base: any NovelCreation
+    let delayedProjectID: NovelProjectID
+
+    init(base: any NovelCreation, delayedProjectID: NovelProjectID) {
+        self.base = base
+        self.delayedProjectID = delayedProjectID
+    }
+
+    func snapshot(_ scope: NovelSnapshotScope) async throws -> NovelSnapshot {
+        if case .project(let projectID) = scope, projectID == delayedProjectID {
+            try await Task.sleep(for: .milliseconds(150))
+        }
+        return try await base.snapshot(scope)
+    }
+
+    func perform(_ action: NovelAction) async throws -> NovelOutcome {
+        try await base.perform(action)
+    }
+
+    func start(_ request: NovelRunRequest) async throws -> NovelRun {
+        try await base.start(request)
+    }
+
+    func interruptForBackground(
+        projectID: NovelProjectID,
+        deadline: Date,
+        runID: NovelRunID?
+    ) async {
+        await base.interruptForBackground(
+            projectID: projectID,
+            deadline: deadline,
+            runID: runID
+        )
+    }
+
+    func cancelInFlightBackgroundMutations(projectID: NovelProjectID) async {
+        await base.cancelInFlightBackgroundMutations(projectID: projectID)
+    }
+
+    func retryPendingTerminal(runID: NovelRunID) async throws {
+        try await base.retryPendingTerminal(runID: runID)
+    }
+}
