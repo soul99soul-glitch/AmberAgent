@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+  <!--
+    Cleartext is permitted app-wide, deliberately: the Synara LAN companion and
+    LAN-hosted LLM providers (e.g. Ollama) need HTTP to private IPs, and Android
+    network-security-config cannot express private-IP CIDR ranges as domains.
+    Trade-off: any user-configured http:// endpoint (custom provider, WebMount
+    station) also goes cleartext, including its credentials. Users should prefer
+    https endpoints; the Synara connect UI validates HTTP targets are private /
+    Tailscale ranges before connecting.
+  -->
+  <base-config cleartextTrafficPermitted="true" />
+
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">localhost</domain>
+    <domain includeSubdomains="false">127.0.0.1</domain>
+    <domain includeSubdomains="false">10.0.2.2</domain>
+  </domain-config>
+</network-security-config>

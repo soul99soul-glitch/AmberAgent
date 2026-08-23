@@ -1,0 +1,375 @@
+name: AmberAgent
+options:
+  bundleIdPrefix: app.amber.ios
+  deploymentTarget:
+    iOS: "26.0"
+    watchOS: "11.0"
+  xcodeVersion: "17.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.1"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    WATCHOS_DEPLOYMENT_TARGET: "11.0"
+  configs:
+    Debug:
+      SHARED_FRAMEWORK_CONFIGURATION: debugFramework
+    Release:
+      SHARED_FRAMEWORK_CONFIGURATION: releaseFramework
+      EXCLUDED_SOURCE_FILE_NAMES:
+        - chat-perf-growing-table.jsonl
+        - chat-perf-long-prose.jsonl
+
+configs:
+  Debug: debug
+  Release: release
+
+packages:
+  swift-nio:
+    url: https://github.com/apple/swift-nio.git
+    from: 2.81.0
+  swift-nio-ssh:
+    url: https://github.com/apple/swift-nio-ssh.git
+    exactVersion: 0.13.0
+  SwiftStreamingMarkdown:
+    path: vendor/SwiftStreamingMarkdown
+  ChatLayout:
+    url: https://github.com/ekazaev/ChatLayout.git
+    exactVersion: 2.4.2
+  ish-arm64-pkg:
+    url: https://github.com/Lolendor/ish-arm64-pkg
+    exactVersion: 0.3.3
+
+targets:
+  iosApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+        excludes:
+          - NovelCreation/AGENTS.md
+      - path: SharedWatch
+      # Deep Read editorial reader fonts — reference the already-tracked Android
+      # font assets (no duplicate binary in the repo); bundled as app resources.
+      - path: ../app/src/main/res/font/noto_serif_sc.otf
+        buildPhase: resources
+      - path: ../app/src/main/res/font/jetbrains_mono.ttf
+        buildPhase: resources
+    preBuildScripts:
+      - name: Build Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_target="IosSimulatorArm64" ;;
+            iphoneos*) kotlin_target="IosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          build_type="${CONFIGURATION:-Debug}"
+          if [ -z "${JAVA_HOME:-}" ]; then
+            for candidate in /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 /opt/homebrew/opt/openjdk /usr/local/opt/openjdk; do
+              if [ -x "$candidate/bin/java" ]; then
+                export JAVA_HOME="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -n "${JAVA_HOME:-}" ]; then
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          cd "${SRCROOT}/.."
+          ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
+      - name: Validate Entitlement Diagnostics
+        basedOnDependencyAnalysis: false
+        script: |
+          /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
+    postBuildScripts:
+      - name: Embed Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_dir="iosSimulatorArm64" ;;
+            iphoneos*) kotlin_dir="iosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          config_dir="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')Framework"
+          framework_src="${SRCROOT}/../shared/build/bin/${kotlin_dir}/${config_dir}/Shared.framework"
+          framework_dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Shared.framework"
+          if [ ! -d "${framework_src}" ]; then
+            echo "Missing Shared.framework at ${framework_src}" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "${framework_dst}")"
+          rm -rf "${framework_dst}"
+          ditto "${framework_src}" "${framework_dst}"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY:-}" != "-" ]; then
+            codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${framework_dst}"
+          fi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios
+        AGENT_ACTIVITY_URL_SCHEME: amber
+        INFOPLIST_FILE: iosApp/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS:
+          - iphoneos
+          - iphonesimulator
+        FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        OTHER_LDFLAGS:
+          - "-lamber_ffi"
+        HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
+        HEADER_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
+    dependencies:
+      - framework: Shared.framework
+        embed: false
+      - package: swift-nio
+        product: NIOCore
+      - package: swift-nio
+        product: NIOPosix
+      - package: swift-nio-ssh
+        product: NIOSSH
+      - package: SwiftStreamingMarkdown
+        product: SwiftStreamingMarkdown
+      - package: ChatLayout
+        product: ChatLayout
+      - target: AmberAgentActivityWidget
+      - target: AmberWatchApp
+        embed: true
+    scheme:
+      gatherCoverageData: false
+      testTargets:
+        - iosAppTests
+  iosAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: iosAppTests
+    dependencies:
+      - target: iosApp
+      - framework: Shared.framework
+        embed: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/iosApp.app/iosApp"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
+        HEADER_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
+        OTHER_LDFLAGS:
+          - "-lamber_ffi"
+        SUPPORTED_PLATFORMS:
+          - iphoneos
+          - iphonesimulator
+  AmberAgentActivityWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ActivityWidget
+      - path: iosApp/AgentActivityModels.swift
+      - path: iosApp/ThinkingOrbEngine.swift
+      - path: iosApp/AgentActivity.strings
+        buildPhase: resources
+      - path: iosApp/zh-Hans.lproj
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.activity
+        INFOPLIST_FILE: ActivityWidget/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: "YES"
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        SUPPORTED_PLATFORMS:
+          - iphoneos
+          - iphonesimulator
+  AmberAgentActivityWidgetExperimentalGPL:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: ActivityWidget
+      - path: iosApp/AgentActivityModels.swift
+      - path: iosApp/ThinkingOrbEngine.swift
+      - path: iosApp/AgentActivity.strings
+        buildPhase: resources
+      - path: iosApp/zh-Hans.lproj
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl.activity
+        INFOPLIST_FILE: ActivityWidget/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SKIP_INSTALL: "YES"
+        APPLICATION_EXTENSION_API_ONLY: "YES"
+        SUPPORTED_PLATFORMS:
+          - iphoneos
+          - iphonesimulator
+  iosAppExperimentalGPL:
+    type: application
+    platform: iOS
+    sources:
+      - path: iosApp
+        excludes:
+          - NovelCreation/AGENTS.md
+      - path: SharedWatch
+      - path: ../app/src/main/res/font/noto_serif_sc.otf
+        buildPhase: resources
+      - path: ../app/src/main/res/font/jetbrains_mono.ttf
+        buildPhase: resources
+      - path: IshRuntimeResources/fs
+        buildPhase: resources
+        type: folder
+    preBuildScripts:
+      - name: Build Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_target="IosSimulatorArm64" ;;
+            iphoneos*) kotlin_target="IosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          build_type="${CONFIGURATION:-Debug}"
+          if [ -z "${JAVA_HOME:-}" ]; then
+            for candidate in /opt/homebrew/opt/openjdk@17 /usr/local/opt/openjdk@17 /opt/homebrew/opt/openjdk /usr/local/opt/openjdk; do
+              if [ -x "$candidate/bin/java" ]; then
+                export JAVA_HOME="$candidate"
+                break
+              fi
+            done
+          fi
+          if [ -n "${JAVA_HOME:-}" ]; then
+            export PATH="$JAVA_HOME/bin:$PATH"
+          fi
+          cd "${SRCROOT}/.."
+          ./gradlew ":shared:link${build_type}Framework${kotlin_target}"
+      - name: Validate Entitlement Diagnostics
+        basedOnDependencyAnalysis: false
+        script: |
+          /bin/sh "${SRCROOT}/scripts/validate-entitlement-diagnostics.sh" "${SRCROOT}/iosApp/AmberAgent.entitlements" "${SRCROOT}/iosApp/Info.plist"
+    postBuildScripts:
+      - name: Embed Shared KMP Framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          case "${SDK_NAME:-}" in
+            iphonesimulator*) kotlin_dir="iosSimulatorArm64" ;;
+            iphoneos*) kotlin_dir="iosArm64" ;;
+            *) echo "Unsupported SDK_NAME: ${SDK_NAME:-unset}" >&2; exit 1 ;;
+          esac
+          config_dir="$(printf '%s' "${CONFIGURATION:-Debug}" | tr '[:upper:]' '[:lower:]')Framework"
+          framework_src="${SRCROOT}/../shared/build/bin/${kotlin_dir}/${config_dir}/Shared.framework"
+          framework_dst="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/Shared.framework"
+          if [ ! -d "${framework_src}" ]; then
+            echo "Missing Shared.framework at ${framework_src}" >&2
+            exit 1
+          fi
+          mkdir -p "$(dirname "${framework_dst}")"
+          rm -rf "${framework_dst}"
+          ditto "${framework_src}" "${framework_dst}"
+          if [ "${CODE_SIGNING_ALLOWED:-YES}" != "NO" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ] && [ "${EXPANDED_CODE_SIGN_IDENTITY:-}" != "-" ]; then
+            codesign --force --sign "${EXPANDED_CODE_SIGN_IDENTITY}" "${framework_dst}"
+          fi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.experimental-gpl
+        AGENT_ACTIVITY_URL_SCHEME: amber-experimental
+        INFOPLIST_FILE: iosApp/Info.plist
+        CODE_SIGN_ENTITLEMENTS: iosApp/AmberAgent.entitlements
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTED_PLATFORMS:
+          - iphoneos
+          - iphonesimulator
+        FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../shared/build/bin/iosSimulatorArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../shared/build/bin/iosArm64/$(SHARED_FRAMEWORK_CONFIGURATION)"
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim"
+        LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64"
+        OTHER_LDFLAGS:
+          - "-lamber_ffi"
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS:
+          - "$(inherited)"
+          - "ENABLE_EXPERIMENTAL_TERMINAL_RUNTIMES"
+        HEADER_SEARCH_PATHS[sdk=iphonesimulator*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64-sim/Headers"
+        HEADER_SEARCH_PATHS[sdk=iphoneos*]:
+          - "$(SRCROOT)/../native/AmberNative.xcframework/ios-arm64/Headers"
+    dependencies:
+      - framework: Shared.framework
+        embed: false
+      - package: swift-nio
+        product: NIOCore
+      - package: swift-nio
+        product: NIOPosix
+      - package: swift-nio-ssh
+        product: NIOSSH
+      - package: SwiftStreamingMarkdown
+        product: SwiftStreamingMarkdown
+      - package: ChatLayout
+        product: ChatLayout
+      - package: ish-arm64-pkg
+        product: IshEmbed
+      - target: AmberAgentActivityWidgetExperimentalGPL
+      - target: AmberWatchApp
+        embed: true
+    scheme:
+      gatherCoverageData: false
+
+  AmberWatchApp:
+    type: application
+    platform: watchOS
+    sources:
+      - path: WatchApp
+      - path: SharedWatch/WatchTaskModels.swift
+      - path: SharedWatch/WatchConnectivityBridge.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.amber.ios.watchkitapp
+        INFOPLIST_FILE: WatchApp/Info.plist
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "4"
+        SDKROOT: watchos
+        SKIP_INSTALL: "YES"
+        GENERATE_INFOPLIST_FILE: "NO"
+        WATCHOS_DEPLOYMENT_TARGET: "11.0"
+        SUPPORTED_PLATFORMS:
+          - watchos
+          - watchsimulator
+    scheme:
+      gatherCoverageData: false

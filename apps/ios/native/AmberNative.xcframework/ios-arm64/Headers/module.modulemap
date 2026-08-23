@@ -1,0 +1,4 @@
+module AmberNative {
+    header "AmberNative.h"
+    export *
+}

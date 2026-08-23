@@ -1,0 +1,28 @@
+  text=HTML Blocks
+  text=CommonMark allows raw HTML blocks. A block-level HTML tag that appears at the start of a line begins an HTML block, which is passed through to the output verbatim.
+  text=Simple DIV
+  text=Note:
+  text=This is a raw HTML block. CommonMark passes it through to the HTML output unchanged. The Markdown renderer must recognise it as a block, not try to parse it as Markdown.
+  text=The paragraph above and below are regular Markdown paragraphs.
+  text=HTML Table (not GFM)
+      text=Name
+      text=Value
+      text=Alpha
+      text=1
+      text=Beta
+      text=2
+      text=Gamma
+      text=3
+  text=Details / Summary
+  text=▶ |Click to expand the explanation
+  text=Script Tag (Type 6 Block)
+  text=HTML blocks can be any block-level element including <script>:
+  text=Comment Block
+  text=The comment above should be invisible in rendered output. This paragraph should appear immediately after the heading.
+  text=Pre Block
+      text=plaintext
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=Preformatted text here
+ with extra spaces
+ and controlled indentation

@@ -1,0 +1,56 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/dist
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.cursor
+.history
+.kotlin
+
+# Perfetto trace binaries (large, regeneratable). Keep .md analysis reports.
+*.pftrace
+*.perfetto-trace
+core/**/build/
+feature/**/build/
+ai-core/build/
+ai-provider-*/build/
+ai/build/
+common/build/
+app/build/
+app/baselineprofile/build/
+search/build/
+tts/build/
+highlight/build/
+document/build/
+web/build/
+shared/build/
+iosApp/build/
+native/target/
+shared/build/
+iosApp/**/*.xcodeproj/
+iosApp/**/*.xcworkspace/
+iosApp/**/DerivedData/
+iosApp/**/build/
+
+# Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
+/amberagent-handoff.zip
+docs/cloud-design/**/uploads/
+docs/cloud-design/**/screenshots/
+docs/cloud-design/**/.thumbnail
+
+# Local one-off design previews
+/index.html
+
+# Local data backups — too large for GitHub, never commit
+/amberagent-notion-data-backup-*.tgz
+.DS_Store
+.pi-subagents/
+
+# ZCode agent local state (session plans etc.) — never commit
+.zcode/

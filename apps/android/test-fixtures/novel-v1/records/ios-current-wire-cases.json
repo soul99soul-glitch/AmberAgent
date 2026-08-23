@@ -1,0 +1,99 @@
+{
+  "activeRun": {
+    "id": {"rawValue": "10101010-1010-4010-8010-101010101010"},
+    "operationID": {"rawValue": "20202020-2020-4020-8020-202020202020"},
+    "requestPayloadSHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branchID": {"rawValue": "22222222-2222-4222-8222-222222222222"},
+    "sessionID": {"rawValue": "33333333-3333-4333-8333-333333333333"},
+    "kind": "characterProposal",
+    "mode": "discussPlan",
+    "userMessageID": {"rawValue": "30303030-3030-4030-8030-303030303030"},
+    "messageID": {"rawValue": "40404040-4040-4040-8040-404040404040"},
+    "contextualCharacterMention": "伊芙",
+    "baseCheckpointID": {"rawValue": "66666666-6666-4666-8666-666666666666"},
+    "baseHeadRevision": 3,
+    "status": "completed",
+    "partialContent": "{\"schemaVersion\":1}",
+    "receiptID": {"rawValue": "50505050-5050-4050-8050-505050505050"},
+    "startedAt": 721692800,
+    "terminalAt": 721692801
+  },
+  "settingProposal": {
+    "id": {"rawValue": "60606060-6060-4060-8060-606060606060"},
+    "branchID": {"rawValue": "22222222-2222-4222-8222-222222222222"},
+    "title": "伊芙",
+    "content": "城门守卫的女儿。",
+    "createdAt": 721692802,
+    "isResolved": false,
+    "origin": {
+      "contextualCharacter": {
+        "runID": {"rawValue": "10101010-1010-4010-8010-101010101010"},
+        "sourceMention": "伊芙",
+        "suggestedKind": {"character": {}}
+      }
+    },
+    "suggestedCharacterAliases": ["伊芙", "守卫之女"]
+  },
+  "archiveSection": {
+    "kind": {
+      "discussionArchive": {
+        "_0": {"rawValue": "70707070-7070-4070-8070-707070707070"},
+        "throughSequence": 12
+      }
+    },
+    "label": "ARCHIVED DISCUSSION THROUGH MESSAGE #12",
+    "reason": "archivedDiscussion",
+    "estimatedTokens": 11,
+    "contentSHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "operations": [
+    {
+      "operationID": {"rawValue": "80808080-8080-4080-8080-808080808080"},
+      "kind": "discardChapter",
+      "payloadSHA256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "outcome": {
+        "chapterDiscardStateChanged": {
+          "projectID": {"rawValue": "11111111-1111-4111-8111-111111111111"},
+          "branchID": {"rawValue": "22222222-2222-4222-8222-222222222222"},
+          "chapterID": {"rawValue": "90909090-9090-4090-8090-909090909090"},
+          "isDiscarded": true,
+          "revision": 7
+        }
+      },
+      "appliedProjectRevision": 7,
+      "appliedAt": 721692803
+    },
+    {
+      "operationID": {"rawValue": "A0A0A0A0-A0A0-40A0-80A0-A0A0A0A0A0A0"},
+      "kind": "restoreChapter",
+      "payloadSHA256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "outcome": {
+        "chapterDiscardStateChanged": {
+          "projectID": {"rawValue": "11111111-1111-4111-8111-111111111111"},
+          "branchID": {"rawValue": "22222222-2222-4222-8222-222222222222"},
+          "chapterID": {"rawValue": "90909090-9090-4090-8090-909090909090"},
+          "isDiscarded": false,
+          "revision": 8
+        }
+      },
+      "appliedProjectRevision": 8,
+      "appliedAt": 721692804
+    },
+    {
+      "operationID": {"rawValue": "B0B0B0B0-B0B0-40B0-80B0-B0B0B0B0B0B0"},
+      "kind": "deleteChapterFromManuscript",
+      "payloadSHA256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "outcome": {
+        "chapterRemovedFromManuscript": {
+          "projectID": {"rawValue": "11111111-1111-4111-8111-111111111111"},
+          "branchID": {"rawValue": "22222222-2222-4222-8222-222222222222"},
+          "chapterID": {"rawValue": "90909090-9090-4090-8090-909090909090"},
+          "workingRevision": 4,
+          "revision": 9
+        }
+      },
+      "appliedProjectRevision": 9,
+      "appliedAt": 721692805
+    }
+  ]
+}

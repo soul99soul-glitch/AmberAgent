@@ -1,0 +1,13 @@
+[package]
+name = "jni-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Used by the `android_logger_init` helper. Other JNI crates depending on this
+# get android_logger transitively; they don't need to declare it again.
+log = { workspace = true }
+android_logger = { workspace = true }

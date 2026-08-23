@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "events": {
+      "type": "sse",
+      "url": "https://mcp.example.com/events"
+    }
+  }
+}

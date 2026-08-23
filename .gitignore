@@ -1,0 +1,11 @@
+.DS_Store
+.migration/snapshots/
+.worktrees/
+**/.gradle/
+**/build/
+**/DerivedData/
+**/local.properties
+**/*.xcuserstate
+**/xcuserdata/
+**/.tmp-*
+**/tmp-iphone-*

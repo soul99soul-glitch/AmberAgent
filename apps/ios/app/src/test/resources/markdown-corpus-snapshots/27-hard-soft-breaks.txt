@@ -1,0 +1,39 @@
+  text=Hard and Soft Line Breaks
+  text=CommonMark distinguishes between soft breaks and hard breaks within a paragraph.
+  text=Soft Breaks
+  text=A soft break is a single newline inside a paragraph. The renderer typically converts it to a space (or treats it as a join point for text reflow). Here is a paragraph where each sentence is on its own source line:
+  text=Line one of this paragraph.
+Line two follows immediately below in the source.
+Line three is also on its own line in the source.
+  text=In the rendered output, those three lines should appear as one continuous paragraph, with the line breaks converted to spaces.
+  text=Hard Breaks
+  text=A hard break is forced by ending a line with two or more trailing spaces (or a backslash \) before the newline. It renders as a <br> element.
+  text=This line ends with two trailing spaces. 
+This line should start on a new line in the rendered output.
+  text=And here using the backslash syntax:\
+This line follows the backslash hard break.
+  text=Mixing Soft and Hard Breaks
+  text=Soft break: one newline, no spaces.
+Still part of the same paragraph.
+  text=Hard break with two trailing spaces at the end: 
+New line within the same paragraph. 
+And another hard-break new line.
+  text=Breaks Inside Other Blocks
+  text=Line breaks inside blockquotes:
+  text=First quoted line.
+ Second quoted line (soft break — same paragraph in the quote).
+ Third line. 
+ Fourth line after a hard break within the blockquote.
+  text=Line breaks inside list items:
+  text=•
+  text=First item, first line. 
+ First item, second line (hard break, continued indented).
+  text=•
+  text=Second item, single line.
+  text=Trailing Spaces in Code Blocks
+  text=Note that trailing spaces inside fenced code blocks are preserved verbatim and do NOT trigger hard breaks, because code blocks are not paragraph content:
+      text=plaintext
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=line with two trailing spaces 
+next line — the spaces above are preserved as-is

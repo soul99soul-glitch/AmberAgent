@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+  <cache-path
+    name="cache"
+    path="." />
+  <external-files-path
+    name="external_files"
+    path="." />
+  <!-- 只共享实际用于分享的子目录；不能用 "." 把含 DataStore（API key）的整个 files 目录暴露出去 -->
+  <files-path
+    name="upload"
+    path="upload/" />
+  <files-path
+    name="chat_images"
+    path="chat_images/" />
+  <files-path
+    name="images"
+    path="images/" />
+  <files-path
+    name="workspace_mirror"
+    path="amberagent/workspace-mirror/" />
+</paths>

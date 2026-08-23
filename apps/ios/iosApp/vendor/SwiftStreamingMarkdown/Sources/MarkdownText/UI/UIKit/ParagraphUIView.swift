@@ -1,0 +1,907 @@
+//
+//  Copyright (c) Microsoft Corporation. All rights reserved.
+//  Licensed under the MIT License. See LICENSE in the project root for license information.
+//
+
+import iosMath
+import SwiftUI
+import UIKit
+import UniformTypeIdentifiers
+
+struct AccessibilityContent {
+  let label: String?
+  let actions: [UIAccessibilityCustomAction]
+}
+
+struct FadeAnimationData {
+  let startTime: CFTimeInterval
+  let duration: CFTimeInterval
+  let range: NSRange
+}
+
+private struct CachedParagraphUIViewSize {
+  let size: CGSize
+  let targetWidth: CGFloat
+}
+
+class ParagraphUIView: UITextView {
+  private static let jsonEncoder = JSONEncoder()
+  static let animationDuration: CFTimeInterval = 0.5 // Animation duration for each word
+
+  // Vendored addition (AmberAgent): the tail-as-unit fade duration scales
+  // continuously with the appended beat size. Streaming beats (~12 chars) keep
+  // the full 0.5s fade; terminal-drain beats (hundreds of chars per append)
+  // fade within a couple of frames. This keeps the fade system's load
+  // rate-independent — concurrent animations ≈ duration / beat interval stays
+  // constant — and stops a 0.5s ink gradient from dragging behind a whoosh.
+  static let minimumUnitFadeDuration: CFTimeInterval = 1.0 / 30.0
+  static let unitFadeReferenceLength = 12
+
+  static func unitFadeDuration(forAppendedLength length: Int) -> CFTimeInterval {
+    guard length > unitFadeReferenceLength else { return animationDuration }
+    return max(
+      minimumUnitFadeDuration,
+      animationDuration * CFTimeInterval(unitFadeReferenceLength) / CFTimeInterval(length)
+    )
+  }
+
+  private(set) var paragraphContents: NSMutableAttributedString = NSMutableAttributedString()
+  private(set) var lineSpacing: CGFloat?
+  // `private(set)` (rather than fully private) so the vendored regression tests
+  // can assert that stale word fades never survive a full content replacement.
+  private(set) var activeAnimations: [FadeAnimationData] = []
+  private var fadeAnimationDisplayLink: CADisplayLink?
+  private var cachedSize: CachedParagraphUIViewSize?
+
+  var textContextMenu: TextContextMenu?
+  var markdownController: MarkdownController?
+
+  var usesTextKit1: Bool {
+    textLayoutManager == nil
+  }
+
+  /// Large but finite measuring height. TextKit 1 falls into pathologically
+  /// slow line-fragment math when the container height is
+  /// `.greatestFiniteMagnitude`, so measurement uses a finite sentinel that
+  /// still exceeds any realistic paragraph (~400k lines of body text).
+  private static let unboundedMeasuringHeight: CGFloat = 10_000_000
+
+  static func makeTextKit1View() -> ParagraphUIView {
+    let storage = NSTextStorage()
+    let layoutManager = NSLayoutManager()
+    let textContainer = NSTextContainer(size: .zero)
+    storage.addLayoutManager(layoutManager)
+    layoutManager.addTextContainer(textContainer)
+    let view = ParagraphUIView(frame: .zero, textContainer: textContainer)
+    // Height must not track the view's current bounds: a tracked container is
+    // resized on every measurement pass, which discards TextKit 1's layout
+    // cache and forces streaming paragraphs to re-lay-out their full length on
+    // every appended chunk. A fixed unbounded height keeps layout incremental.
+    view.textContainer.heightTracksTextView = false
+    view.textContainer.size = CGSize(
+      width: view.textContainer.size.width,
+      height: ParagraphUIView.unboundedMeasuringHeight
+    )
+    return view
+  }
+
+  // To override the behaviour of this property, do so on ParagraphView's SwiftUI wrapper.
+  var onUrlTap: (URL) -> Void = { UIApplication.shared.open($0) }
+
+  override init(frame: CGRect, textContainer: NSTextContainer?) {
+    super.init(frame: frame, textContainer: textContainer)
+    delegate = self
+    setupView()
+  }
+
+  required init?(coder: NSCoder) {
+    super.init(coder: coder)
+    delegate = self
+    setupView()
+  }
+
+  deinit {
+    tearDownDisplayLink()
+    activeAnimations.removeAll()
+  }
+
+  override func willMove(toWindow newWindow: UIWindow?) {
+    super.willMove(toWindow: newWindow)
+    // Fix for crash: "UIPreviewTarget requires that the container view is in a window". When the view is removed from the window (e.g. scrolled out in LazyVStack), we should clear the selection to prevent any pending menu or drag interactions from trying to reference the detached view.
+    if newWindow == nil {
+      selectedTextRange = nil
+    }
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let result = super.resignFirstResponder()
+    if result {
+      selectedTextRange = nil
+    }
+    return result
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if traitCollection.userInterfaceStyle != previousTraitCollection?.userInterfaceStyle {
+      InlineCitationAttachment.updateInterfaceStyle(traitCollection.userInterfaceStyle)
+    }
+  }
+
+  override var intrinsicContentSize: CGSize {
+    if let cachedSize {
+      return cachedSize.size
+    }
+    var targetWidth = bounds.width
+    // When we only have a screen-width guess, still measure height there, but do
+    // not advertise that width as the ideal — SwiftUI would center a screen-wide
+    // row inside the padded chat column and clip both edges.
+    var reportFlexibleWidth = false
+    if targetWidth <= 0 || targetWidth.isInfinite {
+      // Prefer the SwiftUI/UIKit parent column over the full screen for the
+      // height guess...
+      if let superWidth = superview?.bounds.width, superWidth > 0, superWidth.isFinite {
+        targetWidth = superWidth
+      } else {
+        // Last-resort measure width so LazyVStack first pass is not blank.
+        targetWidth = UIScreen.main.bounds.width
+      }
+      // Vendored fix (AmberAgent): any width derived without valid bounds is a
+      // guess — never advertise it as the ideal. The parent column (superview)
+      // can be the full hosting width rather than the padded chat column, and a
+      // screen-wide ideal propagates up `.frame(maxWidth: .infinity)` chains,
+      // widening the row past the column; SwiftUI then centers the oversized row
+      // and the paragraph's leading inset is eaten / both edges are clipped
+      // (real-device report: long unbroken-CJK paragraph at leading ≈ 4pt
+      // instead of the column inset).
+      reportFlexibleWidth = true
+    }
+    let targetSize = CGSize(width: targetWidth, height: .greatestFiniteMagnitude)
+    let contentSize = sizeThatFits(targetSize)
+    let roundedUpSize = CGSize(
+      width: reportFlexibleWidth
+        ? UIView.noIntrinsicMetric
+        : min(contentSize.width.rounded(.up), targetWidth),
+      height: contentSize.height.rounded(.up)
+    )
+    cachedSize = CachedParagraphUIViewSize(size: roundedUpSize, targetWidth: targetWidth)
+    return roundedUpSize
+  }
+
+  override func layoutSubviews() {
+    super.layoutSubviews()
+    if bounds.width != cachedSize?.targetWidth {
+      invalidateCachedSize()
+    }
+    // Vendored fix (AmberAgent): `sizeThatFits` resizes the text container to
+    // the SwiftUI proposal as a measurement side effect. If the view's final
+    // frame is narrower than that proposal, the stale wide container makes
+    // TextKit lay out (and keep) line fragments wider than the visible bounds —
+    // the rendered text then overflows the view and gets clipped. The view's
+    // bounds are the authoritative width: resync the container whenever they
+    // diverge and force the fragments to re-layout at the real width.
+    if usesTextKit1, bounds.width > 0, bounds.width.isFinite {
+      let containerWidth = bounds.width
+        - textContainerInset.left - textContainerInset.right
+      if containerWidth > 0, containerWidth.isFinite,
+         abs(textContainer.size.width - containerWidth) > 0.5 {
+        textContainer.size = CGSize(
+          width: containerWidth,
+          height: ParagraphUIView.unboundedMeasuringHeight
+        )
+        layoutManager.invalidateLayout(
+          forCharacterRange: NSRange(location: 0, length: textStorage.length),
+          actualCharacterRange: nil
+        )
+        setNeedsDisplay()
+      }
+    }
+    invalidateIntrinsicContentSize()
+  }
+
+  override func sizeThatFits(_ size: CGSize) -> CGSize {
+    guard usesTextKit1, size.width > 0, size.width.isFinite else {
+      return super.sizeThatFits(size)
+    }
+    // UITextView's own sizeThatFits mutates the text container per call, which
+    // throws away TextKit 1's incremental layout and re-lays-out the entire
+    // paragraph on every streaming publish. Measuring against a stable,
+    // height-unbounded container only lays out lines that are not cached yet.
+    let containerWidth = size.width
+      - textContainerInset.left - textContainerInset.right
+    let measuringSize = CGSize(width: containerWidth, height: ParagraphUIView.unboundedMeasuringHeight)
+    // Vendored fix (AmberAgent): `layoutSubviews` is the single authoritative
+    // writer of `textContainer.size` (bounds-derived). This measurement only
+    // re-sizes + re-lays-out on a real width transition — the view has no valid
+    // bounds yet (first real measurement) or the proposed width differs from the
+    // current container by >= 0.5pt (tolerance guards sub-pixel oscillation) —
+    // and it restores the container afterwards, so no transient width survives
+    // the call. That keeps the streaming append fast path (stable width)
+    // incremental and stops the table cell measurement chain (makeCache's
+    // unspecified-width pass vs. column-width pass) from swinging the container
+    // on every pass, which used to force a full re-layout of every cell on
+    // every appended row.
+    let boundsInvalid = bounds.width <= 0 || bounds.width.isInfinite
+    // Width comparison carries the sub-pixel tolerance (the table measurement
+    // chain oscillates by fractions of a point). The height must also stay at
+    // the unbounded sentinel: UITextView's attributedText setter resets the
+    // container to the view's frame size (e.g. height 1 on a not-yet-laid-out
+    // view), and a non-sentinel height truncates the laid-out lines, so
+    // `usedRect` would report a constant (first-line) height.
+    let widthDiffers = abs(textContainer.size.width - containerWidth) >= 0.5
+    let heightDiffers = textContainer.size.height != ParagraphUIView.unboundedMeasuringHeight
+    let shouldRelayout = boundsInvalid || widthDiffers || heightDiffers
+    if shouldRelayout {
+      let previousContainerWidth = textContainer.size.width
+      textContainer.size = measuringSize
+      // A real width transition must re-lay the fragments at the proposed
+      // width: TextKit 1's incremental layout keeps fragments at their previous
+      // width, and `usedRect(for:)`/`ensureLayout` do not re-lay fragments
+      // invalidated by a container resize — they keep reporting the stale
+      // width. `invalidateLayout` + `glyphRange(for:)` force the re-layout
+      // (glyphRange is the only measurement API that re-lays container-dirty
+      // fragments); the rects are then read directly because `usedRect` can lag
+      // a just-invalidated layout by one query. This path only runs on a
+      // genuine width transition (>= 0.5pt), a height-sentinel repair, or the
+      // first measurement — never on the steady-state streaming path.
+      layoutManager.invalidateLayout(
+        forCharacterRange: NSRange(location: 0, length: textStorage.length),
+        actualCharacterRange: nil
+      )
+      _ = layoutManager.glyphRange(for: textContainer)
+      let used = Self.laidOutBounds(layoutManager: layoutManager, textContainer: textContainer)
+      // Restore the width so no transient measurement width survives the call
+      // (single-writer contract: `layoutSubviews` owns the container width).
+      // The height stays at the unbounded sentinel — restoring a view-height
+      // value would truncate the laid-out lines and corrupt the next measure.
+      textContainer.size = CGSize(
+        width: previousContainerWidth,
+        height: ParagraphUIView.unboundedMeasuringHeight
+      )
+      let measuredWidth = (used.width + textContainerInset.left + textContainerInset.right).rounded(.up)
+      return CGSize(
+        width: min(measuredWidth, size.width),
+        height: (used.height + textContainerInset.top + textContainerInset.bottom).rounded(.up)
+      )
+    }
+    // Steady state (including the table measurement chain's repeated
+    // same-width passes): measure against the container as-is, no invalidation.
+    // `glyphRange(for:)` lays out only the appended glyphs, so the height stays
+    // incremental; ensureLayout(for:) is the known-slow API and must not be used
+    // on the streaming path.
+    _ = layoutManager.glyphRange(for: textContainer)
+    let used = layoutManager.usedRect(for: textContainer)
+    let measuredWidth = (used.width + textContainerInset.left + textContainerInset.right).rounded(.up)
+    return CGSize(
+      width: min(measuredWidth, size.width),
+      height: (used.height + textContainerInset.top + textContainerInset.bottom).rounded(.up)
+    )
+  }
+
+  /// Union of the actually laid-out line fragments. `usedRect(for:)` can lag a
+  /// just-invalidated layout by one query; reading the fragments directly gives
+  /// the width the text will really render at. O(line count) — only called on
+  /// container-width transitions, never on the steady-state streaming path.
+  private static func laidOutBounds(
+    layoutManager: NSLayoutManager,
+    textContainer: NSTextContainer
+  ) -> CGRect {
+    let glyphCount = layoutManager.numberOfGlyphs
+    guard glyphCount > 0 else { return .zero }
+    var bounds = CGRect.null
+    var glyphIndex = 0
+    while glyphIndex < glyphCount {
+      var range = NSRange(location: 0, length: 0)
+      let rect = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: &range)
+      bounds = bounds.union(rect)
+      guard range.length > 0 else { break }
+      glyphIndex = range.location + range.length
+    }
+    return bounds.isNull ? .zero : bounds
+  }
+
+  func setParagraphContents(
+    _ newContents: NSMutableAttributedString,
+    lineSpacing: CGFloat? = nil,
+    animatedByWord: Bool,
+    appendsTailFadeAsUnit: Bool = false
+  ) {
+    // Keep the cached interface style up to date for citation preview rendering.
+    // This runs on the main thread so it's safe to read traitCollection here.
+    InlineCitationAttachment.updateInterfaceStyle(traitCollection.userInterfaceStyle)
+
+    guard paragraphContents != newContents || self.lineSpacing != lineSpacing else {
+      return
+    }
+
+    // Streaming publishes on the TextKit 1 path almost always extend the
+    // previous contents. Appending only the new tail keeps TextKit's layout
+    // for the existing text valid (a full attributedText replacement
+    // invalidates the whole paragraph), and keeps in-flight word fades running.
+    // Animation is not a prerequisite: completion turns shouldAnimateText off
+    // while the last beats are still prefix extensions. Gating append on
+    // animatedByWord forced a full CJK relayout and tripped the 10s watchdog.
+    if usesTextKit1,
+       self.lineSpacing == lineSpacing,
+       let appendedRange = paragraphContents.appendedTailRange(toBecome: newContents) {
+      #if DEBUG
+      ParagraphUIViewAppendPathTestHook.recordHit()
+      #endif
+      self.paragraphContents = newContents
+      let suffix = NSMutableAttributedString(
+        attributedString: newContents.attributedSubstring(from: appendedRange)
+      )
+      if let lineSpacing {
+        suffix.setLineSpacing(lineSpacing)
+      }
+      invalidateCachedSize()
+      textStorage.beginEditing()
+      textStorage.append(suffix)
+      textStorage.endEditing()
+      setNeedsLayout()
+      // TextKit 1 is selected only for attachment-free paragraphs. Avoid a
+      // full attributed-range scan on every append when no citation action can
+      // exist on this path.
+      accessibilityLabel = textStorage.string
+      accessibilityCustomActions = nil
+      invalidateIntrinsicContentSize()
+      if animatedByWord {
+        appendFadeAnimations(in: appendedRange, asUnit: appendsTailFadeAsUnit)
+      }
+      return
+    }
+
+    #if DEBUG
+    if !usesTextKit1 {
+      ParagraphUIViewAppendPathTestHook.recordMiss("textKit2")
+    } else if self.lineSpacing != lineSpacing {
+      ParagraphUIViewAppendPathTestHook.recordMiss("lineSpacingChanged")
+    } else {
+      ParagraphUIViewAppendPathTestHook.recordMiss(
+        paragraphContents.appendedTailRangeMissReasonForTesting(toBecome: newContents)
+      )
+    }
+    #endif
+
+    self.paragraphContents = newContents
+    self.lineSpacing = lineSpacing
+
+    let oldAttributedString: NSAttributedString = attributedText
+    let finalString: NSMutableAttributedString
+    if lineSpacing != nil {
+      finalString = applyLineSpacing(to: newContents, lineSpacing: lineSpacing)
+    } else {
+      finalString = newContents
+    }
+
+    guard finalString != oldAttributedString else {
+      return
+    }
+
+    // Stop display link update before updating the attributed string
+    tearDownDisplayLink()
+    // Vendored fix (AmberAgent): a full replacement invalidates every in-flight
+    // word fade — their ranges address the previous text. Drop them before any
+    // fades for the newly appended tail are added below; otherwise the stale
+    // ranges apply wrong alphas to unrelated characters in the replacement.
+    activeAnimations.removeAll()
+    invalidateCachedSize()
+    attributedText = finalString
+
+    // Vendored fix (AmberAgent): a reused view's TextKit2 text container can still
+    // be sized for a previous, wider context (e.g. an unconstrained table cell).
+    // `bounds` is not yet valid here (SwiftUI hasn't positioned a freshly reused
+    // view when its content is first set), so the actual width re-sync happens in
+    // `layoutSubviews`, once bounds are real; force a layout pass to make sure
+    // that happens.
+    setNeedsLayout()
+
+    configureAccessibility(for: finalString)
+
+    invalidateIntrinsicContentSize()
+
+    // Vendored fix (AmberAgent): a non-append replacement can keep a real text
+    // prefix while changing everything after it. The old-length heuristic skipped
+    // changed leading glyphs (and skipped all fades when the replacement was
+    // shorter). Fade the actual changed suffix instead.
+    let commonPrefixLength = oldAttributedString.string
+      .commonPrefix(with: attributedText.string, options: .literal)
+      .utf16.count
+    let changedContentLength = attributedText.length - commonPrefixLength
+
+    if animatedByWord,
+       changedContentLength > 0 {
+      appendFadeAnimations(
+        in: NSRange(location: commonPrefixLength, length: changedContentLength),
+        asUnit: appendsTailFadeAsUnit
+      )
+    } else {
+      // If no animation needed anymore, clean up all existings animations if any.
+      activeAnimations.removeAll()
+    }
+  }
+
+  private func appendFadeAnimations(in newContentRange: NSRange, asUnit: Bool = false) {
+    guard newContentRange.length > 0 else { return }
+    let baseStartTime = CACurrentMediaTime()
+    if asUnit {
+      // Vendored addition (AmberAgent): fade the whole appended tail as one
+      // animation. Streaming publishes ~12-36 characters per beat, so a single
+      // fade per beat reads as continuous progressive appearance while costing
+      // one display-link animation entry instead of one per word (each entry
+      // rewrites foreground-color alpha across its range every frame — the
+      // per-word fan-out dominated main-thread time during fast streams).
+      // The duration itself scales with the beat size (see
+      // unitFadeDuration(forAppendedLength:)) so drain-rate appends cannot
+      // pile up dozens of concurrent 0.5s fades.
+      activeAnimations.append(FadeAnimationData(
+        startTime: baseStartTime,
+        duration: Self.unitFadeDuration(forAppendedLength: newContentRange.length),
+        range: newContentRange
+      ))
+    } else {
+      // Animate word by word
+      let wordRanges = attributedText.splitIntoWords(withIn: newContentRange)
+      let wordCount = wordRanges.count
+      let delayBetweenWords: Double = 0.1 / Double(wordCount)
+      for (index, wordRange) in wordRanges.enumerated() {
+        let animationData = FadeAnimationData(
+          startTime: baseStartTime + Double(index) * delayBetweenWords,
+          duration: Self.animationDuration,
+          range: wordRange
+        )
+        activeAnimations.append(animationData)
+      }
+    }
+
+    updateTextViewWithCurrentAnimations()
+
+    if fadeAnimationDisplayLink == nil {
+      setUpDisplayLink()
+    }
+  }
+
+  private func applyLineSpacing(to attributedString: NSMutableAttributedString, lineSpacing: CGFloat?) -> NSMutableAttributedString {
+    let result = NSMutableAttributedString(attributedString: attributedString)
+    if let lineSpacing {
+      result.setLineSpacing(lineSpacing)
+    }
+    return result
+  }
+
+  private func setupView() {
+    // The TextKit 1 path is selected only for attachment-free paragraphs.
+    // Avoid synchronously loading and registering attachment providers on the
+    // first plain streaming line; TextKit 2 views still register them before
+    // rendering citations or LaTeX attachments.
+    if !usesTextKit1 {
+      if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.data.identifier) == nil {
+        NSTextAttachment.registerViewProviderClass(LatexViewProvider.self, forFileType: UTType.data.identifier)
+      }
+      if NSTextAttachment.textAttachmentViewProviderClass(forFileType: UTType.url.identifier) == nil {
+        NSTextAttachment.registerViewProviderClass(InlineCitationViewProvider.self, forFileType: UTType.url.identifier)
+      }
+    }
+
+    isEditable = false
+    isSelectable = true
+    isScrollEnabled = false
+    textAlignment = .left
+    backgroundColor = .clear
+    if #available(iOS 18.0, *) {
+      writingToolsBehavior = .none
+    }
+
+    setContentHuggingPriority(.defaultHigh, for: .vertical)
+    setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
+    setContentHuggingPriority(.defaultLow, for: .horizontal)
+    setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+    textContainerInset = .zero
+    textContainer.lineFragmentPadding = 0
+    textContainer.widthTracksTextView = true
+    textContainer.heightTracksTextView = true
+    textContainer.maximumNumberOfLines = 0
+    textContainer.lineBreakMode = .byWordWrapping
+
+    // When this is empty, UITextView will not override the styles set by attributes
+    self.linkTextAttributes = [:]
+
+    // Disable drag interaction to prevent crashes related to dragging from a view that might disappear
+    textDragInteraction?.isEnabled = false
+  }
+
+  /// Creates a custom accessibility action that forwards activation to `onUrlTap`.
+  private func makeAccessibilityAction(name: String, url: URL) -> UIAccessibilityCustomAction {
+    return UIAccessibilityCustomAction(name: name) { [weak self] _ in
+      guard let self else { return false }
+      self.onUrlTap(url)
+      return true
+    }
+  }
+
+  /// Generate accessibility label and actions in a single pass (optimized)
+  private func generateAccessibilityContent(from attributedString: NSAttributedString) -> AccessibilityContent? {
+    var labelComponents: [String] = []
+    var actions: [UIAccessibilityCustomAction] = []
+    let fullRange = NSRange(location: 0, length: attributedString.length)
+
+    attributedString.enumerateAttributes(in: fullRange, options: []) { attrs, range, _ in
+      // Handle citation attachments
+      if let attachment = attrs[.attachment] as? InlineCitationAttachment,
+         let citationData = attachment.citationData {
+        // Add to accessibility label
+        labelComponents.append(citationData.accessibilityLabel)
+
+        // Create accessibility action for citations
+        let actionName = String.openCitation(citationLabel: citationData.accessibilityLabel)
+        let action = makeAccessibilityAction(name: actionName, url: citationData.url)
+        actions.append(action)
+      } else {
+        // Add the regular text for this range
+        let substring = attributedString.attributedSubstring(from: range)
+        let text = substring.string
+        if !text.isEmpty {
+          labelComponents.append(text)
+        }
+      }
+    }
+
+    let accessibilityLabel = labelComponents.isEmpty ? nil : labelComponents.joined()
+
+    // Return nil if no attachments were found
+    guard !actions.isEmpty else { return nil }
+
+    return AccessibilityContent(label: accessibilityLabel, actions: actions)
+  }
+
+  /// Configure accessibility properties for the text view
+  private func configureAccessibility(for attributedString: NSAttributedString) {
+    // Generate the full accessibility content directly
+    if let accessibilityContent = generateAccessibilityContent(from: attributedString) {
+      // We have citations, use the generated content
+      accessibilityLabel = accessibilityContent.label
+      accessibilityCustomActions = accessibilityContent.actions
+    } else {
+      // No citations found, just use the plain text
+      accessibilityLabel = attributedString.string
+      accessibilityCustomActions = nil
+    }
+  }
+
+  /// Configure visual styling for citations (separate from accessibility)
+  private func configureVisualStyling(for attributedString: NSAttributedString) {
+    // This method handles visual styling that should always be applied
+    // regardless of accessibility configuration
+    // Currently, the visual styling is handled during attachment creation
+    // but this method is a placeholder for any future visual processing
+  }
+
+  // Custom easeOut curve
+  private func easeOut(_ t: CGFloat) -> CGFloat {
+    let c2: CGFloat = 0.1
+    let c4: CGFloat = 1.0
+
+    // Cubic Bezier evaluation
+    let t2 = t * t
+    let t3 = t2 * t
+    let mt = 1 - t
+    let mt2 = mt * mt
+
+    return 3 * mt2 * t * c2 + 3 * mt * t2 * c4 + t3
+  }
+
+  @objc private func updateFadeAnimation() {
+    let currentTime = CACurrentMediaTime()
+    updateTextViewWithCurrentAnimations(at: currentTime)
+    activeAnimations.removeAll { currentTime - $0.startTime >= $0.duration }
+
+    if activeAnimations.isEmpty {
+      tearDownDisplayLink()
+    }
+  }
+
+  private func updateTextViewWithCurrentAnimations(at currentTime: CFTimeInterval = CACurrentMediaTime()) {
+    textStorage.beginEditing()
+    defer { textStorage.endEditing() }
+
+    for animation in activeAnimations {
+      guard animation.range.location + animation.range.length <= textStorage.length else {
+        continue
+      }
+      let elapsed = currentTime - animation.startTime
+      let animatedAlpha: CGFloat
+
+      if elapsed < 0 {
+        animatedAlpha = 0.0
+      } else {
+        let progress = min(max(elapsed / animation.duration, 0.0), 1.0)
+        let easedProgress = easeOut(progress) // Apply ease-out curve
+        animatedAlpha = easedProgress
+      }
+
+      // Apply alpha to this animation's range, preserving each span's
+      // existing foreground color. Spans with no foreground color get a
+      // sensible default so they still fade in instead of disappearing.
+      let defaultColor = UIColor(Color.Theme.Foreground.Primary.Primary750)
+      textStorage.enumerateAttribute(.foregroundColor, in: animation.range, options: []) { value, range, _ in
+        let baseColor = (value as? UIColor) ?? defaultColor
+        textStorage.addAttribute(.foregroundColor, value: baseColor.withAlphaComponent(animatedAlpha), range: range)
+      }
+    }
+  }
+
+  private func setUpDisplayLink() {
+    fadeAnimationDisplayLink = CADisplayLink(target: self, selector: #selector(updateFadeAnimation))
+    fadeAnimationDisplayLink?.preferredFrameRateRange = CAFrameRateRange(
+      minimum: 60,
+      maximum: 120,
+      preferred: 120
+    )
+    fadeAnimationDisplayLink?.add(to: .main, forMode: .common)
+  }
+
+  private func tearDownDisplayLink() {
+    fadeAnimationDisplayLink?.remove(from: .main, forMode: .common)
+    fadeAnimationDisplayLink = nil
+  }
+
+  private func invalidateCachedSize() {
+    cachedSize = nil
+  }
+
+  /// Vendored fix (AmberAgent): reset all stale layout/content state before a
+  /// cached view is handed back for reuse. A reused view may carry a TextKit2
+  /// text container sized for a previous, wider context (e.g. an unconstrained
+  /// table cell). Without this reset the stale layout fragments render wider
+  /// than the new bounds, since `setParagraphContents` short-circuits when
+  /// `paragraphContents` still matches (or the container isn't forced to
+  /// re-layout at the new width).
+  func resetForReuse() {
+    tearDownDisplayLink()
+    activeAnimations.removeAll()
+    paragraphContents = NSMutableAttributedString()
+    lineSpacing = nil
+    attributedText = NSAttributedString()
+    invalidateCachedSize()
+    // Vendored fix (AmberAgent): also drop the previous context's frame. A
+    // recycled view keeps its old bounds (e.g. a wide table cell); with valid
+    // bounds, `intrinsicContentSize` trusts them and advertises the stale wide
+    // width as the ideal, which widens the chat row past the column and clips
+    // both edges. SwiftUI re-frames the view during layout, so resetting to
+    // zero only affects the measurement window before the new frame lands.
+    frame = .zero
+    setNeedsLayout()
+  }
+
+  func setTextContextMenu(_ menu: TextContextMenu?) {
+    textContextMenu = menu
+  }
+
+  func setMarkdownController(_ controller: MarkdownController?) {
+    markdownController = controller
+  }
+}
+
+// MARK: - UITextViewDelegate
+extension ParagraphUIView: UITextViewDelegate {
+  func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+    self.onUrlTap(URL)
+    return false
+  }
+
+  func textView(_ textView: UITextView, shouldInteractWith textAttachment: NSTextAttachment, in characterRange: NSRange) -> Bool {
+    // Check if this is our custom citation attachment with pre-decoded data
+    if let citationAttachment = textAttachment as? InlineCitationAttachment,
+       let citationData = citationAttachment.citationData {
+      self.onUrlTap(citationData.url)
+      return false
+    }
+
+    return false
+  }
+
+  func textView(_ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]) -> UIMenu? {
+    return textContextMenu?.buildUIMenu(
+      textView: textView,
+      selectedRange: range,
+      suggestedActions: suggestedActions,
+      markdownController: markdownController
+    )
+  }
+
+  func textView(_ textView: UITextView, willPresentEditMenuWith animator: any UIEditMenuInteractionAnimating) {
+    guard let textContextMenu, let markdownController else { return }
+    let clampedRange = NSIntersectionRange(textView.selectedRange, NSRange(location: 0, length: textView.attributedText.length))
+    let selectedText = textView.attributedText.attributedSubstring(from: clampedRange).string
+    for group in textContextMenu.menuGroups {
+      for item in group.items {
+        markdownController.onContextMenuAppear(id: item.id, selectedContent: selectedText)
+      }
+    }
+  }
+}
+
+#if DEBUG
+/// Test-only observation hook for `ParagraphUIView.setParagraphContents`'s append
+/// fast-path (incremental `textStorage.append`) vs the full-`attributedText`-replacement
+/// fallback. Compiled out of Release builds entirely (guarded by `#if DEBUG`, matching
+/// the existing pattern in `TableView.swift`/`DocumentView.swift`/`CodeBlockView.swift`
+/// in this package), so it carries zero production overhead and never runs in a
+/// distributed build. Not read by any production code path — added solely so
+/// `xcodebuild test` targets can measure the fast-path hit rate without guessing at it
+/// from external side effects (2026-07-25 length-scan perf audit).
+@MainActor
+enum ParagraphUIViewAppendPathTestHook {
+  static var appendHitCount = 0
+  static var fallbackMissCount = 0
+  static var missReasonCounts: [String: Int] = [:]
+
+  static func reset() {
+    appendHitCount = 0
+    fallbackMissCount = 0
+    missReasonCounts = [:]
+  }
+
+  static func recordHit() {
+    appendHitCount += 1
+  }
+
+  static func recordMiss(_ reason: String) {
+    fallbackMissCount += 1
+    missReasonCounts[reason, default: 0] += 1
+  }
+}
+
+extension NSAttributedString {
+  /// Test-only diagnostic mirror of `appendedTailRange(toBecome:)` that classifies
+  /// *why* an append fast-path attempt didn't qualify, instead of just returning nil.
+  /// Duplicates the same checks read-only; never called from any production path, and
+  /// compiled out of Release builds along with the rest of this `#if DEBUG` block.
+  func appendedTailRangeMissReasonForTesting(toBecome other: NSAttributedString) -> String {
+    let prefixLength = length
+    guard prefixLength > 0 else { return "previousEmpty" }
+    guard other.length > prefixLength else { return "notExtending" }
+    let comparison = (other.string as NSString).compare(
+      string,
+      options: .literal,
+      range: NSRange(location: 0, length: prefixLength)
+    )
+    guard comparison == .orderedSame else { return "prefixMismatch" }
+
+    var index = 0
+    while index < prefixLength {
+      var selfRange = NSRange()
+      var otherRange = NSRange()
+      let selfAttributes = attributes(at: index, effectiveRange: &selfRange)
+      let otherAttributes = other.attributes(at: index, effectiveRange: &otherRange)
+      guard (selfAttributes as NSDictionary).isEqual(to: otherAttributes) else {
+        return "attributesChanged"
+      }
+      index = min(selfRange.location + selfRange.length, otherRange.location + otherRange.length)
+    }
+    // Should be unreachable: the real `appendedTailRange` would have matched too.
+    return "unexpectedMatch"
+  }
+}
+#endif
+
+fileprivate extension NSMutableAttributedString {
+  func setLineSpacing(_ lineSpacing: CGFloat) {
+    let paragraphStyle = NSMutableParagraphStyle()
+    paragraphStyle.lineSpacing = lineSpacing
+    paragraphStyle.alignment = .left
+    addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: length))
+  }
+}
+
+extension NSAttributedString {
+  /// If `other` extends the receiver by appending characters while leaving
+  /// every existing character and attribute run untouched, returns the
+  /// appended tail range in `other`; otherwise returns nil. The comparison is
+  /// O(attribute runs + appended length), never O(total length) of attribute
+  /// content, so streaming callers can probe it on every publish.
+  func appendedTailRange(toBecome other: NSAttributedString) -> NSRange? {
+    let prefixLength = length
+    guard prefixLength > 0, other.length > prefixLength else { return nil }
+    let comparison = (other.string as NSString).compare(
+      string,
+      options: .literal,
+      range: NSRange(location: 0, length: prefixLength)
+    )
+    guard comparison == .orderedSame else { return nil }
+
+    var index = 0
+    while index < prefixLength {
+      var selfRange = NSRange()
+      var otherRange = NSRange()
+      let selfAttributes = attributes(at: index, effectiveRange: &selfRange)
+      let otherAttributes = other.attributes(at: index, effectiveRange: &otherRange)
+      guard (selfAttributes as NSDictionary).isEqual(to: otherAttributes) else {
+        return nil
+      }
+      index = min(selfRange.location + selfRange.length, otherRange.location + otherRange.length)
+    }
+    return NSRange(location: prefixLength, length: other.length - prefixLength)
+  }
+}
+
+struct LatexAttachmentData: Codable {
+  let latex: String
+  let fontSize: CGFloat
+  let lightTextColor: String
+  let darkTextColor: String
+}
+
+extension LatexAttachmentData {
+  var resolvedTextColor: UIColor {
+    let fallback = UIColor(Color.Theme.Foreground.Primary.Primary750)
+    guard let lightColor = UIColor(hex: lightTextColor),
+          let darkColor = UIColor(hex: darkTextColor) else {
+      return fallback
+    }
+    return UIColor { trait in
+      trait.userInterfaceStyle == .dark ? darkColor : lightColor
+    }
+  }
+}
+
+final class LatexViewProvider: NSTextAttachmentViewProvider {
+  private let latex: String
+  private let fontSize: CGFloat
+  private let textColor: UIColor
+  private static let jsonDecoder = JSONDecoder()
+
+  required override init(textAttachment attachment: NSTextAttachment,
+                         parentView: UIView?,
+                         textLayoutManager: NSTextLayoutManager?,
+                         location: any NSTextLocation) {
+
+    var tempLatex = ""
+    var tempFontSize = Typography.base.uiFont.pointSize
+    var tempTextColor: UIColor = UIColor(Color.Theme.Foreground.Primary.Primary750)
+    if let data = attachment.contents {
+      if let attachmentData = try? Self.jsonDecoder.decode(LatexAttachmentData.self, from: data) {
+        tempLatex = attachmentData.latex
+        tempFontSize = attachmentData.fontSize
+        tempTextColor = attachmentData.resolvedTextColor
+      }
+    }
+    latex = tempLatex
+    fontSize = tempFontSize
+    textColor = tempTextColor
+
+    super.init(textAttachment: attachment,
+               parentView: parentView,
+               textLayoutManager: textLayoutManager,
+               location: location)
+
+    tracksTextAttachmentViewBounds = true
+  }
+
+  override func loadView() {
+    let label = MTMathUILabel()
+    label.latex = latex
+    label.textColor = textColor
+    label.displayErrorInline = false
+    label.fontSize = fontSize
+    label.setContentHuggingPriority(.defaultHigh, for: .vertical)
+    self.view = label
+  }
+
+  override func attachmentBounds(for attributes: [NSAttributedString.Key: Any],
+                                 location: any NSTextLocation,
+                                 textContainer: NSTextContainer?,
+                                 proposedLineFragment: CGRect,
+                                 position: CGPoint) -> CGRect {
+    guard let mathLabel = view as? MTMathUILabel else {
+      return .zero
+    }
+    mathLabel.sizeToFit()
+    // It's a known issue that MTMathUILabel may be cut off for some short statement. Manually add 1 to the height fix it.
+    let height = mathLabel.bounds.height.rounded(.up) + 1.0
+    let font = attributes[.font] as? UIFont ?? UIFont.systemFont(ofSize: fontSize)
+    let yOffset = (font.xHeight - height) / 2.0
+    return CGRect(x: 0, y: yOffset, width: mathLabel.bounds.width.rounded(.up), height: height)
+  }
+}

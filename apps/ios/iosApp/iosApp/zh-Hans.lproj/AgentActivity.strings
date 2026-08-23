@@ -1,0 +1,58 @@
+"agent.activity.kind.research" = "深度研究";
+"agent.activity.kind.response" = "生成回复";
+"agent.activity.kind.imageGeneration" = "图片生成";
+"agent.activity.kind.document" = "文档任务";
+"agent.activity.kind.web" = "网页任务";
+"agent.activity.kind.memory" = "记忆更新";
+"agent.activity.kind.command" = "命令任务";
+"agent.activity.kind.workflow" = "智能任务";
+
+"agent.activity.stage.preparing" = "正在准备";
+"agent.activity.stage.thinking" = "正在思考";
+"agent.activity.stage.searching" = "正在搜索";
+"agent.activity.stage.readingSources" = "正在阅读来源";
+"agent.activity.stage.readingWeb" = "正在阅读网页";
+"agent.activity.stage.generating" = "正在生成";
+"agent.activity.stage.generatingImage" = "正在生成图片";
+"agent.activity.stage.organizing" = "正在整理结果";
+"agent.activity.stage.readingDocument" = "正在读取文档";
+"agent.activity.stage.updatingMemory" = "正在更新记忆";
+"agent.activity.stage.runningTool" = "正在处理";
+"agent.activity.stage.waitingForConfirmation" = "等待你的确认";
+"agent.activity.stage.reconnecting" = "正在重新连接";
+"agent.activity.stage.stale" = "状态已过期";
+"agent.activity.stage.completed" = "已完成";
+"agent.activity.stage.failed" = "未完成";
+"agent.activity.stage.cancelled" = "已停止";
+
+"agent.activity.action.openTask" = "打开对话";
+"agent.activity.action.openConfirmation" = "打开确认";
+"agent.activity.action.viewResult" = "查看结果";
+
+"agent.activity.fact.waiting" = "待确认";
+"agent.activity.fact.stale" = "已过期";
+"agent.activity.fact.reconnecting" = "重连中";
+"agent.activity.fact.completed" = "已完成";
+"agent.activity.fact.failed" = "未完成";
+"agent.activity.fact.cancelled" = "已停止";
+
+"agent.activity.compact.preparing" = "正在准备";
+"agent.activity.compact.thinking" = "正在思考";
+"agent.activity.compact.searching" = "正在搜索";
+"agent.activity.compact.readingSources" = "正在阅读";
+"agent.activity.compact.readingWeb" = "正在读网页";
+"agent.activity.compact.generating" = "正在生成";
+"agent.activity.compact.generatingImage" = "正在绘图";
+"agent.activity.compact.organizing" = "正在整理";
+"agent.activity.compact.readingDocument" = "正在读文档";
+"agent.activity.compact.updatingMemory" = "正在记忆";
+"agent.activity.compact.runningTool" = "正在处理";
+
+"agent.activity.metric.source.count" = "已查看 %ld 个来源";
+"agent.activity.metric.source.progress" = "%ld / %ld 个来源";
+"agent.activity.metric.file.count" = "已处理 %ld 个文件";
+"agent.activity.metric.file.progress" = "%ld / %ld 个文件";
+"agent.activity.metric.image.count" = "已生成 %ld 张图片";
+"agent.activity.metric.image.progress" = "%ld / %ld 张图片";
+"agent.activity.metric.item.count" = "已处理 %ld 项";
+"agent.activity.metric.item.progress" = "%ld / %ld 项";

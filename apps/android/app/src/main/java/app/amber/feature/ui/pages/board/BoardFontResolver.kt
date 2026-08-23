@@ -1,0 +1,33 @@
+package app.amber.feature.ui.pages.board
+
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import app.amber.feature.board.TodayBoardReadingFontMode
+import app.amber.core.font.FontPackState
+import app.amber.feature.ui.theme.NotoSerifSC
+import java.io.File
+
+@Composable
+internal fun rememberBoardReadingFontFamily(
+    mode: TodayBoardReadingFontMode,
+    fontPackId: String?,
+    fontStates: List<FontPackState>,
+): FontFamily? = remember(mode, fontPackId, fontStates) {
+    when (mode) {
+        TodayBoardReadingFontMode.SYSTEM -> null
+        TodayBoardReadingFontMode.SERIF -> NotoSerifSC
+        TodayBoardReadingFontMode.SLIDES_PACK -> {
+            val file = fontStates
+                .firstOrNull { it.pack.id == fontPackId && it.installed }
+                ?.installedPath
+                ?.let(::File)
+                ?.takeIf { it.isFile }
+            runCatching {
+                file?.let { FontFamily(Font(it, weight = FontWeight.Normal)) }
+            }.getOrNull() ?: NotoSerifSC
+        }
+    }
+}

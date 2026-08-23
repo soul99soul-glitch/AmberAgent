@@ -1,0 +1,281 @@
+package app.amber.feature.task
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlin.time.Clock
+import kotlinx.serialization.json.Json
+
+class AgentTaskStore(
+    filesDirPath: String,
+    private val json: Json,
+) {
+    private val appFilesDirPath = filesDirPath
+    private val taskDir = TaskFile(filesDirPath + separatorChar() + "amberagent" + separatorChar() + "tasks").also {
+        check(it.mkdirs()) { "Unable to create agent task directory: ${it.path}" }
+    }
+    private val recoveryManager = AgentTaskRecoveryManager()
+    private val mutex = Mutex()
+    private val tasks = mutableMapOf<String, AgentTaskSnapshot>()
+    private val cancelCallbacks = mutableMapOf<String, suspend () -> Boolean>()
+    private val retryCallbacks = mutableMapOf<String, suspend () -> Boolean>()
+    @kotlin.concurrent.Volatile
+    private var taskSnapshot: Map<String, AgentTaskSnapshot> = emptyMap()
+    private val _tasksFlow = MutableStateFlow<List<AgentTaskSnapshot>>(emptyList())
+    val tasksFlow: StateFlow<List<AgentTaskSnapshot>> = _tasksFlow.asStateFlow()
+
+    init {
+        loadSnapshots()
+        // Construction is single-threaded; all post-publication mutations use [mutex].
+        publishLocked()
+    }
+
+    suspend fun register(
+        snapshot: AgentTaskSnapshot,
+        cancel: (suspend () -> Boolean)? = null,
+        retry: (suspend () -> Boolean)? = null,
+    ): AgentTaskSnapshot = upsert(snapshot, cancel, retry)
+
+    suspend fun upsert(
+        snapshot: AgentTaskSnapshot,
+        cancel: (suspend () -> Boolean)? = null,
+        retry: (suspend () -> Boolean)? = null,
+    ): AgentTaskSnapshot = mutex.withLock {
+        require(!snapshot.retryPolicy.retryable || retry != null) {
+            "Retryable agent task ${snapshot.taskId} must register a live retry adapter"
+        }
+        persist(snapshot)
+        tasks[snapshot.taskId] = snapshot
+        if (cancel != null) {
+            cancelCallbacks[snapshot.taskId] = cancel
+        } else if (!snapshot.cancelCapability) {
+            cancelCallbacks.remove(snapshot.taskId)
+        }
+        if (retry != null) {
+            retryCallbacks[snapshot.taskId] = retry
+        } else if (!snapshot.retryPolicy.retryable) {
+            retryCallbacks.remove(snapshot.taskId)
+        }
+        publishLocked()
+        snapshot
+    }
+
+    suspend fun update(
+        taskId: String,
+        status: AgentTaskStatus? = null,
+        queueState: AgentTaskQueueState? = null,
+        summary: String? = null,
+        error: String? = null,
+        lastErrorCode: String? = null,
+        outputPath: String? = null,
+        outputOffset: Long? = null,
+        cancelCapability: Boolean? = null,
+        recoveryState: AgentTaskRecoveryState? = null,
+        retryPolicy: AgentTaskRetryPolicy? = null,
+        outputRef: AgentTaskOutputRef? = null,
+        lastHeartbeatMs: Long? = null,
+        clearSummary: Boolean = false,
+        clearError: Boolean = false,
+        clearLastErrorCode: Boolean = false,
+        clearOutputPath: Boolean = false,
+        clearOutputRef: Boolean = false,
+        clearLastHeartbeat: Boolean = false,
+    ): AgentTaskSnapshot? = mutex.withLock {
+        val current = tasks[taskId] ?: return@withLock null
+        val next = current.copy(
+            status = status ?: current.status,
+            queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
+            summary = if (clearSummary) null else summary ?: current.summary,
+            error = if (clearError) null else error ?: current.error,
+            lastErrorCode = if (clearLastErrorCode) null else lastErrorCode ?: current.lastErrorCode,
+            outputPath = if (clearOutputPath) null else outputPath ?: current.outputPath,
+            outputOffset = outputOffset ?: current.outputOffset,
+            cancelCapability = cancelCapability ?: current.cancelCapability,
+            recoveryState = recoveryState ?: status?.toRecoveryState(current.type, current.retryPolicy) ?: current.recoveryState,
+            retryPolicy = retryPolicy ?: current.retryPolicy,
+            outputRef = if (clearOutputRef) null else outputRef ?: current.outputRef,
+            lastHeartbeatMs = if (clearLastHeartbeat) null else lastHeartbeatMs ?: current.lastHeartbeatMs,
+            updatedAtMs = Clock.System.now().toEpochMilliseconds(),
+        )
+        require(!next.retryPolicy.retryable || retryCallbacks.containsKey(taskId)) {
+            "Retryable agent task $taskId must retain a live retry adapter"
+        }
+        persist(next)
+        tasks[taskId] = next
+        if (!next.cancelCapability) cancelCallbacks.remove(taskId)
+        if (!next.retryPolicy.retryable) retryCallbacks.remove(taskId)
+        publishLocked()
+        next
+    }
+
+    suspend fun remove(taskId: String): Boolean = mutex.withLock {
+        val existing = tasks[taskId] ?: return@withLock false
+        deleteOrThrow(taskDir.child("$taskId.json"))
+        val removed = tasks.remove(existing.taskId) != null
+        cancelCallbacks.remove(taskId)
+        retryCallbacks.remove(taskId)
+        publishLocked()
+        removed
+    }
+
+    fun list(type: String? = null, status: AgentTaskStatus? = null): List<AgentTaskSnapshot> =
+        taskSnapshot.values
+            .filter { type == null || it.type == type }
+            .filter { status == null || it.status == status }
+            .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
+
+    fun read(taskId: String): AgentTaskSnapshot? = taskSnapshot[taskId]
+
+    suspend fun cancel(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
+        val (current, callback) = mutex.withLock {
+            val snapshot = tasks[taskId] ?: error("Unknown agent task: $taskId")
+            snapshot to cancelCallbacks[taskId]
+        }
+        if (!current.status.running) return@withContext current
+        if (!current.cancelCapability || callback == null) {
+            return@withContext update(
+                taskId = taskId,
+                error = "Task cannot be cancelled from AmberAgent.",
+            ) ?: current
+        }
+        val ok = runCatching { callback() }.getOrDefault(false)
+        if (ok) {
+            update(
+                taskId = taskId,
+                status = AgentTaskStatus.CANCELLED,
+                summary = "Cancellation requested.",
+                clearError = true,
+                clearLastErrorCode = true,
+            )
+        } else {
+            update(taskId = taskId, error = "Cancellation request failed.")
+        } ?: current
+    }
+
+    suspend fun retry(taskId: String): AgentTaskSnapshot = withContext(Dispatchers.Default) {
+        val (current, callback) = mutex.withLock {
+            val snapshot = tasks[taskId] ?: error("Unknown agent task: $taskId")
+            snapshot to retryCallbacks[taskId]
+        }
+        if (!current.retryPolicy.retryable) {
+            return@withContext update(
+                taskId = taskId,
+                error = "Task is not retryable.",
+                lastErrorCode = "retry_not_allowed",
+            ) ?: current
+        }
+        if (current.retryPolicy.retryCount >= current.retryPolicy.maxRetries) {
+            return@withContext update(
+                taskId = taskId,
+                error = "Task retry limit reached.",
+                lastErrorCode = "retry_limit_reached",
+            ) ?: current
+        }
+        if (callback == null) {
+            return@withContext update(
+                taskId = taskId,
+                recoveryState = AgentTaskRecoveryState.RETRYABLE,
+                error = "Task retry is available in metadata, but no live retry adapter is registered.",
+                lastErrorCode = "retry_adapter_missing",
+            ) ?: current
+        }
+        val retryPolicy = current.retryPolicy.copy(retryCount = current.retryPolicy.retryCount + 1)
+        val ok = runCatching { callback() }.getOrDefault(false)
+        if (ok) {
+            update(
+                taskId = taskId,
+                status = AgentTaskStatus.QUEUED,
+                queueState = AgentTaskQueueState.QUEUED,
+                recoveryState = AgentTaskRecoveryState.ACTIVE,
+                retryPolicy = retryPolicy,
+                summary = "Retry requested.",
+                clearError = true,
+                clearLastErrorCode = true,
+            )
+        } else {
+            update(
+                taskId = taskId,
+                retryPolicy = retryPolicy,
+                error = "Retry request failed.",
+                lastErrorCode = "retry_failed",
+            )
+        } ?: current
+    }
+
+    suspend fun cleanup(taskId: String, deletePrivateOutput: Boolean = false): Boolean = mutex.withLock {
+        val current = tasks[taskId] ?: return@withLock false
+        if (deletePrivateOutput) {
+            privateOutputFile(current)?.let(::deleteOrThrow)
+        }
+        deleteOrThrow(taskDir.child("$taskId.json"))
+        tasks.remove(taskId)
+        cancelCallbacks.remove(taskId)
+        retryCallbacks.remove(taskId)
+        publishLocked()
+        true
+    }
+
+    suspend fun reconcileOnStartup(): List<AgentTaskSnapshot> = mutex.withLock {
+        val now = Clock.System.now().toEpochMilliseconds()
+        val recovered = tasks.values.map { recoveryManager.recoverOnStartup(it, now) }
+        recovered.forEach(::persist)
+        recovered.forEach { snapshot -> tasks[snapshot.taskId] = snapshot }
+        publishLocked()
+        recovered.sortedByDescending { it.updatedAtMs }
+    }
+
+    private fun loadSnapshots() {
+        taskDir.listFilesByExtension("json").forEach { file ->
+            val snapshot = runCatching {
+                json.decodeFromString(AgentTaskSnapshot.serializer(), file.readText() ?: return@forEach)
+            }.getOrNull() ?: return@forEach
+            val restored = recoveryManager.recoverOnStartup(snapshot, Clock.System.now().toEpochMilliseconds())
+            tasks[restored.taskId] = restored
+            if (restored != snapshot) persist(restored)
+        }
+    }
+
+    private fun privateOutputFile(snapshot: AgentTaskSnapshot): TaskFile? {
+        val path = snapshot.outputRef?.path ?: snapshot.outputPath ?: return null
+        val file = TaskFile(path)
+        val canonical = runCatching { file.canonicalPath() }.getOrNull() ?: return null
+        val root = runCatching { TaskFile(appFilesDirPath).canonicalPath() }.getOrNull() ?: return null
+        return file.takeIf { canonical.startsWith(root + separatorChar()) }
+    }
+
+    private fun persist(snapshot: AgentTaskSnapshot) {
+        taskDir.child("${snapshot.taskId}.json")
+            .writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
+    }
+
+    private fun deleteOrThrow(file: TaskFile) {
+        if (file.exists() && !file.delete()) {
+            error("Unable to delete agent task file: ${file.path}")
+        }
+    }
+
+    private fun publishLocked() {
+        taskSnapshot = tasks.toMap()
+        _tasksFlow.value = taskSnapshot.values
+            .sortedWith(compareByDescending<AgentTaskSnapshot> { it.status.running }.thenByDescending { it.updatedAtMs })
+    }
+}
+
+fun AgentTaskStatus.toQueueState(type: String): AgentTaskQueueState = when {
+    type == "cron" && this == AgentTaskStatus.QUEUED -> AgentTaskQueueState.SCHEDULED
+    this == AgentTaskStatus.QUEUED -> AgentTaskQueueState.QUEUED
+    this == AgentTaskStatus.RUNNING -> AgentTaskQueueState.ACTIVE
+    else -> AgentTaskQueueState.TERMINAL
+}
+
+fun AgentTaskStatus.toRecoveryState(type: String, retryPolicy: AgentTaskRetryPolicy): AgentTaskRecoveryState = when {
+    type == "cron" && this == AgentTaskStatus.QUEUED -> AgentTaskRecoveryState.SCHEDULED
+    this.running -> AgentTaskRecoveryState.ACTIVE
+    retryPolicy.retryable && this in setOf(AgentTaskStatus.FAILED, AgentTaskStatus.INTERRUPTED, AgentTaskStatus.TIMED_OUT) -> AgentTaskRecoveryState.RETRYABLE
+    this == AgentTaskStatus.COMPLETED -> AgentTaskRecoveryState.OUTPUT_ONLY
+    else -> AgentTaskRecoveryState.CLEANUP_ONLY
+}

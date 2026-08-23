@@ -1,0 +1,145 @@
+package app.amber.search
+
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import app.amber.ai.core.InputSchema
+import app.amber.search.SearchResult.SearchResultItem
+import app.amber.search.SearchService.Companion.httpClient
+import app.amber.search.SearchService.Companion.json
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
+import io.ktor.http.isSuccess
+
+object MetasoSearchService : SearchService<SearchServiceOptions.MetasoOptions> {
+    override val name: String = "Metaso"
+
+    @Composable
+    override fun Description() {
+        Text(buildAnnotatedString {
+            append("秘塔搜索: ")
+            withLink(LinkAnnotation.Url("https://metaso.cn/")) {
+                append("https://metaso.cn/")
+            }
+        })
+    }
+
+    override val parameters: InputSchema?
+        get() = InputSchema.Obj(
+            properties = buildJsonObject {
+                put("query", buildJsonObject {
+                    put("type", "string")
+                    put("description", "search keyword")
+                })
+            },
+            required = listOf("query")
+        )
+
+    override val scrapingParameters: InputSchema? = null
+
+    override suspend fun search(
+        params: JsonObject,
+        commonOptions: SearchCommonOptions,
+        serviceOptions: SearchServiceOptions.MetasoOptions
+    ): Result<SearchResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+
+            val requestBody = buildJsonObject {
+                put("q", JsonPrimitive(query))
+                put("scope", JsonPrimitive("webpage"))
+                put("size", JsonPrimitive(commonOptions.resultSize))
+                put("includeSummary", JsonPrimitive(false))
+            }
+
+            val response = httpClient.post("https://metaso.cn/api/v1/search") {
+                setBody(requestBody.toString())
+                contentType(ContentType.Application.Json)
+                header("Authorization", "Bearer ${serviceOptions.apiKey}")
+                header("Accept", "application/json")
+            }
+            if (response.status.isSuccess()) {
+                val bodyRaw = response.bodyAsText()
+                val searchResponse = runCatching {
+                    json.decodeFromString<MetasoSearchResponse>(bodyRaw)
+                }.getOrElse { error("Failed to decode Metaso response") }
+
+                return@withContext Result.success(
+                    SearchResult(
+                        items = searchResponse.webpages.map { webpage ->
+                            SearchResultItem(
+                                title = webpage.title,
+                                url = webpage.link,
+                                text = webpage.snippet ?: ""
+                            )
+                        }
+                    )
+                )
+            } else {
+                response.bodyAsText()
+                error("Search request failed with code ${response.status.value}")
+            }
+        }
+    }
+
+    override suspend fun scrape(
+        params: JsonObject,
+        commonOptions: SearchCommonOptions,
+        serviceOptions: SearchServiceOptions.MetasoOptions
+    ): Result<ScrapedResult> {
+        return Result.failure(Exception("Scraping is not supported for Metaso"))
+    }
+
+    @Serializable
+    data class MetasoSearchResponse(
+        @SerialName("credits")
+        val credits: Int,
+        @SerialName("searchParameters")
+        val searchParameters: MetasoSearchParameters,
+        @SerialName("webpages")
+        val webpages: List<MetasoWebpage>
+    )
+
+    @Serializable
+    data class MetasoSearchParameters(
+        @SerialName("q")
+        val query: String,
+        @SerialName("scope")
+        val scope: String,
+        @SerialName("size")
+        val size: Int,
+    )
+
+    @Serializable
+    data class MetasoWebpage(
+        @SerialName("title")
+        val title: String,
+        @SerialName("link")
+        val link: String,
+        @SerialName("score")
+        val score: String,
+        @SerialName("snippet")
+        val snippet: String?,
+        @SerialName("summary")
+        val summary: String?,
+        @SerialName("position")
+        val position: Int,
+        @SerialName("date")
+        val date: String,
+    )
+}

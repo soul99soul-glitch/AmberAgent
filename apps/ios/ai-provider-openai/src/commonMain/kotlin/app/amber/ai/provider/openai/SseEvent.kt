@@ -1,0 +1,287 @@
+package app.amber.ai.provider.openai
+
+import io.ktor.client.HttpClient
+import io.ktor.client.plugins.ResponseException
+import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.header
+import io.ktor.client.request.prepareRequest
+import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.http.HttpHeaders
+import io.ktor.http.isSuccess
+import io.ktor.utils.io.ByteReadChannel
+import io.ktor.utils.io.readAvailable
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+
+/**
+ * Represents events in an SSE connection.
+ *
+ * Adapted from `common/src/main/java/app/amber/common/http/SSE.kt` for the KMP
+ * OpenAI provider. HTTP failures carry a typed status so callers can distinguish
+ * them from a transport interruption.
+ */
+sealed class SseEvent {
+    data object Open : SseEvent()
+
+    data class Event(val id: String?, val type: String?, val data: String) : SseEvent()
+
+    data object Closed : SseEvent()
+
+    data class Failure(val throwable: Throwable?) : SseEvent()
+}
+
+/** HTTP failures are not transport interruptions and must not be retried as a disconnect. */
+internal class OpenAISseHttpFailure(
+    val statusCode: Int,
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
+
+internal fun openAISseHttpFailure(
+    statusCode: Int,
+    body: String,
+    cause: Throwable? = null,
+): OpenAISseHttpFailure {
+    val detail = if (body.isBlank()) {
+        "HTTP $statusCode"
+    } else {
+        "HTTP $statusCode: ${body.take(1200)}"
+    }
+    return OpenAISseHttpFailure(statusCode, detail, cause)
+}
+
+/**
+ * Incremental SSE line parser with one narrow OpenAI-compatible extension:
+ * a complete JSON `data:` line (or `[DONE]`) is an event by itself even when
+ * a proxy omits the spec's blank separator. Incomplete/multiline data keeps
+ * the standard blank-line behavior.
+ */
+internal class OpenAISseLineParser {
+    private companion object {
+        val json = Json { ignoreUnknownKeys = true }
+    }
+
+    private var id: String? = null
+    private var type: String? = null
+    private val dataLines = mutableListOf<String>()
+
+    fun consume(rawLine: String): SseEvent.Event? {
+        val line = rawLine.trimEnd('\r')
+        if (line.isEmpty()) return flush()
+        if (line.startsWith(":")) return null
+
+        val trimmed = line.trim()
+        if (!trimmed.startsWith("data:") && trimmed.isStandaloneOpenAIPayload()) {
+            dataLines += trimmed
+            return flush()
+        }
+
+        val colonIndex = line.indexOf(':')
+        val field = if (colonIndex >= 0) line.substring(0, colonIndex) else line
+        val rawValue = if (colonIndex >= 0) line.substring(colonIndex + 1) else ""
+        val value = rawValue.removePrefix(" ")
+        when (field) {
+            "id" -> id = value
+            "event" -> type = value
+            "data" -> {
+                dataLines += value
+                if (value.isStandaloneOpenAIPayload()) return flush()
+            }
+        }
+        return null
+    }
+
+    fun finish(): SseEvent.Event? = flush()
+
+    private fun flush(): SseEvent.Event? {
+        val event = if (id != null || type != null || dataLines.isNotEmpty()) {
+            SseEvent.Event(id = id, type = type, data = dataLines.joinToString("\n"))
+        } else {
+            null
+        }
+        id = null
+        type = null
+        dataLines.clear()
+        return event
+    }
+
+    private fun String.isStandaloneOpenAIPayload(): Boolean {
+        var payload = trim()
+        while (payload.startsWith("data:")) {
+            payload = payload.removePrefix("data:").trimStart()
+        }
+        return payload == "[DONE]" ||
+            runCatching { json.parseToJsonElement(payload) is JsonObject }.getOrDefault(false)
+    }
+}
+
+internal enum class OpenAIStreamKind {
+    CHAT_COMPLETIONS,
+    RESPONSES,
+}
+
+/** Per-collection protocol completion check. It deliberately has no global state. */
+internal class OpenAIStreamTerminalState(
+    private val kind: OpenAIStreamKind,
+) {
+    private companion object {
+        val json = Json { ignoreUnknownKeys = true }
+    }
+
+    private var completed = false
+
+    fun observe(data: String) {
+        data.lineSequence()
+            .map { it.trim().withoutSseDataPrefix() }
+            .filter { it.isNotBlank() }
+            .forEach { payload ->
+                if (payload == "[DONE]") {
+                    completed = true
+                    return@forEach
+                }
+                val objectPayload = runCatching { json.parseToJsonElement(payload) as? JsonObject }
+                    .getOrNull() ?: return@forEach
+                completed = completed || when (kind) {
+                    OpenAIStreamKind.CHAT_COMPLETIONS ->
+                        (objectPayload["choices"] as? JsonArray).orEmpty().any { choice ->
+                            val choiceObject = choice as? JsonObject ?: return@any false
+                            (choiceObject["finish_reason"] as? JsonPrimitive)?.contentOrNull != null
+                        }
+
+                    // `response.incomplete` 同样是协议终态(输出写满上限 / 内容过滤),
+                    // 只是内容未写完。把它排除在终态之外,会让一次正常的上限截断在
+                    // 连接关闭时再被误报成"流在终态前断开"。
+                    OpenAIStreamKind.RESPONSES -> {
+                        val eventType = (objectPayload["type"] as? JsonPrimitive)?.contentOrNull
+                        eventType == "response.completed" || eventType == "response.incomplete"
+                    }
+                }
+            }
+    }
+
+    fun requireCompleted() {
+        if (!completed) {
+            throw IllegalStateException("OpenAI ${kind.name.lowercase()} stream ended before a terminal event")
+        }
+    }
+
+    private fun String.withoutSseDataPrefix(): String {
+        var value = this
+        while (value.startsWith("data:")) {
+            value = value.removePrefix("data:").trimStart()
+        }
+        return value
+    }
+}
+
+/** Decode only after a complete byte-framed line is available, preserving UTF-8 split across network reads. */
+internal suspend fun ByteReadChannel.collectUtf8Lines(
+    onLine: suspend (String) -> Unit,
+) {
+    val readBuffer = ByteArray(8 * 1024)
+    val lineBuffer = Utf8LineBuffer()
+    var previousByteWasCarriageReturn = false
+
+    while (true) {
+        val count = readAvailable(readBuffer)
+        if (count < 0) break
+
+        for (index in 0 until count) {
+            val byte = readBuffer[index]
+            if (previousByteWasCarriageReturn) {
+                previousByteWasCarriageReturn = false
+                if (byte == '\n'.code.toByte()) continue
+            }
+
+            when (byte) {
+                '\r'.code.toByte() -> {
+                    onLine(lineBuffer.takeLine())
+                    previousByteWasCarriageReturn = true
+                }
+
+                '\n'.code.toByte() -> onLine(lineBuffer.takeLine())
+                else -> lineBuffer.append(byte)
+            }
+        }
+    }
+
+    lineBuffer.takeFinalLine()?.let { onLine(it) }
+}
+
+private class Utf8LineBuffer {
+    private var bytes = ByteArray(256)
+    private var size = 0
+
+    fun append(byte: Byte) {
+        if (size == bytes.size) bytes = bytes.copyOf(bytes.size * 2)
+        bytes[size] = byte
+        size += 1
+    }
+
+    fun takeLine(): String {
+        val line = bytes.decodeToString(startIndex = 0, endIndex = size)
+        size = 0
+        return line
+    }
+
+    fun takeFinalLine(): String? = if (size == 0) null else takeLine()
+}
+
+/**
+ * Wraps Ktor's SSE client into a reactive [Flow] of [SseEvent].
+ *
+ * Ktor's SSE plugin is flaky with Darwin in this app: successful HTTP 200
+ * streams can be surfaced as SSEClientException with a buffered body, which
+ * destroys real-time streaming. Read the response channel directly instead;
+ * non-success responses retain a typed status so callers can distinguish them
+ * from a transport interruption.
+ */
+fun HttpClient.sseFlow(
+    url: String,
+    block: HttpRequestBuilder.() -> Unit = {},
+): Flow<SseEvent> = callbackFlow {
+    send(SseEvent.Open)
+    try {
+        this@sseFlow.prepareRequest(url) {
+            block()
+            header(HttpHeaders.Accept, "text/event-stream")
+        }.execute { response ->
+            if (!response.status.isSuccess()) {
+                val body = runCatching { response.bodyAsText() }.getOrDefault("")
+                send(SseEvent.Failure(openAISseHttpFailure(response.status.value, body)))
+                return@execute
+            }
+
+            val channel = response.bodyAsChannel()
+            val parser = OpenAISseLineParser()
+
+            channel.collectUtf8Lines { rawLine ->
+                parser.consume(rawLine)?.let { send(it) }
+            }
+            parser.finish()?.let { send(it) }
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: ResponseException) {
+        val status = e.response.status.value
+        val body = runCatching { e.response.bodyAsText() }.getOrDefault("")
+        send(SseEvent.Failure(openAISseHttpFailure(status, body, e)))
+        close()
+        return@callbackFlow
+    } catch (e: Exception) {
+        send(SseEvent.Failure(e))
+        close()
+        return@callbackFlow
+    }
+    send(SseEvent.Closed)
+    close()
+    awaitClose { }
+}

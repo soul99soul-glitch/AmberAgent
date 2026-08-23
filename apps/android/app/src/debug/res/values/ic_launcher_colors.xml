@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Graphite launcher background: warm cream bg token #F4F2EC -->
+    <color name="ic_launcher_bg_graphite">#FFF4F2EC</color>
+</resources>

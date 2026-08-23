@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "notes": {
+      "type": "streamable_http",
+      "url": "https://mcp.example.com/notes-a"
+    },
+    "notes": {
+      "type": "streamable_http",
+      "url": "https://mcp.example.com/notes-b"
+    }
+  }
+}

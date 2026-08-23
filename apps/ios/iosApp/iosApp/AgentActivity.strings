@@ -1,0 +1,58 @@
+"agent.activity.kind.research" = "Deep research";
+"agent.activity.kind.response" = "Response";
+"agent.activity.kind.imageGeneration" = "Image generation";
+"agent.activity.kind.document" = "Document task";
+"agent.activity.kind.web" = "Web task";
+"agent.activity.kind.memory" = "Memory update";
+"agent.activity.kind.command" = "Command task";
+"agent.activity.kind.workflow" = "Agent task";
+
+"agent.activity.stage.preparing" = "Preparing";
+"agent.activity.stage.thinking" = "Thinking";
+"agent.activity.stage.searching" = "Searching";
+"agent.activity.stage.readingSources" = "Reading sources";
+"agent.activity.stage.readingWeb" = "Reading the web";
+"agent.activity.stage.generating" = "Generating";
+"agent.activity.stage.generatingImage" = "Generating image";
+"agent.activity.stage.organizing" = "Organizing results";
+"agent.activity.stage.readingDocument" = "Reading document";
+"agent.activity.stage.updatingMemory" = "Updating memory";
+"agent.activity.stage.runningTool" = "Working";
+"agent.activity.stage.waitingForConfirmation" = "Waiting for confirmation";
+"agent.activity.stage.reconnecting" = "Reconnecting";
+"agent.activity.stage.stale" = "Status expired";
+"agent.activity.stage.completed" = "Completed";
+"agent.activity.stage.failed" = "Not completed";
+"agent.activity.stage.cancelled" = "Stopped";
+
+"agent.activity.action.openTask" = "Open chat";
+"agent.activity.action.openConfirmation" = "Open confirmation";
+"agent.activity.action.viewResult" = "View result";
+
+"agent.activity.fact.waiting" = "Needs confirmation";
+"agent.activity.fact.stale" = "Expired";
+"agent.activity.fact.reconnecting" = "Reconnecting";
+"agent.activity.fact.completed" = "Completed";
+"agent.activity.fact.failed" = "Not completed";
+"agent.activity.fact.cancelled" = "Stopped";
+
+"agent.activity.compact.preparing" = "Preparing";
+"agent.activity.compact.thinking" = "Thinking";
+"agent.activity.compact.searching" = "Searching";
+"agent.activity.compact.readingSources" = "Reading";
+"agent.activity.compact.readingWeb" = "Reading web";
+"agent.activity.compact.generating" = "Generating";
+"agent.activity.compact.generatingImage" = "Drawing";
+"agent.activity.compact.organizing" = "Organizing";
+"agent.activity.compact.readingDocument" = "Reading file";
+"agent.activity.compact.updatingMemory" = "Updating";
+"agent.activity.compact.runningTool" = "Working";
+
+"agent.activity.metric.source.count" = "%ld sources viewed";
+"agent.activity.metric.source.progress" = "%ld / %ld sources";
+"agent.activity.metric.file.count" = "%ld files processed";
+"agent.activity.metric.file.progress" = "%ld / %ld files";
+"agent.activity.metric.image.count" = "%ld images generated";
+"agent.activity.metric.image.progress" = "%ld / %ld images";
+"agent.activity.metric.item.count" = "%ld items processed";
+"agent.activity.metric.item.progress" = "%ld / %ld items";
