@@ -12,6 +12,8 @@ scripts/        平台工作区工具
 
 当前阶段不合并旧 Android/iOS 历史，也不把任一旧分支覆盖到另一端。两个来源工作区及其未提交恢复包均保留；见 `docs/current/PROJECT_STATE.md`。
 
+迁移来源、基线提交和旧历史恢复引用见 `docs/current/MIGRATION_PROVENANCE.md`。
+
 ## Build roots
 
 ```bash
@@ -30,3 +32,7 @@ cd apps/ios && xcodebuild -project iosApp/AmberAgent.xcodeproj -scheme iosApp -s
 ```
 
 日常任务从对应 worktree 的 `apps/ios` 或 `apps/android` 进入。跨端契约任务才打开完整仓库。
+
+## License
+
+项目自有代码遵循根目录 `LICENSE`。平台目录与 vendored 依赖中的独立许可证和第三方声明继续适用于对应内容。
