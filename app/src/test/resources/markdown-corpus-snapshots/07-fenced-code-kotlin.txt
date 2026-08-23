@@ -1,0 +1,72 @@
+  text=Kotlin Code Examples
+  text=Fenced code blocks with a kotlin language tag are the most common code blocks in this project's renderer. Here are several realistic snippets.
+  text=Coroutine-Based Repository
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=class UserRepository(
+ private val api: UserApi,
+ private val db: UserDao,
+ private val dispatcher: CoroutineDispatcher = Dispatchers.IO
+) {
+ fun getUser(id: String): Flow<Result<User>> = flow {
+ // Emit cached value first
+ db.getUser(id)?.let { emit(Result.success(it)) }
+ // Then fetch fresh data
+ try {
+ val remote = api.fetchUser(id)
+ db.upsert(remote)
+ emit(Result.success(remote))
+ } catch (e: HttpException) {
+ emit(Result.failure(e))
+ }
+ }.flowOn(dispatcher)
+}
+  text=Sealed State with Compose
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=sealed interface UiState<out T> {
+ data object Loading : UiState<Nothing>
+ data class Success<T>(val data: T) : UiState<T>
+ data class Error(val message: String, val cause: Throwable? = null) : UiState<Nothing>
+}
+
+@Composable
+fun <T> UiStateContent(
+ state: UiState<T>,
+ onRetry: () -> Unit,
+ content: @Composable (T) -> Unit
+) {
+ when (state) {
+ is UiState.Loading -> CircularProgressIndicator(modifier = Modifier.fillMaxSize())
+ is UiState.Error -> ErrorScreen(message = state.message, onRetry = onRetry)
+ is UiState.Success -> content(state.data)
+ }
+}
+  text=Extension Functions
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=fun String.toSlug(): String =
+ this.lowercase()
+ .replace(Regex("[^a-z0-9\\s-]"), "")
+ .trim()
+ .replace(Regex("\\s+"), "-")
+
+fun <T> List<T>.safeGet(index: Int): T? = getOrNull(index)
+
+suspend fun <T> retryWithBackoff(
+ times: Int = 3,
+ initialDelay: Long = 100L,
+ factor: Double = 2.0,
+ block: suspend () -> T
+): T {
+ var currentDelay = initialDelay
+ repeat(times - 1) {
+ try { return block() } catch (_: Exception) {}
+ delay(currentDelay)
+ currentDelay = (currentDelay * factor).toLong()
+ }
+ return block()
+}

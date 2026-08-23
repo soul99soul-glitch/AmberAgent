@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式冷启动窗口背景 -->
+    <color name="splash_bg">#FF161512</color>
+</resources>

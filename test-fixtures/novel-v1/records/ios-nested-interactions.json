@@ -1,0 +1,116 @@
+{
+  "askUserMessage": {
+    "id": {"rawValue": "78787878-7878-4787-8787-787878787878"},
+    "sequence": 1,
+    "role": "assistant",
+    "mode": "discussPlan",
+    "kind": "discussion",
+    "content": "请确认这次章节修改。",
+    "createdAt": 721692800,
+    "interaction": {
+      "askUser": {
+        "_0": {
+          "question": "要写入这次修改吗？",
+          "options": ["写入正文", "拒绝这次修改"],
+          "chapterRevision": {
+            "chapterID": {"rawValue": "90909090-9090-4090-8090-909090909090"},
+            "chapterOrdinal": 3,
+            "chapterTitle": "第三章",
+            "startParagraph": 2,
+            "endParagraph": 3,
+            "oldText": "旧段落。",
+            "newText": "新段落。",
+            "reason": "修正人物动机。"
+          }
+        }
+      }
+    }
+  },
+  "workspacePlotMessage": {
+    "id": {"rawValue": "7A7A7A7A-7A7A-4A7A-8A7A-7A7A7A7A7A7A"},
+    "sequence": 4,
+    "role": "assistant",
+    "mode": "discussPlan",
+    "kind": "discussion",
+    "content": "请确认写入剧情文件。",
+    "createdAt": 721692804,
+    "interaction": {
+      "askUser": {
+        "_0": {
+          "question": "将 plot/outline.md 写入当前剧情状态？",
+          "options": ["写入剧情", "拒绝这次修改"],
+          "workspacePlot": {
+            "path": "plot/outline.md",
+            "body": "第一幕：城门相遇。\n第二幕：秘密浮现。",
+            "reason": "同步最新剧情节点。"
+          }
+        }
+      }
+    }
+  },
+  "askUserAnswerMessage": {
+    "id": {"rawValue": "89898989-8989-4898-8989-898989898989"},
+    "sequence": 2,
+    "role": "user",
+    "mode": "discussPlan",
+    "kind": "userInput",
+    "content": "写入正文",
+    "createdAt": 721692801,
+    "interaction": {
+      "askUserAnswer": {
+        "_0": {
+          "promptMessageID": {"rawValue": "78787878-7878-4787-8787-787878787878"},
+          "answer": "写入正文"
+        }
+      }
+    }
+  },
+  "manuscriptRevertMessage": {
+    "id": {"rawValue": "A8A8A8A8-A8A8-48A8-88A8-A8A8A8A8A8A8"},
+    "sequence": 3,
+    "role": "assistant",
+    "mode": "discussPlan",
+    "kind": "discussion",
+    "content": "请确认回退最近两章。",
+    "createdAt": 721692802,
+    "interaction": {
+      "askUser": {
+        "_0": {
+          "question": "要回退最近两章吗？",
+          "options": ["回退这几章", "取消回退"],
+          "manuscriptRevert": {
+            "chapterCount": 2,
+            "chapterIDs": [
+              {"rawValue": "90909090-9090-4090-8090-909090909090"},
+              {"rawValue": "A9A9A9A9-A9A9-49A9-89A9-A9A9A9A9A9A9"}
+            ],
+            "chapterTitles": ["第三章", "第四章"],
+            "chapterOrdinals": [3, 4],
+            "targetCheckpointID": {"rawValue": "66666666-6666-4666-8666-666666666666"},
+            "expectedHeadRevision": 4,
+            "expectedWorkingRevision": 2,
+            "reason": "撤回最近生成的两章。"
+          }
+        }
+      }
+    }
+  },
+  "stateSnapshot": {
+    "id": {"rawValue": "55555555-5555-4555-8555-555555555555"},
+    "eventIDs": [],
+    "summary": "已确认人物身份。",
+    "branchOutline": "第一幕",
+    "unresolvedEntityNames": ["伊芙"],
+    "characterIdentityClarifications": [
+      {
+        "mention": "伊芙",
+        "clarification": "伊芙是城门守卫的女儿。",
+        "operationID": {"rawValue": "B0B0B0B0-B0B0-40B0-80B0-B0B0B0B0B0B0"},
+        "createdAt": 721692803
+      }
+    ],
+    "settingProposalIDs": [],
+    "recentWrittenHighlights": [],
+    "createdAt": 721692803
+  }
+}

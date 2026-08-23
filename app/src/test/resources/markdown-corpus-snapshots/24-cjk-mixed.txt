@@ -1,0 +1,49 @@
+  text=CJK 混合内容
+  text=本文件混合使用中文、英文、强调标记和 GFM 表格，用于测试渲染器在 CJK 字符与 Markdown 语法共存时的正确性。
+  text=中文段落与强调
+  text=Kotlin 是一门静态类型的编程语言，由 JetBrains 开发，2016 年 正式发布 1.0 版本。它与 Java 完全互操作，并且可以编译为 JVM 字节码、JavaScript 或原生二进制代码。
+  text=在 Android 开发中，Kotlin 已经成为首选语言。谷歌在 2019 年的 Google I/O 大会上宣布"Kotlin 优先"战略，这意味着所有新的 Android API 和示例将优先使用 Kotlin 编写。
+  text=中文加英文混排
+  text=使用 Jetpack Compose 构建 UI 时，你需要了解以下几个核心概念：
+  text=•
+  text=可组合函数（Composable）：用 @Composable 注解标记，描述 UI 的一个片段。
+  text=•
+  text=状态（State）：驱动 UI 重组（Recomposition）的数据，通常用 remember { mutableStateOf(...) } 持有。
+  text=•
+  text=副作用（Side Effect）：在可组合函数外部执行的操作，如网络请求，使用 LaunchedEffect 启动。
+  text=带中文内容的 GFM 表格
+      text=库名
+      text=用途
+      text=当前版本
+      text=Room
+      text=SQLite 数据库 ORM
+      text=2.6.1
+      text=Koin
+      text=依赖注入框架
+      text=3.5.3
+      text=Coil
+      text=图片异步加载
+      text=2.6.0
+      text=DataStore
+      text=偏好设置持久化
+      text=1.1.1
+      text=Navigation Compose
+      text=Compose 导航
+      text=2.7.7
+  text=日文示例
+  text=Kotlin コルーチンは、非同期プログラミングをシンプルに記述するための仕組みです。suspend キーワードを関数に付けることで、その関数がスレッドをブロックせずに一時停止できるようになります。
+  text=한국어 예시
+  text=코루틴은 경량 스레드라고 볼 수 있습니다. 수천 개의 코루틴을 단 몇 개의 스레드 위에서 실행할 수 있으며, 메모리 사용량이 매우 적습니다.
+  text=中英文混合的代码说明
+  text=以下是一个使用 Flow 实现的简单仓库示例：
+      text=kotlin
+      role=Button desc=Save
+      role=Button desc=Copy Code
+            text=// 用户仓库：先返回缓存，再获取远程数据
+class UserRepository(private val api: UserApi, private val dao: UserDao) {
+ fun getUser(id: String): Flow<User> = flow {
+ dao.getUser(id)?.let { emit(it) } // 发送缓存值
+ emit(api.fetchUser(id)) // 发送远程值
+ }.flowOn(Dispatchers.IO)
+}
+  text=这种"先缓存，后网络"的模式在中文社区中常被称为"离线优先"策略。

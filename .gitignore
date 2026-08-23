@@ -1,0 +1,40 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/dist
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+local.properties.bak*
+*.bak
+.cursor
+.history
+.kotlin
+
+# Perfetto trace binaries (large, regeneratable). Keep .md analysis reports.
+*.pftrace
+*.perfetto-trace
+core/**/build/
+feature/**/build/
+
+# Design handoff reference (large binaries; keep the .md/.css/.jsx specs tracked)
+/amberagent-handoff.zip
+docs/cloud-design/**/uploads/
+docs/cloud-design/**/screenshots/
+docs/cloud-design/**/.thumbnail
+
+# Local data backups — too large for GitHub, never commit
+/amberagent-notion-data-backup-*.tgz
+
+# Signing material & Firebase config — never commit
+*.jks
+*.keystore
+**/google-services.json
+
+# Local agent tooling & Python cache
+.zcode/
+__pycache__/

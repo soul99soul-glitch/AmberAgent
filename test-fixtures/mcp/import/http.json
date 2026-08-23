@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "type": "streamable_http",
+      "url": "https://mcp.example.com/fetch"
+    }
+  }
+}

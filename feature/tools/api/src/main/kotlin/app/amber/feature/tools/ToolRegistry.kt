@@ -1,0 +1,865 @@
+package app.amber.feature.tools
+
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import app.amber.ai.core.InputSchema
+import app.amber.ai.core.Tool
+import app.amber.ai.ui.UIMessagePart
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
+import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_SEATS
+import app.amber.feature.modelcouncil.EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
+import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
+import app.amber.core.agent.utils.JsonInstant
+import java.net.Inet6Address
+import java.net.InetAddress
+import java.util.Locale
+
+val EXTERNAL_CLI_COUNCIL_RUNNER_TYPES: Set<String> = setOf(
+    "external_cli",
+    "cli",
+    "gemini_cli",
+    "antigravity_cli",
+    "codex_cli",
+    "claude_code",
+    "kimi_cli",
+)
+
+data class ToolMetadata(
+    val name: String,
+    val category: String,
+    val mutates: Boolean,
+    val sensitiveRead: Boolean,
+    val needsApproval: Boolean,
+    val autoApprovable: Boolean,
+    val outputBudgetChars: Int,
+    val risk: ToolRisk,
+    val mandatoryApproval: Boolean = false,
+    val effectClass: ToolEffectClass = ToolEffectClass.READ_ONLY,
+    val supportsReconcile: Boolean = false,
+    val idempotencyKeySupported: Boolean = false,
+    /** P2-01: security capability of the tool; null = no capability mapping. */
+    val capability: Capability? = null,
+)
+
+/**
+ * Effect classification for the durable Tool Effect Ledger (P1-02).
+ *
+ *  - READ_ONLY: no state mutation; a Started-without-Finished effect can be
+ *    retried safely after a crash.
+ *  - IDEMPOTENT_WRITE: mutating, but re-executing with identical arguments
+ *    reaches the same end state (retried with the effectId as idempotency key).
+ *  - NON_IDEMPOTENT_WRITE: mutating with external side effects that cannot be
+ *    safely retried. A Started effect without Finished must be marked
+ *    OUTCOME_UNKNOWN and wait for user confirmation.
+ *
+ * Classification is a security semantic: tools we cannot prove to be safe
+ * default to NON_IDEMPOTENT_WRITE.
+ */
+enum class ToolEffectClass {
+    READ_ONLY,
+    IDEMPOTENT_WRITE,
+    NON_IDEMPOTENT_WRITE,
+}
+
+data class ToolInvocationPolicy(
+    val name: String,
+    val category: String,
+    val mutates: Boolean,
+    val needsApproval: Boolean,
+    val autoApprovable: Boolean,
+    val concurrencySafe: Boolean,
+    val outputBudgetChars: Int,
+    val risk: ToolRisk,
+    val parallelGroup: String? = null,
+    val requiresForegroundAppPackage: String? = null,
+    val speculativeEligible: Boolean = false,
+    val speculativeBlockReason: String? = null,
+    val reason: String? = null,
+    val mandatoryApproval: Boolean = false,
+    val alwaysAsk: Boolean = false,
+)
+
+class ToolRegistry private constructor(
+    private val entries: List<Entry>,
+) {
+    val metadata: List<ToolMetadata> = entries.map { it.metadata }
+
+    fun tools(): List<Tool> = entries.map { entry ->
+        entry.tool.copy(
+            needsApproval = entry.metadata.needsApproval,
+            allowsAutoApproval = entry.metadata.autoApprovable,
+            parameters = { entry.tool.parameters().withDisplayTitleHint(entry.tool.name) },
+            execute = { input ->
+                entry.tool.execute(input).enforceOutputBudget(entry.metadata.outputBudgetChars)
+            }
+        )
+    }
+
+    fun metadataFor(name: String): ToolMetadata? =
+        metadata.firstOrNull { it.name == name }
+
+    fun evaluateInvocation(toolName: String, input: JsonElement? = null): ToolInvocationPolicy? =
+        entries.firstOrNull { it.tool.name == toolName }?.tool?.invocationPolicy(input)
+
+    companion object {
+        fun from(tools: List<Tool>): ToolRegistry {
+            val duplicates = tools.groupBy { it.name }.filterValues { it.size > 1 }.keys
+            require(duplicates.isEmpty()) {
+                "Duplicate tool names registered: ${duplicates.sorted().joinToString(", ")}"
+            }
+            return ToolRegistry(
+                tools.map { tool ->
+                    Entry(
+                        tool = tool,
+                        metadata = tool.toMetadata()
+                    )
+                }
+            )
+        }
+
+        private fun Tool.toMetadata(): ToolMetadata {
+            val mutates = mutatesState()
+            val category = category()
+            val riskProfile = riskProfile()
+            val risk = riskProfile.risk
+            val effectiveNeedsApproval = mandatoryApproval || needsApproval || mutates || risk == ToolRisk.High
+            val effectiveAutoApproval = !mandatoryApproval &&
+                allowsAutoApproval &&
+                risk != ToolRisk.High &&
+                !requiresFailClosedAutoApproval(
+                    mutates = mutates,
+                    category = category,
+                    riskExplicit = riskProfile.explicit,
+                )
+            return ToolMetadata(
+                name = name,
+                category = category,
+                mutates = mutates,
+                sensitiveRead = sensitiveRead(),
+                needsApproval = effectiveNeedsApproval,
+                autoApprovable = effectiveAutoApproval,
+                outputBudgetChars = outputBudgetChars(),
+                risk = risk,
+                mandatoryApproval = mandatoryApproval,
+                effectClass = effectClass(),
+                supportsReconcile = supportsReconcile(),
+                idempotencyKeySupported = idempotencyKeySupported(),
+                capability = capability(),
+            )
+        }
+    }
+
+    private data class Entry(
+        val tool: Tool,
+        val metadata: ToolMetadata,
+    )
+}
+
+private fun InputSchema?.withDisplayTitleHint(toolName: String): InputSchema? = when (this) {
+    is InputSchema.Obj if toolName == "subagent_start" -> this
+
+    is InputSchema.Obj -> copy(
+        properties = JsonObject(
+            properties.toMutableMap().apply {
+                put(
+                    "display_title",
+                    buildJsonObject {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "Optional short user-facing action title in Chinese, 4-14 chars, describing this specific step (e.g. 写入第一卷, 合并最终文件)."
+                        )
+                    }
+                )
+            }
+        )
+    )
+
+    null -> null
+}
+
+enum class ToolRisk {
+    Normal,
+    Sensitive,
+    High,
+}
+
+private data class RiskProfile(
+    val risk: ToolRisk,
+    val explicit: Boolean,
+)
+
+fun Tool.invocationPolicy(inputText: String): ToolInvocationPolicy {
+    val input = runCatching {
+        JsonInstant.parseToJsonElement(inputText.ifBlank { "{}" })
+    }.getOrNull()
+    return invocationPolicy(input)
+}
+
+// Static loopback/private host classification. Hostname-based (no DNS resolution),
+// so public names that resolve to private IPs are not caught here; this covers the
+// explicit localhost/RFC1918/link-local targets an agent would request directly.
+fun String?.isPrivateNetworkTarget(): Boolean {
+    if (this.isNullOrBlank()) return false
+    val host = runCatching { java.net.URI(trim()).host }.getOrNull()?.lowercase(Locale.ROOT) ?: return false
+    val bare = host.removePrefix("[").removeSuffix("]")
+    if (bare == "localhost" || bare.endsWith(".localhost") || bare.endsWith(".local") ||
+        bare.endsWith(".internal") || bare.endsWith(".lan")
+    ) {
+        return true
+    }
+    if (bare.contains(':')) {
+        return bare == "::" || bare == "::1" || bare.startsWith("fe80:") ||
+            bare.startsWith("fc") || bare.startsWith("fd")
+    }
+    val parts = bare.split('.')
+    val octets = parts.mapNotNull { it.toIntOrNull() }
+    if (parts.size == 4 && octets.size == 4 && octets.all { it in 0..255 }) {
+        val a = octets[0]
+        val b = octets[1]
+        return a == 0 || a == 127 || a == 10 ||
+            (a == 192 && b == 168) ||
+            (a == 172 && b in 16..31) ||
+            (a == 169 && b == 254) ||
+            (a == 100 && b in 64..127)
+    }
+    return false
+}
+
+fun String?.resolvesToPrivateNetworkTarget(): Boolean {
+    if (isPrivateNetworkTarget()) return true
+    if (this.isNullOrBlank()) return false
+    val host = runCatching { java.net.URI(trim()).host }.getOrNull() ?: return false
+    return runCatching { InetAddress.getAllByName(host).any(InetAddress::isPrivateNetworkAddress) }
+        .getOrDefault(false)
+}
+
+fun InetAddress.isPrivateNetworkAddress(): Boolean {
+    if (isAnyLocalAddress || isLoopbackAddress || isLinkLocalAddress || isSiteLocalAddress) return true
+    val raw = address
+    if (this is Inet6Address) {
+        return raw.isNotEmpty() && (raw[0].toInt() and 0xFE) == 0xFC
+    }
+    if (raw.size != 4) return false
+    val a = raw[0].toInt() and 0xFF
+    val b = raw[1].toInt() and 0xFF
+    return a == 0 || a == 127 || a == 10 ||
+        (a == 192 && b == 168) ||
+        (a == 172 && b in 16..31) ||
+        (a == 169 && b == 254) ||
+        (a == 100 && b in 64..127)
+}
+
+fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
+    val baseMutates = mutatesState()
+    val baseRiskProfile = riskProfile()
+    val baseRisk = baseRiskProfile.risk
+    var mutates = baseMutates
+    var risk = baseRisk
+    var riskExplicit = baseRiskProfile.explicit
+    var mandatoryApprovalEffective = mandatoryApproval
+    var needsApproval = mandatoryApprovalEffective || needsApproval || baseMutates || baseRisk == ToolRisk.High
+    var autoApprovable = !mandatoryApprovalEffective && allowsAutoApproval && baseRisk != ToolRisk.High
+    var concurrencySafe = concurrencySafe()
+
+    when (name) {
+        "http_request" -> {
+            val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
+            val readMethod = method in setOf("GET", "HEAD")
+            // GET/HEAD against loopback/private hosts can probe localhost and LAN
+            // services, so they lose the read-only fast path and surface as High
+            // risk — auto-approved only via the explicit high-risk toggle.
+            val privateTarget = input.stringValue("url").isPrivateNetworkTarget()
+            val safe = readMethod && !privateTarget
+            mutates = !readMethod
+            risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
+            needsApproval = !safe
+            autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = safe
+        }
+
+        "memory_tool" -> {
+            val op = input.stringValue("action")
+                ?: input.stringValue("operation")
+                ?: input.stringValue("op")
+                ?: input.stringValue("type")
+                ?: "read"
+            val readOnly = op.lowercase(Locale.ROOT) in setOf("read", "get", "list", "search", "status", "query")
+            mutates = !readOnly
+            risk = if (readOnly) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
+            needsApproval = !readOnly
+            autoApprovable = readOnly || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = readOnly
+        }
+
+        "cron_task_list", "agent_task_list", "agent_task_read", "agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list", "provider_config_status" -> {
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = true
+        }
+
+        // Provider config writers: mutating settings; High risk, always needs
+        // explicit approval (only the explicit high-risk auto-approval toggle
+        // may run them unattended). refresh/set_model_slot are idempotent
+        // writes but still require approval — writing persisted settings is a
+        // side effect per the config tool contract.
+        "provider_config_apply", "provider_refresh_models", "settings_set_model_slot" -> {
+            mutates = true
+            risk = ToolRisk.High
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
+
+        // P4-03: js_cell_* operate on the sandboxed cell runtime only — no
+        // user data, no external side effects. Not concurrency-safe: parallel
+        // calls against the same cell must serialize (the runtime serializes
+        // per cell anyway; the policy just avoids parallel dispatch).
+        "js_cell_create", "js_cell_run", "js_cell_wait", "js_cell_terminate", "js_cell_store", "js_cell_load" -> {
+            mutates = false
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
+        "agent_prompt_config" -> {
+            val action = input.stringValue("action") ?: "get"
+            val readOnly = action == "get"
+            mutates = !readOnly
+            risk = if (readOnly) ToolRisk.Normal else ToolRisk.Sensitive
+            riskExplicit = true
+            needsApproval = !readOnly
+            autoApprovable = readOnly || allowsAutoApproval
+            concurrencySafe = readOnly
+        }
+
+        "mcp_call_tool" -> {
+            mutates = true
+            risk = ToolRisk.Sensitive
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
+
+        "wm_eval" -> {
+            // Arbitrary JS in the user's logged-in WebView — treat as high-risk
+            // mutation; always needs explicit approval.
+            mutates = true
+            risk = ToolRisk.High
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = false
+            concurrencySafe = false
+        }
+
+        "wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select" -> {
+            // DOM mutation on a logged-in page — Sensitive by default; the
+            // adapter system can pre-approve known-origin tools later.
+            mutates = true
+            risk = ToolRisk.Sensitive
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
+
+        "wm_tab_close" -> {
+            // Destroys a session the agent itself opened. Mutates state but
+            // not user data — keep at Normal risk + auto-approvable to avoid
+            // approval-fatigue training. The user can still observe the
+            // close in activity logs.
+            mutates = true
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
+
+        "wm_site_add" -> {
+            // Plan v2: agent-driven site add. Reversible (user can delete in
+            // the settings page or via wm_site_remove). Doesn't grant the
+            // agent new capabilities — agent already had wm_open for any URL.
+            // Auto-approve so bulk-add scenarios ("add these 10 sites I'm
+            // pasting") don't require 10 confirmations.
+            mutates = true
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
+        "wm_site_remove" -> {
+            // Destructive: clears cookies + OAuth credentials + tokens for
+            // the site. Always require explicit per-call approval.
+            mutates = true
+            risk = ToolRisk.Sensitive
+            riskExplicit = true
+            needsApproval = true
+            autoApprovable = allowsAutoApproval
+            concurrencySafe = false
+        }
+
+        "wm_profile_synthesize" -> {
+            // Writes a Site Profile to the user-imported namespace. Reversible
+            // (profile deleted with the site or by re-synthesizing). The profile
+            // only enriches wm_open/wm_state output with hints — it cannot grant
+            // signing or arbitrary-JS powers (synthesize doesn't accept scripts,
+            // so the resulting profile carries no call_page_fn permissions).
+            // Auto-approve so the agent can iterate on hints across a chat turn.
+            mutates = true
+            risk = ToolRisk.Normal
+            riskExplicit = true
+            needsApproval = false
+            autoApprovable = true
+            concurrencySafe = false
+        }
+
+        "wm_signed_fetch" -> {
+            // Phase 2 M2.2: profile-driven signed fetch. The risk is
+            // method-dependent — GET/HEAD reads are safe (user's own
+            // cookies, same as a browser tab fetching the URL), but
+            // write methods need explicit human approval since they
+            // can perform follow/like/post actions on the user's behalf.
+            val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
+            val safe = method in setOf("GET", "HEAD")
+            mutates = !safe
+            risk = if (safe) ToolRisk.Normal else ToolRisk.High
+            riskExplicit = true
+            needsApproval = !safe
+            autoApprovable = safe || (allowsAutoApproval && risk != ToolRisk.High)
+            concurrencySafe = safe
+        }
+
+        "model_council_start" -> {
+            if (input.containsExternalCliCouncilSeat() || input.allowsExternalCliCouncil()) {
+                mutates = true
+                risk = ToolRisk.Sensitive
+                riskExplicit = true
+                needsApproval = true
+                autoApprovable = false
+                concurrencySafe = false
+                mandatoryApprovalEffective = true
+            }
+        }
+    }
+
+    val category = category()
+    if (requiresFailClosedAutoApproval(mutates = mutates, category = category, riskExplicit = riskExplicit)) {
+        autoApprovable = false
+    }
+    val alwaysAsk = alwaysAsk(input)
+    val foregroundRequirement = foregroundPackageRequirement()
+    // For wm_* tools we want concurrent execution across different sessions
+    // but strict serialization within a session, regardless of mutates/risk.
+    // Derive the parallel group from the session_id in input.
+    val baseParallelGroup = if (concurrencySafe && !mutates && risk == ToolRisk.Normal) category else null
+    val parallelGroup = if (name.startsWith("wm_")) {
+        val sessionId = input.stringValue("session_id")
+        if (sessionId != null) "webmount:$sessionId" else "webmount:unbound"
+    } else {
+        baseParallelGroup
+    }
+    val speculativeBlockReason = speculativeBlockReason(
+        category = category,
+        mutates = mutates,
+        needsApproval = needsApproval,
+        concurrencySafe = concurrencySafe,
+        risk = risk,
+        parallelGroup = parallelGroup,
+        requiresForegroundAppPackage = foregroundRequirement,
+    )
+    return ToolInvocationPolicy(
+        name = name,
+        category = category,
+        mutates = mutates,
+        needsApproval = needsApproval,
+        autoApprovable = autoApprovable,
+        concurrencySafe = concurrencySafe,
+        outputBudgetChars = outputBudgetChars(),
+        risk = risk,
+        parallelGroup = parallelGroup,
+        requiresForegroundAppPackage = foregroundRequirement,
+        speculativeEligible = speculativeBlockReason == null,
+        speculativeBlockReason = speculativeBlockReason,
+        mandatoryApproval = mandatoryApprovalEffective,
+        alwaysAsk = alwaysAsk,
+    )
+}
+
+internal fun Tool.category(): String = when {
+    name.startsWith("external_file_") -> "external_file"
+    name.startsWith("file_") || name.startsWith("archive_") ||
+        name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
+    name.startsWith("icloud_") -> "cloud"
+    name.startsWith("officepro_") -> "office"
+    name.startsWith("terminal_") -> "terminal"
+    name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
+    name.startsWith("webview_") -> "webview"
+    name.startsWith("wm_") -> "webmount"
+    name.startsWith("hn_") -> "webmount_hackernews"
+    name.startsWith("reddit_") -> "webmount_reddit"
+    name.startsWith("juejin_") -> "webmount_juejin"
+    name.startsWith("feishu_docs_") -> "webmount_feishu_docs"
+    name.startsWith("github_") -> "webmount_github"
+    name.startsWith("bilibili_") -> "webmount_bilibili"
+    name.startsWith("zhihu_") -> "webmount_zhihu"
+    name.startsWith("screen_") || name == "vlm_task" -> "screen"
+    name.startsWith("sms_") || name.startsWith("contacts_") || name.startsWith("calendar_") ||
+        name.startsWith("call_") || name.startsWith("apps_") || name.startsWith("app_") ||
+        name in setOf("device_phone_state", "media_search", "location_current", "audio_record_once", "notification_list", "usage_stats_list", "battery_status", "network_status", "wifi_status", "device_info", "settings_open", "intent_open", "share_text", "share_file", "notification_post") -> "system"
+    name.startsWith("memory_") -> "memory"
+    name == "agent_prompt_config" -> "prompt_config"
+    name.startsWith("conversation_") || name.startsWith("session_") -> "context"
+    name.startsWith("deep_read_") -> "deep_read"
+    name.startsWith("cron_task_") -> "cron"
+    name.startsWith("agent_task_") || name == "agent_runtime_status" -> "task"
+    name in setOf("tool_policy_explain", "tool_search", "tools_list") -> "utility"
+    name.startsWith("subagent_") -> "subagent"
+    name.startsWith("model_council_") -> "model_council"
+    name.startsWith("skill") || name == "use_skill" -> "skill"
+    name.startsWith("mcp_") || name.startsWith("mcp__") -> "mcp"
+    else -> "utility"
+}
+
+private fun Tool.mutatesState(): Boolean {
+    if (name == "memory_tool") return true
+    if (name == "deep_read_open") return true
+    if (name == "run_plan_update") return false
+    // P4-03: js_cell_* manage a sandboxed cell's own private state (metadata,
+    // store, terminal status) — same pattern as run_plan_update; they never
+    // mutate user data, so they stay READ_ONLY for the ledger and
+    // approval-free for the agent loop.
+    if (name.startsWith("js_cell_")) return false
+    // Provider config writers: apply writes credentials/endpoints, refresh
+    // models merges a fetched catalog, set_model_slot rewrites a settings
+    // slot. provider_config_status stays read-only (its name carries "status").
+    if (name in setOf(
+            "provider_config_apply",
+            "provider_refresh_models",
+            "settings_set_model_slot",
+            "theme_pack_import",
+            "recipe_import",
+            "recipe_rollback",
+            "recipe_delete",
+        )
+    ) return true
+    return hasMutatingNameHint() ||
+        name.contains("_install") ||
+        name.contains("_stop") ||
+        name == "pdf_render_page" ||
+        name == "mcp_call_tool" ||
+        name == "officepro_make_report" ||
+        name == "officepro_project_update" ||
+        name == "agent_prompt_config" ||
+        name == "model_council_make_report" ||
+        name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
+        name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") ||
+        name.startsWith("memory_") && name != "memory_list" ||
+        name == "conversation_compact" ||
+        name == "deep_read_finish" ||
+        name in setOf("subagent_start", "subagent_cancel") ||
+        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") ||
+        name.startsWith("skill_enable") ||
+        name.startsWith("skill_disable")
+}
+
+private fun String.hasToken(token: String): Boolean =
+    this == token || startsWith("${token}_") || endsWith("_$token") || contains("_${token}_")
+
+private fun Tool.hasMutatingNameHint(): Boolean {
+    val readOnlyName = name.hasToken("read") || name.hasToken("list") || name.hasToken("search") || name.hasToken("status")
+    return name.contains("_write") ||
+        name.contains("_edit") ||
+        name.contains("_move") ||
+        name.contains("_delete") ||
+        name.hasToken("create") ||
+        name.hasToken("append") ||
+        (name.hasToken("comment") && !readOnlyName) ||
+        (name.hasToken("post") && !readOnlyName) ||
+        name.hasToken("publish") ||
+        name.hasToken("send") ||
+        name.hasToken("update")
+}
+
+private fun Tool.riskProfile(): RiskProfile = when {
+    name == "http_request" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "memory_tool" -> RiskProfile(ToolRisk.High, explicit = true)
+    name == "mcp_call_tool" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "wm_eval" -> RiskProfile(ToolRisk.High, explicit = true)
+    // Provider config writers rewrite persisted credentials / endpoints /
+    // model slots — High risk so plain auto-approval can never silently run
+    // them (provider.config capability floor keeps this true flag-off too).
+    name in setOf("provider_config_apply", "provider_refresh_models", "settings_set_model_slot") ->
+        RiskProfile(ToolRisk.High, explicit = true)
+    name in setOf("theme_pack_import", "recipe_import", "recipe_rollback", "recipe_delete") ->
+        RiskProfile(ToolRisk.High, explicit = true)
+    name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name in setOf("session_read", "session_expand") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "pdf_render_page" -> RiskProfile(ToolRisk.High, explicit = true)
+    name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name == "subagent_start" -> RiskProfile(ToolRisk.Normal, explicit = true)
+    name == "officepro_read_screen" ||
+        name == "officepro_capture_context" ||
+        name == "officepro_context_digest" ||
+        name == "officepro_daily_radar" ||
+        name == "officepro_project_briefing" ||
+        name == "officepro_document_warroom" ||
+        name == "officepro_open_items_radar" ||
+        name == "officepro_meeting_closure" ||
+        name == "officepro_create_task_draft" ||
+        name == "officepro_create_base_record_draft" ||
+        name == "officepro_reply_draft" ||
+        name == "officepro_project_context" -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("external_file_") && (name.contains("_write") || name.contains("_delete")) -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> RiskProfile(ToolRisk.High, explicit = true)
+    name.startsWith("screen_") || name == "vlm_task" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    name.startsWith("terminal_") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
+    else -> RiskProfile(ToolRisk.Normal, explicit = false)
+}
+
+private fun Tool.alwaysAsk(input: JsonElement?): Boolean = when (name) {
+    "sms_send", "contacts_write" -> true
+    "call_phone" -> input.booleanValue("direct_call")
+    else -> false
+}
+
+private fun requiresFailClosedAutoApproval(
+    mutates: Boolean,
+    category: String,
+    riskExplicit: Boolean,
+): Boolean =
+    !riskExplicit && (mutates || category in FAIL_CLOSED_AUTO_APPROVAL_CATEGORIES)
+
+private val FAIL_CLOSED_AUTO_APPROVAL_CATEGORIES = setOf(
+    "cloud",
+    "system",
+    "external_file",
+    "terminal",
+    "screen",
+    "office",
+)
+
+private fun Tool.concurrencySafe(): Boolean = when {
+    name in setOf("terminal_install_packages", "terminal_job_stop", "terminal_execute", "terminal_job_start") -> false
+    name.startsWith("cron_task_") && name != "cron_task_list" -> false
+    name.startsWith("agent_task_") || name in setOf("agent_runtime_status", "tool_policy_explain", "tool_search", "tools_list") -> true
+    name.startsWith("subagent_") || name.startsWith("model_council_") -> false
+    else -> !mutatesState()
+}
+
+private fun Tool.sensitiveRead(): Boolean =
+    name in setOf("session_read", "session_expand") ||
+        name.startsWith("screen_") ||
+        name in setOf(
+            "officepro_read_screen",
+            "officepro_capture_context",
+            "officepro_context_digest",
+        )
+
+private fun Tool.foregroundPackageRequirement(): String? = when (name) {
+    "officepro_read_screen",
+    "officepro_capture_context",
+    "officepro_context_digest",
+    "officepro_daily_radar",
+    "officepro_project_briefing",
+    "officepro_document_warroom",
+    "officepro_open_items_radar",
+    "officepro_meeting_closure" -> "configured_officepro_target"
+    else -> null
+}
+
+private fun Tool.speculativeBlockReason(
+    category: String,
+    mutates: Boolean,
+    needsApproval: Boolean,
+    concurrencySafe: Boolean,
+    risk: ToolRisk,
+    parallelGroup: String?,
+    requiresForegroundAppPackage: String?,
+): String? = when {
+    risk != ToolRisk.Normal -> "risk_not_normal"
+    mutates -> "mutates_state"
+    needsApproval -> "needs_approval"
+    !concurrencySafe -> "not_concurrency_safe"
+    parallelGroup == null -> "no_parallel_group"
+    requiresForegroundAppPackage != null -> "requires_foreground_app"
+    category in setOf("terminal", "screen", "office", "external_file", "subagent", "model_council") -> "category_blocked"
+    category == "cron" && name != "cron_task_list" -> "cron_mutation_blocked"
+    category == "memory" && mutates -> "memory_write_blocked"
+    else -> null
+}
+
+private fun Tool.outputBudgetChars(): Int = when (name) {
+    // 262_144 = FILE_READ_HARD_MAX_CHARS in WorkspaceTools.kt (kept in :app
+    // as an internal const). Inlined here so :feature:tools:api can compute
+    // budgets without depending on the heavy WorkspaceTools module.
+    "file_read" -> 262_144 + 2_048
+    // Screenshots inline their base64 image in the Text payload (Image parts
+    // are silently dropped by every provider's tool-result serializer). A
+    // 412×915 PNG ≈ 300 KB base64; JPEG q=85 ≈ 80 KB. Full-page screenshots
+    // are best taken as JPEG.
+    "wm_screenshot" -> 1_200_000
+    "wm_observe" -> 180_000
+    "wm_fetch_replay" -> 220_000
+    // Phase 2 M2.2: signed_fetch bodies can be ~1MB (cap in the shim).
+    // Add headroom for the JSON envelope.
+    "wm_signed_fetch" -> 1_100_000
+    // WebMount adapters whose Tool ctor advertises a >80k max_chars cap. Without
+    // these overrides, the registry truncates them at 80k right after the tool
+    // produces the larger payload — pure waste. Cap each at "claimed max +
+    // small overhead for envelope JSON".
+    "feishu_docs_read" -> 220_000
+    "feishu_docs_blocks" -> 180_000
+    "feishu_docs_snapshot" -> 180_000
+    "feishu_docs_markdown_pack" -> 220_000
+    "github_file_read" -> 220_000
+    "zhihu_answer_read" -> 90_000
+    "zhihu_question_read" -> 100_000
+    "model_council_status",
+    "model_council_start",
+    "model_council_wait",
+    "model_council_cancel",
+    "model_council_read" -> MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS
+
+    "subagent_start",
+    "subagent_wait",
+    "subagent_cancel",
+    "subagent_read" -> SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS
+
+    else -> DEFAULT_TOOL_OUTPUT_BUDGET_CHARS
+}
+
+private fun JsonElement?.stringValue(name: String): String? =
+    runCatching { this?.jsonObject?.get(name)?.jsonPrimitive?.contentOrNull }.getOrNull()
+
+private fun JsonElement?.booleanValue(name: String): Boolean =
+    runCatching { this?.jsonObject?.get(name)?.jsonPrimitive?.contentOrNull?.equals("true", ignoreCase = true) }
+        .getOrNull() == true
+
+private fun JsonElement?.containsExternalCliCouncilSeat(): Boolean {
+    val root = runCatching { this?.jsonObject }.getOrNull() ?: return false
+    val task = runCatching { root["task"]?.jsonObject }.getOrNull() ?: root
+    return task["planned_seats"].containsExternalCliSeat() || task["seats"].containsExternalCliSeat()
+}
+
+private fun JsonElement?.allowsExternalCliCouncil(): Boolean {
+    val root = runCatching { this?.jsonObject }.getOrNull() ?: return false
+    val task = runCatching { root["task"]?.jsonObject }.getOrNull()
+    return this.booleanValue("allow_external_cli") || task.booleanValue("allow_external_cli")
+}
+
+private fun JsonElement?.containsExternalCliSeat(): Boolean {
+    val seats = runCatching { this?.jsonArray }.getOrNull() ?: return false
+    return seats.any { item ->
+        val seat = runCatching { item.jsonObject }.getOrNull() ?: return@any false
+        val runnerType = seat["runner_type"]?.jsonPrimitive?.contentOrNull?.lowercase(Locale.ROOT).orEmpty()
+        val externalTool = seat["external_tool"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        runnerType in EXTERNAL_CLI_COUNCIL_RUNNER_TYPES ||
+            externalTool.isNotBlank()
+    }
+}
+
+private fun List<UIMessagePart>.enforceOutputBudget(maxChars: Int): List<UIMessagePart> {
+    var remaining = maxChars
+    var truncated = false
+    val bounded = mutableListOf<UIMessagePart>()
+    for (part in this) {
+        if (part !is UIMessagePart.Text) {
+            bounded += part
+            continue
+        }
+        if (remaining <= 0) {
+            truncated = true
+            break
+        }
+        if (part.text.length <= remaining) {
+            bounded += part
+            remaining -= part.text.length
+        } else {
+            bounded += part.copy(text = truncatedEnvelope(part.text, maxChars))
+            truncated = true
+            break
+        }
+    }
+    return if (truncated) bounded else this
+}
+
+private fun truncatedEnvelope(text: String, maxChars: Int): String {
+    val tailChars = (maxChars - 512).coerceAtLeast(1_024)
+    return buildJsonObject {
+        put("status", "truncated")
+        put("truncated", true)
+        put("total_chars", text.length)
+        put("max_chars", maxChars)
+        put("content_tail", text.takeLast(tailChars))
+        put("note", "Tool output exceeded the registry output budget. The original tool result remains in the local transcript.")
+    }.toString()
+}
+
+private const val DEFAULT_TOOL_OUTPUT_BUDGET_CHARS = 80_000
+private const val MODEL_COUNCIL_TOOL_OUTPUT_BUDGET_CHARS =
+    EXTENDED_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS *
+        DEFAULT_MODEL_COUNCIL_MAX_SEATS *
+        DEFAULT_MODEL_COUNCIL_MAX_ROUNDS +
+        512_000
+private const val SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS =
+    EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS + 64_000
+
+/**
+ * P1-02 effect classification by real tool semantics.
+ *
+ *  - readOnly: tools that do not mutate state ([Tool.mutatesState]).
+ *  - idempotentWrite: mutating tools proven to reach the same end state when
+ *    re-executed with identical arguments. `file_write` overwrites the whole
+ *    file with the provided content, so a retry with identical args converges.
+ *  - nonIdempotentWrite: everything else that mutates — external side effects
+ *    that cannot be safely retried. This is the safety default.
+ */
+fun Tool.effectClass(): ToolEffectClass = when {
+    !mutatesState() -> ToolEffectClass.READ_ONLY
+    name in IDEMPOTENT_WRITE_TOOLS -> ToolEffectClass.IDEMPOTENT_WRITE
+    else -> ToolEffectClass.NON_IDEMPOTENT_WRITE
+}
+
+/**
+ * Whether the tool can reconcile an unknown outcome by querying its own
+ * state. No tool implements a reconcile query yet (v1), so this is false for
+ * every tool; recovery falls back to the effect-class rules.
+ */
+fun Tool.supportsReconcile(): Boolean = false
+
+/**
+ * Whether the tool can be retried safely with identical arguments. The only
+ * idempotent write today is `file_write`, a local whole-file overwrite: a
+ * retry with the same args converges because it reproduces the same end
+ * state — there is no external system that needs an idempotency key yet.
+ * Passing the effectId as an idempotency key to an external system is
+ * deferred until the first external idempotent write tool exists.
+ */
+fun Tool.idempotencyKeySupported(): Boolean = effectClass() == ToolEffectClass.IDEMPOTENT_WRITE
+
+private val IDEMPOTENT_WRITE_TOOLS = setOf(
+    // Whole-file overwrite with identical args converges on the same content.
+    "file_write",
+    // Merging a fetched model catalog / overwriting one settings slot with the
+    // same target value converges on the same end state on retry.
+    "provider_refresh_models",
+    "settings_set_model_slot",
+)

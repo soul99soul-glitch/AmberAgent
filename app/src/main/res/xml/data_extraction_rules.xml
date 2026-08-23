@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+  <cloud-backup>
+    <!-- 聊天记录等 Room 数据不进入 Google 云备份（应用自带加密同步通道） -->
+    <include
+      domain="sharedpref"
+      path="." />
+    <!-- 小程序 localStorage 是第三方写入的任意 KV（可能含 token），不进云备份 -->
+    <exclude
+      domain="sharedpref"
+      path="mini_app_storage.xml" />
+    <include
+      domain="file"
+      path="upload/" />
+  </cloud-backup>
+  <device-transfer>
+    <include
+      domain="database"
+      path="." />
+    <include
+      domain="sharedpref"
+      path="." />
+    <include
+      domain="file"
+      path="upload/" />
+  </device-transfer>
+</data-extraction-rules>

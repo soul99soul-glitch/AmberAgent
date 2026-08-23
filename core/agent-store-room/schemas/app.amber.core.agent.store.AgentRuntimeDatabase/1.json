@@ -1,0 +1,473 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "1f8e8b2851ffc9c2fbe306e03a38370d",
+    "entities": [
+      {
+        "tableName": "agent_run",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`run_id` TEXT NOT NULL, `parent_run_id` TEXT, `agent_descriptor_id` TEXT NOT NULL, `agent_version` TEXT NOT NULL, `conversation_id` TEXT, `message_node_id` TEXT, `produces_message_id` TEXT, `assistant_id` TEXT, `status` TEXT NOT NULL, `input_digest` TEXT NOT NULL, `input_snapshot_ref` TEXT, `input_schema_version` INTEGER NOT NULL, `started_at` INTEGER NOT NULL, `finished_at` INTEGER, `interrupted_reason` TEXT, PRIMARY KEY(`run_id`))",
+        "fields": [
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentRunId",
+            "columnName": "parent_run_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "agentDescriptorId",
+            "columnName": "agent_descriptor_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agentVersion",
+            "columnName": "agent_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "conversationId",
+            "columnName": "conversation_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "messageNodeId",
+            "columnName": "message_node_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "producesMessageId",
+            "columnName": "produces_message_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "assistantId",
+            "columnName": "assistant_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputDigest",
+            "columnName": "input_digest",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inputSnapshotRef",
+            "columnName": "input_snapshot_ref",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "inputSchemaVersion",
+            "columnName": "input_schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "finishedAt",
+            "columnName": "finished_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "interruptedReason",
+            "columnName": "interrupted_reason",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "run_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agent_run_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_run_status` ON `${TABLE_NAME}` (`status`)"
+          },
+          {
+            "name": "index_agent_run_agent_descriptor_id",
+            "unique": false,
+            "columnNames": [
+              "agent_descriptor_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_run_agent_descriptor_id` ON `${TABLE_NAME}` (`agent_descriptor_id`)"
+          },
+          {
+            "name": "index_agent_run_conversation_id",
+            "unique": false,
+            "columnNames": [
+              "conversation_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_run_conversation_id` ON `${TABLE_NAME}` (`conversation_id`)"
+          },
+          {
+            "name": "index_agent_run_message_node_id",
+            "unique": false,
+            "columnNames": [
+              "message_node_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_run_message_node_id` ON `${TABLE_NAME}` (`message_node_id`)"
+          },
+          {
+            "name": "index_agent_run_assistant_id",
+            "unique": false,
+            "columnNames": [
+              "assistant_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_run_assistant_id` ON `${TABLE_NAME}` (`assistant_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "agent_event",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`event_id` TEXT NOT NULL, `run_id` TEXT NOT NULL, `parent_run_id` TEXT, `seq` INTEGER NOT NULL, `type` TEXT NOT NULL, `payload_type` TEXT NOT NULL, `payload` TEXT NOT NULL, `payload_schema_version` INTEGER NOT NULL, `agent_descriptor_id` TEXT NOT NULL, `agent_version` TEXT NOT NULL, `is_final` INTEGER NOT NULL, `ts` INTEGER NOT NULL, PRIMARY KEY(`event_id`))",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "event_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentRunId",
+            "columnName": "parent_run_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "seq",
+            "columnName": "seq",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadType",
+            "columnName": "payload_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payload",
+            "columnName": "payload",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadSchemaVersion",
+            "columnName": "payload_schema_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agentDescriptorId",
+            "columnName": "agent_descriptor_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "agentVersion",
+            "columnName": "agent_version",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isFinal",
+            "columnName": "is_final",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ts",
+            "columnName": "ts",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "event_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_agent_event_run_id_seq",
+            "unique": true,
+            "columnNames": [
+              "run_id",
+              "seq"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_event_run_id_seq` ON `${TABLE_NAME}` (`run_id`, `seq`)"
+          },
+          {
+            "name": "index_agent_event_run_id",
+            "unique": false,
+            "columnNames": [
+              "run_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_event_run_id` ON `${TABLE_NAME}` (`run_id`)"
+          },
+          {
+            "name": "index_agent_event_ts",
+            "unique": false,
+            "columnNames": [
+              "ts"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_agent_event_ts` ON `${TABLE_NAME}` (`ts`)"
+          }
+        ]
+      },
+      {
+        "tableName": "trace_span",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`span_id` TEXT NOT NULL, `run_id` TEXT NOT NULL, `parent_span_id` TEXT, `name` TEXT NOT NULL, `kind` TEXT NOT NULL, `status` TEXT NOT NULL, `started_at` INTEGER NOT NULL, `ended_at` INTEGER, `attributes_json` TEXT NOT NULL, PRIMARY KEY(`span_id`))",
+        "fields": [
+          {
+            "fieldPath": "spanId",
+            "columnName": "span_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "parentSpanId",
+            "columnName": "parent_span_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "started_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAt",
+            "columnName": "ended_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "attributesJson",
+            "columnName": "attributes_json",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "span_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_trace_span_run_id",
+            "unique": false,
+            "columnNames": [
+              "run_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trace_span_run_id` ON `${TABLE_NAME}` (`run_id`)"
+          },
+          {
+            "name": "index_trace_span_parent_span_id",
+            "unique": false,
+            "columnNames": [
+              "parent_span_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trace_span_parent_span_id` ON `${TABLE_NAME}` (`parent_span_id`)"
+          },
+          {
+            "name": "index_trace_span_kind",
+            "unique": false,
+            "columnNames": [
+              "kind"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trace_span_kind` ON `${TABLE_NAME}` (`kind`)"
+          },
+          {
+            "name": "index_trace_span_started_at",
+            "unique": false,
+            "columnNames": [
+              "started_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_trace_span_started_at` ON `${TABLE_NAME}` (`started_at`)"
+          }
+        ]
+      },
+      {
+        "tableName": "permission_intent",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`intent_id` TEXT NOT NULL, `run_id` TEXT NOT NULL, `kind` TEXT NOT NULL, `tool_id` TEXT, `payload_digest` TEXT NOT NULL, `reason` TEXT NOT NULL, `channel` TEXT NOT NULL, `decision` TEXT NOT NULL, `created_at` INTEGER NOT NULL, `decided_at` INTEGER, `decided_by` TEXT, PRIMARY KEY(`intent_id`))",
+        "fields": [
+          {
+            "fieldPath": "intentId",
+            "columnName": "intent_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "run_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toolId",
+            "columnName": "tool_id",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "payloadDigest",
+            "columnName": "payload_digest",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "channel",
+            "columnName": "channel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decision",
+            "columnName": "decision",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "created_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decidedAt",
+            "columnName": "decided_at",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "decidedBy",
+            "columnName": "decided_by",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "intent_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_permission_intent_run_id",
+            "unique": false,
+            "columnNames": [
+              "run_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_permission_intent_run_id` ON `${TABLE_NAME}` (`run_id`)"
+          },
+          {
+            "name": "index_permission_intent_decision",
+            "unique": false,
+            "columnNames": [
+              "decision"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_permission_intent_decision` ON `${TABLE_NAME}` (`decision`)"
+          },
+          {
+            "name": "index_permission_intent_created_at",
+            "unique": false,
+            "columnNames": [
+              "created_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_permission_intent_created_at` ON `${TABLE_NAME}` (`created_at`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1f8e8b2851ffc9c2fbe306e03a38370d')"
+    ]
+  }
+}
