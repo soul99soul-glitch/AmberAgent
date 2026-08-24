@@ -1,58 +1,74 @@
 {
-  "app": {
-    "products": [
-      {
-        "name": "default",
-        "compatibleSdkVersion": "5.0.0(12)",
-        "runtimeOS": "HarmonyOS",
-        "targetSdkVersion": "5.0.0(12)"
-      }
-    ],
-    "buildModeSet": [
-      {
-        "name": "debug"
-      },
-      {
-        "name": "release"
-      }
+    "app": {
+        "products": [
+            {
+                "name": "default",
+                "compatibleSdkVersion": "5.0.0(12)",
+                "runtimeOS": "HarmonyOS",
+                "targetSdkVersion": "5.0.0(12)",
+                "signingConfig": "default"
+            }
+        ],
+        "buildModeSet": [
+            {
+                "name": "debug"
+            },
+            {
+                "name": "release"
+            }
+        ],
+        "signingConfigs": [
+            {
+                "name": "default",
+                "type": "HarmonyOS",
+                "material": {
+                    "certpath": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.cer",
+                    "keyAlias": "debugKey",
+                    "keyPassword": "0000001B761E9DCEC1B756D4F7D3C6874B1423CD31B8F0F3590E66CB809C9298C24DF778E290B5991C4C06",
+                    "profile": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.p7b",
+                    "signAlg": "SHA256withECDSA",
+                    "storeFile": "/Users/mi/.ohos/config/default_harmony_zYrpmTbrYJKEvKM8dAeCe1QqpyW0q5C9p7pkuVLuNFE=.p12",
+                    "storePassword": "0000001BC0FC0203E606AE26C45C2285A0A7642101363C5D117358BC38CEAB3461E40EDE2B7027973F2A3F"
+                }
+            }
+        ]
+    },
+    "modules": [
+        {
+            "name": "entry",
+            "srcPath": "./entry",
+            "targets": [
+                {
+                    "name": "default",
+                    "applyToProducts": [
+                        "default"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "deepread",
+            "srcPath": "./deepread",
+            "targets": [
+                {
+                    "name": "default",
+                    "applyToProducts": [
+                        "default"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "chat",
+            "srcPath": "./chat",
+            "targets": [
+                {
+                    "name": "default",
+                    "applyToProducts": [
+                        "default"
+                    ]
+                }
+            ]
+        }
     ]
-  },
-  "modules": [
-    {
-      "name": "entry",
-      "srcPath": "./entry",
-      "targets": [
-        {
-          "name": "default",
-          "applyToProducts": [
-            "default"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "deepread",
-      "srcPath": "./deepread",
-      "targets": [
-        {
-          "name": "default",
-          "applyToProducts": [
-            "default"
-          ]
-        }
-      ]
-    },
-    {
-      "name": "chat",
-      "srcPath": "./chat",
-      "targets": [
-        {
-          "name": "default",
-          "applyToProducts": [
-            "default"
-          ]
-        }
-      ]
-    }
-  ]
 }

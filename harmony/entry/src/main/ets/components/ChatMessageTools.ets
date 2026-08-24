@@ -144,8 +144,10 @@ export struct ChatMessageTools {
           Text(this.outputExpanded ? '收起' : '展开')
             .fontSize(LABEL)
             .fontColor(INK3)
+            .padding({ left: 12, right: 12, top: 10, bottom: 6 })
             .margin({ top: 2 })
             .onClick((): void => { this.outputExpanded = !this.outputExpanded; })
+            .accessibilityText(this.outputExpanded ? '收起工具输出' : '展开工具输出')
         }
         .width('100%')
         .margin({ top: 4, left: 32 })

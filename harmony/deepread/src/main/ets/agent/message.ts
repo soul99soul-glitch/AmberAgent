@@ -35,6 +35,9 @@ export interface UIMessagePartTool {
   input: string;  // JSON 参数字符串
   output: UIMessagePartText[];  // 工具执行结果,通常 [Text(jsonString)]
   approvalState: ToolApprovalState;
+  // 流式归并用:OpenAI tool_calls 数组下标(id 缺席/迟到时按它匹配后续分片);
+  // 不参与持久化/请求组装,执行后无意义
+  streamIndex?: number;
 }
 
 export type UIMessagePart =
@@ -91,6 +94,12 @@ export const canResumeToolExecution = (approval: ToolApprovalState): boolean =>
 
 export const canToolResumeExecution = (t: UIMessagePartTool): boolean =>
   !isToolExecuted(t) && canResumeToolExecution(t.approvalState);
+
+// 待执行判定(执行器视角):未执行且不在等用户审批。
+// 'auto'(流式新工具)也要进入执行队列,由 resolveDecision + ApprovalMatrix 决定 allow/ask/deny;
+// 'pending' 表示已标记等待用户,不重复进入决策。
+export const isToolAwaitingExecution = (t: UIMessagePartTool): boolean =>
+  !isToolExecuted(t) && t.approvalState !== 'pending';
 
 // 拿最后一条 assistant 的纯文本(用于解析 plan、fallback 等)
 export const latestAssistantText = (messages: UIMessage[]): string => {

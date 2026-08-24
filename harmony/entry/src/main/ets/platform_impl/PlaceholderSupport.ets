@@ -11,22 +11,18 @@
 import { batteryInfo, deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 import type { KeyValueStore, PlaceholderValues } from '@amber/chat-domain';
+import { loadDisplaySetting } from '@amber/chat-domain';
 import { systemLanguage } from './AgentRuntimePrefs.ets';
 
 // PreferencesKeys.kt:22(逐字)
 export const DISPLAY_SETTING_KEY: string = 'display_setting';
 
-interface DisplaySettingJson {
-  userNickname?: string;
-}
-
 // UIPrefs.kt:56 — 缺失/解析失败 → 默认(userNickname='')
+// 统一经 domain 的 loadDisplaySetting 读取(消除并行 DisplaySettingJson 解析)
 export const loadUserNickname = async (kv: KeyValueStore): Promise<string> => {
-  const raw: string | null = await kv.get(DISPLAY_SETTING_KEY);
-  if (raw === null) return '';
   try {
-    const parsed: DisplaySettingJson = JSON.parse(raw) as DisplaySettingJson;
-    return typeof parsed.userNickname === 'string' ? parsed.userNickname : '';
+    const setting = await loadDisplaySetting(kv);
+    return setting.userNickname;
   } catch {
     return '';
   }

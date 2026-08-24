@@ -4,7 +4,7 @@
 // 降级(跳过): ExportedChatImage bitmap 渲染(componentSnapshot) / FileProvider 分享
 //   图片导出降级为"功能入口"(提示需设备支持),Markdown 导出完整实现
 import type { UIMessage, Conversation } from '@amber/chat-domain';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { promptAction } from '@kit.ArkUI';
@@ -134,7 +134,7 @@ export struct ChatExportSheet {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
     }
   }

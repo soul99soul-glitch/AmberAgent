@@ -42,16 +42,22 @@ export const createTavilyProvider = (http: HttpClient, config: TavilyConfig): Se
       if (resp.status !== 200) {
         throw new Error(`Tavily search failed: ${resp.status} ${resp.body.slice(0, 200)}`);
       }
-      const data = JSON.parse(resp.body) as { results?: Array<{ title: string; url: string; content?: string }> };
+      const data = JSON.parse(resp.body) as {
+        results?: Array<{ title: string; url: string; content?: string; published_date?: string }>
+      };
       const raw = data.results ?? [];
       const hits: SearchHit[] = [];
       for (const r of raw) {
-        hits.push({
+        const hit: SearchHit = {
           title: r.title,
           url: r.url,
           snippet: r.content ?? null,
           source: 'tavily',
-        });
+        };
+        if (typeof r.published_date === 'string' && r.published_date.length > 0) {
+          hit.publishedAt = r.published_date;
+        }
+        hits.push(hit);
       }
       return hits;
     },

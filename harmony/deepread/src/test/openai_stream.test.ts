@@ -121,3 +121,52 @@ test('sink: stops emitting after done even if more chunks fed', () => {
   assert.deepEqual(texts, []);
   assert.equal(doneCount, 1, 'onDone fires exactly once');
 });
+
+// ===== tool_calls 增量解析回归(DepthRead agent loop 组装依赖) =====
+
+test('parseOpenAiStreamEvent: tool_calls delta surfaces index/id/name/args', () => {
+  const evt: SseEvent = {
+    data: JSON.stringify({
+      choices: [{ delta: { tool_calls: [
+        { index: 0, id: 'call_a', function: { name: 'search_web', arguments: '{"q":"' } },
+        { index: 1, function: { arguments: '{"path":"x' } },
+      ] } }],
+    }),
+    done: false,
+  };
+  const d = parseOpenAiStreamEvent(evt);
+  assert.equal(d.deltaText, '');
+  assert.equal(d.toolCalls.length, 2);
+  assert.equal(d.toolCalls[0].index, 0);
+  assert.equal(d.toolCalls[0].id, 'call_a');
+  assert.equal(d.toolCalls[0].name, 'search_web');
+  assert.equal(d.toolCalls[0].args, '{"q":"');
+  assert.equal(d.toolCalls[1].index, 1);
+  assert.equal(d.toolCalls[1].id, undefined);
+  assert.equal(d.done, false);
+});
+
+test('parseOpenAiStreamEvent: tool_calls without index falls back to array position', () => {
+  const evt: SseEvent = {
+    data: JSON.stringify({
+      choices: [{ delta: { tool_calls: [
+        { function: { name: 'write_file' } },
+      ] } }],
+    }),
+    done: false,
+  };
+  const d = parseOpenAiStreamEvent(evt);
+  assert.equal(d.toolCalls.length, 1);
+  assert.equal(d.toolCalls[0].index, 0);
+  assert.equal(d.toolCalls[0].name, 'write_file');
+});
+
+test('parseOpenAiStreamEvent: text-only delta yields empty toolCalls', () => {
+  const evt: SseEvent = {
+    data: JSON.stringify({ choices: [{ delta: { content: 'hi' } }] }),
+    done: false,
+  };
+  const d = parseOpenAiStreamEvent(evt);
+  assert.equal(d.deltaText, 'hi');
+  assert.deepEqual(d.toolCalls, []);
+});

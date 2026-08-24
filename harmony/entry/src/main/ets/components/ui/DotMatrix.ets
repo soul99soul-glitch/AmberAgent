@@ -8,7 +8,7 @@
 //     浅色主题全哑光,小号点阵(日期数字/置顶钉)任何主题都哑光
 // 注:prop 名用 dotScale/dotGap — scale 是 CustomComponent 保留名
 
-import { INK } from '../../design/tokens.ets';
+import { ACCENT, INK } from '../../design/tokens.ets';
 
 // 5×7 LED font — letters, digits, symbols. '1' = lit dot.(逐值复制)
 export const DOTFONT: Record<string, string[]> = {};
@@ -51,6 +51,7 @@ export struct DotGlyph {
   @Prop dotGap: number = -1; // -1 = 缺省 max(1, dotScale*0.5)
   @Prop color: string = INK;
   @Prop glow: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('darkMode') darkMode: boolean = false;
 
   private g(): number {

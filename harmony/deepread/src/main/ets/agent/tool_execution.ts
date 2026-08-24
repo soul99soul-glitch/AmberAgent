@@ -12,7 +12,7 @@
 
 import {
   UIMessage, UIMessagePart, UIMessagePartTool, UIMessagePartText,
-  getTools, canToolResumeExecution, isToolExecuted,
+  getTools, isToolAwaitingExecution, isToolExecuted,
 } from './message.ts';
 
 // ===== 类型定义 =====
@@ -119,10 +119,15 @@ export const executeToolsAndMerge = async (
   if (lastMessage.role !== 'assistant') {
     return { messages, hasPendingApproval: false, executedCount: 0, deniedCount: 0 };
   }
-  // 找未执行且可恢复的 tool parts(对应 Android pendingTools filter)
-  const pendingTools = getTools(lastMessage).filter(t => !isToolExecuted(t) && canToolResumeExecution(t));
+  // 找待执行 tool parts(auto/approved/denied/answered 都进入决策;
+  // 'pending' 已在等用户,跳过)
+  const pendingTools = getTools(lastMessage).filter(t => isToolAwaitingExecution(t));
   if (pendingTools.length === 0) {
-    return { messages, hasPendingApproval: false, executedCount: 0, deniedCount: 0 };
+    // 仅剩已置 pending(等用户)的工具 → 报告 pending,让 agent loop 以
+    // pending_approval 退出而非空转重调模型
+    const parked: boolean = getTools(lastMessage).some(
+      t => !isToolExecuted(t) && t.approvalState === 'pending');
+    return { messages, hasPendingApproval: parked, executedCount: 0, deniedCount: 0 };
   }
 
   // 先做决策:任何一个 ASK → 整体暂停等用户
@@ -146,12 +151,15 @@ export const executeToolsAndMerge = async (
     };
   }
 
-  // 并行执行所有 allow/deny 的 tool
-  const results: Array<{ toolCallId: string; output: UIMessagePartText[] }> = [];
+  // 并行执行所有 allow/deny 的 tool。
+  // 结果携带原 tool part 引用:并行无 id 工具流 toolCallId 同为 '',
+  // 按 id 关联会互相覆写;part 按引用流动,恒等匹配无歧义
+  const results: Array<{ part: UIMessagePartTool; toolCallId: string; output: UIMessagePartText[] }> = [];
   let deniedCount = 0;
   await Promise.all(decisions.map(async ({ tool, def, decision }) => {
     if (decision.action === 'deny') {
       results.push({
+        part: tool,
         toolCallId: tool.toolCallId,
         output: [makeDeniedOutput(decision.reason, decision.trace)],
       });
@@ -162,6 +170,7 @@ export const executeToolsAndMerge = async (
     if (!def) {
       // 不该到这里(allow 必有 def),防御
       results.push({
+        part: tool,
         toolCallId: tool.toolCallId,
         output: [makeFailedOutput('tool definition missing', decision.trace)],
       });
@@ -169,10 +178,11 @@ export const executeToolsAndMerge = async (
     }
     try {
       const output = await def.execute(tool.input);
-      results.push({ toolCallId: tool.toolCallId, output });
+      results.push({ part: tool, toolCallId: tool.toolCallId, output });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       results.push({
+        part: tool,
         toolCallId: tool.toolCallId,
         output: [makeFailedOutput(msg, decision.trace)],
       });
@@ -199,7 +209,8 @@ const markPendingApprovals = (
 ): UIMessagePart[] => {
   return parts.map(p => {
     if (p.kind !== 'tool') return p;
-    const dec = decisions.find(d => d.tool.toolCallId === p.toolCallId);
+    // 恒等匹配:并行无 id 工具的 toolCallId 同为 '',按 id 会误标全部
+    const dec = decisions.find(d => d.tool === p);
     if (dec && dec.decision.action === 'ask') {
       return { ...p, approvalState: 'pending' as const };
     }
@@ -209,11 +220,11 @@ const markPendingApprovals = (
 
 const mergeResultsIntoParts = (
   parts: UIMessagePart[],
-  results: Array<{ toolCallId: string; output: UIMessagePartText[] }>,
+  results: Array<{ part: UIMessagePartTool; toolCallId: string; output: UIMessagePartText[] }>,
 ): UIMessagePart[] => {
   return parts.map(p => {
     if (p.kind !== 'tool') return p;
-    const r = results.find(x => x.toolCallId === p.toolCallId);
+    const r = results.find(x => x.part === p);
     if (!r) return p;
     return { ...p, output: r.output };
   });

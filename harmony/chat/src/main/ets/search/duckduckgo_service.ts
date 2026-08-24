@@ -128,7 +128,13 @@ const fetchDdg = (url: string, ua: string): Promise<string> =>
       'Accept-Language': DDG_ACCEPT_LANG,
       'Referer': 'https://duckduckgo.com/',
     },
-  }).then((r): string => r.body);
+  }).then((r): string => {
+    // 429/403/5xx 的限流页/挑战页不得当结果页解析
+    if (r.status < 200 || r.status >= 300) {
+      throw new Error(`DuckDuckGo request failed with HTTP ${r.status}`);
+    }
+    return r.body;
+  });
 
 export const duckDuckGoSearch = async (
   query: string, commonOptions: SearchCommonOptions,

@@ -76,7 +76,6 @@ export struct ChatMessageActions {
           .onClick((): void => this.onFavorite())
       }
     }
-    .width('100%')
-    .padding({ top: 4, bottom: 4 })
+      .padding({ top: 4, bottom: 4 })
   }
 }

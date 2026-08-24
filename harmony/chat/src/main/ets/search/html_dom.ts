@@ -16,9 +16,16 @@ export interface HtmlElement {
   tagName: string;
   attributes: Record<string, string>;
   children: HtmlElement[];
-  textChunks: string[]; // 直接文本子节点(解析序,与子元素顺序不混排 — 仅 text() 用)
+  // 有序子节点(文本/元素按文档序混排)— elementText 的遍历依据;
+  // Bing/DDG 标题/摘要常含 <strong> 高亮,分箱存放会打乱词序
+  childNodes: HtmlChildNode[];
+  textChunks: string[]; // 直接文本子节点集合(兼容既有消费方;顺序遍历用 childNodes)
   parent: HtmlElement | null;
 }
+
+export type HtmlChildNode =
+  | { kind: 'text'; text: string }
+  | { kind: 'element'; element: HtmlElement };
 
 export interface HtmlDocument {
   root: HtmlElement;
@@ -63,9 +70,16 @@ const makeElement = (tag: string, parent: HtmlElement | null): HtmlElement => ({
   tagName: tag,
   attributes: {},
   children: [],
+  childNodes: [],
   textChunks: [],
   parent,
 });
+
+// 文本入栈:两个视图同步写(textChunks 兼容视图 + childNodes 有序视图)
+const pushText = (el: HtmlElement, text: string): void => {
+  el.textChunks.push(text);
+  el.childNodes.push({ kind: 'text', text });
+};
 
 // 属性段解析:name(=value)?;value 双/单引号或无引号
 const parseAttributes = (s: string, el: HtmlElement): void => {
@@ -113,10 +127,10 @@ export const parseHtml = (html: string): HtmlDocument => {
   while (i < n) {
     const lt: number = html.indexOf('<', i);
     if (lt < 0) {
-      if (i < n) current.textChunks.push(decodeEntities(html.slice(i)));
+      if (i < n) pushText(current, decodeEntities(html.slice(i)));
       break;
     }
-    if (lt > i) current.textChunks.push(decodeEntities(html.slice(i, lt)));
+    if (lt > i) pushText(current, decodeEntities(html.slice(i, lt)));
     if (html.startsWith('<!--', lt)) {
       const end: number = html.indexOf('-->', lt + 4);
       i = end < 0 ? n : end + 3;
@@ -151,6 +165,7 @@ export const parseHtml = (html: string): HtmlDocument => {
     const el: HtmlElement = makeElement(tag, current);
     if (spaceIdx >= 0) parseAttributes(body.slice(spaceIdx + 1), el);
     current.children.push(el);
+    current.childNodes.push({ kind: 'element', element: el });
     if (selfClose || VOID_TAGS.includes(tag)) continue;
     if (RAWTEXT_TAGS.includes(tag)) {
       // rawtext:扫至匹配闭合标签,内容作单文本块
@@ -158,10 +173,10 @@ export const parseHtml = (html: string): HtmlDocument => {
       const rest: string = html.slice(i);
       const m: RegExpExecArray | null = closeRe.exec(rest);
       if (m !== null) {
-        if (m.index > 0) el.textChunks.push(rest.slice(0, m.index));
+        if (m.index > 0) pushText(el, rest.slice(0, m.index));
         i = i + m.index + m[0].length;
       } else {
-        el.textChunks.push(rest);
+        pushText(el, rest);
         i = n;
       }
       continue;
@@ -326,10 +341,12 @@ export const attr = (el: HtmlElement, name: string): string =>
   el.attributes[name.toLowerCase()] ?? '';
 
 const collectText = (el: HtmlElement, out: string[]): void => {
-  // 文本块与子元素按解析序交错失真(textChunks 集中存放)— 近似:先文本后子树,
-  // 与 Jsoup 序差异在折叠空白下不影响 Bing/DDG 字段提取(标题/摘要单元素内)
-  for (const t of el.textChunks) out.push(t);
-  for (const c of el.children) collectText(c, out);
+  // 按文档序遍历有序子节点(与 Jsoup 序一致;<a>Foo <strong>Bar</strong> Baz</a>
+  // 产出 "Foo Bar Baz",不再因分箱变 "Foo Baz Bar")
+  for (const node of el.childNodes) {
+    if (node.kind === 'text') out.push(node.text);
+    else collectText(node.element, out);
+  }
 };
 
 export const elementText = (el: HtmlElement | HtmlDocument): string => {

@@ -111,21 +111,31 @@ const rewriteLastMessage = (conv: Conversation, newMsg: UIMessage): Conversation
   };
 };
 
-// 结果写回末条 assistant 消息(:366-373;按 toolCallId 匹配,非工具 part 不动)
+// 结果写回末条 assistant 消息(:366-373;非工具 part 不动)。
+// 批次(审批 map 或 executeBatch 结果)恒为消息工具的**保序子集**(两条路径都按
+// parts 顺序过滤未执行工具而来),按位置对齐消费即可;已执行工具跳过 —
+// 跨步骤的旧 blank 工具不会被新批次覆写,并行无 id 工具也不按 '' 互相命中。
 const rewriteLastMessageTools = (
   conv: Conversation, updatedTools: UIMessagePartTool[],
 ): Conversation => {
   const nodes: MessageNode[] = conv.messageNodes;
   if (nodes.length === 0) return conv;
   const cur: UIMessage = nodeCurrentMessage(nodes[nodes.length - 1]);
+  let cursor: number = 0;
   const newMsg: UIMessage = {
     ...cur,
     parts: cur.parts.map((p: UIMessagePart): UIMessagePart => {
       if (p.type !== 'tool') return p;
       const tp: UIMessagePartTool = p as UIMessagePartTool;
-      const hit: UIMessagePartTool | undefined = updatedTools.find(
-        (t: UIMessagePartTool): boolean => t.toolCallId === tp.toolCallId);
-      return hit ?? p;
+      if (isToolExecuted(tp)) return p; // 既往批次产物,不在本次对位范围
+      if (cursor >= updatedTools.length) return p;
+      const candidate: UIMessagePartTool = updatedTools[cursor];
+      const aligned: boolean = tp.toolCallId.length > 0
+        ? candidate.toolCallId === tp.toolCallId
+        : candidate.toolCallId.length === 0; // 双 blank:位置即对位
+      if (!aligned) return p;
+      cursor++;
+      return candidate;
     }),
   };
   return rewriteLastMessage(conv, newMsg);
@@ -163,6 +173,7 @@ const runToolLoopCore = async (
   const toolExposure: ToolExposureState = createToolExposureState(loop.tools);
 
   for (let stepIndex = 0; stepIndex < maxSteps; stepIndex++) {
+    if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     const baseMessages: UIMessage[] = currentMessages(conv);
     const lastMsg: UIMessage | undefined = baseMessages.length > 0
       ? baseMessages[baseMessages.length - 1]
@@ -271,6 +282,7 @@ const runToolLoopCore = async (
       if (mergedLast !== lastBase || generated.length > 0) {
         await deps.store.save(conv);
       }
+      if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
 
       const stepMessages: UIMessage[] = currentMessages(conv);
       const newLast: UIMessage = stepMessages[stepMessages.length - 1];
@@ -319,14 +331,16 @@ const runToolLoopCore = async (
     }
 
     // 执行(approved 执行/denied 处理)(:348-358)
-    // D-063(:356):prefetchedTools = runner.reusableResults(流终确认一致才复用)
+    // abort 到达后不再执行任何工具副作用；未执行工具留给页面 stop 收口。
+    if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     const prefetchedTools: Map<string, UIMessagePartTool> = speculativeRunner !== null
       ? await speculativeRunner.reusableResults(toolsToProcess)
       : new Map<string, UIMessagePartTool>();
+    if (deps.abortSignal !== undefined && deps.abortSignal.aborted) break;
     const executedTools: UIMessagePartTool[] = await dispatcher.executeBatch(
       toolsToProcess, stepDefsMap,
       autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-      invocationContext, prefetchedTools, toolRetry);
+      invocationContext, prefetchedTools, toolRetry, deps.abortSignal);
     if (executedTools.length === 0) {
       // 全部 pending 无结果(:360-363)
       break;

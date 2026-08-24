@@ -1,5 +1,5 @@
 // ConfirmDialog — 确认对话框(对齐 Android ConfirmDialog.kt)
-import { INK, INK2, INK3, SURFACE, ACCENT, LINE, BODY, META } from '../../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, ACCENT, LINE, BODY, META, OVERLAY } from '../../design/tokens.ets';
 
 @Component
 export struct ConfirmDialog {
@@ -61,7 +61,7 @@ export struct ConfirmDialog {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
     }
   }

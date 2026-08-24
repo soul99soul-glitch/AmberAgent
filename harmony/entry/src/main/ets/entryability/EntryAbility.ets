@@ -10,7 +10,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '../di/AppContainer.ets';
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
-import { applyTheme, setAccentColor, BG } from '../design/tokens.ets';
+import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -23,6 +23,20 @@ const validatedWantParameter = (value: object | undefined): string => {
 };
 
 export default class EntryAbility extends UIAbility {
+  private avoidAreaWindow: window.Window | null = null;
+  private displayDensity: number = 3;
+
+  private updateSystemAvoidArea(area: window.AvoidArea, preserveTopFallback: boolean = false): void {
+    const topPx: number = area.topRect.height;
+    const bottomPx: number = area.bottomRect.height;
+    if (topPx > 0 || !preserveTopFallback) {
+      const topVp: number = topPx > 0 ? Math.round(topPx / this.displayDensity) : 44;
+      AppStorage.setOrCreate<number>('statusBarHeight', topVp);
+    }
+    AppStorage.setOrCreate<number>('navBarHeight',
+      bottomPx > 0 ? Math.round(bottomPx / this.displayDensity) : 0);
+  }
+
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
     // 注册 JetBrains Mono(设计系统等宽字体), 供 fontFamily('JetBrainsMono') 使用
@@ -33,6 +47,7 @@ export default class EntryAbility extends UIAbility {
       hilog.warn(DOMAIN, TAG, 'registerFont failed: %{public}s', String(e));
     }
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    AppStorage.setOrCreate<string>('accentColor', ACCENT);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
     this.routeFromWant(want);
@@ -62,8 +77,7 @@ export default class EntryAbility extends UIAbility {
     const title: string = validatedWantParameter(params['title']);
     if (topicId.length > 0) {
       AppStorage.setOrCreate<string>('wantTopicId', topicId);
-    }
-    if (title.length > 0) {
+      // title 无条件覆写(含空):仅在有值时写入会残留上一条通知的旧标题
       AppStorage.setOrCreate<string>('wantTitle', title);
     }
   }
@@ -82,15 +96,28 @@ export default class EntryAbility extends UIAbility {
       // 取非零值; px2vp 在 Ability 上下文不可用 → 用窗口 density 手动换算; 仍为0兜底44vp
       let density: number = 3;
       try { density = display.getDefaultDisplaySync().densityPixels; } catch (_e) { density = 3; }
+      this.displayDensity = density;
       let topPx: number = avoidBefore.topRect.height > 0 ? avoidBefore.topRect.height : avoidAfter.topRect.height;
       let topVp: number = topPx > 0 ? Math.round(topPx / density) : 44;
       AppStorage.setOrCreate<number>('statusBarHeight', topVp);
+      // P4:底部安全区(导航条)高度 — 全屏布局下导航条避让区即 bottomRect;
+      //   取非零值,0 = 手势导航全隐藏或设备无导航条(ChatPage 列表/输入栏以此为底 padding)
+      let bottomPx: number = avoidBefore.bottomRect.height > 0 ? avoidBefore.bottomRect.height : avoidAfter.bottomRect.height;
+      let bottomVp: number = bottomPx > 0 ? Math.round(bottomPx / density) : 0;
+      AppStorage.setOrCreate<number>('navBarHeight', bottomVp);
       hilog.info(DOMAIN, TAG, 'statusBar px=%{public}d density=%{public}f vp=%{public}d', topPx, density, topVp);
+      hilog.info(DOMAIN, TAG, 'navBar px=%{public}d vp=%{public}d', bottomPx, bottomVp);
       win.setWindowSystemBarProperties({
         statusBarColor: '#00000000',
         statusBarContentColor: '#1B1A17',
         navigationBarColor: '#00000000',
         navigationBarContentColor: '#1B1A17',
+      });
+      this.avoidAreaWindow = win;
+      win.on('avoidAreaChange', (info: window.AvoidAreaOptions): void => {
+        if (info.type === window.AvoidAreaType.TYPE_SYSTEM) {
+          this.updateSystemAvoidArea(info.area, true);
+        }
       });
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'immersive setup failed: %{public}s', String(e));
@@ -125,9 +152,18 @@ export default class EntryAbility extends UIAbility {
       }
       return loadDisplaySetting(getChatKvStore());
     }).then((s: DisplaySetting): void => {
-      if (s.accentColor.length > 0) setAccentColor(s.accentColor);
+      const accent: string = s.accentColor.length > 0 ? s.accentColor : ACCENT;
+      setAccentColor(accent);
+      AppStorage.setOrCreate<string>('accentColor', accent);
       start();
     }).catch((): void => { start(); });
+  }
+
+  onWindowStageDestroy(): void {
+    if (this.avoidAreaWindow !== null) {
+      try { this.avoidAreaWindow.off('avoidAreaChange'); } catch (_e) {}
+      this.avoidAreaWindow = null;
+    }
   }
 
   onForeground(): void {

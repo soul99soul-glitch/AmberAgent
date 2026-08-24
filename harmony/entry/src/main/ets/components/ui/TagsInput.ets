@@ -167,9 +167,9 @@ export struct TagsInput {
           }
         }, (tag: AmberTag): string => tag.id)
 
-        // 添加按钮(达上限时置灰)
+        // 添加按钮(达上限时置灰;40 热区)
         Text('+').fontSize(BODY).fontColor(this.atMax() ? INK4 : ACCENT)
-          .width(28).height(28)
+          .width(40).height(40)
           .textAlign(TextAlign.Center)
           .backgroundColor(SURFACE2)
           .borderRadius(999)

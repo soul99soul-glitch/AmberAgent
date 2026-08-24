@@ -38,6 +38,8 @@ export interface DisplaySetting {
   chatThemeChoice: string;  // 'WHISPER' etc
   amberBaseFamily: string;  // 'WARM' | 'SAGE'
   accentColor: string;      // hex
+  userNickname: string;     // 用户昵称(Android DisplaySetting 对齐)
+  userAvatar: string;       // 头像(emoji/图片URL,空则首字母)
 }
 
 export const DISPLAY_SETTING_KEY: string = 'display_setting';
@@ -75,6 +77,8 @@ export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplayS
   chatThemeChoice: opts.chatThemeChoice ?? 'WHISPER',
   amberBaseFamily: opts.amberBaseFamily ?? 'WARM',
   accentColor: opts.accentColor ?? '#B8623A',
+  userNickname: opts.userNickname ?? '',
+  userAvatar: opts.userAvatar ?? '',
 });
 
 import type { KeyValueStore } from './kv_store.ts';

@@ -1,127 +1,146 @@
-// ChatDrawer — 侧边抽屉(G4-S4)
-// Android 基准: ChatDrawer.kt(634 行) + ConversationList.kt(410 行)
-// 必要: 导航入口(新聊天/看板/小应用) + 快捷按钮(文件/统计/搜索)
-//   + 用户头像+昵称+设置 + 搜索框 + 会话列表(日期分组/置顶/选中态)
-// 降级(跳过): ModalNavigationDrawer(用 Stack overlay) / FavoritesLiveSheet / 滚动位置持久化
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, BG, LINE, ACCENT, ACCENT_LIGHT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+// ChatDrawer — chat navigation drawer aligned with Android ChatDrawer.
+// Harmony uses a root Stack overlay instead of ModalNavigationDrawer.
+import { INK, INK2, INK3, SURFACE, BG, LINE, ACCENT, BODY, OVERLAY } from '../design/tokens.ets';
 import { WorkspaceSearchField } from './ui/WorkspaceSearchField.ets';
 import { UIAvatar } from './UIAvatar.ets';
 import { Icon } from './ui/Icon.ets';
 
-// 抽屉导航项
-interface DrawerNavItem {
-  icon: string;
-  label: string;
-  accent: boolean;
-  route: string;
-}
-
 @Component
 export struct ChatDrawer {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @Prop show: boolean = false;
   @Prop userNickname: string = '用户';
   @Prop userAvatar: string = '';
   onNewChat: () => void = (): void => {};
   onOpenBoard: () => void = (): void => {};
   onOpenSettings: () => void = (): void => {};
-  onOpenSearch: () => void = (): void => {};
+  onSearchText: (text: string) => void = (_text: string): void => {};
+  onOpenApps: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
-  onEditNickname: (name: string) => void = (_n: string): void => {};
+  onEditNickname: (name: string) => void = (_name: string): void => {};
   @BuilderParam conversationList: () => void;
 
   build(): void {
     if (this.show) {
-      // 遮罩 + 抽屉(右侧滑入)
       Row() {
-        // 左侧遮罩(点击关闭)
-        Column()
-          .width('30%')
-          .height('100%')
-          .backgroundColor('rgba(0,0,0,0.4)')
-          .onClick((): void => { this.onDismiss(); })
-
-        // 抽屉内容
         Column() {
-          // 搜索栏(固定)
+          Text('Amber')
+            .fontSize(30)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(INK)
+            .fontFamily('serif')
+            .width('100%')
+            .padding({ left: 16, right: 16, top: this.statusBarHeight + 12, bottom: 8 })
+
           WorkspaceSearchField({
             placeholder: '搜索聊天',
-            onSearch: (_text: string): void => { /* TODO: 搜索过滤 */ },
+            onSearch: (text: string): void => { this.onSearchText(text); },
           })
-            .margin({ top: 14, left: 16, right: 16 })
+            .margin({ left: 16, right: 16, bottom: 8 })
 
-          // 导航入口
           Column() {
-            this.NavRow('✨', '新对话', true, this.onNewChat)
-            this.NavRow('📰', '今日看板', false, this.onOpenBoard)
-            this.NavRow('🔲', '小应用', false, (): void => {})
+            this.NavRow('plus', '新对话', true, this.onNewChat)
+            this.NavRow('book', '今日看板', false, this.onOpenBoard)
+            this.NavRow('box', '小应用', false, this.onOpenApps)
           }
           .width('100%')
-          .padding({ left: 16, right: 16, top: 8 })
+          .padding({ left: 16, right: 16 })
 
-          Divider().color(LINE).strokeWidth(0.5).margin({ left: 16, right: 16, top: 12, bottom: 8 })
+          Divider()
+            .color(LINE)
+            .strokeWidth(0.5)
+            .margin({ left: 16, right: 16, top: 10, bottom: 8 })
 
-          // "最近" 标签
           Row() {
-            Icon({ name: 'history', iconSize: 14, color: ACCENT }).margin({ right: 6 })
-            Text('最近').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(ACCENT)
+            Icon({ name: 'history', iconSize: 14, color: ACCENT })
+              .margin({ right: 6 })
+            Text('最近')
+              .fontSize(BODY)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(ACCENT)
           }
           .width('100%')
           .padding({ left: 16, bottom: 4 })
 
-          // 会话列表(由父组件注入)
-          Scroll() {
-            Column() {
-              this.conversationList()
-            }
-            .width('100%')
-          }
-          .layoutWeight(1)
-
-          // 底部: 头像 + 昵称 + 设置
-          Divider().color(LINE).strokeWidth(0.5)
-          Row() {
-            UIAvatar({
-              name: this.userNickname,
-              value: this.userAvatar,
-              avatarSize: 32,
-            })
-            Text(this.userNickname)
-              .fontSize(BODY)
-              .fontColor(INK)
-              .maxLines(1)
-              .textOverflow({ overflow: TextOverflow.Ellipsis })
-              .layoutWeight(1)
-              .margin({ left: 12 })
-              .onClick((): void => { /* TODO: 昵称编辑弹窗 */ })
-            Icon({ name: 'gear', iconSize: 18, color: INK3 })
-              .onClick((): void => { this.onOpenSettings(); })
+          Column() {
+            this.conversationList()
           }
           .width('100%')
-          .padding({ left: 22, right: 16, top: 14, bottom: 10 })
+          .layoutWeight(1)
+
+          Divider().color(LINE).strokeWidth(0.5)
+          Row() {
+            Row() {
+              UIAvatar({
+                name: this.userNickname,
+                imageUrl: this.userAvatar,
+                avatarSize: 32,
+                accentColor: ACCENT,
+              })
+              Text(this.userNickname.length > 0 ? this.userNickname : '用户')
+                .fontSize(BODY)
+                .fontColor(INK)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1)
+                .margin({ left: 12 })
+            }
+            .layoutWeight(1)
+            .height(48)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.onEditNickname(this.userNickname); })
+
+            Row() {
+              Icon({ name: 'gear', iconSize: 18, color: INK3 })
+            }
+            .width(44)
+            .height(44)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .accessibilityText('打开设置')
+            .onClick((): void => { this.onOpenSettings(); })
+          }
+          .width('100%')
+          .padding({ left: 16, right: 8, top: 4, bottom: this.navBarHeight + 8 })
           .alignItems(VerticalAlign.Center)
         }
-        .width('70%')
+        .width('86%')
         .height('100%')
         .backgroundColor(SURFACE)
-        .border({ width: { left: 1 }, color: LINE })
+        .borderRadius({ topRight: 24, bottomRight: 24 })
+        .clip(true)
+
+        Column()
+          .layoutWeight(1)
+          .height('100%')
+          .backgroundColor(OVERLAY)
+          .onClick((): void => { this.onDismiss(); })
       }
       .width('100%')
       .height('100%')
+      .backgroundColor(Color.Transparent)
     }
   }
 
   @Builder
   NavRow(icon: string, label: string, accent: boolean, onClick: () => void): void {
     Row() {
-      Text(icon).fontSize(16).margin({ right: 14 })
+      Icon({ name: icon, iconSize: 18, color: accent ? ACCENT : INK2 })
+        .margin({ right: 14 })
       Text(label)
         .fontSize(BODY)
         .fontWeight(accent ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(accent ? ACCENT : INK)
     }
     .width('100%')
-    .padding({ left: 11, right: 11, top: 6, bottom: 6 })
-    .borderRadius(10)
-    .onClick((): void => { onClick(); this.onDismiss(); })
+    .height(46)
+    .padding({ left: 11, right: 11 })
+    .borderRadius(8)
+    .alignItems(VerticalAlign.Center)
+    .onClick((): void => {
+      onClick();
+      this.onDismiss();
+    })
   }
 }

@@ -17,6 +17,9 @@ export interface KeyValueStore {
   get(key: string): Promise<string | null>;
   put(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  // 全部字符串键值枚举(设备端 Preferences getAll 语义;内存实现必给,
+  // 其余 adapter 未实现则 MiniAppStorage 跳过配额核算)
+  allEntries?(): Promise<Array<{ key: string; value: string }>>;
 }
 
 export interface MemoryKeyValueStore extends KeyValueStore {
@@ -38,6 +41,13 @@ export const createMemoryKeyValueStore = (): MemoryKeyValueStore => {
     delete(key: string): Promise<void> {
       entries.delete(key);
       return Promise.resolve();
+    },
+    allEntries(): Promise<Array<{ key: string; value: string }>> {
+      const out: Array<{ key: string; value: string }> = [];
+      for (const [key, value] of entries) {
+        out.push({ key, value });
+      }
+      return Promise.resolve(out);
     },
   };
 };

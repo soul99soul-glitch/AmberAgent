@@ -41,7 +41,7 @@ export struct ChatListGrouped {
   @Prop @Watch('onConversationsChange') conversations: ConversationSummary[] = [];
   @Prop selectedId: string = '';
   @Prop runningIds: string[] = [];
-  onClick: (id: string) => void = (_id: string): void => {};
+  onOpenConversation: (id: string) => void = (_id: string): void => {};
   onDelete: (item: ConversationSummary) => void = (_i: ConversationSummary): void => {};
   onPin: (item: ConversationSummary) => void = (_i: ConversationSummary): void => {};
   onRegenerateTitle: (item: ConversationSummary) => void = (_i: ConversationSummary): void => {};
@@ -145,6 +145,7 @@ export struct ChatListGrouped {
     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     .backgroundColor(this.isSelected(conv.id) ? ACCENT_LIGHT : SURFACE)
     .borderRadius(8)
+    .onClick((): void => { this.onOpenConversation(conv.id); })
     .bindContextMenu(this.ContextMenu(conv), ResponseType.LongPress)
   }
 
@@ -171,7 +172,6 @@ export struct ChatListGrouped {
           } else {
             if (row.conv !== null) {
               this.ConversationRow(row.conv)
-                .onClick((): void => { this.onClick(row.conv!.id); })
             }
           }
         }

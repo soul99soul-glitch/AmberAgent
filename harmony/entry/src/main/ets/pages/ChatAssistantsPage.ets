@@ -8,7 +8,7 @@
 //   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import type {
   Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
@@ -306,18 +306,29 @@ struct ChatAssistantsPage {
   build() {
     Column() {
       Row() {
-        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
+        Row() {
+          Text('←').fontSize(24).fontColor(INK)
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+        .onClick((): void => { router.back(); })
+        .accessibilityText('返回')
         Text('助手')
           .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 8 }).layoutWeight(1)
         Text('提示词注入').fontSize(13).fontColor(INK3).margin({ right: 16 })
+          .padding({ top: 12, bottom: 12 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ChatPromptsPage' }); })
+          .accessibilityText('打开提示词注入')
         Text('+ 新助手')
           .fontSize(14).fontColor(ACCENT)
-          .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .padding({ left: 12, right: 12, top: 12, bottom: 12 })
+          .constraintSize({ minHeight: 44 })
           .onClick((): void => this.startCreate())
+          .accessibilityText('新建助手')
       }
       .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .alignItems(VerticalAlign.Center)
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 
@@ -332,6 +343,8 @@ struct ChatAssistantsPage {
                   Text(a.name.length > 0 ? a.name : '未命名助手')
                     .fontSize(15).fontColor(INK)
                     .layoutWeight(1)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text('对话')
                     .fontSize(12).fontColor(ACCENT)
                     .margin({ right: 14 })
@@ -372,7 +385,7 @@ struct ChatAssistantsPage {
                     .margin({ right: 14 })
                     .onClick((): void => this.copyAssistant(a))
                   Text('删除')
-                    .fontSize(12).fontColor('ERROR')
+                    .fontSize(12).fontColor(ERROR)
                     .onClick((): void => this.confirmDelete(a))
                 }
                 .width('100%')
@@ -484,7 +497,7 @@ struct ChatAssistantsPage {
                 .layoutWeight(1).margin({ left: 8 })
                 .onChange((v: string): void => this.setHeaderValue(i, v))
               Text('删除')
-                .fontSize(12).fontColor('ERROR')
+                .fontSize(12).fontColor(ERROR)
                 .padding({ left: 10 })
                 .onClick((): void => this.removeHeader(i))
             }
@@ -507,7 +520,7 @@ struct ChatAssistantsPage {
                   .layoutWeight(1)
                   .onChange((v: string): void => this.setBodyKey(i, v))
                 Text('删除')
-                  .fontSize(12).fontColor('ERROR')
+                  .fontSize(12).fontColor(ERROR)
                   .padding({ left: 10 })
                   .onClick((): void => this.removeBody(i))
               }
@@ -518,7 +531,7 @@ struct ChatAssistantsPage {
                 .onChange((v: string): void => this.setBodyValueText(i, v))
               if (this.editBodyErrors[i] !== undefined && this.editBodyErrors[i].length > 0) {
                 Text(this.editBodyErrors[i])
-                  .fontSize(11).fontColor('ERROR')
+                  .fontSize(11).fontColor(ERROR)
                   .width('100%').margin({ top: 4 })
               }
             }

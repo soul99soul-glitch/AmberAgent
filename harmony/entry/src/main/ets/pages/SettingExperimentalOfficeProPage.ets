@@ -157,7 +157,7 @@ struct SettingExperimentalOfficeProPage {
             }
             .width('100%').margin({ top: 16, bottom: 32 })
           }
-          .width('100%').padding({ left: 16, right: 16 })
+          .width('100%').padding({ left: 18, right: 18 })
         }
         .layoutWeight(1)
       }

@@ -22,7 +22,8 @@ import type { Conversation } from './conversation.ts';
 import { currentMessages, toMessageNode } from './conversation.ts';
 import { makeUserMessage } from './message.ts';
 import type { MessageChunk, UIMessage, UIMessagePart } from './message.ts';
-import { makeUIMessage } from './message.ts';
+import { isEmptyInputMessage } from './message.ts';
+import { makeUIMessage, finishAssistantMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
@@ -137,10 +138,10 @@ const appendNode = (conv: Conversation, msg: UIMessage): Conversation => ({
   updateAt: nowIso(),
 });
 
-// isEmptyInputMessage 等价(D-038):全空文本 parts → no-op
-const isEmptyInput = (parts: UIMessagePart[]): boolean =>
-  parts.length === 0
-  || parts.every((p: UIMessagePart): boolean => p.type === 'text' && p.text.trim().length === 0);
+// isEmptyInputMessage 等价(D-038;Message.kt:255 全量口径:空 url 的
+// image/document/video/audio 与非输入 part 都按空处理 — 本地实现此前只看
+// text,空 url 图片会被当成有效输入持久化并发起请求)
+const isEmptyInput = (parts: UIMessagePart[]): boolean => isEmptyInputMessage(parts);
 
 // ===== answer=false 派发(D-051,ChatService.kt:847-850) =====
 
@@ -335,11 +336,21 @@ export const generateAssistantOnce = async (
       }
       await sleep(decision.delayMs);
       attempt++;
-      // 重试等待中点停止(含即时 sleep):不发起新尝试,走部分快照终态化
-      if (isAborted()) break;
+      // 重试等待中点停止(含即时 sleep):不发起新尝试,失败尝试的部分输出不入列。
+      if (isAborted()) {
+        lastAccumulator = new MessageStreamAccumulator(seedMessages);
+        break;
+      }
     }
   }
 
-  // 终态:onGenerationFinish transforms(入列在调用方)
-  return await applyOnGenerationFinish(lastAccumulator.snapshot(), deps.outputTransformers, ctx);
+  // 终态:onGenerationFinish transforms(入列在调用方)，并关闭 assistant finishedAt
+  const finished: UIMessage[] = await applyOnGenerationFinish(
+    lastAccumulator.snapshot(), deps.outputTransformers, ctx,
+  );
+  if (isAborted() || finished.length === 0) return finished;
+  const lastIndex: number = finished.length - 1;
+  const last: UIMessage = finishAssistantMessage(finished[lastIndex]);
+  if (last === finished[lastIndex]) return finished;
+  return [...finished.slice(0, lastIndex), last];
 };

@@ -268,11 +268,16 @@ test('streamEventData: finish_reason null → "unknown"(Android 归一)', () => 
   assert.equal(c2[0].choices[0].finishReason, 'stop');
 });
 
-test('streamEventData: delta 缺失时取 message;两者都缺抛错', () => {
+test('streamEventData: delta 缺失时取 message;两者都缺跳过该 choice(usage 保留)', () => {
   const { chunks } = parseOpenAiStreamEventData(
     '{"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}');
   assert.equal(textOf(chunks[0].choices[0].delta?.parts ?? []), 'hi');
-  assert.throws(() => parseOpenAiStreamEventData('{"choices":[{"index":0,"finish_reason":"stop"}]}'));
+  // 网关 usage-only/keep-alive 尾块:choices:[{}] 不得让整条流报废
+  const r = parseOpenAiStreamEventData(
+    '{"choices":[{"index":0,"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}');
+  assert.equal(r.chunks.length, 1);
+  assert.equal(r.chunks[0].choices.length, 0);
+  assert.equal(r.chunks[0].usage?.promptTokens, 5);
 });
 
 test('streamEventData: 纯 [DONE] 数据 → done 信号,无 chunk', () => {

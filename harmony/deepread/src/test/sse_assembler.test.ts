@@ -192,3 +192,11 @@ test('multi-line data with event: field joins with newline', () => {
   assert.equal(events[0].event, 'response.output_text.delta');
   assert.equal(events[0].data, '{"a":\n1}');
 });
+
+// Phase 8 回归:data: [DONE] 带尾随空白仍识别为终止帧
+test('done detection tolerates trailing whitespace', () => {
+  const asm = new SseAssembler();
+  const evts = asm.feed(new TextEncoder().encode('data: [DONE] \n\n').buffer as ArrayBuffer);
+  assert.equal(evts.length, 1);
+  assert.equal(evts[0].done, true);
+});

@@ -8,4 +8,6 @@ export interface Storage {
   getSecret(key: string): Promise<string | null>;
   setSecret(key: string, value: string): Promise<void>;
   deleteSecret(key: string): Promise<void>;
+  // 全部字符串键值枚举(Preferences getAll 语义;供配额核算等前缀扫描)
+  getAllStringEntries(): Promise<Array<{ key: string; value: string }>>;
 }

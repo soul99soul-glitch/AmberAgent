@@ -115,6 +115,42 @@ export const rowToMessageNode = (row: MessageNodeRow, now: () => string = nowIso
   selectIndex: row.select_index,
 });
 
+// ===== 分页窗口(Phase 5 历史懒加载) =====
+
+// 对齐 Android ConversationTimelineLoadState + loadOlderTimelinePage:
+//   会话打开默认只加载尾部窗口,向上滚动加载更早历史。
+//   nodes 按 node_index 升序,oldestLoadedIndex 为窗口首节点绝对索引。
+export interface ConversationWindow {
+  conversationId: string;
+  /** 窗口内节点(node_index 升序),长度 <= limit */
+  nodes: MessageNode[];
+  /** 窗口首个节点的绝对 node 索引(0-based;空窗口 = totalNodeCount) */
+  oldestLoadedIndex: number;
+  /** 会话节点总数(fullyLoaded 判定:oldestLoadedIndex === 0) */
+  totalNodeCount: number;
+}
+
+// rowToMessageNode 的窗口切片(内存实现与 RDB 共用语义)
+const windowOf = (
+  conversationId: string,
+  rows: MessageNodeRow[],
+  start: number,
+  end: number,
+  total: number,
+  now: () => string = nowIso,
+): ConversationWindow => {
+  const nodes: MessageNode[] = [];
+  for (let i = start; i < end; i++) {
+    nodes.push(rowToMessageNode(rows[i], now));
+  }
+  return {
+    conversationId,
+    nodes,
+    oldestLoadedIndex: start,
+    totalNodeCount: total,
+  };
+};
+
 // ===== Repository Port(DAO 语义) =====
 
 // LightConversationEntity 对齐(领域层用 ISO 时间)
@@ -135,6 +171,9 @@ export interface ConversationRepository {
   listRecent(limit: number, assistantId?: string): Promise<ConversationSummary[]>;
   search(searchText: string, assistantId?: string): Promise<ConversationSummary[]>;
   delete(id: string): Promise<void>;                          // 级联 nodes
+  // Phase 5:分页窗口(尾窗 + 历史页;getById 恒全量不变)
+  getConversationTailWindow(id: string, limit: number): Promise<ConversationWindow>;
+  getConversationNodePage(id: string, offset: number, limit: number): Promise<ConversationWindow>;
 }
 
 // SQLite LIKE:ASCII 大小写不敏感(非 ASCII 严格) — 用 ASCII-only 折叠对齐
@@ -183,6 +222,24 @@ export const createMemoryConversationRepository = (
       if (row === undefined) return Promise.resolve(null);
       const nodes: MessageNodeRow[] = nodeRowsByConv.get(id) ?? [];
       return Promise.resolve(rowToConversation(row, nodes, now));
+    },
+
+    getConversationTailWindow(id: string, limit: number): Promise<ConversationWindow> {
+      const rows: MessageNodeRow[] = nodeRowsByConv.get(id) ?? [];
+      const total: number = rows.length;
+      const size: number = Math.max(0, Math.floor(limit));
+      const start: number = Math.max(0, total - size);
+      return Promise.resolve(windowOf(id, rows, start, total, total, now));
+    },
+
+    getConversationNodePage(id: string, offset: number, limit: number): Promise<ConversationWindow> {
+      const rows: MessageNodeRow[] = nodeRowsByConv.get(id) ?? [];
+      const total: number = rows.length;
+      const from: number = Math.max(0, Math.floor(offset));
+      const size: number = Math.max(0, Math.floor(limit));
+      const start: number = Math.min(from, total);
+      const end: number = Math.min(total, start + size);
+      return Promise.resolve(windowOf(id, rows, start, end, total, now));
     },
 
     getSummaryById(id: string): Promise<ConversationSummary | null> {

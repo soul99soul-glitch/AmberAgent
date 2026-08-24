@@ -23,6 +23,7 @@ import {
 } from './tool_permission.ts';
 import type { GenerationRetrySetting, GenerationRetryDecision } from './generation_retry.ts';
 import { decideGenerationRetry, makeGenerationRetrySetting } from './generation_retry.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 
 const textPart = (text: string): UIMessagePartText => ({ type: 'text', text, metadata: null });
 
@@ -233,7 +234,8 @@ export class AgentToolDispatcher {
   }
 
   // executeBatch(:63-117):prefetch 复用 → 并行(全部 canRunInParallel)或顺序 →
-  //   按原 toolCallId 序重排
+  //   按输入序重排(结果与输入按序/恒等配对 — 并行无 id 工具 toolCallId 同为 '',
+  //   按 id 关联会互相覆写)。signal:abort 后不再启动新工具副作用。
   public async executeBatch(
     tools: UIMessagePartTool[],
     toolDefinitions: Map<string, AgentTool>,
@@ -243,49 +245,71 @@ export class AgentToolDispatcher {
     invocationContext: ToolInvocationContext = 'normal',
     prefetchedTools: Map<string, UIMessagePartTool> = new Map<string, UIMessagePartTool>(),
     retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
+    signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool[]> {
+    const isAborted = (): boolean => signal !== undefined && signal.aborted;
     const reused: UIMessagePartTool[] = [];
+    const reusedInputs: Set<UIMessagePartTool> = new Set<UIMessagePartTool>();
     for (const tool of tools) {
+      // prefetch 复用依赖 toolCallId;空 id 无法稳定命中,不复用
+      if (tool.toolCallId.length === 0) continue;
       const prefetched: UIMessagePartTool | undefined = prefetchedTools.get(tool.toolCallId);
       if (prefetched !== undefined
         && prefetched.toolName === tool.toolName
         && prefetched.input === tool.input
         && prefetched.output.length > 0) {
         reused.push(prefetched);
+        reusedInputs.add(tool);
       }
     }
-    const reusedIds = new Set<string>(reused.map((t: UIMessagePartTool): string => t.toolCallId));
     const remaining: UIMessagePartTool[] = tools.filter(
-      (t: UIMessagePartTool): boolean => !reusedIds.has(t.toolCallId));
+      (t: UIMessagePartTool): boolean => !reusedInputs.has(t));
     if (remaining.length === 0) return reused;
-    let executed: UIMessagePartTool[];
+    // (input, result) 按执行序配对;result=null(被跳过/abort)不产生对
+    const pairs: Array<{ input: UIMessagePartTool; result: UIMessagePartTool }> = [];
+    const runOne = async (tool: UIMessagePartTool): Promise<UIMessagePartTool | null> => {
+      if (isAborted()) return null;
+      try {
+        return await this.execute(
+          tool, toolDefinitions.get(tool.toolName) ?? null,
+          autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
+          invocationContext, retrySetting, signal);
+      } catch (e) {
+        // abort 打断重试等待:丢弃该工具(保持未执行,留给停止收口),不外抛
+        if (isAbortError(e) && isAborted()) return null;
+        throw e;
+      }
+    };
     if (remaining.length > 1 && remaining.every(
       (t: UIMessagePartTool): boolean => this.canRunInParallel(t, toolDefinitions.get(t.toolName) ?? null))) {
-      const results: (UIMessagePartTool | null)[] = await Promise.all(remaining.map(
-        (tool: UIMessagePartTool): Promise<UIMessagePartTool | null> => this.execute(
-          tool, toolDefinitions.get(tool.toolName) ?? null,
-          autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-          invocationContext, retrySetting)));
-      executed = results.filter((t: UIMessagePartTool | null): boolean => t !== null) as UIMessagePartTool[];
+      const results: (UIMessagePartTool | null)[] = await Promise.all(remaining.map(runOne));
+      for (let i = 0; i < remaining.length; i++) {
+        if (results[i] !== null) pairs.push({ input: remaining[i], result: results[i] as UIMessagePartTool });
+      }
     } else {
-      executed = [];
       for (const tool of remaining) {
-        const result: UIMessagePartTool | null = await this.execute(
-          tool, toolDefinitions.get(tool.toolName) ?? null,
-          autoApproveTools, autoApproveHighRiskTools, autoApprovedToolNames,
-          invocationContext, retrySetting);
-        if (result !== null) executed.push(result);
+        const result: UIMessagePartTool | null = await runOne(tool);
+        if (result !== null) pairs.push({ input: tool, result });
+        if (isAborted()) break;
       }
     }
-    const reusedById = new Map<string, UIMessagePartTool>(
-      reused.map((t: UIMessagePartTool): [string, UIMessagePartTool] => [t.toolCallId, t]));
-    const executedById = new Map<string, UIMessagePartTool>(
-      executed.map((t: UIMessagePartTool): [string, UIMessagePartTool] => [t.toolCallId, t]));
+    // 按 tools 原序重排(reused/pairs 均保持输入相对序,双游标即可)
     const out: UIMessagePartTool[] = [];
+    let reusedCursor = 0;
+    let pairCursor = 0;
     for (const tool of tools) {
-      const hit: UIMessagePartTool | undefined = reusedById.get(tool.toolCallId)
-        ?? executedById.get(tool.toolCallId);
-      if (hit !== undefined) out.push(hit);
+      if (reusedInputs.has(tool)) {
+        if (reusedCursor < reused.length) {
+          out.push(reused[reusedCursor]);
+          reusedCursor++;
+        }
+        continue;
+      }
+      while (pairCursor < pairs.length && pairs[pairCursor].input !== tool) pairCursor++;
+      if (pairCursor < pairs.length) {
+        out.push(pairs[pairCursor].result);
+        pairCursor++;
+      }
     }
     return out;
   }
@@ -299,7 +323,9 @@ export class AgentToolDispatcher {
     autoApprovedToolNames: string[] = [],
     invocationContext: ToolInvocationContext = 'normal',
     retrySetting: GenerationRetrySetting = makeGenerationRetrySetting({ enabled: false }),
+    signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool | null> {
+    if (signal !== undefined && signal.aborted) return null;
     const decision: PermissionDecision = this.resolveDecision(
       toolDef, tool, autoApproveTools, autoApproveHighRiskTools,
       autoApprovedToolNames, invocationContext);
@@ -333,7 +359,7 @@ export class AgentToolDispatcher {
         }))],
       };
     }
-    return this.executeWithHooks(tracedTool, toolDef, decision, invocationContext, retrySetting);
+    return this.executeWithHooks(tracedTool, toolDef, decision, invocationContext, retrySetting, signal);
   }
 
   // executeWithHooks(:187-239)
@@ -343,6 +369,7 @@ export class AgentToolDispatcher {
     decision: PermissionDecision,
     invocationContext: ToolInvocationContext,
     retrySetting: GenerationRetrySetting,
+    signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool> {
     let request: ToolInvocationRequest = {
       tool,
@@ -371,7 +398,7 @@ export class AgentToolDispatcher {
       this.log(`execute: ${resolved.name} argKeys=${argKeys}`);
       const executed: UIMessagePartTool = await this.executeResolvedToolWithRetry(
         tool, resolved, retrySetting,
-        (): Promise<UIMessagePart[]> => resolved.execute(args));
+        (): Promise<UIMessagePart[]> => resolved.execute(args), signal);
       const hooked: ToolInvocationResult = await this.runAfterHooks(
         request, { output: executed.output, metadata: {} });
       return withHookMetadata({ ...executed, output: hooked.output }, hooked.metadata);
@@ -441,12 +468,13 @@ export class AgentToolDispatcher {
     }
   }
 
-  // executeResolvedToolWithRetry(:289-318)
+  // executeResolvedToolWithRetry(:289-318);signal abort 时以 AbortError 结束重试等待
   private async executeResolvedToolWithRetry(
     tool: UIMessagePartTool,
     toolDef: AgentTool,
     retrySetting: GenerationRetrySetting,
     execute: () => Promise<UIMessagePart[]>,
+    signal: AbortSignalLike | undefined = undefined,
   ): Promise<UIMessagePartTool> {
     const retryable: boolean = this.canRetrySafely(tool, toolDef, retrySetting);
     let retryAttempt: number = 1;
@@ -461,9 +489,42 @@ export class AgentToolDispatcher {
         if (!retryable || !decision.retryable) throw error;
         this.log(
           `execute: retry ${tool.toolName} ${retryAttempt}/${retrySetting.maxRetries} after ${decision.delayMs}ms (${decision.category})`);
-        await this.sleep(decision.delayMs);
+        await this.abortableSleep(decision.delayMs, signal);
         retryAttempt++;
       }
+    }
+  }
+
+  // abort 可打断的重试等待:signal 带 listener 时即刻打断;否则睡完检查
+  private async abortableSleep(ms: number, signal: AbortSignalLike | undefined): Promise<void> {
+    if (signal !== undefined && !signal.aborted
+      && typeof signal.addEventListener === 'function') {
+      await new Promise<void>((resolve, reject): void => {
+        const onAbort = (): void => {
+          cleanup();
+          const err: Error = new Error('aborted');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        const onTimeout = (): void => {
+          cleanup();
+          resolve();
+        };
+        const cleanup = (): void => {
+          signal.removeEventListener?.('abort', onAbort);
+          clearTimeout(timer);
+        };
+        const timer: ReturnType<typeof setTimeout> = setTimeout(onTimeout, ms);
+        // AbortSignalLike 的 addEventListener 仅两参(abort 事件本身至多触发一次,无需 once)
+        signal.addEventListener?.('abort', onAbort);
+      });
+    } else if (signal === undefined || !signal.aborted) {
+      await this.sleep(ms);
+    }
+    if (signal !== undefined && signal.aborted) {
+      const err: Error = new Error('aborted');
+      err.name = 'AbortError';
+      throw err;
     }
   }
 

@@ -3,6 +3,8 @@
 //   支持多选模式: key in selectedKeys → checked
 //
 // ArkUI: content slot 用 @BuilderParam;Checkbox 用 ArkUI Checkbox
+import { ACCENT } from '../../design/tokens.ets';
+
 @Component
 export struct SelectableItem {
   @Prop itemKey: string = '';

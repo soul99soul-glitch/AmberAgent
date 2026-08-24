@@ -18,6 +18,7 @@ import type { DeepReadEvidencePack, DeepReadArticlePlan } from '../research/evid
 import { generateArticlePlan } from '../research/article_plan.ts';
 import type { ScoredImageCandidate } from '../research/image_scorer.ts';
 import type { AiClient } from '../platform/ai_client.ts';
+import type { AbortSignalLike } from '../platform/runtime_api.ts';
 import type { DeepReadOutput } from '../domain/models.ts';
 import { makeEmptyDeepReadOutput } from '../domain/models.ts';
 import {
@@ -152,6 +153,7 @@ export const generateStages = async (
   force: boolean,
   planningPhase: DeepReadGenerationPhase = 'PLANNING',
   markCollecting: boolean = true,
+  signal?: AbortSignalLike,
 ): Promise<RunResult> => {
   // createRunContext(空 prefetch → failure)
   const ctxResult = await createRunContext(deps, topicId, topicTitle, seedUrl, force);
@@ -172,16 +174,16 @@ export const generateStages = async (
 
     // 顺序 if(OVERVIEW → NARRATIVE → ANALYSIS → EXTENDED_READING)
     if (stages.includes('OVERVIEW')) {
-      await runSupervisor(deps, context, 'OVERVIEW');
+      await runSupervisor(deps, context, 'OVERVIEW', signal);
     }
     if (stages.includes('NARRATIVE')) {
-      await runSupervisor(deps, context, 'NARRATIVE');
+      await runSupervisor(deps, context, 'NARRATIVE', signal);
     }
     if (stages.includes('ANALYSIS')) {
-      await runSupervisor(deps, context, 'ANALYSIS');
+      await runSupervisor(deps, context, 'ANALYSIS', signal);
     }
     if (stages.includes('EXTENDED_READING')) {
-      await runSupervisor(deps, context, 'EXTENDED_READING');
+      await runSupervisor(deps, context, 'EXTENDED_READING', signal);
     }
 
     // finish 判定
@@ -225,6 +227,7 @@ const runSupervisor = async (
   _deps: RunManagerDeps,
   context: RunContext,
   stage: DeepReadGenerationStage,
+  signal?: AbortSignalLike,
 ): Promise<void> => {
   await runStageSupervisorLoop({
     writer: context.writer,
@@ -236,6 +239,7 @@ const runSupervisor = async (
     scrapeWebAvailable: context.scrapeWebAvailable,
     collectRun: context.collectRun,
     todayIso: context.todayIso,
+    signal,
     tryFallback: async (s, messages, sources, reason) => {
       const r = await tryFallbackAfterStageFailure({
         writer: context.writer, stage: s, messages, sources, reason, allowReadyRewrite: false,
@@ -263,7 +267,7 @@ export const run = async (
   deps: RunManagerDeps,
   topicId: string,
   topicTitle: string,
-  opts: { force?: boolean; seedUrl?: string | null } = {},
+  opts: { force?: boolean; seedUrl?: string | null; signal?: AbortSignalLike } = {},
 ): Promise<RunResult> => {
   const force = opts.force ?? false;
   const seedUrl = opts.seedUrl ?? null;
@@ -286,7 +290,7 @@ export const run = async (
     }
   }
   // 全 4 stages 生成
-  return generateStages(deps, topicId, topicTitle, STAGE_ORDER, seedUrl, force);
+  return generateStages(deps, topicId, topicTitle, STAGE_ORDER, seedUrl, force, 'PLANNING', true, opts.signal);
 };
 
 export const runSection = async (
@@ -295,6 +299,7 @@ export const runSection = async (
   topicTitle: string,
   stage: DeepReadGenerationStage,
   seedUrl: string | null = null,
+  signal?: AbortSignalLike,
 ): Promise<RunResult> => {
   // markSectionRunning(真实持久化)
   if (deps.repository) {
@@ -309,6 +314,7 @@ export const runSection = async (
     deps, topicId, topicTitle, [stage], seedUrl, false,
     'WRITING',   // planningPhase
     false,       // markCollecting
+    signal,
   );
 };
 

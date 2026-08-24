@@ -11,6 +11,8 @@ export struct UIAvatar {
   @Prop imageUrl: string = '';
   @Prop avatarSize: number = 36;
   @Prop circular: boolean = true;
+  // 可选强调色覆盖:传入则用强调色而非按名字派生的调色板
+  @Prop accentColor: string = '';
   build(): void {
     if (this.imageUrl.length > 0) {
       Image(this.imageUrl)
@@ -38,8 +40,9 @@ export struct UIAvatar {
     return this.name.charAt(0).toUpperCase();
   }
 
-  // 根据名称首字符生成稳定的头像背景色
+  // 强调色优先;否则按名称首字符生成稳定调色板(会话头像多色区分)
   private avatarColor(): string {
+    if (this.accentColor.length > 0) return this.accentColor;
     const colors: string[] = ['#B8623A', '#5E9C6E', '#6B5B95', '#88A096', '#A0795E', '#7B6D8D'];
     if (this.name.length === 0) return colors[0];
     const code: number = this.name.charCodeAt(0);

@@ -15,6 +15,7 @@ import type { Conversation, MessageChunk, UIMessage } from '../main/ets/index.ts
 import { selectMessageBranch, runRegenerateAt } from '../main/ets/chat/regenerate.ts';
 import type { RegenerateDeps } from '../main/ets/chat/regenerate.ts';
 import { createMemoryConversationStore } from '../main/ets/chat/chat_turn.ts';
+import { makeGenerationRetrySetting } from '../main/ets/chat/generation_retry.ts';
 
 const chunkOf = (text: string): MessageChunk => ({
   id: 'c', model: 'm',
@@ -100,6 +101,7 @@ describe('runRegenerateAt', () => {
     assert.equal(node.messages.length, 3);
     assert.equal(node.selectIndex, 2);
     const last = node.messages[2];
+    assert.notEqual(last.finishedAt, null, '正常完成的再生 assistant 必须闭合 finishedAt');
     assert.equal(last.parts[0].type === 'text' ? (last.parts[0] as { text: string }).text : '', 'a2-new');
     // 已有分支保留(追加不覆盖)
     assert.equal(node.messages[0].parts[0].type === 'text'
@@ -218,9 +220,82 @@ describe('runRegenerateAt', () => {
     assert.equal(store.saved.length, 0);
   });
 
+  it('retry sleep 中 abort 丢弃失败尝试部分输出', async () => {
+    const signal = { aborted: false };
+    let releaseSleep: () => void = (): void => {};
+    const store = createMemoryConversationStore();
+    const conv = threeNodeConv();
+    const d: RegenerateDeps = {
+      ...deps({
+        streamText: (_messages: UIMessage[], onChunk: (c: MessageChunk) => void): Promise<void> => {
+          onChunk(chunkOf('failed-partial'));
+          return Promise.reject(new Error('HTTP 503'));
+        },
+      }),
+      store,
+      abortSignal: signal,
+      retrySetting: makeGenerationRetrySetting({
+        enabled: true, maxRetries: 2, initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0,
+      }),
+      sleep: (): Promise<void> => new Promise((resolve): void => { releaseSleep = resolve; }),
+    };
+    const promise = runRegenerateAt(conv, conv.messageNodes[2].id, d);
+    await new Promise((resolve): void => { setTimeout(resolve, 0); });
+    signal.aborted = true;
+    releaseSleep();
+    const out = await promise;
+    assert.equal(out.messageNodes.length, 3);
+    assert.equal(out.messageNodes[2].messages.length, 2);
+    assert.equal(store.saved.length, 0);
+  });
+
   it('未知 nodeId → 抛错(调用方传错是 bug,不静默)', async () => {
     const conv = threeNodeConv();
     const d: RegenerateDeps = deps(textProvider('x'));
     await assert.rejects(() => runRegenerateAt(conv, 'no-such-node', d), /node/);
   });
+});
+
+// Phase 4 回归:finish-only chunk 不点亮 sawChunk(空占位不追加成新分支)
+it('regenerate: finish-only chunk (empty choices) does not append empty branch', async () => {
+  // 单 assistant 节点;provider 流只回调一个空 choices chunk(某些网关的尾帧)
+  const conv: Conversation = {
+    ...makeConversation('conv-f', []),
+    messageNodes: [
+      toMessageNode(makeUserMessage('hi')),
+      toMessageNode(makeAssistantMessage('old')),
+    ],
+  };
+  const finishOnlyProvider = {
+    streamText(_messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> {
+      onChunk({ id: 'x', model: 'm', choices: [], usage: null });
+      return Promise.resolve();
+    },
+  };
+  const out = await runRegenerateAt(conv, conv.messageNodes[1].id, deps(finishOnlyProvider));
+  // 无产出 → 目标 assistant 节点分支不变(仍是 1 条备选)
+  assert.equal(out.messageNodes[1].messages.length, 1, 'no empty alternative branch appended');
+});
+
+// Phase 4 回归:delta/message 双 null 的 choice 同样不算产出
+it('regenerate: choice with null delta and null message does not append empty branch', async () => {
+  const conv: Conversation = {
+    ...makeConversation('conv-g', []),
+    messageNodes: [
+      toMessageNode(makeUserMessage('hi')),
+      toMessageNode(makeAssistantMessage('old')),
+    ],
+  };
+  const nullDeltaProvider = {
+    streamText(_messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> {
+      onChunk({
+        id: 'x', model: 'm',
+        choices: [{ index: 0, delta: null, message: null, finishReason: 'stop' }],
+        usage: null,
+      });
+      return Promise.resolve();
+    },
+  };
+  const out = await runRegenerateAt(conv, conv.messageNodes[1].id, deps(nullDeltaProvider));
+  assert.equal(out.messageNodes[1].messages.length, 1, 'no empty alternative branch appended');
 });

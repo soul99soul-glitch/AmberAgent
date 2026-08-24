@@ -42,6 +42,7 @@ const SUGGESTIONS: string[] = [
 @Component
 struct Index {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;
@@ -102,11 +103,17 @@ struct Index {
     Column() {
       // ── ChatHeader(两行: 标题 + 模型行) ──
       Row() {
-        // 左: history icon
-        Text('☰')
-          .fontSize(22)
-          .fontColor(INK2)
-          .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
+        // 左: history icon(44 热区)
+        Row() {
+          Text('☰')
+            .fontSize(22)
+            .fontColor(INK2)
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
+        .accessibilityText('打开会话列表')
 
         // 中: 标题 + 模型(信息展示, 不可点击)
         Column() {
@@ -123,13 +130,20 @@ struct Index {
         .alignItems(HorizontalAlign.Center)
         .layoutWeight(1)
 
-        // 右: edit icon
-        Text('✎')
-          .fontSize(22)
-          .fontColor(INK2)
-          .onClick((): void => { this.newConversation(); })
+        // 右: edit icon(44 热区)
+        Row() {
+          Text('✎')
+            .fontSize(22)
+            .fontColor(INK2)
+        }
+        .width(44).height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick((): void => { this.newConversation(); })
+        .accessibilityText('新建会话')
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
@@ -147,7 +161,7 @@ struct Index {
             Text('')
               .width(8)
               .height(24)
-              .backgroundColor(ACCENT)
+              .backgroundColor(this.accentColorStore)
               .borderRadius(1)
               .margin({ left: 2 })
               .opacity(this.cursorVisible ? 1 : 0)
@@ -175,10 +189,11 @@ struct Index {
                 .fontSize(BODY2)
                 .fontColor(INK2)
                 .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                .backgroundColor(SURFACE)
                 .borderRadius(999)
                 .border({ width: 1, color: LINE2 })
-                .backgroundColor(SURFACE)
-                .margin({ right: 9, top: 9 })
+                // 左右各 4.5:换行居中时行末不留额外右空隙,列间距仍为 9
+                .margin({ left: 4.5, right: 4.5, top: 9 })
                 .onClick((): void => {
                   this.inputText = s;
                 })
@@ -212,7 +227,7 @@ struct Index {
             Row() {
               Text('查看全部对话')
                 .fontSize(BODY2)
-                .fontColor(ACCENT)
+                .fontColor(this.accentColorStore)
             }
             .width('100%')
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -232,7 +247,7 @@ struct Index {
       Row() {
         // 输入药丸
         TextInput({ text: this.inputText, placeholder: '输入消息…' })
-          .fontSize(15.5)
+          .fontSize(BODY)
           .fontColor(INK)
           .placeholderColor(INK4)
           .backgroundColor(SURFACE2)
@@ -251,8 +266,8 @@ struct Index {
           .width(48)
           .height(48)
           .borderRadius(999)
-          .backgroundColor(this.inputText.trim().length > 0 ? ACCENT : SURFACE2)
-          .border({ width: 1, color: this.inputText.trim().length > 0 ? ACCENT : LINE })
+          .backgroundColor(this.inputText.trim().length > 0 ? this.accentColorStore : SURFACE2)
+          .border({ width: 1, color: this.inputText.trim().length > 0 ? this.accentColorStore : LINE })
           .textAlign(TextAlign.Center)
           .margin({ left: 9 })
           .onClick((): void => { this.send(); })
@@ -265,5 +280,6 @@ struct Index {
     .width('100%')
     .height('100%')
     .backgroundColor(BG)
+    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }
 }

@@ -21,6 +21,7 @@ export struct PageTitleBar {
   @Prop title: string = '';
   @Prop showBack: boolean = true;
   @Prop actionText: string = '';
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   onAction: () => void = (): void => {};
   onBack: () => void = (): void => { router.back(); };
@@ -45,7 +46,7 @@ export struct PageTitleBar {
         .layoutWeight(1)
       if (this.actionText.length > 0) {
         Row() {
-          Text(this.actionText).fontSize(BODY).fontColor(ACCENT)
+          Text(this.actionText).fontSize(BODY).fontColor(this.accentColorStore)
         }
         .constraintSize({ minWidth: 44, minHeight: 44 })
         .justifyContent(FlexAlign.Center)
@@ -55,7 +56,8 @@ export struct PageTitleBar {
       }
     }
     .width('100%')
-    .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
+    // 无返回键时标题对齐页边距 GUTTER(=卡片左缘);有返回键时返回钮贴左,标题随钮
+    .padding({ left: this.showBack ? 14 : GUTTER, right: GUTTER, top: this.statusBarHeight + 2, bottom: 11 })
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .backgroundColor(BG)
   }
@@ -65,11 +67,12 @@ export struct PageTitleBar {
 @Component
 export struct SectionHeader {
   @Prop label: string = '';
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   build(): void {
     Row() {
       Text('//')
         .fontSize(LABEL)
-        .fontColor(ACCENT)
+        .fontColor(this.accentColorStore)
         .fontWeight(FontWeight.Bold)
       Text(` ${this.label.toUpperCase()}`)
         .fontSize(LABEL)
@@ -77,7 +80,8 @@ export struct SectionHeader {
         .fontColor(INK3)
     }
     .width('100%')
-    .padding({ left: 6, top: 20, bottom: 4 })
+    // 对齐行内文字(行 padding 左 16):包边页 18+16=34,全出血页 16,两族一致成立
+    .padding({ left: 16, top: 20, bottom: 4 })
   }
 }
 
@@ -126,6 +130,7 @@ export struct ToggleRow {
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop checked: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onToggle: () => void = (): void => {};
 
   build(): void {
@@ -146,7 +151,7 @@ export struct ToggleRow {
       .layoutWeight(1)
 
       Toggle({ type: ToggleType.Switch, isOn: this.checked })
-        .selectedColor(this.checked ? ACCENT : LINE2)
+        .selectedColor(this.checked ? this.accentColorStore : LINE2)
         .onChange((_v: boolean): void => { this.onToggle(); })
     }
     .width('100%')
@@ -190,6 +195,7 @@ export struct SessionRowItem {
   @Prop modelId: string = '';
   @Prop timeText: string = '';
   @Prop pinned: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onRowClick: () => void = (): void => {};
 
   build(): void {
@@ -197,7 +203,7 @@ export struct SessionRowItem {
       Column() {
         Row() {
           if (this.pinned) {
-            Icon({ name: 'pin', iconSize: 13, color: ACCENT }).margin({ right: 7 })
+            Icon({ name: 'pin', iconSize: 13, color: this.accentColorStore }).margin({ right: 7 })
           }
           Text(this.title.length > 0 ? this.title : '未命名对话')
             .fontSize(BODY)

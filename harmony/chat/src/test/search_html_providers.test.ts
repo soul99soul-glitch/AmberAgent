@@ -178,3 +178,23 @@ test('ddg:双空 + 风控词 → human verification;否则 no parseable 文案�
     (e: Error): boolean => e.message === 'DuckDuckGo returned no parseable organic results',
   );
 });
+
+// ===== Phase 6 回归:非 2xx 响应不得被当作结果页解析 =====
+
+test('bing: HTTP 429 rate-limit page rejects with HTTP error (not "no results")', async () => {
+  const calls: CapturedCall[] = [];
+  initSearchSdk(mockHttpSeq([{ status: 429, headers: {}, body: '<html><body>slow down</body></html>' }], calls),
+    undefined, (): string => 'en-US,en');
+  await assert.rejects(
+    bingSearchService.search({ query: 'q' }, { resultSize: 10 }, bingOptions()),
+    /HTTP 429/);
+});
+
+test('duckduckgo: HTTP 403 challenge page rejects with HTTP error', async () => {
+  const calls: CapturedCall[] = [];
+  initSearchSdk(mockHttpSeq([{ status: 403, headers: {}, body: '<html>forbidden</html>' }], calls),
+    undefined, (): string => 'en-US,en');
+  await assert.rejects(
+    duckDuckGoSearch('q', { resultSize: 10 }),
+    /HTTP 403/);
+});

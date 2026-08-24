@@ -2,7 +2,7 @@
   "string": [
     { "name": "module_desc", "value": "Deep Read 深度阅读" },
     { "name": "EntryAbility_desc", "value": "Deep Read" },
-    { "name": "EntryAbility_label", "value": "深度阅读" },
+    { "name": "EntryAbility_label", "value": "Amber" },
     { "name": "reason_internet", "value": "用于搜索和抓取深度阅读所需的来源" },
     { "name": "reason_network", "value": "检测网络连接状态以决定是否启动深读" },
     { "name": "reason_notification", "value": "在深读生成完成或失败时通知用户" },

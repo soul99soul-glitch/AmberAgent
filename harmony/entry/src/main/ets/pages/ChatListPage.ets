@@ -1,21 +1,14 @@
-// ChatListPage — 会话列表(G7 重构)
-//
-// 对齐 PageTitleBar 风格(inline header, 因需两个 trailing action):
-//   - header padding 14/2/11 + border-bottom 1px LINE + bg BG + ←24/INK
-//   - flat hairline 行(不用 List+divider)
-//   - tokens 从 tokens.ets 导入(无本地重定义)
-//
+// ChatListPage — Android 风格会话首页
 // 保留真实数据逻辑: repo.list/search/删除/撤销/置顶/删除全部
 
 import { router, promptAction } from '@kit.ArkUI';
-import type { Conversation, ConversationSummary, UIMessage } from '@amber/chat-domain';
+import type { Conversation, ConversationSummary, UIMessage, DisplaySetting } from '@amber/chat-domain';
+import { loadDisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
-import { SearchField } from '../components/ui/SearchField.ets';
-import { PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { DotText, DotGlyph, DotGround, DFEATURE } from '../components/ui/DotMatrix.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_INK, ERROR, BODY, META, LABEL, TITLE , BG_FADE_START, BG_FADE_END } from '../design/tokens.ets';
+import { UIAvatar } from '../components/UIAvatar.ets';
+import { ACCENT, ACCENT_INK, BG, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE2 } from '../design/tokens.ets';
 
 interface ActionMenuResult {
   index: number;
@@ -28,32 +21,46 @@ const SNACK_DURATION_MS: number = 4000;
 @Component
 struct ChatListPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
-  // 主题切换时触发整页重建(build 重读可变令牌)
   @StorageProp('darkMode') darkMode: boolean = false;
-  // Return-to-page forces rebuild, reads latest theme tokens (background pages in stack don't receive StorageProp updates)
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State themeTick: number = 0;
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State searchText: string = '';
   @State snackVisible: boolean = false;
-  @State cursorOn: boolean = true;
   @State fabScale: number = 1;
-  // 1:1 原型会话行:预览行 + 消息条数(页面层装配,不动 RDB schema)
+  @State userNickname: string = '';
   @State previews: Record<string, string> = {};
   @State msgCounts: Record<string, number> = {};
   private pendingDeleted: Conversation | null = null;
   private snackTimer: number = -1;
-  private cursorTimer: number = -1;
+  private pageAlive: boolean = false;
+  // refresh 请求序号:慢的旧搜索结果不得覆盖新输入的结果
+  private refreshSeq: number = 0;
 
   onPageShow(): void {
     this.themeTick = Date.now();
+    this.refresh();
+    loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
+      if (this.pageAlive) this.userNickname = setting.userNickname;
+    }).catch((): void => {});
+    // 应用已在前台时,第二条通知不会再触发 aboutToAppear — show 时也要消费深链
+    this.consumeDeepLink();
   }
 
   aboutToAppear(): void {
-    if (this.cursorTimer !== -1) clearInterval(this.cursorTimer);
-    this.cursorTimer = setInterval((): void => { this.cursorOn = !this.cursorOn; }, 525);
+    this.pageAlive = true;
     this.refresh();
-    // Want deep-link(通知/分享入口): EntryAbility 写 AppStorage, 首页消费后跳 DeepReadArticlePage
+    loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
+      if (this.pageAlive) this.userNickname = setting.userNickname;
+    }).catch((): void => {});
+
+    // EntryAbility 写入的通知/分享深链在根页消费，避免改变返回栈语义。
+    this.consumeDeepLink();
+  }
+
+  // 深链消费:置空后跳转;消费过的 topic/title 不残留
+  private consumeDeepLink(): void {
     const wantTopicId: string = AppStorage.get<string>('wantTopicId') ?? '';
     const wantTitle: string = AppStorage.get<string>('wantTitle') ?? '';
     if (wantTopicId.length > 0) {
@@ -67,51 +74,52 @@ struct ChatListPage {
   }
 
   aboutToDisappear(): void {
-    if (this.cursorTimer !== -1) {
-      clearInterval(this.cursorTimer);
-      this.cursorTimer = -1;
-    }
+    this.pageAlive = false;
     if (this.pendingDeleted !== null) this.commitPendingDelete();
   }
 
   private refresh(): void {
     const repo = getChatRepository();
     const query: string = this.searchText.trim();
+    const seq: number = ++this.refreshSeq;
     const future: Promise<ConversationSummary[]> =
       query.length > 0 ? repo.search(query) : repo.list();
     future.then((list: ConversationSummary[]): void => {
+      if (seq !== this.refreshSeq || !this.pageAlive) return;
       const pendingId: string = this.pendingDeleted !== null ? this.pendingDeleted.id : '';
       const visible: ConversationSummary[] = list.filter(
         (item: ConversationSummary): boolean => item.id !== pendingId);
       this.items = visible;
       this.loaded = true;
-      // 1:1 原型会话行:预览行(末条选中消息首行,去 **/`)+ mono 元行「N 条消息」
-      for (const s of visible) {
-        repo.getById(s.id).then((conv: Conversation | null): void => {
-          if (conv === null) return;
+
+      // 会话行预览: 使用末条选中消息的第一行，并去除常见 Markdown 行内标记。
+      for (const summary of visible) {
+        repo.getById(summary.id).then((conversation: Conversation | null): void => {
+          if (conversation === null || seq !== this.refreshSeq || !this.pageAlive) return;
           let count: number = 0;
           let lastText: string = '';
-          for (const node of conv.messageNodes) {
+          for (const node of conversation.messageNodes) {
             if (node.messages.length === 0) continue;
-            const idx: number =
+            const index: number =
               node.selectIndex >= 0 && node.selectIndex < node.messages.length ? node.selectIndex : 0;
-            const m: UIMessage = node.messages[idx];
+            const message: UIMessage = node.messages[index];
             count++;
-            for (const p of m.parts) {
-              if (p.type === 'text') lastText = p.text;
+            for (const part of message.parts) {
+              if (part.type === 'text') lastText = part.text;
             }
           }
-          const first: string = lastText.split('\n')[0]
+          const preview: string = lastText.split('\n')[0]
             .replace(/\*\*([^*]+)\*\*/g, '$1')
             .replace(/`([^`]+)`/g, '$1');
-          const prev: Record<string, string> = {};
-          for (const k of Object.keys(this.previews)) prev[k] = this.previews[k];
-          prev[s.id] = first;
-          this.previews = prev;
-          const counts: Record<string, number> = {};
-          for (const k of Object.keys(this.msgCounts)) counts[k] = this.msgCounts[k];
-          counts[s.id] = count;
-          this.msgCounts = counts;
+          const nextPreviews: Record<string, string> = {};
+          for (const key of Object.keys(this.previews)) nextPreviews[key] = this.previews[key];
+          nextPreviews[summary.id] = preview;
+          this.previews = nextPreviews;
+
+          const nextCounts: Record<string, number> = {};
+          for (const key of Object.keys(this.msgCounts)) nextCounts[key] = this.msgCounts[key];
+          nextCounts[summary.id] = count;
+          this.msgCounts = nextCounts;
         });
       }
     });
@@ -129,10 +137,10 @@ struct ChatListPage {
 
   private togglePin(item: ConversationSummary): void {
     const repo = getChatRepository();
-    repo.getById(item.id).then((conv: Conversation | null): void => {
-      if (conv === null) return;
-      conv.isPinned = !conv.isPinned;
-      repo.save(conv).then((): void => this.refresh());
+    repo.getById(item.id).then((conversation: Conversation | null): void => {
+      if (conversation === null) return;
+      conversation.isPinned = !conversation.isPinned;
+      repo.save(conversation).then((): void => this.refresh());
     });
   }
 
@@ -141,16 +149,16 @@ struct ChatListPage {
       this.commitPendingDelete();
     }
     const repo = getChatRepository();
-    repo.getById(item.id).then((full: Conversation | null): void => {
-      if (full === null) return;
-      this.pendingDeleted = full;
+    repo.getById(item.id).then((fullConversation: Conversation | null): void => {
+      if (fullConversation === null) return;
+      this.pendingDeleted = fullConversation;
       this.snackVisible = true;
       this.refresh();
       this.snackTimer = setTimeout((): void => {
         this.commitPendingDelete();
       }, SNACK_DURATION_MS);
-    }).catch((e: Error): void => {
-      promptAction.showToast({ message: `删除失败：${e.message}`, duration: 1800 });
+    }).catch((error: Error): void => {
+      promptAction.showToast({ message: `删除失败：${error.message}`, duration: 1800 });
     });
   }
 
@@ -169,24 +177,21 @@ struct ChatListPage {
   }
 
   private commitPendingDelete(): void {
-    const full: Conversation | null = this.pendingDeleted;
+    const fullConversation: Conversation | null = this.pendingDeleted;
     this.pendingDeleted = null;
     this.clearSnackTimer();
     this.snackVisible = false;
-    if (full === null) return;
+    if (fullConversation === null) return;
     const repo = getChatRepository();
-    repo.delete(full.id)
+    repo.delete(fullConversation.id)
       .then((): Promise<void> =>
-        cleanupDeletedConversation(full, repo, getChatKvStore()))
-      .then((): void => { this.refresh(); })
-      .catch((e: Error): void => {
-        promptAction.showToast({ message: `删除清理失败：${e.message}`, duration: 2000 });
+        cleanupDeletedConversation(fullConversation, repo, getChatKvStore()))
+      .then((): void => { if (this.pageAlive) this.refresh(); })
+      .catch((error: Error): void => {
+        if (!this.pageAlive) return;
+        promptAction.showToast({ message: `删除清理失败：${error.message}`, duration: 2000 });
         this.refresh();
       });
-  }
-
-  private dismissSnack(): void {
-    this.commitPendingDelete();
   }
 
   private deleteAllConversations(): void {
@@ -195,13 +200,22 @@ struct ChatListPage {
       let chain: Promise<void> = Promise.resolve();
       for (const item of all) {
         chain = chain.then((): Promise<void> =>
-          repo.getById(item.id).then((full: Conversation | null): Promise<void> => {
-            if (full === null) return Promise.resolve();
+          repo.getById(item.id).then((fullConversation: Conversation | null): Promise<void> => {
+            if (fullConversation === null) return Promise.resolve();
             return repo.delete(item.id).then((): Promise<void> =>
-              cleanupDeletedConversation(full, repo, getChatKvStore()));
+              cleanupDeletedConversation(fullConversation, repo, getChatKvStore()));
           }));
       }
-      chain.then((): void => this.refresh());
+      chain.then((): void => {
+        if (this.pageAlive) this.refresh();
+      }).catch((error: Error): void => {
+        if (!this.pageAlive) return;
+        promptAction.showToast({ message: `删除全部对话失败：${error.message}`, duration: 2000 });
+        this.refresh();
+      });
+    }).catch((error: Error): void => {
+      if (!this.pageAlive) return;
+      promptAction.showToast({ message: `删除全部对话失败：${error.message}`, duration: 2000 });
     });
   }
 
@@ -218,15 +232,36 @@ struct ChatListPage {
     });
   }
 
-  // 会话行(1:1 参考首页): 标题+置顶图标 / 预览行 / mono 元信息行; 滑动/长按 置顶/删除
   private previewOf(id: string): string {
-    const p: string | undefined = this.previews[id];
-    return p === undefined ? '' : p;
+    const preview: string | undefined = this.previews[id];
+    return preview === undefined || preview.length === 0 ? '暂无消息' : preview;
   }
 
-  private countLabel(id: string): string {
-    const n: number | undefined = this.msgCounts[id];
-    return `${n === undefined ? 0 : n} 条消息`;
+  private messageCount(id: string): number {
+    const count: number | undefined = this.msgCounts[id];
+    return count === undefined ? 0 : count;
+  }
+
+  private formatConversationDate(updateAt: string): string {
+    const date: Date = new Date(updateAt);
+    if (isNaN(date.getTime())) return updateAt.length > 10 ? updateAt.substring(0, 10) : updateAt;
+    const now: Date = new Date();
+    const monthDay: string = `${date.getMonth() + 1}月${date.getDate()}日`;
+    return date.getFullYear() === now.getFullYear() ? monthDay : `${date.getFullYear()}年${monthDay}`;
+  }
+
+  private todayLabel(): string {
+    const date: Date = new Date();
+    const weekday: string = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()];
+    return `今天 · ${date.getMonth() + 1}月${date.getDate()}日 ${weekday}`;
+  }
+
+  private onFeature(id: string): void {
+    if (id === 'reader') router.pushUrl({ url: 'pages/BoardPage' });
+    else if (id === 'novel') router.pushUrl({ url: 'pages/NovelProjectsPage' });
+    else if (id === 'council') router.pushUrl({ url: 'pages/CouncilPage' });
+    else if (id === 'apps') router.pushUrl({ url: 'pages/MiniAppListPage' });
+    else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
   }
 
   @Builder
@@ -234,49 +269,55 @@ struct ChatListPage {
     Column() {
       Row() {
         Text(item.title.length > 0 ? item.title : '未命名对话')
-          .fontSize(15)
-          .fontWeight(FontWeight.Medium)
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
           .fontColor(INK)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
         if (item.isPinned) {
-          DotGlyph({ rows: DFEATURE['pin'], dotScale: 2.4, color: ACCENT })
+          Icon({ name: 'pin', iconSize: 17, color: this.accentColorStore })
+            .margin({ left: 10, right: 8 })
         }
+        Text(this.formatConversationDate(item.updateAt))
+          .fontSize(13)
+          .fontColor(INK4)
+          .maxLines(1)
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
 
-      // 1:1 原型预览行：末条消息首行(13/ink-3, marginTop 4)
-      if (this.previewOf(item.id).length > 0) {
+      Row() {
         Text(this.previewOf(item.id))
-          .fontSize(13)
+          .fontSize(15)
           .fontColor(INK3)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .margin({ top: 4 })
-      }
-
-      // mono 元信息行: 左=N 条消息, 右=日期(marginTop 6)
-      Row() {
-        Text(this.countLabel(item.id))
-          .fontSize(11)
-          .fontFamily('JetBrainsMono')
-          .fontColor(INK4)
-        Blank()
-        Text(item.updateAt.length > 10 ? item.updateAt.substring(0, 10) : item.updateAt)
-          .fontSize(11)
-          .fontFamily('JetBrainsMono')
-          .fontColor(INK4)
+          .layoutWeight(1)
+          .margin({ right: 14 })
+        if (this.messageCount(item.id) > 0) {
+          Text(`${this.messageCount(item.id)}`)
+            .fontSize(16)
+            .fontColor(this.accentColorStore)
+            .width(42)
+            .height(42)
+            .lineHeight(42)
+            .textAlign(TextAlign.Center)
+            .maxLines(1)
+            .minFontSize(11)
+            .border({ width: 1, color: this.accentColorStore })
+            .borderRadius(21)
+        }
       }
       .width('100%')
-      .margin({ top: 6 })
+      .alignItems(VerticalAlign.Center)
+      .margin({ top: 9 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 14, bottom: 14 })
+    .padding({ left: 20, right: 20, top: 17, bottom: 14 })
     .backgroundColor(BG)
-    .border({ width: { bottom: 1 }, color: { bottom: LINE }, style: { bottom: BorderStyle.Dotted } })
+    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .onClick((): void => { this.openConversation(item.id); })
     .gesture(
       LongPressGesture()
@@ -287,35 +328,42 @@ struct ChatListPage {
   @Builder
   SwipePin(item: ConversationSummary): void {
     Column() {
-      DotGlyph({ rows: DFEATURE['pin'], dotScale: 2.5, color: ACCENT })
+      Icon({ name: 'pin', iconSize: 20, color: this.accentColorStore })
       Text(item.isPinned ? '取消置顶' : '置顶')
-        .fontSize(10).fontFamily('JetBrainsMono').fontColor(ACCENT).margin({ top: 4 })
+        .fontSize(12)
+        .fontColor(this.accentColorStore)
+        .margin({ top: 6 })
     }
-    .width(88).height('100%')
+    .width(88)
+    .height('100%')
     .backgroundColor(SURFACE2)
     .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
     .onClick((): void => { this.togglePin(item); })
   }
 
   @Builder
   SwipeDelete(item: ConversationSummary): void {
-    Row() {
-      Icon({ name: 'trash', iconSize: 17, color: ACCENT_INK })
+    Column() {
+      Icon({ name: 'trash', iconSize: 20, color: ACCENT_INK })
       Text('删除')
-        .fontSize(10).fontFamily('JetBrainsMono').fontColor(ACCENT_INK).margin({ top: 4 })
+        .fontSize(12)
+        .fontColor(ACCENT_INK)
+        .margin({ top: 6 })
     }
-    .width(88).height('100%')
-    .backgroundColor(ACCENT)
+    .width(88)
+    .height('100%')
+    .backgroundColor(this.accentColorStore)
     .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
     .onClick((): void => { this.onDelete(item); })
   }
 
-  // 长按操作菜单(置顶/删除), 取代常显按钮(设计更干净)
   private showRowMenu(item: ConversationSummary): void {
     promptAction.showActionMenu({
       buttons: [
-        { text: item.isPinned ? '取消置顶' : '置顶', color: '#1B1A17' },
-        { text: '删除', color: '#C2553F' },
+        { text: item.isPinned ? '取消置顶' : '置顶', color: INK },
+        { text: '删除', color: ERROR },
       ],
     }).then((result: ActionMenuResult): void => {
       if (result.index === 0) this.togglePin(item);
@@ -323,220 +371,190 @@ struct ChatListPage {
     }).catch((): void => {});
   }
 
-  // 今天 · M月D日 周X(参考首页头部日期)
-  private todayLabel(): string {
-    const d: Date = new Date();
-    const wd: string = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
-    return `今天 · ${d.getMonth() + 1}月${d.getDate()}日 ${wd}`;
-  }
-
-  // 1:1 原型眉标:「今天」陶土 600,日期部分 ink-4,等宽 letter-spacing 0.08em
-  private mmdd(): string {
-    const d: Date = new Date();
-    const p = (n: number): string => n < 10 ? `0${n}` : `${n}`;
-    return `${p(d.getMonth() + 1)}.${p(d.getDate())}`;
-  }
-
-  private wd(): string {
-    return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date().getDay()];
-  }
-
-  // 功能栏入口 → 对应页面
-  private onFeature(id: string): void {
-    if (id === 'reader') router.pushUrl({ url: 'pages/BoardPage' });
-    else if (id === 'novel') router.pushUrl({ url: 'pages/NovelProjectsPage' });
-    else if (id === 'council') router.pushUrl({ url: 'pages/CouncilPage' });
-    else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
-  }
-
   @Builder
   FeatureItem(id: string, label: string, icon: string): void {
     Column() {
-      DotGlyph({ rows: DFEATURE[id], dotScale: 3.4, dotGap: 1.7, color: ACCENT, glow: true })
+      Icon({ name: icon, iconSize: 36, color: this.accentColorStore })
       Text(label)
-        .fontSize(12)
+        .fontSize(15)
+        .fontWeight(FontWeight.Medium)
         .fontColor(INK2)
         .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ top: 10 })
     }
-    .padding({ top: 12, bottom: 13 })
+    .width('100%')
+    .height('100%')
     .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
     .onClick((): void => { this.onFeature(id); })
   }
 
-  // 1:1 原型底部 mask 渐隐(52/56px,transparent→BG,不拦截触摸)
   @Builder
-  BottomFade(h: number): void {
+  FeatureDivider(): void {
     Column()
-      .width('100%')
-      .height(h)
-      .linearGradient({
-        direction: GradientDirection.Bottom,
-        colors: [[BG_FADE_START, 0.0], [BG_FADE_END, 1.0]],
-      })
-      .hitTestBehavior(HitTestMode.None)
-  }
-
-  // 竖向点状分隔:1px 圆点列(border dotted 光栅化呈实线,故逐点渲染)
-  //   固定宽度,位置由 5 等宽槽决定 → 钉在 20/40/60/80% 均分边界
-  @Builder
-  RailSep(): void {
-    Column() {
-      ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], (i: number): void => {
-        Column().width(1).height(1).borderRadius(0.5).backgroundColor(LINE)
-      }, (i: number): string => `d${i}`)
-    }
-    .height('100%')
-    .padding({ top: 13, bottom: 13 })
-    .justifyContent(FlexAlign.SpaceBetween)
-    .alignItems(HorizontalAlign.Center)
+      .width(1)
+      .height(58)
+      .backgroundColor(LINE)
   }
 
   build(): void {
     Stack({ alignContent: Alignment.Bottom }) {
-      DotGround()
       Column() {
-        // 头部(ascii 1:1): 点阵 AMBER+闪烁光标 | 日期眉标(今天·点阵MM.DD·周X)
-        //   词标行 alignItems flex-end,日期行 lineHeight 1 → 底边齐平
         Row() {
           Row() {
-            DotText({ text: 'AMBER', dotScale: 2.3, color: INK, glow: true })
-            Text('')
-              .width(11).height(21).backgroundColor(ACCENT).borderRadius(1)
-              .margin({ left: 4 })
-              .opacity(this.cursorOn ? 1 : 0)
+            Text('Amber')
+              .fontSize(32)
+              .fontWeight(FontWeight.Medium)
+              .fontColor(INK)
+            Column()
+              .width(4)
+              .height(28)
+              .backgroundColor(this.accentColorStore)
+              .margin({ left: 9 })
           }
           .alignItems(VerticalAlign.Center)
+
+          Text(this.todayLabel())
+            .fontSize(14)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+            .margin({ left: 16 })
+
+
           Row() {
-            Text('今天')
-              .fontSize(11.5).lineHeight(11.5)
-              .fontFamily('JetBrainsMono')
-              .fontWeight(600)
-              .fontColor(ACCENT)
-              .letterSpacing(0.9)
-            Text('·').fontSize(11.5).lineHeight(11.5).fontFamily('JetBrainsMono').fontColor(INK4)
-              .margin({ left: 5, right: 5 })
-            DotText({ text: this.mmdd(), dotScale: 1, dotGap: 0.7, color: INK3 })
-            Text('·').fontSize(11.5).lineHeight(11.5).fontFamily('JetBrainsMono').fontColor(INK4)
-              .margin({ left: 5, right: 5 })
-            Text(this.wd())
-              .fontSize(11.5).lineHeight(11.5)
-              .fontFamily('JetBrainsMono')
-              .fontColor(INK4)
-              .letterSpacing(0.9)
+            Icon({ name: 'gear', iconSize: 22, color: INK2 })
           }
+          .width(44)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .margin({ left: 9 })
-          Blank()
-          Icon({ name: 'gear', iconSize: 20, color: INK2 })
-            .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
-          Column()
-            .width(34).height(34).borderRadius(999)
-            .backgroundColor(ACCENT)
-            .margin({ left: 10 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
+
+          Row() {
+            UIAvatar({
+              name: this.userNickname,
+              avatarSize: 40,
+              accentColor: this.accentColorStore,
+            })
+          }
+          .width(44)
+          .height(44)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .margin({ left: 8 })
+          .onClick((): void => { router.pushUrl({ url: 'pages/ProfilePage' }); })
         }
         .width('100%')
-        .alignItems(VerticalAlign.Bottom)
-        .padding({ left: 20, right: 20, top: this.statusBarHeight + 8, bottom: 12 })
+        .alignItems(VerticalAlign.Center)
+        .padding({ left: 20, right: 20, top: this.statusBarHeight + 16, bottom: 21 })
 
-        // 搜索栏(flat, 底部 hairline)
         Row() {
-          Icon({ name: 'search', iconSize: 17, color: INK3 })
+          Icon({ name: 'search', iconSize: 28, color: INK3 })
           TextInput({ text: this.searchText, placeholder: '搜索会话' })
-            .fontSize(14.5)
+            .fontSize(21)
             .fontColor(INK)
             .placeholderColor(INK4)
             .backgroundColor(Color.Transparent)
             .layoutWeight(1)
-            .margin({ left: 9 })
-            .onChange((v: string): void => { this.searchText = v; this.refresh(); })
+            .margin({ left: 16 })
+            .onChange((value: string): void => { this.searchText = value; this.refresh(); })
           if (this.searchText.length > 0) {
-            Icon({ name: 'close', iconSize: 15, color: INK3 })
-              .onClick((): void => { this.searchText = ''; this.refresh(); })
+            Row() {
+              Icon({ name: 'close', iconSize: 18, color: INK3 })
+            }
+            .width(44)
+            .height(44)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.searchText = ''; this.refresh(); })
           }
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 9, bottom: 10 })
-        .border({ width: { bottom: 1 }, color: { bottom: LINE }, style: { bottom: BorderStyle.Dotted } })
+        .height(72)
+        .padding({ left: 20, right: 20 })
+        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+        .alignItems(VerticalAlign.Center)
 
-        // 功能栏:5 等宽槽(首槽左锚/末槽右锚/中间居中)→ 竖线钉死 20/40/60/80% 均分边界
         Row() {
-          Row() { this.FeatureItem('reader', '深度阅读', 'book') }
-            .layoutWeight(1).justifyContent(FlexAlign.Start)
-          this.RailSep()
-          Row() { this.FeatureItem('apps', '小应用', 'box') }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-          this.RailSep()
-          Row() { this.FeatureItem('novel', '小说创作', 'edit') }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-          this.RailSep()
-          Row() { this.FeatureItem('webmount', 'WebMount', 'globe') }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-          this.RailSep()
-          Row() { this.FeatureItem('council', '模型议会', 'brain') }
-            .layoutWeight(1).justifyContent(FlexAlign.End)
+          Column() { this.FeatureItem('reader', '深度阅读', 'book') }.height('100%').layoutWeight(1)
+          this.FeatureDivider()
+          Column() { this.FeatureItem('apps', '小应用', 'box') }.height('100%').layoutWeight(1)
+          this.FeatureDivider()
+          Column() { this.FeatureItem('novel', '小说创作', 'edit') }.height('100%').layoutWeight(1)
+          this.FeatureDivider()
+          Column() { this.FeatureItem('webmount', '站点', 'globe') }.height('100%').layoutWeight(1)
+          this.FeatureDivider()
+          Column() { this.FeatureItem('council', '模型议会', 'brain') }.height('100%').layoutWeight(1)
         }
         .width('100%')
-        .height(76)
-        .alignItems(VerticalAlign.Center)
+        .height(112)
         .padding({ left: 20, right: 20 })
-        .border({ width: { bottom: 1 }, color: { bottom: LINE }, style: { bottom: BorderStyle.Dotted } })
+        .alignItems(VerticalAlign.Center)
+        .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
-        // 会话列表 + FAB(右下悬浮)
         Stack({ alignContent: Alignment.BottomEnd }) {
           List() {
             if (!this.loaded) {
               ListItem() {
-                Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+                Text('加载会话中…')
+                  .fontSize(BODY)
+                  .fontColor(INK3)
+                  .padding({ top: 48 })
               }
             } else if (this.items.length === 0) {
               ListItem() {
                 Column() {
-                  Row() {
-                    Text('//').fontSize(12).fontFamily('JetBrainsMono').fontColor(ACCENT)
-                    Text(' 0 results').fontSize(12).fontFamily('JetBrainsMono').fontColor(INK4)
-                  }
-                  .margin({ bottom: 8 })
-                  Text(this.searchText.trim().length > 0 ? `没有匹配「${this.searchText}」的会话` : '暂无会话，点击右下角按钮开始')
-                    .fontSize(13.5).fontColor(INK3)
+                  Text(this.searchText.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
+                    .fontSize(17)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(INK2)
+                  Text(this.searchText.trim().length > 0 ? '换一个关键词再试试。' : '点击右下角按钮开始新的对话。')
+                    .fontSize(15)
+                    .fontColor(INK3)
+                    .margin({ top: 8 })
                 }
                 .width('100%')
                 .alignItems(HorizontalAlign.Center)
-                .padding({ top: 56, bottom: 56 })
+                .padding({ top: 64, bottom: 64 })
               }
             } else {
               ForEach(this.items, (item: ConversationSummary): void => {
                 ListItem() {
                   this.ConversationRow(item)
                 }
-                .swipeAction({ start: (): void => { this.SwipePin(item); }, end: (): void => { this.SwipeDelete(item); } })
-              }, (item: ConversationSummary): string => item.id + (this.darkMode ? "-d" : "-l"))
+                .swipeAction({
+                  start: (): void => { this.SwipePin(item); },
+                  end: (): void => { this.SwipeDelete(item); },
+                })
+              }, (item: ConversationSummary): string => item.id + (this.darkMode ? '-dark' : '-light'))
             }
           }
           .width('100%')
           .height('100%')
-          // 1:1 原型:滚动内容直抵底缘 + 52px 渐隐 + FAB 防遮挡 paddingBottom 100
-          .padding({ bottom: 100 })
-          .overlay(this.BottomFade(52), { align: Alignment.Bottom })
+          .padding({ bottom: this.snackVisible ? 168 : 108 })
+          .backgroundColor(BG)
           .divider({ strokeWidth: 0, color: Color.Transparent })
 
-          // FAB 新会话(右下悬浮, accent 圆)
           Column() {
-            DotGlyph({ rows: DFEATURE['plus'], dotScale: 3.4, dotGap: 1.8, color: ACCENT_INK, glow: true })
+            Icon({ name: 'edit', iconSize: 27, color: ACCENT_INK })
           }
-          .width(56).height(56).borderRadius(999)
-          .backgroundColor(ACCENT)
+          .width(62)
+          .height(62)
+          .borderRadius(31)
+          .backgroundColor(this.accentColorStore)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
-          // 1:1 原型 .fab:active scale(.96) .18s ease-out
           .scale({ x: this.fabScale, y: this.fabScale })
-          .onTouch((e: TouchEvent): void => {
-            const down: boolean = e.type === TouchType.Down;
+          .onTouch((event: TouchEvent): void => {
+            const down: boolean = event.type === TouchType.Down;
             animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
               this.fabScale = down ? 0.96 : 1;
             });
           })
-          .margin({ right: 20, bottom: 24 })
+          .margin({ right: 24, bottom: this.snackVisible ? 84 : 28 })
           .onClick((): void => { this.newConversation(); })
         }
         .layoutWeight(1)
@@ -545,12 +563,13 @@ struct ChatListPage {
       .width('100%')
       .height('100%')
 
-      // 撤销 snackbar(底部居中)
       if (this.snackVisible) {
         Row() {
           Text('对话已删除').fontSize(META).fontColor(Color.White)
           Blank()
-          Text('撤销').fontSize(META).fontColor(ACCENT)
+          Text('撤销')
+            .fontSize(META)
+            .fontColor(this.accentColorStore)
             .padding({ left: 16, top: 6, bottom: 6 })
             .onClick((): void => { this.undoDelete(); })
         }
@@ -564,7 +583,8 @@ struct ChatListPage {
     .width('100%')
     .height('100%')
     .backgroundColor(BG)
-    // 读 themeTick 建依赖:主题变更 onPageShow 后 build 重读令牌
+    // 返回首页时确保重新读取可变主题令牌。
     .opacity(this.themeTick >= 0 ? 1 : 1)
+    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }
 }

@@ -194,3 +194,32 @@ test('simulate OpenAI streaming: tool_call fragments assemble correctly', () => 
     assert.equal(parts[2].input, '{"q":"latest news"}');
   }
 });
+
+// ===== 多工具无 id 流式回归(#2:streamToolIndex 归位) =====
+
+test('parallel tool streams: fragments land in their own part by streamToolIndex', () => {
+  let parts: UIMessagePart[] = [];
+  // 两个工具的首个分片都无 id,只有 index
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 0, toolName: 'search_web', input: '{"q":"' });
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 1, toolName: 'write_file', input: '{"path":"a' });
+  // 后续分片交错到达
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 1, input: '.txt","c":"' });
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 0, input: 'news"}' });
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 1, input: 'hi"}' });
+  // id 迟到
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 0, toolCallId: 'call_0' });
+  parts = appendChunk(parts, { kind: 'tool', streamToolIndex: 1, toolCallId: 'call_1' });
+
+  const tools = parts.filter(p => p.kind === 'tool');
+  assert.equal(tools.length, 2, 'two distinct tool parts, no duplicates');
+  const t0 = tools[0];
+  const t1 = tools[1];
+  if (t0.kind === 'tool' && t1.kind === 'tool') {
+    assert.equal(t0.toolCallId, 'call_0');
+    assert.equal(t0.toolName, 'search_web');
+    assert.equal(t0.input, '{"q":"news"}');
+    assert.equal(t1.toolCallId, 'call_1');
+    assert.equal(t1.toolName, 'write_file');
+    assert.equal(t1.input, '{"path":"a.txt","c":"hi"}');
+  }
+});

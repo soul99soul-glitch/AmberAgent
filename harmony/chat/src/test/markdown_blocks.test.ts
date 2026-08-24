@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseMarkdown,
+  orderedListLabel,
   parseInline,
 } from '../main/ets/chat/markdown_blocks.ts';
 import type {
@@ -241,6 +242,68 @@ describe('parseMarkdown lists', () => {
       const types1 = block.items[1].map((t: InlineToken): string => t.type);
       assert.ok(types1.includes('code'));
     }
+  });
+
+  it('flat list omits depths field', () => {
+    const block = firstBlock('- a\n- b');
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') assert.equal(block.depths, undefined);
+  });
+
+  it('uniformly indented flat list also omits depths', () => {
+    const block = firstBlock('  - a\n  - b');
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') assert.equal(block.depths, undefined);
+  });
+
+  it('nested unordered list emits per-item depths (2 spaces per level)', () => {
+    const md = '- top\n  - child\n    - grandchild\n- top again';
+    const block = firstBlock(md);
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') {
+      assert.deepEqual(block.depths, [0, 1, 2, 0]);
+    }
+  });
+
+  it('nested ordered list emits per-item depths', () => {
+    const md = '1. top\n   1. child\n2. top again';
+    const block = firstBlock(md);
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') {
+      assert.deepEqual(block.depths, [0, 1, 0]);
+    }
+  });
+
+  it('depths clamp at 3 and never go negative on dedent', () => {
+    const md = '- a\n' + '        - deep\n' + '- b';
+    const block = firstBlock(md);
+    assert.equal(block.kind, 'list');
+    if (block.kind === 'list') {
+      assert.deepEqual(block.depths, [0, 3, 0]);
+    }
+  });
+});
+
+describe('orderedListLabel numbering', () => {
+  it('flat list continues from start', () => {
+    assert.equal(orderedListLabel(4, [], 0), '4');
+    assert.equal(orderedListLabel(4, [], 1), '5');
+    assert.equal(orderedListLabel(4, [0, 0], 1), '5');
+  });
+
+  it('nested depth restarts at 1, top level continues after it', () => {
+    const depths = [0, 1, 0];
+    assert.equal(orderedListLabel(1, depths, 0), '1');
+    assert.equal(orderedListLabel(1, depths, 1), '1');
+    assert.equal(orderedListLabel(1, depths, 2), '2');
+  });
+
+  it('deeper depth resets when returning to a shallower one', () => {
+    const depths = [0, 1, 2, 1];
+    assert.equal(orderedListLabel(1, depths, 0), '1');
+    assert.equal(orderedListLabel(1, depths, 1), '1');
+    assert.equal(orderedListLabel(1, depths, 2), '1');
+    assert.equal(orderedListLabel(1, depths, 3), '2');
   });
 });
 

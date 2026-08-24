@@ -264,10 +264,17 @@ const numOrNull = (j: JsonObject, key: string): number | null => {
   return typeof v === 'number' ? v : null;
 };
 
-// ignoreUnknownKeys;缺字段回该类默认;未知 type → 抛错
+// ignoreUnknownKeys;缺字段回该类默认;未知 type → 抛错(调用方逐条解码、
+// 只跳过未知条目 — 整体 catch 会把已配置的有效服务全部抹成默认)
+export const isKnownSearchServiceType = (t: string): boolean =>
+  Object.keys(SEARCH_SERVICE_TYPES).includes(t);
+
 export const searchServiceOptionsFromJson = (j: JsonObject): SearchServiceOptions => {
   const t: JsonValue | undefined = j['type'];
   if (typeof t !== 'string') throw new Error('SearchServiceOptions.type is required');
+  if (!isKnownSearchServiceType(t)) {
+    throw new Error(`unknown search service type: ${t}`);
+  }
   const id: string = strOr(j, 'id', newId());
   const base = makeSearchServiceOptions(t as SearchServiceOptionsType);
   // 逐项覆盖(缺字段/类型不符 → 保留默认;未知键忽略)

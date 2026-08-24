@@ -1,6 +1,6 @@
 // SettingPage — 设置入口(G8 对齐 SettingsScreen 设计稿)
 //
-// 结构梳理(对齐 Android 层次):外观 / 模型与服务 / Agent / 数据 / 关于。
+// 结构梳理(对齐 Android 层次):外观 / 模型与服务 / Agent Runtime / 数据 / 关于。
 //   无 profile 卡、无订阅占位、无死占位行(退出登录/通知)。
 
 import { router } from '@kit.ArkUI';
@@ -22,8 +22,9 @@ const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
 struct SettingPage {
   // theme swap triggers full-page rebuild (build re-reads mutable tokens)
   @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State themeMode: string = 'light';
-  @State accentColor: string = '#B8623A';
+  @State accentColor: string = ACCENT;
   // 真实值装配:默认模型标签 + 版本号(不写死占位)
   @State modelLabel: string = '';
   @State versionLabel: string = '';
@@ -38,7 +39,11 @@ struct SettingPage {
     }
     // 真实持久化回读:强调色(DisplaySetting)+ 主题(ui_color_mode)
     loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
-      if (s.accentColor.length > 0) this.accentColor = s.accentColor;
+      if (s.accentColor.length > 0) {
+        this.accentColor = s.accentColor;
+        setAccentColor(s.accentColor);
+        AppStorage.setOrCreate<string>('accentColor', s.accentColor);
+      }
     });
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
       if (raw === 'dark' || raw === 'light') this.themeMode = raw;
@@ -57,6 +62,7 @@ struct SettingPage {
   private setAccent(color: string): void {
     this.accentColor = color;
     setAccentColor(color);
+    AppStorage.setOrCreate<string>('accentColor', color);
     loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
       const next: DisplaySetting = s;
       next.accentColor = color;
@@ -138,14 +144,15 @@ struct SettingPage {
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
 
-          // ── Agent ──
-          SectionHeader({ label: 'AGENT' })
+          // ── Agent Runtime ──
+          SectionHeader({ label: 'AGENT RUNTIME' })
           Column() {
             NavRow({ label: '技能', onRowClick: (): void => { this.go('pages/SkillsPage'); } })
             NavRow({ label: '核心记忆', onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
+            NavRow({ label: '提示词', onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
             NavRow({ label: 'MCP 服务器', onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
-            NavRow({ label: '扩展管理', onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
             NavRow({ label: '执行参数', onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
+            NavRow({ label: '权限与批准', onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
             NavRow({ label: '沙盒设置', onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
             NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
             NavRow({ label: '实验功能', isLast: true, onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
@@ -188,5 +195,6 @@ struct SettingPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }
 }

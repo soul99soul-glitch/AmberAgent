@@ -48,9 +48,12 @@ const sanitizeUrl = (url: string): string | null => {
 
 // ===== 行内格式 =====
 // 处理顺序: 先代码(占位符隔离),再链接/图片,最后 bold/italic
-// 行内代码内容用占位符替换,避免后续处理器侵入
+// 行内代码内容用占位符替换,避免后续处理器侵入;
+// 段落/引用的多行连接符 <br> 同理用占位符 — 直接拼 <br> 会被前置
+// escapeHtml 转义成字面 "&lt;br&gt;" 文本
 
 const INLINE_CODE_PLACEHOLDER = '\x01INLINECODE\x01';
+const BR_PLACEHOLDER = '\x01BRTOKEN\x01';
 const codePlaceholders: string[] = [];
 
 // 行内代码 → 占位符(内容已被前置 escapeHtml 转义,此处不再转义)
@@ -115,6 +118,8 @@ const processInline = (text: string): string => {
   result = processBold(result);
   result = processItalic(result);
   result = restoreInlineCode(result);
+  // 多行连接符回填(占位符不会被 escapeHtml 破坏)
+  result = result.split(BR_PLACEHOLDER).join('<br>');
   return result;
 };
 
@@ -215,7 +220,7 @@ export const markdownToHtml = (markdown: string): string => {
         quoteLines.push(lines[i].replace(/^>\s?/, ''));
         i++;
       }
-      htmlParts.push(`<blockquote>${processInline(quoteLines.join('<br>'))}</blockquote>`);
+      htmlParts.push(`<blockquote>${processInline(quoteLines.join(BR_PLACEHOLDER))}</blockquote>`);
       continue;
     }
 
@@ -275,7 +280,7 @@ export const markdownToHtml = (markdown: string): string => {
       i++;
     }
     if (paraLines.length > 0) {
-      htmlParts.push(`<p>${processInline(paraLines.join('<br>'))}</p>`);
+      htmlParts.push(`<p>${processInline(paraLines.join(BR_PLACEHOLDER))}</p>`);
     }
   }
 

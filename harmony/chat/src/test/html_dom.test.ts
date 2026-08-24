@@ -102,3 +102,18 @@ test('数字实体 + &nbsp; 归一', () => {
   assert.ok(t.includes('A'));
   assert.ok(t.includes('BC'));
 });
+
+// Phase 6 回归:混排文本/子元素按文档序输出(标题含 <strong> 高亮不再乱序)
+test('elementText: mixed text and inline elements keep document order', () => {
+  const doc = parseHtml('<html><body><a href="https://x.com">Foo <strong>Bar</strong> Baz</a></body></html>');
+  const a = selectFirst(doc, 'a');
+  assert.ok(a !== null);
+  assert.equal(elementText(a).trim(), 'Foo Bar Baz');
+});
+
+test('elementText: deeper interleaving stays ordered', () => {
+  const doc = parseHtml('<p>1<b>2</b>3<i>4</i>5</p>');
+  const p = selectFirst(doc, 'p');
+  assert.ok(p !== null);
+  assert.equal(elementText(p).replace(/\s+/g, ''), '12345');
+});

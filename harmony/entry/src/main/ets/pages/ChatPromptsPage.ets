@@ -20,7 +20,7 @@
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
 import { promptAction } from '@kit.ArkUI';
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
 import type {
@@ -575,7 +575,7 @@ struct ChatPromptsPage {
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 16, topRight: 16 })
     }
-    .width('100%').height('100%').backgroundColor('#66000000')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
   }
 
   // ===== overlay:世界书编辑(:793-923) =====
@@ -661,7 +661,7 @@ struct ChatPromptsPage {
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 16, topRight: 16 })
     }
-    .width('100%').height('100%').backgroundColor('#66000000')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
   }
 
   // ===== overlay:条目编辑(:949-1176;canSave = keywords 非空 || constantActive) =====
@@ -772,7 +772,7 @@ struct ChatPromptsPage {
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 16, topRight: 16 })
     }
-    .width('100%').height('100%').backgroundColor('#66000000')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
   }
 
   build() {

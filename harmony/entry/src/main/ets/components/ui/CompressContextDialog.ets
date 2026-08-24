@@ -3,7 +3,7 @@
 // 升级: 真模态(遮罩层) + SURFACE2 导入修复 + 警告文本 + 全宽 TextArea
 //   + loading 态保留标题/取消按钮(只替换 body)
 // 降级(跳过): SingleChoiceSegmentedButtonRow(用 pill 替代) / Promise 异步(用同步 onConfirm)
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, ERROR, BODY, LABEL } from '../../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, ACCENT, ERROR, BODY, LABEL, OVERLAY } from '../../design/tokens.ets';
 import { RabbitLoading } from './RabbitLoading.ets';
 
 const TOKEN_OPTIONS: number[] = [500, 1000, 2000, 4000];
@@ -157,7 +157,7 @@ export struct CompressContextDialog {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
     }
   }

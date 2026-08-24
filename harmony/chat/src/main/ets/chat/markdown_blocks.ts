@@ -79,6 +79,12 @@ export interface MarkdownBlockList {
   /** The source number for an ordered list; unordered lists use 1. */
   start: number;
   items: InlineToken[][];
+  /**
+   * Per-item nesting depth (relative to the first item's indent, 2 spaces per
+   * level, clamped to 0..3). Omitted when every item is at depth 0, so
+   * flat-list consumers stay unchanged.
+   */
+  depths?: number[];
 }
 
 export type MarkdownTableAlignment = 'left' | 'center' | 'right';
@@ -382,12 +388,15 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
       continue;
     }
 
-    // 无序列表 - / *
+    // 无序列表 - / *(连续行合并;首行缩进为基准,2 空格一级嵌套)
     if (/^\s*[-*]\s+/.test(line)) {
       const items: InlineToken[][] = [];
+      const depths: number[] = [];
+      const baseIndent: number = countLeadingSpaces(line);
       while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
         const itemText: string = lines[i].replace(/^\s*[-*]\s+/, '');
         items.push(parseInline(itemText));
+        depths.push(listDepthAt(lines[i], baseIndent));
         i++;
       }
       blocks.push({
@@ -395,6 +404,7 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
         ordered: false,
         start: 1,
         items,
+        depths: listDepthsField(depths),
       } as MarkdownBlockList);
       continue;
     }
@@ -405,9 +415,12 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
       const parsedStart: number = firstMatch !== null ? parseInt(firstMatch[1], 10) : 1;
       const start: number = Number.isFinite(parsedStart) && parsedStart >= 0 ? parsedStart : 1;
       const items: InlineToken[][] = [];
+      const depths: number[] = [];
+      const baseIndent: number = countLeadingSpaces(line);
       while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
         const itemText: string = lines[i].replace(/^\s*\d+\.\s+/, '');
         items.push(parseInline(itemText));
+        depths.push(listDepthAt(lines[i], baseIndent));
         i++;
       }
       blocks.push({
@@ -415,6 +428,7 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
         ordered: true,
         start,
         items,
+        depths: listDepthsField(depths),
       } as MarkdownBlockList);
       continue;
     }
@@ -478,6 +492,53 @@ const parseMarkdownInternal = (markdown: string): MarkdownBlock[] => {
   }
 
   return blocks;
+};
+
+/** Count leading spaces of a raw markdown list line. */
+const countLeadingSpaces = (line: string): number => {
+  const m: RegExpMatchArray | null = line.match(/^\s*/);
+  if (m === null) return 0;
+  return m[0].length;
+};
+
+/** Nesting depth of a list line relative to the block's base indent (2 spaces per level, 0..3). */
+const listDepthAt = (line: string, baseIndent: number): number => {
+  const d: number = Math.floor((countLeadingSpaces(line) - baseIndent) / 2);
+  return Math.min(3, Math.max(0, d));
+};
+
+/** Emit the depths field only when some item is actually nested (keeps flat lists unchanged). */
+const listDepthsField = (depths: number[]): number[] | undefined => {
+  for (const d of depths) {
+    if (d > 0) return depths;
+  }
+  return undefined;
+};
+
+/**
+ * Ordered-list numbering (CommonMark-style): the top-level sequence starts at
+ * `start` and continues across nested runs; each nested depth restarts at 1 and
+ * resets anything deeper. `depths` may omit entries (treated as depth 0).
+ */
+export const orderedListLabel = (start: number, depths: number[], idx: number): string => {
+  const counters: number[] = [0, 0, 0, 0];
+  const seen: boolean[] = [false, false, false, false];
+  let depth: number = 0;
+  for (let i: number = 0; i <= idx; i++) {
+    depth = i < depths.length ? depths[i] : 0;
+    if (depth < 0) depth = 0;
+    if (depth > 3) depth = 3;
+    if (!seen[depth]) {
+      counters[depth] = i === 0 ? start : 1;
+      seen[depth] = true;
+    } else {
+      counters[depth] += 1;
+    }
+    for (let k: number = depth + 1; k < 4; k++) {
+      seen[k] = false;
+    }
+  }
+  return `${counters[depth]}`;
 };
 
 /** Parse Markdown without allowing malformed input to break message rendering. */

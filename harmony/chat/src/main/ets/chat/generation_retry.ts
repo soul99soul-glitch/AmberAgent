@@ -170,7 +170,9 @@ export const delayForAttempt = (
   random: () => number = Math.random,
 ): number => {
   const exponent: number = Math.max(0, attempt - 1);
-  const base: number = Math.min(setting.maxDelayMs, setting.initialDelayMs << exponent);
+  // 算术指数:<< 位移 32 位截断,attempt≥32 时 initialDelayMs<<31 变负数,
+  // min(maxDelayMs, 负数) 为负 → 重试变立即重试
+  const base: number = Math.min(setting.maxDelayMs, setting.initialDelayMs * (2 ** exponent));
   const jitterRange: number = Math.max(0, Math.trunc(base * setting.jitterRatio));
   if (jitterRange === 0) return base;
   const jitter: number = Math.floor(random() * (2 * jitterRange + 1)) - jitterRange;

@@ -102,3 +102,27 @@ test('prefs:enable_web_search(D-099)— 缺失 → false(ChatPrefs.kt:66 == true
   await store.put('enable_web_search', 'garbage');
   assert.equal((await loadSearchPrefs(store)).enableWebSearch, false);
 });
+
+// ===== Phase 6 回归:未知服务 type 只跳过单条,不抹掉整份配置 =====
+
+test('loadSearchPrefs: unknown service type skipped, valid services preserved', async () => {
+  const store = createMemoryKeyValueStore();
+  const raw = JSON.stringify([
+    { type: 'tavily', id: 's1', apiKey: 'k1' },
+    { type: 'future_provider_v9', id: 's2' },
+    { type: 'bing_local', id: 's3' },
+  ]);
+  await store.put(SEARCH_PREFS_KEYS.searchServices, raw);
+  const prefs = await loadSearchPrefs(store);
+  const types = prefs.searchServices.map((s): string => s.type);
+  assert.deepEqual(types, ['tavily', 'bing_local'],
+    'unknown entry skipped; configured valid services preserved');
+});
+
+test('loadSearchPrefs: all-unknown services blob falls back to default (not empty)', async () => {
+  const store = createMemoryKeyValueStore();
+  await store.put(SEARCH_PREFS_KEYS.searchServices, JSON.stringify([{ type: 'nope_v1' }]));
+  const prefs = await loadSearchPrefs(store);
+  assert.ok(prefs.searchServices.length > 0);
+  assert.equal(prefs.searchServices[0].type, 'bing_local');
+});

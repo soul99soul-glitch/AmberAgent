@@ -29,33 +29,61 @@ export let ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
 export const SIGNAL: string = '#5E9C6E';   // 活跃/在线绿(区别于 accent)
 export const ERROR: string = '#C2553F';    // 危险红
 
+// ── 状态色(上下文用量/压缩等活动指示;中等明度,深浅主题通用) ──
+export const STATUS_BLUE: string = '#4F86D6';   // 压缩中/信息
+export const STATUS_AMBER: string = '#D19A66';  // ≥50% 用量预警
+export let STATUS_BLUE_LIGHT: string = '#E8F0FE'; // 蓝色 chip 淡底(随主题)
+
+// ── 遮罩(弹层/抽屉半透明黑,统一暗度) ──
+export const OVERLAY: string = '#66000000';
+
 // ── 派生 alpha 色(BG 的渐隐/玻璃变体,随主题切换) ──
 export let BG_FADE_START: string = '#00F4F2EC'; // 底部渐隐起点(全透)
 export let BG_FADE_END: string = '#F4F2EC';     // 底部渐隐终点(=BG)
 export let BG_GLASS: string = '#CCF4F2EC';      // 头部毛玻璃底(80% BG)
 
 // applyTheme — 浅/深双主题(session-home.html 令牌逐值)
+let darkTheme: boolean = false;
+
+const accentLightFor = (hex: string, dark: boolean): string => {
+  if (dark) {
+    if (hex === '#5E9C6E') return '#1D2B22';
+    if (hex === '#4F86D6') return '#1B2638';
+    if (hex === '#9277C4') return '#282039';
+    if (hex === '#C2607A') return '#351F28';
+    return '#2A211B';
+  }
+  if (hex === '#5E9C6E') return '#EFF8F0';
+  if (hex === '#4F86D6') return '#EEF4FD';
+  if (hex === '#9277C4') return '#F3F0FC';
+  if (hex === '#C2607A') return '#FDF0F4';
+  return '#FFF5F0';
+};
+
 export const applyTheme = (dark: boolean): void => {
+  darkTheme = dark;
   if (dark) {
     BG = '#161512'; SURFACE = '#1C1B17'; SURFACE2 = '#211F1A'; RAISED = '#23211C';
     INK = '#ECE8DF'; INK2 = '#A8A298'; INK3 = '#756F64'; INK4 = '#564F45';
     LINE = '#2E2B25'; LINE2 = '#3A362E';
     USER_BG = '#ECE8DF'; USER_INK = '#1B1A17'; CODE_BG = '#211F1A';
-    ACCENT_LIGHT = '#2A211B';
     BG_FADE_START = '#00161512'; BG_FADE_END = '#161512'; BG_GLASS = '#CC161512';
+    STATUS_BLUE_LIGHT = '#1B2638';
   } else {
     BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
     INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
     LINE = '#E4E0D6'; LINE2 = '#D6D1C4';
     USER_BG = '#1B1A17'; USER_INK = '#F6F4EE'; CODE_BG = '#EDEAE1';
-    ACCENT_LIGHT = '#FFF5F0';
     BG_FADE_START = '#00F4F2EC'; BG_FADE_END = '#F4F2EC'; BG_GLASS = '#CCF4F2EC';
+    STATUS_BLUE_LIGHT = '#E8F0FE';
   }
+  ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
 };
 
 // setAccentColor — 强调色切换(色板五选一)
 export const setAccentColor = (hex: string): void => {
   ACCENT = hex;
+  ACCENT_LIGHT = accentLightFor(hex, darkTheme);
 };
 
 // ── 字号(对齐设计稿 px 值) ──

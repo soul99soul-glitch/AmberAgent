@@ -59,38 +59,55 @@ export interface SchedulerDeps {
   createAbortController: () => AbortControllerLike;
 }
 
+// runningJobs 条目:token 防迟到 finally 误删 REPLACE 后的新注册
+interface RunningJob { controller: AbortControllerLike; token: number }
+
 export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
-  // runningJobs:topicId → AbortControllerLike(REPLACE 语义)
-  const runningJobs = new Map<string, AbortControllerLike>();
+  // runningJobs:topicId → RunningJob(REPLACE 语义;token 防 A 轮
+  // finally 误删 B 轮已注册的条目)
+  const runningJobs = new Map<string, RunningJob>();
+  let jobTokenSeq = 0;
   // backgrounded 标志(切后台暂停用)
   const backgroundedTopics = new Set<string>();
-  // aborted 标志(模拟 cancel signal;真实用 AbortController.signal 传给 runManager)
-  const abortedTopics = new Set<string>();
 
   // topicMutex:同 topicId 串行(REPLACE:abort 现有 + 等结束 + 启新)
-  const topicLocks = new Map<string, Promise<unknown>>();
-  const withTopicLock = async <T>(topicId: string, fn: () => Promise<T>): Promise<T> => {
-    const prev = topicLocks.get(topicId) ?? Promise.resolve();
+  const withLock = async <T>(
+    locks: Map<string, Promise<unknown>>, topicId: string, fn: () => Promise<T>,
+  ): Promise<T> => {
+    const prev = locks.get(topicId) ?? Promise.resolve();
     let resolve!: () => void;
     const next = new Promise<void>(r => { resolve = r; });
-    topicLocks.set(topicId, prev.then(() => next));
+    // 必须保存链式 promise 本体再入 map;finally 与同一对象比较才能清理,
+    // 否则 map 条目永不删除(每次同 topic 运行泄漏一条 resolved promise)
+    const queued = prev.then(() => next);
+    locks.set(topicId, queued);
     await prev;
     try {
       return await fn();
     } finally {
       resolve();
-      if (topicLocks.get(topicId) === next) topicLocks.delete(topicId);
+      if (locks.get(topicId) === queued) locks.delete(topicId);
     }
   };
+  const topicLocks = new Map<string, Promise<unknown>>();
+  const withTopicLock = <T>(topicId: string, fn: () => Promise<T>): Promise<T> =>
+    withLock(topicLocks, topicId, fn);
+  // 准入锁:串行化「abort 旧 + waitForAbort + 注册新」段 — B/C 并发 REPLACE
+  // 时只放行一个进入注册,后到者会 abort 先到者(否则双双通过,B 白跑)
+  const admissionLocks = new Map<string, Promise<unknown>>();
+  const withAdmissionLock = <T>(topicId: string, fn: () => Promise<T>): Promise<T> =>
+    withLock(admissionLocks, topicId, fn);
 
+  // 取消只经 per-job signal:topic 级共享 marker 会被跨轮迟到 finally 误清/
+  // 残留,signal 归属单轮作业,无此竞态
   const abort = (topicId: string): void => {
-    abortedTopics.add(topicId);
-    const controller = runningJobs.get(topicId);
-    if (controller) controller.abort();
+    const job = runningJobs.get(topicId);
+    if (job) job.controller.abort();
   };
 
   const waitForAbort = async (topicId: string): Promise<void> => {
-    // 简化:等当前 run 结束(runningJobs 清除);真实有 signal 传播
+    // 等当前 run 结束(signal 已贯穿 run → supervisor → collectRun,正常路径
+    // 会很快退出;5s 截止是 collectRun 不遵守 signal 时的兜底)
     const deadline = Date.now() + 5_000;
     while (runningJobs.has(topicId) && Date.now() < deadline) {
       await new Promise(r => setTimeout(r, 10));
@@ -102,32 +119,43 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
     title: string,
     opts: SchedulerRunOptions,
   ): Promise<RunResult> => {
-    // dedup:REPLACE 语义
-    if (runningJobs.has(topicId)) {
-      abort(topicId);
-      await waitForAbort(topicId);
-    }
-    abortedTopics.delete(topicId);
     const controller = deps.createAbortController();
-    runningJobs.set(topicId, controller);
-
-    // 不申请 ContinuousTask(0.2);只 ongoing notification
-    await deps.notifier?.notifyRunning(topicId, title);
+    const job: RunningJob = { controller, token: ++jobTokenSeq };
+    // dedup:REPLACE 语义(准入段整体串行,防并发双注册)
+    await withAdmissionLock(topicId, async (): Promise<void> => {
+      if (runningJobs.has(topicId)) {
+        abort(topicId);
+        await waitForAbort(topicId);
+      }
+      runningJobs.set(topicId, job);
+    });
+    const registered: boolean = runningJobs.get(topicId) === job;
+    if (!registered) {
+      // 准入被后到者取代:本作业直接作废
+      return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+    }
 
     try {
+      // 不申请 ContinuousTask(0.2);只 ongoing notification。
+      // 在 try 内:notifyRunning 拒绝时 finally 兜底清理注册,不泄漏
+      await deps.notifier?.notifyRunning(topicId, title);
       const result = await withTopicLock(topicId, async () => {
-        // 检查 abort(在锁内再确认)
-        if (abortedTopics.has(topicId)) {
+        // 检查 abort(在锁内再确认;per-job signal,不受他轮影响)
+        if (controller.signal.aborted) {
           return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
         }
-        return run(deps.runManager, topicId, title, opts);
+        return run(deps.runManager, topicId, title, { force: opts.force, seedUrl: opts.seedUrl, signal: controller.signal });
       });
       const finalResult: RunResult = await result;
       await deps.notifier?.notifyCompleted(topicId, title, finalResult.output.generationComplete);
       return finalResult;
     } finally {
-      runningJobs.delete(topicId);
-      abortedTopics.delete(topicId);
+      // 仅当注册条目仍是本轮(token 匹配)才清除:避免 A 轮迟到 finally
+      // 误删 REPLACE 后 B 轮的注册,导致 C 轮并发进入
+      const current = runningJobs.get(topicId);
+      if (current !== undefined && current.token === job.token) {
+        runningJobs.delete(topicId);
+      }
       await deps.notifier?.cancelRunning(topicId);
     }
   };
@@ -138,16 +166,35 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
     stage: DeepReadGenerationStage,
     seedUrl: string | null,
   ): Promise<RunResult> => {
-    if (runningJobs.has(topicId)) {
-      abort(topicId);
-      await waitForAbort(topicId);
-    }
     const controller = deps.createAbortController();
-    runningJobs.set(topicId, controller);
+    const job: RunningJob = { controller, token: ++jobTokenSeq };
+    await withAdmissionLock(topicId, async (): Promise<void> => {
+      if (runningJobs.has(topicId)) {
+        abort(topicId);
+        await waitForAbort(topicId);
+      }
+      runningJobs.set(topicId, job);
+    });
+    if (runningJobs.get(topicId) !== job) {
+      return { ok: false, output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(), error: 'aborted' };
+    }
     try {
-      return await withTopicLock(topicId, () => runSection(deps.runManager, topicId, title, stage, seedUrl));
+      return await withTopicLock(topicId, () => {
+        // 排队期间被 abort(等锁时)→ 不再进 prefetch/plan,不写仓库状态
+        if (controller.signal.aborted) {
+          return Promise.resolve({
+            ok: false,
+            output: deps.runManager.repository?.get(topicId, title) ?? makeEmpty(),
+            error: 'aborted',
+          } as RunResult);
+        }
+        return runSection(deps.runManager, topicId, title, stage, seedUrl, controller.signal);
+      });
     } finally {
-      runningJobs.delete(topicId);
+      const current = runningJobs.get(topicId);
+      if (current !== undefined && current.token === job.token) {
+        runningJobs.delete(topicId);
+      }
     }
   };
 

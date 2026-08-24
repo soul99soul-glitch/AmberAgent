@@ -96,51 +96,62 @@ export const compressImageAsDataUrl = async (uri: string): Promise<string> => {
     }
 
     // :148-155 — decode bounds(ImageSource.getImageInfo)
+    // 原生资源(source/packer/pixelMap)必须逐层 release:泄漏累积会耗尽
+    // ImageKit 原生内存(ArtifactPorts.ets 同款三层 finally 模式)
     const source: image.ImageSource = image.createImageSource(file.fd);
-    let width: number = 0;
-    let height: number = 0;
     try {
-      const info: image.ImageInfo = await source.getImageInfo();
-      width = info.size.width;
-      height = info.size.height;
-    } catch {
-      throw new Error(`Failed to decode image dimensions: ${uri}`);
-    }
-    if (width <= 0 || height <= 0) {
-      throw new Error(`Failed to decode image dimensions: ${uri}`);
-    }
-
-    // :157-171 — 强制采样压缩;decode 失败逐字
-    const sampleSize: number = calculateInSampleSize(
-      width, height, COMPRESS_MAX_DIMENSION, COMPRESS_MAX_DIMENSION);
-    let pixelMap: image.PixelMap;
-    try {
-      const options: image.DecodingOptions = { sampleSize };
-      pixelMap = await source.createPixelMap(options);
-    } catch {
-      throw new Error(`Failed to decode image: ${uri}`);
-    }
-    try {
-      // normalizeByExif(:189-198):读 EXIF 失败按 NORMAL;变换失败保留原图
-      let orientation: number = 1;
+      let width: number = 0;
+      let height: number = 0;
       try {
-        const text: string = await source.getImageProperty(image.PropertyKey.ORIENTATION);
-        const mapped: number | undefined = ORIENTATION_TEXT_TO_INT[text];
-        orientation = mapped !== undefined ? mapped : 1;
+        const info: image.ImageInfo = await source.getImageInfo();
+        width = info.size.width;
+        height = info.size.height;
       } catch {
-        orientation = 1;
+        throw new Error(`Failed to decode image dimensions: ${uri}`);
       }
-      await applyExifTransform(pixelMap, mapExifOrientationToTransform(orientation));
+      if (width <= 0 || height <= 0) {
+        throw new Error(`Failed to decode image dimensions: ${uri}`);
+      }
 
-      // :174-186 — 强制 JPEG q85
-      const packer: image.ImagePacker = image.createImagePacker();
-      const packed: ArrayBuffer = await packer.packToData(
-        pixelMap, { format: 'image/jpeg', quality: COMPRESS_JPEG_QUALITY });
-      return `data:image/jpeg;base64,${toBase64(new Uint8Array(packed))}`;
+      // :157-171 — 强制采样压缩;decode 失败逐字
+      const sampleSize: number = calculateInSampleSize(
+        width, height, COMPRESS_MAX_DIMENSION, COMPRESS_MAX_DIMENSION);
+      let pixelMap: image.PixelMap;
+      try {
+        const options: image.DecodingOptions = { sampleSize };
+        pixelMap = await source.createPixelMap(options);
+      } catch {
+        throw new Error(`Failed to decode image: ${uri}`);
+      }
+      try {
+        // normalizeByExif(:189-198):读 EXIF 失败按 NORMAL;变换失败保留原图
+        let orientation: number = 1;
+        try {
+          const text: string = await source.getImageProperty(image.PropertyKey.ORIENTATION);
+          const mapped: number | undefined = ORIENTATION_TEXT_TO_INT[text];
+          orientation = mapped !== undefined ? mapped : 1;
+        } catch {
+          orientation = 1;
+        }
+        await applyExifTransform(pixelMap, mapExifOrientationToTransform(orientation));
+
+        // :174-186 — 强制 JPEG q85
+        const packer: image.ImagePacker = image.createImagePacker();
+        try {
+          const packed: ArrayBuffer = await packer.packToData(
+            pixelMap, { format: 'image/jpeg', quality: COMPRESS_JPEG_QUALITY });
+          return `data:image/jpeg;base64,${toBase64(new Uint8Array(packed))}`;
+        } finally {
+          await packer.release();
+        }
+      } finally {
+        await pixelMap.release();
+      }
     } finally {
-      pixelMap.release();
+      await source.release();
     }
   } finally {
+    // 外层 finally 统一关文件句柄(statSync/断言早抛时也能关闭)
     fileIo.closeSync(file);
   }
 };

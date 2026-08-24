@@ -1,6 +1,6 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
-import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
@@ -714,7 +714,7 @@ struct NovelWorkspacePage {
       }
       .width('84%').padding(22).backgroundColor(SURFACE).borderRadius(16)
     }
-    .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
     .onClick(() => { this.collectMessageId = ''; })
   }
@@ -744,7 +744,7 @@ struct NovelWorkspacePage {
       }
       .width('88%').padding(22).backgroundColor(SURFACE).borderRadius(16)
     }
-    .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
   }
 
@@ -792,7 +792,7 @@ struct NovelWorkspacePage {
       }
       .width('88%').padding(22).backgroundColor(SURFACE).borderRadius(16)
     }
-    .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
   }
 }

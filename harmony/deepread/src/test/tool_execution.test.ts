@@ -303,3 +303,113 @@ test('integration: agent loop simulates one tool execution round', async () => {
   assert.ok(tool && tool.kind === 'tool' && tool.output.length > 0);
   assert.equal(parseToolOutputStatus(tool.output), 'ok');
 });
+
+// ===== 流式 auto 工具回归(#1:审批态 'auto' 必须可执行) =====
+
+test('executeToolsAndMerge: streamed approvalState=auto tool enters execution', async () => {
+  const def: ToolDefinition = {
+    name: 'search_web',
+    description: 'search',
+    allowsAutoApproval: true, isHighRisk: false,
+    execute: async () => [makeSuccessOutput({ results: [] })],
+  };
+  const msgs: UIMessage[] = [
+    makeUserMessage('search'),
+    makeAssistantMessage([{
+      // appendChunk 流式新建工具的缺省审批态 = 'auto'
+      kind: 'tool', toolCallId: 'c1', toolName: 'search_web',
+      input: '{}', output: [], approvalState: 'auto',
+    }]),
+  ];
+  const r = await executeToolsAndMerge(msgs, new Map([['search_web', def]]), {
+    autoApproveTools: true, autoApproveHighRiskTools: false,
+    autoApprovedToolNames: new Set(['search_web']),
+  });
+  assert.equal(r.executedCount, 1, 'auto tool must execute when matrix allows');
+  assert.equal(r.hasPendingApproval, false);
+  const tool = r.messages[1].parts.find(p => p.kind === 'tool');
+  assert.ok(tool && tool.kind === 'tool' && tool.output.length > 0);
+});
+
+test('executeToolsAndMerge: auto tool with autoApproveTools=false → ask (pending), not skipped', async () => {
+  const def: ToolDefinition = {
+    name: 'search_web',
+    description: 'search',
+    allowsAutoApproval: false, isHighRisk: false,
+    execute: async () => [makeSuccessOutput({})],
+  };
+  const msgs: UIMessage[] = [
+    makeUserMessage('search'),
+    makeAssistantMessage([{
+      kind: 'tool', toolCallId: 'c1', toolName: 'search_web',
+      input: '{}', output: [], approvalState: 'auto',
+    }]),
+  ];
+  const r = await executeToolsAndMerge(msgs, new Map([['search_web', def]]), {
+    autoApproveTools: false, autoApproveHighRiskTools: false,
+    autoApprovedToolNames: new Set(),
+  });
+  assert.equal(r.executedCount, 0);
+  assert.equal(r.hasPendingApproval, true, 'auto tool must surface as pending approval, not vanish');
+  const tool = r.messages[1].parts.find(p => p.kind === 'tool');
+  assert.ok(tool && tool.kind === 'tool' && tool.approvalState === 'pending');
+});
+
+test('executeToolsAndMerge: pending tool is not re-entered', async () => {
+  const def: ToolDefinition = {
+    name: 'search_web',
+    description: 'search',
+    allowsAutoApproval: true, isHighRisk: false,
+    execute: async () => [makeSuccessOutput({})],
+  };
+  const msgs: UIMessage[] = [
+    makeUserMessage('search'),
+    makeAssistantMessage([{
+      kind: 'tool', toolCallId: 'c1', toolName: 'search_web',
+      input: '{}', output: [], approvalState: 'pending',
+    }]),
+  ];
+  const r = await executeToolsAndMerge(msgs, new Map([['search_web', def]]), {
+    autoApproveTools: true, autoApproveHighRiskTools: false,
+    autoApprovedToolNames: new Set(),
+  });
+  assert.equal(r.executedCount, 0);
+  assert.equal(r.hasPendingApproval, true,
+    'parked pending tools must report hasPendingApproval so agent loop exits with pending_approval');
+});
+
+// ===== 1b 回归:并行无 id 工具的结果按 part 恒等写回 =====
+
+test('executeToolsAndMerge: parallel blank-id tools get distinct results (identity merge)', async () => {
+  let calls = 0;
+  const def: ToolDefinition = {
+    name: 'search_web',
+    description: 'search',
+    allowsAutoApproval: true, isHighRisk: false,
+    execute: async () => {
+      calls++;
+      return [makeSuccessOutput({ n: calls })];
+    },
+  };
+  const msgs: UIMessage[] = [
+    makeUserMessage('search twice'),
+    makeAssistantMessage([
+      { kind: 'tool', toolCallId: '', toolName: 'search_web', input: '{"n":1}', output: [], approvalState: 'auto', streamIndex: 0 },
+      { kind: 'tool', toolCallId: '', toolName: 'search_web', input: '{"n":2}', output: [], approvalState: 'auto', streamIndex: 1 },
+    ]),
+  ];
+  const r = await executeToolsAndMerge(msgs, new Map([['search_web', def]]), {
+    autoApproveTools: true, autoApproveHighRiskTools: false,
+    autoApprovedToolNames: new Set(['search_web']),
+  });
+  assert.equal(r.executedCount, 2);
+  const tools = r.messages[1].parts.filter(p => p.kind === 'tool');
+  assert.equal(tools.length, 2);
+  if (tools[0].kind === 'tool' && tools[1].kind === 'tool') {
+    assert.notEqual(tools[0].output, tools[1].output);
+    const out0 = JSON.parse((tools[0].output[0] as { text: string }).text) as { n: number };
+    const out1 = JSON.parse((tools[1].output[0] as { text: string }).text) as { n: number };
+    assert.equal(out0.n, 1, 'first blank-id tool keeps its own result');
+    assert.equal(out1.n, 2, 'second blank-id tool keeps its own result');
+  }
+});

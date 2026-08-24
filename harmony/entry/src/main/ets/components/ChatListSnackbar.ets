@@ -49,11 +49,12 @@ export struct ChatListSnackbar {
         Text('撤销')
           .fontSize(13)
           .fontColor(ACCENT)
-          .padding({ left: 16, top: 6, bottom: 6 })
+          .padding({ left: 16, right: 4, top: 6, bottom: 6 })
           .onClick((): void => {
             this.clearTimer();
             this.onUndo();
           })
+          .accessibilityText('撤销删除')
       }
       .width('92%')
       .padding({ left: 16, right: 16, top: 10, bottom: 10 })

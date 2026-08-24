@@ -7,11 +7,12 @@ import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amb
 import type { DisplaySetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { PageTitleBar, SectionHeader } from '../components/PageTemplate.ets';
-import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, ACCENT } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL, ACCENT, GUTTER } from '../design/tokens.ets';
 
 @Entry
 @Component
 struct SettingDisplayPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State setting: DisplaySetting = makeDisplaySetting();
   @State loaded: boolean = false;
 
@@ -57,6 +58,8 @@ struct SettingDisplayPage {
       chatThemeChoice: patch.chatThemeChoice ?? this.setting.chatThemeChoice,
       amberBaseFamily: patch.amberBaseFamily ?? this.setting.amberBaseFamily,
       accentColor: patch.accentColor ?? this.setting.accentColor,
+      userNickname: patch.userNickname ?? this.setting.userNickname,
+      userAvatar: patch.userAvatar ?? this.setting.userAvatar,
     });
     saveDisplaySetting(getChatKvStore(), this.setting);
   }
@@ -143,10 +146,12 @@ struct SettingDisplayPage {
             Column() {}.height(40)
           }
           .width('100%')
+          .padding({ left: GUTTER, right: GUTTER })
         }
         .layoutWeight(1)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)
+      .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
   }
 }

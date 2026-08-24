@@ -65,6 +65,7 @@ export struct Icon {
     if (this.name === 'palette') return $r('sys.symbol.paintpalette');
     if (this.name === 'clock') return $r('sys.symbol.clock');
     if (this.name === 'arrow_up') return $r('sys.symbol.arrow_up');
+    if (this.name === 'arrow_down_to_line') return $r('sys.symbol.arrow_down_to_line');
     if (this.name === 'share') return $r('sys.symbol.share');
     return $r('sys.symbol.circle');
   }

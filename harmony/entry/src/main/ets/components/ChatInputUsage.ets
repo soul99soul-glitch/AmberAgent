@@ -2,7 +2,7 @@
 // 对齐 Android ChatInputUsage.kt(663 行)
 // 必要: ContextRing(圆环+token数) + ReasoningLevelChip(等级选择)
 // 降级(跳过): Canvas drawArc(用 Text 替代) / DropdownMenu(用 Select 替代) / ComposerUsageSheet(已有独立页面)
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, BODY, META, LABEL, STATUS_BLUE, STATUS_AMBER, STATUS_BLUE_LIGHT } from '../design/tokens.ets';
 
 // 格式化 token 数(对齐 Android formatContextTokens)
 const formatTokens = (tokens: number): string => {
@@ -14,9 +14,9 @@ const formatTokens = (tokens: number): string => {
 
 // 上下文用量颜色(对齐 Android ringColor)
 const contextColor = (ratio: number, compactActive: boolean): string => {
-  if (compactActive) return '#4F86D6';  // blue
+  if (compactActive) return STATUS_BLUE;  // blue
   if (ratio >= 0.7) return ERROR;       // red
-  if (ratio >= 0.5) return '#D19A66';   // amber
+  if (ratio >= 0.5) return STATUS_AMBER;   // amber
   return INK3;                           // muted
 };
 
@@ -70,11 +70,11 @@ export struct ReasoningLevelChip {
   build(): void {
     Text(this.label)
       .fontSize(LABEL)
-      .fontColor(this.accent ? '#4F86D6' : INK2)
+      .fontColor(this.accent ? STATUS_BLUE : INK2)
       .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-      .backgroundColor(this.accent ? '#E8F0FE' : SURFACE)
+      .backgroundColor(this.accent ? STATUS_BLUE_LIGHT : SURFACE)
       .borderRadius(8)
-      .border({ width: 1, color: this.accent ? '#4F86D6' : LINE })
+      .border({ width: 1, color: this.accent ? STATUS_BLUE : LINE })
       .maxLines(1)
       .onClick((): void => { this.onSelect(); })
   }
@@ -89,11 +89,11 @@ export struct ComposerStatusChip {
   build(): void {
     Text(this.text)
       .fontSize(LABEL)
-      .fontColor(this.accent ? '#4F86D6' : INK2)
+      .fontColor(this.accent ? STATUS_BLUE : INK2)
       .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-      .backgroundColor(this.accent ? '#E8F0FE' : SURFACE)
+      .backgroundColor(this.accent ? STATUS_BLUE_LIGHT : SURFACE)
       .borderRadius(8)
-      .border({ width: 1, color: this.accent ? '#4F86D6' : LINE })
+      .border({ width: 1, color: this.accent ? STATUS_BLUE : LINE })
       .maxLines(1)
       .textOverflow({ overflow: TextOverflow.Ellipsis })
       .onClick((): void => { this.onClick(); })

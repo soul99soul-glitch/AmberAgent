@@ -90,7 +90,8 @@ export class SseAssembler {
     this.pending = [];
     for (let i: number = safeEnd; i < combined.length; i++) this.pending.push(combined[i]);
     const safeBytes: Uint8Array = combined.slice(0, safeEnd);
-    const text = this.buffer + (safeBytes.length > 0 ? this.decode(safeBytes.buffer) : '');
+    // TS 5.7+ 下 Uint8Array.buffer 是 ArrayBufferLike;slice() 的结果必背靠普通 ArrayBuffer,窄化安全
+    const text = this.buffer + (safeBytes.length > 0 ? this.decode(safeBytes.buffer as ArrayBuffer) : '');
     this.buffer = '';
     const events: SseEvent[] = [];
     let searchFrom = 0;
@@ -153,7 +154,8 @@ const parseSseBlock = (raw: string): SseEvent | null => {
   while (stripped.startsWith('data:')) {
     stripped = stripped.slice(5).trimStart();
   }
-  if (stripped === '[DONE]' || stripped === '[DONE]\n') {
+  const trimmedDone: string = stripped.trimEnd();
+  if (trimmedDone === '[DONE]' || trimmedDone === '[DONE]\n') {
     return { data: '[DONE]', done: true, event: eventName, id: eventId };
   }
   return { data: stripped, done: false, event: eventName, id: eventId };

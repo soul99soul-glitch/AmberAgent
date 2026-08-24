@@ -14,7 +14,7 @@
 //   - ModalBottomSheet → 全屏 overlay(同 ChatTaskModelsPage overlay 先例)
 //   - StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 1..50 语义保留)
 //   - 每 provider Description() composable 未移植(P1 既有登记)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -761,7 +761,7 @@ struct ChatSearchSettingsPage {
       .backgroundColor(SURFACE)
       .borderRadius({ topLeft: 16, topRight: 16 })
     }
-    .width('100%').height('100%').backgroundColor('#66000000')
+    .width('100%').height('100%').backgroundColor(OVERLAY)
   }
 
   build() {

@@ -4,6 +4,12 @@
 import type { Storage } from '@amber/deepread-domain';
 import type { KeyValueStore } from '@amber/chat-domain';
 
+// ArkTS 不允许对象字面量类型;allEntries 返回元素的具名形态
+interface StringKVEntry {
+  key: string;
+  value: string;
+}
+
 class ChatKvStore implements KeyValueStore {
   private storage: Storage;
 
@@ -21,6 +27,11 @@ class ChatKvStore implements KeyValueStore {
 
   async delete(key: string): Promise<void> {
     await this.storage.delete(key);
+  }
+
+  // KeyValueStore.allEntries(可选契约;MiniAppStorage 配额核算前缀扫描)
+  async allEntries(): Promise<StringKVEntry[]> {
+    return this.storage.getAllStringEntries();
   }
 }
 

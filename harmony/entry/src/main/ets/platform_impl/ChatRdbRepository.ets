@@ -10,7 +10,7 @@ import { relationalStore } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   Conversation, ConversationRepository, ConversationSummary,
-  ConversationRow, MessageNodeRow,
+  ConversationRow, MessageNodeRow, MessageNode, ConversationWindow,
 } from '@amber/chat-domain';
 import {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
@@ -172,6 +172,27 @@ class ChatRdbRepository implements ConversationRepository {
     const predicates = new relationalStore.RdbPredicates('message_node');
     predicates.equalTo('conversation_id', conversationId);
     predicates.orderByAsc('node_index');
+    return this.readNodeRows(store, predicates);
+  }
+
+  // Phase 5:node 窗口读取(offset/limit 分页,API 12 offsetAs/limitAs;
+  //   limit<=0 → 不限,等价全量查询)
+  private async queryNodeWindowRows(
+    store: relationalStore.RdbStore, conversationId: string, offset: number, limit: number,
+  ): Promise<MessageNodeRow[]> {
+    const predicates = new relationalStore.RdbPredicates('message_node');
+    predicates.equalTo('conversation_id', conversationId);
+    predicates.orderByAsc('node_index');
+    if (limit > 0) {
+      predicates.limitAs(limit);
+      predicates.offsetAs(offset);
+    }
+    return this.readNodeRows(store, predicates);
+  }
+
+  private async readNodeRows(
+    store: relationalStore.RdbStore, predicates: relationalStore.RdbPredicates,
+  ): Promise<MessageNodeRow[]> {
     const rs = await store.query(predicates, NODE_COLUMNS);
     try {
       const rows: MessageNodeRow[] = [];
@@ -185,6 +206,20 @@ class ChatRdbRepository implements ConversationRepository {
         });
       }
       return rows;
+    } finally {
+      rs.close();
+    }
+  }
+
+  // Phase 5:会话节点总数(窗口 fullyLoaded 判定)
+  private async countNodes(
+    store: relationalStore.RdbStore, conversationId: string,
+  ): Promise<number> {
+    const rs = await store.querySql(
+      'SELECT COUNT(*) FROM message_node WHERE conversation_id = ?', [conversationId]);
+    try {
+      if (rs.goToNextRow()) return rs.getLong(0);
+      return 0;
     } finally {
       rs.close();
     }
@@ -218,6 +253,52 @@ class ChatRdbRepository implements ConversationRepository {
     if (rows.length === 0) return null;
     const nodeRows: MessageNodeRow[] = await this.queryNodeRows(store, id);
     return rowToConversation(rows[0], nodeRows);
+  }
+
+  // Phase 5:尾部窗口读取(会话打开默认只加载最近 limit 个节点)。
+  //   limit<=0 → 等价全量(返回整段窗口)。行序 node_index 升序。
+  async getConversationTailWindow(id: string, limit: number): Promise<ConversationWindow> {
+    const store = await this.ensureStore();
+    if (store === null) return this.memory.getConversationTailWindow(id, limit);
+    const totalNodeCount: number = await this.countNodes(store, id);
+    const size: number = Math.max(0, Math.floor(limit));
+    const nodeRows: MessageNodeRow[] = size > 0 && totalNodeCount > 0
+      ? await this.queryNodeWindowRows(store, id, Math.max(0, totalNodeCount - size), size)
+      : [];
+    return this.windowOf(id, nodeRows, totalNodeCount);
+  }
+
+  // Phase 5:历史页读取(offset/limit 绝对索引窗口)。
+  //   offset 越界 → 空节点窗口 + totalNodeCount(调用方据 oldestLoadedIndex 判定)。
+  async getConversationNodePage(
+    id: string, offset: number, limit: number,
+  ): Promise<ConversationWindow> {
+    const store = await this.ensureStore();
+    if (store === null) return this.memory.getConversationNodePage(id, offset, limit);
+    const totalNodeCount: number = await this.countNodes(store, id);
+    const from: number = Math.max(0, Math.floor(offset));
+    const size: number = Math.max(0, Math.floor(limit));
+    const nodeRows: MessageNodeRow[] = size > 0 && from < totalNodeCount
+      ? await this.queryNodeWindowRows(store, id, from, size)
+      : [];
+    return this.windowOf(id, nodeRows, totalNodeCount);
+  }
+
+  // 节点窗口组装:nodeRows 按 node_index 升序;
+  //   窗口首节点绝对索引 = rows[0].node_index(空窗口回退 totalNodeCount)。
+  private windowOf(
+    id: string, nodeRows: MessageNodeRow[], totalNodeCount: number,
+  ): ConversationWindow {
+    const nodes: MessageNode[] = [];
+    for (let i = 0; i < nodeRows.length; i++) {
+      nodes.push(rowToMessageNode(nodeRows[i]));
+    }
+    return {
+      conversationId: id,
+      nodes,
+      oldestLoadedIndex: nodes.length > 0 ? nodeRows[0].node_index : totalNodeCount,
+      totalNodeCount,
+    };
   }
 
   async getSummaryById(id: string): Promise<ConversationSummary | null> {
@@ -278,12 +359,17 @@ class ChatRdbRepository implements ConversationRepository {
     if (assistantId !== undefined) {
       predicates.equalTo('assistant_id', assistantId);
     }
-    // SQLite LIKE:ASCII 大小写不敏感 — 与 Android ConversationDAO.search 对齐
+    // SQLite LIKE:ASCII 大小写不敏感 — 与 Android ConversationDAO.search 对齐。
+    // RdbPredicates 无 ESCAPE 子句,反斜杠转义不生效(%/_ 仍是通配符):LIKE 只作
+    // 粗筛,再用 TS 字面量子串精滤,保证搜索 "%" / "_" 不匹配全部标题
     predicates.like('title', `%${searchText}%`);
     predicates.orderByDesc('is_pinned');
     predicates.orderByDesc('update_at');
     const rows: ConversationRow[] = await this.queryConversationRows(store, predicates);
-    return rows.map((r: ConversationRow): ConversationSummary => ChatRdbRepository.summaryOf(r));
+    const needle: string = searchText.toLowerCase();
+    return rows
+      .filter((r: ConversationRow): boolean => r.title.toLowerCase().includes(needle))
+      .map((r: ConversationRow): ConversationSummary => ChatRdbRepository.summaryOf(r));
   }
 
   async delete(id: string): Promise<void> {

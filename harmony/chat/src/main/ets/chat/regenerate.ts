@@ -17,7 +17,7 @@
 import type { Conversation, MessageNode } from './conversation.ts';
 import { currentMessages, nodeRole, toMessageNode } from './conversation.ts';
 import type { MessageChunk, UIMessage } from './message.ts';
-import { makeUIMessage } from './message.ts';
+import { finishAssistantMessage, makeUIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
@@ -68,6 +68,8 @@ export interface RegenerateDeps {
   //   contextMessageSize 强制 0(引擎内部截断,避免双重截断)
   prepareContextMessages?: (messages: UIMessage[]) => Promise<UIMessage[]>;
   onUpdate?: (messages: UIMessage[]) => void;
+  // raw accumulator 快照观察点(周期 checkpoint;与 ChatTurnDeps 同语义)
+  onRawFlushSnapshot?: (messages: UIMessage[]) => void;
   // 停止生成(D-035 扩展):abort → 部分快照照常入列(分支追加/新节点),正常 resolve
   abortSignal?: AbortSignalLike;
   // 生成重试(D-050,chat_turn 同语义)
@@ -193,15 +195,29 @@ export const runRegenerateAt = async (
     const callProvider = async (msgs: UIMessage[]): Promise<void> => {
       if (useNonStream && deps.provider.generateText !== undefined) {
         const chunk: MessageChunk = await deps.provider.generateText(msgs, streamOpts);
-        sawChunk = true;
+        // 只有携带实际 delta/message 的 chunk 才算有产出:finish-only/usage-only
+        // 尾块(choices 空)不得点亮 sawChunk,否则空占位会追加成新分支
+        if (chunk.choices.length > 0
+          && (chunk.choices[0].delta !== null || chunk.choices[0].message !== null)) {
+          sawChunk = true;
+        }
         accumulator.append(chunk);
+        if (deps.onRawFlushSnapshot !== undefined) {
+          deps.onRawFlushSnapshot(accumulator.snapshot());
+        }
         if (deps.onUpdate !== undefined) {
           deps.onUpdate(accumulator.snapshot());
         }
       } else {
         await deps.provider.streamText(msgs, (chunk: MessageChunk): void => {
-          sawChunk = true;
+          if (chunk.choices.length > 0
+            && (chunk.choices[0].delta !== null || chunk.choices[0].message !== null)) {
+            sawChunk = true;
+          }
           accumulator.append(chunk);
+          if (deps.onRawFlushSnapshot !== undefined) {
+            deps.onRawFlushSnapshot(accumulator.snapshot());
+          }
           if (deps.onUpdate !== undefined) {
             deps.onUpdate(accumulator.snapshot());
           }
@@ -240,8 +256,12 @@ export const runRegenerateAt = async (
       }
       await sleep(decision.delayMs);
       attempt++;
-      // 重试等待中 abort:不发起新尝试(chat_turn 同语义)
-      if (isAborted()) break;
+      // 重试等待中 abort:不发起新尝试,丢弃失败尝试的部分输出。
+      if (isAborted()) {
+        lastAccumulator = new MessageStreamAccumulator(seed);
+        sawChunk = false;
+        break;
+      }
     }
   }
   if (!sawChunk) {
@@ -249,9 +269,17 @@ export const runRegenerateAt = async (
   }
 
   // 4. 终态 transforms → 入列
-  const finalMessages: UIMessage[] = await applyOnGenerationFinish(
+  const transformed: UIMessage[] = await applyOnGenerationFinish(
     lastAccumulator.snapshot(), deps.outputTransformers, ctx,
   );
+  let finalMessages: UIMessage[] = transformed;
+  if (!isAborted() && transformed.length > 0) {
+    const lastIndex: number = transformed.length - 1;
+    const last: UIMessage = finishAssistantMessage(transformed[lastIndex]);
+    if (last !== transformed[lastIndex]) {
+      finalMessages = [...transformed.slice(0, lastIndex), last];
+    }
+  }
   const generated: UIMessage[] = finalMessages.slice(baseMessages.length);
   if (generated.length === 0) {
     return isUserNode ? working : conversation;

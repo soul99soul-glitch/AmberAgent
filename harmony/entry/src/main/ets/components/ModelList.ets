@@ -178,6 +178,16 @@ export struct ModelList {
     this.editingId = '';
   }
 
+  // 编辑保留原 enabled 状态(否则编辑已停用模型会被静默重新启用)
+  // 读 this.models(随父组件实时同步),不读派生缓存 visibleModels(可能滞后)
+  private editingModelEnabled(): boolean {
+    let enabled: boolean = true;
+    this.models.forEach((m: ModelInfo): void => {
+      if (m.id === this.editingId) enabled = m.enabled;
+    });
+    return enabled;
+  }
+
   private confirmEdit(): void {
     if (this.editingId.length === 0) return;
     const name: string = this.editName.trim();
@@ -190,7 +200,7 @@ export struct ModelList {
       isNaN(ctx) ? 0 : ctx,
       isNaN(maxOut) ? 0 : maxOut,
       isNaN(temp) ? 0 : temp,
-      true,
+      this.editingModelEnabled(),
     );
     this.onEdit(edited);
     this.editingId = '';

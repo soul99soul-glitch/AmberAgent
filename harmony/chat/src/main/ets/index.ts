@@ -15,7 +15,7 @@ export type {
   UIMessageAnnotation, UIMessage, UIMessageOpts, UIMessageChoice, MessageChunk,
 } from './chat/message.ts';
 export {
-  makeUIMessage, makeSystemMessage, makeUserMessage, makeAssistantMessage,
+  makeUIMessage, makeSystemMessage, makeUserMessage, makeAssistantMessage, finishAssistantMessage,
   canResumeToolExecution, isToolExecuted, isToolPending, canToolResumeExecution,
   toolInputAsJson, toText, reasoningPartText, summaryAsText, getTools, isValidToUpload,
   hasBase64Part, isEmptyInputMessage, isEmptyUIMessage,
@@ -296,6 +296,7 @@ export {
 } from './chat/persistence.ts';
 export type {
   ConversationRow, MessageNodeRow, ConversationSummary, ConversationRepository,
+  ConversationWindow,
 } from './chat/persistence.ts';
 
 export {
@@ -391,6 +392,31 @@ export {
   safeStreamingTerminalEnd, streamingImmediateDisplayText,
   streamingTailActiveWhen,
 } from './chat/streaming_display.ts';
+
+// Phase 3:流式逐字 reveal 状态驱动(可注入时间,对齐 rememberStreamingDisplayText)
+export {
+  StreamingDisplayState,
+  STREAM_DISPLAY_SPEED_ALPHA,
+  STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS,
+  STREAM_DISPLAY_MIN_FRAME_DELTA_MS,
+  STREAM_DISPLAY_MAX_FRAME_DELTA_MS,
+  STREAM_DISPLAY_INITIAL_FRAME_DELTA_SECONDS,
+} from './chat/streaming_display.ts';
+export type {
+  StreamingDisplaySliceProxy,
+} from './chat/streaming_display.ts';
+
+// Phase 3:Markdown 增量解析缓存(精确 + 前缀/增量,代码围栏/表格边界安全回退)
+export {
+  MarkdownCache,
+  markdownCacheKey,
+  markdownPrefixReuseSafe,
+  MARKDOWN_CACHE_MAX_ENTRIES,
+  MARKDOWN_CACHE_MAX_CHARS,
+} from './chat/markdown_cache.ts';
+export type {
+  MarkdownCacheEntry, MarkdownCacheResult, MarkdownCacheStats,
+} from './chat/markdown_cache.ts';
 
 // G2-S3:模型推理能力推断(ChatInputUsage.kt:509-660)
 export {
@@ -1052,7 +1078,7 @@ export { groupMessageParts } from './chat/message_grouping.ts';
 export { markdownToHtml } from './chat/markdown_html.ts';
 
 // ===== P0:Markdown→block AST(替代 RichText,原生 ArkUI 渲染) =====
-export { parseMarkdown, parseInline } from './chat/markdown_blocks.ts';
+export { parseMarkdown, parseInline, orderedListLabel } from './chat/markdown_blocks.ts';
 export type {
   MarkdownBlock,
   MarkdownBlockHeading,
@@ -1071,3 +1097,110 @@ export type {
   InlineLinkToken,
   InlineImageToken,
 } from './chat/markdown_blocks.ts';
+
+// ===== Phase 1:消息流跟随底部(纯逻辑,零 SDK 依赖) =====
+export type { FollowMode } from './chat/timeline_follow.ts';
+export {
+  FOLLOW_BOTTOM_TOLERANCE_VP,
+  transitionOnUserScroll,
+  transitionOnStreamUpdate,
+  transitionOnGenerateEnd,
+  transitionOnJumpToBottom,
+  shouldScrollOnStreamUpdate,
+  shouldScrollOnGenerateEnd,
+  shouldScrollOnAppend,
+  isCloseEnoughToBottom,
+  resolveInitialRowIndex,
+} from './chat/timeline_follow.ts';
+
+// ===== Phase 5:历史分页窗口加载(纯逻辑,零 SDK 依赖) =====
+export type { ConversationTimelineLoadState } from './chat/timeline_load.ts';
+export {
+  createInitialTimelineLoadState, applyTailWindow, beginLoadOlder,
+  applyOlderPage, canLoadOlder, coversIndex, nextOlderPageOffset,
+  mergeOlderNodes,
+} from './chat/timeline_load.ts';
+
+// ===== Phase 2:停止生成收口(ChatService.stopGeneration :2408-2455) =====
+export {
+  CANCEL_TOOL_BY_USER_OUTPUT, CANCEL_TOOL_BY_USER_REASON,
+  cancelToolByUser, stopGenerationUpdatedMessage, applyStopGeneration,
+} from './chat/stop_generation.ts';
+
+// ===== Phase 2:流式 checkpoint 纯逻辑判定(StreamCheckpoints.kt) =====
+export {
+  STREAM_CHECKPOINT_INTERVAL_MS, STREAM_CHECKPOINT_MIN_GROWTH_CHARS,
+  streamContentLength, streamPartsCanonical, defaultStreamPartsHash,
+  streamPartsHash, shouldCheckpoint, checkpointConversationTail,
+  checkpointRegenerateConversation,
+} from './chat/stream_checkpoint.ts';
+
+// ===== MiniApp 子系统纯领域逻辑(MiniApp*.kt 移植) =====
+export {
+  MINI_APP_MAX_HTML_BYTES, MINI_APP_VERSION_KEEP_LIMIT, MINI_APP_BOARD_SUMMARY_MAX_CHARS,
+  MINI_APP_TITLE_MAX_CHARS, MINI_APP_DESCRIPTION_MAX_CHARS, MINI_APP_ICON_MAX_CHARS,
+  MINI_APP_RENAME_TITLE_MAX_CHARS, MINI_APP_RENAME_DESCRIPTION_MAX_CHARS,
+  MINI_APP_AUDIT_SUMMARY_MAX_CHARS, MINI_APP_CHANGE_NOTE_MAX_CHARS,
+  MINI_APP_SHARED_VALUE_BYTES, MINI_APP_SHARED_NAMESPACE_BYTES,
+  MINI_APP_V2_PERMISSIONS, MINI_APP_V3_PERMISSIONS, MINI_APP_V1_PERMISSIONS,
+  MINI_APP_CATEGORIES, MINI_APP_PERMISSION_ALIASES,
+  MiniAppValidationException, MiniAppSecurityException, MiniAppParseException,
+  utf8ByteLength,
+} from './chat/miniapp/miniapp_models.ts';
+export type {
+  MiniAppPermission, MiniAppGrantDecision, MiniAppGeneratedOutput, MiniAppCardRef,
+  MiniAppBridgeRequest, MiniAppBridgeResponse, MiniAppRecord, MiniAppVersionRecord,
+  MiniAppAuditEntry,
+} from './chat/miniapp/miniapp_models.ts';
+export {
+  makeMiniAppSetting, serializeMiniAppSetting, parseMiniAppSetting,
+  loadMiniAppSetting, saveMiniAppSetting, MINI_APP_SETTING_KEY,
+  isPermissionGloballyEnabled,
+} from './chat/miniapp/miniapp_setting.ts';
+export type { MiniAppSetting } from './chat/miniapp/miniapp_setting.ts';
+export { validateMiniAppHtml } from './chat/miniapp/miniapp_html_validator.ts';
+export { MiniAppOutputParser } from './chat/miniapp/miniapp_output_parser.ts';
+export { MiniAppSandbox } from './chat/miniapp/miniapp_sandbox.ts';
+export type { MiniAppSandboxDeps } from './chat/miniapp/miniapp_sandbox.ts';
+export {
+  MINI_APP_SHELL_BASE_URL, injectMiniAppShell,
+} from './chat/miniapp/miniapp_shell.ts';
+export { BRIDGE_JS } from './chat/miniapp/miniapp_bridge_js.ts';
+export { MiniAppUrlGuard, resolveRedirectUrl, isIpLiteralHost } from './chat/miniapp/miniapp_url_guard.ts';
+export type { MiniAppUrlRecord, MiniAppHostResolver } from './chat/miniapp/miniapp_url_guard.ts';
+export {
+  MINI_APP_USER_AGENT, MINI_APP_MAX_REQUEST_BODY_BYTES, MINI_APP_MAX_RESPONSE_BYTES,
+  MINI_APP_MAX_TEXT_CHARS, MINI_APP_MAX_IMAGE_BYTES, MINI_APP_MAX_REDIRECTS,
+  MINI_APP_ACCEPT_HEADER, MINI_APP_IMAGE_ACCEPT_HEADER,
+  isAllowedRequestHeader, buildMiniAppRequestPlan, resolveMiniAppResponseType,
+} from './chat/miniapp/miniapp_network_policy.ts';
+export type { MiniAppRequestPlan, MiniAppResponseType } from './chat/miniapp/miniapp_network_policy.ts';
+export { MiniAppStorage } from './chat/miniapp/miniapp_storage.ts';
+export type { MiniAppStorageSnapshot, MiniAppStorageOpts } from './chat/miniapp/miniapp_storage.ts';
+export {
+  MINI_APP_EVENT_BUS_MAX_SUBSCRIPTIONS_PER_APP,
+  MINI_APP_LAUNCH_WINDOW_MS, MINI_APP_LAUNCH_MAX_IN_WINDOW,
+  MINI_APP_AI_DAILY_BUDGET,
+  createMiniAppEventBus, createMiniAppLaunchLimiter, createMiniAppAiBudget,
+  defaultMiniAppAiDayKey,
+} from './chat/miniapp/miniapp_runtime.ts';
+export type {
+  MiniAppEventBus, MiniAppLaunchLimiter, MiniAppAiBudget, MiniAppAiBudgetDeps,
+} from './chat/miniapp/miniapp_runtime.ts';
+export {
+  createMemoryMiniAppRepository, miniAppToCardRef, miniAppMinimalHostContext,
+} from './chat/miniapp/miniapp_repository.ts';
+export type {
+  MiniAppRepository, MiniAppRepositoryDeps, MemoryMiniAppRepository,
+  MiniAppSharedDataRecord, MiniAppHostContext,
+} from './chat/miniapp/miniapp_repository.ts';
+export {
+  MINI_APP_INSTRUCTION, MINI_APP_REVISION_HTML_CONTEXT_CHARS,
+  isExplicitMiniAppRequest, revisionAppId, revisionVersion,
+  createMiniAppPromptTransformer,
+} from './chat/miniapp/miniapp_prompt_transformer.ts';
+export type { MiniAppPromptTransformerDeps } from './chat/miniapp/miniapp_prompt_transformer.ts';
+export {
+  mightContainMiniApp, revisionChangeNote, createMiniAppOutputTransformer,
+} from './chat/miniapp/miniapp_output_transformer.ts';
+export type { MiniAppOutputTransformerDeps } from './chat/miniapp/miniapp_output_transformer.ts';

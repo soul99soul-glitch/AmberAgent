@@ -10,10 +10,7 @@
 //   - ForEach/@Builder 内不声明 const/let(UI 树优先;辅助逻辑外移到 VM 纯函数)
 //   - 排序/过滤结果用 @State 缓存,在事件回调里重算(不放在 build 内)
 
-import {
-  INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, ERROR,
-  BODY, META, LABEL, TITLE, RADIUS,
-} from '../design/tokens.ets';
+import { ACCENT, ACCENT_LIGHT, BODY, ERROR, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, RADIUS, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
 import {
   type WorkspaceFileInfo, type WorkspaceFileSortKey,
   searchFiles, sortFiles, formatFileSize, formatFileTime, extOf,
@@ -302,7 +299,7 @@ export struct WorkspaceFileSheet {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
     }
   }
@@ -356,7 +353,7 @@ export struct WorkspaceFileSheet {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Bottom)
     }
   }

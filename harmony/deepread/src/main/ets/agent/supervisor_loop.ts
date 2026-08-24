@@ -8,6 +8,7 @@
 
 import type { UIMessage } from './message.ts';
 import { makeUserMessage } from './message.ts';
+import type { AbortSignalLike } from '../platform/runtime_api.ts';
 import type { SectionWriterTools } from './section_writer_tools.ts';
 import type { DeepReadEvidencePack, EvidenceCard, DeepReadArticlePlan } from '../research/evidence_pack.ts';
 import { cardsFor } from '../research/evidence_pack.ts';
@@ -21,7 +22,13 @@ import type { DeepReadOutput } from '../domain/models.ts';
 
 // ===== collectRun:AiClient.generateText 薄封装(可注入便于测试) =====
 // 真实实现由 RunManager 注入 aiClient.generateText;测试用 mock
-export type CollectRunFn = (messages: UIMessage[], statusLabel: string) => Promise<UIMessage[]>;
+// signal:调度层 abort 贯穿(scheduler.abort → run opts.signal → 此处);
+//   实现侧应在等待中轮询/监听 signal 并以 AbortError 结束
+export type CollectRunFn = (
+  messages: UIMessage[],
+  statusLabel: string,
+  signal?: AbortSignalLike,
+) => Promise<UIMessage[]>;
 
 // ===== buildPrompt(照搬 Android :661-739) =====
 
@@ -207,6 +214,8 @@ export interface SupervisorContext {
   scrapeWebAvailable: boolean;
   collectRun: CollectRunFn;
   todayIso: string;
+  /** 调度层 abort 信号:每 pass 开始时检查,并传给 collectRun 供模型调用取消 */
+  signal?: AbortSignalLike;
   /** 注入:tryFallbackAfterStageFailure(Phase 4 Task C 实现) */
   tryFallback: (stage: DeepReadGenerationStage, messages: UIMessage[], sources: EvidenceCard[], reason: string) => Promise<boolean>;
 }
@@ -245,8 +254,15 @@ export const runStageSupervisorLoop = async (
 
   try {
     for (let pass = 0; pass < MAX_SUPERVISOR_PASSES; pass++) {
+      if (ctx.signal !== undefined && ctx.signal.aborted) {
+        // 调度层 abort:以 abort 语义上抛(generateStates 的 isAbortError 重抛路径)
+        throw new Error('aborted');
+      }
       const beforeWrites = writer.requiredWriteCount;
-      messages = await withTimeout(stageTimeoutMs, ctx.collectRun(messages, `深度阅读 ${STAGE_LABELS[stage]}`));
+      // signal 传入 collectRun:等待中的模型调用应随 abort 取消。
+      // 注:withTimeout 超时仅结束本 pass 的 await,后台 straggler 的写入依赖
+      // collectRun 实现侧对 signal/自身超时的遵守(JS 无结构化取消,登记限制)。
+      messages = await withTimeout(stageTimeoutMs, ctx.collectRun(messages, `深度阅读 ${STAGE_LABELS[stage]}`, ctx.signal));
       const stageReady = statusOf(writer.current(), stage) === 'READY';
       // 0.1: 无 coverageReport,supplementWritten 永远 true
       const supplementWritten = writer.requiredWriteCount > initialRequiredWrites;

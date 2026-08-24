@@ -17,14 +17,72 @@
 import {
   parseMarkdown,
   tokenizeCode,
+  orderedListLabel,
+  StreamingDisplayState,
+  MarkdownCache,
 } from '@amber/chat-domain';
 import type {
   MarkdownBlock,
   MarkdownBlockTable,
   InlineToken,
   HighlightToken,
+  MarkdownCacheResult,
 } from '@amber/chat-domain';
-import { INK, SURFACE2, LINE, BODY, META } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, LINE, META, SURFACE2 } from '../design/tokens.ets';
+
+// ===== P3:流式逐字 reveal + Markdown 增量解析(Phase 3 计划 §4) =====
+// 仅对「活动流式尾消息的最后文本块」启用 pacing(streaming=true 且 streamKey 非空);
+// 历史/非尾文本即时完整渲染(streaming=false → 直接 settle)。
+// 语义对齐 Android rememberStreamingDisplayText(StreamingDisplay.kt):
+//   - StreamingDisplayState.advance(注入 nowMs,定时器只负责喂时间 → 零时钟依赖);
+//   - stream=false 终态 drain(FINAL 速率)而非丢弃可见文本;
+//   - 状态按 messageId+partKey 存模块级注册表,跨 streamingTail → rows 迁移保活。
+
+// pacing 定时器节拍(≈60fps;ArkUI 无 withFrameNanos,用 setInterval 等价物登记)
+const PACING_TICK_MS: number = 16;
+// 流式 Markdown 解析节流(≥200ms,对齐 deferStreamingMarkdownParse 语义)
+const MARKDOWN_STREAM_PARSE_THROTTLE_MS: number = 200;
+// 可见增长回调最小间隔:避免每 tick scrollEdge 风暴(仍受 ChatPage 既有 follow 守卫)
+const VISIBLE_GROW_CALLBACK_MIN_INTERVAL_MS: number = 100;
+// 模块级流式状态注册表上限(有界,LRU 淘汰兜底泄漏)
+const STREAM_STATE_REGISTRY_MAX: number = 64;
+
+// 逐字 reveal 状态注册表:跨组件重建(streamingTail → rows)保活同一消息的 pacing 状态。
+const streamStateRegistry: Map<string, StreamingDisplayState> = new Map();
+
+// 全局 Markdown 增量解析缓存(32 条目 / 200k 字符,精确 + 前缀增量,有界)。
+const markdownCache: MarkdownCache = new MarkdownCache();
+
+const getStreamState = (key: string): StreamingDisplayState => {
+  let state: StreamingDisplayState | undefined = streamStateRegistry.get(key);
+  if (state === undefined) {
+    state = new StreamingDisplayState();
+  } else {
+    streamStateRegistry.delete(key); // LRU touch
+  }
+  streamStateRegistry.set(key, state);
+  // 有界淘汰:超出上限移除最旧条目(Map 保持插入序)
+  while (streamStateRegistry.size > STREAM_STATE_REGISTRY_MAX) {
+    let eldest: string = '';
+    let found: boolean = false;
+    streamStateRegistry.forEach((_v: StreamingDisplayState, k: string): void => {
+      if (!found) {
+        eldest = k;
+        found = true;
+      }
+    });
+    if (!found) break;
+    streamStateRegistry.delete(eldest);
+  }
+  return state;
+};
+
+const getStreamStateIfPresent = (key: string): StreamingDisplayState | undefined =>
+  streamStateRegistry.get(key);
+
+const releaseStreamState = (key: string): void => {
+  streamStateRegistry.delete(key);
+};
 
 // 代码高亮色板(对齐 code_highlight.ts HIGHLIGHT_COLORS)
 const CODE_KEYWORD: string = '#C678DD';
@@ -39,7 +97,7 @@ const CODE_BG: string = '#282C34';
 const CODE_TEXT: string = '#ABB2BF';
 
 // 行内代码样式
-const INLINE_CODE_FG: string = '#B8623A';
+const INLINE_CODE_FG: string = ACCENT;
 
 @Component
 export struct MarkdownText {
@@ -48,49 +106,204 @@ export struct MarkdownText {
   @Prop fontColor: string = INK;
   // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
   @Prop fillWidth: boolean = true;
-  @State private cachedContent: string = '';
-  @State private cachedBlocks: MarkdownBlock[] = [];
+  // P3:是否活动流式尾(仅最后文本块传 true)→ 启动逐字 reveal
+  @Prop @Watch('onStreamingChanged') streaming: boolean = false;
+  // P3:稳定键(messageId + partKey);非空 = 参与 pacing/增量缓存;
+  //   空 = 历史/非流式内容,即时完整渲染(推理卡/其他组件不受影响)
+  @Prop streamKey: string = '';
+  // P3:可见文本增长回调(逐字/drain 推进时触发,供 ChatPage 复用既有
+  //   followStreamingUpdate,不新建第二套滚动状态机;内部节流防风暴)
+  onVisibleGrow: () => void = (): void => {};
+  @State private displayText: string = '';
+  @State private displayBlocks: MarkdownBlock[] = [];
   private highlightCache: Map<string, HighlightToken[]> = new Map<string, HighlightToken[]>();
+  private pacingTimer: number = -1;
+  private lastParseMs: number = 0;
+  private lastParsedText: string = '';
+  private lastGrowCallbackMs: number = 0;
 
   aboutToAppear(): void {
-    this.updateCachedContent(this.content);
+    this.updateDisplay();
+  }
+
+  // 不在此释放 streamStateRegistry:streamingTail → rows 迁移中,同 key 的
+  // 新组件实例仍需状态完成终态 drain;注册表有界(LRU)兜底泄漏。
+  aboutToDisappear(): void {
+    this.stopPacingTimer();
   }
 
   private onContentChanged(): void {
-    this.updateCachedContent(this.content);
+    this.updateDisplay();
   }
 
-  private updateCachedContent(content: string): void {
-    if (content === this.cachedContent) return;
-    this.cachedContent = content;
-    this.cachedBlocks = parseMarkdown(content);
-    this.highlightCache.clear();
+  private onStreamingChanged(): void {
+    this.updateDisplay();
+  }
+
+  // 统一显示入口:根据 streaming/streamKey 决定 settle 或 pacing/drain。
+  private updateDisplay(): void {
+    const key: string = this.streamKey;
+    if (key.length === 0) {
+      this.settleDisplay();
+      return;
+    }
+    const state: StreamingDisplayState | undefined = getStreamStateIfPresent(key);
+    if (this.content.length === 0) {
+      // 工具续跑会同时保留旧消息行和同 id 的流式预览。旧行不能释放
+      // 正在被预览使用的状态，否则 reveal 会从头重启。
+      if (state === undefined || state.content.length === 0) releaseStreamState(key);
+      this.settleDisplay();
+      return;
+    }
+    if (this.streaming) {
+      // 活动流式:确保定时器运行并立即推进一步(首帧即出字)
+      this.ensurePacingTimer();
+      this.tickPacing();
+      return;
+    }
+    if (state !== undefined && state.content !== this.content) {
+      // 同 key 的活动流式实例拥有不同的新内容时，当前旧行只做静态渲染，
+      // 不推进或释放共享状态，避免两个定时器交替覆盖 target。
+      this.settleDisplay();
+      return;
+    }
+    if (state !== undefined && state.visibleLength < this.content.length) {
+      // stream=false 但存在待清空 backlog → 继续终态 drain(不丢可见文本)
+      this.ensurePacingTimer();
+      this.tickPacing();
+      return;
+    }
+    if (state !== undefined) releaseStreamState(key);
+    this.settleDisplay();
+  }
+
+  // 非 pacing 路径:完整内容即时渲染(历史/用户气泡/推理卡/已定型内容)
+  private settleDisplay(): void {
+    this.stopPacingTimer();
+    this.displayText = this.content;
+    this.parseDisplay(true);
+  }
+
+  private ensurePacingTimer(): void {
+    if (this.pacingTimer !== -1) return;
+    this.pacingTimer = setInterval((): void => {
+      this.tickPacing();
+    }, PACING_TICK_MS);
+  }
+
+  private stopPacingTimer(): void {
+    if (this.pacingTimer !== -1) {
+      clearInterval(this.pacingTimer);
+      this.pacingTimer = -1;
+    }
+  }
+
+  // 一帧 pacing:advance(注入 nowMs)→ 发射则更新显示文本并通知增长回调。
+  private tickPacing(): void {
+    const key: string = this.streamKey;
+    if (key.length === 0) {
+      this.stopPacingTimer();
+      return;
+    }
+    const state: StreamingDisplayState = getStreamState(key);
+    const now: number = Date.now();
+    const emitted: boolean = state.advance(this.content, this.streaming, now);
+    const slice: string = this.content.substring(0, state.visibleLength);
+    if (slice !== this.displayText) {
+      // 内容替换(前缀失配/缩短 → advance 已 settle)→ 立即强制重解析,避免
+      // 节流窗口内短暂展示旧块;前缀增长 → 走常规节流
+      const replaced: boolean = this.displayText.length > 0 && slice.length > 0 &&
+        !slice.startsWith(this.displayText);
+      this.displayText = slice;
+      this.parseDisplay(replaced);
+    }
+    if (emitted && slice.length > 0) {
+      this.notifyVisibleGrow(now);
+    }
+    // 状态机收尾:
+    if (!this.streaming && state.visibleLength >= state.content.length) {
+      // 终态 drain 完成 → 释放注册表条目并停表(最终内容已在末帧解析)
+      releaseStreamState(key);
+      this.stopPacingTimer();
+    } else if (this.streaming && state.visibleLength >= state.content.length) {
+      // 流式中 backlog 已空:停表,待下一次内容增长由 onContentChanged 重启
+      this.stopPacingTimer();
+    }
+  }
+
+  // 可见文本确实增长才回调(非每 tick),且受最小间隔节流 + ChatPage 既有 follow 守卫
+  private notifyVisibleGrow(now: number): void {
+    if (now - this.lastGrowCallbackMs < VISIBLE_GROW_CALLBACK_MIN_INTERVAL_MS) return;
+    this.lastGrowCallbackMs = now;
+    this.onVisibleGrow();
+  }
+
+  // 解析节流:流式中 ≥200ms 一次;settle/drain(streaming=false)立即解析(精确缓存兜底)
+  private parseDisplay(force: boolean): void {
+    const text: string = this.displayText;
+    if (text === this.lastParsedText) return;
+    if (!force && this.streaming && this.streamKey.length > 0 &&
+      Date.now() - this.lastParseMs < MARKDOWN_STREAM_PARSE_THROTTLE_MS) {
+      return;
+    }
+    const prevLen: number = this.lastParsedText.length;
+    this.lastParseMs = Date.now();
+    this.lastParsedText = text;
+    this.displayBlocks = this.parseBlocks(text, prevLen);
+  }
+
+  private parseBlocks(text: string, prevLen: number): MarkdownBlock[] {
+    if (text.length === 0) return [];
+    if (this.streamKey.length > 0) {
+      // 流式/已定型内容:全局增量缓存(精确命中 + 前缀增量;
+      //   代码围栏/表格边界不安全 → 自动全量回退 = 不完整 Markdown 安全兜底)
+      const result: MarkdownCacheResult = markdownCache.getOrParse(this.streamKey, prevLen, text);
+      return result.blocks;
+    }
+    // 非流式内容:直接解析(parseMarkdown 自带异常安全回退 → 纯文本段落)
+    return parseMarkdown(text);
   }
 
   build(): void {
     Column() {
-      if (this.cachedContent.trim().length > 0) {
-        ForEach(
-          this.cachedBlocks,
-          (block: MarkdownBlock, idx: number): void => {
-            if (block.kind === 'heading') {
-              this.RenderHeading(block)
-            } else if (block.kind === 'paragraph') {
-              this.RenderParagraph(block)
-            } else if (block.kind === 'code_block') {
-              this.RenderCodeBlock(block)
-            } else if (block.kind === 'list') {
-              this.RenderList(block)
-            } else if (block.kind === 'blockquote') {
-              this.RenderBlockquote(block)
-            } else if (block.kind === 'table') {
-              this.RenderTable(block)
-            } else {
-              Divider().color(LINE).strokeWidth(0.5).margin({ top: 8, bottom: 8 })
-            }
-          },
-          (block: MarkdownBlock, idx: number): string => `md-${idx}-${block.kind}`,
-        )
+      if (this.displayText.trim().length > 0) {
+        if (this.displayBlocks.length === 0) {
+          // 安全兜底:解析未产出块(理论不会,parseMarkdown 有异常回退)→ 纯文本段落
+          Text(this.displayText)
+            .fontSize(this.fontSize)
+            .fontColor(this.fontColor)
+            .lineHeight(this.fontSize * 1.6)
+        } else {
+          ForEach(
+            this.displayBlocks,
+            (block: MarkdownBlock, idx: number): void => {
+              if (block.kind === 'heading') {
+                this.RenderHeading(block)
+              } else if (block.kind === 'paragraph') {
+                this.RenderParagraph(block)
+              } else if (block.kind === 'code_block') {
+                this.RenderCodeBlock(block)
+              } else if (block.kind === 'list') {
+                this.RenderList(block)
+              } else if (block.kind === 'blockquote') {
+                this.RenderBlockquote(block)
+              } else if (block.kind === 'table') {
+                this.RenderTable(block)
+              } else {
+                Divider().color(LINE).strokeWidth(0.5).margin({ top: 8, bottom: 8 })
+              }
+            },
+            (block: MarkdownBlock, idx: number): string => `md-${idx}-${block.kind}`,
+          )
+          if (this.displayText.length > this.lastParsedText.length) {
+            Text(this.displayText.substring(this.lastParsedText.length))
+              .width(this.fillWidth ? '100%' : 'auto')
+              .fontSize(this.fontSize)
+              .fontColor(this.fontColor)
+              .lineHeight(this.fontSize * 1.6)
+              .margin({ bottom: 4 })
+          }
+        }
       }
     }
     .width(this.fillWidth ? '100%' : 'auto')
@@ -107,6 +320,18 @@ export struct MarkdownText {
     if (cached !== undefined) return this.splitTokensByLine(cached);
     const tokens: HighlightToken[] = tokenizeCode(block.code, block.lang);
     this.highlightCache.set(key, tokens);
+    while (this.highlightCache.size > 16) {
+      let eldest: string = '';
+      let found: boolean = false;
+      this.highlightCache.forEach((_v: HighlightToken[], cacheKey: string): void => {
+        if (!found) {
+          eldest = cacheKey;
+          found = true;
+        }
+      });
+      if (!found) break;
+      this.highlightCache.delete(eldest);
+    }
     return this.splitTokensByLine(tokens);
   }
 
@@ -223,6 +448,23 @@ export struct MarkdownText {
     .margin({ top: 4, bottom: 4 })
   }
 
+  // 列表项嵌套深度(parser depths;每级缩进 12)
+  private listDepthAt(block: MarkdownBlock, idx: number): number {
+    if (block.kind !== 'list' || block.depths === undefined) return 0;
+    if (idx < 0 || idx >= block.depths.length) return 0;
+    return block.depths[idx];
+  }
+
+  // 有序序号:顶层延续、嵌套层各自从 1 重启(CommonMark 语义)
+  private orderedLabel(block: MarkdownBlock, idx: number): string {
+    if (block.kind !== 'list') return '';
+    if (block.depths === undefined) {
+      const flat: number[] = [];
+      return orderedListLabel(block.start, flat, idx);
+    }
+    return orderedListLabel(block.start, block.depths, idx);
+  }
+
   @Builder
   RenderList(block: MarkdownBlock): void {
     Column() {
@@ -231,7 +473,7 @@ export struct MarkdownText {
           block.items,
           (itemInlines: InlineToken[], idx: number): void => {
             Row() {
-              Text(block.ordered ? `${block.start + idx}.` : '•')
+              Text(block.ordered ? this.orderedLabel(block, idx) : '•')
                 .fontSize(this.fontSize)
                 .fontColor(this.fontColor)
                 .width(block.ordered ? 32 : 16)
@@ -251,6 +493,7 @@ export struct MarkdownText {
               .layoutWeight(1)
             }
             .width('100%')
+            .padding({ left: this.listDepthAt(block, idx) * 12 })
             .margin({ bottom: 2 })
           },
           (itemInlines: InlineToken[], idx: number): string => `list-${idx}`,
@@ -265,41 +508,49 @@ export struct MarkdownText {
   RenderCodeBlock(block: MarkdownBlock): void {
     Column() {
       if (block.kind === 'code_block') {
-        if (block.lang.length > 0) {
-          ForEach(
-            this.getCodeLines(block),
-            (lineTokens: HighlightToken[], idx: number): void => {
-              if (lineTokens.length === 0) {
-                Text(' ').fontSize(12).fontFamily('JetBrainsMono').lineHeight(18).width('100%')
-              } else {
-                Text() {
-                  ForEach(
-                    lineTokens,
-                    (tok: HighlightToken, ti: number): void => {
-                      Span(tok.text)
-                        .fontSize(12)
-                        .fontFamily('JetBrainsMono')
-                        .fontColor(this.tokenColor(tok.type))
-                    },
-                    (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
-                  )
-                }
+        // 横向滚动:长行不折行,行 Text 不限宽(内容自适应),短行靠 Column 左对齐
+        Scroll() {
+          Column() {
+            if (block.lang.length > 0) {
+              ForEach(
+                this.getCodeLines(block),
+                (lineTokens: HighlightToken[], idx: number): void => {
+                  if (lineTokens.length === 0) {
+                    Text(' ').fontSize(12).fontFamily('JetBrainsMono').lineHeight(18)
+                  } else {
+                    Text() {
+                      ForEach(
+                        lineTokens,
+                        (tok: HighlightToken, ti: number): void => {
+                          Span(tok.text)
+                            .fontSize(12)
+                            .fontFamily('JetBrainsMono')
+                            .fontColor(this.tokenColor(tok.type))
+                        },
+                        (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
+                      )
+                    }
+                    .fontSize(12)
+                    .fontFamily('JetBrainsMono')
+                    .lineHeight(18)
+                  }
+                },
+                (lineTokens: HighlightToken[], idx: number): string => `codeline-${idx}`,
+              )
+            } else {
+              Text(block.code)
                 .fontSize(12)
+                .fontColor(CODE_TEXT)
                 .fontFamily('JetBrainsMono')
                 .lineHeight(18)
-                .width('100%')
-              }
-            },
-            (lineTokens: HighlightToken[], idx: number): string => `codeline-${idx}`,
-          )
-        } else {
-          Text(block.code)
-            .fontSize(12)
-            .fontColor(CODE_TEXT)
-            .fontFamily('JetBrainsMono')
-            .lineHeight(18)
-            .width('100%')
+            }
+          }
+          .alignItems(HorizontalAlign.Start)
         }
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .align(Alignment.Start)
       }
     }
     .width('100%')

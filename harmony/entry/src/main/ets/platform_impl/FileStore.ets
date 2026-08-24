@@ -19,7 +19,22 @@ class OhosFileStore implements FileStore {
     return this.root;
   }
 
+  // 相对路径校验:拒绝绝对路径与 '.'/'..' 段 — joinPath 只折叠斜杠不消 '..',
+  // 不校验时 writeText('../x') 可逃出 filesDir(模型侧路径属外部输入,防御纵深)
+  private validateRelativePath(path: string): void {
+    if (path.startsWith('/') || path.startsWith('\\')) {
+      throw new Error(`FileStore path must be relative: ${path}`);
+    }
+    const segs: string[] = path.split('/');
+    for (const seg of segs) {
+      if (seg === '.' || seg === '..') {
+        throw new Error(`FileStore path must not contain '${seg}' segment: ${path}`);
+      }
+    }
+  }
+
   private async resolve(path: string): Promise<string> {
+    this.validateRelativePath(path);
     const root: string = await this.getRoot();
     return joinPath(root, path);
   }

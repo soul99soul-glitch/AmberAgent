@@ -16,13 +16,14 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { INK, INK2, INK3, INK4, ACCENT, ACCENT_INK, SURFACE, SURFACE2, BODY, META, LABEL, LINE } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
 export struct ChatInput {
   @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   @Prop sending: boolean = false;
   @Prop editing: boolean = false;
@@ -110,7 +111,7 @@ export struct ChatInput {
           Text('编辑中').fontSize(LABEL).fontColor(INK4)
         }
         .width('100%')
-        .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+        .padding({ left: 20, right: 20, top: 4, bottom: 4 })
         .onClick((): void => { this.onCancelEdit(); })
       }
 
@@ -142,7 +143,7 @@ export struct ChatInput {
             .fontSize(BODY).fontColor(INK)
             .placeholderColor(INK4)
             .placeholderFont({ size: BODY })
-            .backgroundColor('#00000000')
+            .backgroundColor(Color.Transparent)
             .borderRadius(26)
             .padding({ top: 13, bottom: 14 })
             .maxLines(4)
@@ -179,8 +180,8 @@ export struct ChatInput {
           }
           .width(48).height(48)
           .borderRadius(999)
-          .backgroundColor(this.canSend() ? ACCENT : SURFACE2)
-          .border({ width: 1, color: this.canSend() ? ACCENT : LINE })
+          .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE2)
+          .border({ width: 1, color: this.canSend() ? this.accentColorStore : LINE })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })

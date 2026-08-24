@@ -1,5 +1,5 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
-import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
@@ -174,7 +174,7 @@ struct NovelProjectsPage {
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
         }
-        .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+        .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
         .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
       }
@@ -195,7 +195,7 @@ struct NovelProjectsPage {
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
         }
-        .width('100%').height('100%').backgroundColor('rgba(0,0,0,0.35)')
+        .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
         .onClick(() => { this.confirmDeleteId = ''; })
       }

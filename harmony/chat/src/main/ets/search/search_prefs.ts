@@ -51,8 +51,18 @@ const parseServices = (raw: string | null): SearchServiceOptions[] => {
   try {
     const arr: JsonValue = JSON.parse(raw) as JsonValue;
     if (!Array.isArray(arr)) return [DEFAULT_SEARCH_SERVICE_OPTIONS];
-    return arr.map((v: JsonValue): SearchServiceOptions =>
-      searchServiceOptionsFromJson((typeof v === 'object' && v !== null) ? v as JsonObject : {}));
+    // 逐条解码:未知 type(未来版本/损坏单条)只跳过该条,
+    // 不得把整份已配置服务列表抹成默认;全部无效才回落默认
+    const out: SearchServiceOptions[] = [];
+    for (const v of arr) {
+      try {
+        out.push(searchServiceOptionsFromJson(
+          (typeof v === 'object' && v !== null) ? v as JsonObject : {}));
+      } catch {
+        // skip unknown entry
+      }
+    }
+    return out.length > 0 ? out : [DEFAULT_SEARCH_SERVICE_OPTIONS];
   } catch {
     return [DEFAULT_SEARCH_SERVICE_OPTIONS]; // decodeJsonOrNull ?: default
   }

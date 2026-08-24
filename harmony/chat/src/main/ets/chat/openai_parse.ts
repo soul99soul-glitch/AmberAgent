@@ -253,17 +253,18 @@ export const parseOpenAiStreamEventData = (data: string): OpenAiStreamEventResul
       const deltaRaw: JsonValue | undefined = choice['delta'];
       const messageRaw: JsonValue | undefined = choice['message'];
       const message: JsonObject | null = isObj(deltaRaw) ? deltaRaw : (isObj(messageRaw) ? messageRaw : null);
-      if (message === null) {
-        throw new Error('delta/message is null');
+      // 部分网关的 usage-only/keep-alive 尾块发 delta/message 双 null:
+      // 跳过该 choice 但保留 chunk(usage 仍随行),不得让整条已收完内容的流报废
+      if (message !== null) {
+        // finish_reason null/缺失一律归一 "unknown"(ChatCompletionsAPI.kt:224-226)
+        const finishReason: string = strOrNull(choice['finish_reason']) ?? 'unknown';
+        choiceList.push({
+          index: 0,
+          delta: parseChatCompletionMessage(message),
+          message: null,
+          finishReason,
+        });
       }
-      // finish_reason null/缺失一律归一 "unknown"(ChatCompletionsAPI.kt:224-226)
-      const finishReason: string = strOrNull(choice['finish_reason']) ?? 'unknown';
-      choiceList.push({
-        index: 0,
-        delta: parseChatCompletionMessage(message),
-        message: null,
-        finishReason,
-      });
     }
 
     const usageRaw: JsonValue | undefined = it['usage'];

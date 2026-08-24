@@ -11,9 +11,9 @@ import {
 import type { ToolInvocationHook, ToolInvocationResult } from '../main/ets/chat/tool_dispatcher.ts';
 import { PermissionDecisionResolver } from '../main/ets/chat/tool_permission.ts';
 import { makeGenerationRetrySetting } from '../main/ets/chat/generation_retry.ts';
-import { makeAgentTool } from '../main/ets/chat/tool.ts';
-import type { AgentTool } from '../main/ets/chat/tool.ts';
-import type { UIMessagePart, UIMessagePartTool, ToolApprovalState } from '../main/ets/chat/message.ts';
+import { makeAgentTool, makeInputSchemaObj } from '../main/ets/chat/tool.ts';
+import type { AgentTool, InputSchemaObj } from '../main/ets/chat/tool.ts';
+import type { UIMessagePart, UIMessagePartText, UIMessagePartTool, ToolApprovalState } from '../main/ets/chat/message.ts';
 import type { JsonValue } from '../main/ets/chat/json.ts';
 
 let seq = 0;
@@ -304,4 +304,92 @@ describe('metadata 合并(:344-355)', () => {
     const merged = withHookMetadata(t, { k: 'v' });
     assert.equal(merged.metadata?.['k'], 'v');
   });
+});
+
+// ===== Phase 4 回归:空 toolCallId 并行工具的结果按输入序配对 =====
+
+it('executeBatch: parallel blank-id tools return distinct results in input order', async () => {
+  let calls = 0;
+  const tool = makeAgentTool({
+    name: 'search_web',
+    description: 'search',
+    parameters: (): InputSchemaObj => makeInputSchemaObj({}),
+    execute: async (): Promise<UIMessagePart[]> => {
+      calls++;
+      return [{ type: 'text', text: `result-${calls}`, metadata: null }];
+    },
+  });
+  const blank = (input: string): UIMessagePartTool => ({
+    type: 'tool', toolCallId: '', toolName: 'search_web',
+    input, output: [], approvalState: { type: 'auto' }, metadata: null,
+  });
+  const dispatcher = new AgentToolDispatcher();
+  const results = await dispatcher.executeBatch(
+    [blank('{"n":1}'), blank('{"n":2}')], new Map([[tool.name, tool]]),
+    true, false, [], 'normal', new Map(), makeGenerationRetrySetting({ enabled: false }));
+  assert.equal(results.length, 2);
+  assert.equal((results[0].output[0] as UIMessagePartText).text, 'result-1');
+  assert.equal((results[1].output[0] as UIMessagePartText).text, 'result-2');
+});
+
+it('executeBatch: abort signal skips not-yet-started tools (sequential)', async () => {
+  let calls = 0;
+  const tool = makeAgentTool({
+    name: 'file_read',
+    description: 'read',
+    parameters: (): InputSchemaObj => makeInputSchemaObj({}),
+    execute: async (): Promise<UIMessagePart[]> => {
+      calls++;
+      return [{ type: 'text', text: 'ok', metadata: null }];
+    },
+  });
+  const controller = new AbortController();
+  const mk = (id: string): UIMessagePartTool => ({
+    type: 'tool', toolCallId: id, toolName: 'file_read',
+    input: '{}', output: [], approvalState: { type: 'auto' }, metadata: null,
+  });
+  const dispatcher = new AgentToolDispatcher();
+  // 先执行第一个成功,然后 abort — 第二个不得产生副作用
+  const first = await dispatcher.execute(
+    mk('t1'), tool, true, false, [], 'normal', makeGenerationRetrySetting({ enabled: false }));
+  assert.ok(first !== null && first.output.length > 0);
+  controller.abort();
+  assert.equal(calls, 1);
+  const results = await dispatcher.executeBatch(
+    [mk('t2'), mk('t3')], new Map([[tool.name, tool]]),
+    true, false, [], 'normal', new Map(),
+    makeGenerationRetrySetting({ enabled: false }), controller.signal);
+  assert.equal(results.length, 0, 'aborted batch must not start tool side effects');
+  assert.equal(calls, 1);
+});
+
+it('executeWithRetry: abort during retry wait stops retrying', async () => {
+  const controller = new AbortController();
+  let attempts = 0;
+  const tool = makeAgentTool({
+    name: 'search_web',
+    description: 'search',
+    parameters: (): InputSchemaObj => makeInputSchemaObj({}),
+    execute: async (): Promise<UIMessagePart[]> => {
+      attempts++;
+      throw new Error('transient network error');
+    },
+  });
+  const dispatcher = new AgentToolDispatcher({
+    sleep: (ms: number): Promise<void> => new Promise((resolve): void => {
+      setTimeout(resolve, ms);
+    }),
+  });
+  const mk = (): UIMessagePartTool => ({
+    type: 'tool', toolCallId: 't1', toolName: 'search_web',
+    input: '{}', output: [], approvalState: { type: 'auto' }, metadata: null,
+  });
+  const retry = makeGenerationRetrySetting({ enabled: true, initialDelayMs: 5_000, maxRetries: 10 });
+  const pending = dispatcher.executeBatch(
+    [mk()], new Map([[tool.name, tool]]), true, false, [], 'normal', new Map(), retry, controller.signal);
+  await new Promise((r): void => { setTimeout(r, 30); });
+  controller.abort();
+  const results = await pending;
+  assert.equal(attempts, 1, 'abort during retry wait must prevent further attempts');
+  assert.equal(results.length, 0, 'aborted tool stays unexecuted (no result written back)');
 });

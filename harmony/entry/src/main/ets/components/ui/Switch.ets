@@ -31,7 +31,8 @@ export struct AmberSwitch {
     return 18;
   }
   private thumbOffset(): number {
-    return this.checked ? this.trackWidth() - this.thumbSize() - 4 : 2;
+    // 左右留白对称(均 2):选中态与未选中态的 thumb 内边距一致
+    return this.checked ? this.trackWidth() - this.thumbSize() - 2 : 2;
   }
   private trackColor(): string {
     if (!this.fieldEnabled) return SURFACE2;

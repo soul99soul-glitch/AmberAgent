@@ -157,20 +157,25 @@ if [ -x "$HDC" ]; then
   if [ -n "$UDID_LIST" ]; then
     # 把每个序列号转成 UDID 并构造 JSON 数组
     DEVICE_IDS=$(python3 << PYEOF || echo "[]"
-import subprocess, json
+import subprocess, json, re
 out = """$UDID_LIST"""
 udids = []
 for line in out.strip().splitlines():
     sn = line.split()[0] if line.split() else ""
     if not sn: continue
-    # hdc shell bm dump --udid 能拿到 UDID（64 位 hex）
-    try:
-        r = subprocess.run(["$HDC", "-t", sn, "shell", "bm", "dump", "--udid"], capture_output=True, text=True, timeout=5)
-        udid = r.stdout.strip()
-        if udid and len(udid) == 64:
-            udids.append(udid.lower())
-    except Exception:
-        pass
+    # 设备实际支持的 UDID 命令: bm get --udid(部分系统 bm dump --udid 无输出)
+    udid = ""
+    for cmd in (["bm", "get", "--udid"], ["bm", "dump", "--udid"]):
+        try:
+            r = subprocess.run(["$HDC", "-t", sn, "shell"] + cmd, capture_output=True, text=True, timeout=5)
+            m = re.search(r'[0-9A-Fa-f]{64}', r.stdout)
+            if m:
+                udid = m.group(0).lower()
+                break
+        except Exception:
+            pass
+    if udid:
+        udids.append(udid)
 print(json.dumps(udids))
 PYEOF
 )

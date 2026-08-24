@@ -9,8 +9,10 @@
 //   - Responses API、Google Service Account 当前不支持;保存时迁移到已支持边界
 //   - brand 编辑及 openai account 区(余额等)= P1
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
-import { ACCENT,BG,INK,INK3,SURFACE,ERROR } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, LABEL, ERROR, RADIUS,
+} from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import type {
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingGoogle,
@@ -34,6 +36,7 @@ interface ProviderRow {
 @Entry
 @Component
 struct ChatProviderSettingsPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State rows: ProviderRow[] = [];
   @State selectedId: string = '';
@@ -72,8 +75,13 @@ struct ChatProviderSettingsPage {
     this.load();
   }
 
+  // 加载序号:aboutToAppear + onPageShow 双触发时,迟到的旧加载不得覆盖新数据/选中态
+  private loadSeq: number = 0;
+
   private load(): void {
+    const seq: number = ++this.loadSeq;
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
+      if (seq !== this.loadSeq) return;
       this.all = list ?? [];
       this.rebuildRows();
       // 兼容旧行为(D-020):默认选中首个 openai,否则首个 provider
@@ -83,6 +91,9 @@ struct ChatProviderSettingsPage {
         this.selectProvider(target);
       }
       this.loaded = true;
+    }).catch((): void => {
+      // 读取失败也要退出加载态(否则页面永远 loading)
+      if (seq === this.loadSeq) this.loaded = true;
     });
   }
 
@@ -171,6 +182,7 @@ struct ChatProviderSettingsPage {
     if (this.selectedRaw === null || this.selectedType.length === 0) return;
     if (this.unsupportedAuthMsg.length > 0 && this.apiKey.trim().length === 0) {
       this.savedMsg = '请先填写 API Key';
+      setTimeout((): void => { this.savedMsg = ''; }, 2000);
       return;
     }
     const raw: ProviderSetting = this.selectedRaw;
@@ -260,8 +272,10 @@ struct ChatProviderSettingsPage {
         value: '删除',
         fontColor: ERROR,
         action: (): void => {
-          this.all = this.all.filter((p: ProviderSetting): boolean => p.id !== id);
-          saveProviders(getChatKvStore(), this.all).then((): void => {
+          // 先持久化候选列表,成功后再更新 UI;失败保留原状(避免「UI 已删、存储还在」)
+          const next: ProviderSetting[] = this.all.filter((p: ProviderSetting): boolean => p.id !== id);
+          saveProviders(getChatKvStore(), next).then((): void => {
+            this.all = next;
             this.rebuildRows();
             this.selectedRaw = null;
             this.selectedId = '';
@@ -269,6 +283,8 @@ struct ChatProviderSettingsPage {
             if (this.all.length > 0) {
               this.selectProvider(this.all[0]);
             }
+          }).catch((error: Error): void => {
+            this.savedMsg = `删除失败：${error.message}`;
           });
         },
       },
@@ -290,160 +306,308 @@ struct ChatProviderSettingsPage {
   @Builder
   switchRow(label: string, isOn: boolean, onChange: (v: boolean) => void) {
     Row() {
-      Text(label).fontSize(14).fontColor(INK)
+      Text(label).fontSize(BODY).fontColor(INK)
       Blank()
       Toggle({ type: ToggleType.Switch, isOn: isOn })
-        .selectedColor(ACCENT)
+        .selectedColor(isOn ? this.accentColorStore : LINE)
         .onChange(onChange)
-    }.width('100%').margin({ bottom: 14 })
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .backgroundColor(SURFACE)
   }
 
   @Builder
-  addButton(label: string, ptype: string) {
+  addProviderButton(label: string, ptype: string) {
     Text(label)
-      .fontSize(12).fontColor(ACCENT)
-      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-      .backgroundColor(SURFACE).borderRadius(12)
+      .fontSize(BODY2)
+      .fontColor(this.accentColorStore)
+      .padding({ left: 14, right: 14, top: 9, bottom: 9 })
+      .constraintSize({ minHeight: 44 })
+      .backgroundColor(SURFACE2)
+      .borderRadius(RADIUS)
       .onClick((): void => this.addProvider(ptype))
+  }
+
+  @Builder
+  providerTemplateCard(name: string, desc: string, ptype: string) {
+    Row() {
+      Column() {
+        Text(name)
+          .fontSize(BODY)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(INK)
+        Text(desc)
+          .fontSize(LABEL)
+          .fontColor(INK3)
+          .margin({ top: 2 })
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+
+      Text('+')
+        .fontSize(20)
+        .fontColor(this.accentColorStore)
+        .fontWeight(FontWeight.Bold)
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 15, bottom: 15 })
+    .backgroundColor(SURFACE)
+    .border({ width: 1, color: LINE })
+    .borderRadius(RADIUS)
+    .onClick((): void => this.addProvider(ptype))
   }
 
   build() {
     Column() {
       PageTitleBar({
-        title: 'Provider 设置',
+        title: '服务商与密钥',
         actionText: '保存',
         onAction: (): void => { this.save(); },
       })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY2).fontColor(INK3)
+        }
+        .width('100%').height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
-            // provider 列表 + 新增(Android SettingProviderPage 列表语义)
-            Row() {
-              Text('Providers').fontSize(12).fontColor(INK3)
-              Blank()
-              this.addButton('+ OpenAI', 'openai')
-              this.addButton('+ Google', 'google')
-              this.addButton('+ Claude', 'claude')
-            }.width('100%').margin({ bottom: 8 })
+            // ── Provider 列表 ──
+            SectionHeader({ label: 'PROVIDERS' })
 
             if (this.rows.length === 0) {
-              Text('暂无 Provider,点右上角新增').fontSize(13).fontColor(INK3)
-                .margin({ bottom: 14 })
+              // 空状态:直接列出模板选择器,顶部不留白
+              Column({ space: 8 }) {
+                this.providerTemplateCard('OpenAI', 'GPT-4o / o1 / 兼容接口', 'openai')
+                this.providerTemplateCard('Google', 'Gemini / Vertex AI', 'google')
+                this.providerTemplateCard('Claude', 'Anthropic Claude', 'claude')
+              }
+              .width('100%')
             } else {
               Column() {
-                ForEach(this.rows, (row: ProviderRow): void => {
+                ForEach(this.rows, (row: ProviderRow, idx: number): void => {
                   Row() {
-                    Text(row.name).fontSize(14).fontColor(INK)
-                    Text(` · ${row.ptype}`).fontSize(12).fontColor(INK3)
-                    Blank()
+                    Column() {
+                      Text(row.name)
+                        .fontSize(BODY)
+                        .fontWeight(FontWeight.Medium)
+                        .fontColor(INK)
+                        .maxLines(1)
+                        .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text(row.ptype)
+                        .fontSize(LABEL)
+                        .fontColor(INK4)
+                        .margin({ top: 2 })
+                    }
+                    .alignItems(HorizontalAlign.Start)
+                    .layoutWeight(1)
+
                     if (!row.enabled) {
-                      Text('停用').fontSize(11).fontColor(INK3)
+                      Text('停用')
+                        .fontSize(LABEL).fontColor(INK4)
+                        .padding({ left: 8, right: 8, top: 3, bottom: 3 })
+                        .backgroundColor(SURFACE2).borderRadius(RADIUS)
+                        .margin({ right: 8 })
                     }
                     if (row.id === this.selectedId) {
-                      Text('编辑中').fontSize(11).fontColor(ACCENT).margin({ left: 8 })
+                      Text('编辑中')
+                        .fontSize(LABEL).fontColor(this.accentColorStore)
                     }
                   }
                   .width('100%')
-                  .padding({ left: 12, right: 12, top: 10, bottom: 10 })
-                  .backgroundColor(row.id === this.selectedId ? SURFACE : Color.Transparent)
-                  .borderRadius(8)
+                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                  .backgroundColor(row.id === this.selectedId ? SURFACE2 : SURFACE)
+                  .border(idx === this.rows.length - 1 ? { width: 0 } : { width: { bottom: 0.5 }, color: { bottom: LINE } })
                   .onClick((): void => this.selectById(row.id))
                 }, (row: ProviderRow): string => row.id)
               }
-              .width('100%').alignItems(HorizontalAlign.Start)
-              .margin({ bottom: 14 })
+              .width('100%').backgroundColor(SURFACE)
+              .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+
+              // 有数据时:紧凑横排添加按钮
+              Row() {
+                this.addProviderButton('+ OpenAI', 'openai')
+                Blank()
+                this.addProviderButton('+ Google', 'google')
+                Blank()
+                this.addProviderButton('+ Claude', 'claude')
+              }
+              .width('100%')
+              .margin({ top: 10 })
             }
 
+            // ── 编辑区 ──
             if (this.selectedType.length > 0) {
-              this.switchRow('启用', this.providerEnabled,
-                (v: boolean): void => { this.providerEnabled = v; })
-              this.field('名称', 'Provider', this.name,
+              SectionHeader({ label: '编辑' })
+
+              // 基本信息卡
+              Column() {
+                // 启用开关
+                Row() {
+                  Text('启用').fontSize(BODY).fontColor(INK).layoutWeight(1)
+                  Toggle({ type: ToggleType.Switch, isOn: this.providerEnabled })
+                    .selectedColor(this.providerEnabled ? this.accentColorStore : LINE)
+                    .onChange((v: boolean): void => { this.providerEnabled = v; })
+                }
+                .width('100%')
+                .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+              }
+              .width('100%').backgroundColor(SURFACE)
+              .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+              .margin({ bottom: 8 })
+
+              // 名称
+              this.field('名称', 'Provider 名称', this.name,
                 (v: string): void => { this.name = v; }, false, false)
 
+              // 不支持的旧配置提示
               if (this.unsupportedAuthMsg.length > 0) {
-                Text(this.unsupportedAuthMsg)
-                  .fontSize(12).fontColor(ERROR).lineHeight(18)
-                  .width('100%').margin({ bottom: 12 })
+                Column() {
+                  Text(this.unsupportedAuthMsg)
+                    .fontSize(LABEL).fontColor(ERROR).lineHeight(18)
+                }
+                .width('100%')
+                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                .backgroundColor(SURFACE)
+                .border({ width: 1, color: ERROR, radius: RADIUS })
+                .margin({ top: 8 })
               }
+
+              // API Key
               this.field('API Key',
                 this.selectedType === 'claude' ? 'sk-ant-…' : 'sk-…',
                 this.apiKey, (v: string): void => { this.apiKey = v; }, true, true)
 
+              // 类型相关字段
               if (this.selectedType === 'openai') {
-                // OpenAIEndpointFields(:531-561)
                 this.field('Base URL', 'https://api.openai.com/v1', this.baseUrl,
                   (v: string): void => { this.baseUrl = v; }, false, true)
                 this.field('API Path', '/chat/completions', this.chatPath,
                   (v: string): void => { this.chatPath = v; }, false, true)
               } else if (this.selectedType === 'google') {
-                // GoogleAuthConsole(:436-487) + GoogleEndpointFields(:563-623)
-                this.switchRow('Vertex AI', this.vertexAI,
-                  (v: boolean): void => { this.vertexAI = v; })
+                // Vertex AI 开关
+                Column() {
+                  Row() {
+                    Text('Vertex AI').fontSize(BODY).fontColor(INK).layoutWeight(1)
+                    Toggle({ type: ToggleType.Switch, isOn: this.vertexAI })
+                      .selectedColor(this.vertexAI ? this.accentColorStore : LINE)
+                      .onChange((v: boolean): void => { this.vertexAI = v; })
+                  }
+                  .width('100%')
+                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                }
+                .width('100%').backgroundColor(SURFACE)
+                .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+                .margin({ top: 8 })
+
                 if (!this.vertexAI) {
                   this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
                     this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
                 }
               } else if (this.selectedType === 'claude') {
-                // ClaudeEndpointFields(:625-642)
                 this.field('Base URL', 'https://api.anthropic.com/v1', this.baseUrl,
                   (v: string): void => { this.baseUrl = v; }, false, true)
-                this.switchRow('Prompt Caching', this.promptCaching,
-                  (v: boolean): void => { this.promptCaching = v; })
+
+                // Prompt Caching 开关
+                Column() {
+                  Row() {
+                    Text('Prompt Caching').fontSize(BODY).fontColor(INK).layoutWeight(1)
+                    Toggle({ type: ToggleType.Switch, isOn: this.promptCaching })
+                      .selectedColor(this.promptCaching ? this.accentColorStore : LINE)
+                      .onChange((v: boolean): void => { this.promptCaching = v; })
+                  }
+                  .width('100%')
+                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                }
+                .width('100%').backgroundColor(SURFACE)
+                .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+                .margin({ top: 8 })
               }
 
+              // 模型列表(逗号分隔,用 FlatTextField 多行模式统一风格)
               Column() {
-                Text('模型(逗号分隔 modelId)').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+                Text('模型')
+                  .fontSize(META).fontColor(INK3)
+                  .margin({ left: 2, bottom: 8 })
                 TextArea({ text: this.modelsText, placeholder: 'gpt-4o, gpt-4o-mini' })
-                  .fontSize(14).padding(10)
-                  .backgroundColor(SURFACE).borderRadius(8)
+                  .fontSize(BODY).fontColor(INK)
+                  .backgroundColor(SURFACE)
+                  .borderRadius(12)
+                  .border({ width: 1, color: LINE })
+                  .padding({ left: 14, right: 14, top: 12, bottom: 12 })
                   .height(80)
                   .onChange((v: string): void => { this.modelsText = v; })
-              }.width('100%').alignItems(HorizontalAlign.Start)
+                Text('逗号分隔 modelId')
+                  .fontSize(LABEL).fontColor(INK4)
+                  .margin({ left: 2, top: 6 })
+              }
+              .width('100%')
+              .alignItems(HorizontalAlign.Start)
+              .margin({ top: 8 })
 
-              // D-109:模型级自定义参数入口(Android 模型行 → 编辑 sheet;
-              //   已持久化模型逐行列出,'参数' → ChatModelParamsPage)
+              // D-109:模型级自定义参数入口
               if (this.selectedRaw !== null && this.selectedRaw.models.length > 0) {
+                SectionHeader({ label: '模型参数' })
                 Column() {
-                  ForEach(this.selectedRaw.models, (m: ProviderModel) => {
+                  ForEach(this.selectedRaw.models, (m: ProviderModel, mIdx: number): void => {
                     Row() {
                       Text(m.displayName.length > 0 ? m.displayName : m.modelId)
-                        .fontSize(13).fontColor(INK)
+                        .fontSize(BODY2).fontColor(INK)
                         .layoutWeight(1)
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                       Text('参数')
-                        .fontSize(12).fontColor(ACCENT)
-                        .padding({ left: 12, right: 4, top: 4, bottom: 4 })
-                        .onClick((): void => {
-                          const params: Record<string, string> = {};
-                          params['providerId'] = this.selectedId;
-                          params['modelId'] = m.id;
-                          router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
-                        })
+                        .fontSize(BODY2).fontColor(this.accentColorStore)
                     }
-                    .width('100%').padding({ top: 8, bottom: 8 })
+                    .width('100%')
+                    .padding({ left: 16, right: 16, top: 13, bottom: 13 })
+                    .backgroundColor(SURFACE)
+                    .border(mIdx === this.selectedRaw!.models.length - 1
+                      ? { width: 0 }
+                      : { width: { bottom: 0.5 }, color: { bottom: LINE } })
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['providerId'] = this.selectedId;
+                      params['modelId'] = m.id;
+                      router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
+                    })
                   }, (m: ProviderModel): string => m.id)
                 }
-                .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 4 })
+                .width('100%').backgroundColor(SURFACE)
+                .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
               }
 
+              // 删除 + 保存状态
               Row() {
-                Text('删除此 Provider').fontSize(13).fontColor(ERROR)
+                Text('删除此 Provider')
+                  .fontSize(BODY2).fontColor(ERROR)
+                  .padding({ top: 10, bottom: 10 })
                   .onClick((): void => this.removeSelected())
                 Blank()
                 if (this.savedMsg.length > 0) {
-                  Text(this.savedMsg).fontSize(13).fontColor(ACCENT)
+                  Text(this.savedMsg)
+                    .fontSize(BODY2)
+                    .fontColor(this.savedMsg.startsWith('保存失败') || this.savedMsg.startsWith('删除失败') ? ERROR : this.accentColorStore)
                 }
-              }.width('100%').margin({ top: 16 })
+              }
+              .width('100%')
+              .margin({ top: 16 })
             }
+
+            PageSpacer()
           }
-          .width('100%').padding({ left: 18, right: 18, top: 8, bottom: 32 })
+          .width('100%')
+          .padding({ left: 18, right: 18 })
         }
         .layoutWeight(1)
+        .backgroundColor(BG)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 }

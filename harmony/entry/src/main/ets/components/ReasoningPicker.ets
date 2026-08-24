@@ -12,6 +12,11 @@ export struct ReasoningPicker {
   @Prop currentLevel: string = '';
   onReasoningLevelChange: (level: string) => void = (_l: string): void => {};
 
+  // 选中段 = accent 14% 透明底(随色板/主题切换)
+  private selectedBg(): string {
+    return '#24' + ACCENT.substring(1);
+  }
+
   build(): void {
     if (this.levels.length > 1) {
       Row() {
@@ -23,7 +28,7 @@ export struct ReasoningPicker {
             .layoutWeight(1)
             .textAlign(TextAlign.Center)
             .padding({ top: 6, bottom: 6 })
-            .backgroundColor(opt.level === this.currentLevel ? '#24B8623A' : SURFACE2)
+            .backgroundColor(opt.level === this.currentLevel ? this.selectedBg() : SURFACE2)
             .borderRadius(8)
             .margin({ left: 3, right: 3 })
             .onClick((): void => { this.onReasoningLevelChange(opt.level); })

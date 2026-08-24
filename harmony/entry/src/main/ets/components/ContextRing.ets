@@ -2,7 +2,7 @@
 // Android 基准: ContextRing.kt(439 行)
 // 必要: 5 段条(threshold 颜色) + 百分比文本
 // 降级(跳过): ContextUsagePopup(260dp 弹出详情) / Canvas drawArc / 配额行
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, LABEL } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR, LABEL, STATUS_AMBER } from '../design/tokens.ets';
 
 const formatTokens = (n: number): string => {
   if (n <= 0) return '0';
@@ -32,7 +32,7 @@ export struct ContextRing {
     if (!filled) return LINE;
     const r: number = this.ratio();
     if (r >= 0.75) return ERROR;
-    if (r >= 0.5) return '#D19A66';
+    if (r >= 0.5) return STATUS_AMBER;
     return ACCENT;
   }
 

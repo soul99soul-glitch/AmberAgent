@@ -1,6 +1,6 @@
 // AgentToolCallCapsule — 工具调用胶囊(对齐 Android ChatMessageTools.kt AgentToolCallCapsule)
 // wrap-content pill: 图标 + 标题文本 + 状态徽章 / 审批按钮
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, META } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, META, STATUS_AMBER } from '../design/tokens.ets';
 import { DotLoading } from './ui/DotLoading.ets';
 
 // 工具状态
@@ -79,7 +79,7 @@ export const toolStatusLabel = (status: ToolStatus): string => {
 // 工具状态 → 状态色
 export const toolStatusColor = (status: ToolStatus): string => {
   if (status === ToolStatus.Running) return ACCENT;
-  if (status === ToolStatus.WaitingApproval) return '#D19A66';
+  if (status === ToolStatus.WaitingApproval) return STATUS_AMBER;
   if (status === ToolStatus.Succeeded) return SIGNAL;
   if (status === ToolStatus.Failed) return ERROR;
   return INK4;

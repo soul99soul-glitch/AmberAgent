@@ -8,7 +8,7 @@
 //     follows = followCompressModel && findModelById(modelId) == null →
 //     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
 //     onSelect → id + follow=false
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK2, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -313,7 +313,7 @@ struct ChatTaskModelsPage {
       .borderRadius({ topLeft: 16, topRight: 16 })
     }
     .width('100%').height('100%')
-    .backgroundColor('#66000000')
+    .backgroundColor(OVERLAY)
     .onClick((): void => { this.editingPrompt = ''; })
   }
 

@@ -34,6 +34,7 @@ const metadataBoolean = (m: JsonObject | null, key: string): boolean => {
 export const streamToolIndex = (t: UIMessagePartTool): number | null =>
   metadataNumber(t.metadata, STREAM_TOOL_INDEX_METADATA_KEY);
 
+
 const withMetadata = (t: UIMessagePartTool, key: string, value: JsonValue): UIMessagePartTool => ({
   ...t,
   metadata: { ...(t.metadata ?? {}), [key]: value },

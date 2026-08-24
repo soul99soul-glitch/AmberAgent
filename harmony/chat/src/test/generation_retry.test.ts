@@ -289,3 +289,20 @@ test('runChatTurn: 部分流式输出在重试时丢弃,不混入成功结果', 
   });
   assert.deepEqual(currentMessages(out).map(toText), ['你好', '干净答案']);
 });
+
+// Phase 4 回归:位移溢出修复(attempt≥32 时 << 进符号位变负)
+
+test('delayForAttempt: attempt 32+ 不再溢出为负(算术指数)', () => {
+  const setting = makeGenerationRetrySetting({ enabled: true, initialDelayMs: 1000, maxDelayMs: 30_000 });
+  for (let attempt = 1; attempt <= 40; attempt++) {
+    const d = delayForAttempt(attempt, setting, (): number => 0.5);
+    assert.ok(d >= 0, `attempt=${attempt} delay=${d}`);
+    assert.ok(d <= setting.maxDelayMs, `attempt=${attempt} delay=${d} exceeds max`);
+  }
+  // 无 jitter 下精确验证钳制(位移语义下 attempt 32: 1000<<31 → 负)
+  const exact = makeGenerationRetrySetting({
+    enabled: true, initialDelayMs: 1000, maxDelayMs: 30_000, jitterRatio: 0,
+  });
+  assert.equal(delayForAttempt(32, exact, (): number => 0), 30_000);
+  assert.equal(delayForAttempt(40, exact, (): number => 0), 30_000);
+});

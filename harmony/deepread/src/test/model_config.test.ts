@@ -29,6 +29,13 @@ const createFakeStorage = (): Storage & { dump: () => Map<string, unknown> } => 
     async deleteSecret(key: string): Promise<void> {
       map.delete(key);
     },
+    async getAllStringEntries(): Promise<Array<{ key: string; value: string }>> {
+      const out: Array<{ key: string; value: string }> = [];
+      for (const [key, value] of map) {
+        if (typeof value === 'string') out.push({ key, value });
+      }
+      return out;
+    },
   };
 };
 

@@ -14,12 +14,23 @@
 const STREAM_DISPLAY_BASE_CHARS_PER_SEC: number = 72;
 const STREAM_DISPLAY_MAX_CHARS_PER_SEC: number = 1500;
 const STREAM_DISPLAY_FINAL_MAX_CHARS_PER_SEC: number = 2400;
-const STREAM_DISPLAY_SPEED_ALPHA: number = 0.08;
+// 速度平滑系数(StreamingDisplay.kt STREAM_DISPLAY_SPEED_ALPHA=0.08f)
+export const STREAM_DISPLAY_SPEED_ALPHA: number = 0.08;
 const STREAM_DISPLAY_TARGET_DRAIN_SECONDS: number = 0.90;
 const STREAM_DISPLAY_FINAL_TARGET_DRAIN_SECONDS: number = 0.18;
 const STREAM_DISPLAY_MAX_BACKLOG_CHARS: number = 1200;
 const STREAM_DISPLAY_MAX_CHARS_PER_EMIT: number = 8;
 const STREAM_DISPLAY_FINAL_MAX_CHARS_PER_EMIT: number = 20;
+
+// 状态驱动(StreamingDisplayState)的注入时间语义:
+//   调用方(定时器/帧回调)把 nowMs 传入 advance(),本模块零时钟依赖。
+// 帧间最小发射间隔(Android STREAM_DISPLAY_MIN_EMIT_INTERVAL_NANOS=8_000_000 → 8ms)
+export const STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS: number = 8;
+// deltaSeconds 钳制(Android coerceIn(1ms, 100ms) → 秒)
+export const STREAM_DISPLAY_MIN_FRAME_DELTA_MS: number = 1;
+export const STREAM_DISPLAY_MAX_FRAME_DELTA_MS: number = 100;
+// 首帧时间增量(Android lastFrameNanos==0 → 1/60s 占位)
+export const STREAM_DISPLAY_INITIAL_FRAME_DELTA_SECONDS: number = 1 / 60;
 
 const ZERO_WIDTH_JOINER: number = 0x200D;
 
@@ -186,6 +197,12 @@ export const safeStreamingTerminalEnd = (str: string): number => {
   return safeStreamingDisplayEnd(str, end);
 };
 
+// streamingNextCodePointEnd:从 offset 前进一个完整 code point(Android nextCodePointEnd)
+export const streamingNextCodePointEnd = (str: string, offset: number): number => {
+  if (offset >= str.length) return str.length;
+  return Math.min(offset + charCount(codePointAt(str, offset)), str.length);
+};
+
 // streamingImmediateDisplayText:安全截断到终端安全位置(:284-291)
 export const streamingImmediateDisplayText = (content: string): string => {
   const safeEnd: number = safeStreamingTerminalEnd(content);
@@ -194,3 +211,178 @@ export const streamingImmediateDisplayText = (content: string): string => {
 
 // streamingTailActiveWhen:流式标记(:35-36)
 export const streamingTailActiveWhen = (streaming: boolean): boolean => streaming;
+
+// ===== StreamingDisplayState:可注入时间的逐字 reveal 状态驱动 =====
+//
+// 对应 Android rememberStreamingDisplayText(StreamingDisplay.kt:39-221)的
+// 帧循环纯逻辑部分,但把「时间」从 withFrameNanos 时钟解耦:
+//   - 调用方(ArkUI setInterval/帧回调)每次把当前时间 nowMs 传入 advance();
+//   - 模块内 deltaSeconds 由 lastFrameMs 与钳制常量计算,不依赖全局时钟。
+// 语义忠实对齐 Android 帧循环:
+//   - 首次调用(start/snap 之后)按 1/60s 占位 delta(Android lastFrameNanos==0);
+//   - backlog 超上限 → streamingDisplayBacklogCatchUpEnd 硬 snap(safeEnd 切片);
+//   - 平滑 emit:budget += speed*delta(cap=maxCharsPerEmit),取整发射,
+//     并受最小发射间隔(8ms)约束,发射后 budget 减掉已用额度;
+//   - target 内容被替换(前缀失配/变短)→ 立即 settle 到完整新内容(Android 同路径);
+//   - stream=false:终态 drain(FINAL 速率/每 emit 20 字符,FINAL_TARGET_DRAIN=0.18s),
+//   - 切片恒走 safeStreamingDisplayEnd(代理类可注入,测试注入恒等代理验证预算)。
+// 零 UI/零 IO/零定时器,可单测。
+
+/** 注入可选的切分/发射判定(测试用:验证预算记账,不改变可见长度) */
+export interface StreamingDisplaySliceProxy {
+  safeEnd(candidate: number): number;
+  nextCodePointEnd(offset: number): number;
+}
+
+// 默认走真实 Unicode 安全切分(safeStreamingDisplayEnd / streamingNextCodePointEnd)。
+// 仅测试注入代理时切换为外部实现(恒等代理用于验证预算记账)。
+
+/** 状态驱动(纯逻辑,ArkTS API 12 兼容:无 !、无 object spread、无 JS 私有#) */
+export class StreamingDisplayState {
+  /** 当前可见长度 */
+  visibleLength: number = 0;
+  /** 当前目标内容 */
+  content: string = '';
+  /** 平滑后的速度(cps) */
+  speed: number = STREAM_DISPLAY_BASE_CHARS_PER_SEC;
+  /** 剩余发射预算 */
+  budget: number = 0;
+  /** 自本实例开始跟随以来是否见过 streaming=true(Android sawStreaming) */
+  sawStreaming: boolean = false;
+  /** 上一帧时间(ms),0 = 尚未有帧 */
+  private lastFrameMs: number = 0;
+  /** 上次成功发射时间(ms),0 = 未发射过 */
+  private lastEmitMs: number = 0;
+  /** 切分代理(测试可注入;null = 使用真实 Unicode 安全切分) */
+  private sliceProxy: StreamingDisplaySliceProxy | null;
+
+  constructor(sliceProxy: StreamingDisplaySliceProxy | null = null) {
+    this.sliceProxy = sliceProxy;
+  }
+
+  /** 安全终点(代理注入时用代理,否则真实 safeStreamingDisplayEnd) */
+  private safeEndOf(content: string, candidate: number): number {
+    if (this.sliceProxy !== null) return this.sliceProxy.safeEnd(candidate);
+    return safeStreamingDisplayEnd(content, candidate);
+  }
+
+  /** 下一个完整 code point 终点(代理注入时用代理,否则真实) */
+  private nextCodePointEndOf(content: string, offset: number): number {
+    if (this.sliceProxy !== null) return this.sliceProxy.nextCodePointEnd(offset);
+    return streamingNextCodePointEnd(content, offset);
+  }
+
+  /** 是否正处在终态 drain(streaming=false 但 backlog 未清)——可见内容恒为前缀 */
+  private drainingAfterStream(): boolean {
+    return this.sawStreaming && this.visibleLength < this.content.length;
+  }
+
+  /** 硬 snap 到指定安全位置(直接发可见帧) */
+  private snap(targetLength: number): void {
+    const safeEnd: number = this.safeEndOf(this.content, Math.min(targetLength, this.content.length));
+    this.visibleLength = Math.max(0, Math.min(safeEnd, this.content.length));
+    this.speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC;
+    this.budget = 0;
+  }
+
+  /**
+   * 推进一帧。
+   * @param content 最新目标内容
+   * @param streaming 是否仍在流式
+   * @param nowMs 当前时间(注入,单调递增即可)
+   * @returns true 表示本帧发出了新的可见内容(调用方可触发重绘)
+   */
+  advance(content: string, streaming: boolean, nowMs: number): boolean {
+    if (content.length === 0) {
+      this.content = '';
+      this.visibleLength = 0;
+      this.speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC;
+      this.budget = 0;
+      this.lastFrameMs = 0;
+      this.lastEmitMs = 0;
+      return false;
+    }
+    if (this.content !== content) {
+      // 内容更新:target 已替换。用「当前可见前缀文本」(上一 target 的子串)判定:
+      // 对齐 Android `visible.length > target.length || !target.startsWith(visible)`。
+      const oldVisibleText: string = this.content.substring(0, this.visibleLength);
+      if (this.visibleLength > content.length || !content.startsWith(oldVisibleText)) {
+        // 前缀失配/变短 → 立即 settle 到完整新内容(Android 同路径:visible=target)
+        this.content = content;
+        this.snap(content.length);
+        this.lastFrameMs = nowMs;
+        this.lastEmitMs = nowMs;
+        return true;
+      }
+      this.content = content;
+    }
+    if (streaming && !this.sawStreaming) {
+      this.sawStreaming = true;
+    }
+    const draining: boolean = this.drainingAfterStream();
+    if (!streaming && !draining) {
+      // settled:任何遗留可见长度偏差立即对齐(含从未流式的实例收到内容修正)
+      if (this.visibleLength !== this.content.length) {
+        this.snap(this.content.length);
+        return true;
+      }
+      return false;
+    }
+    // === 逐字 pacing 帧 ===
+    let deltaSeconds: number = STREAM_DISPLAY_INITIAL_FRAME_DELTA_SECONDS;
+    if (this.lastFrameMs > 0) {
+      const deltaMs: number = Math.max(
+        STREAM_DISPLAY_MIN_FRAME_DELTA_MS,
+        Math.min(STREAM_DISPLAY_MAX_FRAME_DELTA_MS, nowMs - this.lastFrameMs),
+      );
+      deltaSeconds = deltaMs / 1000;
+    }
+    this.lastFrameMs = nowMs;
+    const backlog: number = this.content.length - this.visibleLength;
+    if (backlog <= 0) return false;
+
+    // catch-up:backlog 超上限 → 硬 snap 到安全位置(对齐 catchUpEnd 语义)
+    const catchUpEnd: number = streamingDisplayBacklogCatchUpEnd(this.visibleLength, this.content.length);
+    if (catchUpEnd > this.visibleLength) {
+      const safeEnd: number = this.safeEndOf(this.content, Math.min(catchUpEnd, this.content.length));
+      if (safeEnd > this.visibleLength) {
+        this.visibleLength = Math.min(safeEnd, this.content.length);
+        this.budget = 0;
+        this.lastEmitMs = nowMs;
+        return true;
+      }
+    }
+
+    const targetSpeed: number = streamingDisplayTargetSpeed(backlog, streaming);
+    this.speed += (targetSpeed - this.speed) * STREAM_DISPLAY_SPEED_ALPHA;
+    const maxCharsPerEmit: number = streamingDisplayMaxCharsPerEmit(streaming);
+    this.budget += this.speed * deltaSeconds;
+    if (this.budget > maxCharsPerEmit) this.budget = maxCharsPerEmit;
+    const releaseCount: number = Math.min(Math.floor(this.budget), maxCharsPerEmit);
+    if (releaseCount <= 0) return false;
+    if (this.lastEmitMs > 0 && nowMs - this.lastEmitMs < STREAM_DISPLAY_MIN_EMIT_INTERVAL_MS) {
+      return false;
+    }
+    const nextEnd: number = this.safeEndOf(this.content, this.visibleLength + releaseCount);
+    const safeEnd: number = nextEnd > this.visibleLength
+      ? nextEnd
+      : this.nextCodePointEndOf(this.content, this.visibleLength);
+    this.visibleLength = Math.min(safeEnd, this.content.length);
+    this.budget -= releaseCount;
+    this.lastEmitMs = nowMs;
+    return true;
+  }
+
+  /**
+   * 重置状态(新实例语义:visible/content/speed 全部回到初值)。
+   */
+  reset(): void {
+    this.visibleLength = 0;
+    this.content = '';
+    this.speed = STREAM_DISPLAY_BASE_CHARS_PER_SEC;
+    this.budget = 0;
+    this.sawStreaming = false;
+    this.lastFrameMs = 0;
+    this.lastEmitMs = 0;
+  }
+}

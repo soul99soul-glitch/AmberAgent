@@ -14,7 +14,7 @@ export struct ChatMessageBranch {
     if (this.branchCount > 1) {
       Row() {
         Row() {
-          Icon({ name: 'chevron_left', iconSize: 15, color: this.selectIndex > 0 ? INK3 : INK4 })
+          Icon({ name: 'chevron_left', iconSize: 17, color: this.selectIndex > 0 ? INK3 : INK4 })
         }
         .width(44).height(44)
         .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
@@ -26,7 +26,7 @@ export struct ChatMessageBranch {
           .fontSize(10).fontFamily('JetBrainsMono').fontColor(INK3)
           .margin({ left: 6, right: 6 })
         Row() {
-          Icon({ name: 'chevron_right', iconSize: 15,
+          Icon({ name: 'chevron_right', iconSize: 17,
             color: this.selectIndex < this.branchCount - 1 ? INK3 : INK4 })
         }
         .width(44).height(44)

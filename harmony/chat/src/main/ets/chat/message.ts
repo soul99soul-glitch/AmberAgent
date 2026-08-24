@@ -157,6 +157,12 @@ export const makeUserMessage = (prompt: string): UIMessage =>
 export const makeAssistantMessage = (prompt: string): UIMessage =>
   makeUIMessage('assistant', [{ type: 'text', text: prompt, metadata: null }]);
 
+export const finishAssistantMessage = (
+  message: UIMessage, finishedAt: string = nowIso(),
+): UIMessage => message.role === 'assistant' && message.finishedAt === null
+  ? { ...message, finishedAt }
+  : message;
+
 // ===== MessageChunk / UIMessageChoice(Message.kt:615-629) =====
 
 export interface UIMessageChoice {

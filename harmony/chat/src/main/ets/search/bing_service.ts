@@ -107,6 +107,10 @@ export const bingSearchService: SearchService = {
         'Cookie': 'SRCHHPGUSR=ULSR=1',
       },
     });
+    if (resp.status < 200 || resp.status >= 300) {
+      // 429/403/5xx 的挑战页/错误页不得当结果页解析(会被误报成无结果或返回错误页链接)
+      throw new Error(`Bing request failed with HTTP ${resp.status}`);
+    }
     const doc = parseHtml(resp.body);
     const pageText: string = elementText(doc);
     const lower: string = pageText.toLowerCase();

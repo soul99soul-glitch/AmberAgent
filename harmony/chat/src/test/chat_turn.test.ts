@@ -18,13 +18,14 @@ import type {
   ChatStreamProvider, ConversationStore,
 } from '../main/ets/chat/chat_turn.ts';
 import { makeAssistant } from '../main/ets/chat/assistant.ts';
+import { makeGenerationRetrySetting } from '../main/ets/chat/generation_retry.ts';
 import type { Assistant } from '../main/ets/chat/assistant.ts';
 import {
   createTemplateTransformer, thinkTagTransformer,
 } from '../main/ets/chat/transformers.ts';
 import { makeConversation, currentMessages, toMessageNode } from '../main/ets/chat/conversation.ts';
 import type { Conversation } from '../main/ets/chat/conversation.ts';
-import type { MessageChunk, UIMessage } from '../main/ets/chat/message.ts';
+import type { MessageChunk, UIMessage, UIMessagePart } from '../main/ets/chat/message.ts';
 import { toText, reasoningPartText, makeUserMessage, makeAssistantMessage } from '../main/ets/chat/message.ts';
 
 const chunkOf = (text: string): MessageChunk => ({
@@ -74,6 +75,7 @@ test('chatTurn happy path: user 入列 → provider → accumulator → assistan
   assert.equal(msgs[0].role, 'user');
   assert.equal(msgs[1].role, 'assistant');
   assert.equal(toText(msgs[1]), '你好世界', 'chunk 经 accumulator 合并');
+  assert.notEqual(msgs[1].finishedAt, null, '正常完成的 assistant 必须闭合 finishedAt');
 
   // provider 看到的消息包含 user 输入
   const seen = (provider as FakeProvider).seenMessages[0];
@@ -142,6 +144,32 @@ test('chatTurn: provider 抛错 → 传播;user 消息已持久化,assistant 节
   assert.equal(conv.messageNodes.length, 0, '入参 conversation 不被就地修改');
 });
 
+test('chatTurn: retry sleep 中 abort 丢弃失败尝试部分输出', async () => {
+  const signal = { aborted: false };
+  let releaseSleep: () => void = (): void => {};
+  const provider: ChatStreamProvider = {
+    streamText: (_messages: UIMessage[], onChunk: (c: MessageChunk) => void): Promise<void> => {
+      onChunk(chunkOf('failed-partial'));
+      return Promise.reject(new Error('HTTP 503'));
+    },
+  };
+  const store = createMemoryConversationStore();
+  const outPromise = runChatTurn(makeConversation('retry-abort', []), 'q', {
+    ...baseDeps(makeAssistant({}), provider, store),
+    abortSignal: signal,
+    retrySetting: makeGenerationRetrySetting({
+      enabled: true, maxRetries: 2, initialDelayMs: 1, maxDelayMs: 1, jitterRatio: 0,
+    }),
+    sleep: (): Promise<void> => new Promise((resolve): void => { releaseSleep = resolve; }),
+  });
+  await new Promise((resolve): void => { setTimeout(resolve, 0); });
+  signal.aborted = true;
+  releaseSleep();
+  const out = await outPromise;
+  assert.equal(out.messageNodes.length, 1);
+  assert.equal(store.saved.length, 1);
+});
+
 test('chatTurn: provider 零 chunk → 不追加空 assistant 节点', async () => {
   const conv: Conversation = makeConversation('conv1', [], { title: 't' });
   const provider = fakeProvider([]);
@@ -173,4 +201,17 @@ test('chatTurn: 上下文组装 — system 前置 + 截断 + 模板在组装后�
   // 会话本体:无 system、无截断(3 历史 + user + assistant = 5 节点)
   assert.equal(out.messageNodes.length, 5);
   assert.equal(currentMessages(out)[0].role, 'user');
+});
+
+// Phase 4 回归:空 url 图片输入不再被当作有效输入(isEmptyInputMessage 口径)
+test('chatTurn: image part with empty url is a no-op', async () => {
+  const conv: Conversation = makeConversation('conv-empty-img', [], { title: 't' });
+  const provider = fakeProvider([[chunkOf('不应被调用')]]);
+  const store = createMemoryConversationStore();
+  const out = await runChatTurn(
+    conv, [{ type: 'image', url: '', metadata: null }],
+    baseDeps(makeAssistant({}), provider, store));
+  assert.equal(out, conv, 'empty-url image input must be a no-op (returns original conversation)');
+  assert.equal(store.saved.length, 0, 'nothing persisted');
+  assert.equal(provider.seenMessages.length, 0, 'provider must not be called');
 });

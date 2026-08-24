@@ -4,6 +4,12 @@
 import { preferences } from '@kit.ArkData';
 import type { Storage } from '@amber/deepread-domain';
 
+// ArkTS 不允许对象字面量类型;Storage.getAllStringEntries 返回元素的具名形态
+interface StringKVEntry {
+  key: string;
+  value: string;
+}
+
 class PreferencesStorage implements Storage {
   private pref: preferences.Preferences | null = null;
 
@@ -54,6 +60,20 @@ class PreferencesStorage implements Storage {
     const p: preferences.Preferences = await this.getPref();
     await p.delete(key);
     await p.flush();
+  }
+
+  async getAllStringEntries(): Promise<StringKVEntry[]> {
+    const p: preferences.Preferences = await this.getPref();
+    const all: preferences.ValueType = await p.getAll();
+    const rec: Record<string, preferences.ValueType> = all as Record<string, preferences.ValueType>;
+    const out: StringKVEntry[] = [];
+    for (const key of Object.keys(rec)) {
+      const v: preferences.ValueType = rec[key];
+      if (typeof v === 'string') {
+        out.push({ key: key, value: v });
+      }
+    }
+    return out;
   }
 }
 

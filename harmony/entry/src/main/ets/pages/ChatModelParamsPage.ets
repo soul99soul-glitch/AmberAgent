@@ -16,7 +16,7 @@
 //     持久化结果等价;显示态 raw 保留
 //   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
 //     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
-import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT,BG,ERROR,INK,INK2,INK3,INK4,LINE,SURFACE } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import type {
@@ -216,7 +216,7 @@ struct ChatModelParamsPage {
                     .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
                   Blank()
                   Text('删除')
-                    .fontSize(12).fontColor('ERROR')
+                    .fontSize(12).fontColor(ERROR)
                     .padding({ left: 10, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeHeader(i); })
                 }
@@ -251,7 +251,7 @@ struct ChatModelParamsPage {
                     .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
                   Blank()
                   Text('删除')
-                    .fontSize(12).fontColor('ERROR')
+                    .fontSize(12).fontColor(ERROR)
                     .padding({ left: 10, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeBody(i); })
                 }

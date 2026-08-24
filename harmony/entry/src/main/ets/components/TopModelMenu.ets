@@ -5,7 +5,7 @@
 //   结构:Box { scrim(点击=onClose); AnimatedVisibility(panel) }。无 ViewModel 注入。
 //
 // 鸿蒙对应:
-//   - 组件自含全屏 dimmed scrim(28% 黑 ≈ Android sheetBackdrop)+ 贴顶面板
+//   - 组件自含全屏 dimmed scrim(40% 黑(统一 OVERLAY) ≈ Android sheetBackdrop)+ 贴顶面板
 //     (对齐 Android scrim 由组件内部拥有,非父级)
 //   - 选择层非 Uuid:currentProviderId/modelId 为字符串(provider.id + model.modelId)
 //   - groups 由域纯逻辑 buildTopModelMenuGroups() 预装配(过滤 hasUsableAuth + ModelType)
@@ -24,12 +24,11 @@ import { ReasoningPicker } from './ReasoningPicker.ets';
 import {
   formatNumberInt,
 } from '@amber/chat-domain';
-import {
-  INK2, INK3, INK4, ACCENT, SIGNAL, SURFACE, SURFACE2, LINE, BODY, META, LABEL, HEADER,
-} from '../design/tokens.ets';
+import { ACCENT, BODY, HEADER, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 
 @Component
 export struct TopModelMenu {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   // 预装配数据:每 provider 一组,组内仅目标类型模型(调用方决定 type,通常 chat)
   @Prop groups: TopModelMenuGroup[] = [];
   // 当前选中(provider.id + model.modelId 字符串);空串 = 无选中
@@ -84,7 +83,7 @@ export struct TopModelMenu {
 
   build(): void {
     // 全屏遮罩 + 面板(对齐 Android TopModelMenu.kt:Box { scrim; AnimatedVisibility(panel) })
-    //   scrim:28% 黑(Android sheetBackdrop ~0.28 alpha),点击 = onClose
+    //   scrim:40% 黑(统一 OVERLAY)(Android sheetBackdrop ~0.28 alpha),点击 = onClose
     //   面板:贴顶,SURFACE2 底 + 底部 hairline, maxHeight 420 可滚
     Column() {
       // 顶部留白(头部高度, 透明+不拦截点击 → 头部仍可见可点, 对齐参考图面板在头部下方)
@@ -103,7 +102,7 @@ export struct TopModelMenu {
               Text('请在设置中添加 baseUrl、API Key 和模型')
                 .fontSize(META).fontColor(INK3).margin({ top: 4 })
               Text('去 Provider 设置')
-                .fontSize(BODY).fontColor(ACCENT).margin({ top: 12 })
+                .fontSize(BODY).fontColor(this.accentColorStore).margin({ top: 12 })
                 .onClick((): void => { this.onOpenProviderSettings(); })
             }
             .width('100%')
@@ -127,7 +126,7 @@ export struct TopModelMenu {
           Divider().color(LINE).strokeWidth(0.5)
           Row() {
             Text('全部模型 / 管理')
-              .fontSize(META).fontColor(ACCENT).layoutWeight(1)
+              .fontSize(META).fontColor(this.accentColorStore).layoutWeight(1)
             Text('▸').fontSize(LABEL).fontColor(INK4)
           }
           .width('100%')
@@ -152,7 +151,7 @@ export struct TopModelMenu {
       Column()
         .width('100%')
         .layoutWeight(1)
-        .backgroundColor('#47000000')
+        .backgroundColor(OVERLAY)
         .onClick((): void => { this.onClose(); })
         .transition(TransitionEffect.OPACITY)
     }
@@ -166,7 +165,7 @@ export struct TopModelMenu {
       Row() {
         Text(group.providerName)
           .fontSize(15).fontFamily('JetBrainsMono')
-          .fontColor(this.isExpanded(group.providerId) ? SIGNAL : INK2)
+          .fontColor(this.isExpanded(group.providerId) ? this.accentColorStore : INK2)
           .layoutWeight(1)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(this.isExpanded(group.providerId) ? '−' : '+')
@@ -181,7 +180,7 @@ export struct TopModelMenu {
           Row() {
             Text(model.displayName.length > 0 ? model.displayName : model.modelId)
               .fontSize(14).fontFamily('JetBrainsMono')
-              .fontColor(model.selected ? SIGNAL : INK3).layoutWeight(1)
+              .fontColor(model.selected ? this.accentColorStore : INK3).layoutWeight(1)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             if (model.contextWindowTokens !== null) {
               Text(formatNumberInt(model.contextWindowTokens))

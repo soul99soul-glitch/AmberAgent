@@ -6,6 +6,8 @@ export interface SearchHit {
   url: string;
   snippet: string | null;
   source: string;
+  // 发布日期(provider 有则填,如 Tavily published_date;无则省略)
+  publishedAt?: string | null;
 }
 
 export interface SearchProvider {

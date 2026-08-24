@@ -176,7 +176,7 @@ struct SettingExperimentalSubAgentPageFull {
       Row() {
         Text(a.name.length > 0 ? a.name : '未命名子代理')
           .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK).layoutWeight(1)
-        Text('删除').fontSize(META).fontColor('ERROR')
+        Text('删除').fontSize(META).fontColor(ERROR)
           .padding({ left: 8, right: 4, top: 4, bottom: 4 })
           .onClick((): void => { this.removeAgent(a.id); })
       }

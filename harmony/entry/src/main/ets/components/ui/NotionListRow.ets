@@ -1,7 +1,7 @@
 // NotionListRow — Notion 风格列表行(ui/NotionListRow.kt:124 行)
 // Android 基准: 56dp min 高 + leading/title/subtitle/trailing + selected 态(背景色变化)
 // ArkUI 差异: Surface → Row with 条件 backgroundColor
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BODY, META, LABEL } from '../../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, BODY, META, LABEL } from '../../design/tokens.ets';
 
 @Component
 export struct NotionListRow {
@@ -29,7 +29,7 @@ export struct NotionListRow {
     .width('100%')
     .constraintSize({ minHeight: 56 })
     .padding({ left: 16, right: 16 })
-    .backgroundColor(this.selected ? '#FFF5F0' : SURFACE)
+    .backgroundColor(this.selected ? ACCENT_LIGHT : SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
     .onClick((): void => { if (this.enabled) this.onClick(); })
   }

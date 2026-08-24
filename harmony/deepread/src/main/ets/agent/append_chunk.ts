@@ -96,10 +96,11 @@ const appendTool = (parts: UIMessagePart[], delta: DeltaPart & { kind: 'tool' })
     const newPart: UIMessagePartTool = {
       kind: 'tool',
       toolCallId: delta.toolCallId ?? '',
-      toolName: delta.streamArgsReplace ? (delta.toolName ?? '') : (delta.toolName ?? ''),
-      input: delta.streamArgsReplace ? (delta.input ?? '') : (delta.input ?? ''),
+      toolName: delta.toolName ?? '',
+      input: delta.input ?? '',
       output: delta.output ?? [],
       approvalState: delta.approvalState ?? 'auto',
+      streamIndex: delta.streamToolIndex,
     };
     return [...parts, newPart];
   }
@@ -113,7 +114,7 @@ const appendTool = (parts: UIMessagePart[], delta: DeltaPart & { kind: 'tool' })
 // 规则:
 // 1. 跳过已 executed 的 tool part
 // 2. 优先按 toolCallId 匹配(delta id 非空时)
-// 3. fallback 按 streamToolIndex
+// 3. fallback 按 streamToolIndex(part 创建时记录,多工具无 id 场景的归位依据)
 export const findToolMergeTarget = (parts: UIMessagePart[], delta: DeltaPart & { kind: 'tool' }): number => {
   const candidates: { idx: number; part: UIMessagePartTool }[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -127,21 +128,13 @@ export const findToolMergeTarget = (parts: UIMessagePart[], delta: DeltaPart & {
     const hit = candidates.find(c => c.part.toolCallId === delta.toolCallId);
     if (hit) return hit.idx;
   }
-  // 按 streamToolIndex
+  // 按 streamToolIndex(part.streamIndex 与 delta.streamToolIndex 一致才归位)
   if (delta.streamToolIndex !== undefined) {
-    const hit = candidates.find(c => extractStreamToolIndex(c.part) === delta.streamToolIndex);
+    const hit = candidates.find(c => c.part.streamIndex === delta.streamToolIndex);
     if (hit) return hit.idx;
   }
   // delta 无 id 无 index:不合并(让上层决定是否新建)
   return -1;
-};
-
-// streamToolIndex:OpenAI 流式响应里 tool_calls 数组的索引
-// 我们简化:不显式存,推断为"未 executed tool parts 中的位置序号"
-const extractStreamToolIndex = (_part: UIMessagePartTool): number => {
-  // 简化版:返回 0(单 tool 场景);多 tool 时需要外部维护 index→part 映射
-  // 生产实现会维护单独的 index 字段,这里 MVP 兼容单 tool 流式
-  return 0;
 };
 
 // 合并 tool delta 到现有 tool part(对应 Android Tool.merge)
@@ -164,5 +157,7 @@ export const mergeTool = (
       : existing.input + (delta.input ?? ''),
     output: delta.output ? [...existing.output, ...delta.output] : existing.output,
     approvalState: delta.approvalState ?? existing.approvalState,
+    // 归位键跟随目标 part(创建时的 index 即该调用在数组中的稳定位置)
+    streamIndex: existing.streamIndex ?? delta.streamToolIndex,
   };
 };

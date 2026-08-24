@@ -54,7 +54,7 @@ export struct WorkspaceIconButton {
     Text(this.icon)
       .fontSize(15)
       .fontColor(toneColors(this.tone).content)
-      .width(32).height(32)
+      .width(40).height(40)
       .textAlign(TextAlign.Center)
       .backgroundColor(toneColors(this.tone).container)
       .borderRadius(6)

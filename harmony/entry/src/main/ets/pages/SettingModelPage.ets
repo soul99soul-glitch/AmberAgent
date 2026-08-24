@@ -143,7 +143,7 @@ struct SettingModelPage {
                   Text(m.name.length > 0 ? m.name : '未命名模型')
                     .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
                     .layoutWeight(1)
-                  Text('删除').fontSize(META).fontColor('ERROR')
+                  Text('删除').fontSize(META).fontColor(ERROR)
                     .padding({ left: 8, right: 4, top: 4, bottom: 4 })
                     .onClick((): void => { this.removeModel(m.id); })
                 }
@@ -183,7 +183,7 @@ struct SettingModelPage {
             }
             .width('100%').margin({ top: 8, bottom: 32 })
           }
-          .width('100%').padding({ left: 16, right: 16 })
+          .width('100%').padding({ left: 18, right: 18 })
         }
         .layoutWeight(1)
       }

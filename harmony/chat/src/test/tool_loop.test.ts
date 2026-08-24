@@ -109,6 +109,38 @@ const toolPartOf = (m: UIMessage, callId: string): UIMessagePartTool =>
     p.type === 'tool' && (p as UIMessagePartTool).toolCallId === callId) as UIMessagePartTool;
 
 describe('runChatTurnWithTools 单步与循环', () => {
+  it('tool call chunk 后 abort:保留部分工具消息但不执行工具副作用', async () => {
+    const signalState: { aborted: boolean } = { aborted: false };
+    let ran: boolean = false;
+    const tool = makeAgentTool({
+      name: 'conversation_search',
+      description: 'must not run after abort',
+      parameters: () => makeInputSchemaObj({ q: { type: 'string' } }),
+      execute: (): Promise<UIMessagePart[]> => {
+        ran = true;
+        return Promise.resolve([{ type: 'text', text: 'unexpected', metadata: null }]);
+      },
+    });
+    const provider: ChatStreamProvider = {
+      streamText: (_messages: UIMessage[], onChunk: (c: MessageChunk) => void): Promise<void> => {
+        onChunk(toolDelta('abort-call', 'conversation_search', '{"q":"x"}'));
+        signalState.aborted = true;
+        return Promise.reject(new Error('stream aborted'));
+      },
+    };
+    const store = createMemoryConversationStore();
+    const depsWithAbort: ChatTurnDeps = {
+      ...baseDeps(provider, store),
+      abortSignal: signalState,
+    };
+    const out = await runChatTurnWithTools(
+      makeConversation('abort-tools', []), 'stop', depsWithAbort, loopOf(provider, [tool]));
+    const last = currentMessages(out)[currentMessages(out).length - 1];
+    const pending = toolPartOf(last, 'abort-call');
+    assert.equal(ran, false);
+    assert.equal(pending.output.length, 0);
+  });
+
   it('无工具调用 → 单步结束(与单跑同构)', async () => {
     const conv: Conversation = makeConversation('c1', []);
     const provider = scriptedProvider([[textDelta('你好')]]);

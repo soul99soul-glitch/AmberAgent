@@ -10,10 +10,7 @@
 //   - @Prop 无保留字(file 为字段名,安全)
 //   - @Builder 内不声明 const/let(UI 树优先)
 
-import {
-  INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ERROR,
-  BODY, META, LABEL, TITLE,
-} from '../design/tokens.ets';
+import { ACCENT, BODY, ERROR, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
 import { type WorkspaceFileInfo, extOf, formatFileSize } from './WorkspaceFileVM.ets';
 import { MarkdownText } from './MarkdownText.ets';
 import { Icon } from './ui/Icon.ets';
@@ -204,7 +201,7 @@ export struct WorkspaceFilePreview {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('rgba(0,0,0,0.4)')
+      .backgroundColor(OVERLAY)
       .alignContent(Alignment.Center)
     }
   }

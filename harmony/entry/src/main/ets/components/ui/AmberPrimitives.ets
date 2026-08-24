@@ -1,6 +1,6 @@
 // AmberPrimitives — 设计系统原语(对齐 Android AmberPrimitives.kt)
 // AmberCard / Hairline / BtnInk / BtnAccent / SectionLabel / LiveDot / BlinkingCursor
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, BG, BODY, META, LABEL, RADIUS } from '../../design/tokens.ets';
+import { ACCENT, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, BODY, META, LABEL, RADIUS } from '../../design/tokens.ets';
 
 // AmberCard — 圆角卡片容器(borderRadius 14, surface 背景, line 边框)
 @Component
@@ -55,6 +55,7 @@ export struct BtnInk {
 // BtnAccent — 强调色按钮(accent 背景, 白字)
 @Component
 export struct BtnAccent {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   @Prop enabled: boolean = true;
   onClick: () => void = (): void => {};
@@ -68,7 +69,7 @@ export struct BtnAccent {
     .width('100%')
     .justifyContent(FlexAlign.Center)
     .padding({ left: 18, right: 18, top: 12, bottom: 12 })
-    .backgroundColor(this.enabled ? ACCENT : SURFACE2)
+    .backgroundColor(this.enabled ? this.accentColorStore : SURFACE2)
     .borderRadius(15)
     .opacity(this.enabled ? 1 : 0.5)
     .onClick((): void => { if (this.enabled) this.onClick(); })
@@ -78,10 +79,11 @@ export struct BtnAccent {
 // SectionLabel — eyebrow 标签("// TITLE")
 @Component
 export struct SectionLabel {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   build(): void {
     Row() {
-      Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+      Text('//').fontSize(META).fontColor(this.accentColorStore).fontWeight(FontWeight.Bold)
       Text(' ' + this.text.toUpperCase()).fontSize(META).fontColor(INK3)
     }
     .width('100%')
@@ -91,6 +93,7 @@ export struct SectionLabel {
 // LiveDot — 呼吸点(signal 色, 脉冲动画)
 @Component
 export struct LiveDot {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop idle: boolean = false;
   @Prop dotSize: number = 7;
   @State haloScale: number = 1;
@@ -103,7 +106,7 @@ export struct LiveDot {
           .width(this.dotSize * this.haloScale)
           .height(this.dotSize * this.haloScale)
           .borderRadius(this.dotSize * this.haloScale / 2)
-          .backgroundColor(this.idle ? INK4 : ACCENT)
+          .backgroundColor(this.idle ? INK4 : this.accentColorStore)
           .opacity(this.haloAlpha)
       }
       .width(this.dotSize * 2.2)
@@ -116,7 +119,7 @@ export struct LiveDot {
         .width(this.dotSize)
         .height(this.dotSize)
         .borderRadius(this.dotSize / 2)
-        .backgroundColor(this.idle ? INK4 : ACCENT)
+        .backgroundColor(this.idle ? INK4 : this.accentColorStore)
     }
     .width(this.dotSize * 2.2)
     .height(this.dotSize * 2.2)
@@ -127,7 +130,8 @@ export struct LiveDot {
 // BlinkingCursor — 终端闪烁光标
 @Component
 export struct BlinkingCursor {
-  @Prop color: string = ACCENT;
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @Prop color: string = '';
   @Prop width: number = 8;
   @Prop height: number = 18;
   @State visible: boolean = true;
@@ -135,7 +139,7 @@ export struct BlinkingCursor {
     Text('')
       .width(this.width)
       .height(this.height)
-      .backgroundColor(this.color)
+      .backgroundColor(this.color.length > 0 ? this.color : this.accentColorStore)
       .borderRadius(1)
       .opacity(this.visible ? 1 : 0)
   }

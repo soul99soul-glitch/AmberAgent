@@ -70,8 +70,11 @@ export struct ChatMessageActionFooter {
             })
           }
           .width('100%')
+          // 用户消息操作行跟随气泡右对齐;助手消息保持左起
+          .justifyContent(this.isUser ? FlexAlign.End : FlexAlign.Start)
         } else if (this.mode === 'reserved') {
-          Row().height(20).width('100%')
+          // 占位高度与 visible 操作行一致(按钮 44 + 上下 padding 4×2),避免结束时跳变
+          Row().height(52).width('100%')
         }
       }
       .width('100%')

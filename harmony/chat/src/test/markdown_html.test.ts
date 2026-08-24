@@ -245,3 +245,9 @@ describe('markdownToHtml bug-fix coverage (review)', () => {
     assert.ok(html.includes('<p>'));
   });
 });
+
+// Phase 8 回归:多行段落/引用的换行必须是真 <br>,不得被 escape 成字面文本
+it('multiline paragraph and blockquote render real <br>', () => {
+  assert.equal(markdownToHtml('para line1\npara line2'), '<p>para line1<br>para line2</p>');
+  assert.equal(markdownToHtml('> quote1\n> quote2'), '<blockquote>quote1<br>quote2</blockquote>');
+});

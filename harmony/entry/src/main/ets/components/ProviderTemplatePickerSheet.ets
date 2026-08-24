@@ -7,10 +7,7 @@
 // Props:@Prop show / onPick(template) / onDismiss
 // ArkUI 规则:无 as unknown / 无对象展开 / 无 any/unknown;@Prop 避开 size/enabled/Select/onClick;
 //   ForEach 内不出现 const/let(UI 树优先);过滤逻辑放 private 方法
-import {
-  INK, INK2, INK3, INK4, SURFACE, SURFACE2, BG, LINE, ACCENT,
-  BODY, META, LABEL,
-} from '../design/tokens.ets';
+import { ACCENT, BG, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 
 // Provider 模板接口(供 onPick 回调传递)
@@ -124,7 +121,7 @@ export struct ProviderTemplatePickerSheet {
         Column()
           .width('100%')
           .height('100%')
-          .backgroundColor('rgba(0,0,0,0.4)')
+          .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
 
         // sheet 主体

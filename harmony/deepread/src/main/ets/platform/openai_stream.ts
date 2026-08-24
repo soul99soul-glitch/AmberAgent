@@ -14,12 +14,30 @@ export interface OpenAiStreamDelta {
   deltaText: string;       // choices[0].delta.content 增量
   reasoningText: string;   // choices[0].delta.reasoning_content 增量(部分 provider 有)
   done: boolean;           // [DONE] 或 finish 信号
+  // choices[0].delta.tool_calls 增量(DeepRead agent loop 组装用;
+  // 议会/小说的纯文本 sink 不消费)。index 为 tool_calls 数组下标 —
+  // 并行无 id 工具流的归位键(appendChunk streamToolIndex)。
+  toolCalls: StreamToolCallDelta[];
+}
+
+export interface StreamToolCallDelta {
+  index: number;
+  id?: string;             // 可能只有后续分片才带
+  name?: string;           // function.name 片段
+  args?: string;           // function.arguments 片段
 }
 
 // OpenAI 流式 chunk 的最小结构(只取用到的字段,避免 any)
+interface OpenAiStreamToolCall {
+  index?: number;
+  id?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 interface OpenAiStreamChoiceDelta {
   content?: string;
   reasoning_content?: string;
+  tool_calls?: OpenAiStreamToolCall[];
 }
 
 interface OpenAiStreamChoice {
@@ -33,14 +51,14 @@ interface OpenAiStreamChunk {
 
 // 解析单个 SSE event → 文本增量。健壮:非法 JSON / 缺字段一律返回空增量,不抛。
 export const parseOpenAiStreamEvent = (evt: SseEvent): OpenAiStreamDelta => {
-  const empty: OpenAiStreamDelta = { deltaText: '', reasoningText: '', done: false };
+  const empty: OpenAiStreamDelta = { deltaText: '', reasoningText: '', done: false, toolCalls: [] };
   if (evt.done) {
-    return { deltaText: '', reasoningText: '', done: true };
+    return { deltaText: '', reasoningText: '', done: true, toolCalls: [] };
   }
   const raw: string = evt.data;
   if (raw.length === 0) return empty;
   if (raw === '[DONE]') {
-    return { deltaText: '', reasoningText: '', done: true };
+    return { deltaText: '', reasoningText: '', done: true, toolCalls: [] };
   }
   let parsed: OpenAiStreamChunk;
   try {
@@ -56,11 +74,25 @@ export const parseOpenAiStreamEvent = (evt: SseEvent): OpenAiStreamDelta => {
   const delta: OpenAiStreamChoiceDelta | undefined = choice.delta;
   const deltaText: string = delta?.content ?? '';
   const reasoningText: string = delta?.reasoning_content ?? '';
+  const toolCalls: StreamToolCallDelta[] = [];
+  const rawToolCalls: OpenAiStreamToolCall[] | undefined = delta?.tool_calls;
+  if (rawToolCalls !== undefined) {
+    for (let i = 0; i < rawToolCalls.length; i++) {
+      const tc: OpenAiStreamToolCall = rawToolCalls[i];
+      const call: StreamToolCallDelta = {
+        index: tc.index ?? i,
+        id: tc.id,
+        name: tc.function?.name,
+        args: tc.function?.arguments,
+      };
+      toolCalls.push(call);
+    }
+  }
   // finish_reason 非空(stop/length 等)表示本条是最后一帧;content 可能仍有增量
   const finished: boolean = choice.finish_reason !== undefined
     && choice.finish_reason !== null
     && choice.finish_reason.length > 0;
-  return { deltaText: deltaText, reasoningText: reasoningText, done: finished };
+  return { deltaText: deltaText, reasoningText: reasoningText, done: finished, toolCalls };
 };
 
 // 便利封装:吃 ArrayBuffer chunk,吐文本增量。供议会 runner / 小说 adapter 复用。
