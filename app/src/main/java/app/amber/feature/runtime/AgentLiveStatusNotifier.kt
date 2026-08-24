@@ -32,6 +32,8 @@ enum class AgentLiveStatusKind {
     WRITING,
     COMPLETED,
     FAILED,
+    TIMED_OUT,
+    INTERRUPTED,
     CANCELLED,
 }
 
@@ -151,6 +153,8 @@ class AgentLiveStatusNotifier(
                 ToolActivityStatus.WAITING_FOR_PERMISSION -> context.getString(R.string.notification_live_status_chip_waiting)
                 ToolActivityStatus.SUCCEEDED -> context.getString(R.string.notification_live_status_chip_done)
                 ToolActivityStatus.FAILED -> context.getString(R.string.notification_live_status_chip_failed)
+                ToolActivityStatus.TIMED_OUT -> context.getString(R.string.notification_live_status_chip_timed_out)
+                ToolActivityStatus.INTERRUPTED -> context.getString(R.string.notification_live_status_chip_interrupted)
                 ToolActivityStatus.CANCELLED -> context.getString(R.string.notification_live_status_chip_cancelled)
             }
             val kind = when (active.status) {
@@ -158,6 +162,8 @@ class AgentLiveStatusNotifier(
                 ToolActivityStatus.WAITING_FOR_PERMISSION -> AgentLiveStatusKind.WAITING_PERMISSION
                 ToolActivityStatus.SUCCEEDED -> AgentLiveStatusKind.RUNNING_TOOL
                 ToolActivityStatus.FAILED -> AgentLiveStatusKind.FAILED
+                ToolActivityStatus.TIMED_OUT -> AgentLiveStatusKind.TIMED_OUT
+                ToolActivityStatus.INTERRUPTED -> AgentLiveStatusKind.INTERRUPTED
                 ToolActivityStatus.CANCELLED -> AgentLiveStatusKind.CANCELLED
             }
             return AgentLiveStatus(
@@ -243,6 +249,8 @@ class AgentLiveStatusNotifier(
             }
 
             ToolActivityStatus.FAILED -> context.getString(R.string.notification_live_status_failed)
+            ToolActivityStatus.TIMED_OUT -> context.getString(R.string.notification_live_status_timed_out)
+            ToolActivityStatus.INTERRUPTED -> context.getString(R.string.notification_live_status_interrupted)
             ToolActivityStatus.CANCELLED -> context.getString(R.string.notification_live_status_cancelled)
             else -> if (activity.isTerminalTool()) {
                 context.getString(R.string.notification_live_status_terminal_title)
@@ -601,6 +609,22 @@ class AgentLiveStatusNotifier(
                 trackColor = XIAOMI_ISLAND_ERROR_TRACK_COLOR,
             )
 
+            AgentLiveStatusKind.TIMED_OUT -> XiaomiIslandVisual(
+                title = "执行超时",
+                content = objectText,
+                summary = "超时",
+                accentColor = XIAOMI_ISLAND_ERROR_COLOR,
+                trackColor = XIAOMI_ISLAND_ERROR_TRACK_COLOR,
+            )
+
+            AgentLiveStatusKind.INTERRUPTED -> XiaomiIslandVisual(
+                title = "执行中断",
+                content = objectText,
+                summary = "中断",
+                accentColor = XIAOMI_ISLAND_WAITING_COLOR,
+                trackColor = XIAOMI_ISLAND_WAITING_TRACK_COLOR,
+            )
+
             AgentLiveStatusKind.CANCELLED -> XiaomiIslandVisual(
                 title = "已停止",
                 content = "本次执行已取消",
@@ -640,6 +664,8 @@ class AgentLiveStatusNotifier(
             AgentLiveStatusKind.WRITING -> 86
             AgentLiveStatusKind.COMPLETED -> 100
             AgentLiveStatusKind.FAILED,
+            AgentLiveStatusKind.TIMED_OUT,
+            AgentLiveStatusKind.INTERRUPTED,
             AgentLiveStatusKind.CANCELLED -> 100
         }
 

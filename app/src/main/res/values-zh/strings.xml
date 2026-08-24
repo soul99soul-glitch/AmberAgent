@@ -88,6 +88,10 @@
   <string name="assistant_page_local_tools_javascript_engine_title">JavaScript 引擎</string>
   <string name="assistant_page_local_tools_time_info_desc">从设备获取当前日期、星期、时间和时区信息</string>
   <string name="assistant_page_local_tools_time_info_title">时间信息</string>
+  <string name="assistant_page_local_tools_workspace_title">Workspace 文件工具</string>
+  <string name="assistant_page_local_tools_workspace_desc">在用户授权的 Workspace 中列出、读取、写入、编辑、搜索和移动文件。</string>
+  <string name="assistant_page_local_tools_terminal_title">终端工具</string>
+  <string name="assistant_page_local_tools_terminal_desc">在 AmberAgent 运行环境的 Workspace 中执行命令和持久终端会话。</string>
   <string name="assistant_page_local_tools_tts_desc">让AI使用设备TTS引擎为您朗读文本</string>
   <string name="assistant_page_local_tools_tts_title">文字转语音</string>
   <string name="assistant_page_manage_memory_title">管理记忆</string>
@@ -380,6 +384,8 @@
   <string name="notification_live_status_terminal_install_generic">正在安装依赖</string>
   <string name="notification_live_status_webview">正在浏览 %s</string>
   <string name="notification_live_status_failed">任务失败</string>
+  <string name="notification_live_status_timed_out">任务已超时</string>
+  <string name="notification_live_status_interrupted">任务已中断</string>
   <string name="notification_live_status_cancelled">任务已取消</string>
   <string name="notification_live_status_chip_planning">规划</string>
   <string name="notification_live_status_chip_tool">工具</string>
@@ -387,6 +393,8 @@
   <string name="notification_live_status_chip_writing">写作</string>
   <string name="notification_live_status_chip_done">完成</string>
   <string name="notification_live_status_chip_failed">失败</string>
+  <string name="notification_live_status_chip_timed_out">超时</string>
+  <string name="notification_live_status_chip_interrupted">中断</string>
   <string name="notification_live_status_chip_cancelled">取消</string>
   <string name="notification_live_status_action_stop">停止</string>
   <string name="notification_live_status_action_approve">批准</string>
@@ -594,6 +602,7 @@
   <string name="setting_files_page_workspace_selected">Workspace 已授权</string>
   <string name="setting_files_page_workspace_saved">Workspace 已保存</string>
   <string name="setting_files_page_workspace_cleared">Workspace 已清除</string>
+  <string name="setting_files_page_workspace_update_failed">Workspace 更新失败：%1$s</string>
   <string name="setting_agent_memory_title">核心记忆</string>
   <string name="setting_agent_memory_soul_title">agents.md / Soul</string>
   <string name="setting_agent_memory_soul_desc">这段应用级 Markdown 行为准则会在每次对话前注入到 System Prompt 中。</string>
@@ -867,13 +876,17 @@
   <string name="setting_sandbox_runtime_section">运行时</string>
   <string name="setting_sandbox_alpine_ready">终端运行环境已就绪</string>
   <string name="setting_sandbox_alpine_failed">运行时检查失败：%1$s</string>
+  <string name="setting_sandbox_runtime_recheck">重新检查</string>
+  <string name="setting_sandbox_runtime_installing">安装中…</string>
+  <string name="setting_sandbox_runtime_install_repair">安装 / 修复运行时</string>
+  <string name="setting_sandbox_runtime_repair_note">运行时更新可能会重建 Alpine，并移除其中安装的软件包；Workspace 文件不受影响。</string>
   <string name="setting_sandbox_terminal_runtime_title">默认运行时</string>
   <string name="setting_sandbox_terminal_runtime_desc">终端 job 默认使用的运行时，工具调用可单次覆盖。</string>
   <string name="setting_sandbox_terminal_runtime_builtin">Alpine</string>
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">并发 Job</string>
-  <string name="setting_sandbox_terminal_jobs_desc">默认 1，避免并发写 /workspace。</string>
+  <string name="setting_sandbox_terminal_jobs_desc">本地运行时会串行使用 /workspace；更高并发仅对外部 Termux job 生效。</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d 个</string>
   <string name="setting_sandbox_terminal_output_title">输出尾部</string>
   <string name="setting_sandbox_terminal_output_desc">工具结果保留的输出尾部大小，完整日志仍保存在应用目录。</string>

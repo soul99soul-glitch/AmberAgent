@@ -496,6 +496,13 @@ afterEvaluate {
     }
 }
 
+val embeddedProotUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/b6326a3b091848c2502ca050ed8c0ad320ff6697/aarch64/proot"
+val embeddedProotChecksum = "f25ac0a0258e18671c699154cdc88001fbd1cbe09df75c960a1ee8dad29d88ae"
+val embeddedLibtallocUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/b6326a3b091848c2502ca050ed8c0ad320ff6697/aarch64/libtalloc.so.2"
+val embeddedLibtallocChecksum = "368262b345120a4e09ae961f4bda92e0cdfc18004145317f923abe403df6facf"
+val embeddedAlpineUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.1-aarch64.tar.gz"
+val embeddedAlpineChecksum = "f55a90f69052c5bd6f92cb09a8f47065970830b194c917a006fb94028e721259"
+
 fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: String) {
     val file = file(localPath)
     if (file.exists() && file.length() > 0L) {
@@ -538,24 +545,32 @@ fun downloadRuntimeFile(localPath: String, remoteUrl: String, expectedChecksum: 
 
 val prepareEmbeddedTerminalRuntime by tasks.registering {
     val outputDir = layout.buildDirectory.dir("generated/assets/embeddedTerminalRuntime/embedded-terminal-runtime")
+    inputs.property("prootUrl", embeddedProotUrl)
+    inputs.property("prootChecksum", embeddedProotChecksum)
+    inputs.property("libtallocUrl", embeddedLibtallocUrl)
+    inputs.property("libtallocChecksum", embeddedLibtallocChecksum)
+    inputs.property("alpineUrl", embeddedAlpineUrl)
+    inputs.property("alpineChecksum", embeddedAlpineChecksum)
     outputs.dir(outputDir)
     doLast {
         val root = outputDir.get().asFile
         root.mkdirs()
         downloadRuntimeFile(
             localPath = root.resolve("proot").absolutePath,
-            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/proot",
-            expectedChecksum = "f25ac0a0258e18671c699154cdc88001fbd1cbe09df75c960a1ee8dad29d88ae",
+            // Karbon-PackagesX does not publish versioned releases; pin the reviewed
+            // repository snapshot so a later main-branch change cannot alter our APK input.
+            remoteUrl = embeddedProotUrl,
+            expectedChecksum = embeddedProotChecksum,
         )
         downloadRuntimeFile(
             localPath = root.resolve("libtalloc.so.2").absolutePath,
-            remoteUrl = "https://raw.githubusercontent.com/Xed-Editor/Karbon-PackagesX/main/aarch64/libtalloc.so.2",
-            expectedChecksum = "368262b345120a4e09ae961f4bda92e0cdfc18004145317f923abe403df6facf",
+            remoteUrl = embeddedLibtallocUrl,
+            expectedChecksum = embeddedLibtallocChecksum,
         )
         downloadRuntimeFile(
             localPath = root.resolve("alpine.tar.gz").absolutePath,
-            remoteUrl = "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz",
-            expectedChecksum = "f31202c4070c4ef7de9e157e1bd01cb4da3a2150035d74ea5372c5e86f1efac1",
+            remoteUrl = embeddedAlpineUrl,
+            expectedChecksum = embeddedAlpineChecksum,
         )
     }
 }

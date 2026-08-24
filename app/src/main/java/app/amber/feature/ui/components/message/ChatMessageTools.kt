@@ -45,6 +45,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -109,6 +111,8 @@ internal enum class AgentToolStatus {
     WAITING_FOR_PERMISSION,
     SUCCEEDED,
     FAILED,
+    TIMED_OUT,
+    INTERRUPTED,
     CANCELLED,
 }
 
@@ -164,6 +168,12 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
 
     in setOf(
         "terminal_execute",
+        "terminal_install_packages",
+        "terminal_workspace_flush",
+        "terminal_job_start",
+        "terminal_job_read",
+        "terminal_job_wait",
+        "terminal_job_stop",
         "terminal_session_start",
         "terminal_session_exec",
         "terminal_session_read",
@@ -212,6 +222,12 @@ private fun getToolKind(toolName: String) = when {
 
     toolName in setOf(
         "terminal_execute",
+        "terminal_install_packages",
+        "terminal_workspace_flush",
+        "terminal_job_start",
+        "terminal_job_read",
+        "terminal_job_wait",
+        "terminal_job_stop",
         "terminal_session_start",
         "terminal_session_exec",
         "terminal_session_read",
@@ -282,7 +298,7 @@ private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): 
         return !error.isNullOrBlank() ||
             (exitCode != null && exitCode != 0) ||
             failed ||
-            status in setOf("failed", "error", "denied")
+            status in setOf("failed", "error", "denied", "timed_out", "interrupted")
     }
     return output.filterIsInstance<UIMessagePart.Text>().any { part ->
         part.text.contains("\"error\"", ignoreCase = true) ||
@@ -294,13 +310,24 @@ private fun toolStatusFromMessagePart(
     tool: UIMessagePart.Tool,
     loading: Boolean,
     content: JsonElement?,
-): AgentToolStatus = when {
-    tool.approvalState is ToolApprovalState.Pending -> AgentToolStatus.WAITING_FOR_PERMISSION
-    tool.approvalState is ToolApprovalState.Denied -> AgentToolStatus.CANCELLED
-    !tool.isExecuted && loading -> AgentToolStatus.RUNNING
-    !tool.isExecuted -> AgentToolStatus.RUNNING
-    toolHasFailure(content = content, output = tool.output) -> AgentToolStatus.FAILED
-    else -> AgentToolStatus.SUCCEEDED
+): AgentToolStatus {
+    val reportedStatus = content?.jsonObjectOrNull
+        ?.get("status")
+        ?.jsonPrimitiveOrNull
+        ?.contentOrNull
+        ?.lowercase()
+    return when {
+        tool.approvalState is ToolApprovalState.Pending -> AgentToolStatus.WAITING_FOR_PERMISSION
+        tool.approvalState is ToolApprovalState.Denied -> AgentToolStatus.CANCELLED
+        !tool.isExecuted && loading -> AgentToolStatus.RUNNING
+        !tool.isExecuted -> AgentToolStatus.RUNNING
+        reportedStatus in setOf("queued", "running") -> AgentToolStatus.RUNNING
+        reportedStatus == "cancelled" -> AgentToolStatus.CANCELLED
+        reportedStatus == "timed_out" -> AgentToolStatus.TIMED_OUT
+        reportedStatus == "interrupted" -> AgentToolStatus.INTERRUPTED
+        toolHasFailure(content = content, output = tool.output) -> AgentToolStatus.FAILED
+        else -> AgentToolStatus.SUCCEEDED
+    }
 }
 
 @Composable
@@ -309,6 +336,8 @@ private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
     AgentToolStatus.WAITING_FOR_PERMISSION -> "待授权"
     AgentToolStatus.SUCCEEDED -> "成功"
     AgentToolStatus.FAILED -> "失败"
+    AgentToolStatus.TIMED_OUT -> "已超时"
+    AgentToolStatus.INTERRUPTED -> "已中断"
     AgentToolStatus.CANCELLED -> "已取消"
 }
 
@@ -317,6 +346,8 @@ private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (statu
     AgentToolStatus.WAITING_FOR_PERMISSION -> WorkspaceTone.Warning
     AgentToolStatus.SUCCEEDED -> WorkspaceTone.Success
     AgentToolStatus.FAILED -> WorkspaceTone.Danger
+    AgentToolStatus.TIMED_OUT -> WorkspaceTone.Danger
+    AgentToolStatus.INTERRUPTED -> WorkspaceTone.Warning
     AgentToolStatus.CANCELLED -> WorkspaceTone.Neutral
 }
 
@@ -426,8 +457,11 @@ internal fun AgentToolCallCapsule(
                         color = theme.toolLabelInk,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier
-                            .widthIn(max = if (approvalActions == null) 380.dp else 180.dp)
+                        modifier = (if (approvalActions == null) {
+                            Modifier.widthIn(max = 380.dp)
+                        } else {
+                            Modifier.weight(1f, fill = false)
+                        })
                             .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
                     )
 
@@ -477,6 +511,7 @@ private fun V3ToolStatusBadge(
     modifier: Modifier = Modifier,
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val statusDescription = toolStatusLabel(status)
     // §6.2 amended (2026-06-10): `signal` is aliased to the user accent in buildAmberTokens,
     // so the completed badge renders in the accent — same family as the failed cross.
     val signal = app.amber.feature.ui.theme.LocalAmberTokens.current.signal
@@ -487,6 +522,8 @@ private fun V3ToolStatusBadge(
         // 避免出现"对勾黑、叉白"的不一致。
         AgentToolStatus.WAITING_FOR_PERMISSION -> theme.contextMid to theme.toolDoneBadgeInk
         AgentToolStatus.FAILED -> theme.contextHigh to theme.toolDoneBadgeInk
+        AgentToolStatus.TIMED_OUT -> theme.contextHigh to theme.toolDoneBadgeInk
+        AgentToolStatus.INTERRUPTED -> theme.contextMid to theme.toolDoneBadgeInk
         // 已取消: 空心(透明底) + 强调色描边 + 强调色叉 —— 用"空心 vs 实心"与真正失败区分。
         AgentToolStatus.CANCELLED -> Color.Transparent to theme.accent
     }
@@ -498,7 +535,9 @@ private fun V3ToolStatusBadge(
         return
     }
     Surface(
-        modifier = modifier.requiredSize(16.dp),
+        modifier = modifier
+            .requiredSize(16.dp)
+            .semantics { stateDescription = statusDescription },
         shape = androidx.compose.foundation.shape.CircleShape,
         color = bg,
         border = if (status == AgentToolStatus.CANCELLED) BorderStroke(1.dp, ink) else null,
@@ -511,7 +550,7 @@ private fun V3ToolStatusBadge(
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
-            } else if (status == AgentToolStatus.FAILED) {
+            } else if (status == AgentToolStatus.FAILED || status == AgentToolStatus.TIMED_OUT) {
                 Icon(
                     imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
                     contentDescription = null,
@@ -525,7 +564,7 @@ private fun V3ToolStatusBadge(
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
-            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION) {
+            } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION || status == AgentToolStatus.INTERRUPTED) {
                 Icon(
                     imageVector = me.rerere.hugeicons.HugeIcons.Time02,
                     contentDescription = null,
@@ -619,6 +658,12 @@ private fun toolDisplayTitle(
     "tools_list" -> "查看工具目录"
     "tool_policy_explain" -> "检查工具权限"
     "terminal_execute" -> "执行 Alpine 命令 ${arguments.getStringContent("command")?.compactToolPreview(22).orEmpty()}"
+    "terminal_install_packages" -> "安装终端软件包"
+    "terminal_workspace_flush" -> "同步终端 workspace"
+    "terminal_job_start" -> "启动后台终端任务 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
+    "terminal_job_read" -> "读取后台终端任务"
+    "terminal_job_wait" -> "等待后台终端任务"
+    "terminal_job_stop" -> "停止后台终端任务"
     "terminal_session_start" -> "启动终端会话"
     "terminal_session_exec" -> "终端会话执行 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
     "terminal_session_read" -> "读取终端输出"
@@ -713,7 +758,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         ToolStatusPill(status = status)
                         WorkspaceIconButton(
                             onClick = { showDenyDialog = true },
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(48.dp),
                             size = 24.dp,
                             iconSize = 12.dp,
                             tone = WorkspaceTone.Danger,
@@ -722,7 +767,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         )
                         WorkspaceIconButton(
                             onClick = { onToolApproval(tool.toolCallId, true, "") },
-                            modifier = Modifier.size(24.dp),
+                            modifier = Modifier.size(48.dp),
                             size = 24.dp,
                             iconSize = 12.dp,
                             tone = WorkspaceTone.Success,
@@ -741,7 +786,10 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
         // (same shape as the requested aspect ratio), then crossfade to the
         // real carousel once images arrive. Skip entirely on FAILED / DENIED
         // — the capsule itself surfaces those states.
-        if (isGenerateImage && status != AgentToolStatus.FAILED && !isDenied) {
+        if (isGenerateImage &&
+            status !in setOf(AgentToolStatus.FAILED, AgentToolStatus.TIMED_OUT, AgentToolStatus.INTERRUPTED) &&
+            !isDenied
+        ) {
             val aspectRatioFloat = remember(arguments) {
                 parseAspectRatioFloat(
                     arguments.jsonObject["aspect_ratio"]?.jsonPrimitive?.contentOrNull

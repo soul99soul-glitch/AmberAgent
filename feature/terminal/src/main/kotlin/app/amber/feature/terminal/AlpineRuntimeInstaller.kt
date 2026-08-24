@@ -1,23 +1,15 @@
 package app.amber.feature.terminal
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.os.Build
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 
-/**
- * @param appVersionCode used to invalidate the unpacked runtime cache when
- *                       the app upgrades. Inject from :app's BuildConfig.VERSION_CODE
- *                       so this class stays free of :app generated-config dependencies.
- *                       Note: :app's BuildConfig overrides VERSION_CODE as a String
- *                       (see app/build.gradle.kts: buildConfigField("String", "VERSION_CODE", ...)).
- */
-class AlpineRuntimeInstaller(
-    private val context: Context,
-    private val appVersionCode: String,
-) {
+class AlpineRuntimeInstaller(private val context: Context) {
     private val prefixDir: File = context.filesDir.parentFile ?: context.filesDir
-    private val runtimeVersion = appVersionCode
+    private val runtimeVersion = RUNTIME_ASSET_REVISION
     private val runtimeVersionFile: File = context.filesDir.resolve("embedded-terminal-runtime.version")
     val localDir: File = prefixDir.resolve("local")
     val localBinDir: File = localDir.resolve("bin")
@@ -56,6 +48,7 @@ class AlpineRuntimeInstaller(
 
     private fun installRuntime(overwriteRuntimeFiles: Boolean): InstallStatus {
         return runCatching {
+            resetInstalledRuntimeIfOutdated()
             localDir.mkdirs()
             localBinDir.mkdirs()
             localLibDir.mkdirs()
@@ -108,6 +101,7 @@ class AlpineRuntimeInstaller(
 
     fun environment(workspacePath: String, sessionId: String): Map<String, String> {
         val linker = if (File("/system/bin/linker64").exists()) "/system/bin/linker64" else "/system/bin/linker"
+        val (dnsServers, dnsError) = activeDnsConfiguration()
         val env = linkedMapOf(
             "PATH" to "${System.getenv("PATH").orEmpty()}:/sbin:${localBinDir.absolutePath}",
             "HOME" to "/root",
@@ -122,6 +116,8 @@ class AlpineRuntimeInstaller(
             "PKG" to context.packageName,
             "PKG_PATH" to context.applicationInfo.sourceDir,
             "AMBERAGENT_HOST_WORKSPACE" to workspacePath,
+            "AMBERAGENT_DNS_SERVERS" to dnsServers,
+            "AMBERAGENT_DNS_ERROR" to dnsError,
             "PROOT_TMP_DIR" to tempDir.resolve(sessionId).apply { mkdirs() }.absolutePath,
             "TMPDIR" to tempDir.absolutePath,
         )
@@ -130,6 +126,32 @@ class AlpineRuntimeInstaller(
             env["PROOT_LOADER"] = loader.absolutePath
         }
         return env
+    }
+
+    private fun activeDnsConfiguration(): Pair<String, String> {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java)
+        val network = connectivity.activeNetwork ?: return "" to ""
+        val linkProperties = connectivity.getLinkProperties(network) ?: return "" to ""
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && linkProperties.isPrivateDnsActive) {
+            return "" to "Android Private DNS is active; guest DNS is disabled to avoid unencrypted queries."
+        }
+        return linkProperties.dnsServers
+            .mapNotNull { it.hostAddress }
+            .distinct()
+            .joinToString(" ") to ""
+    }
+
+    private fun resetInstalledRuntimeIfOutdated() {
+        if (runtimeVersionIssue() == null) return
+        listOf(
+            localDir.resolve("alpine"),
+            localBinDir.resolve("proot"),
+            localLibDir.resolve("libtalloc.so.2"),
+        ).forEach { target ->
+            if (target.exists()) {
+                require(target.deleteRecursively()) { "Unable to replace outdated runtime path: ${target.absolutePath}" }
+            }
+        }
     }
 
     private fun copyRuntimeAsset(
@@ -179,6 +201,11 @@ class AlpineRuntimeInstaller(
     private fun runtimeVersionIssue(): String? {
         val installedVersion = runtimeVersionFile.takeIf { it.exists() }?.readText()?.trim()
         return if (installedVersion == runtimeVersion) null else "runtime assets (outdated)"
+    }
+
+    private companion object {
+        // Bump whenever the embedded archive, proot binaries, or init scripts change.
+        const val RUNTIME_ASSET_REVISION = "alpine-3.24.1-proot-b6326a3b"
     }
 }
 

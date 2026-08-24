@@ -50,6 +50,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,6 +65,7 @@ import me.rerere.hugeicons.stroke.ArrowRight01
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.Code
 import me.rerere.hugeicons.stroke.Tick01
+import me.rerere.hugeicons.stroke.Time02
 import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
@@ -282,6 +285,8 @@ internal fun sandboxStatusLabel(status: ToolActivityStatus): String = when (stat
     ToolActivityStatus.WAITING_FOR_PERMISSION -> "待授权"
     ToolActivityStatus.SUCCEEDED -> "成功"
     ToolActivityStatus.FAILED -> "失败"
+    ToolActivityStatus.TIMED_OUT -> "已超时"
+    ToolActivityStatus.INTERRUPTED -> "已中断"
     ToolActivityStatus.CANCELLED -> "已取消"
 }
 
@@ -290,11 +295,14 @@ internal fun sandboxStatusContainerColor(status: ToolActivityStatus): Color = wh
     ToolActivityStatus.WAITING_FOR_PERMISSION -> Color(0xFFFFC44D)
     ToolActivityStatus.SUCCEEDED -> Color(0xFF34C96E)
     ToolActivityStatus.FAILED -> Color(0xFFE45A5A)
+    ToolActivityStatus.TIMED_OUT -> Color(0xFFE45A5A)
+    ToolActivityStatus.INTERRUPTED -> Color(0xFFFFC44D)
     ToolActivityStatus.CANCELLED -> Color(0xFFB8C0CC)
 }
 
 internal fun sandboxStatusOnContainerColor(status: ToolActivityStatus): Color = when (status) {
     ToolActivityStatus.WAITING_FOR_PERMISSION,
+    ToolActivityStatus.INTERRUPTED,
     ToolActivityStatus.CANCELLED -> Color(0xFF1B1C20)
     else -> Color.White
 }
@@ -767,11 +775,15 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
     val (bg, ink) = when (status) {
         ToolActivityStatus.SUCCEEDED -> theme.toolDoneBg to theme.toolDoneBadgeInk
         ToolActivityStatus.FAILED -> workspace.red to Color.White
+        ToolActivityStatus.TIMED_OUT -> workspace.red to Color.White
+        ToolActivityStatus.INTERRUPTED -> workspace.amber to Color(0xFF1B1C20)
         ToolActivityStatus.CANCELLED -> workspace.muted to Color.White
         else -> theme.toolDoneBg to theme.toolDoneBadgeInk // RUNNING / WAITING 用 accent 表示进行中
     }
     Surface(
-        modifier = Modifier.size(16.dp),
+        modifier = Modifier
+            .size(16.dp)
+            .semantics { stateDescription = sandboxStatusLabel(status) },
         shape = CircleShape,
         color = bg,
         contentColor = ink,
@@ -781,7 +793,9 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
                 imageVector = when (status) {
                     ToolActivityStatus.SUCCEEDED -> HugeIcons.Tick01
                     ToolActivityStatus.FAILED,
+                    ToolActivityStatus.TIMED_OUT,
                     ToolActivityStatus.CANCELLED -> HugeIcons.Cancel01
+                    ToolActivityStatus.INTERRUPTED -> HugeIcons.Time02
                     else -> HugeIcons.Tick01 // 运行中也显示勾 (表示已开始/在进行)
                 },
                 contentDescription = null,

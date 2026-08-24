@@ -29,6 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -246,22 +249,30 @@ fun WorkspaceIconButton(
         WorkspaceTone.Warning -> colors.amber
         WorkspaceTone.Danger -> colors.red
     }.copy(alpha = if (enabled) 1f else 0.36f)
-    Surface(
+    Box(
         modifier = modifier
             .size(size)
             .clip(RoundedCornerShape(6.dp))
-            .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(6.dp),
-        color = containerColor ?: if (tone == WorkspaceTone.Accent) scheme.primaryContainer else colors.paper,
-        contentColor = contentColor,
-        border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                contentDescription?.let { this.contentDescription = it }
+            },
+        contentAlignment = Alignment.Center,
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Icon(
-                imageVector = icon,
-                contentDescription = contentDescription,
-                modifier = Modifier.size(iconSize),
-            )
+        Surface(
+            modifier = Modifier.size(size),
+            shape = RoundedCornerShape(6.dp),
+            color = containerColor ?: if (tone == WorkspaceTone.Accent) scheme.primaryContainer else colors.paper,
+            contentColor = contentColor,
+            border = if (showBorder) workspaceBorder(alpha = if (enabled) 1f else 0.48f) else null,
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(iconSize),
+                )
+            }
         }
     }
 }

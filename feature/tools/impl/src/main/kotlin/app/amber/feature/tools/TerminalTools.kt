@@ -56,7 +56,7 @@ class TerminalTools(
             textJson {
                 put("runtime", result.runtime)
                 put("workspace", result.workspace)
-                put("exit_code", result.exitCode)
+                result.exitCode?.let { put("exit_code", it) }
                 put("output", result.output)
                 put("sync_note", result.syncNote)
                 result.jobId?.let { put("job_id", it) }
@@ -334,6 +334,7 @@ class TerminalTools(
     private fun TerminalJobSnapshot.toTextJson(): List<UIMessagePart> = textJson {
         put("job_id", jobId)
         put("runtime", runtime.wireName)
+        put("workspace", workspace)
         put("status", status.wireName)
         exitCode?.let { put("exit_code", it) }
         put("running", running)

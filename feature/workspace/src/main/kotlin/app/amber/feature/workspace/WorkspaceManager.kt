@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,33 +17,61 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedReader
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicBoolean
 
 class WorkspaceManager(private val context: Context) {
     private val prefs = context.getSharedPreferences("amberagent_workspace", Context.MODE_PRIVATE)
     private val mirrorMutex = Mutex()
+    private var activeTerminalMirrors = 0
     private val _state = MutableStateFlow(loadState())
     val state: StateFlow<WorkspaceState> = _state.asStateFlow()
 
     val mirrorDir get() = context.filesDir.resolve("amberagent/workspace-mirror")
 
-    fun setWorkspace(uri: Uri) {
+    suspend fun setWorkspace(uri: Uri) = withContext(Dispatchers.IO) {
         val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        context.contentResolver.takePersistableUriPermission(uri, flags)
-        prefs.edit().putString(KEY_TREE_URI, uri.toString()).apply()
-        _state.value = loadState()
-    }
-
-    fun clearWorkspace() {
-        _state.value.treeUri?.let { uri ->
+        val previousUri = mirrorMutex.withLock {
+            val previous = _state.value.treeUri
+            if (previous == uri) return@withLock previous
+            check(activeTerminalMirrors == 0) {
+                "Stop active terminal jobs and sessions before changing the workspace."
+            }
+            if (previous != null) {
+                syncFromMirrorLocked()
+                resetMirror()
+            }
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+            prefs.edit().putString(KEY_TREE_URI, uri.toString()).commit()
+            _state.value = loadState()
+            previous
+        }
+        if (previousUri != null && previousUri != uri) {
             runCatching {
-                context.contentResolver.releasePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                )
+                context.contentResolver.releasePersistableUriPermission(previousUri, flags)
             }
         }
-        prefs.edit().remove(KEY_TREE_URI).apply()
-        _state.value = loadState()
+    }
+
+    suspend fun clearWorkspace() = withContext(Dispatchers.IO) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val previousUri = mirrorMutex.withLock {
+            val previous = _state.value.treeUri
+            if (previous != null) {
+                check(activeTerminalMirrors == 0) {
+                    "Stop active terminal jobs and sessions before clearing the workspace."
+                }
+                syncFromMirrorLocked()
+                resetMirror()
+            }
+            prefs.edit().remove(KEY_TREE_URI).commit()
+            _state.value = loadState()
+            previous
+        }
+        previousUri?.let { uri ->
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(uri, flags)
+            }
+        }
     }
 
     suspend fun list(relativePath: String = "."): List<WorkspaceEntry> = withContext(Dispatchers.IO) {
@@ -264,15 +293,45 @@ class WorkspaceManager(private val context: Context) {
 
     suspend fun refreshMirrorFromWorkspace(): String = withContext(Dispatchers.IO) {
         mirrorMutex.withLock {
+            check(activeTerminalMirrors == 0) {
+                "Workspace refresh is unavailable while terminal jobs or sessions are active."
+            }
             refreshMirrorFromWorkspaceLocked()
         }
     }
 
     suspend fun ensureMirrorWorkspace(): String = withContext(Dispatchers.IO) {
-        val root = ensureMirrorRoot()
-        require(root.mkdirs() || root.isDirectory) { "Unable to create workspace mirror: ${root.absolutePath}" }
-        "Using POSIX mirror workspace at ${root.absolutePath}. SAF sync was not required for this terminal job."
+        mirrorMutex.withLock {
+            ensureMirrorWorkspaceLocked()
+        }
     }
+
+    suspend fun acquireTerminalMirror(refreshFromWorkspace: Boolean): WorkspaceMirrorLease =
+        mirrorMutex.withLock {
+            check(activeTerminalMirrors == 0) {
+                "Another local terminal job or session is already using the workspace mirror."
+            }
+            val preparationNote = if (refreshFromWorkspace) {
+                refreshMirrorFromWorkspaceLocked()
+            } else {
+                ensureMirrorWorkspaceLocked()
+            }
+            activeTerminalMirrors++
+            WorkspaceMirrorLease(
+                directory = mirrorDir,
+                preparationNote = preparationNote,
+            ) { syncBack ->
+                withContext(NonCancellable + Dispatchers.IO) {
+                    mirrorMutex.withLock {
+                        try {
+                            if (syncBack) syncFromMirrorLocked() else ""
+                        } finally {
+                            activeTerminalMirrors--
+                        }
+                    }
+                }
+            }
+        }
 
     /**
      * Stages a content URI (typically a file shared from the system Share menu) into the
@@ -354,6 +413,9 @@ class WorkspaceManager(private val context: Context) {
 
     suspend fun syncFromMirror(): String = withContext(Dispatchers.IO) {
         mirrorMutex.withLock {
+            check(activeTerminalMirrors == 0) {
+                "Workspace flush is unavailable while terminal jobs or sessions are active."
+            }
             syncFromMirrorLocked()
         }
     }
@@ -390,6 +452,12 @@ class WorkspaceManager(private val context: Context) {
         }
         return "Refreshed POSIX mirror from SAF workspace at ${mirrorDir.absolutePath}. " +
             "Existing mirror-only files were preserved. " + stats.summary()
+    }
+
+    private fun ensureMirrorWorkspaceLocked(): String {
+        val root = ensureMirrorRoot()
+        require(root.mkdirs() || root.isDirectory) { "Unable to create workspace mirror: ${root.absolutePath}" }
+        return "Using POSIX mirror workspace at ${root.absolutePath}. SAF sync was not required for this terminal job."
     }
 
     private fun syncFromMirrorLocked(): String {
@@ -687,6 +755,19 @@ data class WorkspaceMirrorResult<T>(
     val value: T,
     val syncNote: String,
 )
+
+class WorkspaceMirrorLease internal constructor(
+    val directory: File,
+    val preparationNote: String,
+    private val releaseBlock: suspend (syncBack: Boolean) -> String,
+) {
+    private val released = AtomicBoolean(false)
+
+    suspend fun release(syncBack: Boolean): String {
+        if (!released.compareAndSet(false, true)) return ""
+        return releaseBlock(syncBack)
+    }
+}
 
 private class MirrorSyncStats {
     var files: Int = 0

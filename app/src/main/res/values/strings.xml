@@ -380,6 +380,8 @@
   <string name="notification_live_status_terminal_install_generic">Installing dependencies</string>
   <string name="notification_live_status_webview">Browsing %s</string>
   <string name="notification_live_status_failed">Task failed</string>
+  <string name="notification_live_status_timed_out">Task timed out</string>
+  <string name="notification_live_status_interrupted">Task interrupted</string>
   <string name="notification_live_status_cancelled">Task cancelled</string>
   <string name="notification_live_status_chip_planning">Plan</string>
   <string name="notification_live_status_chip_tool">Tool</string>
@@ -387,6 +389,8 @@
   <string name="notification_live_status_chip_writing">Write</string>
   <string name="notification_live_status_chip_done">Done</string>
   <string name="notification_live_status_chip_failed">Fail</string>
+  <string name="notification_live_status_chip_timed_out">Timeout</string>
+  <string name="notification_live_status_chip_interrupted">Interrupted</string>
   <string name="notification_live_status_chip_cancelled">Stop</string>
   <string name="notification_live_status_action_stop">Stop</string>
   <string name="notification_live_status_action_approve">Approve</string>
@@ -1016,6 +1020,7 @@
   <string name="setting_files_page_workspace_selected">Workspace authorized</string>
   <string name="setting_files_page_workspace_saved">Workspace saved</string>
   <string name="setting_files_page_workspace_cleared">Workspace cleared</string>
+  <string name="setting_files_page_workspace_update_failed">Workspace update failed: %1$s</string>
   <string name="setting_agent_memory_title">Core Memory</string>
   <string name="setting_agent_memory_soul_title">agents.md / Soul</string>
   <string name="setting_agent_memory_soul_desc">This app-level Markdown guide is injected into every conversation before assistant compatibility prompts.</string>
@@ -1289,13 +1294,17 @@
   <string name="setting_sandbox_runtime_section">Runtime</string>
   <string name="setting_sandbox_alpine_ready">Terminal runtime ready</string>
   <string name="setting_sandbox_alpine_failed">Runtime check failed: %1$s</string>
+  <string name="setting_sandbox_runtime_recheck">Check again</string>
+  <string name="setting_sandbox_runtime_installing">Installing…</string>
+  <string name="setting_sandbox_runtime_install_repair">Install / repair runtime</string>
+  <string name="setting_sandbox_runtime_repair_note">A runtime update may recreate Alpine and remove packages installed inside it. Workspace files are preserved.</string>
   <string name="setting_sandbox_terminal_runtime_title">Default Runtime</string>
   <string name="setting_sandbox_terminal_runtime_desc">Runtime used by terminal jobs unless a tool call overrides it.</string>
   <string name="setting_sandbox_terminal_runtime_builtin">Alpine</string>
   <string name="setting_sandbox_terminal_runtime_android_shell">Android shell</string>
   <string name="setting_sandbox_terminal_runtime_termux">Termux</string>
   <string name="setting_sandbox_terminal_jobs_title">Concurrent Jobs</string>
-  <string name="setting_sandbox_terminal_jobs_desc">Default 1; avoid concurrent /workspace writes.</string>
+  <string name="setting_sandbox_terminal_jobs_desc">Local runtimes serialize /workspace access. Higher limits only benefit external Termux jobs.</string>
   <string name="setting_sandbox_terminal_jobs_value">%1$d jobs</string>
   <string name="setting_sandbox_terminal_output_title">Output Tail</string>
   <string name="setting_sandbox_terminal_output_desc">How much output each job keeps in tool results. Full logs stay in app storage.</string>

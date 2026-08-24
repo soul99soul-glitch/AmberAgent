@@ -124,7 +124,8 @@ class AgentTaskStore(
         }
         val ok = runCatching { callback() }.getOrDefault(false)
         if (ok) {
-            update(taskId = taskId, status = AgentTaskStatus.CANCELLED, summary = "Cancellation requested.")
+            tasks[taskId]?.takeUnless { it.status.running }
+                ?: update(taskId = taskId, status = AgentTaskStatus.CANCELLED, summary = "Cancellation requested.")
         } else {
             update(taskId = taskId, error = "Cancellation request failed.")
         } ?: current

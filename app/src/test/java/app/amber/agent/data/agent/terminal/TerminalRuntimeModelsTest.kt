@@ -98,9 +98,12 @@ class TerminalRuntimeModelsTest {
     fun runtimeAndStatusWireValuesAreStable() {
         assertEquals(TerminalRuntimeKind.BUILTIN_ALPINE, TerminalRuntimeKind.fromWire("builtin_alpine"))
         assertEquals(TerminalRuntimeKind.TERMUX_EXTERNAL, TerminalRuntimeKind.fromWire("TERMUX_EXTERNAL"))
+        assertTrue(TerminalRuntimeKind.BUILTIN_ALPINE.supportsWorkspaceSync)
+        assertFalse(TerminalRuntimeKind.TERMUX_EXTERNAL.supportsWorkspaceSync)
         assertTrue(TerminalJobStatus.QUEUED.running)
         assertTrue(TerminalJobStatus.RUNNING.running)
         assertFalse(TerminalJobStatus.COMPLETED.running)
         assertFalse(TerminalJobStatus.TIMED_OUT.running)
+        assertFalse(TerminalJobStatus.INTERRUPTED.running)
     }
 }

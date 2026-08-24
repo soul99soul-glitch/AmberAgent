@@ -75,23 +75,23 @@ if [ ! -d "$PREFIX/local/alpine/tmp" ]; then
 fi
 ARGS="$ARGS -b $PREFIX/local/alpine/tmp:/dev/shm"
 
-# --- DNS setup (fixes package download failures in PROOT) ---
+# Refresh DNS on every launch because Android network DNS can change between
+# Wi-Fi, cellular, and VPN connections. Private DNS is blocked by the host
+# because guest resolvers cannot preserve Android's encrypted DNS semantics.
 RESOLV_CONF="$ALPINE_DIR/etc/resolv.conf"
 mkdir -p "$(dirname "$RESOLV_CONF")"
+: > "$RESOLV_CONF"
+for DNS_SERVER in $AMBERAGENT_DNS_SERVERS; do
+    printf 'nameserver %s\n' "$DNS_SERVER" >> "$RESOLV_CONF"
+done
 if [ ! -s "$RESOLV_CONF" ]; then
-    # Try Android system DNS first, fall back to public resolvers
-    DNS1=$(getprop net.dns1 2>/dev/null)
-    DNS2=$(getprop net.dns2 2>/dev/null)
-    {
-        [ -n "$DNS1" ] && echo "nameserver $DNS1"
-        [ -n "$DNS2" ] && echo "nameserver $DNS2"
-        if [ -z "$DNS1" ] && [ -z "$DNS2" ]; then
-            echo "nameserver 8.8.8.8"
-            echo "nameserver 8.8.4.4"
-        fi
-    } > "$RESOLV_CONF"
+    if [ -n "$AMBERAGENT_DNS_ERROR" ]; then
+        echo "$AMBERAGENT_DNS_ERROR" >&2
+    else
+        echo "AmberAgent terminal DNS is unavailable on the active Android network." >&2
+    fi
 fi
-# ----------------------------------------------------
+unset DNS_SERVER RESOLV_CONF AMBERAGENT_DNS_ERROR
 
 ARGS="$ARGS -r $PREFIX/local/alpine"
 ARGS="$ARGS -0"

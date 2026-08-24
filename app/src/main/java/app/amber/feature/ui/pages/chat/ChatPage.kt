@@ -1269,7 +1269,7 @@ private fun PendingUserMessageQueueRow(
 
 private const val MAX_SANDBOX_TIMELINE_ITEMS = 24
 private const val MAX_SANDBOX_OUTPUT_TAIL_CHARS = 1_600
-private const val MAX_SANDBOX_JSON_PARSE_CHARS = 80_000
+private const val MAX_SANDBOX_JSON_PARSE_CHARS = 3_200_000
 
 private fun mergeSandboxTimeline(
     messageActivities: List<SandboxActivityUiState>,
@@ -1393,6 +1393,12 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
             "file_search",
             "file_move",
             "terminal_execute",
+            "terminal_install_packages",
+            "terminal_workspace_flush",
+            "terminal_job_start",
+            "terminal_job_read",
+            "terminal_job_wait",
+            "terminal_job_stop",
             "terminal_session_start",
             "terminal_session_exec",
             "terminal_session_read",
@@ -1412,13 +1418,20 @@ private fun UIMessagePart.Tool.isSandboxActivityTool(): Boolean =
 private fun UIMessagePart.Tool.activityStatus(
     loading: Boolean,
     outputJson: JsonObject,
-): ToolActivityStatus = when {
-    approvalState is ToolApprovalState.Pending -> ToolActivityStatus.WAITING_FOR_PERMISSION
-    approvalState is ToolApprovalState.Denied -> ToolActivityStatus.CANCELLED
-    !isExecuted && loading -> ToolActivityStatus.RUNNING
-    !isExecuted -> ToolActivityStatus.RUNNING
-    outputJson.indicatesFailure() -> ToolActivityStatus.FAILED
-    else -> ToolActivityStatus.SUCCEEDED
+): ToolActivityStatus {
+    val reportedStatus = outputJson.getStringContent("status")?.lowercase()
+    return when {
+        approvalState is ToolApprovalState.Pending -> ToolActivityStatus.WAITING_FOR_PERMISSION
+        approvalState is ToolApprovalState.Denied -> ToolActivityStatus.CANCELLED
+        !isExecuted && loading -> ToolActivityStatus.RUNNING
+        !isExecuted -> ToolActivityStatus.RUNNING
+        reportedStatus in setOf("queued", "running") -> ToolActivityStatus.RUNNING
+        reportedStatus == "cancelled" -> ToolActivityStatus.CANCELLED
+        reportedStatus == "timed_out" -> ToolActivityStatus.TIMED_OUT
+        reportedStatus == "interrupted" -> ToolActivityStatus.INTERRUPTED
+        outputJson.indicatesFailure() -> ToolActivityStatus.FAILED
+        else -> ToolActivityStatus.SUCCEEDED
+    }
 }
 
 private fun UIMessagePart.Tool.sandboxTitle(input: kotlinx.serialization.json.JsonElement = inputAsJson()): String {
@@ -1441,6 +1454,12 @@ private fun UIMessagePart.Tool.sandboxTitle(input: kotlinx.serialization.json.Js
         "file_search" -> "搜索文件 ${input.getStringContent("query").orEmpty().compactSandboxText(20)}"
         "file_move" -> "移动文件 ${input.getStringContent("from").orEmpty().compactSandboxText(16)}"
         "terminal_execute" -> "执行 Alpine 命令"
+        "terminal_install_packages" -> "安装终端软件包"
+        "terminal_workspace_flush" -> "同步终端 workspace"
+        "terminal_job_start" -> "启动后台终端任务"
+        "terminal_job_read" -> "读取后台终端任务"
+        "terminal_job_wait" -> "等待后台终端任务"
+        "terminal_job_stop" -> "停止后台终端任务"
         "terminal_session_start" -> "启动终端会话"
         "terminal_session_exec" -> "终端会话执行"
         "terminal_session_read" -> "读取终端输出"
@@ -1473,7 +1492,9 @@ private fun UIMessagePart.Tool.inputPreview(input: kotlinx.serialization.json.Js
         "webview_read" -> input.getStringContent("url")
         "icloud_list", "icloud_read", "icloud_write" -> input.getStringContent("path")
         "icloud_search" -> input.getStringContent("query")
-        "terminal_execute", "terminal_session_exec" -> input.getStringContent("command")
+        "terminal_execute", "terminal_job_start", "terminal_session_exec" -> input.getStringContent("command")
+        "terminal_install_packages" -> input.getStringContent("packages")
+        "terminal_job_read", "terminal_job_wait", "terminal_job_stop" -> input.getStringContent("job_id")
         "file_list", "file_read", "file_write", "file_edit" -> input.getStringContent("path")
         "file_search" -> input.getStringContent("query")
         "file_move" -> input.getStringContent("from")
@@ -1495,6 +1516,7 @@ private fun UIMessagePart.Tool.defaultRuntime(): String = when {
     toolName == "terminal_execute" ||
         toolName == "terminal_install_packages" ||
         toolName.startsWith("terminal_job_") -> "alpine-proot-stage1"
+    toolName == "terminal_workspace_flush" -> "saf-workspace"
     toolName.startsWith("terminal_session_") -> "alpine-proot-session"
     toolName.startsWith("file_") -> "saf-workspace"
     toolName.startsWith("screen_") || toolName == "vlm_task" -> "accessibility-service"
@@ -1516,11 +1538,12 @@ private fun JsonObject.indicatesFailure(): Boolean {
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
         failed ||
-        status in setOf("failed", "error", "denied")
+        status in setOf("failed", "error", "denied", "timed_out", "interrupted")
 }
 
 private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {
     val output = outputJson.getStringContent("output")
+        ?: outputJson.getStringContent("output_tail")
         ?: outputJson.getStringContent("error")
         ?: outputText(MAX_SANDBOX_OUTPUT_TAIL_CHARS)
     return output.trim().takeLast(MAX_SANDBOX_OUTPUT_TAIL_CHARS)

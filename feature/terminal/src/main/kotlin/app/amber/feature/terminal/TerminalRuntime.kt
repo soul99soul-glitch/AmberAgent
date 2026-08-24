@@ -8,9 +8,13 @@ import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import app.amber.core.infra.AppScope
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -23,6 +27,7 @@ import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.running
 import app.amber.feature.task.toQueueState
 import app.amber.feature.workspace.WorkspaceManager
+import app.amber.feature.workspace.WorkspaceMirrorLease
 import app.amber.core.settings.prefs.SettingsAggregator
 import java.io.BufferedWriter
 import java.io.File
@@ -47,6 +52,8 @@ class TerminalRuntime(
 ) {
     private val jobs = ConcurrentHashMap<String, TerminalJob>()
     private val sessions = ConcurrentHashMap<String, TerminalSession>()
+    private val admissionMutex = Mutex()
+    private val sessionMutex = Mutex()
     private val installRunning = AtomicBoolean(false)
 
     suspend fun execute(
@@ -67,11 +74,16 @@ class TerminalRuntime(
             outputCallback = onOutputLine,
         )
         if (shouldDetach) {
+            val startedSuccessfully = started.running
             return TerminalResult(
-                exitCode = 0,
-                output = "Command started as terminal job ${started.jobId}. Use terminal_job_read or terminal_job_wait to follow progress.",
+                exitCode = started.exitCode,
+                output = if (startedSuccessfully) {
+                    "Command started as terminal job ${started.jobId}. Use terminal_job_read or terminal_job_wait to follow progress."
+                } else {
+                    started.error ?: started.outputTail
+                },
                 runtime = started.runtime.wireName,
-                workspace = "/workspace",
+                workspace = started.workspace,
                 syncNote = "",
                 jobId = started.jobId,
                 status = started.status.wireName,
@@ -85,7 +97,7 @@ class TerminalRuntime(
             exitCode = final.exitCode ?: if (final.status == TerminalJobStatus.COMPLETED) 0 else 1,
             output = final.outputTail,
             runtime = final.runtime.wireName,
-            workspace = "/workspace",
+            workspace = final.workspace,
             syncNote = "",
             jobId = final.jobId,
             status = final.status.wireName,
@@ -106,42 +118,53 @@ class TerminalRuntime(
         outputCallback: ((String) -> Unit)? = null,
     ): TerminalJobSnapshot = withContext(Dispatchers.IO) {
         val selectedRuntime = runtime ?: settingsStore.settingsFlow.value.agentRuntime.terminalDefaultRuntime
-        val maxJobs = settingsStore.settingsFlow.value.agentRuntime.terminalMaxConcurrentJobs.coerceIn(1, MAX_CONCURRENT_JOBS)
-        val runningJobs = jobs.values.count { it.status.get().running }
-        if (runningJobs >= maxJobs) {
-            return@withContext failedJob(
-                command = command,
-                runtime = selectedRuntime,
-                error = "Too many running terminal jobs ($runningJobs/$maxJobs). Stop or wait for an existing job first.",
-                toolName = toolName,
-                title = title,
-            )
-        }
-        if (isInstall && !installRunning.compareAndSet(false, true)) {
-            return@withContext failedJob(
-                command = command,
-                runtime = selectedRuntime,
-                error = "Another terminal_install_packages job is already running.",
-                toolName = toolName,
-                title = title,
-            )
-        }
+        val job = admissionMutex.withLock {
+            pruneFinishedJobsLocked()
+            val maxJobs = settingsStore.settingsFlow.value.agentRuntime.terminalMaxConcurrentJobs
+                .coerceIn(1, MAX_CONCURRENT_JOBS)
+            val runningJobs = jobs.values.count { it.status.get().running }
+            if (runningJobs >= maxJobs) {
+                return@withContext failedJob(
+                    command = command,
+                    runtime = selectedRuntime,
+                    error = "Too many running terminal jobs ($runningJobs/$maxJobs). Stop or wait for an existing job first.",
+                    toolName = toolName,
+                    title = title,
+                )
+            }
+            if ((syncWorkspace || flushWorkspace) && !selectedRuntime.supportsWorkspaceSync) {
+                return@withContext failedJob(
+                    command = command,
+                    runtime = selectedRuntime,
+                    error = "${selectedRuntime.wireName} does not use AmberAgent /workspace and cannot sync or flush it.",
+                    toolName = toolName,
+                    title = title,
+                )
+            }
+            if (isInstall && !installRunning.compareAndSet(false, true)) {
+                return@withContext failedJob(
+                    command = command,
+                    runtime = selectedRuntime,
+                    error = "Another terminal_install_packages job is already running.",
+                    toolName = toolName,
+                    title = title,
+                )
+            }
 
-        val job = newJob(
-            command = command,
-            runtime = selectedRuntime,
-            timeoutMillis = timeoutMillis.coerceIn(MIN_JOB_TIMEOUT_MS, MAX_JOB_TIMEOUT_MS),
-            toolName = toolName,
-            title = title,
-            isInstall = isInstall,
-            syncWorkspace = syncWorkspace,
-            flushWorkspace = flushWorkspace,
-            outputCallback = outputCallback,
-        )
-        jobs[job.id] = job
+            newJob(
+                command = command,
+                runtime = selectedRuntime,
+                timeoutMillis = timeoutMillis.coerceIn(MIN_JOB_TIMEOUT_MS, MAX_JOB_TIMEOUT_MS),
+                toolName = toolName,
+                title = title,
+                isInstall = isInstall,
+                syncWorkspace = syncWorkspace,
+                flushWorkspace = flushWorkspace,
+                outputCallback = outputCallback,
+            ).also { jobs[it.id] = it }
+        }
         agentTaskStore.register(job.toAgentTaskSnapshot(AgentTaskStatus.QUEUED), cancel = {
-            stopJob(job.id)
-            true
+            stopJob(job.id).status in setOf(TerminalJobStatus.CANCELLED, TerminalJobStatus.INTERRUPTED)
         })
         activityStore.start(job.toActivityState())
 
@@ -204,7 +227,18 @@ class TerminalRuntime(
         withContext(Dispatchers.IO) {
             val job = jobs[id] ?: error("Unknown terminal job: $id")
             stopJobInternal(job, reason)
-            job.snapshot()
+            job.snapshot().also { snapshot ->
+                if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL && !snapshot.running) {
+                    agentTaskStore.update(
+                        taskId = job.id,
+                        status = snapshot.status.toAgentTaskStatus(),
+                        summary = snapshot.outputTail.take(4_000),
+                        error = snapshot.error,
+                        outputOffset = job.log.file.length(),
+                        cancelCapability = false,
+                    )
+                }
+            }
         }
 
     suspend fun cancelRunningJobs(reason: String = "Command cancelled by user."): Int = withContext(Dispatchers.IO) {
@@ -268,41 +302,59 @@ class TerminalRuntime(
     }
 
     suspend fun startSession(): TerminalSessionInfo = withContext(Dispatchers.IO) {
-        workspaceManager.ensureMirrorWorkspace()
-        val workingDir = workspaceManager.mirrorDir.also { it.mkdirs() }
-        val id = Uuid.random().toString()
-        val processBuilder = ProcessBuilder(
-            "/system/bin/sh",
-            alpineRuntimeInstaller.localBinDir.resolve("init-host").absolutePath,
-            "/bin/sh",
-            "-l",
-        )
-            .directory(workingDir)
-            .redirectErrorStream(true)
-        alpineRuntimeInstaller.environment(
-            workspacePath = workingDir.absolutePath,
-            sessionId = id,
-        ).forEach { (key, value) -> processBuilder.environment()[key] = value }
-        val installStatus = alpineRuntimeInstaller.ensureInstalled()
-        require(installStatus.success) { installStatus.message }
-        val process = processBuilder.start()
-        sessions[id] = TerminalSession(
-            id = id,
-            process = process,
-            writer = BufferedWriter(OutputStreamWriter(process.outputStream)),
-            workingDir = workingDir,
-            runtime = TerminalRuntimeKind.BUILTIN_ALPINE,
-            lastActivityMs = System.currentTimeMillis(),
-        )
-        TerminalSessionInfo(
-            id = id,
-            runtime = TerminalRuntimeKind.BUILTIN_ALPINE.wireName,
-            workspace = workingDir.absolutePath,
-        )
+        sessionMutex.withLock {
+            pruneDeadSessionsLocked()
+            val activeSessions = sessions.values.count { it.process.isAlive }
+            check(activeSessions < MAX_CONCURRENT_SESSIONS) {
+                "Too many active terminal sessions ($activeSessions/$MAX_CONCURRENT_SESSIONS). Stop an existing session first."
+            }
+            val id = Uuid.random().toString()
+            val installStatus = alpineRuntimeInstaller.ensureInstalled()
+            require(installStatus.success) { installStatus.message }
+            var mirrorLease: WorkspaceMirrorLease? = null
+            try {
+                mirrorLease = workspaceManager.acquireTerminalMirror(refreshFromWorkspace = false)
+                val workingDir = mirrorLease.directory
+                val processBuilder = ProcessBuilder(
+                    "/system/bin/sh",
+                    alpineRuntimeInstaller.localBinDir.resolve("init-host").absolutePath,
+                    "/bin/sh",
+                    "-l",
+                )
+                    .directory(workingDir)
+                    .redirectErrorStream(true)
+                alpineRuntimeInstaller.environment(
+                    workspacePath = workingDir.absolutePath,
+                    sessionId = id,
+                ).forEach { (key, value) -> processBuilder.environment()[key] = value }
+                val process = processBuilder.start()
+                val session = TerminalSession(
+                    id = id,
+                    process = process,
+                    writer = BufferedWriter(OutputStreamWriter(process.outputStream)),
+                    workingDir = workingDir,
+                    runtime = TerminalRuntimeKind.BUILTIN_ALPINE,
+                    mirrorLease = mirrorLease,
+                    output = TerminalSessionOutput(MAX_SESSION_OUTPUT_CHARS),
+                    lastActivityMs = System.currentTimeMillis(),
+                )
+                sessions[id] = session
+                session.reader = appScope.launch(Dispatchers.IO) { readSessionOutput(session) }
+                TerminalSessionInfo(
+                    id = id,
+                    runtime = TerminalRuntimeKind.BUILTIN_ALPINE.wireName,
+                    workspace = "/workspace",
+                )
+            } catch (error: Throwable) {
+                mirrorLease?.release(syncBack = false)
+                throw error
+            }
+        }
     }
 
     suspend fun execSession(id: String, command: String): TerminalReadResult = withContext(Dispatchers.IO) {
         val session = sessions[id] ?: error("Unknown terminal session: $id")
+        check(session.process.isAlive) { "Terminal session has exited: $id. Read it to collect final output." }
         session.lastActivityMs = System.currentTimeMillis()
         session.writer.write(command)
         session.writer.newLine()
@@ -312,37 +364,88 @@ class TerminalRuntime(
 
     suspend fun readSession(id: String): TerminalReadResult = withContext(Dispatchers.IO) {
         val session = sessions[id] ?: error("Unknown terminal session: $id")
-        val stream = session.process.inputStream
-        val buffer = ByteArray(DEFAULT_READ_BYTES)
-        val output = StringBuilder()
-        while (stream.available() > 0) {
-            val count = stream.read(buffer, 0, minOf(buffer.size, stream.available()))
-            if (count <= 0) break
-            output.append(String(buffer, 0, count))
-        }
         TerminalReadResult(
             id = id,
-            output = output.toString(),
+            output = session.output.drain(),
             running = session.process.isAlive,
         )
     }
 
     suspend fun stopSession(id: String): TerminalReadResult = withContext(Dispatchers.IO) {
-        val session = sessions.remove(id) ?: error("Unknown terminal session: $id")
-        session.process.destroy()
-        session.process.waitFor(1, TimeUnit.SECONDS)
-        if (session.process.isAlive) {
-            session.process.destroyForcibly()
+        val session = sessions[id] ?: error("Unknown terminal session: $id")
+        withContext(NonCancellable) {
+            var terminated = false
+            var syncNote = ""
+            try {
+                runCatching { session.writer.close() }
+                session.process.destroy()
+                session.process.waitFor(1, TimeUnit.SECONDS)
+                if (session.process.isAlive) {
+                    session.process.destroyForcibly()
+                    session.process.waitFor(1, TimeUnit.SECONDS)
+                }
+                check(!session.process.isAlive) { "Unable to stop terminal session: $id" }
+                terminated = true
+            } finally {
+                if (terminated) {
+                    sessions.remove(id, session)
+                    withTimeoutOrNull(1_000L) { session.reader?.join() }
+                    syncNote = runCatching {
+                        session.mirrorLease.release(syncBack = workspaceManager.state.value.configured)
+                    }.getOrElse { "workspace sync failed: ${it.message}" }
+                }
+            }
+            TerminalReadResult(
+                id = id,
+                output = listOf(session.output.drain(), "session stopped", syncNote)
+                    .filter { it.isNotBlank() }
+                    .joinToString("; "),
+                running = false,
+            )
         }
-        // The session is already gone at this point; a missing SAF workspace must
-        // not turn a successful stop into a tool error.
-        val syncNote = runCatching { workspaceManager.syncFromMirror() }
-            .getOrElse { "sync skipped: ${it.message}" }
-        TerminalReadResult(
-            id = id,
-            output = "session stopped; $syncNote",
-            running = false,
-        )
+    }
+
+    private suspend fun readSessionOutput(session: TerminalSession) {
+        val buffer = ByteArray(DEFAULT_READ_BYTES)
+        try {
+            while (true) {
+                val count = session.process.inputStream.read(buffer)
+                if (count <= 0) break
+                session.output.append(String(buffer, 0, count))
+                session.lastActivityMs = System.currentTimeMillis()
+            }
+        } catch (error: Throwable) {
+            if (session.process.isAlive) {
+                session.output.append("Terminal output stream closed: ${error.message.orEmpty()}\n")
+            }
+        } finally {
+            if (session.process.isAlive) {
+                runCatching { session.process.waitFor() }
+            }
+            if (!session.process.isAlive) {
+                runCatching { session.writer.close() }
+                val syncNote = runCatching {
+                    session.mirrorLease.release(syncBack = workspaceManager.state.value.configured)
+                }.getOrElse { "workspace sync failed: ${it.message}" }
+                if (syncNote.isNotBlank()) session.output.append("$syncNote\n")
+            }
+        }
+    }
+
+    private fun pruneDeadSessionsLocked() {
+        val deadSessions = sessions.values
+            .filterNot { it.process.isAlive }
+            .sortedBy { it.lastActivityMs }
+        val removeCount = (deadSessions.size - MAX_RETAINED_SESSIONS + 1).coerceAtLeast(0)
+        deadSessions.take(removeCount).forEach { session -> sessions.remove(session.id, session) }
+    }
+
+    private fun pruneFinishedJobsLocked() {
+        val finishedJobs = jobs.values
+            .filterNot { it.status.get().running }
+            .sortedBy { it.updatedAtMs }
+        val removeCount = (finishedJobs.size - MAX_RETAINED_JOBS + 1).coerceAtLeast(0)
+        finishedJobs.take(removeCount).forEach { job -> jobs.remove(job.id, job) }
     }
 
     private fun newJob(
@@ -362,6 +465,11 @@ class TerminalRuntime(
             id = id,
             command = command,
             runtime = runtime,
+            workspace = when (runtime) {
+                TerminalRuntimeKind.BUILTIN_ALPINE -> "/workspace"
+                TerminalRuntimeKind.ANDROID_SHELL -> workspaceManager.mirrorDir.absolutePath
+                TerminalRuntimeKind.TERMUX_EXTERNAL -> TERMUX_HOME
+            },
             timeoutMillis = timeoutMillis,
             output = TerminalOutputBuffer(
                 settingsStore.settingsFlow.value.agentRuntime.terminalOutputTailChars.coerceIn(
@@ -445,21 +553,23 @@ class TerminalRuntime(
         job: TerminalJob,
         processBuilder: suspend (File) -> ProcessBuilder,
     ) {
+        var mirrorLease: WorkspaceMirrorLease? = null
+        var processStatus: TerminalJobStatus? = null
+        var processExitCode: Int? = null
         try {
-            job.status.set(TerminalJobStatus.RUNNING)
+            if (!job.status.compareAndSet(TerminalJobStatus.QUEUED, TerminalJobStatus.RUNNING)) return
             agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
-            val syncIn = if (job.syncWorkspace) {
+            if (job.syncWorkspace) {
                 appendJobOutput(job, "Preparing /workspace mirror...\n")
-                workspaceManager.refreshMirrorFromWorkspace()
-            } else {
-                workspaceManager.ensureMirrorWorkspace()
             }
-            appendJobOutput(job, "$syncIn\n")
+            mirrorLease = workspaceManager.acquireTerminalMirror(refreshFromWorkspace = job.syncWorkspace)
+            appendJobOutput(job, "${mirrorLease.preparationNote}\n")
             if (job.status.get() == TerminalJobStatus.CANCELLED) {
+                mirrorLease.release(syncBack = false)
                 finishJob(job, TerminalJobStatus.CANCELLED, job.exitCode, job.error)
                 return
             }
-            val workingDir = workspaceManager.mirrorDir.also { it.mkdirs() }
+            val workingDir = mirrorLease.directory
             appendJobOutput(job, "Starting ${job.runtime.wireName} command...\n")
             val process = processBuilder(workingDir).start()
             job.process = process
@@ -468,26 +578,58 @@ class TerminalRuntime(
             }
             val status = waitForProcess(job, process)
             reader.join(1_000)
-            val exitCode = if (process.isAlive) null else runCatching { process.exitValue() }.getOrNull()
+            processExitCode = if (process.isAlive) null else runCatching { process.exitValue() }.getOrNull()
             val finalStatus = when {
                 job.status.get() == TerminalJobStatus.CANCELLED -> TerminalJobStatus.CANCELLED
                 status == TerminalJobStatus.TIMED_OUT -> TerminalJobStatus.TIMED_OUT
-                exitCode == 0 -> TerminalJobStatus.COMPLETED
+                processExitCode == 0 -> TerminalJobStatus.COMPLETED
                 else -> TerminalJobStatus.FAILED
             }
-            if ((job.syncWorkspace || job.flushWorkspace) && !job.isInstall) {
+            processStatus = finalStatus
+            val syncBack = (job.syncWorkspace || job.flushWorkspace) && !job.isInstall
+            if (syncBack) {
                 appendJobOutput(job, "Syncing /workspace changes back to SAF...\n")
-                runCatching { workspaceManager.syncFromMirror() }
-                    .onFailure { appendJobOutput(job, "Workspace sync failed: ${it.message.orEmpty()}\n") }
             }
-            finishJob(job, finalStatus, exitCode, null)
+            val syncNote = mirrorLease.release(syncBack = syncBack)
+            if (syncNote.isNotBlank()) appendJobOutput(job, "$syncNote\n")
+            val statusAfterSync = if (job.status.get() == TerminalJobStatus.CANCELLED) {
+                TerminalJobStatus.CANCELLED
+            } else {
+                finalStatus
+            }
+            finishJob(
+                job,
+                statusAfterSync,
+                processExitCode,
+                job.error.takeIf { statusAfterSync == TerminalJobStatus.CANCELLED },
+            )
         } catch (error: CancellationException) {
             stopJobInternal(job, "Command cancelled by user.")
+            mirrorLease?.release(syncBack = false)
+            finishJob(job, TerminalJobStatus.CANCELLED, processExitCode, job.error)
             throw error
         } catch (error: Throwable) {
-            appendJobOutput(job, "${error.message ?: error::class.java.simpleName}\n")
-            finishJob(job, TerminalJobStatus.FAILED, null, error.message ?: error::class.java.simpleName)
+            job.process?.takeIf { it.isAlive }?.let { terminateProcess(job, it) }
+            mirrorLease?.release(syncBack = false)
+            val message = listOfNotNull(job.error, error.message ?: error::class.java.simpleName)
+                .distinct()
+                .joinToString("; ")
+            val finalStatus = when {
+                job.status.get() == TerminalJobStatus.CANCELLED -> TerminalJobStatus.CANCELLED
+                processStatus == TerminalJobStatus.TIMED_OUT -> TerminalJobStatus.TIMED_OUT
+                else -> TerminalJobStatus.FAILED
+            }
+            appendJobOutput(job, "$message\n")
+            finishJob(
+                job = job,
+                status = finalStatus,
+                exitCode = processExitCode?.takeUnless { finalStatus == TerminalJobStatus.FAILED && it == 0 },
+                error = message,
+            )
         } finally {
+            if (job.process?.isAlive != true) {
+                mirrorLease?.release(syncBack = false)
+            }
             if (job.isInstall) installRunning.set(false)
         }
     }
@@ -533,7 +675,9 @@ class TerminalRuntime(
         }
 
         runCatching {
-            job.status.set(TerminalJobStatus.RUNNING)
+            if (!job.status.compareAndSet(TerminalJobStatus.QUEUED, TerminalJobStatus.RUNNING)) {
+                return
+            }
             appScope.launch(Dispatchers.IO) {
                 agentTaskStore.update(job.id, status = AgentTaskStatus.RUNNING)
             }
@@ -565,7 +709,12 @@ class TerminalRuntime(
                 delay(job.timeoutMillis)
                 if (job.status.get().running) {
                     appendJobOutput(job, "Termux job timed out after ${job.timeoutMillis}ms. The external Termux process may still be running.\n")
-                    finishJob(job, TerminalJobStatus.TIMED_OUT, null, "Termux job timed out.")
+                    finishJob(
+                        job,
+                        TerminalJobStatus.INTERRUPTED,
+                        null,
+                        "Termux result timed out in AmberAgent; external process state is unknown.",
+                    )
                 }
             }
         }.onFailure { error ->
@@ -576,14 +725,26 @@ class TerminalRuntime(
     }
 
     private fun stopJobInternal(job: TerminalJob, reason: String) {
-        if (!job.status.get().running) return
-        job.status.set(TerminalJobStatus.CANCELLED)
+        val stoppedStatus = if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
+            TerminalJobStatus.INTERRUPTED
+        } else {
+            TerminalJobStatus.CANCELLED
+        }
+        var previousStatus: TerminalJobStatus
+        while (true) {
+            previousStatus = job.status.get()
+            if (!previousStatus.running) return
+            if (job.status.compareAndSet(previousStatus, stoppedStatus)) break
+        }
+        job.error = reason
         appendJobOutput(job, "$reason\n")
         job.process?.let { terminateProcess(job, it) }
         if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL) {
             appendJobOutput(job, "Termux external jobs cannot be force-killed from AmberAgent; check Termux if work continues.\n")
         }
-        finishJob(job, TerminalJobStatus.CANCELLED, job.exitCode, reason)
+        if (job.runtime == TerminalRuntimeKind.TERMUX_EXTERNAL || previousStatus == TerminalJobStatus.QUEUED) {
+            finishJob(job, stoppedStatus, job.exitCode, reason)
+        }
     }
 
     private fun finishJob(
@@ -592,34 +753,57 @@ class TerminalRuntime(
         exitCode: Int?,
         error: String?,
     ) {
+        var finalStatus = status
         while (true) {
             val current = job.status.get()
-            val allowCancelledFinalization = current == TerminalJobStatus.CANCELLED &&
-                status == TerminalJobStatus.CANCELLED &&
-                !job.completionNotified.get()
-            if (!current.running && !allowCancelledFinalization) return
+            if (!current.running) {
+                if (current in setOf(TerminalJobStatus.CANCELLED, TerminalJobStatus.INTERRUPTED) &&
+                    !job.completionNotified.get()
+                ) {
+                    finalStatus = current
+                    break
+                }
+                return
+            }
             if (job.status.compareAndSet(current, status)) break
         }
+        val finalError = if (finalStatus in setOf(TerminalJobStatus.CANCELLED, TerminalJobStatus.INTERRUPTED)) {
+            error ?: job.error
+        } else {
+            error
+        }
         job.exitCode = exitCode
-        job.error = error
+        job.error = finalError
         job.updatedAtMs = System.currentTimeMillis()
+        job.outputCallback = null
         if (job.isInstall) installRunning.set(false)
         if (!job.completionNotified.compareAndSet(false, true)) return
         appScope.launch(Dispatchers.IO) {
             agentTaskStore.update(
                 taskId = job.id,
-                status = status.toAgentTaskStatus(),
+                status = finalStatus.toAgentTaskStatus(),
                 summary = job.output.snapshot().take(4_000),
-                error = error,
+                error = finalError,
                 outputOffset = job.log.file.length(),
                 cancelCapability = false,
             )
         }
-        when (status) {
+        when (finalStatus) {
             TerminalJobStatus.COMPLETED -> activityStore.complete(job.id, exitCode ?: 0, job.output.snapshot())
             TerminalJobStatus.CANCELLED -> activityStore.cancel(job.id, job.output.snapshot())
-            TerminalJobStatus.FAILED,
-            TerminalJobStatus.TIMED_OUT -> activityStore.complete(job.id, exitCode ?: 1, job.output.snapshot())
+            TerminalJobStatus.FAILED -> activityStore.complete(job.id, exitCode ?: 1, job.output.snapshot())
+            TerminalJobStatus.TIMED_OUT -> activityStore.complete(
+                job.id,
+                exitCode ?: 1,
+                job.output.snapshot(),
+                ToolActivityStatus.TIMED_OUT,
+            )
+            TerminalJobStatus.INTERRUPTED -> activityStore.complete(
+                job.id,
+                exitCode ?: 1,
+                job.output.snapshot(),
+                ToolActivityStatus.INTERRUPTED,
+            )
             TerminalJobStatus.QUEUED,
             TerminalJobStatus.RUNNING -> Unit
         }
@@ -672,6 +856,7 @@ class TerminalRuntime(
         TerminalJobStatus.FAILED -> AgentTaskStatus.FAILED
         TerminalJobStatus.CANCELLED -> AgentTaskStatus.CANCELLED
         TerminalJobStatus.TIMED_OUT -> AgentTaskStatus.TIMED_OUT
+        TerminalJobStatus.INTERRUPTED -> AgentTaskStatus.INTERRUPTED
     }
 
     private fun terminateProcess(job: TerminalJob, process: Process) {
@@ -681,9 +866,10 @@ class TerminalRuntime(
         runCatching { process.waitFor(1, TimeUnit.SECONDS) }
         if (process.isAlive) {
             pid?.let { killProcessTree(it, signal = "KILL") }
-            runCatching { process.destroyForcibly() }
-            runCatching { process.waitFor(1, TimeUnit.SECONDS) }
+            process.destroyForcibly()
+            process.waitFor()
         }
+        check(!process.isAlive) { "Terminal process did not stop; workspace lease remains held." }
     }
 
     private fun processPid(process: Process): Long? =
@@ -767,24 +953,27 @@ class TerminalRuntime(
             status = ToolActivityStatus.RUNNING,
             inputPreview = command,
             runtime = runtime.wireName,
-            workspace = "/workspace",
+            workspace = workspace,
             startedAtEpochMillis = startedAtMs,
             canCancel = true,
         )
 
-    private fun TerminalJob.snapshot(): TerminalJobSnapshot =
-        TerminalJobSnapshot(
+    private fun TerminalJob.snapshot(): TerminalJobSnapshot {
+        val currentStatus = status.get()
+        return TerminalJobSnapshot(
             jobId = id,
             runtime = runtime,
-            status = status.get(),
+            workspace = workspace,
+            status = currentStatus,
             exitCode = exitCode,
-            running = status.get().running,
+            running = currentStatus.running,
             outputTail = output.snapshot(),
             outputLogPath = log.file.absolutePath,
             startedAtMs = startedAtMs,
             updatedAtMs = updatedAtMs,
             error = error,
         )
+    }
 
     private fun String.looksLikeLongRunningCommand(): Boolean =
         LONG_RUNNING_COMMAND_REGEX.containsMatchIn(this)
@@ -800,8 +989,12 @@ class TerminalRuntime(
         private const val MAX_JOB_TIMEOUT_MS = 60 * 60_000L
         private const val DEFAULT_READ_BYTES = 64 * 1024
         private const val MAX_CONCURRENT_JOBS = 4
+        private const val MAX_CONCURRENT_SESSIONS = 4
+        private const val MAX_RETAINED_JOBS = 64
+        private const val MAX_RETAINED_SESSIONS = 8
         private const val MIN_OUTPUT_TAIL_CHARS = 64 * 1024
         private const val MAX_OUTPUT_TAIL_CHARS = 512 * 1024
+        private const val MAX_SESSION_OUTPUT_CHARS = 256 * 1024
         private const val MAX_JOB_LOG_BYTES = 8 * 1024 * 1024
 
         private const val TERMUX_PACKAGE_NAME = "com.termux"
@@ -834,7 +1027,7 @@ class TerminalRuntime(
 }
 
 data class TerminalResult(
-    val exitCode: Int,
+    val exitCode: Int?,
     val output: String,
     val runtime: String,
     val workspace: String,
@@ -861,6 +1054,7 @@ private data class TerminalJob(
     val id: String,
     val command: String,
     val runtime: TerminalRuntimeKind,
+    val workspace: String,
     val timeoutMillis: Long,
     val output: TerminalOutputBuffer,
     val startedAtMs: Long,
@@ -870,7 +1064,7 @@ private data class TerminalJob(
     val isInstall: Boolean,
     val syncWorkspace: Boolean,
     val flushWorkspace: Boolean,
-    val outputCallback: ((String) -> Unit)?,
+    @Volatile var outputCallback: ((String) -> Unit)?,
     val log: TerminalJobLog,
     val status: AtomicReference<TerminalJobStatus> = AtomicReference(TerminalJobStatus.QUEUED),
     val completionNotified: AtomicBoolean = AtomicBoolean(false),
@@ -886,8 +1080,36 @@ private data class TerminalSession(
     val writer: BufferedWriter,
     val workingDir: File,
     val runtime: TerminalRuntimeKind,
+    val mirrorLease: WorkspaceMirrorLease,
+    val output: TerminalSessionOutput,
+    @Volatile var reader: Job? = null,
     @Volatile var lastActivityMs: Long,
 )
+
+private class TerminalSessionOutput(private val maxChars: Int) {
+    private val buffer = StringBuilder()
+    private var truncated = false
+
+    @Synchronized
+    fun append(text: String) {
+        buffer.append(text)
+        if (buffer.length > maxChars) {
+            buffer.delete(0, buffer.length - maxChars)
+            truncated = true
+        }
+    }
+
+    @Synchronized
+    fun drain(): String {
+        val output = buildString {
+            if (truncated) append("[Session output truncated]\n")
+            append(buffer)
+        }
+        buffer.clear()
+        truncated = false
+        return output
+    }
+}
 
 private data class ProcessRow(
     val pid: Long,

@@ -57,7 +57,7 @@ val agentInfraModule = module {
 
     single { LiveModeManager(get(), get(), get(), get()) }
 
-    single { AlpineRuntimeInstaller(get(), BuildConfig.VERSION_CODE) }
+    single { AlpineRuntimeInstaller(get()) }
 
     single { TerminalRuntime(get(), get(), get(), get(), get(), get(), get()) }
 

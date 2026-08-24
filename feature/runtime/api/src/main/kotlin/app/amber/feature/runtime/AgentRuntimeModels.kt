@@ -87,6 +87,12 @@ enum class ToolActivityStatus {
     @SerialName("failed")
     FAILED,
 
+    @SerialName("timed_out")
+    TIMED_OUT,
+
+    @SerialName("interrupted")
+    INTERRUPTED,
+
     @SerialName("cancelled")
     CANCELLED,
 }

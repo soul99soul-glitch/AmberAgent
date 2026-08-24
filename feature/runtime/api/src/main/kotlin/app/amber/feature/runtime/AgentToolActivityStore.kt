@@ -63,11 +63,17 @@ class AgentToolActivityStore {
         return toolCallId
     }
 
-    fun complete(toolCallId: String, exitCode: Int, output: String) {
+    fun complete(
+        toolCallId: String,
+        exitCode: Int,
+        output: String,
+        explicitStatus: ToolActivityStatus? = null,
+    ) {
         _sandboxActivity.update { current ->
             if (current?.toolCallId == toolCallId) {
                 current.copy(
-                    status = if (exitCode == 0) ToolActivityStatus.SUCCEEDED else ToolActivityStatus.FAILED,
+                    status = explicitStatus
+                        ?: if (exitCode == 0) ToolActivityStatus.SUCCEEDED else ToolActivityStatus.FAILED,
                     outputTail = output.trim().takeLast(MAX_OUTPUT_TAIL_CHARS),
                     endedAtEpochMillis = System.currentTimeMillis(),
                     canCancel = false,

@@ -4,15 +4,18 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class TerminalRuntimeKind(val wireName: String) {
+enum class TerminalRuntimeKind(
+    val wireName: String,
+    val supportsWorkspaceSync: Boolean,
+) {
     @SerialName("builtin_alpine")
-    BUILTIN_ALPINE("builtin_alpine"),
+    BUILTIN_ALPINE("builtin_alpine", supportsWorkspaceSync = true),
 
     @SerialName("android_shell")
-    ANDROID_SHELL("android_shell"),
+    ANDROID_SHELL("android_shell", supportsWorkspaceSync = true),
 
     @SerialName("termux_external")
-    TERMUX_EXTERNAL("termux_external");
+    TERMUX_EXTERNAL("termux_external", supportsWorkspaceSync = false);
 
     companion object {
         fun fromWire(value: String?): TerminalRuntimeKind? =
@@ -38,7 +41,10 @@ enum class TerminalJobStatus(val wireName: String) {
     CANCELLED("cancelled"),
 
     @SerialName("timed_out")
-    TIMED_OUT("timed_out");
+    TIMED_OUT("timed_out"),
+
+    @SerialName("interrupted")
+    INTERRUPTED("interrupted");
 
     val running: Boolean
         get() = this == QUEUED || this == RUNNING
@@ -47,6 +53,7 @@ enum class TerminalJobStatus(val wireName: String) {
 data class TerminalJobSnapshot(
     val jobId: String,
     val runtime: TerminalRuntimeKind,
+    val workspace: String,
     val status: TerminalJobStatus,
     val exitCode: Int?,
     val running: Boolean,

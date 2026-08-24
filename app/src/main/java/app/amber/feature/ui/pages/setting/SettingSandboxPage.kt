@@ -54,6 +54,8 @@ import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
+import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -72,6 +74,8 @@ fun SettingSandboxPage(
     val scope = rememberCoroutineScope()
     val workspaceSavedToast = stringResource(R.string.setting_files_page_workspace_saved)
     val workspaceClearedToast = stringResource(R.string.setting_files_page_workspace_cleared)
+    val workspaceUpdateFailed = stringResource(R.string.setting_files_page_workspace_update_failed)
+    var workspaceMutationRunning by remember { mutableStateOf(false) }
     var installStatus by remember { mutableStateOf<InstallStatus?>(null) }
     var installingRuntime by remember { mutableStateOf(false) }
     LaunchedEffect(alpineRuntimeInstaller) {
@@ -86,9 +90,24 @@ fun SettingSandboxPage(
     val outputTailOptions = remember { listOf(64, 128, 256, 512).map { it * 1024 } }
     val installTimeoutOptions = remember { listOf(5, 15, 30).map { it * 60_000L } }
     val workspaceLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            workspaceManager.setWorkspace(uri)
-            toaster.show(workspaceSavedToast)
+        if (uri == null) {
+            workspaceMutationRunning = false
+        } else {
+            workspaceMutationRunning = true
+            scope.launch {
+                try {
+                    workspaceManager.setWorkspace(uri)
+                    toaster.show(workspaceSavedToast)
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    toaster.show(
+                        workspaceUpdateFailed.format(error.message ?: error::class.java.simpleName),
+                        type = ToastType.Error,
+                    )
+                } finally {
+                    workspaceMutationRunning = false
+                }
+            }
         }
     }
 
@@ -131,7 +150,11 @@ fun SettingSandboxPage(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Button(
-                                        onClick = { workspaceLauncher.launch(null) },
+                                        onClick = {
+                                            workspaceMutationRunning = true
+                                            workspaceLauncher.launch(null)
+                                        },
+                                        enabled = !workspaceMutationRunning,
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
                                         Text(
@@ -141,10 +164,25 @@ fun SettingSandboxPage(
                                     }
                                     OutlinedButton(
                                         onClick = {
-                                            workspaceManager.clearWorkspace()
-                                            toaster.show(workspaceClearedToast)
+                                            workspaceMutationRunning = true
+                                            scope.launch {
+                                                try {
+                                                    workspaceManager.clearWorkspace()
+                                                    toaster.show(workspaceClearedToast)
+                                                } catch (error: Throwable) {
+                                                    if (error is CancellationException) throw error
+                                                    toaster.show(
+                                                        workspaceUpdateFailed.format(
+                                                            error.message ?: error::class.java.simpleName,
+                                                        ),
+                                                        type = ToastType.Error,
+                                                    )
+                                                } finally {
+                                                    workspaceMutationRunning = false
+                                                }
+                                            }
                                         },
-                                        enabled = workspaceState.configured,
+                                        enabled = workspaceState.configured && !workspaceMutationRunning,
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
                                         Text(
@@ -357,6 +395,11 @@ private fun RuntimeStatusBlock(
                     MaterialTheme.colorScheme.onSurfaceVariant
                 },
             )
+            Text(
+                text = stringResource(R.string.setting_sandbox_runtime_repair_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -365,17 +408,22 @@ private fun RuntimeStatusBlock(
                     onClick = onRefresh,
                     enabled = !installing,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f),
                 ) {
-                    Text("重新检查", maxLines = 1)
+                    Text(stringResource(R.string.setting_sandbox_runtime_recheck))
                 }
                 Button(
                     onClick = onInstallOrRepair,
                     enabled = !installing,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f),
                 ) {
                     Text(
-                        text = if (installing) "安装中…" else "安装/修复 runtime",
-                        maxLines = 1,
+                        text = if (installing) {
+                            stringResource(R.string.setting_sandbox_runtime_installing)
+                        } else {
+                            stringResource(R.string.setting_sandbox_runtime_install_repair)
+                        },
                     )
                 }
             }

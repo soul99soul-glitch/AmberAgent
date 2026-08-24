@@ -3,18 +3,18 @@ package app.amber.feature.ui.components.ui
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -45,7 +46,7 @@ fun Switch(
     trackColor: Color = MaterialTheme.colorScheme.primary,
     trackColorUnchecked: Color = MaterialTheme.colorScheme.surfaceContainer,
     thumbColor: Color = MaterialTheme.colorScheme.surface,
-    thumbColorUnchecked: Color = MaterialTheme.colorScheme.outline
+    thumbColorUnchecked: Color = MaterialTheme.colorScheme.outline,
 ) {
     val dimensions = when (size) {
         SwitchSize.Small -> SwitchDimensions(
@@ -94,30 +95,35 @@ fun Switch(
 
     Box(
         modifier = modifier
-            .size(width = dimensions.trackWidth, height = dimensions.trackHeight)
-            .clip(RoundedCornerShape(50))
-            .background(currentTrackColor)
-            .clickable(
+            .minimumInteractiveComponentSize()
+            .toggleable(
+                value = checked,
                 enabled = enabled,
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() }
-            ) {
-                onCheckedChange(!checked)
-            },
-        contentAlignment = Alignment.CenterStart
+                role = Role.Switch,
+                onValueChange = onCheckedChange,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
-                .padding(dimensions.thumbPadding)
-                .offset(x = thumbOffset)
-                .size(dimensions.thumbSize)
-                .shadow(
-                    elevation = if (enabled && checked) 1.dp else 0.dp,
-                    shape = CircleShape
-                )
-                .clip(CircleShape)
-                .background(currentThumbColor)
-        )
+                .size(width = dimensions.trackWidth, height = dimensions.trackHeight)
+                .clip(RoundedCornerShape(50))
+                .background(currentTrackColor),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .padding(dimensions.thumbPadding)
+                    .offset(x = thumbOffset)
+                    .size(dimensions.thumbSize)
+                    .shadow(
+                        elevation = if (enabled && checked) 1.dp else 0.dp,
+                        shape = CircleShape,
+                    )
+                    .clip(CircleShape)
+                    .background(currentThumbColor),
+            )
+        }
     }
 }
 
