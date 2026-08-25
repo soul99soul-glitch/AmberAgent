@@ -177,8 +177,9 @@ const HILOG_TAG: string = 'DeepRead.ChatPage';
 
 // Phase 5:历史分页常量(计划 §6.7 — PAGE_SIZE 对齐 Android 会话分页规模)
 const TIMELINE_PAGE_SIZE: number = 50;
-// 首屏跨页定位最多连续追加历史页数(深度受限,避免极端会话无限链)
-const TIMELINE_MAX_PREFETCH_PAGES: number = 3;
+// 首屏跨页定位最多连续追加历史页数/节点数,避免极端会话无限链。
+const TIMELINE_MAX_PREFETCH_PAGES: number = 40;
+const TIMELINE_MAX_PREFETCH_NODES: number = 2000;
 
 
 // 节点视图模型:分支切换/重新生成需要节点级信息
@@ -1676,10 +1677,17 @@ struct ChatPage {
     if (st.fullyLoaded || coversIndex(st, targetNodeIndex)) {
       this.prefetching = false;
       const row: number = this.rows.findIndex((r: MsgRow): boolean => r.nodeId === targetNodeId);
+      if (row < 0) {
+        hilog.warn(HILOG_DOMAIN, HILOG_TAG,
+          'prefetch covered target index but node was not found: %{public}s', targetNodeId);
+      }
       this.applyInitialScroll(row >= 0 ? row : -1);
       return;
     }
-    if (depth >= TIMELINE_MAX_PREFETCH_PAGES) {
+    if (depth >= TIMELINE_MAX_PREFETCH_PAGES ||
+      st.loadedNodeCount >= TIMELINE_MAX_PREFETCH_NODES) {
+      hilog.warn(HILOG_DOMAIN, HILOG_TAG,
+        'prefetch history stopped before target: %{public}s', targetNodeId);
       this.prefetching = false;
       this.applyInitialScroll(-1);
       return;
@@ -1689,8 +1697,10 @@ struct ChatPage {
       return;
     }
     const convId: string = this.conversation.id;
-    const offset: number = nextOlderPageOffset(st, TIMELINE_PAGE_SIZE);
-    getChatRepository().getConversationNodePage(convId, offset, TIMELINE_PAGE_SIZE)
+    const pageSize: number = Math.min(
+      TIMELINE_PAGE_SIZE, TIMELINE_MAX_PREFETCH_NODES - st.loadedNodeCount);
+    const offset: number = nextOlderPageOffset(st, pageSize);
+    getChatRepository().getConversationNodePage(convId, offset, pageSize)
       .then((page): void => {
         if (!this.pageAlive) return;
         const older: MsgRow[] = buildRowsFromNodes(page.nodes);
@@ -1699,6 +1709,13 @@ struct ChatPage {
         this.rows = merged;
         this.timelineLoadState = applyOlderPage(
           this.timelineLoadState, page.oldestLoadedIndex, added);
+        if (older.length === 0 || added === 0) {
+          hilog.warn(HILOG_DOMAIN, HILOG_TAG,
+            'prefetch history made no progress for target: %{public}s', targetNodeId);
+          this.prefetching = false;
+          this.applyInitialScroll(-1);
+          return;
+        }
         this.prefetchHistoryUntilCovered(targetNodeId, targetNodeIndex, depth + 1);
       })
       .catch((e: Error): void => {
