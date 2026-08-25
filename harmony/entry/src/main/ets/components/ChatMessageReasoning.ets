@@ -159,26 +159,10 @@ export struct ChatMessageReasoning {
   }
 
   private headerText(): string {
-    const reasoning: UIMessagePartReasoning = this.part;
     if (this.loading) {
-      const title: string | null = extractThinkingTitle(reasoning.reasoning);
+      const title: string | null = extractThinkingTitle(this.part.reasoning);
       if (title !== null) return title;
     }
-    if (reasoning.finishedAt !== null || this.loading) {
-      const durationMs: number = reasoningDurationMs(
-        reasoning.createdAt, reasoning.finishedAt, this.loading, this.durationTick);
-      if (Number.isFinite(durationMs) && durationMs >= 0) {
-        let label: string = this.loading
-          ? `思考中 ${(durationMs / 1000).toFixed(1)}s`
-          : formatThoughtSeconds(durationMs / 1000);
-        // budget 标签(如果有)
-        const budget: string = this.budgetLabel();
-        if (budget.length > 0) label = `${label} · ${budget}`;
-        return label;
-      }
-    }
-    const budget: string = this.budgetLabel();
-    if (budget.length > 0) return `深度思考 · ${budget}`;
     return '深度思考';
   }
 

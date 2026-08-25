@@ -22,7 +22,7 @@ import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDi
 import { getDeepReadScheduler, getRepository } from '../di/AppContainer.ets';
 import {
   BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT,
-  BODY, META, TITLE,
+  BODY, META, TITLE, ERROR,
 } from '../design/tokens.ets';
 
 const DOMAIN: number = 0x0001;
@@ -33,6 +33,7 @@ const FONT_SCALE_MIN: number = 0.85;
 const FONT_SCALE_MAX: number = 1.25;
 const FONT_SCALE_STEP: number = 0.05;
 const FONT_SCALE_DEFAULT: number = 1.0;
+const GENERATION_STEP_COUNT: number = 6;
 
 interface ArticleParams {
   topicId: string;
@@ -49,6 +50,7 @@ struct DeepReadArticlePage {
   @State running: boolean = true;
   @State errorMsg: string = '';
   @State currentStage: string = '';
+  @State cancelled: boolean = false;
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
   // G5-S1:重新生成确认对话框
@@ -80,7 +82,7 @@ struct DeepReadArticlePage {
     hilog.info(DOMAIN, TAG, 'aboutToAppear: topicId=%{public}s title=%{public}s', this.topicId, this.title);
     this.loadArticle(token, false).catch((e: Error): void => {
       if (this.pageAlive && token === this.pageToken) {
-        this.errorMsg = e.message;
+        this.errorMsg = this.cancelled ? '生成已取消' : e.message;
         this.running = false;
       }
     });
@@ -120,17 +122,23 @@ struct DeepReadArticlePage {
     if (this.unsubscribeRunning !== null) this.unsubscribeRunning();
     this.unsubscribeRunning = this.scheduler.observeRunning(this.topicId).subscribe((running: boolean): void => {
       if (!this.pageAlive || token !== this.pageToken) return;
-      this.running = running;
-      if (running && this.currentStage.length === 0) this.currentStage = '收集来源';
+      this.running = this.cancelled ? false : running;
+      if (running && this.currentStage.length === 0) this.currentStage = this.progressLabel('收集来源', 1);
     });
     this.running = true;
+    this.cancelled = false;
     this.errorMsg = '';
-    this.currentStage = force ? '收集来源' : this.phaseLabel(cached?.output ?? null);
+    this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(cached?.output ?? null);
     const result: RunResult = await this.scheduler.run(this.topicId, this.title, { force });
     if (!this.pageAlive || token !== this.pageToken) return;
     if (result.output !== null) this.applyOutput(result.output, token);
-    if (!result.ok && result.error !== 'aborted') {
-      this.errorMsg = result.error ?? '深度阅读生成失败';
+    if (!result.ok) {
+      if (result.error === 'aborted') {
+        this.cancelled = true;
+        this.errorMsg = '生成已取消';
+      } else {
+        this.errorMsg = result.error ?? '深度阅读生成失败';
+      }
     }
     this.running = false;
   }
@@ -143,18 +151,25 @@ struct DeepReadArticlePage {
   }
 
   private phaseLabel(output: DeepReadOutput | null): string {
-    if (output === null) return '收集来源';
-    if (output.generationPhase === 'COLLECTING') return '收集来源';
-    if (output.generationPhase === 'PLANNING') return '规划文章';
+    if (output === null) return this.progressLabel('收集来源', 1);
+    if (output.generationPhase === 'COLLECTING') return this.progressLabel('收集来源', 1);
+    if (output.generationPhase === 'PLANNING') return this.progressLabel('规划文章', 2);
     if (output.generationPhase === 'WRITING') {
-      for (const stage of STAGE_ORDER) {
-        if (output.sectionStates[stage]?.status === 'RUNNING') return this.stageLabel(stage);
+      for (let index: number = 0; index < STAGE_ORDER.length; index++) {
+        const stage: DeepReadGenerationStage = STAGE_ORDER[index];
+        if (output.sectionStates[stage]?.status === 'RUNNING') {
+          return this.progressLabel(this.stageLabel(stage), index + 3);
+        }
       }
-      return '撰写文章';
+      return this.progressLabel('撰写文章', 3);
     }
     if (output.generationPhase === 'COMPLETE' || isComplete(output)) return '完成';
     if (firstFailureMessage(output) !== null) return '生成失败';
     return '等待生成';
+  }
+
+  private progressLabel(label: string, step: number): string {
+    return `${label}（第 ${step}/${GENERATION_STEP_COUNT} 步）`;
   }
 
   private stageLabel(stage: DeepReadGenerationStage): string {
@@ -228,15 +243,24 @@ struct DeepReadArticlePage {
     return lines.join('\n');
   }
 
+  private cancelGeneration(): void {
+    if (!this.running || this.scheduler === null || this.topicId.length === 0) return;
+    this.cancelled = true;
+    this.running = false;
+    this.errorMsg = '生成已取消';
+    this.scheduler.abort(this.topicId);
+  }
+
   generateArticle(): void {
     const token: number = ++this.pageToken;
     this.output = null;
     this.errorMsg = '';
+    this.cancelled = false;
     this.running = true;
-    this.currentStage = '收集来源';
+    this.currentStage = this.progressLabel('收集来源', 1);
     this.loadArticle(token, true).catch((e: Error): void => {
       if (this.pageAlive && token === this.pageToken) {
-        this.errorMsg = e.message;
+        this.errorMsg = this.cancelled ? '生成已取消' : e.message;
         this.running = false;
       }
     });
@@ -301,10 +325,9 @@ struct DeepReadArticlePage {
 
         // ── 内容区 ──
         if (this.running) {
-          // G5-S1:生成中 — RunningStageNotice(阶段 + 进度指示)
+          // G5-S1:生成中 — RunningStageNotice(阶段 + 步骤指示)
           Column() {
             LoadingProgress().width(40).height(40).color(ACCENT)
-            // RunningStageNotice:阶段文字 + 百分比样式(对齐 Android 494-512)
             Row() {
               Text(this.currentStage)
                 .fontSize(META)
@@ -314,11 +337,19 @@ struct DeepReadArticlePage {
             .backgroundColor(SURFACE)
             .borderRadius(50)
             .margin({ top: 16 })
+            Text('取消生成')
+              .fontSize(BODY)
+              .fontColor(ERROR)
+              .height(40)
+              .padding({ left: 16, right: 16 })
+              .margin({ top: 12 })
+              .onClick((): void => { this.cancelGeneration(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.errorMsg.length > 0 && this.output === null) {
-          // 首次生成失败,保留明确重试入口
+          // 首次生成失败或显式取消,保留明确重试入口
           Column() {
-            Text('生成失败').fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
+            Text(this.cancelled ? '生成已取消' : '生成失败')
+              .fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
             Text(this.errorMsg).fontSize(META).fontColor(INK3).margin({ top: 6 })
             Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
               .onClick((): void => { this.generateArticle(); })
@@ -339,6 +370,24 @@ struct DeepReadArticlePage {
                   .margin({ top: 14 })
               }
               Text(this.currentStage).fontSize(META).fontColor(INK3).margin({ top: 10 })
+              if (this.cancelled) {
+                Row() {
+                  Text(this.errorMsg.length > 0 ? this.errorMsg : '生成已取消')
+                    .fontSize(META)
+                    .fontColor(ERROR)
+                    .layoutWeight(1)
+                  Text('重试')
+                    .fontSize(META)
+                    .fontColor(ACCENT)
+                    .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+                    .onClick((): void => { this.generateArticle(); })
+                }
+                .width('100%')
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(SURFACE2)
+                .borderRadius(8)
+                .margin({ top: 12 })
+              }
               Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 4 })
               if (this.partialError().length > 0) {
                 this.PartialErrorNotice(this.partialError())

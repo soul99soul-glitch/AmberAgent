@@ -127,6 +127,8 @@ export struct MarkdownText {
   private lastParsedText: string = '';
   private lastGrowCallbackMs: number = 0;
   @State private previewUrl: string = '';
+  @State private previewScale: number = 1;
+  private pinchStartScale: number = 1;
 
   aboutToAppear(): void {
     this.updateDisplay();
@@ -423,6 +425,12 @@ export struct MarkdownText {
 
   private closeImagePreview(): void {
     this.previewUrl = '';
+    this.previewScale = 1;
+    this.pinchStartScale = 1;
+  }
+
+  private clampPreviewScale(value: number): number {
+    return Math.max(1, Math.min(3, value));
   }
 
   @Builder
@@ -433,7 +441,15 @@ export struct MarkdownText {
           .width('100%')
           .height('100%')
           .objectFit(ImageFit.Contain)
+          .scale({ x: this.previewScale, y: this.previewScale })
           .onClick((): void => { this.closeImagePreview(); })
+          .gesture(
+            PinchGesture()
+              .onActionStart((): void => { this.pinchStartScale = this.previewScale; })
+              .onActionUpdate((event: GestureEvent): void => {
+                this.previewScale = this.clampPreviewScale(this.pinchStartScale * event.scale);
+              })
+          )
         Icon({ name: 'close', iconSize: 24, color: '#FFFFFF' })
           .width(44)
           .height(44)

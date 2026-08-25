@@ -6,7 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, USER_BG, USER_INK } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, TEXT_STYLES, USER_BG, USER_INK } from '../design/tokens.ets';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { router, promptAction, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -4510,13 +4510,18 @@ struct ChatPage {
         Column() {
           if (this.editingTitle) {
             TextInput({ text: this.titleInput, placeholder: '会话标题' })
-              .fontSize(HEADER).fontWeight(FontWeight.Bold)
+              .fontSize(TEXT_STYLES.sessionTitle.size)
+              .fontWeight(TEXT_STYLES.sessionTitle.weight)
+              .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
               .layoutWeight(1).height(36)
               .backgroundColor(SURFACE)
               .onChange((v: string): void => { this.titleInput = v; })
           } else {
             Text(this.title)
-              .fontSize(HEADER).fontWeight(FontWeight.Bold).fontColor(INK)
+              .fontSize(TEXT_STYLES.sessionTitle.size)
+              .fontWeight(TEXT_STYLES.sessionTitle.weight)
+              .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
+              .fontColor(INK)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
           }
