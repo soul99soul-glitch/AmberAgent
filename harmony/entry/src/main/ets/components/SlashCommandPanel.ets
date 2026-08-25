@@ -60,7 +60,10 @@ export struct SlashCommandPanel {
       .backgroundColor(SURFACE)
       .borderRadius(12)
       .border({ width: 1, color: LINE })
-      .margin({ bottom: 4 })
+      // The parent Stack is the composer; position above its actual height.
+      .position({ left: 0, bottom: '100%' })
+      .zIndex(20)
+      .shadow({ radius: 10, color: '#22000000', offsetY: 3 })
     }
   }
 }

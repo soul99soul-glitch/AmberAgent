@@ -96,13 +96,6 @@ export struct ChatInput {
 
   build(): void {
     Column() {
-      // 斜杠命令面板(输入 / 时显示)
-      SlashCommandPanel({
-        commands: this.getSlashCommands(),
-        visible: this.isSlashVisible(),
-        onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
-      })
-
       // 编辑取消条
       if (this.editing) {
         Row() {
@@ -117,7 +110,8 @@ export struct ChatInput {
 
       // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
       //   + / 胶囊 / 发送键严格等高 48,容器 alignItems:center,胶囊固定 height 48。
-      Row() {
+      Stack() {
+        Row() {
         // Attach capsule:48x48, radius 999, bg SURFACE2, border 1px LINE, plus 22/INK2
         Row() {
           Icon({ name: 'plus', iconSize: 22, color: INK2 })
@@ -199,10 +193,18 @@ export struct ChatInput {
           )
           .accessibilityText('发送消息，长按仅发送不等待回复')
         }
+        }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 10, bottom: 14 })
+        .alignItems(VerticalAlign.Center)
+
+        // Slash panel overlays the composer and follows its actual height.
+        SlashCommandPanel({
+          commands: this.getSlashCommands(),
+          visible: this.isSlashVisible(),
+          onSelect: (cmd: SlashCommand): void => { this.handleSlashCommand(cmd); },
+        })
       }
-      .width('100%')
-      .padding({ left: 20, right: 20, top: 10, bottom: 14 })
-      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
   }

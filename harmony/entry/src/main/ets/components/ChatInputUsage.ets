@@ -6,19 +6,71 @@ import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, S
 
 // 格式化 token 数(对齐 Android formatContextTokens)
 const formatTokens = (tokens: number): string => {
-  if (tokens <= 0) return '0';
-  if (tokens < 1000) return '<1K';
-  if (tokens < 10000) return `${(tokens / 1000).toFixed(1)}K`;
-  return `${Math.round(tokens / 1000)}K`;
+  const value: number = Math.trunc(tokens);
+  if (value <= 0) return '0';
+  if (value < 1000) return String(value);
+  if (value < 1000000) {
+    const kilo: number = value / 1000;
+    return Number.isInteger(kilo) ? `${kilo}K` : `${kilo.toFixed(1)}K`;
+  }
+  if (value < 1000000000) {
+    const mega: number = value / 1000000;
+    return Number.isInteger(mega) ? `${mega}M` : `${mega.toFixed(1)}M`;
+  }
+  const billion: number = value / 1000000000;
+  return Number.isInteger(billion) ? `${billion}B` : `${billion.toFixed(1)}B`;
 };
 
 // 上下文用量颜色(对齐 Android ringColor)
 const contextColor = (ratio: number, compactActive: boolean): string => {
-  if (compactActive) return STATUS_BLUE;  // blue
-  if (ratio >= 0.7) return ERROR;       // red
-  if (ratio >= 0.5) return STATUS_AMBER;   // amber
-  return INK3;                           // muted
+  if (compactActive) return STATUS_BLUE;  // compact active
+  if (ratio >= 0.9) return ERROR;         // error
+  if (ratio >= 0.7) return STATUS_AMBER;  // amber
+  return INK3;                            // normal
 };
+
+@Component
+struct ContextRing {
+  @Prop @Watch('onInputChanged') ratio: number = 0;
+  @Prop @Watch('onInputChanged') color: string = INK3;
+  @Prop @Watch('onInputChanged') lineColor: string = LINE;
+  private settings: RenderingContextSettings = new RenderingContextSettings(true);
+  private context: CanvasRenderingContext2D = new CanvasRenderingContext2D(this.settings);
+
+  private onInputChanged(): void {
+    this.draw();
+  }
+
+  private draw(): void {
+    const width: number = this.context.width;
+    const height: number = this.context.height;
+    const size: number = Math.min(width, height);
+    if (size <= 0) return;
+    this.context.clearRect(0, 0, width, height);
+    const stroke: number = 1.5;
+    const center: number = size / 2;
+    const radius: number = (size - stroke) / 2;
+    this.context.beginPath();
+    this.context.strokeStyle = this.lineColor;
+    this.context.lineWidth = stroke;
+    this.context.arc(center, center, radius, 0, Math.PI * 2);
+    this.context.stroke();
+    if (this.ratio <= 0) return;
+    this.context.beginPath();
+    this.context.strokeStyle = this.color;
+    this.context.lineWidth = stroke;
+    this.context.arc(center, center, radius, -Math.PI / 2,
+      -Math.PI / 2 + Math.PI * 2 * Math.min(this.ratio, 1));
+    this.context.stroke();
+  }
+
+  build(): void {
+    Canvas(this.context)
+      .width(14)
+      .height(14)
+      .onReady((): void => { this.draw(); });
+  }
+}
 
 // ContextUsageIndicator — 上下文环 + token 文本
 @Component
@@ -26,6 +78,7 @@ export struct ContextUsageIndicator {
   @Prop usedTokens: number = 0;
   @Prop contextWindow: number = 0;
   @Prop compactActive: boolean = false;
+  @Prop lineColor: string = LINE;
 
   private ratio(): number {
     if (this.contextWindow <= 0) return 0;
@@ -45,17 +98,15 @@ export struct ContextUsageIndicator {
 
   build(): void {
     Row() {
-      // 圆环(用 Text 字符模拟,ArkUI Canvas 复杂度高)
-      Text('●')
-        .fontSize(10)
-        .fontColor(this.ringColor())
-        .opacity(this.ratio() > 0 ? 0.8 : 0.3)
+      ContextRing({ ratio: this.ratio(), color: this.ringColor(), lineColor: this.lineColor })
         .margin({ right: 4 })
 
       Text(this.labelText())
         .fontSize(LABEL)
         .fontColor(INK3)
+        .constraintSize({ maxWidth: 180 })
         .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .alignItems(VerticalAlign.Center)
   }
@@ -85,7 +136,7 @@ export struct ReasoningLevelChip {
 export struct ComposerStatusChip {
   @Prop text: string = '';
   @Prop accent: boolean = false;
-  onClick: () => void = (): void => {};
+  onSelect: () => void = (): void => {};
   build(): void {
     Text(this.text)
       .fontSize(LABEL)
@@ -96,6 +147,6 @@ export struct ComposerStatusChip {
       .border({ width: 1, color: this.accent ? STATUS_BLUE : LINE })
       .maxLines(1)
       .textOverflow({ overflow: TextOverflow.Ellipsis })
-      .onClick((): void => { this.onClick(); })
+      .onClick((): void => { this.onSelect(); })
   }
 }

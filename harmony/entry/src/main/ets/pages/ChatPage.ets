@@ -133,6 +133,7 @@ import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
+import { ContextUsageIndicator } from '../components/ChatInputUsage.ets';
 import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
@@ -240,6 +241,7 @@ struct MessageRow {
   // D-053:本行是否属于活动流式尾部(reasoning loading 判定;
   //   Android messageLoading 语义,流式尾/regen 预览传 true)
   @Prop @Watch('onStreamingChange') streaming: boolean = false;
+  @Prop autoCloseThinking: boolean = true;
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
   onSwitch: (idx: number) => void = (_idx: number): void => {};
@@ -381,6 +383,15 @@ struct MessageRow {
     this.reasoningStates = copy;
   }
 
+  private autoCollapseReasoning(idx: string): void {
+    if (this.streaming || this.reasoningStateAt(idx) !== 'expanded') return;
+    const copy: Record<string, string> = {};
+    const keys: string[] = Object.keys(this.reasoningStates);
+    for (const k of keys) copy[k] = this.reasoningStates[k];
+    copy[idx] = 'preview';
+    this.reasoningStates = copy;
+  }
+
   // groupMessageParts 分组结果(每次 build 重算,题量小)
   private getBlocks(): MessagePartBlock[] {
     return groupMessageParts(this.message.parts);
@@ -454,6 +465,7 @@ struct MessageRow {
       //   SubAgentBlock/CouncilBlock → 占位卡片(完整 UI 后续梯队)。
       //   reasoning 状态索引仍用原始 part index(通过 ContentBlock.index 或
       //   ThinkingBlock 内 step 遍历时累加获得)。
+      Column() {
       ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
         if (block.kind === 'thinking') {
           // 组级折叠头部(ChainOfThought 语义:摘要+步骤数)
@@ -478,8 +490,12 @@ struct MessageRow {
                 part: step.reasoning,
                 state: this.reasoningStateAt(`${bi}-${si}`),
                 loading: this.reasoningLoading(step.reasoning),
+                autoCloseThinking: this.autoCloseThinking,
                 onToggle: (): void => {
                   this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
+                },
+                onAutoCollapse: (): void => {
+                  this.autoCollapseReasoning(`${bi}-${si}`);
                 },
               })
             } else if (step.kind === 'tool') {
@@ -540,13 +556,6 @@ struct MessageRow {
               .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
               .constraintSize({ maxWidth: '82%' })
               .margin({ bottom: 4 })
-              .gesture(
-                GestureGroup(
-                  GestureMode.Exclusive,
-                  LongPressGesture().onAction((): void => { this.onOpenActions(); }),
-                  TapGesture().onAction((): void => { this.onEdit(); }),
-                )
-              )
             } else {
               // 1:1 原型 AgentTurn:无卡片,正文直接落在 BG 上(15/1.66/ink)
   // P3:活动流式尾消息(streaming=true)只对最后文本块启用逐字 reveal;
@@ -623,6 +632,18 @@ struct MessageRow {
           })
         }
       }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
+      }
+      .gesture(
+        GestureGroup(
+          GestureMode.Exclusive,
+          LongPressGesture().onAction((): void => {
+            if (this.message.role === 'user') this.onOpenActions();
+          }),
+          TapGesture().onAction((): void => {
+            if (this.message.role === 'user') this.onEdit();
+          }),
+        )
+      )
       // 第三梯队:ChatMessageActionFooter 替换内联操作行(annotations + branch + actions 统一尾部)
       // streaming 期间交给 resolveActionFooterMode → reserved(占位防跳动),不再强制 hidden
       ChatMessageActionFooter({
@@ -747,6 +768,7 @@ struct ChatPage {
   @State contextCompacts: ConversationCompact[] = [];
   @State contextWindowTokens: number | null = null;
   @State compactActiveCount: number = 0;
+  @State autoCloseThinking: boolean = true;
   private contextEstimateConversation: Conversation | null = null;
   private contextEstimateCompacts: ConversationCompact[] | null = null;
   private contextEstimateTokens: number = 0;
@@ -1065,6 +1087,7 @@ struct ChatPage {
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
+      this.autoCloseThinking = setting.autoCloseThinking;
     });
     // MiniApp:设置页改 enabled 后返回,刷新快照(transform enabled 门;
     //   aboutToAppear 仅首载,Android settingsFlow collect 持续语义的页面级近似)
@@ -1269,6 +1292,7 @@ struct ChatPage {
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
+      this.autoCloseThinking = setting.autoCloseThinking;
       if (!this.enableAutoScroll) this.followMode = 'idle';
     });
     // D-075:mode_injections/lorebooks 快照(缺失/损坏 → [])
@@ -1915,12 +1939,12 @@ struct ChatPage {
     return `Context ${formatContextTokens(used)} / ${w !== null ? formatNumberInt(w) : '--'}`;
   }
 
-  // :120-125 — 环色:压缩中 blue;≥0.7 red;≥0.5 amber;否则 muted
+  // :120-125 — 环色:压缩中 blue;≥0.9 red;≥0.7 amber;否则 muted
   private contextRingColor(): string {
     if (this.compactActiveCount > 0) return STATUS_BLUE;
     const r: number = this.contextUsageRatio();
-    if (r >= 0.7) return ERROR;
-    if (r >= 0.5) return STATUS_AMBER;
+    if (r >= 0.9) return ERROR;
+    if (r >= 0.7) return STATUS_AMBER;
     return INK3;
   }
 
@@ -4293,9 +4317,10 @@ struct ChatPage {
         }
         ForEach(this.rows, (row: MsgRow): void => {
           ListItem() {
-            MessageRow({
-              message: row.message,
-              branchCount: row.branchCount,
+              MessageRow({
+                message: row.message,
+                autoCloseThinking: this.autoCloseThinking,
+                branchCount: row.branchCount,
               selectIndex: row.selectIndex,
               isLastAssistant: row.isLastAssistant,
               onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
@@ -4332,6 +4357,7 @@ struct ChatPage {
             ListItem() {
               MessageRow({
                 message: this.regenTail as UIMessage,
+                autoCloseThinking: this.autoCloseThinking,
                 streaming: true,
                 streamKeyTag: 'regen:',
                 // 流式尾 = 正在生成的最后一条 assistant(footer 走 reserved 占位)
@@ -4343,7 +4369,7 @@ struct ChatPage {
         }, (row: MsgRow): string => row.nodeId + (this.darkMode ? "-d" : "-l"))
         ForEach(this.streamingTail, (m: UIMessage): void => {
           ListItem() {
-            MessageRow({ message: m, streaming: true,
+            MessageRow({ message: m, autoCloseThinking: this.autoCloseThinking, streaming: true,
               isLastAssistant: true,
               onTextGrow: (): void => { this.followStreamingUpdate(); } })
           }
@@ -4479,17 +4505,12 @@ struct ChatPage {
             //   contextFilledBars/contextRingColor 计算;点击弹紧凑详情 sheet)—
             //   置 header 右侧,+ 图标左侧,不遮挡模型行
             Row() {
-              Row() {
-                ForEach([0, 1, 2, 3, 4], (i: number): void => {
-                  Text('')
-                    .width(3).height(8).borderRadius(1)
-                    .backgroundColor(i < this.contextFilledBars() ? this.contextRingColor() : LINE)
-                    .margin({ right: 2 })
-                }, (i: number): string => `ctxbar-${i}`)
-              }
-              .margin({ right: 3 })
-              Text(`${Math.round(this.contextUsageRatio() * 100)}%`)
-                .fontSize(LABEL).fontColor(INK3)
+              ContextUsageIndicator({
+                usedTokens: this.estimatedContextTokens(),
+                contextWindow: this.contextWindowTokens ?? 0,
+                compactActive: this.compactActiveCount > 0,
+                lineColor: LINE,
+              })
             }
             .alignItems(VerticalAlign.Center)
             .padding({ left: 6, right: 6, top: 6, bottom: 6 })

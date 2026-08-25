@@ -105,7 +105,9 @@ export struct ChatDrawer {
           .padding({ left: 16, right: 8, top: 4, bottom: this.navBarHeight + 8 })
           .alignItems(VerticalAlign.Center)
         }
-        .width('86%')
+        // Android 基准 336dp;小屏保持 min(336,86%) 保护。
+        .width(336)
+        .constraintSize({ maxWidth: '86%' })
         .height('100%')
         .backgroundColor(SURFACE)
         .borderRadius({ topRight: 24, bottomRight: 24 })

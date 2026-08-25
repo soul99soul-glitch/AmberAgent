@@ -2,8 +2,8 @@
 //
 // Android 基准: ChatMessageReasoning.kt(451 行)
 // 升级: 三态完整(collapsed/preview/expanded) + budget 标签 + MarkdownText 渲染内容
-//   + duration 实时显示 + preview 限高滚动
-// 降级(跳过): shimmer / AnimatedContent 标题切换 / 自动折叠 / 250ms ticker / 主题色变体
+//   + duration 实时显示 + preview 限高滚动 + 自动折叠/ticker
+// 降级(跳过): shimmer / AnimatedContent 标题切换 / 主题色变体
 
 import type { UIMessagePartReasoning } from '@amber/chat-domain';
 import {
@@ -18,8 +18,74 @@ import { Icon } from './ui/Icon.ets';
 export struct ChatMessageReasoning {
   @Prop part: UIMessagePartReasoning;
   @Prop state: string; // 'collapsed' | 'preview' | 'expanded'
-  @Prop loading: boolean;
+  @Prop @Watch('onLoadingChanged') loading: boolean;
+  @Prop autoCloseThinking: boolean = true;
   onToggle: () => void = (): void => {};
+  onAutoCollapse: () => void = (): void => {};
+
+  @State private durationTick: number = Date.now();
+  private durationTimer: number = -1;
+  private collapseTimer: number = -1;
+  private collapseTimerVersion: number = 0;
+  private sawLoading: boolean = false;
+
+  aboutToAppear(): void {
+    this.sawLoading = this.loading;
+    if (this.loading) this.startDurationTicker();
+  }
+
+  aboutToDisappear(): void {
+    this.stopDurationTicker();
+    this.clearCollapseTimer();
+  }
+
+  private onLoadingChanged(): void {
+    if (this.loading) {
+      this.sawLoading = true;
+      this.clearCollapseTimer();
+      this.startDurationTicker();
+      return;
+    }
+    this.stopDurationTicker();
+    if (this.sawLoading && this.part.finishedAt !== null &&
+      this.autoCloseThinking && this.state === 'expanded') {
+      this.scheduleAutoCollapse();
+    }
+  }
+
+  private startDurationTicker(): void {
+    if (this.durationTimer !== -1) return;
+    this.durationTimer = setInterval((): void => {
+      this.durationTick = Date.now();
+    }, 250);
+  }
+
+  private stopDurationTicker(): void {
+    if (this.durationTimer !== -1) {
+      clearInterval(this.durationTimer);
+      this.durationTimer = -1;
+    }
+  }
+
+  private clearCollapseTimer(): void {
+    this.collapseTimerVersion++;
+    if (this.collapseTimer !== -1) {
+      clearTimeout(this.collapseTimer);
+      this.collapseTimer = -1;
+    }
+  }
+
+  private scheduleAutoCollapse(): void {
+    this.clearCollapseTimer();
+    const timerVersion: number = this.collapseTimerVersion;
+    this.collapseTimer = setTimeout((): void => {
+      if (timerVersion !== this.collapseTimerVersion) return;
+      this.collapseTimer = -1;
+      if (this.autoCloseThinking && this.state === 'expanded' && this.part.finishedAt !== null) {
+        this.onAutoCollapse();
+      }
+    }, 800);
+  }
 
   build(): void {
     Column() {
@@ -51,7 +117,10 @@ export struct ChatMessageReasoning {
       }
       .width('100%')
       .padding({ left: 2, top: 6, bottom: 6 })
-      .onClick((): void => { this.onToggle(); })
+      .onClick((): void => {
+        this.clearCollapseTimer();
+        this.onToggle();
+      })
 
       // 内容(preview / expanded)
       if (this.state === 'preview') {
@@ -97,9 +166,11 @@ export struct ChatMessageReasoning {
     }
     if (reasoning.finishedAt !== null || this.loading) {
       const durationMs: number = reasoningDurationMs(
-        reasoning.createdAt, reasoning.finishedAt, this.loading, Date.now());
-      if (durationMs > 0) {
-        let label: string = formatThoughtSeconds(durationMs / 1000);
+        reasoning.createdAt, reasoning.finishedAt, this.loading, this.durationTick);
+      if (Number.isFinite(durationMs) && durationMs >= 0) {
+        let label: string = this.loading
+          ? `思考中 ${(durationMs / 1000).toFixed(1)}s`
+          : formatThoughtSeconds(durationMs / 1000);
         // budget 标签(如果有)
         const budget: string = this.budgetLabel();
         if (budget.length > 0) label = `${label} · ${budget}`;
@@ -118,14 +189,17 @@ export struct ChatMessageReasoning {
   }
 
   private shouldShowDuration(): boolean {
-    if (!this.loading) return false;
-    const title: string | null = extractThinkingTitle(this.part.reasoning);
-    return title !== null;
+    if (!this.loading && this.part.finishedAt === null) return false;
+    const durationMs: number = reasoningDurationMs(
+      this.part.createdAt, this.part.finishedAt, this.loading, this.durationTick);
+    return Number.isFinite(durationMs) && durationMs >= 0;
   }
 
   private durationLabel(): string {
     const durationMs: number = reasoningDurationMs(
-      this.part.createdAt, this.part.finishedAt, this.loading, Date.now());
+      this.part.createdAt, this.part.finishedAt, this.loading, this.durationTick);
+    if (!Number.isFinite(durationMs) || durationMs < 0) return '';
+    if (this.loading) return `思考中 ${(durationMs / 1000).toFixed(1)}s`;
     return formatThoughtSeconds(durationMs / 1000);
   }
 }

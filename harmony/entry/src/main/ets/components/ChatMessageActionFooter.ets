@@ -1,8 +1,7 @@
 // ChatMessageActionFooter — 消息统一尾部(第三梯队)
 // Android 基准: ChatMessageActionFooter.kt(91 行)— 引用+操作行统一尾部
 //   ActionFooterMode: Hidden/Reserved/Visible
-//   注:Android user→Hidden,但鸿蒙旧实现 user 有操作行(分叉/编辑/重发),
-//   保持鸿蒙行为:user→Visible(Android 差异登记)
+//   user 消息已有单击编辑 + 长按 ActionsSheet,因此 footer 对齐 Android 为 Hidden。
 
 import type { UIMessageAnnotation } from '@amber/chat-domain';
 import { ChatMessageAnnotations } from './ChatMessageCommon.ets';
@@ -11,11 +10,11 @@ import { ChatMessageBranch } from './ChatMessageBranch.ets';
 
 export type ActionFooterMode = 'hidden' | 'reserved' | 'visible';
 
-// resolveActionFooterMode:鸿蒙适配(user→visible,保持原有操作行入口)
+// resolveActionFooterMode:user 的编辑/复制/删除入口由长按 ActionsSheet 提供。
 export const resolveActionFooterMode = (
   role: string, lastMessage: boolean, loading: boolean, hasContent: boolean,
 ): ActionFooterMode => {
-  if (role === 'user') return 'visible';
+  if (role === 'user') return 'hidden';
   if (lastMessage && loading) return 'reserved';
   if (lastMessage && !loading) return 'visible';
   if (hasContent) return 'visible';
