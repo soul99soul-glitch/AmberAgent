@@ -14,7 +14,7 @@ import {
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
-  ACCENT, ERROR, TITLE, BODY, BODY2, META,
+  ACCENT, ERROR, TITLE, BODY, BODY2, META, GUTTER, RADIUS,
 } from '../design/tokens.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
@@ -26,6 +26,7 @@ interface MemoryDraft {
 @Entry
 @Component
 struct MemoryPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State memories: MemoryRecord[] = [];
   @State autoMemory: boolean = true;
   @State loaded: boolean = false;
@@ -160,12 +161,12 @@ struct MemoryPage {
   @Builder
   pageHeader(): void {
     Row() {
-      Text('←').fontSize(24).fontColor(INK)
+      Icon({ name: 'back', iconSize: 22, color: INK3 })
         .onClick((): void => { router.back(); })
       Text('核心记忆').fontSize(TITLE).fontWeight(700).fontColor(INK)
         .layoutWeight(1).margin({ left: 8 })
     }
-    .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+    .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
     .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
   }
 
@@ -176,12 +177,13 @@ struct MemoryPage {
       Column() {
         Text('自动记忆').fontSize(14.5).fontWeight(600).fontColor(INK)
         Text('Amber 会记住对话里值得留存的信息')
-          .fontSize(12).fontColor(INK3).margin({ top: 2 })
+          .fontSize(BODY2).fontColor(INK3).margin({ top: 2 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       }.alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 13 })
       Toggle({ type: ToggleType.Switch, isOn: this.autoMemory })
         .selectedColor(ACCENT).onChange((v: boolean): void => { this.toggleAutoMemory(v); })
     }
-    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .width('100%').padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
     .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(14).margin({ top: 8 })
   }
 
@@ -189,7 +191,8 @@ struct MemoryPage {
   memoryCard(item: MemoryRecord): void {
     Column() {
       Row() {
-        Text(item.content).fontSize(14).fontColor(INK).lineHeight(21).layoutWeight(1)
+        Text(item.content).fontSize(BODY).fontColor(INK).lineHeight(21).layoutWeight(1)
+          .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
         Icon({ name: 'pin', iconSize: 14, color: item.pinned ? ACCENT : INK4 })
           .margin({ left: 10 }).onClick((): void => { this.togglePin(item); })
       }.width('100%')
@@ -204,7 +207,7 @@ struct MemoryPage {
           .onClick((): void => { this.deleteMemory(item); })
       }.width('100%').margin({ top: 9 })
     }
-    .width('100%').padding({ left: 15, right: 15, top: 13, bottom: 13 })
+    .width('100%').padding({ left: GUTTER, right: GUTTER, top: 13, bottom: 13 })
     .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(14)
   }
 
@@ -250,6 +253,7 @@ struct MemoryPage {
                 Text('// 暂无核心记忆').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
                 Text('Agent 会在对话中自动沉淀，也可手动添加')
                   .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
+                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
               }.width('100%').padding({ top: 48 }).alignItems(HorizontalAlign.Center)
             } else {
               Column({ space: 10 }) {
@@ -259,7 +263,7 @@ struct MemoryPage {
               }.width('100%')
             }
           }.width('100%')
-        }.layoutWeight(1).padding({ left: 18, right: 18, top: 0, bottom: 28 }).backgroundColor(BG)
+        }.layoutWeight(1).padding({ left: GUTTER, right: GUTTER, top: 0, bottom: 28 }).backgroundColor(BG)
       }.width('100%').height('100%').backgroundColor(BG)
       if (this.draft !== null) this.draftDialog(this.draft)
     }

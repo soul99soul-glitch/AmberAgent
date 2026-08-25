@@ -107,6 +107,7 @@ struct ChatAgentExecutionPage {
       Column() {
         Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
         Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
       Toggle({ type: ToggleType.Switch, isOn: value })

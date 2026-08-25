@@ -7,6 +7,7 @@ import { BG, INK, INK2, INK3, BODY, TITLE, SURFACE, LINE, PAD_CARD, RADIUS } fro
 @Entry
 @Component
 struct SettingExperimentalWebMountPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   build(): void {
     Column() {
       Text('Alpha · 未实装').fontSize(TITLE).fontColor(INK)
@@ -24,6 +25,7 @@ struct SettingExperimentalWebMountPage {
     .border({ width: 1, color: LINE })
     .margin({ left: 24, right: 24 })
     .width('100%').height('100%').backgroundColor(BG)
-    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .padding({ top: this.statusBarHeight + 40 })
   }
 }

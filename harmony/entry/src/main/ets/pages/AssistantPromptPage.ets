@@ -1,13 +1,14 @@
 // AssistantPromptPage — 系统提示词 + 世界书条目编辑。
 // 世界书真实读写 ExtensionPrefs.lorebooks，并把选中的 lorebookIds 写回 Assistant。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import {
   loadAssistants, saveAssistants, patchAssistant, makeLorebook, makeRegexInjection,
 } from '@amber/chat-domain';
 import type { Assistant, Lorebook, RegexInjection } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadLorebooks, updateLorebooks } from '../platform_impl/ExtensionPrefs.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 
 interface RouterParams {
@@ -24,6 +25,7 @@ interface DraftEntry {
 @Entry
 @Component
 struct AssistantPromptPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State editSystemPrompt: string = '';
   @State editModeIndex: number = 0;
@@ -178,26 +180,29 @@ struct AssistantPromptPage {
   build(): void {
     Column() {
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3).onClick((): void => { router.back(); })
+        Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick((): void => { router.back(); })
         Text('提示词').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
-        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT)
+        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+          .constraintSize({ minHeight: 40 })
           .onClick((): void => { this.save(); })
-      }.width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      }.width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
             this.sectionHeader('系统提示词')
             Column() {
               TextArea({ text: this.editSystemPrompt, placeholder: '定义助手的行为、角色与约束…' })
-                .fontSize(BODY).height(180).backgroundColor(SURFACE).borderRadius(12)
+                .fontSize(BODY).height(180).backgroundColor(SURFACE).borderRadius(RADIUS)
                 .border({ width: 1, color: LINE }).padding({ left: 14, right: 14, top: 10, bottom: 10 })
                 .onChange((v: string): void => { this.editSystemPrompt = v; })
-            }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: 16, right: 16 }).margin({ bottom: 8 })
+            }.width('100%').alignItems(HorizontalAlign.Start).padding({ left: GUTTER, right: GUTTER }).margin({ bottom: 8 })
 
             this.sectionHeader('注入模式')
             Row() {
@@ -205,7 +210,7 @@ struct AssistantPromptPage {
               PillSelect({ options: this.modes, selectedIndex: this.editModeIndex,
                 onSelect: (i: number): void => { this.editModeIndex = i; } })
             }.padding({ left: 14, right: 14, top: 10, bottom: 10 })
-              .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
+              .backgroundColor(SURFACE).borderRadius(RADIUS).border({ width: 1, color: LINE })
               .margin({ left: 16, right: 16 })
 
             this.sectionHeader('世界书条目')
@@ -226,19 +231,23 @@ struct AssistantPromptPage {
                     .margin({ top: 6 }).onChange((v: string): void => { this.setEntryContent(index, v); })
                   Row() {
                     Blank()
-                    Text('删除条目').fontSize(META).fontColor('#C93A2F')
-                      .padding({ left: 10, top: 4, bottom: 4 }).onClick((): void => { this.removeEntry(index); })
+                  Text('删除条目').fontSize(META).fontColor('#C93A2F').maxLines(1)
+                    .padding({ left: 10, top: 4, bottom: 4 })
+                    .constraintSize({ minHeight: 40 })
+                    .onClick((): void => { this.removeEntry(index); })
+
                   }.width('100%')
                 }.width('100%').alignItems(HorizontalAlign.Start).backgroundColor(SURFACE2)
                   .borderRadius(12).padding({ left: 12, right: 12, top: 10, bottom: 10 }).margin({ bottom: 8 })
               }, (entry: DraftEntry): string => entry.id)
-            }.width('100%').padding({ left: 16, right: 16 })
+            }.width('100%').padding({ left: GUTTER, right: GUTTER })
 
             Row() {
-              Text('+ 添加条目').fontSize(BODY).fontColor(ACCENT)
-                .padding({ left: 14, right: 14, top: 8, bottom: 8 }).backgroundColor(SURFACE2)
+              Text('+ 添加条目').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+                .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                .constraintSize({ minHeight: 40 }).backgroundColor(SURFACE2)
                 .borderRadius(50).onClick((): void => { this.addEntry(); })
-            }.width('100%').padding({ left: 16, top: 4, bottom: 32 })
+            }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 4, bottom: 32 })
           }.width('100%')
         }.layoutWeight(1)
       }

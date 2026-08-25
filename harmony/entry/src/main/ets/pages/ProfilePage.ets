@@ -325,8 +325,10 @@ struct ProfilePage {
             .margin({ top: 14 })
             .onClick((): void => { this.openNicknameEditor(); })
 
-            Text(`${formatCount(this.stats.totalConversations)} 个会话 · ${formatCount(this.stats.totalMessages)} 条消息`)
+              Text(`${formatCount(this.stats.totalConversations)} 个会话 · ${formatCount(this.stats.totalMessages)} 条消息`)
               .fontSize(LABEL)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+
               .fontColor(INK3)
               .fontFamily('JetBrainsMono')
               .margin({ top: 4 })
@@ -416,6 +418,7 @@ struct ProfilePage {
           Row() {
             Text('$').fontColor(this.accentColorStore).fontSize(LABEL).fontFamily('JetBrainsMono')
             Text(` amber v${this.versionLabel}`).fontColor(INK3).fontSize(LABEL).fontFamily('JetBrainsMono')
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .width('100%').justifyContent(FlexAlign.Center).margin({ top: 22 })
 

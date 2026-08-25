@@ -11,7 +11,7 @@
 //     存储/Skills 子系统未移植,P1 登记)→ 本页仅 2 tab
 //   - HorizontalPager+SecondaryTabRow → 顶部二 tab 行(语义等价)
 //   - Set<Uuid> ± id → string[] Set 语义(toggle 去重)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
@@ -98,15 +98,18 @@ struct ChatAssistantExtensionsPage {
   emptyState(message: string) {
     Column() {
       Text(message).fontSize(13).fontColor(INK3)
+        .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       Row() {
         Icon({ name: 'link', iconSize: 13, color: ACCENT })
         Text(' 前往提示词管理').fontSize(13).fontColor(ACCENT)
       }
       .margin({ top: 12 })
-      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .constraintSize({ minHeight: 40 })
       .onClick((): void => { this.gotoPrompts(); })
     }
-    .width('100%').padding(32).margin({ top: 60 })
+    .width('100%').padding({ left: GUTTER, right: GUTTER, top: 64, bottom: 64 }).margin({ top: 0 })
+      .alignItems(HorizontalAlign.Center)
   }
 
   build() {
@@ -114,9 +117,13 @@ struct ChatAssistantExtensionsPage {
       PageTitleBar({ title: '扩展' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(13).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.assistant === null) {
-        Text('助手不存在').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('助手不存在').fontSize(13).fontColor(INK3)
+        }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         // 顶部二 tab(SecondaryTabRow 适配;quickMessages/skills 未移植)
         Row() {
@@ -156,7 +163,7 @@ struct ChatAssistantExtensionsPage {
                       })
                   }
                   .width('100%')
-                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                  .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
                 }, (mi: PromptInjection): string => mi.id)
                 Row() {
                   Text('前往提示词管理')
@@ -179,6 +186,7 @@ struct ChatAssistantExtensionsPage {
                       if (lb.description.trim().length > 0) {
                         Text(lb.description)
                           .fontSize(11).fontColor(INK3).margin({ top: 2 })
+                          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                       }
                     }
                     .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -194,7 +202,7 @@ struct ChatAssistantExtensionsPage {
                       })
                   }
                   .width('100%')
-                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                  .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
                 }, (lb: Lorebook): string => lb.id)
                 Row() {
                   Text('前往提示词管理')
@@ -206,7 +214,7 @@ struct ChatAssistantExtensionsPage {
               }
             }
           }
-          .width('100%').padding({ bottom: 24 })
+          .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 24 })
         }
         .width('100%').layoutWeight(1)
       }

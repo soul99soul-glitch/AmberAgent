@@ -468,13 +468,14 @@ struct ChatSearchSettingsPage {
         Column() {
           Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
           Text(desc).fontSize(11).fontColor(INK3).margin({ top: 2 })
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 10 })
         Toggle({ type: ToggleType.Switch, isOn: this.builtinValue(field) })
           .selectedColor(ACCENT)
           .onChange((v: boolean): void => { this.setBuiltin(field, v); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
 
       if (showDivider) {
         Row().height(1).backgroundColor(LINE).margin({ left: 16, right: 16 })
@@ -515,7 +516,7 @@ struct ChatSearchSettingsPage {
           .onChange((v: boolean): void => { this.toggleService(svc, v); })
         Text('›').fontSize(16).fontColor(INK3).margin({ left: 8 })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
+      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
       .onClick((): void => { this.openEdit(svc, index); })
 
       if (index < this.s.searchServices.length - 1) {
@@ -533,6 +534,7 @@ struct ChatSearchSettingsPage {
         Column() {
           Text('结果数量').fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
           Text('每次搜索最多返回的结果条数').fontSize(11).fontColor(INK3).margin({ top: 2 })
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Row() {
@@ -568,6 +570,7 @@ struct ChatSearchSettingsPage {
     Row() {
       Text(title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ACCENT)
       Text(detail).fontSize(12).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.End)
+        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
     .border({ width: 1, color: LINE }).borderRadius(12)

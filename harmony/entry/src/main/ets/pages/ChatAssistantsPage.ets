@@ -8,7 +8,7 @@
 //   (AssistantBasicPage.kt:496-501 toIntOrNull()?.takeIf { it > 0 })
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
-import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import type {
@@ -46,6 +46,7 @@ interface BodyDraft {
 @Entry
 @Component
 struct ChatAssistantsPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: Assistant[] = [];
   @State loaded: boolean = false;
   // 编辑态(editingId 非空 = 编辑该助手;= '' = 新建)
@@ -364,13 +365,15 @@ struct ChatAssistantsPage {
           .onClick((): void => this.startCreate())
           .accessibilityText('新建助手')
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .alignItems(VerticalAlign.Center)
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY2).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (!this.showEditor) {
         List() {
           ForEach(this.items, (a: Assistant): void => {
@@ -428,12 +431,12 @@ struct ChatAssistantsPage {
                 .width('100%')
                 if (a.systemPrompt.trim().length > 0) {
                   Text(a.systemPrompt)
-                    .fontSize(11).fontColor(INK3).margin({ top: 4 })
+                    .fontSize(META).fontColor(INK3).margin({ top: 4 })
                     .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => this.startEdit(a))
             }
@@ -449,7 +452,7 @@ struct ChatAssistantsPage {
             .fontSize(15).fontColor(INK2)
             .width('100%').margin({ bottom: 12 })
           TextInput({ text: this.editName, placeholder: '名称' })
-            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .fontSize(BODY2).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editName = v; })
           TextArea({ text: this.editSystemPrompt, placeholder: '系统提示词(可空)' })
@@ -457,19 +460,19 @@ struct ChatAssistantsPage {
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editSystemPrompt = v; })
           TextInput({ text: this.editTemperature, placeholder: '温度(可空,如 0.7)' })
-            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .fontSize(BODY2).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editTemperature = v; })
           TextInput({ text: this.editTopP, placeholder: 'top_p(可空,0-1)' })
-            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .fontSize(BODY2).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editTopP = v; })
           TextInput({ text: this.editMaxTokens, placeholder: '最大输出 tokens(可空,>0)' })
-            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .fontSize(BODY2).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editMaxTokens = v; })
           TextInput({ text: this.editContextSize, placeholder: '上下文消息数(可空,如 20)' })
-            .fontSize(14).height(40).backgroundColor(SURFACE)
+            .fontSize(BODY2).height(40).backgroundColor(SURFACE)
             .margin({ bottom: 8 })
             .onChange((v: string): void => { this.editContextSize = v; })
           // 推理力度 7 档选择(D-032)
@@ -526,11 +529,11 @@ struct ChatAssistantsPage {
           ForEach(this.editHeaders, (h: HeaderDraft): void => {
             Row() {
               TextInput({ text: h.name, placeholder: 'Header 名' })
-                .fontSize(13).height(38).backgroundColor(SURFACE)
+                .fontSize(META).height(40).backgroundColor(SURFACE)
                 .layoutWeight(1)
                 .onChange((v: string): void => this.setHeaderName(h.uid, v))
               TextInput({ text: h.value, placeholder: '值' })
-                .fontSize(13).height(38).backgroundColor(SURFACE)
+                .fontSize(META).height(40).backgroundColor(SURFACE)
                 .layoutWeight(1).margin({ left: 8 })
                 .onChange((v: string): void => this.setHeaderValue(h.uid, v))
               Text('删除')
@@ -553,7 +556,7 @@ struct ChatAssistantsPage {
             Column() {
               Row() {
                 TextInput({ text: b.key, placeholder: 'Body 键' })
-                  .fontSize(13).height(38).backgroundColor(SURFACE)
+                  .fontSize(META).height(40).backgroundColor(SURFACE)
                   .layoutWeight(1)
                   .onChange((v: string): void => this.setBodyKey(b.uid, v))
                 Text('删除')
@@ -594,7 +597,7 @@ struct ChatAssistantsPage {
           }
           .width('100%')
         }
-        .width('100%').padding({ left: 16, right: 16, bottom: 32 })
+        .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 32 })
         }
         .layoutWeight(1)
       }

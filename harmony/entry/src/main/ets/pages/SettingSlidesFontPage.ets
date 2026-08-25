@@ -1,6 +1,7 @@
 // SettingSlidesFontPage — 幻灯片字体设置页
 // 字体族选择(PillSelect) + 字号滑块(NotionSlider) + 预览文本
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 import { NotionSlider } from '../components/ui/NotionSlider.ets';
@@ -21,6 +22,7 @@ function placeholderLoadFontSettings(): Promise<SlidesFontSettings> {
 @Entry
 @Component
 struct SettingSlidesFontPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State s: SlidesFontSettings = makeFontSettings(0, 18);
   @State loaded: boolean = false;
   private fonts: string[] = ['系统默认', '思源黑体', '思源宋体', '等距更纱黑体', 'JetBrains Mono'];
@@ -104,14 +106,14 @@ struct SettingSlidesFontPage {
     Column() {
       // 标题栏:返回 + 标题 + 完成
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('幻灯片字体').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
         Text('完成').fontSize(BODY).fontColor(ACCENT)
           .onClick((): void => { this.done(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })

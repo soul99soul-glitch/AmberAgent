@@ -39,6 +39,7 @@ interface ArticleParams {
 @Entry
 @Component
 struct DeepReadArticlePage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State topicId: string = '';
   @State title: string = '';
   @State output: DeepReadOutput | null = null;
@@ -126,7 +127,7 @@ struct DeepReadArticlePage {
           .borderRadius(8)
           .backgroundColor(SURFACE2)
         }
-        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .backgroundColor(BG)
 
         // ── 内容区 ──

@@ -16,7 +16,7 @@
 //   Card → SURFACE 圆角卡(设置面惯例);AssistantDetailVM.mcpServerConfigs →
 //   McpSettingsStore 订阅(同一数据源)
 
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER,RADIUS,BODY2,META } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -145,9 +145,10 @@ struct ChatAssistantMcpPage {
       Column() {
         Text(server.commonOptions.name)
           .fontSize(15).fontColor(INK)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(pickerStatusText(this.statusOf(server)))
-          .fontSize(11).fontColor(INK3).margin({ top: 4 })
-          .maxLines(5)
+          .fontSize(META).fontColor(INK3).margin({ top: 4 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         // :213-221 — Connected 时 'N/M tools' tag
         if (this.statusOf(server).kind === 'connected') {
           Text(`${server.commonOptions.tools.filter((t: McpTool): boolean => t.enable).length}/${server.commonOptions.tools.length} tools`)
@@ -168,8 +169,8 @@ struct ChatAssistantMcpPage {
           this.toggleServer(server, v).catch((): void => {});
         })
     }
-    .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(SURFACE).borderRadius(10)
+    .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 12 })
+    .backgroundColor(SURFACE).borderRadius(RADIUS)
     .border({ width: 1, color: LINE })
   }
 
@@ -178,9 +179,13 @@ struct ChatAssistantMcpPage {
       PageTitleBar({ title: 'MCP 服务器' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY2).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.assistant === null) {
-        Text('助手不存在').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('助手不存在').fontSize(BODY2).fontColor(INK3)
+        }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         List() {
           // :169 — 仅列 enable 服务器
@@ -194,7 +199,7 @@ struct ChatAssistantMcpPage {
             }, (server: McpServerConfig): string => server.id)
         }
         .width('100%').layoutWeight(1)
-        .padding({ left: 12, right: 12, top: 8 })
+        .padding({ left: GUTTER, right: GUTTER, top: 8 })
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

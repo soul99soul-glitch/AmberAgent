@@ -5,7 +5,7 @@ import { router } from '@kit.ArkUI';
 import { loadAssistants } from '@amber/chat-domain';
 import type { Assistant, Avatar } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface RouterParams {
@@ -20,6 +20,7 @@ interface TabItem {
 @Entry
 @Component
 struct AssistantDetailPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State assistant: Assistant | null = null;
   @State activeTab: number = 0;
@@ -92,17 +93,21 @@ struct AssistantDetailPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('助手详情').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.assistant === null) {
-        Text('助手不存在').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('助手不存在').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         // 顶部助手卡:头像 + 名称
         Row() {
@@ -112,13 +117,15 @@ struct AssistantDetailPage {
           Column() {
             Text(this.displayName())
               .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             Text(this.displayIdSnippet())
               .fontSize(LABEL).fontColor(INK3).margin({ top: 4 })
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .alignItems(HorizontalAlign.Start).margin({ left: 12 }).layoutWeight(1)
         }
-        .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 })
-        .backgroundColor(SURFACE)
+        .width('100%').padding({ left: GUTTER, right: GUTTER, top: 16, bottom: 16 })
+        .backgroundColor(SURFACE).borderRadius(RADIUS)
         .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
 
         // Tab 栏
@@ -135,6 +142,7 @@ struct AssistantDetailPage {
             }
             .layoutWeight(1)
             .padding({ top: 10, bottom: 10 })
+            .constraintSize({ minHeight: 40 })
             .onClick((): void => { this.gotoTab(i); })
           }, (t: TabItem, i: number): string => `tab-${i}`)
         }
@@ -162,6 +170,7 @@ struct AssistantDetailPage {
                 Text(' 背景设置').fontSize(META).fontColor(INK3)
               }
               .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .constraintSize({ minHeight: 40 })
               .backgroundColor(SURFACE2).borderRadius(8)
               .margin({ right: 8 })
               .onClick((): void => {

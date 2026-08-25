@@ -2,10 +2,11 @@
 // 真实写回:temperature / topP / maxTokens / customHeaders(语义同
 //   ChatAssistantsPage 编辑器:maxTokens 空白或 ≤0 → null)。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { loadAssistants, saveAssistants, patchAssistant } from '@amber/chat-domain';
 import type { Assistant, CustomHeader } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 import { NotionSlider } from '../components/ui/NotionSlider.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 
@@ -16,6 +17,7 @@ interface RouterParams {
 @Entry
 @Component
 struct AssistantRequestPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State editTemperature: number = 0.7;
   @State editTopP: number = 0.9;
@@ -120,7 +122,7 @@ struct AssistantRequestPage {
       }).margin({ top: 6 })
     }
     .width('100%').alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
@@ -129,17 +131,20 @@ struct AssistantRequestPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('请求参数').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
-        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT)
+        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+          .constraintSize({ minHeight: 40 })
           .onClick((): void => { this.save(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -157,7 +162,7 @@ struct AssistantRequestPage {
                 onChange: (v: string): void => { this.editMaxTokens = v; },
               })
             }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .width('100%').padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
             .backgroundColor(SURFACE)
             .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
 
@@ -170,23 +175,24 @@ struct AssistantRequestPage {
               ForEach(this.editHeaders, (h: CustomHeader, i: number): void => {
                 Row() {
                   TextInput({ text: h.name, placeholder: 'Header 名' })
-                    .fontSize(META).height(38).backgroundColor(SURFACE2)
+                    .fontSize(META).height(40).backgroundColor(SURFACE2)
                     .borderRadius(8).layoutWeight(1)
                     .onChange((v: string): void => this.setHeaderName(i, v))
                   TextInput({ text: h.value, placeholder: '值' })
-                    .fontSize(META).height(38).backgroundColor(SURFACE2)
+                    .fontSize(META).height(40).backgroundColor(SURFACE2)
                     .borderRadius(8).layoutWeight(1).margin({ left: 8 })
                     .onChange((v: string): void => this.setHeaderValue(i, v))
-                  Text('删除').fontSize(META).fontColor('#C93A2F')
-                    .padding({ left: 10 }).onClick((): void => this.removeHeader(i))
+                  Text('删除').fontSize(META).fontColor('#C93A2F').maxLines(1)
+                    .padding({ left: 10 }).constraintSize({ minHeight: 40 })
+                    .onClick((): void => this.removeHeader(i))
                 }
                 .width('100%').margin({ bottom: 6 })
               }, (h: CustomHeader, i: number): string => `h-${i}`)
-              Text('+ 添加 Header').fontSize(BODY).fontColor(ACCENT)
-                .padding({ top: 4, bottom: 4 })
+              Text('+ 添加 Header').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+                .padding({ top: 4, bottom: 4 }).constraintSize({ minHeight: 40 })
                 .onClick((): void => this.addHeader())
             }
-            .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 32 })
+            .width('100%').padding({ left: GUTTER, right: GUTTER, top: 4, bottom: 32 })
           }
           .width('100%')
         }

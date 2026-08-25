@@ -42,11 +42,14 @@ export struct PageTitleBar {
         .fontSize(TITLE)
         .fontWeight(FontWeight.Bold)
         .fontColor(INK)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ left: this.showBack ? 8 : 0 })
         .layoutWeight(1)
       if (this.actionText.length > 0) {
         Row() {
           Text(this.actionText).fontSize(BODY).fontColor(this.accentColorStore)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .constraintSize({ minWidth: 44, minHeight: 44 })
         .justifyContent(FlexAlign.Center)
@@ -110,6 +113,9 @@ export struct NavRow {
           .fontSize(BODY2)
           .fontColor(this.danger ? ERROR : INK3)
           .fontFamily('JetBrainsMono')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End)
           .margin({ right: 8 })
       }
       if (this.showChevron) {
@@ -147,6 +153,8 @@ export struct ToggleRow {
           Text(this.desc)
             .fontSize(BODY2)
             .fontColor(INK3)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
             .margin({ top: 2 })
         }
       }
@@ -181,6 +189,9 @@ export struct SelectRow {
         .fontSize(BODY2)
         .fontColor(INK3)
         .fontFamily('JetBrainsMono')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .textAlign(TextAlign.End)
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -243,6 +254,8 @@ export struct SessionRowItem {
         .fontSize(LABEL)
         .fontColor(INK4)
         .fontFamily('JetBrainsMono')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ left: 11, top: 2 })
     }
     .width('100%')

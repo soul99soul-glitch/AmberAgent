@@ -9,6 +9,7 @@ import type { NovelProject } from '@amber/deepread-domain';
 @Entry
 @Component
 struct NovelProjectsPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State projects: NovelProject[] = [];
   @State loading: boolean = true;
   @State nameDialogOpen: boolean = false;
@@ -98,12 +99,13 @@ struct NovelProjectsPage {
         Row() {
           Icon({ name: 'back', iconSize: 20, color: INK }).onClick(() => { router.back(); })
           Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily('serif').margin({ left: 12 })
+            .fontFamily('serif').margin({ left: 12 }).maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
           Blank()
           Text('新建').fontSize(13).fontColor(ACCENT)
             .onClick(() => { this.openNew(); })
         }
-        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .backgroundColor(BG)
 
         if (this.loading) {
@@ -112,6 +114,7 @@ struct NovelProjectsPage {
             Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 12 })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          .padding({ top: 48 })
         } else if (this.projects.length === 0) {
           Column() {
             Text('开始你的第一部小说').fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK2)
@@ -123,6 +126,7 @@ struct NovelProjectsPage {
               .onClick(() => { this.openNew(); })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+          .padding({ top: 48 })
         } else {
           List({ space: 0 }) {
             ForEach(this.projects, (p: NovelProject) => {
@@ -133,6 +137,7 @@ struct NovelProjectsPage {
                       .fontFamily('serif').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(`${p.chapters.length} 章 · ${p.materials.length} 条资料 · ${p.messages.length} 条对话`)
                       .fontSize(12).fontColor(INK3).margin({ top: 6 })
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
                   Text('重命名').fontSize(12).fontColor(INK3).margin({ right: 16 })
@@ -140,7 +145,7 @@ struct NovelProjectsPage {
                   Text('删除').fontSize(12).fontColor('#E53935')
                     .onClick(() => { this.confirmDeleteId = p.id; })
                 }
-                .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
+                .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 14 }).backgroundColor(SURFACE).borderRadius(14)
                 .border({ width: 1, color: LINE }).margin({ bottom: 14 })
                 .onClick(() => { this.openWorkspace(p.id); })
               }

@@ -2,7 +2,8 @@
 // 列出 4 个扩展类别(Skills / MCP / LocalTools / Prompts),每行为
 // icon + 标题 + chevron,点击携带 assistantId 跳转到对应既有页面。
 import { router } from '@kit.ArkUI';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 
 interface RouterParams {
   assistantId?: string;
@@ -18,6 +19,7 @@ interface CategoryRow {
 @Entry
 @Component
 struct AssistantExtensionsPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State assistantId: string = '';
   private categories: CategoryRow[] = [
     { icon: '✦', title: 'Skills', desc: '已启用的技能集合', target: 'pages/ChatAssistantExtensionsPage' },
@@ -48,12 +50,12 @@ struct AssistantExtensionsPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('扩展').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       // 说明条
       Row() {
@@ -70,12 +72,15 @@ struct AssistantExtensionsPage {
               this.rowIcon(c.icon)
               Column() {
                 Text(c.title).fontSize(BODY).fontColor(INK)
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 Text(c.desc).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
               }
               .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 12 })
               Text('›').fontSize(18).fontColor(INK3)
             }
-            .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+            .width('100%').padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
+            .constraintSize({ minHeight: 64 })
             .backgroundColor(SURFACE)
             .onClick((): void => { this.goto(c.target); })
           }
@@ -83,6 +88,7 @@ struct AssistantExtensionsPage {
       }
       .width('100%').layoutWeight(1)
       .divider({ strokeWidth: 0.5, color: LINE })
+      .padding({ left: 0, right: 0 })
 
       Column() {}.height(16)
     }

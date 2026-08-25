@@ -1,6 +1,7 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
@@ -42,6 +43,7 @@ const filterLabel = (f: MaterialFilter): string => {
 @Entry
 @Component
 struct NovelWorkspacePage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State project: NovelProject | null = null;
   @State tab: number = 0;
   @State errorMsg: string = '';
@@ -628,14 +630,14 @@ const unsub: (() => void) | null = this.currentUnsub;
       Column() {
         // 顶栏
         Row() {
-          Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
+          Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick(() => { router.back(); })
           Text(this.project !== null ? this.project.name : '小说创作')
             .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily('serif').margin({ left: 12 }).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
         }
-        .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .backgroundColor(BG)
 
         // 页签

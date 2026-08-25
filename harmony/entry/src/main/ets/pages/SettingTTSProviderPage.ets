@@ -35,7 +35,7 @@ struct SettingTTSProviderPage {
       Row() {
         Text('探测合成能力')
           .fontSize(BODY2).fontColor(INK3)
-          .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+          .padding({ left: 14, right: 14, top: 12, bottom: 12 })
           .backgroundColor(SURFACE).borderRadius(999)
           .border({ width: 1, color: LINE })
           .onClick((): void => {

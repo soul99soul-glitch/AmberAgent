@@ -38,6 +38,7 @@ struct SettingAboutPage {
             Row() {
               Text('版本').fontSize(BODY).fontColor(INK2).layoutWeight(1)
               Text(this.versionLabel).fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.End)
             }
             .width('100%')
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -45,6 +46,7 @@ struct SettingAboutPage {
             Row() {
               Text('构建').fontSize(BODY).fontColor(INK2).layoutWeight(1)
               Text('HarmonyOS NEXT / ArkTS').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.End)
             }
             .width('100%')
             .padding({ left: 16, right: 16, top: 14, bottom: 14 })

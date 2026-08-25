@@ -373,6 +373,7 @@ struct ChatProviderSettingsPage {
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
+        .padding({ top: 48 })
       } else {
         Scroll() {
           Column() {

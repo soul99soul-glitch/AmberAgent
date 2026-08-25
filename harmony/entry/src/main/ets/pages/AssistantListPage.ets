@@ -6,6 +6,7 @@
 //     lastUsed 保持插入序;created 用逆插入序(新追加者居首)作启发式近似。
 //   - 长按删除 = AlertDialog 确认 + 级联删该助手会话(同 ChatAssistantsPage 语义)。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { loadAssistants, saveAssistants, makeAssistant } from '@amber/chat-domain';
 import type {
@@ -16,7 +17,7 @@ import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.et
 import { PillSelect } from '../components/ui/Select.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT,
-  BODY, META, LABEL, TITLE,
+  BODY, META, LABEL, TITLE, GUTTER, RADIUS,
 } from '../design/tokens.ets';
 
 // JSON 导入结构(字段均可缺省,同 AssistantImporter)
@@ -33,6 +34,7 @@ const SORT_LABELS: string[] = ['按名称', '按最近使用', '按创建时间'
 @Entry
 @Component
 struct AssistantListPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: Assistant[] = [];
   @State loaded: boolean = false;
   @State query: string = '';
@@ -197,11 +199,12 @@ struct AssistantListPage {
           .fontSize(LABEL).fontColor(INK2)
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .backgroundColor(SURFACE2).borderRadius(6)
+          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .width('100%')
     }
     .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE).borderRadius(12)
+    .backgroundColor(SURFACE).borderRadius(RADIUS)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
     .onClick((): void => this.gotoDetail(a))
     .gesture(
@@ -214,21 +217,23 @@ struct AssistantListPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('助手列表').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
-        Text('+ 新建').fontSize(BODY).fontColor(Color.White)
+        Text('+ 新建').fontSize(BODY).fontColor(Color.White).maxLines(1)
           .backgroundColor(ACCENT).borderRadius(8)
           .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+          .constraintSize({ minHeight: 40 })
           .onClick((): void => { this.addAssistant(); })
-        Text('导入').fontSize(BODY).fontColor(ACCENT)
+        Text('导入').fontSize(BODY).fontColor(ACCENT).maxLines(1)
           .margin({ left: 8 })
           .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .constraintSize({ minHeight: 40 })
           .backgroundColor(ACCENT_LIGHT).borderRadius(8)
           .onClick((): void => { this.importFromClipboard(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       // 搜索栏
       Row() {
@@ -237,7 +242,7 @@ struct AssistantListPage {
           .borderRadius(8).layoutWeight(1)
           .onChange((v: string): void => { this.query = v; })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+      .width('100%').padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 8 })
 
       // 排序栏
       Row() {
@@ -250,12 +255,15 @@ struct AssistantListPage {
         Blank()
         if (this.statusMsg.length > 0) {
           Text(this.statusMsg).fontSize(LABEL).fontColor(INK3)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }
-      .width('100%').padding({ left: 16, right: 16, bottom: 8 })
+      .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 8 })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.filtered().length === 0) {
         // 空状态
         Column() {
@@ -264,7 +272,7 @@ struct AssistantListPage {
           Text(this.query.trim().length > 0 ? '尝试其他关键词' : '点击右上「+ 新建」创建第一个助手')
             .fontSize(META).fontColor(INK3).margin({ top: 8 })
         }
-        .width('100%').margin({ top: 80 }).alignItems(HorizontalAlign.Center)
+        .width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -272,7 +280,7 @@ struct AssistantListPage {
               this.assistantCard(a)
             }, (a: Assistant): string => a.id)
           }
-          .width('100%').padding({ left: 16, right: 16, bottom: 16 })
+          .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 16 })
         }
         .width('100%').layoutWeight(1)
       }

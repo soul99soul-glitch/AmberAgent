@@ -100,6 +100,7 @@ struct SettingCronTasksPage {
 
                 Row() {
                   Text(t.cronExpression).fontSize(MONO_SMALL).fontColor(INK3).fontFamily('JetBrainsMono')
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(`下次 ${this.fmtTime(t.nextRunAtMs)}`)
                     .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono').margin({ left: 12 })
                   Text(`已跑 ${t.runCount} 次`)
@@ -141,7 +142,7 @@ struct SettingCronTasksPage {
                       });
                     })
                 }
-                .width('100%').margin({ top: 6 })
+                .width('100%').margin({ top: 12 })
               }
               .padding(14)
               .backgroundColor(SURFACE)

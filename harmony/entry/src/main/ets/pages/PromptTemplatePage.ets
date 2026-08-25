@@ -6,13 +6,14 @@
 //   - 变量语法 {{name}},预览用内置样例值替换;lastUsed/createdAt 未落地(P1)。
 //   - 文件 picker 导入导出未移植(外部目录 picker 先例),改用剪贴板 JSON。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { newId } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT,
-  BODY, META, LABEL, TITLE,
+  BODY, META, LABEL, TITLE, GUTTER, RADIUS,
 } from '../design/tokens.ets';
 
 interface RouterParams {
@@ -82,6 +83,7 @@ const renderPreview = (content: string): string => {
 @Entry
 @Component
 struct PromptTemplatePage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State mode: string = 'list'; // 'list' | 'edit'
   @State templates: PromptTemplate[] = [];
   @State loaded: boolean = false;
@@ -278,7 +280,8 @@ struct PromptTemplatePage {
           .layoutWeight(1)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(CATEGORY_LABELS[categoryIndexOf(t.category)])
-          .fontSize(LABEL).fontColor(ACCENT)
+          .fontSize(LABEL).fontColor(ACCENT).maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
           .padding({ left: 6, right: 6, top: 2, bottom: 2 })
           .backgroundColor(ACCENT_LIGHT).borderRadius(6)
       }
@@ -289,8 +292,8 @@ struct PromptTemplatePage {
         .width('100%')
     }
     .width('100%').alignItems(HorizontalAlign.Start)
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE).borderRadius(12)
+    .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
+    .backgroundColor(SURFACE).borderRadius(RADIUS)
     .border({ width: 1, color: LINE }).margin({ bottom: 8 })
   }
 
@@ -298,30 +301,34 @@ struct PromptTemplatePage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => {
             if (this.mode === 'edit') this.backFromEdit(); else router.back();
           })
         Text('提示词模板').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.mode === 'list') {
         // ===== 列表模式 =====
         Row() {
-          Text('+ 新建').fontSize(BODY).fontColor(Color.White)
+          Text('+ 新建').fontSize(BODY).fontColor(Color.White).maxLines(1)
             .backgroundColor(ACCENT).borderRadius(8)
             .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+            .constraintSize({ minHeight: 40 })
             .onClick((): void => { this.startCreate(); })
           Blank()
-          Text('导入').fontSize(BODY).fontColor(ACCENT)
+          Text('导入').fontSize(BODY).fontColor(ACCENT).maxLines(1)
             .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .constraintSize({ minHeight: 40 })
             .onClick((): void => { this.importToList(); })
         }
-        .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        .width('100%').padding({ left: GUTTER, right: GUTTER, top: 8, bottom: 8 })
 
         if (this.statusMsg.length > 0) {
           Text(this.statusMsg).fontSize(LABEL).fontColor(INK3)
@@ -334,7 +341,7 @@ struct PromptTemplatePage {
             Text('点击「新建」创建第一个提示词模板').fontSize(META).fontColor(INK3)
               .margin({ top: 8 })
           }
-          .width('100%').margin({ top: 80 }).alignItems(HorizontalAlign.Center)
+          .width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
         } else {
           Scroll() {
             Column() {
@@ -342,7 +349,7 @@ struct PromptTemplatePage {
                 this.templateCard(t)
               }, (t: PromptTemplate): string => t.id)
             }
-            .width('100%').padding({ left: 16, right: 16, bottom: 16 })
+            .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 16 })
           }
           .width('100%').layoutWeight(1)
         }
@@ -401,7 +408,8 @@ struct PromptTemplatePage {
             Text('预览').fontSize(META).fontColor(INK3).width('100%').margin({ bottom: 4 })
             Text(renderPreview(this.editContent))
               .fontSize(BODY).fontColor(INK2)
-              .width('100%').backgroundColor(SURFACE2).borderRadius(8)
+              .width('100%').backgroundColor(SURFACE2).borderRadius(RADIUS)
+              .maxLines(4).textOverflow({ overflow: TextOverflow.Ellipsis })
               .padding(12).margin({ bottom: 12 })
 
             // 导入/导出
@@ -447,7 +455,7 @@ struct PromptTemplatePage {
 
             Column() {}.height(32)
           }
-          .width('100%').padding({ left: 16, right: 16, top: 12 })
+          .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
         }
         .width('100%').layoutWeight(1)
       }

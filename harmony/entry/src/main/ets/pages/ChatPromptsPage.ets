@@ -821,6 +821,7 @@ struct ChatPromptsPage {
           Row() {
             Text(this.tab === 0 ? '＋ 添加模式注入' : '＋ 添加世界书')
               .fontSize(14).fontColor(Color.White)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .padding({ left: 24, right: 24, top: 10, bottom: 10 })
               .backgroundColor(ACCENT).borderRadius(20)
               .onClick((): void => {

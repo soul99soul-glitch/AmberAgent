@@ -27,6 +27,7 @@ import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, TITLE, BODY, META, LABE
 @Entry
 @Component
 struct SettingSubAgentPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State subAgentEnabled: boolean = false;
   @State mode: string = 'roster';
   @State allowDynamic: boolean = true;
@@ -93,7 +94,7 @@ struct SettingSubAgentPage {
       Row() {
         Text('子代理设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 8 })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3)
@@ -171,6 +172,7 @@ struct SettingSubAgentPage {
       Column() {
         Text(label).fontSize(BODY).fontColor(INK)
         Text(desc).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Toggle({ type: ToggleType.Switch, isOn: checked })
@@ -188,6 +190,7 @@ struct SettingSubAgentPage {
         Text('模式').fontSize(BODY).fontColor(INK)
         Text(this.mode === 'smart_dynamic' ? '智能动态:隐藏内置角色,按需创建临时子代理' : '名册:使用预设的内置子代理角色')
           .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
       Text(this.mode === 'smart_dynamic' ? '智能动态' : '名册').fontSize(META).fontColor(ACCENT)

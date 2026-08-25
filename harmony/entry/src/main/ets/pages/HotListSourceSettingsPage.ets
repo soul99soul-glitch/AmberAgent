@@ -25,6 +25,7 @@ function makeSource(id: string, name: string, enabled: boolean): SourceSetting {
 @Entry
 @Component
 struct HotListSourceSettingsPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: SourceSetting[] = [];
   @State loaded: boolean = false;
   private storage: Storage | null = null;
@@ -68,7 +69,7 @@ struct HotListSourceSettingsPage {
         Text('热榜来源').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
@@ -79,13 +80,14 @@ struct HotListSourceSettingsPage {
               Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' 启用的来源将出现在热榜页').fontSize(META).fontColor(INK3)
             }
-            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
+            .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 8 })
 
             Column() {
               ForEach(this.items, (s: SourceSetting): void => {
                 Row() {
                   Column() {
                     Text(s.name).fontSize(BODY).fontColor(INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
 

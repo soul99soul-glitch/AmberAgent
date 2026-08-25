@@ -272,7 +272,7 @@ struct ChatMcpSettingsPage {
       Column() {
         Icon({ name: 'gear', iconSize: 18, color: INK3 })
       }
-      .width(38).height(38)
+      .width(44).height(44)
       .justifyContent(FlexAlign.Center).alignItems(HorizontalAlign.Center)
       .onClick((): void => { this.openEdit(config); })
     }
@@ -564,7 +564,8 @@ struct ChatMcpSettingsPage {
         })
       if (this.importError.length > 0) {
         Text(this.importError)
-          .fontSize(12).fontColor(RED).width('100%').margin({ top: 6 })
+          .fontSize(12).fontColor(RED).width('100%').maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis }).margin({ top: 6 })
       }
       Row() {
         Button('取消')

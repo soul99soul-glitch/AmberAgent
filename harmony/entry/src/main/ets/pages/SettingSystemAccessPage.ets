@@ -3,6 +3,7 @@
 // 每项显示 已授权 / 未授权 / 不支持 状态徽标
 // NOTE:HarmonyOS 权限模型与 Android 不同;本页仅展示状态,不发起实际授权请求
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 interface PermissionItem {
@@ -29,6 +30,7 @@ function placeholderLoadPermissions(): Promise<PermissionItem[]> {
 @Entry
 @Component
 struct SettingSystemAccessPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: PermissionItem[] = [];
   @State loaded: boolean = false;
 
@@ -67,14 +69,14 @@ struct SettingSystemAccessPage {
     Column() {
       // 标题栏:返回 + 标题 + 完成
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('系统访问').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
         Text('完成').fontSize(BODY).fontColor(ACCENT)
           .onClick((): void => { this.done(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })

@@ -222,7 +222,9 @@ struct ChatTaskModelsPage {
       Row() {
         Column() {
           Text(title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(desc).fontSize(12).fontColor(INK3).margin({ top: 3 })
+            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         if (hasPrompt) {
@@ -236,8 +238,10 @@ struct ChatTaskModelsPage {
       Row() {
         Column() {
           Text(currentLine).fontSize(13).fontColor(INK2)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (followLine.length > 0) {
             Text(followLine).fontSize(11).fontColor(INK3).margin({ top: 3 })
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -258,7 +262,7 @@ struct ChatTaskModelsPage {
       }
       .width('100%').margin({ top: 10 })
     }
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .padding({ left: 18, right: 18, top: 14, bottom: 14 })
     .backgroundColor(SURFACE)
     .borderRadius(12)
     .margin({ left: 18, right: 18, top: 12 })
@@ -384,7 +388,7 @@ struct ChatTaskModelsPage {
                 '',
                 false, '', 'ocr', true, false)
             }
-            .width('100%').padding({ bottom: 24 })
+            .width('100%').padding({ top: 2, bottom: 24 })
           }
           .width('100%').layoutWeight(1)
         }

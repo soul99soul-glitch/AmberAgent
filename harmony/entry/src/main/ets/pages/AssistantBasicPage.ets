@@ -2,12 +2,13 @@
 // 真实写回:name / systemPrompt / avatar emoji / chatModelId。
 // Assistant 域模型没有 description，页面展示 systemPrompt 的只读摘要。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import {
   loadAssistants, saveAssistants, patchAssistant, loadProviders, hasUsableAuth,
 } from '@amber/chat-domain';
 import type { Assistant, Avatar, ProviderSetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 import { PillSelect } from '../components/ui/Select.ets';
 
 interface RouterParams {
@@ -17,6 +18,7 @@ interface RouterParams {
 @Entry
 @Component
 struct AssistantBasicPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State editName: string = '';
   @State editAvatarEmoji: string = '';
@@ -110,17 +112,20 @@ struct AssistantBasicPage {
     Column() {
       // 标题栏:返回 + 标题 + 保存
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('基础信息').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
-        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT)
+        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+          .constraintSize({ minHeight: 40 })
           .onClick((): void => { this.save(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -129,7 +134,7 @@ struct AssistantBasicPage {
               this.fieldLabel('名称')
               TextInput({ text: this.editName, placeholder: '助手名称' })
                 .fontSize(BODY).height(44).backgroundColor(SURFACE)
-                .borderRadius(12).border({ width: 1, color: LINE })
+                .borderRadius(RADIUS).border({ width: 1, color: LINE })
                 .padding({ left: 14, right: 14 })
                 .onChange((v: string): void => { this.editName = v; })
             }
@@ -142,7 +147,8 @@ struct AssistantBasicPage {
                 ? this.editSystemPrompt.trim().substring(0, 200) + '…'
                 : this.editSystemPrompt.trim().length > 0 ? this.editSystemPrompt.trim() : '暂无系统提示词')
                 .fontSize(BODY).fontColor(INK2).height(72)
-                .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
+                .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
+                .backgroundColor(SURFACE).borderRadius(RADIUS).border({ width: 1, color: LINE })
                 .padding({ left: 14, right: 14, top: 10, bottom: 10 })
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
@@ -153,7 +159,7 @@ struct AssistantBasicPage {
               Row() {
                 TextInput({ text: this.editAvatarEmoji, placeholder: '如 🤖' })
                   .fontSize(BODY).height(44).backgroundColor(SURFACE)
-                  .borderRadius(12).border({ width: 1, color: LINE })
+                  .borderRadius(RADIUS).border({ width: 1, color: LINE })
                   .padding({ left: 14, right: 14 })
                   .layoutWeight(1)
                   .onChange((v: string): void => { this.editAvatarEmoji = v; })
@@ -185,13 +191,13 @@ struct AssistantBasicPage {
               this.fieldLabel('系统提示词')
               TextArea({ text: this.editSystemPrompt, placeholder: '定义助手的行为、角色与约束…' })
                 .fontSize(BODY).height(160).backgroundColor(SURFACE)
-                .borderRadius(12).border({ width: 1, color: LINE })
+                .borderRadius(RADIUS).border({ width: 1, color: LINE })
                 .padding({ left: 14, right: 14, top: 10, bottom: 10 })
                 .onChange((v: string): void => { this.editSystemPrompt = v; })
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 32 })
           }
-          .width('100%').padding({ left: 16, right: 16, top: 12 })
+          .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
         }
         .layoutWeight(1)
       }

@@ -34,6 +34,7 @@ const baseToInit = (base: ModelCouncilRuntimeSetting): Record<string, Object | n
 @Entry
 @Component
 struct CouncilPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State objective: string = '';
   @State mode: ModelCouncilMode = 'compare';
   @State rounds: number = 2;
@@ -142,7 +143,7 @@ struct CouncilPage {
         Text('模型议会').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif').margin({ left: 12 })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .backgroundColor(BG)
 
       Scroll() {
@@ -174,8 +175,9 @@ struct CouncilPage {
                 .margin({ left: 12 })
                 .onClick(() => { this.mode = 'debate'; })
               Blank()
-              Text(this.mode === 'compare' ? '各席独立作答一轮' : '多轮交锋后裁决')
+                Text(this.mode === 'compare' ? '各席独立作答一轮' : '多轮交锋后裁决')
                 .fontSize(11).fontColor(INK3)
+                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             }
             .width('100%')
 
@@ -235,8 +237,10 @@ struct CouncilPage {
             } else {
               ForEach(this.models, (m: ModelConfig) => {
                 Row() {
-                  Text(m.label.length > 0 ? m.label : m.model).fontSize(14).fontColor(INK).layoutWeight(1)
+                  Text(m.label.length > 0 ? m.label : m.model).fontSize(14).fontColor(INK)
+                    .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(m.model).fontSize(11).fontColor(INK3)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .width('100%').padding({ top: 8, bottom: 8 })
                 .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })

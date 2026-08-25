@@ -40,6 +40,7 @@ const TASK_TITLES: Record<string, string> = {
 @Entry
 @Component
 struct ChatTaskModelPickerPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State rows: TaskModelRow[] = [];
   @State loaded: boolean = false;
   @State task: string = 'title';
@@ -131,7 +132,7 @@ struct ChatTaskModelPickerPage {
         Text(TASK_TITLES[this.task] ?? '选择模型')
           .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 12 })
+      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 12 })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
@@ -152,8 +153,10 @@ struct ChatTaskModelPickerPage {
                 Column() {
                   Text(row.displayName.length > 0 ? row.displayName : row.modelId)
                     .fontSize(15).fontColor(INK)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(`${row.modelId} · ${row.providerName} · ${row.providerType}`)
                     .fontSize(11).fontColor(INK3).margin({ top: 4 })
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)
                 if (row.selected) {
@@ -161,7 +164,7 @@ struct ChatTaskModelPickerPage {
                 }
               }
               .width('100%')
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .padding({ left: 18, right: 18, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => this.pick(row))
             }

@@ -153,12 +153,13 @@ struct SettingFilesPage {
                     .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(`${row.folder} · ${this.fmtSize(row.file.sizeBytes)}`)
                     .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono').margin({ top: 2 })
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 10 })
                 Icon({ name: 'trash', iconSize: 15, color: ERROR })
                   .onClick((): void => { this.deleteRow(row); })
               }
-              .padding(12)
+              .padding({ left: 14, right: 14, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .border({ width: 1, color: LINE }).borderRadius(12)
               .margin({ left: 18, right: 18, bottom: 8 })

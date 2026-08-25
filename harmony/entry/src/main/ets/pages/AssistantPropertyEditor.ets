@@ -3,6 +3,7 @@
 // 依 type 渲染对应编辑器:text → TextInput;number → FlatTextField;
 //   boolean → AmberSwitch。保存即 router.back()(值由调用方自行回读)。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
@@ -16,6 +17,7 @@ interface RouterParams {
 @Entry
 @Component
 struct AssistantPropertyEditor {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State propName: string = '';
   @State propType: string = 'text';
@@ -52,14 +54,14 @@ struct AssistantPropertyEditor {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text(this.titleText()).fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
         Text('保存').fontSize(BODY).fontColor(ACCENT)
           .onClick((): void => { this.save(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })

@@ -2,10 +2,11 @@
 // 解析字段:name / systemPrompt / temperature / topP / maxTokens。
 // 导入:makeAssistant 新建并 saveAssistants 追加到列表,随后 router.back()。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { loadAssistants, saveAssistants, makeAssistant } from '@amber/chat-domain';
 import type { Assistant } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 
 // JSON 导入结构(字段均可缺省)
 interface ImportedAssistant {
@@ -19,6 +20,7 @@ interface ImportedAssistant {
 @Entry
 @Component
 struct AssistantImporter {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State jsonText: string = '';
   @State parsed: ImportedAssistant | null = null;
   @State errorMsg: string = '';
@@ -147,30 +149,32 @@ struct AssistantImporter {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('导入助手').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       Scroll() {
         Column() {
           this.fieldLabel('粘贴 JSON')
           TextArea({ text: this.jsonText, placeholder: '{ "name": "...", "systemPrompt": "..." }' })
             .fontSize(META).height(140).backgroundColor(SURFACE)
-            .borderRadius(12).border({ width: 1, color: LINE })
+            .borderRadius(RADIUS).border({ width: 1, color: LINE })
             .padding({ left: 12, right: 12, top: 10, bottom: 10 })
             .onChange((v: string): void => { this.jsonText = v; })
 
           Row() {
-            Text('解析').fontSize(BODY).fontColor(Color.White)
+            Text('解析').fontSize(BODY).fontColor(Color.White).maxLines(1)
               .backgroundColor(ACCENT).borderRadius(8)
               .padding({ left: 18, right: 18, top: 8, bottom: 8 })
+              .constraintSize({ minHeight: 40 })
               .onClick((): void => { this.parse(); })
             Blank()
             if (this.errorMsg.length > 0) {
               Text(this.errorMsg).fontSize(LABEL).fontColor('#C93A2F').layoutWeight(1)
+                .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                 .margin({ left: 8 })
             }
           }
@@ -192,10 +196,11 @@ struct AssistantImporter {
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 12 })
 
             Row() {
-              Text(this.importing ? '导入中…' : '导入')
+              Text(this.importing ? '导入中…' : '导入').maxLines(1)
                 .fontSize(BODY).fontColor(Color.White)
                 .backgroundColor(this.importing ? INK4 : ACCENT).borderRadius(8)
                 .padding({ left: 24, right: 24, top: 10, bottom: 10 })
+                .constraintSize({ minHeight: 40 })
                 .onClick((): void => { this.doImport(); })
               Blank()
               if (this.doneMsg.length > 0) {
@@ -207,7 +212,7 @@ struct AssistantImporter {
 
           Column() {}.height(32)
         }
-        .width('100%').padding({ left: 16, right: 16, top: 12 })
+        .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
       }
       .layoutWeight(1)
     }

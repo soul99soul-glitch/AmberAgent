@@ -22,6 +22,7 @@ import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, ERROR, TITLE, BODY, MET
 @Entry
 @Component
 struct SettingModelCouncilPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State councilEnabled: boolean = true;
   @State maxSeats: number = 5;
   @State defaultRounds: number = 1;
@@ -91,7 +92,7 @@ struct SettingModelCouncilPage {
       Row() {
         Text('Model Council 设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
       }
-      .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 8 })
+      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 8 })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(BODY).fontColor(INK3)
@@ -241,8 +242,10 @@ struct SettingModelCouncilPage {
         Column() {
           Text(seat.name.length > 0 ? seat.name : '(未命名席位)')
             .fontSize(BODY).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(isCoreRole(seat.role) ? '核心席' : `视角席 · ${seat.role}`)
             .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Text(this.expandedSeatId === seat.seatId ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)

@@ -1,9 +1,10 @@
 // QuickMessagesPage — 快捷消息列表
 // 展示快捷消息模板(标题 + 内容预览),添加/内联编辑/滑动删除。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
@@ -48,6 +49,7 @@ const decodeMessages = (raw: string): QuickMessage[] | null => {
 @Entry
 @Component
 struct QuickMessagesPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State items: QuickMessage[] = [];
   @State loaded: boolean = false;
   @State editing: boolean = false;
@@ -158,14 +160,16 @@ struct QuickMessagesPage {
   build(): void {
     Column() {
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
+        Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick((): void => { router.back(); })
         Text('快捷消息').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
         if (!this.editing) {
-          Text('+ 新建').fontSize(BODY).fontColor(ACCENT).onClick((): void => { this.startNew(); });
+          Text('+ 新建').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+            .constraintSize({ minHeight: 40 })
+            .onClick((): void => { this.startNew(); });
         }
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (this.editing) {
@@ -177,13 +181,13 @@ struct QuickMessagesPage {
             Text('标题').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
               .width('100%').margin({ bottom: 6 })
             TextInput({ text: this.editTitle, placeholder: '消息标题' })
-              .fontSize(BODY).fontColor(INK).backgroundColor(SURFACE).borderRadius(8)
-              .width('100%').padding({ left: 12, right: 12, top: 10, bottom: 10 })
+              .fontSize(BODY).fontColor(INK).backgroundColor(SURFACE).borderRadius(RADIUS)
+              .width('100%').height(40).padding({ left: 12, right: 12 })
               .onChange((v: string): void => { this.editTitle = v; })
             Text('内容').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
               .width('100%').margin({ top: 16, bottom: 6 })
             TextArea({ text: this.editContent, placeholder: '消息内容…' })
-              .fontSize(BODY).fontColor(INK).backgroundColor(SURFACE).borderRadius(8)
+              .fontSize(BODY).fontColor(INK).backgroundColor(SURFACE).borderRadius(RADIUS)
               .width('100%').height(140).padding({ left: 12, right: 12, top: 10, bottom: 10 })
               .onChange((v: string): void => { this.editContent = v; })
             Row() {
@@ -196,15 +200,17 @@ struct QuickMessagesPage {
                 .margin({ left: 12 }).onClick((): void => { this.saveEdit(); })
             }.width('100%').margin({ top: 24 })
             Column() {}.height(40)
-          }.width('100%').padding({ left: 16, right: 16, top: 16 })
+          }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 16 })
         }.layoutWeight(1)
       } else if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.items.length === 0) {
         Column() {
           Text('还没有快捷消息').fontSize(BODY).fontColor(INK2)
           Text('点右上角新建一条').fontSize(META).fontColor(INK3).margin({ top: 8 })
-        }.margin({ top: 64 })
+        }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         List() {
           ForEach(this.items, (item: QuickMessage): void => {
@@ -215,7 +221,7 @@ struct QuickMessagesPage {
                 Text(item.content).fontSize(META).fontColor(INK3).margin({ top: 4 })
                   .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               }.width('100%').alignItems(HorizontalAlign.Start)
-                .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+                .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
                 .backgroundColor(SURFACE).onClick((): void => { this.startEdit(item); })
             }.swipeAction({ end: this.swipeActions(item) });
           }, (item: QuickMessage): string => item.id)

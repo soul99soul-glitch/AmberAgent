@@ -93,8 +93,10 @@ struct ChatModelPickerPage {
                 Column() {
                   Text(row.modelId)
                     .fontSize(15).fontColor(INK)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(`${row.providerName} · ${row.providerType}`)
                     .fontSize(11).fontColor(INK3).margin({ top: 4 })
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)
                 if (row.selected) {
@@ -102,7 +104,7 @@ struct ChatModelPickerPage {
                 }
               }
               .width('100%')
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+              .padding({ left: 18, right: 18, top: 14, bottom: 14 })
               .backgroundColor(SURFACE)
               .onClick((): void => this.pick(row))
             }

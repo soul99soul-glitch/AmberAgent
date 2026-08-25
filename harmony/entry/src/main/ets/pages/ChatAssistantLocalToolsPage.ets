@@ -12,7 +12,7 @@
 //   - 平台专属工具(terminal/screen/system_access/webview/icloud/webmount 系)
 //     在 harmony 无实现,开关仅落 localTools 配置(Android 同为纯配置面;
 //     工具实体缺失时目录自然不含)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
+import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -153,9 +153,13 @@ struct ChatAssistantLocalToolsPage {
       PageTitleBar({ title: '本地工具' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('加载中…').fontSize(BODY2).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.assistant === null) {
-        Text('助手不存在').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Column() {
+          Text('助手不存在').fontSize(BODY2).fontColor(INK3)
+        }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -163,9 +167,11 @@ struct ChatAssistantLocalToolsPage {
               Row() {
                 Column() {
                   Text(row.title)
-                    .fontSize(14).fontColor(INK)
+                    .fontSize(BODY).fontColor(INK)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   Text(row.desc)
-                    .fontSize(11).fontColor(INK3).margin({ top: 3 })
+                    .fontSize(META).fontColor(INK3).margin({ top: 3 })
+                    .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)
                 .margin({ right: 12 })
@@ -181,7 +187,7 @@ struct ChatAssistantLocalToolsPage {
                   })
               }
               .width('100%')
-              .padding({ left: 16, right: 16, top: 13, bottom: 13 })
+              .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
               .border({
                 width: { bottom: i < LOCAL_TOOL_ROWS.length - 1 ? 0.5 : 0 },
                 color: LINE,
@@ -190,9 +196,9 @@ struct ChatAssistantLocalToolsPage {
           }
           .width('100%')
           .backgroundColor(SURFACE)
-          .borderRadius(14)
+          .borderRadius(RADIUS)
           .border({ width: 1, color: LINE })
-          .margin({ left: 16, right: 16, bottom: 24 })
+          .margin({ left: GUTTER, right: GUTTER, bottom: 24 })
         }
         .width('100%').layoutWeight(1)
       }

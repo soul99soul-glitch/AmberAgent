@@ -317,6 +317,7 @@ struct MiniAppListPage {
     .width('100%').layoutWeight(1)
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
+    .padding({ top: 48 })
   }
 
   // 重命名弹窗(TextInput 内嵌,Stack overlay;AlertDialog 无文本输入)
@@ -480,6 +481,7 @@ struct MiniAppListPage {
           .width('100%').layoutWeight(1)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
+          .padding({ top: 48 })
         } else if (this.apps.length === 0) {
           this.emptyState()
         } else {

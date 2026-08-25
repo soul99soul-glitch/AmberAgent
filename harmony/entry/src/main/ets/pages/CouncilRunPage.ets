@@ -25,6 +25,7 @@ const statusVerb = (s: string): string => {
 @Entry
 @Component
 struct CouncilRunPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State tabKeys: string[] = [];
   @State tabLabels: string[] = [];
   @State liveTexts: string[] = [];
@@ -165,7 +166,7 @@ struct CouncilRunPage {
           Text(this.statusText).fontSize(12).fontColor(ACCENT)
         }
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .backgroundColor(BG)
 
       if (this.errorMsg.length > 0) {

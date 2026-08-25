@@ -76,6 +76,7 @@ const localResultsFrom = (items: ConversationSummary[]): SearchResult[] =>
 @Entry
 @Component
 struct SearchPage {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State searchText: string = '';
   @State results: SearchResult[] = [];
   @State loading: boolean = false;
@@ -179,11 +180,11 @@ struct SearchPage {
   build(): void {
     Column() {
       Row() {
-        Text('←').fontSize(24).fontColor(INK).onClick((): void => { router.back(); })
+        Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick((): void => { router.back(); })
         Text('搜索').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 8 }).layoutWeight(1)
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       Row() {
@@ -205,7 +206,7 @@ struct SearchPage {
         Column() {
           DotLoading({ dotSize: 12 })
           Text('搜索中…').fontSize(BODY).fontColor(INK3).margin({ top: 12 })
-        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).padding({ top: 48 })
       } else if (this.errorMsg.length > 0) {
         Column() {
           Text('搜索失败').fontSize(BODY).fontColor(INK2)

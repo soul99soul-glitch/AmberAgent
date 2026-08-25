@@ -2,10 +2,11 @@
 // 真实写回:background(选中色 hex)/ backgroundOpacity(滑块 0-1)。
 // 6 色色板 + 预览区 + 不透明度滑块 + 保存。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { loadAssistants, saveAssistants, patchAssistant } from '@amber/chat-domain';
 import type { Assistant } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 import { NotionSlider } from '../components/ui/NotionSlider.ets';
 
 interface RouterParams {
@@ -15,6 +16,7 @@ interface RouterParams {
 @Entry
 @Component
 struct AssistantBackgroundPicker {
+  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State selectedColor: string = '#F4F2EC';
   @State editOpacity: number = 1.0;
@@ -63,17 +65,20 @@ struct AssistantBackgroundPicker {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(TITLE).fontColor(INK3)
+        Icon({ name: 'back', iconSize: 22, color: INK3 })
           .onClick((): void => { router.back(); })
         Text('背景').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
-        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT)
+        Text(this.saving ? '保存中' : '保存').fontSize(BODY).fontColor(ACCENT).maxLines(1)
+          .constraintSize({ minHeight: 40 })
           .onClick((): void => { this.save(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
+      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 }).border({ width: { bottom: 1 }, color: { bottom: LINE } }).backgroundColor(BG)
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
+        Column() {
+          Text('加载中…').fontSize(BODY).fontColor(INK3)
+        }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else {
         Scroll() {
           Column() {
@@ -85,16 +90,16 @@ struct AssistantBackgroundPicker {
             }
             .width('100%')
             .backgroundColor(this.selectedColor)
-            .borderRadius(12)
+            .borderRadius(RADIUS)
             .border({ width: 1, color: LINE })
-            .margin({ left: 16, right: 16, top: 16, bottom: 16 })
+            .margin({ left: GUTTER, right: GUTTER, top: 16, bottom: 16 })
 
             // 色板标签
             Row() {
               Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' 选择颜色').fontSize(META).fontColor(INK3)
             }
-            .width('100%').padding({ left: 16, bottom: 8 })
+            .width('100%').padding({ left: 16, right: GUTTER, bottom: 8 })
 
             // 6 色色板(3 列 × 2 行)
             Flex({ wrap: FlexWrap.Wrap }) {
@@ -113,14 +118,14 @@ struct AssistantBackgroundPicker {
                 .onClick((): void => { this.selectedColor = c; })
               }, (c: string, i: number): string => `sw-${i}`)
             }
-            .width('100%').padding({ left: 16, right: 16 })
+            .width('100%').padding({ left: GUTTER, right: GUTTER })
 
             // 不透明度
             Row() {
               Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
               Text(' 不透明度').fontSize(META).fontColor(INK3)
             }
-            .width('100%').padding({ left: 16, top: 12, bottom: 8 })
+            .width('100%').padding({ left: 16, right: GUTTER, top: 12, bottom: 8 })
 
             Column() {
               NotionSlider({
