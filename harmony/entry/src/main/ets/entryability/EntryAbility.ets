@@ -3,7 +3,7 @@
 // onForeground → AppStorage 写 appBackgrounded false(恢复)
 // 对照设计 §6.5
 
-import { UIAbility, AbilityConstant, Want } from '@kit.AbilityKit';
+import { UIAbility, AbilityConstant, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { window, display, font } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -15,6 +15,25 @@ import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
 const MAX_WANT_PARAMETER_LENGTH: number = 512;
+const WINDOW_SYSTEM_BAR_TRANSPARENT: string = '#00000000';
+const WINDOW_LIGHT_CONTENT: string = '#1B1A17';
+const WINDOW_DARK_CONTENT: string = '#ECE8DF';
+let themeWindow: window.Window | null = null;
+
+export const applyWindowTheme = (dark: boolean): void => {
+  if (themeWindow === null) return;
+  try {
+    themeWindow.setWindowBackgroundColor(BG);
+    themeWindow.setWindowSystemBarProperties({
+      statusBarColor: WINDOW_SYSTEM_BAR_TRANSPARENT,
+      statusBarContentColor: dark ? WINDOW_DARK_CONTENT : WINDOW_LIGHT_CONTENT,
+      navigationBarColor: WINDOW_SYSTEM_BAR_TRANSPARENT,
+      navigationBarContentColor: dark ? WINDOW_DARK_CONTENT : WINDOW_LIGHT_CONTENT,
+    });
+  } catch (e) {
+    hilog.warn(DOMAIN, TAG, 'theme window apply failed: %{public}s', String(e));
+  }
+};
 
 const validatedWantParameter = (value: object | undefined): string => {
   if (value === undefined || typeof value !== 'string') return '';
@@ -25,6 +44,7 @@ const validatedWantParameter = (value: object | undefined): string => {
 export default class EntryAbility extends UIAbility {
   private avoidAreaWindow: window.Window | null = null;
   private displayDensity: number = 3;
+  private systemDarkMode: boolean = false;
 
   private updateSystemAvoidArea(area: window.AvoidArea, preserveTopFallback: boolean = false): void {
     const topPx: number = area.topRect.height;
@@ -47,6 +67,8 @@ export default class EntryAbility extends UIAbility {
       hilog.warn(DOMAIN, TAG, 'registerFont failed: %{public}s', String(e));
     }
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
+    this.systemDarkMode = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    AppStorage.setOrCreate<boolean>('systemDarkMode', this.systemDarkMode);
     AppStorage.setOrCreate<string>('accentColor', ACCENT);
     AppStorage.setOrCreate<Context>('abilityContext', this.context);
     // Want 契约(§7.2):分享/deep-link 收 URL/title → 写 AppStorage 供 Index 跳转
@@ -87,11 +109,12 @@ export default class EntryAbility extends UIAbility {
     //   全屏布局使状态栏后面=窗口背景; 窗口背景=BG; 状态栏透明 → 无缝
     try {
       const win: window.Window = windowStage.getMainWindowSync();
+      themeWindow = win;
       // 先读 avoid area(全屏前), 再全屏; 全屏后 TYPE_SYSTEM 可能返回 0
       const avoidBefore: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       win.setWindowLayoutFullScreen(true);
       const avoidAfter: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
-      win.setWindowBackgroundColor('#F4F2EC'); // = BG token
+      // 背景和系统栏颜色在 KV 主题解析后设置，避免深色启动闪帧。
       win.setWindowSystemBarEnable(['status', 'navigation']);
       // 取非零值; px2vp 在 Ability 上下文不可用 → 用窗口 density 手动换算; 仍为0兜底44vp
       let density: number = 3;
@@ -107,12 +130,6 @@ export default class EntryAbility extends UIAbility {
       AppStorage.setOrCreate<number>('navBarHeight', bottomVp);
       hilog.info(DOMAIN, TAG, 'statusBar px=%{public}d density=%{public}f vp=%{public}d', topPx, density, topVp);
       hilog.info(DOMAIN, TAG, 'navBar px=%{public}d vp=%{public}d', bottomPx, bottomVp);
-      win.setWindowSystemBarProperties({
-        statusBarColor: '#00000000',
-        statusBarContentColor: '#1B1A17',
-        navigationBarColor: '#00000000',
-        navigationBarContentColor: '#1B1A17',
-      });
       this.avoidAreaWindow = win;
       win.on('avoidAreaChange', (info: window.AvoidAreaOptions): void => {
         if (info.type === window.AvoidAreaType.TYPE_SYSTEM) {
@@ -136,20 +153,11 @@ export default class EntryAbility extends UIAbility {
       });
     };
     getChatKvStore().get('ui_color_mode').then((mode: string | null): Promise<DisplaySetting> => {
-      applyTheme(mode === 'dark');
-      AppStorage.setOrCreate<boolean>('darkMode', mode === 'dark');
-      try {
-        const win: window.Window = windowStage.getMainWindowSync();
-        win.setWindowBackgroundColor(BG);
-        win.setWindowSystemBarProperties({
-          statusBarColor: '#00000000',
-          statusBarContentColor: mode === 'dark' ? '#ECE8DF' : '#1B1A17',
-          navigationBarColor: '#00000000',
-          navigationBarContentColor: mode === 'dark' ? '#ECE8DF' : '#1B1A17',
-        });
-      } catch (e) {
-        hilog.warn(DOMAIN, TAG, 'theme window apply failed: %{public}s', String(e));
-      }
+      const resolvedDark: boolean = mode === 'dark' || (mode !== 'light' && this.systemDarkMode);
+      applyTheme(resolvedDark);
+      AppStorage.setOrCreate<string>('uiColorMode', mode === 'dark' || mode === 'light' || mode === 'system' ? mode : 'system');
+      AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
+      applyWindowTheme(resolvedDark);
       return loadDisplaySetting(getChatKvStore());
     }).then((s: DisplaySetting): void => {
       const accent: string = s.accentColor.length > 0 ? s.accentColor : ACCENT;
@@ -159,11 +167,24 @@ export default class EntryAbility extends UIAbility {
     }).catch((): void => { start(); });
   }
 
+  onConfigurationUpdate(newConfig: Configuration): void {
+    const isDark: boolean = newConfig.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    this.systemDarkMode = isDark;
+    AppStorage.setOrCreate<boolean>('systemDarkMode', isDark);
+    const mode: string = AppStorage.get<string>('uiColorMode') ?? 'system';
+    if (mode === 'system') {
+      applyTheme(isDark);
+      AppStorage.setOrCreate<boolean>('darkMode', isDark);
+      applyWindowTheme(isDark);
+    }
+  }
+
   onWindowStageDestroy(): void {
     if (this.avoidAreaWindow !== null) {
       try { this.avoidAreaWindow.off('avoidAreaChange'); } catch (_e) {}
       this.avoidAreaWindow = null;
     }
+    themeWindow = null;
   }
 
   onForeground(): void {

@@ -10,7 +10,7 @@ import { router } from '@kit.ArkUI';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR, CODE_BG,
-  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
+  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
   PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER,
 } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
@@ -39,8 +39,9 @@ export struct PageTitleBar {
         .onClick((): void => { this.onBack(); })
       }
       Text(this.title)
-        .fontSize(TITLE)
-        .fontWeight(FontWeight.Bold)
+        .fontSize(TEXT_STYLES.screenTitle.size)
+        .fontWeight(TEXT_STYLES.screenTitle.weight)
+        .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
         .fontColor(INK)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -48,7 +49,11 @@ export struct PageTitleBar {
         .layoutWeight(1)
       if (this.actionText.length > 0) {
         Row() {
-          Text(this.actionText).fontSize(BODY).fontColor(this.accentColorStore)
+          Text(this.actionText)
+            .fontSize(TEXT_STYLES.secondary.size)
+            .fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontColor(this.accentColorStore)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .constraintSize({ minWidth: 44, minHeight: 44 })
@@ -74,12 +79,16 @@ export struct SectionHeader {
   build(): void {
     Row() {
       Text('//')
-        .fontSize(LABEL)
+        .fontSize(TEXT_STYLES.eyebrow.size)
         .fontColor(this.accentColorStore)
-        .fontWeight(FontWeight.Bold)
+        .fontWeight(TEXT_STYLES.eyebrow.weight)
+        .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+        .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
       Text(` ${this.label.toUpperCase()}`)
-        .fontSize(LABEL)
-        .fontWeight(FontWeight.Bold)
+        .fontSize(TEXT_STYLES.eyebrow.size)
+        .fontWeight(TEXT_STYLES.eyebrow.weight)
+        .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+        .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
         .fontColor(INK3)
     }
     .width('100%')
@@ -104,13 +113,16 @@ export struct NavRow {
   build(): void {
     Row() {
       Text(this.label)
-        .fontSize(BODY)
-        .fontWeight(FontWeight.Medium)
+        .fontSize(TEXT_STYLES.body.size)
+        .fontWeight(TEXT_STYLES.body.weight)
+        .lineHeight(TEXT_STYLES.body.lineHeight)
         .fontColor(this.danger ? ERROR : INK)
         .layoutWeight(1)
       if (this.valueText.length > 0) {
         Text(this.valueText)
-          .fontSize(BODY2)
+          .fontSize(TEXT_STYLES.secondary.size)
+          .fontWeight(TEXT_STYLES.secondary.weight)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight)
           .fontColor(this.danger ? ERROR : INK3)
           .fontFamily('JetBrainsMono')
           .maxLines(1)

@@ -10,11 +10,22 @@ export struct ConfirmDialog {
   @Prop dismissText: string = '取消';
   onConfirm: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
+  @State private entered: boolean = false;
+
+  aboutToAppear(): void {
+    this.entered = false;
+    animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => { this.entered = true; });
+  }
 
   build(): void {
     if (this.show) {
-      // 遮罩层
+      // 遮罩层独立成全屏子项，卡片置后并消费点击避免误关闭
       Stack() {
+        Row() {}
+          .width('100%')
+          .height('100%')
+          .backgroundColor(OVERLAY)
+          .onClick((): void => { this.onDismiss(); })
         Column() {
           Text(this.title)
             .fontSize(BODY)
@@ -58,6 +69,9 @@ export struct ConfirmDialog {
         .backgroundColor(SURFACE)
         .borderRadius(14)
         .padding({ left: 20, right: 20, top: 20, bottom: 0 })
+        .scale({ x: this.entered ? 1 : 0.96, y: this.entered ? 1 : 0.96 })
+        .opacity(this.entered ? 1 : 0)
+        .onClick((): void => {})
       }
       .width('100%')
       .height('100%')

@@ -4323,7 +4323,7 @@ struct ChatPage {
         if (!this.timelineLoadState.fullyLoaded) {
           ListItem() {
             Row() {
-              DotLoading()
+              DotLoading({ dotSize: 6, color: INK3 })
               Text('加载更早消息…')
                 .fontSize(META).fontColor(INK3)
                 .margin({ left: 8 })

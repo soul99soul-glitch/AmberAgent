@@ -1,12 +1,11 @@
-// DotLoading — 脉冲加载点(对齐 Android DotLoading.kt)
-// 单圆点 alpha 0.3↔1 往复循环(iterations -1 + Alternate)
-import { ACCENT } from '../../design/tokens.ets';
+// DotLoading — 三点脉冲加载(对齐 Android DotLoading.kt)
+// 三个小圆点共享 alpha 0.3↔1 往复循环(iterations -1 + Alternate)
+import { INK3 } from '../../design/tokens.ets';
 
 @Component
 export struct DotLoading {
-  @StorageProp('accentColor') accentColorStore: string = ACCENT;
-  @Prop color: string = '';
-  @Prop dotSize: number = 16;
+  @Prop color: string = INK3;
+  @Prop dotSize: number = 6;
   @State alpha: number = 0.3;
 
   aboutToAppear(): void {
@@ -16,11 +15,19 @@ export struct DotLoading {
   }
 
   build(): void {
-    Text('')
-      .width(this.dotSize)
-      .height(this.dotSize)
-      .borderRadius(this.dotSize / 2)
-      .backgroundColor(this.color.length > 0 ? this.color : this.accentColorStore)
-      .opacity(this.alpha)
+    Row() {
+      Circle({ width: this.dotSize, height: this.dotSize })
+        .fill(this.color)
+        .opacity(this.alpha)
+      Circle({ width: this.dotSize, height: this.dotSize })
+        .fill(this.color)
+        .opacity(this.alpha)
+        .margin({ left: 4 })
+      Circle({ width: this.dotSize, height: this.dotSize })
+        .fill(this.color)
+        .opacity(this.alpha)
+        .margin({ left: 4 })
+    }
+    .height(this.dotSize)
   }
 }

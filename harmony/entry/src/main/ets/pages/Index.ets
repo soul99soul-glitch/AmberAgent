@@ -19,7 +19,7 @@ import { SectionHeader, PageSpacer, SessionRowItem } from '../components/PageTem
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
   ACCENT, ACCENT_INK, ACCENT_LIGHT,
-  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY,
+  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
 
 // 问候语(根据时间)
@@ -116,12 +116,15 @@ struct Index {
 
         // 中: 标题 + 模型(信息展示, 不可点击)
         Column() {
-          Text('新会话')
-            .fontSize(HEADER)
-            .fontWeight(FontWeight.Bold)
+            Text('新会话')
+            .fontSize(TEXT_STYLES.sessionTitle.size)
+            .fontWeight(TEXT_STYLES.sessionTitle.weight)
+            .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
             .fontColor(INK)
           Text('deepseek-v4-flash')
-            .fontSize(META)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
             .fontColor(INK3)
             .fontFamily('JetBrainsMono')
             .margin({ top: 1 })

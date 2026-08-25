@@ -122,7 +122,7 @@ export struct AgentToolCallCapsule {
 
         if (!this.showApproval) {
           if (this.status === ToolStatus.Running) {
-            DotLoading({ dotSize: 12, color: ACCENT })
+            DotLoading({ dotSize: 6, color: ACCENT })
           } else {
             Text(toolStatusIcon(this.status))
               .fontSize(10)

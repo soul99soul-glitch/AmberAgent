@@ -1,6 +1,6 @@
 // 设计系统组件 — 杂志风排版原语 + 聊天交互原语
 // 基准: Android ds/AmberPrimitives.kt(186 行) + 杂志风既有组件
-import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS } from './tokens.ets';
+import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS, OVERLAY } from './tokens.ets';
 
 // ===== 聊天交互原语(Android AmberPrimitives.kt 对齐) =====
 
@@ -272,28 +272,47 @@ export struct ConfirmDialog {
   @Prop cancelText: string = '取消';
   onConfirm: () => void = (): void => {};
   onCancel: () => void = (): void => {};
+  @State private entered: boolean = false;
+
+  aboutToAppear(): void {
+    this.entered = false;
+    animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => { this.entered = true; });
+  }
+
   build(): void {
     if (this.show) {
-      Column() {
-        Text(this.title).fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK)
-        if (this.message.length > 0) {
-          Text(this.message).fontSize(BODY).fontColor(INK2).margin({ top: 8 })
+      Stack({ alignContent: Alignment.Center }) {
+        Row() {}
+          .width('100%')
+          .height('100%')
+          .backgroundColor(OVERLAY)
+          .onClick((): void => { this.onCancel(); })
+        Column() {
+          Text(this.title).fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK)
+          if (this.message.length > 0) {
+            Text(this.message).fontSize(BODY).fontColor(INK2).margin({ top: 8 })
+          }
+          Row() {
+            Text(this.cancelText).fontSize(BODY).fontColor(INK3)
+              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+              .onClick((): void => { this.onCancel(); })
+            Blank()
+            Text(this.confirmText).fontSize(BODY).fontColor(ACCENT)
+              .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+              .onClick((): void => { this.onConfirm(); })
+          }
+          .width('100%')
+          .margin({ top: 16 })
         }
-        Row() {
-          Text(this.cancelText).fontSize(BODY).fontColor(INK3)
-            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-            .onClick((): void => { this.onCancel(); })
-          Blank()
-          Text(this.confirmText).fontSize(BODY).fontColor(ACCENT)
-            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-            .onClick((): void => { this.onConfirm(); })
-        }
-        .width('100%')
-        .margin({ top: 16 })
+        .width('84%')
+        .padding(20)
+        .backgroundColor(SURFACE)
+        .borderRadius(16)
+        .scale({ x: this.entered ? 1 : 0.96, y: this.entered ? 1 : 0.96 })
+        .opacity(this.entered ? 1 : 0)
       }
-      .padding(20)
-      .backgroundColor(SURFACE)
-      .borderRadius(16)
+      .width('100%')
+      .height('100%')
     }
   }
 }
@@ -393,20 +412,6 @@ export struct ImagePreviewDialog {
   }
 }
 
-// DotLoading: 三点跳动加载动画(MVP:静态三点,动画需设备验证)
-@Component
-export struct DotLoading {
-  @Prop color: string = INK3;
-  dotSize: number = 6;
-  build(): void {
-    Row() {
-      Text('●').fontSize(this.dotSize).fontColor(this.color)
-      Text('●').fontSize(this.dotSize).fontColor(this.color).margin({ left: 4 }).opacity(0.6)
-      Text('●').fontSize(this.dotSize).fontColor(this.color).margin({ left: 4 }).opacity(0.3)
-    }
-  }
-}
-
 // ShareSheet: 分享面板(MVP:复制链接/分享文本)
 @Component
 export struct ShareSheet {
@@ -414,25 +419,43 @@ export struct ShareSheet {
   @Prop text: string = '';
   onCopy: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
+  @State private entered: boolean = false;
+
+  aboutToAppear(): void {
+    this.entered = false;
+    animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => { this.entered = true; });
+  }
+
   build(): void {
     if (this.show) {
-      Column() {
-        Text('分享').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
-          .width('100%').padding({ left: 16, top: 12, bottom: 8 })
-        Text('复制文本').fontSize(BODY).fontColor(ACCENT)
-          .width('100%').padding({ left: 16, top: 10, bottom: 10 })
-          .onClick((): void => {
-            this.onCopy();
-            this.onDismiss();
-          })
-        Divider().color(LINE).strokeWidth(0.5)
-        Text('取消').fontSize(BODY).fontColor(INK3)
-          .width('100%').padding({ left: 16, top: 10, bottom: 10 })
+      Stack() {
+        Row() {}
+          .width('100%')
+          .height('100%')
+          .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
+        Column() {
+          Text('分享').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
+            .width('100%').padding({ left: 16, top: 12, bottom: 8 })
+          Text('复制文本').fontSize(BODY).fontColor(ACCENT)
+            .width('100%').padding({ left: 16, top: 10, bottom: 10 })
+            .onClick((): void => {
+              this.onCopy();
+              this.onDismiss();
+            })
+          Divider().color(LINE).strokeWidth(0.5)
+          Text('取消').fontSize(BODY).fontColor(INK3)
+            .width('100%').padding({ left: 16, top: 10, bottom: 10 })
+            .onClick((): void => { this.onDismiss(); })
+        }
+        .width('100%')
+        .backgroundColor(SURFACE)
+        .borderRadius({ topLeft: 16, topRight: 16 })
+        .translate({ y: this.entered ? 0 : 80 })
       }
       .width('100%')
-      .backgroundColor(SURFACE)
-      .borderRadius({ topLeft: 16, topRight: 16 })
+      .height('100%')
+      .alignContent(Alignment.Bottom)
     }
   }
 }

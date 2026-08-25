@@ -1,8 +1,8 @@
 // RabbitLoading — 加载动画(ui/RabbitLoading.kt:35 行)
 // Android 基准: AnimatedVectorDrawable(R.drawable.pig)+ primary 色 tint
-// ArkUI: 无 AVD 等价 → 降级用既有 DotLoading 三点动画(design/components.ets)
+// ArkUI: 无 AVD 等价 → 复用统一 DotLoading 动画
 //   登记:需 Lottie/AVPlayer 资源移植后才还原本动画
-import { DotLoading } from '../../design/components.ets';
+import { DotLoading } from './DotLoading.ets';
 import { ACCENT } from '../../design/tokens.ets';
 
 @Component

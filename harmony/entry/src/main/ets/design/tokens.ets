@@ -110,6 +110,33 @@ export const MONO_SMALL: number = 11.5;      // 等宽小字(11.5/400)
 export const LABEL: number = 11;             // 标签/eyebrow(11/600)
 export const TINY: number = 10.5;            // 极小字(10.5/400-600)
 
+// ── TypeScale contract (Android AmberType.kt seven levels) ──
+export class TextStyleToken {
+  size: number;
+  weight: FontWeight;
+  lineHeight: number;
+  letterSpacing: number;
+
+  constructor(size: number, weight: FontWeight, lineHeight: number, letterSpacing: number = 0) {
+    this.size = size;
+    this.weight = weight;
+    this.lineHeight = lineHeight;
+    this.letterSpacing = letterSpacing;
+  }
+}
+
+export class TextStyles {
+  screenTitle: TextStyleToken = new TextStyleToken(19, FontWeight.Bold, 25);
+  sessionTitle: TextStyleToken = new TextStyleToken(16, FontWeight.Bold, 21);
+  body: TextStyleToken = new TextStyleToken(15, FontWeight.Normal, 22);
+  secondary: TextStyleToken = new TextStyleToken(13, FontWeight.Normal, 18);
+  meta: TextStyleToken = new TextStyleToken(12, FontWeight.Normal, 16);
+  eyebrow: TextStyleToken = new TextStyleToken(11, 600, 14, 1.3);
+  tinyTag: TextStyleToken = new TextStyleToken(10.5, 600, 13);
+}
+
+export const TEXT_STYLES: TextStyles = new TextStyles();
+
 // ── 间距/圆角 ──
 export const PAD_CARD: number = 16;
 export const PAD_ITEM: number = 13;

@@ -363,7 +363,7 @@ struct SearchPage {
 
       if (this.loading && this.results.length === 0) {
         Column() {
-          DotLoading({ dotSize: 12 })
+          DotLoading({ dotSize: 6, color: INK3 })
           Text('搜索中…').fontSize(BODY).fontColor(INK3).margin({ top: 12 })
         }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center).padding({ top: 48 })
       } else if (this.errorMsg.length > 0 && this.results.length === 0) {

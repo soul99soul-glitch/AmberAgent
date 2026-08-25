@@ -13,6 +13,7 @@ import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/P
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { loadDisplaySetting, saveDisplaySetting } from '@amber/chat-domain';
+import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 
 // 主题选择持久化键(全局调色板应用登记 P1:tokens 为静态常量)
 const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
@@ -22,8 +23,9 @@ const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
 struct SettingPage {
   // theme swap triggers full-page rebuild (build re-reads mutable tokens)
   @StorageProp('darkMode') darkMode: boolean = false;
+  @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
-  @State themeMode: string = 'light';
+  @State themeMode: string = 'system';
   @State accentColor: string = ACCENT;
   // 真实值装配:默认模型标签 + 版本号(不写死占位)
   @State modelLabel: string = '';
@@ -46,15 +48,18 @@ struct SettingPage {
       }
     });
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
-      if (raw === 'dark' || raw === 'light') this.themeMode = raw;
+      if (raw === 'dark' || raw === 'light' || raw === 'system') this.themeMode = raw;
     });
   }
 
   private setTheme(mode: string): void {
     this.themeMode = mode;
     getChatKvStore().put(UI_COLOR_MODE_KEY, mode);
-    applyTheme(mode === 'dark');
-    AppStorage.setOrCreate<boolean>('darkMode', mode === 'dark');
+    const resolvedDark: boolean = mode === 'dark' || (mode === 'system' && this.systemDarkMode);
+    applyTheme(resolvedDark);
+    applyWindowTheme(resolvedDark);
+    AppStorage.setOrCreate<string>('uiColorMode', mode);
+    AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
     // tokens 于 build 读取 → 重建当前页即时生效(栈内他页回栈时重建)
     // @StorageProp('darkMode') 驱动各根页重建读新令牌
   }
@@ -105,6 +110,17 @@ struct SettingPage {
             .padding({ top: 9, bottom: 9 }).borderRadius(10)
             .backgroundColor(this.themeMode === 'dark' ? RAISED : 'transparent')
             .onClick((): void => { this.setTheme('dark'); })
+
+            Row() {
+              Text('跟随系统')
+                .fontSize(BODY2)
+                .fontWeight(this.themeMode === 'system' ? FontWeight.Bold : FontWeight.Normal)
+                .fontColor(this.themeMode === 'system' ? INK : INK3)
+            }
+            .layoutWeight(1).justifyContent(FlexAlign.Center)
+            .padding({ top: 9, bottom: 9 }).borderRadius(10)
+            .backgroundColor(this.themeMode === 'system' ? RAISED : 'transparent')
+            .onClick((): void => { this.setTheme('system'); })
           }
           .width('100%').padding(4)
           .backgroundColor(SURFACE2).borderRadius(13)
