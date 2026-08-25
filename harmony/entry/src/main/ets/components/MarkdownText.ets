@@ -28,7 +28,11 @@ import type {
   HighlightToken,
   MarkdownCacheResult,
 } from '@amber/chat-domain';
-import { ACCENT, BODY, INK, LINE, META, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK3, LINE, META, MONO_SMALL, SURFACE2 } from '../design/tokens.ets';
+import { Icon } from './ui/Icon.ets';
+import { promptAction } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
+import { common } from '@kit.AbilityKit';
 
 // ===== P3:流式逐字 reveal + Markdown 增量解析(Phase 3 计划 §4) =====
 // 仅对「活动流式尾消息的最后文本块」启用 pacing(streaming=true 且 streamKey 非空);
@@ -94,6 +98,7 @@ const CODE_PLAIN: string = '#ABB2BF';
 
 // 代码块背景
 const CODE_BG: string = '#282C34';
+const CODE_HEADER_BG: string = '#20242B';
 const CODE_TEXT: string = '#ABB2BF';
 
 // 行内代码样式
@@ -121,6 +126,7 @@ export struct MarkdownText {
   private lastParseMs: number = 0;
   private lastParsedText: string = '';
   private lastGrowCallbackMs: number = 0;
+  @State private previewUrl: string = '';
 
   aboutToAppear(): void {
     this.updateDisplay();
@@ -308,6 +314,9 @@ export struct MarkdownText {
     }
     .width(this.fillWidth ? '100%' : 'auto')
     .alignItems(HorizontalAlign.Start)
+    .bindContentCover(this.previewUrl.length > 0, this.ImagePreviewOverlay(), {
+      onWillDismiss: (): void => { this.closeImagePreview(); },
+    })
   }
 
   // ===== 预计算方法(非 @Builder) =====
@@ -358,6 +367,83 @@ export struct MarkdownText {
     if (alignment === 'center') return TextAlign.Center;
     if (alignment === 'right') return TextAlign.End;
     return TextAlign.Start;
+  }
+
+  private copyText(text: string, message: string): void {
+    try {
+      const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+      promptAction.showToast({ message: message, duration: 1400 });
+    } catch (_e) {
+      promptAction.showToast({ message: '复制失败', duration: 1400 });
+    }
+  }
+
+  private openUrl(url: string): void {
+    const normalizedUrl: string = url.trim();
+    if (normalizedUrl.length === 0) return;
+    const schemeEnd: number = normalizedUrl.indexOf(':');
+    const scheme: string = schemeEnd > 0 ? normalizedUrl.substring(0, schemeEnd).toLowerCase() : '';
+    if (scheme !== 'http' && scheme !== 'https' && scheme !== 'mailto' && scheme !== 'tel') {
+      this.copyText(url, '无法打开浏览器，已复制链接');
+      return;
+    }
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      ctx.startAbility({
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: normalizedUrl,
+      }).catch((_e: Error): void => {
+        this.copyText(url, '无法打开浏览器，已复制链接');
+      });
+    } catch (_e) {
+      this.copyText(url, '无法打开浏览器，已复制链接');
+    }
+  }
+
+  private showLinkActions(url: string): void {
+    AlertDialog.show({
+      title: '链接',
+      message: url,
+      primaryButton: {
+        value: '复制链接',
+        action: (): void => { this.copyText(url, '已复制链接'); },
+      },
+      secondaryButton: {
+        value: '浏览器打开',
+        action: (): void => { this.openUrl(url); },
+      },
+    });
+  }
+
+  private showImagePreview(url: string): void {
+    this.previewUrl = url;
+  }
+
+  private closeImagePreview(): void {
+    this.previewUrl = '';
+  }
+
+  @Builder
+  ImagePreviewOverlay(): void {
+    if (this.previewUrl.length > 0) {
+      Stack({ alignContent: Alignment.Center }) {
+        Image(this.previewUrl)
+          .width('100%')
+          .height('100%')
+          .objectFit(ImageFit.Contain)
+          .onClick((): void => { this.closeImagePreview(); })
+        Icon({ name: 'close', iconSize: 24, color: '#FFFFFF' })
+          .width(44)
+          .height(44)
+          .position({ top: 24, right: 16 })
+          .onClick((): void => { this.closeImagePreview(); })
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor('#000000')
+    }
   }
 
   private splitTokensByLine(tokens: HighlightToken[]): HighlightToken[][] {
@@ -508,6 +594,27 @@ export struct MarkdownText {
   RenderCodeBlock(block: MarkdownBlock): void {
     Column() {
       if (block.kind === 'code_block') {
+        Row() {
+          Text(block.lang.length > 0 ? block.lang : 'code')
+            .fontSize(MONO_SMALL)
+            .fontColor('#9AA3B2')
+            .fontFamily('JetBrainsMono')
+            .layoutWeight(1)
+          Text('复制')
+            .fontSize(META)
+            .fontColor(CODE_TEXT)
+            .width(48)
+            .height(44)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => { this.copyText(block.code, '已复制代码'); })
+        }
+        .width('100%')
+        .height(44)
+        .padding({ right: 4 })
+        .alignItems(VerticalAlign.Center)
+        .backgroundColor(CODE_HEADER_BG)
+        .border({ width: { bottom: 0.5 }, color: '#3A404B' })
+
         // 横向滚动:长行不折行,行 Text 不限宽(内容自适应),短行靠 Column 左对齐
         Scroll() {
           Column() {
@@ -654,14 +761,30 @@ export struct MarkdownText {
         .fontColor(this.fontColor === INK ? INLINE_CODE_FG : color)
         .fontFamily('JetBrainsMono')
     } else if (tok.type === 'link') {
-      // No safe open action is available in this renderer; keep links as ordinary text.
       Span(tok.text)
         .fontSize(size)
-        .fontColor(color)
-    } else {
-      Span(`[图: ${tok.alt}]`)
-        .fontSize(size)
-        .fontColor(color)
+        .fontColor(ACCENT)
+        .decoration({ type: TextDecorationType.Underline, color: ACCENT })
+        .gesture(
+          GestureGroup(
+            GestureMode.Exclusive,
+            LongPressGesture().onAction((): void => { this.copyText(tok.url, '已复制链接'); }),
+            TapGesture().onAction((): void => { this.showLinkActions(tok.url); }),
+          )
+        )
+    } else if (tok.type === 'image') {
+      if (tok.url.trim().length > 0) {
+        ImageSpan(tok.url)
+          .width(220)
+          .height(150)
+          .objectFit(ImageFit.Contain)
+          .borderRadius(8)
+          .onClick((): void => { this.showImagePreview(tok.url); })
+      } else {
+        Span(`[图: ${tok.alt}]`)
+          .fontSize(size)
+          .fontColor(color)
+      }
     }
   }
 }
