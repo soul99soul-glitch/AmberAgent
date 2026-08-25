@@ -124,6 +124,8 @@ interface MiniAppFetchBytesResult {
   ok: boolean;
   contentType: string;
   bytes: Uint8Array;
+  // 重定向后的最终请求 URL(fetch 契约对齐 Android:返回最终地址)
+  finalUrl: string;
 }
 
 interface MiniAppImageResult {
@@ -196,6 +198,17 @@ class MiniAppHttpExecutor {
         });
       const response: rcp.Response = await this.ensureSession().fetch(request);
       const status: number = response.statusCode;
+      // 每跳统一预检(重定向响应体也应受限;3xx 一般无 body,此为防御)
+      const hopLength: string | string[] | undefined = response.headers['content-length'];
+      const hopLengthText: string | null = typeof hopLength === 'string'
+        ? hopLength : (Array.isArray(hopLength) && hopLength.length > 0
+          ? String(hopLength[0]) : null);
+      if (hopLengthText !== null) {
+        const hopLen: number = Number.parseInt(hopLengthText, 10);
+        if (Number.isFinite(hopLen) && hopLen > MINI_APP_MAX_RESPONSE_BYTES) {
+          throw new MiniAppValidationException('Response is too large');
+        }
+      }
       if (status >= 300 && status < 400) {
         const location: string | undefined = response.headers['location'];
         if (hop >= MINI_APP_MAX_REDIRECTS || location === undefined || location.trim().length === 0) {
@@ -215,7 +228,7 @@ class MiniAppHttpExecutor {
       if (bytes.byteLength > MINI_APP_MAX_RESPONSE_BYTES) {
         throw new MiniAppValidationException('Response is too large');
       }
-      return { status, ok: status >= 200 && status < 300, contentType, bytes };
+      return { status, ok: status >= 200 && status < 300, contentType, bytes, finalUrl: url };
     }
   }
 
@@ -388,7 +401,7 @@ export class MiniAppBridgeImpl {
         const payload: JsonObject = {};
         payload['status'] = result.status as JsonValue;
         payload['ok'] = result.ok as JsonValue;
-        payload['url'] = plan.url as JsonValue;
+        payload['url'] = result.finalUrl as JsonValue;
         payload['contentType'] = result.contentType as JsonValue;
         payload['body'] = body;
         return payload;

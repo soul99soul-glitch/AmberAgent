@@ -38,6 +38,11 @@ struct AssistantDetailPage {
     this.refresh();
   }
 
+  // 子页(基础/提示词/请求/扩展)保存返回后刷新,否则详情仍显示旧名称/预览
+  onPageShow(): void {
+    if (this.assistantId.length > 0) this.refresh();
+  }
+
   private async refresh(): Promise<void> {
     const list: Assistant[] | null = await loadAssistants(getChatKvStore());
     const found: Assistant | null = list === null
@@ -163,16 +168,9 @@ struct AssistantDetailPage {
                 const params: RouterParams = { assistantId: this.assistantId };
                 router.pushUrl({ url: 'pages/AssistantBackgroundPicker', params: params });
               })
-              Row() {
-                Icon({ name: 'gear', iconSize: META, color: INK3 })
-                Text(' 属性编辑').fontSize(META).fontColor(INK3)
-              }
-              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              .backgroundColor(SURFACE2).borderRadius(8)
-              .onClick((): void => {
-                const params: RouterParams = { assistantId: this.assistantId };
-                router.pushUrl({ url: 'pages/AssistantPropertyEditor', params: params });
-              })
+              // 属性编辑入口移除:AssistantPropertyEditor 是无调用方匹配参数的
+              // 占位页(详情页只传 assistantId,编辑器读 propertyName/value 且
+              // 保存仅 router.back(),进去必空壳)——保留页面文件,入口不再暴露
             }
             .width('100%').padding({ left: 16, top: 16 })
 

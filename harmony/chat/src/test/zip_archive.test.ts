@@ -107,3 +107,32 @@ test('未知压缩方法 → 抛错(非静默)', async () => {
   const weird: ZipEntryRecord = { ...rec, method: 12 };
   await assert.rejects(() => readZipEntryText(zip, weird, nodeInflate), /unsupported compression method 12/);
 });
+
+// ===== Phase5 加固回归 =====
+
+test('伪造超大声明 uncompressedSize 的 deflate 条目 → 分配前拒绝(炸弹防护)', async () => {
+  const zip = buildZip([{ name: 'bomb.xml', text: '<x/>', method: 8 }]);
+  const rec: ZipEntryRecord = readZipEntries(zip)[0];
+  const lying: ZipEntryRecord = { ...rec, uncompressedSize: 5 * 1024 * 1024 * 1024 };
+  await assert.rejects(
+    () => readZipEntryText(zip, lying, nodeInflate),
+    /declares oversized output/,
+  );
+});
+
+test('stored 条目声明与实际不符 → 拒绝(截断数据不再静默当成功)', () => {
+  const zip = buildZip([{ name: 's.txt', text: 'abcdef', method: 0 }]);
+  const rec: ZipEntryRecord = readZipEntries(zip)[0];
+  const lying: ZipEntryRecord = { ...rec, compressedSize: rec.compressedSize - 2 };
+  assert.throws(() => extractZipEntryData(zip, lying), /stored entry size mismatch/);
+});
+
+test('CD 记录越界(count 超实际) → 抛错而非读出 undefined 字段', () => {
+  const zip = buildZip([{ name: 'a', text: 'a', method: 0 }]);
+  // 篡改 EOCD count 为 2(实际 1) → 第二轮 off 越界
+  const mutated = new Uint8Array(zip);
+  const eocd = mutated.length - 22;
+  mutated[eocd + 10] = 2;
+  mutated[eocd + 12] = 2;
+  assert.throws(() => readZipEntries(mutated), /central directory/);
+});

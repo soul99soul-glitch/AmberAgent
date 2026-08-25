@@ -2,6 +2,7 @@
 // Android 基准: app/.../core/ai/tools/SearchTools.kt(全文 256 行)
 // 偏差:Tool → AgentTool(chat HAR 既有形状);LocalDate.now().toLocalString(true) → deps.today 注入
 import type { JsonObject, JsonValue } from '../chat/json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessagePart } from '../chat/message.ts';
 import type { AgentTool, InputSchemaObj } from '../chat/tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from '../chat/tool.ts';
@@ -117,6 +118,31 @@ const resolveScrapeService = (settings: SearchSettings, input: JsonObject): Sear
 };
 
 // :23-147
+const abortError = (): Error => {
+  const err: Error = new Error('search tool aborted');
+  err.name = 'AbortError';
+  return err;
+};
+
+const raceAbort = <T>(run: Promise<T>, signal: AbortSignalLike): Promise<T> =>
+  new Promise<T>((resolve, reject): void => {
+    let listener: (() => void) | null = null;
+    const settle = (fn: () => void): void => {
+      if (listener !== null && signal.removeEventListener !== undefined) {
+        signal.removeEventListener('abort', listener);
+      }
+      fn();
+    };
+    if (signal.addEventListener !== undefined) {
+      listener = (): void => { settle((): void => { reject(abortError()); }); };
+      signal.addEventListener('abort', listener);
+    }
+    run.then(
+      (value: T): void => { settle((): void => { resolve(value); }); },
+      (e: Error): void => { settle((): void => { reject(e); }); },
+    );
+  });
+
 export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDeps = {}): AgentTool[] => {
   const today: string = (deps.today ?? ((): string => new Date().toISOString().substring(0, 10)))();
   const enabled: SearchServiceOptions[] = enabledServices(settings);
@@ -174,9 +200,19 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
       name: 'search_web',
       description: searchWebDescription,
       parameters: searchWebParameters,
-      execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-        const results: JsonObject =
-          await searchOrchestratorSearch(settings, asInputObject(input), undefined, deps);
+      execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+        // Stop 取消:即时以 AbortError 结算工具(底层 HTTP 有自身超时上限;
+        // provider 级 signal 贯穿登记为后续接线)
+        if (signal !== undefined && signal.aborted) {
+          throw abortError();
+        }
+        const run: Promise<JsonObject> =
+          searchOrchestratorSearch(settings, asInputObject(input), undefined, deps);
+        if (signal === undefined) {
+          const results: JsonObject = await run;
+          return [{ type: 'text', text: JSON.stringify(results), metadata: null }];
+        }
+        const results: JsonObject = await raceAbort(run, signal);
         return [{ type: 'text', text: JSON.stringify(results), metadata: null }];
       },
     }),
@@ -213,12 +249,14 @@ export const createSearchTools = (settings: SearchSettings, deps: OrchestratorDe
         'Avoid using it for common questions unless the user asks.',
       ].join('\n'),
       parameters: scrapeWebParameters,
-      execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+        if (signal !== undefined && signal.aborted) throw abortError();
         const obj: JsonObject = asInputObject(input);
         const options: SearchServiceOptions = resolveScrapeService(settings, obj);
-        const result: ScrapedResult = await getSearchService(options).scrape(
+        const run: Promise<ScrapedResult> = getSearchService(options).scrape(
           obj, settings.searchCommonOptions, options,
         );
+        const result: ScrapedResult = signal === undefined ? await run : await raceAbort(run, signal);
         const payload: JsonObject = scrapedResultToJson(result);
         return [{ type: 'text', text: JSON.stringify(payload), metadata: null }];
       },

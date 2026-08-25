@@ -18,6 +18,10 @@ export interface ZipEntryRecord {
 // method 8 raw deflate 解压 Port(平台注入)
 export type InflateRawPort = (data: Uint8Array, expectedSize: number) => Promise<Uint8Array>;
 
+// 单条目解压输出上限:中央目录声明的 uncompressedSize 是不可信输入,
+// 直接按其分配输出缓冲可被 GB 级声明击穿(压缩炸弹)
+export const MAX_ZIP_ENTRY_OUTPUT_BYTES: number = 64 * 1024 * 1024;
+
 const EOCD_SIG: number = 0x06054b50;
 const CD_SIG: number = 0x02014b50;
 const LOCAL_SIG: number = 0x04034b50;
@@ -70,10 +74,17 @@ export const readZipEntries = (bytes: Uint8Array): ZipEntryRecord[] => {
   let off: number = u32(bytes, eocd + 16);
   const entries: ZipEntryRecord[] = [];
   for (let i: number = 0; i < count; i++) {
+    // 边界校验:伪造 count/name/extra/comment 可把读取游标推出文件尾
+    if (off < 0 || off + 46 > bytes.length) {
+      throw new Error('central directory corrupted');
+    }
     if (u32(bytes, off) !== CD_SIG) throw new Error('central directory corrupted');
     const nameLen: number = u16(bytes, off + 28);
     const extraLen: number = u16(bytes, off + 30);
     const commentLen: number = u16(bytes, off + 32);
+    if (off + 46 + nameLen + extraLen + commentLen > bytes.length) {
+      throw new Error('central directory record exceeds archive bounds');
+    }
     const rec: ZipEntryRecord = {
       name: utf8Decode(bytes.subarray(off + 46, off + 46 + nameLen)),
       method: u16(bytes, off + 10),
@@ -90,10 +101,19 @@ export const readZipEntries = (bytes: Uint8Array): ZipEntryRecord[] => {
 // getInputStream(entry):local header → 数据段切片(压缩态原样)
 export const extractZipEntryData = (bytes: Uint8Array, rec: ZipEntryRecord): Uint8Array => {
   const off: number = rec.localHeaderOffset;
-  if (u32(bytes, off) !== LOCAL_SIG) throw new Error(`local header missing for ${rec.name}`);
+  if (off < 0 || off + 30 > bytes.length || u32(bytes, off) !== LOCAL_SIG) {
+    throw new Error(`local header missing for ${rec.name}`);
+  }
   const nameLen: number = u16(bytes, off + 26);
   const extraLen: number = u16(bytes, off + 28);
   const dataOff: number = off + 30 + nameLen + extraLen;
+  if (dataOff > bytes.length || dataOff + rec.compressedSize > bytes.length) {
+    // subarray 超界只会静默截断,损坏/截断归档必须显式失败
+    throw new Error(`entry data out of bounds for ${rec.name}`);
+  }
+  if (rec.method === 0 && rec.compressedSize !== rec.uncompressedSize) {
+    throw new Error(`stored entry size mismatch for ${rec.name}`);
+  }
   return bytes.subarray(dataOff, dataOff + rec.compressedSize);
 };
 
@@ -104,7 +124,13 @@ export const readZipEntryText = async (
   const raw: Uint8Array = extractZipEntryData(bytes, rec);
   if (rec.method === 0) return utf8Decode(raw);
   if (rec.method === 8) {
+    if (rec.uncompressedSize > MAX_ZIP_ENTRY_OUTPUT_BYTES) {
+      throw new Error(`zip entry '${rec.name}' declares oversized output`);
+    }
     const plain: Uint8Array = await inflateRaw(raw, rec.uncompressedSize);
+    if (plain.length !== rec.uncompressedSize) {
+      throw new Error(`zip entry '${rec.name}' inflate size mismatch`);
+    }
     return utf8Decode(plain);
   }
   throw new Error(`unsupported compression method ${rec.method} for ${rec.name}`);

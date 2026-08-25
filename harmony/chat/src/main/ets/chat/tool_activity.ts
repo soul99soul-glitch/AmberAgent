@@ -31,6 +31,7 @@
 //   - Message.kt Tool.inputAsJson 已有 toolInputAsJson(message.ts:186),复用
 
 import { currentMessages } from './conversation.ts';
+import { newId } from './ids.ts';
 import type { Conversation } from './conversation.ts';
 import {
   isToolExecuted, toolInputAsJson,
@@ -134,7 +135,7 @@ export class AgentToolActivityStore {
 
   subscribe(listener: ActivityListener): () => void {
     this.listeners.push(listener);
-    listener(this.current);
+    try { listener(this.current); } catch { /* 首次回放同 emit 隔离 */ }
     return (): void => {
       const i: number = this.listeners.indexOf(listener);
       if (i >= 0) this.listeners.splice(i, 1);
@@ -142,7 +143,11 @@ export class AgentToolActivityStore {
   }
 
   private emit(): void {
-    for (const l of this.listeners) l(this.current);
+    // 逐 listener 隔离:单个订阅者异常不得阻断其余订阅者,也不得把异常
+    // 传播回 start/complete/fail 调用路径
+    for (const l of [...this.listeners]) {
+      try { l(this.current); } catch { /* 订阅者自身异常不阻断广播 */ }
+    }
   }
 
   // withCurrentConversation(:142-148)
@@ -194,7 +199,8 @@ export class AgentToolActivityStore {
     canCancel: boolean = false,
     conversationId: string | null = null,
   ): string {
-    const toolCallId: string = `${toolName}_${Date.now()}`;
+    // 同名工具同毫秒并发启动会碰撞 → 用唯一 id
+    const toolCallId: string = `${toolName}_${newId()}`;
     this.start(makeSandboxActivityUiState({
       toolCallId,
       toolName,

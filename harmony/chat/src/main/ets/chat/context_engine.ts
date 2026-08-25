@@ -617,6 +617,10 @@ export const withEffectiveMessages = (  conversation: Conversation, effectiveMes
   };
 };
 
+// 同会话自动 precompact 单飞:prepareContext 可被连续触发(快速发消息/工具循环),
+// 无门时会并发生成两份摘要并互相覆盖 insertCompact
+const precompactInFlight: Set<string> = new Set<string>();
+
 export const prepareContext = async (
   conversation: Conversation | null,
   policy: CompactPolicy,
@@ -669,20 +673,31 @@ export const prepareContext = async (
       } finally {
         if (deps.onCompactActiveChange !== undefined) deps.onCompactActiveChange(false);
       }
-    } else if (deps.launchPrecompact !== undefined) {
-      deps.launchPrecompact(() => compactConversation(
-        conversation as Conversation, policy, modelContextWindowTokens,
-        'auto_precompact', '', false, deps));
-    } else {
-      const run: Promise<CompactResult> = compactConversation(
-        conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, deps);
-      run.catch((e: Error): void => {
-        if (deps.store.recordEvent !== undefined) {
-          deps.store.recordEvent((conversation as Conversation).id,
-            'auto_precompact', null, `floating precompact failed: ${e.message}`)
-            .catch((): void => {});
+    } else if (!precompactInFlight.has(conversation.id)) {
+      precompactInFlight.add(conversation.id);
+      const release = (): void => { precompactInFlight.delete(conversation.id); };
+      if (deps.launchPrecompact !== undefined) {
+        try {
+          deps.launchPrecompact((): Promise<CompactResult> =>
+            compactConversation(
+              conversation as Conversation, policy, modelContextWindowTokens,
+              'auto_precompact', '', false, deps).finally(release));
+        } catch (e) {
+          release(); // launcher 同步抛错/拒收回调时不泄漏门闩
+          throw e instanceof Error ? e : new Error(String(e));
         }
-      });
+      } else {
+        const run: Promise<CompactResult> = compactConversation(
+          conversation, policy, modelContextWindowTokens, 'auto_precompact', '', false, deps)
+          .finally(release);
+        run.catch((e: Error): void => {
+          if (deps.store.recordEvent !== undefined) {
+            deps.store.recordEvent((conversation as Conversation).id,
+              'auto_precompact', null, `floating precompact failed: ${e.message}`)
+              .catch((): void => {});
+          }
+        });
+      }
     }
   }
   let latestCompacts: ConversationCompact[] = await deps.store.getCompacts(conversation.id);

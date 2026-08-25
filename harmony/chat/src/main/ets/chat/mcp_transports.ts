@@ -87,12 +87,28 @@ export class McpSseOpenError extends Error {
   }
 }
 
+// 用户自定义头不得覆盖协议必需头;名称大小写不敏感合并
+const mergeMcpHeaders = (
+  user: Array<[string, string]>, protocol: Array<[string, string]>,
+  protocolFirst: boolean,
+): Array<[string, string]> => {
+  const out: Array<[string, string]> = [];
+  for (const pair of user) {
+    const clash: boolean = protocol.some(
+      (proto: [string, string]): boolean =>
+        proto[0].toLowerCase() === pair[0].toLowerCase());
+    if (!clash) out.push(pair);
+  }
+  // 顺序按各传输层金样;用户自定义头不可覆盖协议必需头
+  return protocolFirst ? [...protocol, ...out] : [...out, ...protocol];
+};
+
 export interface McpHttpPort {
   request(method: string, url: string, headers: Array<[string, string]>,
-    body: string | null, requestId?: string): Promise<McpHttpResponse>;
+    body: string | null, requestId?: string, timeoutMs?: number): Promise<McpHttpResponse>;
   openSse(url: string, headers: Array<[string, string]>): Promise<McpSseStream>;
   postStream(url: string, headers: Array<[string, string]>,
-    body: string, requestId?: string): Promise<McpPostStreamResponse>;
+    body: string, requestId?: string, timeoutMs?: number): Promise<McpPostStreamResponse>;
   cancelPending?: (requestId: string) => void | Promise<void>;
 }
 
@@ -224,8 +240,13 @@ export class McpSseClientTransport implements McpTransport {
       this.endpointResolve = resolve;
       this.endpointReject = reject;
     });
+    // openSse 失败路径不 await endpointPromise → closeResources 的 reject
+    // 会成为 unhandled;预挂 noop(不影响 start 处 await 的正常感知)
+    this.endpointPromise.catch((): void => {});
     try {
-      this.session = await this.port.openSse(this.urlString, this.configHeaders);
+      // Legacy SSE 必须声明接受事件流(Android Ktor SSE 插件自动补,鸿蒙需显式)
+      this.session = await this.port.openSse(this.urlString,
+        mergeMcpHeaders(this.configHeaders, [['Accept', 'text/event-stream']], false));
       this.jobActive = true;
       this.pump(); // collectMessages 协程(浮空,finally closeResources)
       await this.endpointPromise;
@@ -237,19 +258,18 @@ export class McpSseClientTransport implements McpTransport {
   }
 
   // :96-122
-  async send(message: JsonObject): Promise<void> {
+  async send(message: JsonObject, timeoutMs?: number): Promise<void> {
     if (!this.initialized) throw new Error('SseClientTransport is not initialized!');
     if (!this.jobActive) throw new Error('SseClientTransport is closed!');
     if (this.endpointUrl === null) throw new Error('Not connected!');
     try {
-      const headers: Array<[string, string]> = [
-        ...this.configHeaders,
+      const headers: Array<[string, string]> = mergeMcpHeaders(this.configHeaders, [
         ['Content-Type', 'application/json'],
-      ];
+      ], false);
       const requestId: string | undefined = typeof message['id'] === 'string'
         ? message['id'] as string : undefined;
       const response: McpHttpResponse = await this.port.request(
-        'POST', this.endpointUrl, headers, JSON.stringify(message), requestId);
+        'POST', this.endpointUrl, headers, JSON.stringify(message), requestId, timeoutMs);
       // bodyAsText 消费(:108-111 注释语义:端口层已全文读取)
       if (response.status < 200 || response.status >= 300) {
         throw new Error(
@@ -330,6 +350,9 @@ export class McpSseClientTransport implements McpTransport {
     if (!this.initialized) return;
     this.initialized = false;
     this.jobActive = false;
+    // endpoint 事件前流终止/主动 close:必须解除 start() 的 await,
+    // 否则 connect() 永久挂起(settle-once,已 resolve 后为 no-op)
+    this.endpointReject(new Error('SSE connection closed before endpoint event'));
     try {
       if (this.session !== null) await this.session.cancel();
     } catch (e) {
@@ -397,21 +420,25 @@ export class McpStreamableHttpTransport implements McpTransport {
     return out;
   }
 
+  // initialize 协商出的协议版本回写(mcp_protocol connect 调用)
+  setProtocolVersion(version: string): void {
+    this.protocolVersion = version;
+  }
+
   // :92-177(resumptionToken 发送侧 :109-116 — 我方 client 不构造,保留分支)
-  async send(message: JsonObject): Promise<void> {
+  async send(message: JsonObject, timeoutMs?: number): Promise<void> {
     if (!this.initialized) throw new Error('Transport is not started');
 
     const jsonBody: string = JSON.stringify(message);
-    const headers: Array<[string, string]> = [
+    const headers: Array<[string, string]> = mergeMcpHeaders(this.configHeaders, [
       ...this.applyCommonHeaders([]),
       ['Accept', 'application/json, text/event-stream'],
       ['Content-Type', 'application/json'],
-      ...this.configHeaders,
-    ];
+    ], true);
     const requestId: string | undefined = typeof message['id'] === 'string'
       ? message['id'] as string : undefined;
     const response: McpPostStreamResponse = await this.port.postStream(
-      this.url, headers, jsonBody, requestId);
+      this.url, headers, jsonBody, requestId, timeoutMs);
 
     const sessionHeader: string | null = headerGet(response.headers, MCP_SESSION_ID_HEADER);
     if (sessionHeader !== null) this.sessionId = sessionHeader;
@@ -481,7 +508,7 @@ export class McpStreamableHttpTransport implements McpTransport {
   async terminateSession(): Promise<void> {
     if (this.sessionId === null) return;
     const response: McpHttpResponse = await this.port.request(
-      'DELETE', this.url, [...this.applyCommonHeaders([]), ...this.configHeaders], null);
+      'DELETE', this.url, mergeMcpHeaders(this.configHeaders, this.applyCommonHeaders([]), true), null);
     const success: boolean = response.status >= 200 && response.status < 300;
     if (!success && response.status !== 405) {
       const error: StreamableHttpError = new StreamableHttpError(
@@ -498,11 +525,12 @@ export class McpStreamableHttpTransport implements McpTransport {
     resumptionToken: string | null, replayMessageId: JsonValue | null,
   ): Promise<void> {
     if (this.sseSession !== null) await this.sseSession.cancel();
-    const headers: Array<[string, string]> = [...this.applyCommonHeaders([])];
-    headers.push(['Accept', 'application/json']);
+    const protocol: Array<[string, string]> = [...this.applyCommonHeaders([])];
+    protocol.push(['Accept', 'application/json']);
     const token: string | null = resumptionToken ?? this.lastEventId;
-    if (token !== null) headers.push([MCP_RESUMPTION_TOKEN_HEADER, token]);
-    headers.push(...this.configHeaders);
+    if (token !== null) protocol.push([MCP_RESUMPTION_TOKEN_HEADER, token]);
+    const headers: Array<[string, string]> =
+      mergeMcpHeaders(this.configHeaders, protocol, true);
 
     let stream: McpSseStream;
     try {
@@ -511,7 +539,10 @@ export class McpStreamableHttpTransport implements McpTransport {
       // :247-262 — 405(不支持 GET/SSE)/ct=json(JSON-only 模式)→ 静默返回
       if (e instanceof McpSseOpenError) {
         if (e.status === 405) return;
-        if (e.contentType !== null && e.contentType.startsWith('application/json')) return;
+        if (e.contentType !== null
+          && e.contentType.trim().split(';')[0].trim().toLowerCase() === 'application/json') {
+          return;
+        }
       }
       const err: Error = e instanceof Error ? e : new Error(String(e));
       this.errorBlock(err);

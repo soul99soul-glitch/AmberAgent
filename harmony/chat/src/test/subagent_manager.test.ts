@@ -406,7 +406,7 @@ describe('SubAgentManager start validation and admission', () => {
 });
 
 describe('SubAgentManager grants and child tool scope', () => {
-  it('creates a history grant before admission and leaves it behind when admission rejects', async () => {
+  it('revokes the history grant when admission rejects', async () => {
     const harness = await createManager(makeSetting({ maxConcurrentRuns: 1 }), (runner): void => {
       runner.scripts.push(abortablePendingScript());
     });
@@ -422,13 +422,8 @@ describe('SubAgentManager grants and child tool scope', () => {
     }, [textTool('session_read')]);
 
     assert.equal(payloadCode(rejected), 'too_many_subagents');
-    const grant = harness.grants.get('grant-1');
-    assert.ok(grant !== null);
-    assert.deepEqual(grant.sessionIds, ['session-a', 'session-b']);
-    assert.equal(grant.maxChars, 48000);
-    assert.equal(grant.purpose, 'Read history');
-    assert.equal(grant.sourceConversationId, 'parent');
-    assert.equal(grant.assignedSubagentRunId, null);
+    // admission 拒绝 → grant 被撤销,不留无主授权
+    assert.equal(harness.grants.get('grant-1'), null);
     await harness.manager.cancel(payloadRunId(active));
   });
 
@@ -692,7 +687,7 @@ describe('SubAgentManager cancellation and first-wins races', () => {
     assert.equal(result['summary'], 'Subagent run was cancelled.');
   });
 
-  it('preserves Android timeout cancellation by leaving the run and task RUNNING', async () => {
+  it('finishes a timed-out run as timed_out (不再永久 RUNNING 占并发额度)', async () => {
     const override: SubAgentOverride = makeSubAgentOverride();
     override.timeoutMsOverride = 5;
     const overrides: Map<string, SubAgentOverride> = new Map<string, SubAgentOverride>();
@@ -704,20 +699,24 @@ describe('SubAgentManager cancellation and first-wins races', () => {
       'parent', builtinInput(), [textTool('file_read')]);
     const runId: string = payloadRunId(initial);
     await waitForRunnerCalls(harness.runner, 1);
+    // cappedBy 会把 timeoutMs 钳到下限 1000ms → 轮询窗口须覆盖
     for (let attempt: number = 0;
-      attempt < 100 && harness.runner.calls[0].signal?.aborted !== true; attempt++) {
-      await new Promise<void>((resolve): void => { setTimeout(resolve, 1); });
+      attempt < 400 && harness.runner.calls[0].signal?.aborted !== true; attempt++) {
+      await new Promise<void>((resolve): void => { setTimeout(resolve, 5); });
     }
 
     assert.equal(harness.runner.calls[0].signal?.aborted, true);
-    assert.equal((await harness.manager.read(runId))['status'], 'running');
-    assert.equal(harness.taskStore.read(runId)?.status, 'RUNNING');
+    for (let attempt: number = 0;
+      attempt < 400 && (await harness.manager.read(runId))['status'] !== 'timed_out'; attempt++) {
+      await new Promise<void>((resolve): void => { setTimeout(resolve, 5); });
+    }
+    assert.equal((await harness.manager.read(runId))['status'], 'timed_out');
+    assert.equal(harness.taskStore.read(runId)?.status, 'TIMED_OUT');
     assert.deepEqual(transcriptEvents(harness.files, runId).map(
-      (event: JsonObject): JsonValue | undefined => event['event']), ['started']);
-    await harness.manager.cancel(runId);
+      (event: JsonObject): JsonValue | undefined => event['event']), ['started', 'finished']);
   });
 
-  it('allows early cancel before controller assignment, then still launches and keeps cancellation first', async () => {
+  it('early cancel during registration blocks the runner launch; cancellation stays first-wins', async () => {
     const harness = await createManager(makeSetting(), (runner): void => {
       runner.scripts.push((): Promise<SubAgentResult> => Promise.resolve(
         makeSubAgentResult({ status: 'completed', summary: 'late completion' })));
@@ -739,8 +738,9 @@ describe('SubAgentManager cancellation and first-wins races', () => {
     assert.equal(payloadStatus(initial), 'running');
     assert.deepEqual(transcriptEvents(harness.files, 'run-1').map(
       (event: JsonObject): JsonValue | undefined => event['event']), ['started', 'finished']);
-    await waitForRunnerCalls(harness.runner, 1);
+    // controller 在 runtimeRun 创建时即存在,启动前已 aborted → runner 不再启动
     await new Promise<void>((resolve): void => { setTimeout(resolve, 0); });
+    assert.equal(harness.runner.calls.length, 0);
     assert.equal((await harness.manager.read('run-1'))['status'], 'cancelled');
   });
 });

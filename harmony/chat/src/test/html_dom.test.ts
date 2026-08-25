@@ -117,3 +117,46 @@ test('elementText: deeper interleaving stays ordered', () => {
   assert.ok(p !== null);
   assert.equal(elementText(p).replace(/\s+/g, ''), '12345');
 });
+
+// ===== Phase8 解析加固回归 =====
+
+test('属性值内的 > 不截断标签(引号感知)', () => {
+  const doc = parseHtml('<a href="https://x.test/?a=>b">T</a>');
+  const a = doc.root.children.find((c) => c.tagName === 'a');
+  assert.ok(a !== undefined);
+  assert.equal(a.attributes['href'], 'https://x.test/?a=>b');
+  assert.equal(a !== undefined, true);
+});
+
+test('文本中的 < 后非标签形态按普通文本处理("2 < 3")', () => {
+  const doc = parseHtml('<p>2 < 3 and > 1</p>');
+  const p = doc.root.children.find((c) => c.tagName === 'p');
+  assert.ok(p !== undefined);
+  const text = p.childNodes.map(
+    (n) => n.kind === 'text' ? n.text : '').join('');
+  assert.ok(text.includes('2 < 3'), `text=${text}`);
+});
+
+test('无引号 URL 尾部 / 不被误判 self-close', () => {
+  const doc = parseHtml('<img src=http://x.test/>');
+  const img = doc.root.children.find((c) => c.tagName === 'img');
+  assert.ok(img !== undefined);
+  assert.equal(img.attributes['src'], 'http://x.test/');
+});
+
+test('数字实体:非 BMP 用 codePoint(#x1F600 emoji);大写 #X 同收', () => {
+  const doc = parseHtml('<p>&#x1F600;&#X41;</p>');
+  const p = doc.root.children.find((c) => c.tagName === 'p');
+  assert.ok(p !== undefined);
+  const text = p.childNodes.map(
+    (n) => n.kind === 'text' ? n.text : '').join('');
+  assert.equal(text, '\u{1F600}A');
+});
+
+test('<br/> 无空白自闭合仍按 void 标签处理(相邻 p 不误挂)', () => {
+  const doc = parseHtml('<div>a<br/><p>next</p></div>');
+  const div = doc.root.children.find((c) => c.tagName === 'div');
+  assert.ok(div !== undefined);
+  const tags: string[] = div.children.map((c) => c.tagName);
+  assert.deepEqual(tags, ['br', 'p']);
+});

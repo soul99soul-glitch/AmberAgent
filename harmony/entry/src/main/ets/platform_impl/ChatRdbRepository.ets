@@ -56,6 +56,26 @@ const nodeBucket = (row: MessageNodeRow): relationalStore.ValuesBucket => {
   return bucket;
 };
 
+// 列 diff 迁移用(ALTER ADD COLUMN 语义):CREATE TABLE IF NOT EXISTS 不会给旧表补新增列。
+// NOT NULL 列在 ALTER 时必须带默认值(仅影响旧行补值,与建表定义可不同)。
+// 限制:id(PK)无法 ALTER 添加,不列入;真实历史增量只有后加的普通列(如 auto_approve_tools),
+// 缺基础列的病态旧表不在本迁移能力内(会初始化失败回退内存实现,登记)。
+const CONV_ALTER_COLUMN_DEFS: string[][] = [
+  ['assistant_id', `TEXT NOT NULL DEFAULT '0950e2dc-9bd5-4801-afa3-aa887aa36b4e'`],
+  ['title', `TEXT NOT NULL DEFAULT ''`],
+  ['create_at', 'INTEGER NOT NULL DEFAULT 0'],
+  ['update_at', 'INTEGER NOT NULL DEFAULT 0'],
+  ['suggestions', `TEXT NOT NULL DEFAULT '[]'`],
+  ['is_pinned', 'INTEGER NOT NULL DEFAULT 0'],
+  ['auto_approve_tools', 'INTEGER NOT NULL DEFAULT 0'],
+];
+const NODE_ALTER_COLUMN_DEFS: string[][] = [
+  ['conversation_id', `TEXT NOT NULL DEFAULT ''`],
+  ['node_index', 'INTEGER NOT NULL DEFAULT 0'],
+  ['messages', `TEXT NOT NULL DEFAULT '[]'`],
+  ['select_index', 'INTEGER NOT NULL DEFAULT 0'],
+];
+
 class ChatRdbRepository implements ConversationRepository {
   private store: relationalStore.RdbStore | null = null;
   private initPromise: Promise<relationalStore.RdbStore | null> | null = null;
@@ -98,6 +118,27 @@ class ChatRdbRepository implements ConversationRepository {
     }
   }
 
+  // PRAGMA table_info 列 diff:缺列补 ALTER ADD COLUMN(升级路径,建表语句本身不动)
+  private async ensureTableColumns(
+    store: relationalStore.RdbStore, table: string, defs: string[][],
+  ): Promise<void> {
+    const resultSet = await store.querySql(`PRAGMA table_info(${table})`);
+    const existing: Set<string> = new Set<string>();
+    try {
+      const nameIdx: number = resultSet.getColumnIndex('name');
+      while (resultSet.goToNextRow()) {
+        existing.add(resultSet.getString(nameIdx));
+      }
+    } finally {
+      resultSet.close();
+    }
+    for (const def of defs) {
+      if (!existing.has(def[0])) {
+        await store.executeSql(`ALTER TABLE ${table} ADD COLUMN ${def[0]} ${def[1]}`);
+      }
+    }
+  }
+
   private async initializeStore(): Promise<relationalStore.RdbStore | null> {
     try {
       const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
@@ -105,10 +146,17 @@ class ChatRdbRepository implements ConversationRepository {
         name: DB_NAME,
         securityLevel: relationalStore.SecurityLevel.S1,
       });
-      const stmts: string[] = CHAT_SCHEMA_SQL.split(';');
-      for (const raw of stmts) {
-        const sql: string = raw.trim();
-        if (sql.length > 0) await store.executeSql(sql);
+      // 两阶段执行:先建表(旧表缺列时 CREATE INDEX 会先失败),迁移补列后再建索引
+      const stmts: string[] = CHAT_SCHEMA_SQL.split(';')
+        .map((raw: string): string => raw.trim())
+        .filter((sql: string): boolean => sql.length > 0);
+      for (const sql of stmts) {
+        if (sql.startsWith('CREATE TABLE')) await store.executeSql(sql);
+      }
+      await this.ensureTableColumns(store, 'conversation', CONV_ALTER_COLUMN_DEFS);
+      await this.ensureTableColumns(store, 'message_node', NODE_ALTER_COLUMN_DEFS);
+      for (const sql of stmts) {
+        if (!sql.startsWith('CREATE TABLE')) await store.executeSql(sql);
       }
 
       // Operations wait on the shared init promise, so the memory snapshot cannot
@@ -329,9 +377,11 @@ class ChatRdbRepository implements ConversationRepository {
     if (assistantId !== undefined) {
       predicates.equalTo('assistant_id', assistantId);
     }
-    // 列表/搜索一律 ORDER BY is_pinned DESC, update_at DESC(D-013)
+    // 列表/搜索一律 ORDER BY is_pinned DESC, update_at DESC(D-013);
+    // id 升序兜底保证同毫秒排序稳定(与内存实现 byPinnedThenUpdated 一致)
     predicates.orderByDesc('is_pinned');
     predicates.orderByDesc('update_at');
+    predicates.orderByAsc('id');
     if (limit > 0) {
       predicates.limitAs(limit);
     }
@@ -365,6 +415,7 @@ class ChatRdbRepository implements ConversationRepository {
     predicates.like('title', `%${searchText}%`);
     predicates.orderByDesc('is_pinned');
     predicates.orderByDesc('update_at');
+    predicates.orderByAsc('id');
     const rows: ConversationRow[] = await this.queryConversationRows(store, predicates);
     const needle: string = searchText.toLowerCase();
     return rows

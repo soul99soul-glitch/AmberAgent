@@ -21,45 +21,58 @@ export const createTavilyProvider = (http: HttpClient, config: TavilyConfig): Se
   return {
     name: 'tavily',
     search: async (queries: string[]): Promise<SearchHit[]> => {
-      // Tavily /search 一次只接受一个 query;Android 实际每个 query 单独调用
-      // 简化:取第一个(多个 query 的 round-robin 在 interleaveSearchResults 处理)
-      const query = queries[0] ?? '';
-      if (query.length === 0) return [];
-      const resp = await http.fetch({
-        url: `${baseUrl}/search`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify({
-          query,
-          max_results: TAVILY_MAX_RESULTS,
-          search_depth: 'advanced',
-          include_answer: false,
-        }),
-      });
-      if (resp.status !== 200) {
-        throw new Error(`Tavily search failed: ${resp.status} ${resp.body.slice(0, 200)}`);
-      }
-      const data = JSON.parse(resp.body) as {
-        results?: Array<{ title: string; url: string; content?: string; published_date?: string }>
-      };
-      const raw = data.results ?? [];
-      const hits: SearchHit[] = [];
-      for (const r of raw) {
-        const hit: SearchHit = {
-          title: r.title,
-          url: r.url,
-          snippet: r.content ?? null,
-          source: 'tavily',
-        };
-        if (typeof r.published_date === 'string' && r.published_date.length > 0) {
-          hit.publishedAt = r.published_date;
+      // Tavily /search 一次只接受一个 query:逐个执行后按 URL 去重合并
+      // (原实现只取 queries[0],多变体查询实际只查了一个,来源召回偏窄);
+      // 单个 query 失败只丢该 query,不让整个 provider 失败
+      const merged: SearchHit[] = [];
+      const seenUrls = new Set<string>();
+      let lastError: Error | null = null;
+      for (const query of queries) {
+        if (query.trim().length === 0) continue;
+        try {
+          const resp = await http.fetch({
+            url: `${baseUrl}/search`,
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${config.apiKey}`,
+            },
+            body: JSON.stringify({
+              query,
+              max_results: TAVILY_MAX_RESULTS,
+              search_depth: 'advanced',
+              include_answer: false,
+            }),
+          });
+          if (resp.status !== 200) {
+            throw new Error(`Tavily search failed: ${resp.status} ${resp.body.slice(0, 200)}`);
+          }
+          const data = JSON.parse(resp.body) as {
+            results?: Array<{ title: string; url: string; content?: string; published_date?: string }>
+          };
+          const raw = data.results ?? [];
+          for (const r of raw) {
+            if (seenUrls.has(r.url)) continue;
+            seenUrls.add(r.url);
+            const hit: SearchHit = {
+              title: r.title,
+              url: r.url,
+              snippet: r.content ?? null,
+              source: 'tavily',
+            };
+            if (typeof r.published_date === 'string' && r.published_date.length > 0) {
+              hit.publishedAt = r.published_date;
+            }
+            merged.push(hit);
+          }
+        } catch (e) {
+          // 该 query 失败:跳过继续下一个;但全部失败时保留抛错语义
+          // (坏 API key 等配置错误不能静默成空结果)
+          lastError = e instanceof Error ? e : new Error(String(e));
         }
-        hits.push(hit);
       }
-      return hits;
+      if (merged.length === 0 && lastError !== null) throw lastError;
+      return merged;
     },
   };
 };

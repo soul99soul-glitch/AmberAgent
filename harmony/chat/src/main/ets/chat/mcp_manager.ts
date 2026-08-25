@@ -45,6 +45,7 @@
 // - Base64.decode 域内纯实现(标准字母表+padding;kotlin.io.encoding.Base64 等价)
 
 import type { JsonObject } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { McpClient } from './mcp_protocol.ts';
 import type { McpTransport, McpServerTool, McpContentBlock } from './mcp_protocol.ts';
 import {
@@ -154,6 +155,7 @@ export class McpManager {
   private readonly settings: McpSettingsPort;
   private readonly files: McpFilesPort;
   private readonly clients: Map<string, ClientEntry> = new Map();
+  private readonly generations: Map<string, number> = new Map<string, number>();
   private readonly reconnectJobs: Map<string, ReconnectHandle> = new Map();
   private readonly reconnectAttempts: Map<string, number> = new Map();
   private reconcileTail: Promise<void> = Promise.resolve();
@@ -226,11 +228,13 @@ export class McpManager {
   }
 
   // :120-131
-  getAllAvailableTools(): McpTool[] {
-    const assistantIds: string[] = this.settings.getCurrentAssistantMcpServerIds();
+  // assistantIds:调用方(工具构建/执行)的按轮快照 — 全局 provider 会被
+  // 并存的多个 ChatPage 互相改写,读侧必须以本轮 assistant 为准
+  getAllAvailableTools(assistantIds?: string[]): McpTool[] {
+    const ids: string[] = assistantIds ?? this.settings.getCurrentAssistantMcpServerIds();
     return this.settings.getMcpServers()
       .filter((c: McpServerConfig): boolean =>
-        c.commonOptions.enable && assistantIds.includes(c.id))
+        c.commonOptions.enable && ids.includes(c.id))
       .flatMap((c: McpServerConfig): McpTool[] =>
         c.commonOptions.tools
           .filter((t: McpTool): boolean => t.enable)
@@ -238,8 +242,9 @@ export class McpManager {
   }
 
   // :133-160
-  async callTool(toolName: string, args: JsonObject, serverId?: string): Promise<McpMessagePart[]> {
-    const available: McpTool[] = this.getAllAvailableTools().filter(
+  async callTool(toolName: string, args: JsonObject, serverId?: string,
+    signal?: AbortSignalLike, assistantIds?: string[]): Promise<McpMessagePart[]> {
+    const available: McpTool[] = this.getAllAvailableTools(assistantIds).filter(
       (candidate: McpTool): boolean => candidate.name === toolName && candidate.enable &&
         (serverId === undefined || candidate.serverId === serverId));
     if (available.length === 0) {
@@ -249,9 +254,10 @@ export class McpManager {
       throw new Error(`Failed to execute tool, because tool is ambiguous: ${toolName}`);
     }
     const tool: McpTool = available[0];
+    const scopedIds: string[] = assistantIds ?? this.settings.getCurrentAssistantMcpServerIds();
     const config: McpServerConfig | undefined = this.settings.getMcpServers().find(
       (candidate: McpServerConfig): boolean => candidate.id === tool.serverId &&
-        candidate.commonOptions.enable && this.settings.getCurrentAssistantMcpServerIds().includes(candidate.id) &&
+        candidate.commonOptions.enable && scopedIds.includes(candidate.id) &&
         candidate.commonOptions.tools.some(
           (candidateTool: McpTool): boolean => candidateTool.name === toolName && candidateTool.enable));
     if (config === undefined) {
@@ -268,17 +274,19 @@ export class McpManager {
     const client: McpClient = entry.client;
     this.deps.log(`callTool: ${toolName} keys=${Object.keys(args)}`);
     if (!client.hasTransport) await client.connect(this.getTransport(config));
-    const result = await client.callTool(tool.name, args, 120000);
+    const result = await client.callTool(tool.name, args, 120000, signal);
     return this.mapContent(result.content, result.isError, result.structuredContent);
   }
 
   // :162-205
   async callConfiguredTool(serverId: string | null, serverName: string | null,
-    toolName: string, args: JsonObject): Promise<McpMessagePart[]> {
+    toolName: string, args: JsonObject,
+    signal?: AbortSignalLike, assistantIds?: string[]): Promise<McpMessagePart[]> {
     if (toolName.trim().length === 0) throw new Error('tool_name is required');
     let candidates: McpServerConfig[] = this.settings.getMcpServers()
       .filter((config: McpServerConfig): boolean =>
         config.commonOptions.enable &&
+        (assistantIds === undefined || assistantIds.includes(config.id)) &&
         (serverId === null || serverId.trim().length === 0 || config.id === serverId) &&
         (serverName === null || serverName.trim().length === 0 ||
           config.commonOptions.name === serverName) &&
@@ -315,7 +323,7 @@ export class McpManager {
     if (!client.hasTransport) await client.connect(this.getTransport(liveConfig));
     this.deps.log(
       `callConfiguredTool: ${server.commonOptions.name}/${toolName} keys=${Object.keys(args)}`);
-    const result = await client.callTool(tool.name, args, 120000);
+    const result = await client.callTool(tool.name, args, 120000, signal);
     return this.mapContent(result.content, result.isError, result.structuredContent);
   }
 
@@ -375,10 +383,25 @@ export class McpManager {
   }
 
   // :251-295
+  // generation token:await client.close()/connect() 期间并发的 add/remove/reconnect
+  // 会为同一 server 装入新 client;旧流程恢复后不得误删新 client/覆盖新状态
+  private nextGeneration(serverId: string): number {
+    const next: number = (this.generations.get(serverId) ?? 0) + 1;
+    this.generations.set(serverId, next);
+    return next;
+  }
+
+  private isCurrentClient(serverId: string, generation: number, client: McpClient): boolean {
+    const entry: ClientEntry | undefined = this.clients.get(serverId);
+    return this.generations.get(serverId) === generation
+      && entry !== undefined && entry.client === client;
+  }
+
   async addClient(config: McpServerConfig): Promise<void> {
     await this.removeClient(config); // Remove first
     this.cancelReconnect(config.id);
     this.reconnectAttempts.set(config.id, 0);
+    const generation: number = this.nextGeneration(config.id);
 
     const transport: McpTransport = this.getTransport(config);
     const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
@@ -388,14 +411,18 @@ export class McpManager {
     try {
       this.setStatus(config, MCP_STATUS_CONNECTING);
       await client.connect(transport);
+      if (!this.isCurrentClient(config.id, generation, client)) return; // 已被替换
       await this.sync(config);
+      if (!this.isCurrentClient(config.id, generation, client)) return;
       this.setStatus(config, MCP_STATUS_CONNECTED);
       this.reconnectAttempts.set(config.id, 0); // 重置重连计数
       this.deps.log(`addClient: connected ${config.commonOptions.name}`);
     } catch (e) {
-      this.deps.log(String(e));
-      const msg: string = e instanceof Error ? (e.message || e.name) : String(e);
-      this.setStatus(config, mcpStatusError(msg));
+      if (this.isCurrentClient(config.id, generation, client)) {
+        this.deps.log(String(e));
+        const msg: string = e instanceof Error ? (e.message || e.name) : String(e);
+        this.setStatus(config, mcpStatusError(msg));
+      }
     }
   }
 
@@ -427,11 +454,14 @@ export class McpManager {
     const entry: ClientEntry | undefined = this.clients.get(config.id);
     if (entry === undefined) return;
     const client: McpClient = entry.client;
-
+    // sync 全程异步:listTools/写设置期间 client 可能被移除/替换 →
+    // 写回前必须确认仍是当前 client(防旧 server 工具表污染设置)
     this.setStatus(config, MCP_STATUS_CONNECTING);
 
     if (!client.hasTransport) await client.connect(this.getTransport(config));
+    if (this.clients.get(config.id)?.client !== client) return;
     const serverTools: McpServerTool[] = await client.listTools();
+    if (this.clients.get(config.id)?.client !== client) return;
     this.deps.log(`sync: tools: ${JSON.stringify(serverTools)}`);
     this.settings.updateMcpServers((old: McpServerConfig[]): McpServerConfig[] =>
       old.map((serverConfig: McpServerConfig): McpServerConfig => {
@@ -504,18 +534,24 @@ export class McpManager {
     this.cancelReconnect(config.id);
     const entry: ClientEntry | undefined = this.clients.get(config.id);
     if (entry !== undefined) {
+      const generation: number = this.nextGeneration(config.id);
       entry.intentionalClose = true;
       try {
         await entry.client.close();
       } catch (e) {
         this.deps.log(String(e));
       }
-      this.clients.delete(config.id);
-      const next: Map<string, McpStatus> = new Map(this.syncingStatus);
-      next.delete(config.id);
-      this.syncingStatus = next;
-      this.emitStatuses();
-      this.deps.log(`removeClient: ${entry.config.commonOptions.name}`);
+      // close 等待期间新 client 可能已装入 → 只清理仍是自己的一代(含状态面,
+      // 否则会把并发装入的新 client 的状态一并摘除)
+      if (this.isCurrentClient(config.id, generation, entry.client)) {
+        this.clients.delete(config.id);
+        this.generations.delete(config.id);
+        const next: Map<string, McpStatus> = new Map(this.syncingStatus);
+        next.delete(config.id);
+        this.syncingStatus = next;
+        this.emitStatuses();
+        this.deps.log(`removeClient: ${entry.config.commonOptions.name}`);
+      }
     }
     this.reconnectAttempts.delete(config.id);
   }
@@ -582,7 +618,8 @@ export class McpManager {
 
   // :447-487
   private async reconnectClient(config: McpServerConfig): Promise<void> {
-    // 先关闭旧客户端
+    // 先关闭旧客户端;close 等待期间并发 add/reconnect 可能已装入新 client,
+    // 旧流程恢复后不得误删 — 先失效旧代,删除前做身份校验
     const oldEntry: ClientEntry | undefined = this.clients.get(config.id);
     if (oldEntry !== undefined) {
       oldEntry.intentionalClose = true;
@@ -591,8 +628,11 @@ export class McpManager {
       } catch (e) {
         this.deps.log(String(e));
       }
-      this.clients.delete(config.id);
+      if (this.clients.get(config.id)?.client === oldEntry.client) {
+        this.clients.delete(config.id);
+      }
     }
+    const generation: number = this.nextGeneration(config.id);
 
     const transport: McpTransport = this.getTransport(config);
     const client: McpClient = new McpClient({ name: config.commonOptions.name, version: '1.0' });
@@ -601,7 +641,9 @@ export class McpManager {
     this.clients.set(config.id, { config, client, intentionalClose: false });
     this.setStatus(config, MCP_STATUS_CONNECTING);
     await client.connect(transport);
+    if (!this.isCurrentClient(config.id, generation, client)) return;
     await this.sync(config);
+    if (!this.isCurrentClient(config.id, generation, client)) return;
     this.setStatus(config, MCP_STATUS_CONNECTED);
     this.reconnectAttempts.set(config.id, 0); // 重置重连计数
     this.deps.log(`Reconnected successfully: ${config.commonOptions.name}`);

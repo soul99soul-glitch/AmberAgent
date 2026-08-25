@@ -1,33 +1,24 @@
 // HotListSourceSettingsPage — 热榜来源设置
-// 各来源启用开关(AmberSwitch)+ 刷新间隔选择(点击循环切换)
-// Android 基准: feature/ui/pages/board/HotListSourceSettingsPage.kt
+// 数据源 = NewsNowProvider.NEWSNOW_PRESETS(与 BoardPage/SettingDeepReadPage 同一套);
+// 开关持久化 `source_<id>`(BoardPage 消费的同一键)。原占位实现用的是假 id
+// (github vs github-trending-today 等)且不落盘 — 开关对热榜页完全无效。
+// 刷新间隔控件移除:当前无任何调度消费者,保留即假设置。
 import { router } from '@kit.ArkUI';
 import { AmberSwitch } from '../design/components.ets';
-import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
-
-const INTERVALS: number[] = [15, 30, 60, 120, 240];
+import { INK, INK3, SURFACE, LINE, BG, ACCENT, BODY, META, TITLE } from '../design/tokens.ets';
+import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
+import type { NewsNowPreset } from '../platform_impl/NewsNowProvider.ets';
+import { getAppContainer } from '../di/AppContainer.ets';
+import type { Storage } from '@amber/deepread-domain';
 
 interface SourceSetting {
   id: string;
   name: string;
   enabled: boolean;
-  intervalMinutes: number;
 }
 
-function makeSource(id: string, name: string, enabled: boolean, intervalMinutes: number): SourceSetting {
-  return { id: id, name: name, enabled: enabled, intervalMinutes: intervalMinutes };
-}
-
-function placeholderLoadSources(): Promise<SourceSetting[]> {
-  const seed: SourceSetting[] = [
-    makeSource('zhihu', '知乎热榜', true, 30),
-    makeSource('weibo', '微博热搜', true, 15),
-    makeSource('baidu', '百度热点', true, 30),
-    makeSource('juejin', '掘金热门', false, 60),
-    makeSource('github', 'GitHub Trending', true, 120),
-    makeSource('v2ex', 'V2EX', false, 60),
-  ];
-  return Promise.resolve(seed);
+function makeSource(id: string, name: string, enabled: boolean): SourceSetting {
+  return { id: id, name: name, enabled: enabled };
 }
 
 @Entry
@@ -35,40 +26,37 @@ function placeholderLoadSources(): Promise<SourceSetting[]> {
 struct HotListSourceSettingsPage {
   @State items: SourceSetting[] = [];
   @State loaded: boolean = false;
+  private storage: Storage | null = null;
 
   aboutToAppear(): void {
-    placeholderLoadSources().then((list: SourceSetting[]): void => {
-      this.items = list;
+    const storage: Storage = getAppContainer().storage;
+    this.storage = storage;
+    const load = async (): Promise<void> => {
+      const out: SourceSetting[] = [];
+      for (let i = 0; i < NEWSNOW_PRESETS.length; i++) {
+        const p: NewsNowPreset = NEWSNOW_PRESETS[i];
+        const enabled: string = await storage.get<string>('source_' + p.id, 'true');
+        out.push(makeSource(p.id, p.displayName, enabled === 'true'));
+      }
+      this.items = out;
       this.loaded = true;
-    });
+    };
+    load().catch((): void => { this.loaded = true; });
   }
 
   private toggleSource(id: string, value: boolean): void {
+    if (this.storage === null) return;
+    const previous: SourceSetting[] = this.items;
     this.items = this.items.map((s: SourceSetting): SourceSetting => {
       if (s.id === id) {
-        return makeSource(s.id, s.name, value, s.intervalMinutes);
+        return makeSource(s.id, s.name, value);
       }
       return s;
     });
-  }
-
-  private cycleInterval(id: string): void {
-    this.items = this.items.map((s: SourceSetting): SourceSetting => {
-      if (s.id === id) {
-        const idx: number = INTERVALS.indexOf(s.intervalMinutes);
-        const newInterval: number = INTERVALS[(idx + 1) % INTERVALS.length];
-        return makeSource(s.id, s.name, s.enabled, newInterval);
-      }
-      return s;
-    });
-  }
-
-  private formatInterval(minutes: number): string {
-    if (minutes < 60) {
-      return `${minutes} 分钟`;
-    }
-    const hours: number = minutes / 60;
-    return `${hours.toString()} 小时`;
+    this.storage.set<string>('source_' + id, value ? 'true' : 'false')
+      .catch((): void => {
+        this.items = previous; // 写失败回滚开关
+      });
   }
 
   build(): void {
@@ -97,13 +85,12 @@ struct HotListSourceSettingsPage {
                 Row() {
                   Column() {
                     Text(s.name).fontSize(BODY).fontColor(INK)
-                    Text('刷新间隔').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Text(this.formatInterval(s.intervalMinutes))
-                    .fontSize(LABEL).fontColor(ACCENT).margin({ right: 12 })
-                    .onClick((): void => { this.cycleInterval(s.id); })
-                  AmberSwitch({ checked: s.enabled, onChange: (v: boolean): void => { this.toggleSource(s.id, v); } })
+
+                  AmberSwitch({ checked: s.enabled, onChange: (v: boolean): void => {
+                    this.toggleSource(s.id, v);
+                  } })
                 }
                 .width('100%')
                 .padding({ left: 16, right: 16, top: 14, bottom: 14 })
@@ -112,12 +99,6 @@ struct HotListSourceSettingsPage {
               }, (s: SourceSetting): string => s.id)
             }
             .width('100%').backgroundColor(SURFACE).border({ width: 1, color: LINE })
-
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 点击右侧时长可循环切换间隔').fontSize(META).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
 
             Column() {}.height(40)
           }

@@ -120,3 +120,9 @@ test('buildDefaultSeats: includes user non-core defaultSeats', () => {
   assert.ok(seats.some(x => x.role === 'custom'));
   assert.ok(seats.some(x => x.role === 'supporter'));
 });
+
+test('parseTask: setting.enabled=false → fail closed(任何调用路径拦截)', () => {
+  assert.throws(() => parseTask(
+    { mode: 'compare', objective: 'q' },
+    makeRuntimeSetting({ enabled: false }), pool), /模型议会/);
+});

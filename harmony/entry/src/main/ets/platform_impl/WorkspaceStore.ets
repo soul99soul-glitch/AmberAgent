@@ -137,7 +137,11 @@ export const createEntryWorkspaceFsPort = (): WorkspaceFsPort => ({
       (append ? fileIo.OpenMode.APPEND : fileIo.OpenMode.TRUNC);
     const file = fileIo.openSync(abs, mode);
     try {
-      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
+      // bytes 可能是 subarray(非零 byteOffset/短于 backing buffer)——必须按视图范围
+      // 切片,否则会写出整个 backing buffer(zip stored 条目即为此路径)
+      const exact: ArrayBuffer = (bytes.buffer as ArrayBuffer)
+        .slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      fileIo.writeSync(file.fd, exact);
     } finally {
       fileIo.closeSync(file);
     }

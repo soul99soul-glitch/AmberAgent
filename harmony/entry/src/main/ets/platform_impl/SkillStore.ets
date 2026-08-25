@@ -150,7 +150,10 @@ export const createEntrySkillFilePort = (): SkillFilePort => ({
       fileIo.OpenMode.TRUNC;
     const file = fileIo.openSync(path, mode);
     try {
-      fileIo.writeSync(file.fd, bytes.buffer as ArrayBuffer);
+      // subarray 视图必须按 byteOffset/byteLength 切片,防写出整个 backing buffer
+      const exact: ArrayBuffer = (bytes.buffer as ArrayBuffer)
+        .slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      fileIo.writeSync(file.fd, exact);
     } finally {
       fileIo.closeSync(file);
     }

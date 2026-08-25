@@ -40,8 +40,18 @@ const RAWTEXT_TAGS: string[] = ['script', 'style'];
 
 // ===== 实体解码 =====
 
+const codePointEntity = (value: number): string => {
+  if (!Number.isFinite(value) || value < 0 || value > 0x10ffff) return '\uFFFD';
+  if (value >= 0xD800 && value <= 0xDFFF) return '\uFFFD'; // surrogate 区间非法
+  try {
+    return String.fromCodePoint(value);
+  } catch (_e) {
+    return '\uFFFD';
+  }
+};
+
 const decodeEntities = (s: string): string =>
-  s.replace(/&(amp|lt|gt|quot|apos|nbsp|#39|#x27|#\d+|#x[0-9A-Fa-f]+);/g,
+  s.replace(/&(amp|lt|gt|quot|apos|nbsp|#39|#x27|#\d+|#[xX][0-9A-Fa-f]+);/g,
     (whole: string, body: string): string => {
       switch (body) {
         case 'amp': return '&';
@@ -54,10 +64,10 @@ const decodeEntities = (s: string): string =>
         case 'nbsp': return ' ';
         default: {
           if (body.startsWith('#x') || body.startsWith('#X')) {
-            return String.fromCharCode(parseInt(body.slice(2), 16));
+            return codePointEntity(parseInt(body.slice(2), 16));
           }
           if (body.startsWith('#')) {
-            return String.fromCharCode(parseInt(body.slice(1), 10));
+            return codePointEntity(parseInt(body.slice(1), 10));
           }
           return whole;
         }
@@ -119,6 +129,32 @@ const parseAttributes = (s: string, el: HtmlElement): void => {
   }
 };
 
+// 引号感知的标签结束定位:属性值(引号内)的 '>' 不是标签结束
+//   (indexOf('>') 会把 href="...?a=>b" 处截断,链接残缺/文本错乱)
+const findTagEnd = (html: string, from: number): number => {
+  let quote: string | null = null;
+  for (let i: number = from; i < html.length; i++) {
+    const c: string = html.charAt(i);
+    if (quote !== null) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === '\'') {
+      quote = c;
+      continue;
+    }
+    if (c === '>') return i;
+  }
+  return -1;
+};
+
+// '<' 后是否形似标签起始(字母/斜杠/!/?) — 否则按普通文本处理("2 < 3")
+const looksLikeTagStart = (html: string, lt: number): boolean => {
+  if (lt + 1 >= html.length) return false;
+  const next: string = html.charAt(lt + 1);
+  return /[A-Za-z\/!?]/.test(next);
+};
+
 export const parseHtml = (html: string): HtmlDocument => {
   const root: HtmlElement = makeElement('#document', null);
   let current: HtmlElement = root;
@@ -131,6 +167,12 @@ export const parseHtml = (html: string): HtmlDocument => {
       break;
     }
     if (lt > i) pushText(current, decodeEntities(html.slice(i, lt)));
+    if (!looksLikeTagStart(html, lt)) {
+      // 非标签形态的 '<' 按普通文本(例如 "2 < 3 and > 1")
+      pushText(current, '<');
+      i = lt + 1;
+      continue;
+    }
     if (html.startsWith('<!--', lt)) {
       const end: number = html.indexOf('-->', lt + 4);
       i = end < 0 ? n : end + 3;
@@ -141,7 +183,7 @@ export const parseHtml = (html: string): HtmlDocument => {
       i = end < 0 ? n : end + 1;
       continue;
     }
-    const gt: number = html.indexOf('>', lt + 1);
+    const gt: number = findTagEnd(html, lt + 1);
     if (gt < 0) break;
     const inner: string = html.slice(lt + 1, gt);
     i = gt + 1;
@@ -157,8 +199,14 @@ export const parseHtml = (html: string): HtmlDocument => {
       }
       continue;
     }
-    const selfClose: boolean = inner.endsWith('/');
-    const body: string = selfClose ? inner.slice(0, -1) : inner;
+    // self-close 判定:'/' 前须是空白 — 无引号属性值结尾的 '/' 属于数据
+    //   (<img src=http://x/> 的 URL 尾斜杠不能被吃掉;<br/> 由 VOID_TAGS 兜底)
+    const trimmedInner: string = inner.trimEnd();
+    const selfClose: boolean = trimmedInner.endsWith('/')
+      && trimmedInner.length >= 2
+      && (/\s/.test(trimmedInner.charAt(trimmedInner.length - 2))
+        || /^[A-Za-z][A-Za-z0-9]*\/$/.test(trimmedInner));
+    const body: string = selfClose ? inner.slice(0, inner.lastIndexOf('/')) : inner;
     const spaceIdx: number = body.search(/\s/);
     const tag: string = (spaceIdx < 0 ? body : body.slice(0, spaceIdx)).toLowerCase();
     if (tag.length === 0) continue;

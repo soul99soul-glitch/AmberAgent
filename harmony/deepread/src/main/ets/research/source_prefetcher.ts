@@ -114,7 +114,12 @@ export const createSourcePrefetcher = (
     if (!force) {
       const cached = cache.get(cacheKey);
       if (cached && cached.expiresAt > Date.now()) {
-        return cached.value;
+        // 命中重排 LRU(否则频繁访问的旧 key 被提前淘汰)并返回副本
+        // (调用方变异会污染缓存)
+        const idx = cacheOrder.indexOf(cacheKey);
+        if (idx >= 0) cacheOrder.splice(idx, 1);
+        cacheOrder.push(cacheKey);
+        return cached.value.slice();
       }
     }
 
@@ -124,8 +129,10 @@ export const createSourcePrefetcher = (
     // 1. 多 provider 并行搜索(失败 provider → 空 bucket)
     const queries = buildDeepReadQueries(title, seedUrl);
     const providers = [...searchRegistry.enabled(), ...searchRegistry.fallback()];
+    // catch 在 withDeadline 外:provider 超时只丢该 bucket,
+    // 不让 Promise.all 整体失败丢掉其它 provider 已完成的结果
     const searchBuckets = await Promise.all(
-      providers.map(p => withDeadline(deadline, p.search(queries).catch(() => [] as SearchHit[]))),
+      providers.map(p => withDeadline(deadline, p.search(queries)).catch(() => [] as SearchHit[])),
     );
     const interleaved = interleaveSearchResults(searchBuckets);
 
@@ -134,9 +141,8 @@ export const createSourcePrefetcher = (
     if (seedUrl) {
       const seedSource = await withDeadline(
         deadline,
-        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false })
-          .catch(() => null),
-      );
+        fetchSource(seedUrl, title, 'seed', MIN_SEED_SOURCE_CHARS, { autoApproveAll: false, autoApproveHighRisk: false }),
+      ).catch(() => null); // catch 在外:seed 超时只丢 seed,不中止整个 collect
       if (seedSource) sources.push(seedSource);
     }
 
@@ -163,9 +169,9 @@ export const createSourcePrefetcher = (
       if (deduped.length >= MAX_SOURCES) break;
     }
 
-    // 5. 写 LRU cache
+    // 5. 写 LRU cache(返回副本:调用方变异不得污染缓存)
     setCache(cacheKey, deduped);
-    return deduped;
+    return deduped.slice();
   };
 
   return {
@@ -236,16 +242,24 @@ const makeSourceId = (): string => {
   return `src-${sourceIdCounter}`;
 };
 
-// 带 deadline 的 promise 包装:剩余时间 <= 0 时直接返回原 promise(给已完成结果机会)
+// 带 deadline 的 promise 包装:到期立即拒绝 — 原实现 return p 会无限等待
+// 未完成的请求(调用方 collect 卡死)
 const withDeadline = async <T>(deadline: number, p: Promise<T>): Promise<T> => {
   const remaining = deadline - Date.now();
-  if (remaining <= 0) return p;
-  return Promise.race([
-    p,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error('prefetch deadline exceeded')), remaining),
-    ),
-  ]);
+  if (remaining <= 0) {
+    p.catch((): void => {}); // 只挂消化 handler,不等待(原请求可能永不完成)
+    throw new Error('prefetch deadline exceeded');
+  }
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutPromise = new Promise<T>((_, reject): void => {
+    timer = setTimeout((): void => { reject(new Error('prefetch deadline exceeded')); }, remaining);
+  });
+  timeoutPromise.catch((): void => {}); // 败者 rejection 不外溢
+  try {
+    return await Promise.race([p, timeoutPromise]);
+  } finally {
+    if (timer !== null) clearTimeout(timer); // 快请求不留定时器
+  }
 };
 
 // 重新导出辅助(测试可能用到)

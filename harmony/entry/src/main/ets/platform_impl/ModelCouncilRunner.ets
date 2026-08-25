@@ -39,8 +39,8 @@ class StreamModelCouncilRunner implements ModelCouncilTextRunner {
     const apiKey: string = req.model.apiKey;
     const warnings: string[] = [];
     if (apiKey.length === 0) {
-      warnings.push('model has no API key');
-      return { text: '', warnings: warnings };
+      // 无 key 是配置错误,不是空产出:必须抛错(manager 会把空文本记 completed)
+      throw new Error(`model ${req.model.id} has no API key`);
     }
 
     const messages: OpenAiMessage[] = [
@@ -97,8 +97,9 @@ class StreamModelCouncilRunner implements ModelCouncilTextRunner {
     });
 
     if (resp.status !== 200 && resp.status !== 0) {
-      warnings.push(`HTTP ${resp.status}`);
+      // 非 2xx 是请求失败:返回空文本会被 manager 记为 completed 空产出
       hilog.warn(DOMAIN, TAG, 'generate non-200: %{public}d', resp.status);
+      throw new Error(`HTTP ${resp.status}`);
     }
     req.onChunk(cumulative);
     return { text: cumulative, warnings: warnings };

@@ -6,6 +6,7 @@
 // 裁剪:其余 agentRuntime 字段(maxToolLoopSteps/harnessDebug/任务调度等
 //   设置面)= P1 已登记,本文件仅承载已落地切片所需快照
 import { i18n } from '@kit.LocalizationKit';
+import { sharedKvMutex } from './AtomicJsonFile.ets';
 import type { KeyValueStore, MemoryRecallSetting, ReasoningLevel } from '@amber/chat-domain';
 import { DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
 import { DEFAULT_AGENT_SOUL_MARKDOWN, DEFAULT_MEMORY_RECALL_SETTING } from '@amber/chat-domain';
@@ -339,9 +340,10 @@ export interface MemoryWorkerTogglePatch {
 //   与 parseMemoryWorker 读侧互逆)。
 // dream 开关联动(Page :447-451/:475-479):写 dreamMaintenanceEnabled 或
 //   dreamModelEnabled 时同步 dreamEnabled=false(旧别名迁移写回语义逐字)。
-export const updateMemoryWorkerToggles = async (
+export const updateMemoryWorkerToggles = (
   kv: KeyValueStore, patch: MemoryWorkerTogglePatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -366,7 +368,8 @@ export const updateMemoryWorkerToggles = async (
   root.memoryWorker = worker;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // D-094:worker/daydream 任务模型写回(SettingModelPage.kt:619-643/:684-697)—
 //   onClear → modelId = DEFAULT_AUTO_MODEL_ID + followCompressModel = true
@@ -379,9 +382,10 @@ export interface MemoryWorkerModelPatch {
   daydreamReasoningLevel?: string;
 }
 
-export const updateMemoryWorkerModels = async (
+export const updateMemoryWorkerModels = (
   kv: KeyValueStore, patch: MemoryWorkerModelPatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -407,13 +411,15 @@ export const updateMemoryWorkerModels = async (
   root.memoryWorker = worker;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // D-090:agentSoulMarkdown 写回(VM :190-194 updateAgentRuntime {
 //   copy(agentSoulMarkdown = value) };Page :792-791 AgentSoulCard onSave)
-export const updateAgentSoulMarkdown = async (
+export const updateAgentSoulMarkdown = (
   kv: KeyValueStore, value: string,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -426,7 +432,8 @@ export const updateAgentSoulMarkdown = async (
   root.agentSoulMarkdown = value;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // D-091:contextCompaction 开关写回(Page :536-558 两 Switch →
 //   VM updateAgentRuntime { copy(contextCompaction = ...) })
@@ -435,9 +442,10 @@ export interface ContextCompactionTogglePatch {
   notifyOnly?: boolean;
 }
 
-export const updateContextCompactionToggles = async (
+export const updateContextCompactionToggles = (
   kv: KeyValueStore, patch: ContextCompactionTogglePatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -453,7 +461,8 @@ export const updateContextCompactionToggles = async (
   root.contextCompaction = compaction;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // D-092:召回开关写回(Page :359-431 MemoryRecallSubpage 六 Switch →
 //   VM updateAgentRuntime;memoryRecall.debug 走嵌套 copy(:420-424))
@@ -466,9 +475,10 @@ export interface RecallTogglePatch {
   memoryRecallDebug?: boolean;
 }
 
-export const updateRecallToggles = async (
+export const updateRecallToggles = (
   kv: KeyValueStore, patch: RecallTogglePatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -501,7 +511,8 @@ export const updateRecallToggles = async (
   }
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // ===== D-104:权限/推测执行写回(SettingAgentPermissionsPage/SettingAgentExtensionsPage
 //   updateSettings { copy(agentRuntime = ...) } 全文档重写 → RMW 保留未知字段) =====
@@ -512,9 +523,10 @@ export interface AgentRuntimePermissionsPatch {
   speculativeEnabled?: boolean;
 }
 
-export const updateAgentRuntimePermissions = async (
+export const updateAgentRuntimePermissions = (
   kv: KeyValueStore, patch: AgentRuntimePermissionsPatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -537,7 +549,8 @@ export const updateAgentRuntimePermissions = async (
   }
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // ===== D-115:执行参数写回(SettingAgentExecutionPage.kt:136-143/:331-344
 //   /:353-364 updateSettings { copy(agentRuntime = ...) } 全文档重写 →
@@ -551,9 +564,10 @@ export interface AgentRuntimeExecutionPatch {
   operationPreviewMode?: AgentOperationPreviewMode;
 }
 
-export const updateAgentRuntimeExecution = async (
+export const updateAgentRuntimeExecution = (
   kv: KeyValueStore, patch: AgentRuntimeExecutionPatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -577,7 +591,8 @@ export const updateAgentRuntimeExecution = async (
   }
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });
+
 
 // ===== 沙盒并发门写回(SettingSandboxPage 消费;tool_loop.ts:184-188 读侧) =====
 
@@ -586,9 +601,10 @@ export interface SpeculativeToolExecutionPatch {
   maxConcurrentTools?: number;
 }
 
-export const updateSpeculativeToolExecution = async (
+export const updateSpeculativeToolExecution = (
   kv: KeyValueStore, patch: SpeculativeToolExecutionPatch,
-): Promise<AgentRuntimeSnapshot> => {
+): Promise<AgentRuntimeSnapshot> =>
+  sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<AgentRuntimeSnapshot> => {
   const raw: string | null = await kv.get(AGENT_RUNTIME_KEY);
   let root: AgentRuntimeJson = {};
   if (raw !== null) {
@@ -604,4 +620,4 @@ export const updateSpeculativeToolExecution = async (
   root.speculativeToolExecution = cur;
   await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(root));
   return loadAgentRuntimeSnapshot(kv);
-};
+  });

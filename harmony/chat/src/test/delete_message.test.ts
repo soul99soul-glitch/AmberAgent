@@ -64,3 +64,36 @@ describe('deleteMessage', () => {
     assert.deepEqual(out.messageNodes, conv.messageNodes);
   });
 });
+
+describe('deleteMessage 分支定位修复', () => {
+  it('三个分支删除最前面的未选中项:当前选中分支保持不变(索引前移)', () => {
+    const a1 = makeAssistantMessage('a1');
+    const a2 = makeAssistantMessage('a2');
+    const a3 = makeAssistantMessage('a3');
+    const conv: Conversation = {
+      ...makeConversation('conv-br', []),
+      messageNodes: [
+        { id: 'node-b', messages: [a1, a2, a3], selectIndex: 2 },
+      ],
+    };
+    const out = deleteMessage(conv, a1.id);
+    const node = out.messageNodes[0];
+    assert.equal(node.messages.length, 2);
+    assert.equal(node.messages[node.selectIndex].id, a3.id,
+      '删除前面的分支后仍选中原来的 a3,而不是错切到 a2');
+  });
+
+  it('删除的就是当前选中项:回退 clamp 语义(与基准一致)', () => {
+    const a1 = makeAssistantMessage('a1');
+    const a2 = makeAssistantMessage('a2');
+    const a3 = makeAssistantMessage('a3');
+    const conv: Conversation = {
+      ...makeConversation('conv-br2', []),
+      messageNodes: [
+        { id: 'node-c', messages: [a1, a2, a3], selectIndex: 2 },
+      ],
+    };
+    const out = deleteMessage(conv, a3.id);
+    assert.equal(out.messageNodes[0].selectIndex, 1);
+  });
+});

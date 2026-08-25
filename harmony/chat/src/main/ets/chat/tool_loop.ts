@@ -29,6 +29,7 @@ import { generateAssistantOnce, runAppendUserMessage, runChatTurn } from './chat
 import type { RegenerateDeps, RegenerateSeed } from './regenerate.ts';
 import { prepareRegenerateSeed, runRegenerateAt } from './regenerate.ts';
 import { assembleInternalMessages, buildToolSystemPrompt } from './context_assembly.ts';
+import { fitMessagesToTokenBudget } from './context_compact.ts';
 import type { TransformerContext } from './transformer_pipeline.ts';
 import {
   applyInputTransformers, applyVisualTransformersStreamingTail,
@@ -222,7 +223,7 @@ const runToolLoopCore = async (
       const toolPrompt: string = loop.toolPromptModel !== undefined
         ? buildToolSystemPrompt(stepTools, loop.toolPromptModel, preparedMessages)
         : '';
-      const assembled: UIMessage[] = assembleInternalMessages({
+      const assembledBase: UIMessage[] = assembleInternalMessages({
         messages: preparedMessages,
         assistant: deps.assistant,
         agentSoul: deps.agentSoul ?? '',
@@ -238,6 +239,10 @@ const runToolLoopCore = async (
           ? 0
           : (deps.contextMessageSize ?? 0),
       });
+      // 发送边界兜底 fit(chat_turn 同语义;工具 prompt 也是后置 system 块)
+      const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
+        ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
+        : assembledBase;
       const internalMessages: UIMessage[] = await applyInputTransformers(
         assembled, deps.inputTransformers, ctx);
       // D-071a:视觉兜底重建闭包(逐步构建 — assembled 每步不同,

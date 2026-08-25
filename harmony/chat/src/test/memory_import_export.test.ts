@@ -282,3 +282,30 @@ test('memoryEventToJsonText: null 字段显式输出(explicitNulls)', () => {
   assert.equal(parsed['durationMs'], null);
   assert.equal(parsed['message'], '');
 });
+
+test('importFrom: 同一导入包内相同内容的两个文件只新增一次(可变去重索引)', async () => {
+  const fs = new MemFs();
+  const file: string = encodeMemoryFrontmatter(
+    record({ id: 0, kind: 'user', content: '重复内容' }), { now: nowFn });
+  fs.files.set('/root/AmberAgentMemory/memories/user/a.mem.md', file);
+  fs.files.set('/root/AmberAgentMemory/memories/user/b.mem.md', file);
+  fs.files.set('/root/AmberAgentMemory/manifest.json', '{}');
+  let seq: number = 10;
+  const upserted: MemoryRecord[] = [];
+  const result = await importMemoriesFrom('/root', {
+    fs,
+    getAllRecords: (): Promise<MemoryRecord[]> => Promise.resolve([]),
+    getRecentEvents: (): Promise<MemoryEvent[]> => Promise.resolve([]),
+    upsertRecord: (r: MemoryRecord): Promise<MemoryRecord> => {
+      // 尊重传入 id(沿用既有);0 才分配新 id(真实自增语义)
+      const out: MemoryRecord = r.id !== 0 ? { ...r } : { ...r, id: seq++ };
+      upserted.push(out);
+      return Promise.resolve(out);
+    },
+    now: nowFn,
+  });
+  assert.equal(result.importedCount, 2);
+  assert.equal(upserted.length, 2);
+  assert.equal(upserted[0].id, 10, '第一个文件按新增(id=0→分配 10)');
+  assert.equal(upserted[1].id, 10, '第二个文件命中索引 → 沿用 10,不再按 0 新增');
+});

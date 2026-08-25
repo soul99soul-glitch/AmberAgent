@@ -90,10 +90,14 @@ const serviceName = (options: SearchServiceOptions): string =>
 const supportsNativeTopic = (options: SearchServiceOptions): boolean =>
   options.type === 'tavily';
 
+// 域键含端口(不带默认端口的同 host 不同服务不得经标题别名误合并);
+// IPv6 host 保留方括号形态
 const domainOf = (url: string): string => {
   try {
-    const host: string = parseUrlHost(url.trim());
-    return host.toLowerCase().replace(/^www\./, '');
+    const parsed = parseUrl(url.trim());
+    const host: string = parsed.host.toLowerCase().replace(/^www\./, '');
+    const port: string = parsed.port !== null ? `:${parsed.port}` : '';
+    return `${host}${port}`;
   } catch {
     return '';
   }
@@ -167,7 +171,9 @@ export const canonicalizeUrlWithTracker = (url: string, blocked: string[]): stri
       const joined: string = kept.join('&');
       if (joined.trim().length > 0) query = joined;
     }
-    let out: string = `${scheme}://${host}${path}`;
+    // 非默认端口保留(丢端口会把不同服务误判为同源去重)
+    const portSuffix: string = parsed.port !== null ? `:${parsed.port}` : '';
+    let out: string = `${scheme}://${host}${portSuffix}${path}`;
     if (query !== null) out += `?${query}`;
     return out;
   } catch {
@@ -176,7 +182,7 @@ export const canonicalizeUrlWithTracker = (url: string, blocked: string[]): stri
 };
 
 // java.net.URI 容错解析子集:无 scheme:// 时 host 为空(path 保留原串)
-interface ParsedUrl { scheme: string | null; host: string; path: string; query: string | null; }
+interface ParsedUrl { scheme: string | null; host: string; port: string | null; path: string; query: string | null; }
 const parseUrl = (u: string): ParsedUrl => {
   if (u.length === 0) throw new Error('empty url');
   // java.net.URI 对空白字符抛 URISyntaxException → 走回退分支
@@ -186,15 +192,36 @@ const parseUrl = (u: string): ParsedUrl => {
     let authority: string = m[2];
     const at: number = authority.lastIndexOf('@');
     if (at >= 0) authority = authority.substring(at + 1);
-    const colon: number = authority.indexOf(':');
-    const host: string = colon >= 0 ? authority.substring(0, colon) : authority;
-    return { scheme: m[1], host, path: m[3], query: m[4] ?? null };
+    // host/port 拆分:IPv6 [..] 按右括号截取;普通 authority 仅当 ':' 后
+    //   全为数字才视作端口(域名含冒号的畸形输入不作端口拆分)
+    let host: string;
+    let port: string | null = null;
+    if (authority.startsWith('[')) {
+      const close: number = authority.indexOf(']');
+      if (close >= 0) {
+        host = authority.substring(0, close + 1);
+        const rest: string = authority.substring(close + 1);
+        if (rest.startsWith(':') && /^\d+$/.test(rest.substring(1))) port = rest.substring(1);
+      } else {
+        host = authority;
+      }
+    } else {
+      const colon: number = authority.indexOf(':');
+      if (colon >= 0 && /^\d+$/.test(authority.substring(colon + 1))) {
+        host = authority.substring(0, colon);
+        port = authority.substring(colon + 1);
+      } else {
+        host = authority;
+      }
+    }
+    return { scheme: m[1], host, port, path: m[3], query: m[4] ?? null };
   }
   // 相对/无 scheme:host 空,path 取 ? 之前
   const q: number = u.indexOf('?');
   return {
     scheme: null,
     host: '',
+    port: null,
     path: q >= 0 ? u.substring(0, q) : u,
     query: q >= 0 ? u.substring(q + 1) : null,
   };
@@ -282,17 +309,24 @@ const mergeResults = (
     if (!source.outcome.ok || source.outcome.result === undefined) continue;
     const items: SearchResultItem[] = source.outcome.result.items;
     items.forEach((item: SearchResultItem, index: number) => {
+      // 空 URL/空标题条目不入聚合(污染排序与去重键;provider 缺字段时产生)
+      if (item.url.trim().length === 0 || item.title.trim().length === 0) return;
       const canonical: string = canonicalizeUrl(item.url);
-      const titleKey: string = domainOf(item.url) + '|' + normalizedTitle(item.title);
+      const domain: string = domainOf(item.url);
+      const normalized: string = normalizedTitle(item.title);
+      // 保守标题别名:域非空 + 归一化标题足够长,防不同文章同名误合并
+      const titleKeyEligible: boolean = domain.length > 0 && normalized.length >= 3;
+      const titleKey: string = titleKeyEligible ? `${domain}|${normalized}` : '';
       const key: string = canonical.trim().length > 0 ? canonical : titleKey;
-      const existing: AggregatedSearchItem | undefined = byKey.get(key) ?? byKey.get(titleKey);
+      const existing: AggregatedSearchItem | undefined = byKey.get(key)
+        ?? (titleKeyEligible ? byKey.get(titleKey) : undefined);
       if (existing === undefined) {
         const sourceBoost: number = (results.length - source.sourceIndex) * 10;
         const hitBoost: number = queryTokens.filter((token: string) =>
           item.title.toLowerCase().includes(token) || item.text.toLowerCase().includes(token)
         ).length * 3;
         const freshnessBoost: number = (topic === 'news' && timeRange !== 'any') ? 8 : 0;
-        byKey.set(key, {
+        const created: AggregatedSearchItem = {
           title: item.title,
           url: item.url,
           text: item.text,
@@ -302,8 +336,16 @@ const mergeResults = (
           duplicateCount: 1,
           score: sourceBoost + hitBoost + freshnessBoost - index,
           images: item.images.slice(0, 5),
-        });
+        };
+        byKey.set(key, created);
+        // 标题别名索引:后续同域同题但 URL 不同的条目可命中合并
+        if (titleKeyEligible && titleKey !== key) byKey.set(titleKey, created);
       } else {
+        // 标题别名命中合并后回写 canonical:后续同 URL 不同标题的条目
+        // 不得再新建重复项
+        if (canonical.trim().length > 0 && byKey.get(canonical) === undefined) {
+          byKey.set(canonical, existing);
+        }
         if (!existing.sourceServices.includes(source.serviceName)) {
           existing.sourceServices.push(source.serviceName);
         }
@@ -316,7 +358,14 @@ const mergeResults = (
       }
     });
   }
-  const list: AggregatedSearchItem[] = Array.from(byKey.values());
+  // byKey 混有标题别名键(与 canonical 键同引用)——按引用去重后输出
+  const seen = new Set<AggregatedSearchItem>();
+  const list: AggregatedSearchItem[] = [];
+  for (const item of Array.from(byKey.values())) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    list.push(item);
+  }
   list.sort((a: AggregatedSearchItem, b: AggregatedSearchItem): number =>
     (b.score - a.score) || (b.duplicateCount - a.duplicateCount) || (a.sourceRank - b.sourceRank));
   return list;
@@ -337,7 +386,7 @@ const enhanceQuery = (
   else if (timeRange === 'week') rangeText = `this week ${today}`;
   else if (timeRange === 'month') rangeText = `this month ${today}`;
   else if (timeRange === 'year') rangeText = `this year ${today}`;
-  const parts: string[] = [query];
+  const parts: string[] = [query.trim()];
   if (topic === 'news') parts.push('news');
   if (rangeText !== null) parts.push(rangeText);
   return parts.join(' ');

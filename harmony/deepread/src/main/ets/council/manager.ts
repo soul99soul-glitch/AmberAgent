@@ -14,7 +14,7 @@ import {
 } from './models.ts';
 import type {
   ModelCouncilRun, ModelCouncilSeat, ModelCouncilTurn, ModelCouncilRunStatus,
-  ModelCouncilRuntimeSetting,
+  ModelCouncilRuntimeSetting, ModelCouncilResult,
 } from './models.ts';
 import {
   seatSystemPrompt, openingPrompt, responsePrompt, finalPositionPrompt,
@@ -31,6 +31,49 @@ class TimeoutError extends Error {
   }
 }
 
+// 裁决保守解析:顶层 JSON object 的字符串数组字段填入结构化结果;
+// 解析失败/无已知字段 → 原文保留在 finalRecommendation 并附 warning(不丢弃)
+const applyVerdictText = (
+  result: ModelCouncilResult, text: string, warnings: string[],
+): void => {
+  result.warnings = warnings;
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_e) {
+    parsed = null;
+  }
+  const stringArrayField = (obj: Record<string, unknown>, keys: string[]): string[] | null => {
+    for (const key of keys) {
+      const v: unknown = obj[key];
+      if (Array.isArray(v) && v.every((x): boolean => typeof x === 'string')) {
+        return v as string[];
+      }
+    }
+    return null;
+  };
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const obj: Record<string, unknown> = parsed as Record<string, unknown>;
+    const consensus = stringArrayField(obj, ['consensus']);
+    const conflicts = stringArrayField(obj, ['conflicts']);
+    const evidence = stringArrayField(obj, ['strongestEvidence', 'strongest_evidence']);
+    const risks = stringArrayField(obj, ['risks']);
+    const finalRec: unknown = obj['finalRecommendation'] ?? obj['final_recommendation'];
+    const structured: boolean = consensus !== null || conflicts !== null
+      || evidence !== null || risks !== null || typeof finalRec === 'string';
+    if (structured) {
+      if (consensus !== null) result.consensus = consensus;
+      if (conflicts !== null) result.conflicts = conflicts;
+      if (evidence !== null) result.strongestEvidence = evidence;
+      if (risks !== null) result.risks = risks;
+      result.finalRecommendation = typeof finalRec === 'string' ? finalRec : text;
+      return;
+    }
+  }
+  result.finalRecommendation = text;
+  result.warnings = [...warnings, 'synthesis response is not valid structured JSON'];
+};
+
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> => {
   return new Promise<T>((resolve, reject) => {
     const timer: ReturnType<typeof setTimeout> =
@@ -45,6 +88,10 @@ class CancelSignal implements AbortSignalLike {
   private cbs: Array<() => void> = [];
   addEventListener(_type: string, listener: () => void): void {
     this.cbs.push(listener);
+  }
+  removeEventListener(_type: string, listener: () => void): void {
+    const i: number = this.cbs.indexOf(listener);
+    if (i >= 0) this.cbs.splice(i, 1);
   }
   abort(): void {
     if (this.aborted) return;
@@ -193,6 +240,17 @@ export class ModelCouncilManager {
 
   private async executeCouncil(run: ModelCouncilRun): Promise<void> {
     const signal: CancelSignal = this.signals.get(run.runId) as CancelSignal;
+    // 运行级 deadline(totalTimeoutMs 从不生效是缺陷):到期 abort 根 signal,
+    // 所有席位/裁判请求级联取消,终态按 timed_out(不伪装 cancelled)
+    let deadlineTimer: ReturnType<typeof setTimeout> | null = null;
+    let deadlineHit: boolean = false;
+    deadlineTimer = setTimeout((): void => {
+      // 用户已先取消 → 保持 cancelled 语义,不被迟到的 deadline 改写
+      if (!signal.aborted) {
+        deadlineHit = true;
+        signal.abort();
+      }
+    }, Math.max(this.setting.totalTimeoutMs, 1));
     try {
       await this.runRound(run, 1, signal);
       if (run.task.mode === 'debate') {
@@ -207,7 +265,9 @@ export class ModelCouncilManager {
       const allCompleted: boolean = run.turns.length > 0 && run.turns.every(t => t.status === 'completed');
       const synthOk: boolean = run.result !== null && run.result.error.length === 0;
       const anyCompleted: boolean = this.anyCompleted(run);
-      if (signal.aborted) {
+      if (deadlineHit && signal.aborted) {
+        run.status = 'timed_out';
+      } else if (signal.aborted) {
         run.status = 'cancelled';
       } else if (!anyCompleted) {
         // 无任何成功席位(或 synthesize 因无输入而跳过):灾难性失败
@@ -221,7 +281,7 @@ export class ModelCouncilManager {
         run.status = (allCompleted && synthOk) ? 'completed' : 'partial_failed';
       }
     } catch (e) {
-      run.status = signal.aborted ? 'cancelled' : 'failed';
+      run.status = deadlineHit && signal.aborted ? 'timed_out' : (signal.aborted ? 'cancelled' : 'failed');
       if (run.result === null) {
         const r = makeEmptyResult();
         r.error = String(e);
@@ -230,6 +290,7 @@ export class ModelCouncilManager {
         run.result.error = String(e);
       }
     } finally {
+      if (deadlineTimer !== null) clearTimeout(deadlineTimer);
       run.updatedAtMs = this.nowMs();
       const finished: TranscriptFinished = { event: 'finished', status: run.status };
       this.writeTranscriptLine(run.runId, JSON.stringify(finished));
@@ -237,6 +298,9 @@ export class ModelCouncilManager {
       // signals/completions/listeners 不再需要,释放引用避免泄漏)
       this.signals.delete(run.runId);
       this.completions.delete(run.runId);
+      // live 文本与 listener 集合同步释放(否则每次运行泄漏整份流文本闭包)
+      this.liveText.delete(run.runId);
+      this.listeners.delete(run.runId);
     }
   }
 
@@ -284,7 +348,15 @@ export class ModelCouncilManager {
     else userPrompt = responsePrompt(run.task, seat, run.turns);
 
     let cumulative: string = prefix;
+    // 席位级子 signal:超时只取消本席底层请求(不动根 signal,其余席位继续);
+    // 创建时继承根信号已中止状态(cancel 可先于席位启动发生)
+    const seatSignal: CancelSignal = new CancelSignal();
+    if (signal.aborted) seatSignal.abort();
+    const cascade = (): void => { seatSignal.abort(); };
+    signal.addEventListener('abort', cascade);
+    let seatTimer: ReturnType<typeof setTimeout> | null = null;
     try {
+      seatTimer = setTimeout((): void => { seatSignal.abort(); }, Math.max(this.setting.seatTimeoutMs, 1));
       const res = await withTimeout(raceCancel(this.runner.generate({
         model: model,
         systemPrompt: seatSystemPrompt(seat),
@@ -296,8 +368,8 @@ export class ModelCouncilManager {
           cumulative = prefix + text;
           this.setLive(runId, seat.seatId, cumulative);
         },
-        signal: signal,
-      }), signal), this.setting.seatTimeoutMs);
+        signal: seatSignal,
+      }), seatSignal), this.setting.seatTimeoutMs);
 
       if (signal.aborted) {
         this.appendTurn(run, this.makeTurn(round, seat, label, 'cancelled',
@@ -306,14 +378,23 @@ export class ModelCouncilManager {
       }
       const content: string = truncate(res.text, seat.outputBudgetChars);
       this.setLive(runId, seat.seatId, prefix + content);
+      if (content.trim().length === 0) {
+        // 空文本 = 无有效产出(空流/网关异常),不得计 completed 进入裁判
+        this.appendTurn(run, this.makeTurn(round, seat, label, 'failed',
+          '', 'empty response text', res.warnings));
+        return;
+      }
       this.appendTurn(run, this.makeTurn(round, seat, label, 'completed', content, '', res.warnings));
     } catch (e) {
       let status: ModelCouncilRunStatus;
       if (signal.aborted) status = 'cancelled';
-      else if (e instanceof TimeoutError) status = 'timed_out';
+      else if (e instanceof TimeoutError || seatSignal.aborted) status = 'timed_out';
       else status = 'failed';
       const partial: string = cumulative.length > prefix.length ? cumulative.slice(prefix.length) : '';
       this.appendTurn(run, this.makeTurn(round, seat, label, status, partial, String(e), []));
+    } finally {
+      if (seatTimer !== null) clearTimeout(seatTimer);
+      signal.removeEventListener('abort', cascade);
     }
   }
 
@@ -328,21 +409,32 @@ export class ModelCouncilManager {
     }
     this.setLive(run.runId, SYNTHESIZER_SEAT_KEY, '');
     try {
-      const res = await withTimeout(raceCancel(this.runner.generate({
-        model: model,
-        systemPrompt: SYNTHESIZER_SYSTEM_PROMPT,
-        userPrompt: synthesisPrompt(run.task, run.turns),
-        outputBudgetChars: this.setting.outputBudgetChars,
-        reasoningLevel: 'off',
-        temperature: null,
-        onChunk: (text: string): void => { this.setLive(run.runId, SYNTHESIZER_SEAT_KEY, text); },
-        signal: signal,
-      }), signal), this.setting.seatTimeoutMs);
-      const result = makeEmptyResult();
-      result.finalRecommendation = res.text;
-      result.warnings = res.warnings;
-      result.perSeatSummaries = this.perSeatSummaries(run);
-      run.result = result;
+      // 裁判同席位:子 signal(超时取消底层请求;继承根中止;结束清理)
+      const synthSignal: CancelSignal = new CancelSignal();
+      if (signal.aborted) synthSignal.abort();
+      const synthCascade = (): void => { synthSignal.abort(); };
+      signal.addEventListener('abort', synthCascade);
+      let synthTimer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        synthTimer = setTimeout((): void => { synthSignal.abort(); }, Math.max(this.setting.seatTimeoutMs, 1));
+        const res = await withTimeout(raceCancel(this.runner.generate({
+          model: model,
+          systemPrompt: SYNTHESIZER_SYSTEM_PROMPT,
+          userPrompt: synthesisPrompt(run.task, run.turns),
+          outputBudgetChars: this.setting.outputBudgetChars,
+          reasoningLevel: 'off',
+          temperature: null,
+          onChunk: (text: string): void => { this.setLive(run.runId, SYNTHESIZER_SEAT_KEY, text); },
+          signal: synthSignal,
+        }), synthSignal), this.setting.seatTimeoutMs);
+        const result = makeEmptyResult();
+        applyVerdictText(result, res.text, res.warnings);
+        result.perSeatSummaries = this.perSeatSummaries(run);
+        run.result = result;
+      } finally {
+        if (synthTimer !== null) clearTimeout(synthTimer);
+        signal.removeEventListener('abort', synthCascade);
+      }
     } catch (e) {
       const r = makeEmptyResult();
       r.error = String(e);

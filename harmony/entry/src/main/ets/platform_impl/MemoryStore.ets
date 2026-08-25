@@ -25,6 +25,7 @@ import {
   memoryRecordToAssistantMemory, touchMemoryRecords, updateMemoryRecordContent,
   upsertMemoryRecord,
 } from '@amber/chat-domain';
+import { writeTextFileAtomic, quarantineIfStillInvalid } from './AtomicJsonFile.ets';
 
 const MEMORY_FOLDER: string = 'memory';
 const MEMORY_FILE: string = 'memory_records.json';
@@ -37,32 +38,33 @@ const memoryPath = (name: string): string => {
 };
 
 const readJsonArray = async <T>(path: string): Promise<T[]> => {
+  let text: string;
   try {
     const ok: boolean = await fileIo.access(path);
     if (!ok) return []; // 文件不存在 → 空库(等价空表)
-    const text: string = await fileIo.readText(path);
-    const parsed: T[] = JSON.parse(text) as T[];
-    return Array.isArray(parsed) ? parsed : [];
+    text = await fileIo.readText(path);
   } catch {
-    return []; // 损坏 → 空(不崩溃;写路径切片落地备份策略)
+    return []; // IO 异常 → 空库(不崩溃)
   }
+  try {
+    const parsed: T[] = JSON.parse(text) as T[];
+    if (Array.isArray(parsed)) return parsed;
+  } catch {
+    // 落入下方隔离
+  }
+  // 损坏 → 二次确认仍无效则保留 .bad 现场后按空库回退,防下次写以空快照覆盖
+  await quarantineIfStillInvalid(path, (t: string): boolean => {
+    try {
+      return !Array.isArray(JSON.parse(t));
+    } catch {
+      return true;
+    }
+  });
+  return [];
 };
 
-const writeJsonArray = async <T>(path: string, items: T[]): Promise<void> => {
-  const dir: string = path.substring(0, path.lastIndexOf('/'));
-  try {
-    await fileIo.mkdir(dir, true);
-  } catch {
-    // 已存在
-  }
-  const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
-  const file: fileIo.File = await fileIo.open(path, mode);
-  try {
-    await fileIo.write(file.fd, JSON.stringify(items));
-  } finally {
-    await fileIo.close(file);
-  }
-};
+const writeJsonArray = async <T>(path: string, items: T[]): Promise<void> =>
+  writeTextFileAtomic(path, JSON.stringify(items));
 
 const readAll = (): Promise<MemoryRecord[]> => readJsonArray<MemoryRecord>(memoryPath(MEMORY_FILE));
 
@@ -307,15 +309,20 @@ export const getMemoryImportExportDeps = (): MemoryImportExportDeps => ({
 // ===== D-085f:dream 存储面 =====
 
 // getPendingCandidates(MemoryCandidateDAO :19-20)— status='pending' ORDER created_at DESC
+// (显式排序:文件序不保证 createdAt 序,reverse() 假设不成立)
+const candidateByCreatedDesc = (a: MemoryCandidate, b: MemoryCandidate): number =>
+  b.createdAt - a.createdAt;
+
 const getPendingCandidates = async (): Promise<MemoryCandidate[]> => {
   const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
-  return all.filter((c: MemoryCandidate): boolean => c.status === 'pending').reverse();
+  return all.filter((c: MemoryCandidate): boolean => c.status === 'pending')
+    .sort(candidateByCreatedDesc);
 };
 
-// getAllCandidates(DAO :22-23)— ORDER created_at DESC(文件为时间升序 → 反转)
+// getAllCandidates(DAO :22-23)— ORDER created_at DESC
 const getAllCandidates = async (): Promise<MemoryCandidate[]> => {
   const all: MemoryCandidate[] = await readJsonArray<MemoryCandidate>(memoryPath(CANDIDATES_FILE));
-  return [...all].reverse();
+  return [...all].sort(candidateByCreatedDesc);
 };
 
 // updateCandidate(MemoryRepository.kt:174-176)— copy(updatedAt=now) 后 update;
@@ -412,6 +419,29 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
     return all.filter((row: MemoryDreamPlanEntity): boolean =>
       row.source === source && row.createdAt >= createdAfter).length;
   },
+  // 原子「dismiss 全量 pending + insert」:单次 enqueueWrite,防并发交错留多个 pending
+  replacePendingAndInsert: (status: string, dismissedAt: number,
+    entity: MemoryDreamPlanEntity): Promise<void> =>
+    enqueueWrite(async (): Promise<void> => {
+      const all: MemoryDreamPlanEntity[] =
+        await readJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE));
+      const next: MemoryDreamPlanEntity[] = all.map(
+        (row: MemoryDreamPlanEntity): MemoryDreamPlanEntity => {
+          if (row.status !== 'pending') return row;
+          return {
+            id: row.id, planJson: row.planJson, status, source: row.source,
+            mergeCount: row.mergeCount, promoteCount: row.promoteCount,
+            archiveCount: row.archiveCount, supersedeCount: row.supersedeCount,
+            ignoreCandidateCount: row.ignoreCandidateCount, createdAt: row.createdAt,
+            appliedAt: row.appliedAt, dismissedAt,
+          };
+        });
+      const replaced: number = next.findIndex(
+        (row: MemoryDreamPlanEntity): boolean => row.id === entity.id);
+      if (replaced >= 0) next[replaced] = entity;
+      else next.push(entity);
+      await writeJsonArray<MemoryDreamPlanEntity>(memoryPath(DREAM_PLANS_FILE), next);
+    }),
   updatePendingStatus: (status: string, dismissedAt: number): Promise<void> =>
     enqueueWrite(async (): Promise<void> => {
       const all: MemoryDreamPlanEntity[] =

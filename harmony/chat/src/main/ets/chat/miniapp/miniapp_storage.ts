@@ -26,6 +26,21 @@ const MAX_KEYS_PER_APP: number = 128;
 const MAX_TOTAL_BYTES_PER_APP: number = 512 * 1024;
 const KEY_PATTERN: RegExp = /^[a-zA-Z0-9._:-]{1,64}$/;
 
+// appId 级互斥:配额检查是快照-校验-写入的 TOCTOU,同 app 多 Runner 并发
+// set/remove 会双双基于同一旧快照通过检查并突破 128 key/512KB 上限。
+// 模块级(非实例字段):跨 Storage 实例同样生效。
+const appIdMutexTails: Map<string, Promise<void>> = new Map<string, Promise<void>>();
+
+const withAppLock = <T>(appId: string, op: () => Promise<T>): Promise<T> => {
+  const previous: Promise<void> = appIdMutexTails.get(appId) ?? Promise.resolve();
+  const run: Promise<T> = previous.catch((): void => {}).then(op);
+  const tail: Promise<void> = run.then((): void => {}, (): void => {});
+  appIdMutexTails.set(appId, tail);
+  return run.finally((): void => {
+    if (appIdMutexTails.get(appId) === tail) appIdMutexTails.delete(appId);
+  });
+};
+
 export class MiniAppStorage {
   constructor(
     private readonly store: KeyValueStore,
@@ -43,13 +58,17 @@ export class MiniAppStorage {
     if (valueBytes > MAX_VALUE_BYTES) {
       throw new MiniAppValidationException('Storage value is too large');
     }
-    await this.enforceAppQuota(appId, key, valueBytes);
-    await this.store.put(this.storageKey(appId, key), value);
+    return withAppLock(appId, async (): Promise<void> => {
+      await this.enforceAppQuota(appId, key, valueBytes);
+      await this.store.put(this.storageKey(appId, key), value);
+    });
   }
 
   async remove(appId: string, key: string): Promise<void> {
     this.validateKey(key);
-    await this.store.delete(this.storageKey(appId, key));
+    return withAppLock(appId, async (): Promise<void> => {
+      await this.store.delete(this.storageKey(appId, key));
+    });
   }
 
   private validateKey(key: string): void {

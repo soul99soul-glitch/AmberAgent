@@ -103,6 +103,24 @@ const parseInstant = (text: string): number => {
 // Kotlin String.trim('"'):首尾所有 '"' 移除
 const trimQuotes = (text: string): string => text.replace(/^"+/, '').replace(/"+$/, '');
 
+// 带引号 scalar 的反转义:encode 的 quote() 转义了 \ 与 ",decode 只去引号会失真
+// (source_conversation_id 等含反斜杠/引号的字段 round-trip 改变内容)。
+// sentinel 法避免 " 与 \ 的替换顺序歧义。
+const unescapeQuotedScalar = (raw: string): string => {
+  const trimmed: string = raw.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    // encode 的 quote() 转义了 \\ 与 \"(成对);先消费 \\ 再消费 \"，
+    // 用哨兵避免还原时歧义 —— 全程用 charCode 构造,规避源码转义层级
+    const bs: string = String.fromCharCode(92);
+    const sentinel: string = String.fromCharCode(0);
+    return trimmed.substring(1, trimmed.length - 1)
+      .split(bs + bs).join(sentinel)
+      .split(bs + '"').join('"')
+      .split(sentinel).join(bs);
+  }
+  return trimQuotes(trimmed);
+};
+
 // decode(:31-59)
 export const decodeMemoryFrontmatter = (
   text: string, deps: MemoryFrontmatterCodecDeps = {},
@@ -117,7 +135,7 @@ export const decodeMemoryFrontmatter = (
   for (const line of frontmatterText.split('\n')) {
     const index: number = line.indexOf(':');
     if (index < 0) continue;
-    frontmatter.set(line.substring(0, index).trim(), trimQuotes(line.substring(index + 1).trim()));
+    frontmatter.set(line.substring(0, index).trim(), unescapeQuotedScalar(line.substring(index + 1)));
   }
   const scope: MemoryScope = memoryScopeFromWireName(frontmatter.get('scope') ?? null);
   const kind: MemoryKind = memoryKindFromWireName(frontmatter.get('kind') ?? null);

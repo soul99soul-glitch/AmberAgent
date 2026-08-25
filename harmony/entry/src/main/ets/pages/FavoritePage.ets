@@ -4,6 +4,7 @@
 //   鸿蒙接 entry FavoriteStore.ets(KV JSON 落盘);收藏入口 = 消息动作 star 键。
 
 import type { FavoriteEntry } from '../platform_impl/FavoriteStore.ets';
+import { promptAction } from '@kit.ArkUI';
 import { listFavorites, removeFavorite } from '../platform_impl/FavoriteStore.ets';
 import {
   BG, SURFACE, INK, INK3, INK4, LINE, ERROR,
@@ -61,7 +62,10 @@ struct FavoritePage {
                         title: '取消收藏', message: '删除这条收藏？',
                         primaryButton: { value: '取消', action: (): void => {} },
                         secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                          removeFavorite(f.id).then((): void => { this.reload(); });
+                          removeFavorite(f.id).then((): void => { this.reload(); })
+                            .catch((e: Error): void => {
+                              promptAction.showToast({ message: `删除失败:${e.message}`, duration: 1800 });
+                            });
                         } },
                       });
                     })

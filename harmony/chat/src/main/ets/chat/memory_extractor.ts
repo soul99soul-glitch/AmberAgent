@@ -70,9 +70,12 @@ const longOrNull = (v: unknown): number | null => {
 };
 
 const floatOrNull = (v: unknown): number | null => {
-  if (typeof v === 'number') return v;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'string') {
-    const n: number = Number.parseFloat(v);
+    // 严格整串浮点(kotlinx floatOrNull 语义):parseFloat 前缀解析会把
+    // "0.86oops" 当 0.86,污染 confidence 自动入库
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v.trim())) return null;
+    const n: number = Number.parseFloat(v.trim());
     return Number.isFinite(n) ? n : null;
   }
   return null;
@@ -235,7 +238,23 @@ const logEvent = (
   messageCount: fields.messageCount ?? null,
 }));
 
+// 按会话单飞:同一会话并发完成生成时,check-then-set 的去抖门会被同时穿过
+// (双跑双入库);跨会话不互相拦截(对齐 Android 按会话去抖语义)
+const extractionInFlight: Set<string> = new Set<string>();
+
 export const runMemoryExtraction = async (
+  conversation: Conversation, deps: MemoryExtractionDeps,
+): Promise<void> => {
+  if (extractionInFlight.has(conversation.id)) return;
+  extractionInFlight.add(conversation.id);
+  try {
+    await runMemoryExtractionGuarded(conversation, deps);
+  } finally {
+    extractionInFlight.delete(conversation.id);
+  }
+};
+
+const runMemoryExtractionGuarded = async (
   conversation: Conversation, deps: MemoryExtractionDeps,
 ): Promise<void> => {
   const nowFn: () => number = deps.now ?? ((): number => Date.now());

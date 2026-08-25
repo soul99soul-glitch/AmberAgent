@@ -23,6 +23,21 @@ import type {
   KeyValueStore, AgentTaskFilePort, AgentCronPersistencePort, AgentCronSchedulerPort,
 } from '@amber/chat-domain';
 
+// 段级规范化(沙箱内无 symlink,lexical 等价):'..' 弹栈,'.' 与空段忽略
+const normalizeSegments = (p: string): string => {
+  const parts: string[] = p.split('/');
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part.length === 0 || part === '.') continue;
+    if (part === '..') {
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return `/${out.join('/')}`;
+};
+
 const DOMAIN: number = 0x0001;
 const TAG: string = 'Chat.AgentCron';
 
@@ -110,8 +125,15 @@ export const createEntryAgentTaskFilePort = (): AgentTaskFilePort => ({
       return Promise.resolve(false);
     }
   },
-  isPathInside: (root: string, path: string): Promise<boolean> =>
-    Promise.resolve(path.startsWith(`${root}/`)),
+  isPathInside: (root: string, path: string): Promise<boolean> => {
+    if (root.length === 0 || path.length === 0 || !path.startsWith('/')) {
+      return Promise.resolve(false);
+    }
+    // 段级规范化后判 containment,防 root/../outside 前缀绕过(SubAgentStore 同款)
+    const normRoot: string = normalizeSegments(root);
+    const normPath: string = normalizeSegments(path);
+    return Promise.resolve(normPath.startsWith(`${normRoot}/`));
+  },
 });
 
 // ===== AgentCronSchedulerPort(应用存活期定时器) =====

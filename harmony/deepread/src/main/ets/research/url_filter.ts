@@ -12,6 +12,23 @@ export const isPrivateUrl = (url: string): boolean => {
   const trimmed = url.trim();
   if (trimmed.length === 0) return false;
 
+  // 剥离 userinfo(user@host 的 user 部分,取最后一个 @ 分隔 — 多重 @ 时
+  // 只剥第一段仍会污染 host):不剥离时 'attacker@127.0.0.1' 会被当成完整
+  // host,IPv4/IPv6 判定失效(SSRF 绕过)
+  const schemeMatch: RegExpExecArray | null = /^[a-zA-Z][a-zA-Z0-9+.\-]*:\/\//.exec(trimmed);
+  if (schemeMatch !== null) {
+    const rest: string = trimmed.substring(schemeMatch[0].length);
+    const slash: number = rest.search(/[/?#]/);
+    const authorityRaw: string = slash >= 0 ? rest.substring(0, slash) : rest;
+    const at: number = authorityRaw.lastIndexOf('@');
+    if (at >= 0) {
+      const hostPart: string = authorityRaw.substring(at + 1);
+      const tailPart: string = slash >= 0 ? rest.substring(slash) : '';
+      const rebuilt: string = schemeMatch[0] + hostPart + tailPart;
+      return isPrivateUrl(rebuilt);
+    }
+  }
+
   let host: string;
   // 从 URL 提取 host(不依赖全局 URL 类,ArkTS 兼容)
   // 支持:protocol://host[:port]/path、protocol://[ipv6][:port]/path
@@ -41,6 +58,16 @@ export const isPrivateUrl = (url: string): boolean => {
     return true;
   }
 
+  // IPv4-mapped IPv6(::ffff:127.0.0.1 / ::ffff:7f00:1)— 提取内嵌 IPv4 再判
+  const lower: string = bare.toLowerCase();
+  if (lower.startsWith('::ffff:')) {
+    const tail: string = lower.substring('::ffff:'.length);
+    const mapped: number[] | null = parseIpv4MappedTail(tail);
+    if (mapped !== null) return isPrivateOctets(mapped);
+    // 非法 tail 按未知处理 → 私网语义(拒绝)
+    return true;
+  }
+
   // IPv6(含 ':')::: / ::1 / fe80: (link-local) / fc / fd (ULA)
   if (bare.includes(':')) {
     return bare === '::' || bare === '::1' ||
@@ -49,15 +76,100 @@ export const isPrivateUrl = (url: string): boolean => {
       bare.startsWith('fd');
   }
 
-  // IPv4 dotted quad
-  const parts = bare.split('.');
-  if (parts.length !== 4) return false;
-  const octets: number[] = [];
-  for (const p of parts) {
-    const n = /^[0-9]+$/.test(p) ? parseInt(p, 10) : NaN;
-    if (!Number.isInteger(n) || n < 0 || n > 255) return false;
-    octets.push(n);
+  // IPv4 全形态(inet_aton):整数/十六进制/八进制/短格式/混合进制
+  // (2130706433 = 127.0.0.1 — 系统解析器会规范化,只认点分十进制会漏拦)
+  const octets: number[] | null = parseIpv4Text(bare);
+  if (octets === null) return false;
+  return isPrivateOctets(octets);
+};
+
+const isHexChar = (c: string): boolean =>
+  (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+
+const hexValue = (c: string): number => {
+  if (c >= '0' && c <= '9') return c.charCodeAt(0) - '0'.charCodeAt(0);
+  if (c >= 'a' && c <= 'f') return c.charCodeAt(0) - 'a'.charCodeAt(0) + 10;
+  return c.charCodeAt(0) - 'A'.charCodeAt(0) + 10;
+};
+
+// inet_aton 数字段解析:0x 前缀十六进制 / 0 前缀八进制 / 十进制;非法 → null
+const parseIpSegment = (seg: string): number | null => {
+  if (seg.length === 0) return null;
+  let radix: number = 10;
+  let digits: string = seg;
+  if (seg.length > 2 && seg[0] === '0' && (seg[1] === 'x' || seg[1] === 'X')) {
+    radix = 16;
+    digits = seg.substring(2);
+  } else if (seg.length > 1 && seg[0] === '0') {
+    radix = 8;
+    digits = seg.substring(1);
   }
+  if (digits.length === 0) return null;
+  let v: number = 0;
+  for (let i = 0; i < digits.length; i++) {
+    if (!isHexChar(digits[i])) return null;
+    const d: number = hexValue(digits[i]);
+    if (d >= radix) return null;
+    v = v * radix + d;
+    if (v > 0xFFFFFFFF) return null;
+  }
+  return v;
+};
+
+// IPv4 文本(含短格式/混合进制)→ 4 字节,失败 → null
+const parseIpv4Text = (s: string): number[] | null => {
+  const parts: string[] = s.split('.');
+  if (parts.length === 0 || parts.length > 4) return null;
+  const values: number[] = [];
+  for (const part of parts) {
+    const v: number | null = parseIpSegment(part);
+    if (v === null) return null;
+    values.push(v);
+  }
+  if (parts.length === 4) {
+    if (values.some((v: number): boolean => v > 0xFF)) return null;
+    return values;
+  }
+  const lastIdx: number = values.length - 1;
+  for (let i = 0; i < lastIdx; i++) {
+    if (values[i] > 0xFF) return null;
+  }
+  const tailBytes: number = 5 - values.length;
+  const tailMax: number = 2 ** (8 * tailBytes) - 1;
+  if (values[lastIdx] > tailMax) return null;
+  const out: number[] = [];
+  for (let i = 0; i < lastIdx; i++) out.push(values[i]);
+  for (let shift = 8 * (tailBytes - 1); shift >= 0; shift -= 8) {
+    out.push((values[lastIdx] >> shift) & 0xFF);
+  }
+  return out;
+};
+
+// IPv4-mapped 尾部:dotted 或 16 进制两段,失败 → null
+const parseIpv4MappedTail = (tail: string): number[] | null => {
+  const v4: number[] | null = parseIpv4Text(tail);
+  if (v4 !== null) return v4;
+  const parts: string[] = tail.split(':');
+  if (parts.length !== 2) return null;
+  const hi: string = parts[0];
+  const lo: string = parts[1];
+  if (hi.length > 4 || lo.length > 4) return null;
+  let allHex: boolean = true;
+  for (let i = 0; i < hi.length; i++) {
+    if (!isHexChar(hi[i])) allHex = false;
+  }
+  for (let i = 0; i < lo.length; i++) {
+    if (!isHexChar(lo[i])) allHex = false;
+  }
+  if (!allHex) return null;
+  let h: number = 0;
+  for (let i = 0; i < hi.length; i++) h = (h << 4) | hexValue(hi[i]);
+  let l: number = 0;
+  for (let i = 0; i < lo.length; i++) l = (l << 4) | hexValue(lo[i]);
+  return [(h >> 8) & 0xff, h & 0xff, (l >> 8) & 0xff, l & 0xff];
+};
+
+const isPrivateOctets = (octets: number[]): boolean => {
   const a = octets[0];
   const b = octets[1];
   return a === 0 || a === 127 || a === 10 ||

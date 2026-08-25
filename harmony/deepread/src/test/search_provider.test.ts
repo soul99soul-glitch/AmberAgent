@@ -158,3 +158,21 @@ test('fallback providers: search does not throw on empty query', async () => {
     assert.ok(Array.isArray(hits));
   }
 });
+
+test('tavily: 多 query 逐个执行并按 URL 去重;部分失败只丢该 query', async () => {
+  let call = 0;
+  const bodies: string[] = [
+    JSON.stringify({ results: [{ title: 'A', url: 'https://x.test/1' }, { title: 'A2', url: 'https://x.test/1' }] }),
+    JSON.stringify({ results: [{ title: 'B', url: 'https://x.test/2' }] }),
+    JSON.stringify({ results: [{ title: 'C', url: 'https://x.test/3' }] }),
+  ];
+  const { http } = mockHttp((): { status: number; headers: Record<string, string>; body: string } => {
+    call++;
+    if (call === 2) return { status: 500, headers: {}, body: 'boom' };
+    return { status: 200, headers: {}, body: bodies[call - 1] ?? '{}' };
+  });
+  const provider = createTavilyProvider(http, { apiKey: 'k' });
+  const hits = await provider.search(['q1', 'q2', 'q3']);
+  assert.equal(hits.length, 2, 'q1 两去重为 1 + q3 补 1(q2 500 跳过)');
+  assert.equal(call, 3);
+});

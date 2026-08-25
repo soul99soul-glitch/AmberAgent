@@ -42,6 +42,7 @@ export interface MiniAppPlatform {
 }
 
 class MiniAppPlatformImpl implements MiniAppPlatform {
+  private settingWriteTail: Promise<void> = Promise.resolve();
   readonly repository: MiniAppFileRepository;
   readonly storage: MiniAppStorage;
   readonly eventBus: MiniAppEventBus;
@@ -70,8 +71,15 @@ class MiniAppPlatformImpl implements MiniAppPlatform {
   }
 
   async saveSetting(setting: MiniAppSetting): Promise<void> {
-    cachedSetting = setting;
-    await saveMiniAppSetting(this.kv, setting);
+    // 写串行:快速切换多个开关时,并发 load/modify/save 的后写者会覆盖先写者
+    const run: Promise<void> = this.settingWriteTail
+      .catch((): void => {})
+      .then(async (): Promise<void> => {
+        await saveMiniAppSetting(this.kv, setting);
+        cachedSetting = setting; // 持久化成功后才更新缓存(失败不留内存/磁盘分叉)
+      });
+    this.settingWriteTail = run.then((): void => {}, (): void => {});
+    return run;
   }
 
   settingSnapshot(): MiniAppSetting {
@@ -79,6 +87,9 @@ class MiniAppPlatformImpl implements MiniAppPlatform {
   }
 
   async refreshSetting(): Promise<MiniAppSetting> {
+    // 等待在途写完成再读盘:否则失败回滚路径可能在排队写入前读到旧值,
+    // 又在写入成功后把 cachedSetting 覆盖回旧值
+    await this.settingWriteTail.catch((): void => {});
     cachedSetting = await loadMiniAppSetting(this.kv);
     return cachedSetting;
   }
@@ -141,11 +152,21 @@ export const createMiniAppPlatform = async (): Promise<MiniAppPlatform> => {
     repository, storage, eventBus, launchLimiter, aiBudget, kv);
 };
 
+let platformInitPromise: Promise<MiniAppPlatform> | null = null;
+
 export const getMiniAppPlatform = async (): Promise<MiniAppPlatform> => {
-  if (platformInstance === null) {
-    platformInstance = await createMiniAppPlatform();
+  if (platformInstance !== null) return platformInstance;
+  // Promise 单例:并发首访不得创建双实例(双 repository/双写 index.json)
+  if (platformInitPromise === null) {
+    platformInitPromise = createMiniAppPlatform();
   }
-  return platformInstance;
+  try {
+    platformInstance = await platformInitPromise;
+    return platformInstance;
+  } catch (e) {
+    platformInitPromise = null; // 失败不缓存,允许重试
+    throw e instanceof Error ? e : new Error(String(e));
+  }
 };
 
 export const MINI_APP_SETTING_STORAGE_KEY: string = MINI_APP_SETTING_KEY;

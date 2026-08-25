@@ -210,9 +210,12 @@ const intOrNull = (v: unknown): number | null => {
 };
 
 const floatOrNull = (v: unknown): number | null => {
-  if (typeof v === 'number') return v;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
   if (typeof v === 'string') {
-    const n: number = Number.parseFloat(v);
+    // 严格整串浮点(kotlinx floatOrNull 语义):parseFloat 前缀解析会把
+    // "0.86oops" 当 0.86,污染 confidence 自动入库
+    if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(v.trim())) return null;
+    const n: number = Number.parseFloat(v.trim());
     return Number.isFinite(n) ? n : null;
   }
   return null;

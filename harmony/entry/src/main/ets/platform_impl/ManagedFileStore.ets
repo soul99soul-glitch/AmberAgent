@@ -10,6 +10,7 @@ import {
   createFilesRepository, deleteChatFiles, conversationFileUris, clearPendingQueueStorage,
 } from '@amber/chat-domain';
 import { removeFavoritesOfConversation } from './FavoriteStore.ets';
+import { writeTextFileAtomic, quarantineIfStillInvalid } from './AtomicJsonFile.ets';
 import type {
   DeleteChatFilesDeps, FilesRepository, ManagedFileDaoPort, ManagedFileEntity,
   Conversation, ConversationRepository, KeyValueStore,
@@ -39,33 +40,38 @@ const storePath = (): string => {
   return `${ctx.filesDir}/managed_files.json`;
 };
 
-// 缺失/损坏 → 空表(MemoryStore.readJsonArray 同策略)
+// 缺失 → 空表;损坏 → quarantineFile 保留 .bad 后按空表回退(MemoryStore.readJsonArray 同策略)
 const readShape = async (): Promise<ManagedFileFileShape> => {
   const path: string = storePath();
+  let text: string;
   try {
     const ok: boolean = await fileIo.access(path);
     if (!ok) return emptyShape();
-    const text: string = await fileIo.readText(path);
-    const parsed: ManagedFileFileShape = JSON.parse(text) as ManagedFileFileShape;
-    if (typeof parsed.nextId !== 'number' || !Array.isArray(parsed.rows)) {
-      return emptyShape();
-    }
-    return parsed;
+    text = await fileIo.readText(path);
   } catch {
     return emptyShape();
   }
+  try {
+    const parsed: ManagedFileFileShape = JSON.parse(text) as ManagedFileFileShape;
+    if (typeof parsed.nextId === 'number' && Array.isArray(parsed.rows)) {
+      return parsed;
+    }
+  } catch {
+    // 落入下方隔离
+  }
+  await quarantineIfStillInvalid(path, (t: string): boolean => {
+    try {
+      const again: ManagedFileFileShape = JSON.parse(t) as ManagedFileFileShape;
+      return !(typeof again.nextId === 'number' && Array.isArray(again.rows));
+    } catch {
+      return true;
+    }
+  });
+  return emptyShape();
 };
 
-const writeShape = async (shape: ManagedFileFileShape): Promise<void> => {
-  const path: string = storePath();
-  const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
-  const file: fileIo.File = await fileIo.open(path, mode);
-  try {
-    await fileIo.write(file.fd, JSON.stringify(shape));
-  } finally {
-    await fileIo.close(file);
-  }
-};
+const writeShape = async (shape: ManagedFileFileShape): Promise<void> =>
+  writeTextFileAtomic(storePath(), JSON.stringify(shape));
 
 // 写串行队列(MemoryStore.enqueueWrite 同构)
 let writeQueue: Promise<void> = Promise.resolve();

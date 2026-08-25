@@ -21,6 +21,7 @@ import { finishAssistantMessage, makeUIMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
+import { fitMessagesToTokenBudget } from './context_compact.ts';
 import type {
   MessageTransformer, OutputMessageTransformer, TransformerContext,
 } from './transformer_pipeline.ts';
@@ -78,6 +79,8 @@ export interface RegenerateDeps {
   onRetryStatus?: (status: string | null) => void;
   // D-071a:模型是否支持图像输入(GenerationHandler.kt:431);true 时启用视觉兜底
   modelSupportsImageInput?: boolean;
+  // 发送边界最终预算(chat_turn 同语义:组装后置 system 块之后的兜底 fit)
+  finalTokenBudget?: number;
 }
 
 // ===== 再生基底(D-057 提取:runRegenerateAt 与 runRegenerateAtWithTools 共享) =====
@@ -134,7 +137,7 @@ export const runRegenerateAt = async (
   const preparedMessages: UIMessage[] = deps.prepareContextMessages !== undefined
     ? await deps.prepareContextMessages(baseMessages)
     : baseMessages;
-  const assembled: UIMessage[] = assembleInternalMessages({
+  const assembledBase: UIMessage[] = assembleInternalMessages({
     messages: preparedMessages,
     assistant: deps.assistant,
     agentSoul: deps.agentSoul ?? '',
@@ -147,6 +150,10 @@ export const runRegenerateAt = async (
       ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
     ],
   });
+  // 发送边界兜底 fit(chat_turn 同语义)
+  const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
+    ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
+    : assembledBase;
   const internalMessages: UIMessage[] = await applyInputTransformers(
     assembled, deps.inputTransformers, ctx);
   // D-071a:视觉兜底重建闭包(chat_turn 同语义,GenerationHandler.kt:613/:648)

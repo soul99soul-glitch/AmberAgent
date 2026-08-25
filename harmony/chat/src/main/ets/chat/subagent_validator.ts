@@ -397,9 +397,11 @@ const cappedBy = (
   definition,
   definition.toolAllowlist,
   definition.dynamic,
-  Math.min(definition.maxTurns, Math.max(setting.maxTurns, 1)),
-  Math.min(definition.timeoutMs, Math.max(setting.timeoutMs, 1000)),
-  Math.min(definition.outputBudgetChars, Math.max(setting.outputBudgetChars, 1000)),
+  // 双向钳制:持久化 custom definition 的非正值(旧数据/手工修改)也回收到下限,
+  // 只做上限 cap 会把 timeoutMs<=0/maxTurns<=0 直接放进运行时
+  Math.max(Math.min(definition.maxTurns, Math.max(setting.maxTurns, 1)), 1),
+  Math.max(Math.min(definition.timeoutMs, Math.max(setting.timeoutMs, 1000)), 1000),
+  Math.max(Math.min(definition.outputBudgetChars, Math.max(setting.outputBudgetChars, 1000)), 1000),
 );
 
 const safeSavedCustomDefinition = (

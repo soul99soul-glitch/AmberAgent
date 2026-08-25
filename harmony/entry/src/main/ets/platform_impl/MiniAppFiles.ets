@@ -71,6 +71,31 @@ interface MiniAppIndexJson {
   apps: MiniAppIndexEntryJson[];
 }
 
+// index 条目结构守卫:损坏/旧版字段缺失只跳过单条,id 参与路径拼接必须受控
+const SAFE_ENTRY_ID_PATTERN: RegExp = /^[A-Za-z0-9_-]{1,64}$/;
+
+const isValidIndexVersion = (v: MiniAppIndexVersionJson): boolean =>
+  v !== null && typeof v === 'object'
+  && typeof v.versionNumber === 'number' && Number.isSafeInteger(v.versionNumber)
+  && v.versionNumber >= 1
+  && typeof v.htmlHash === 'string'
+  && (v.changeNote === null || typeof v.changeNote === 'string')
+  && typeof v.createdAt === 'number' && Number.isFinite(v.createdAt);
+
+const isValidIndexEntry = (e: MiniAppIndexEntryJson): boolean =>
+  e !== null && typeof e === 'object'
+  && typeof e.id === 'string' && SAFE_ENTRY_ID_PATTERN.test(e.id)
+  && typeof e.title === 'string'
+  && Array.isArray(e.permissions)
+  && e.permissions.every((p: string): boolean => typeof p === 'string')
+  && typeof e.pinned === 'boolean'
+  && typeof e.runCount === 'number' && Number.isSafeInteger(e.runCount)
+  && e.runCount >= 0
+  && typeof e.createdAt === 'number' && Number.isFinite(e.createdAt)
+  && typeof e.updatedAt === 'number' && Number.isFinite(e.updatedAt)
+  && Array.isArray(e.versions)
+  && e.versions.every((v: MiniAppIndexVersionJson): boolean => isValidIndexVersion(v));
+
 interface MiniAppGrantsJson {
   apps: Record<string, Record<string, MiniAppGrantDecision>>;
 }
@@ -174,12 +199,28 @@ class MiniAppFilesIo {
     const indexText: string | null = await this.readText('index.json');
     if (indexText !== null) {
       let index: MiniAppIndexJson = emptyIndex();
+      let parsedOk: boolean = false;
       try {
-        index = JSON.parse(indexText) as MiniAppIndexJson;
+        const parsed: MiniAppIndexJson = JSON.parse(indexText) as MiniAppIndexJson;
+        if (Array.isArray(parsed.apps)) {
+          index = parsed;
+          parsedOk = true;
+        }
       } catch (_e) {
-        index = emptyIndex();
+        parsedOk = false;
+      }
+      if (!parsedOk) {
+        // 顶层损坏:隔离保留现场(下次写入以空索引起步,不静默覆盖原文件)
+        try {
+          fileIo.renameSync(`${this.dir}/index.json`, `${this.dir}/index.${Date.now()}.bad`);
+        } catch (_e) {
+          // 隔离尽力而为
+        }
       }
       for (const entry of index.apps) {
+        // 数据清理策略(有意):无法安全加载的条目跳过且不回写 index —
+        // 后续任意 persistIndex 会将其从索引移除(HTML 成孤儿文件)
+        if (!isValidIndexEntry(entry)) continue;
         const html: string | null = await this.readText(`${entry.id}.html`);
         if (html === null) continue;
         const record: MiniAppRecord = {

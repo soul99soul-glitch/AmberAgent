@@ -37,6 +37,9 @@ struct SettingCronTasksPage {
     m.listTasks().then((list: AgentCronTask[]): void => {
       this.tasks = list;
       this.loaded = true;
+    }).catch((e: Error): void => {
+      this.loaded = true;
+      promptAction.showToast({ message: e.message, duration: 1800 });
     });
   }
 
@@ -130,7 +133,10 @@ struct SettingCronTasksPage {
                         title: '删除定时任务', message: `删除「${t.title}」？`,
                         primaryButton: { value: '取消', action: (): void => {} },
                         secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                          m.deleteTask(t.id).then((): void => { this.reload(); });
+                          m.deleteTask(t.id).then((): void => { this.reload(); })
+                            .catch((e: Error): void => {
+                              promptAction.showToast({ message: e.message, duration: 1800 });
+                            });
                         } },
                       });
                     })

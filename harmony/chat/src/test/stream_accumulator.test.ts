@@ -361,3 +361,63 @@ test('handleMessageChunk: 新消息带 modelId', () => {
   const r = handleMessageChunk(seed(), chunk([textDelta('a')], 'user'), 'm-9');
   assert.equal(r[2].modelId, 'm-9');
 });
+
+// ===== usage-only 尾块(choices:[] + usage;stream_options.include_usage 形态) =====
+
+test('usage-only chunk: accumulator/appendChunkToMessage/handleMessageChunk 均合并 usage', () => {
+  const u1 = { promptTokens: 10, completionTokens: 5, cachedTokens: 0, totalTokens: 15 };
+  const uOnly = { promptTokens: 12, completionTokens: 9, cachedTokens: 3, totalTokens: 21 };
+  const usageOnly: MessageChunk = {
+    id: 'x', model: 'm',
+    choices: [],
+    usage: uOnly as UIMessage['usage'],
+  } as MessageChunk;
+
+  const acc = new MessageStreamAccumulator(seed());
+  acc.append(chunk([textDelta('a')], 'assistant', u1));
+  acc.append(usageOnly);
+  assert.equal(acc.snapshot()[1].usage?.completionTokens, 9);
+  assert.equal(acc.snapshot()[1].usage?.totalTokens, 21);
+
+  let msg = appendChunkToMessage(makeAssistantMessage('a'), chunk([textDelta('t')], 'assistant', u1));
+  assert.equal(msg.usage?.completionTokens, 5, '带 choice 的 delta chunk 的 usage 也要合并(不可变 API)');
+  msg = appendChunkToMessage(msg, usageOnly);
+  assert.equal(msg.usage?.completionTokens, 9);
+
+  let msgs = handleMessageChunk(seed(), chunk([textDelta('t')], 'assistant', u1));
+  msgs = handleMessageChunk(msgs, usageOnly);
+  assert.equal(msgs[msgs.length - 1].usage?.completionTokens, 9);
+});
+
+// ===== 图片 data URI 前缀守卫 =====
+
+test('image: 完整 data URI(JPEG) 原样保留,裸 base64 才补 PNG 前缀', () => {
+  const jpegUri = 'data:image/jpeg;base64,/9j/4AAQ';
+  const acc = new MessageStreamAccumulator(seed());
+  acc.append(chunk([{ type: 'image', url: jpegUri, metadata: null }]));
+  const viaAcc = (acc.snapshot()[1].parts[0] as UIMessagePartImage).url;
+  assert.equal(viaAcc, jpegUri);
+
+  const acc2 = new MessageStreamAccumulator(seed());
+  acc2.append(chunk([{ type: 'image', url: 'aGVsbG8=', metadata: null }]));
+  const viaBare = (acc2.snapshot()[1].parts[0] as UIMessagePartImage).url;
+  assert.equal(viaBare, 'data:image/png;base64,aGVsbG8=');
+
+  const msg = appendChunkToMessage(
+    makeUIMessage('assistant', []),
+    chunk([{ type: 'image', url: jpegUri, metadata: null }]),
+  );
+  assert.equal((msg.parts[0] as UIMessagePartImage).url, jpegUri);
+});
+
+test('finish-only chunk(有 choice 但 delta/message 双 null)携带 usage 也合并', () => {
+  const acc = new MessageStreamAccumulator(seed());
+  acc.append(chunk([textDelta('a')], 'assistant'));
+  const finishOnly: MessageChunk = {
+    id: 'c3', model: 'm1',
+    choices: [{ index: 0, delta: null, message: null, finishReason: 'stop' }],
+    usage: { promptTokens: 10, completionTokens: 4, cachedTokens: 0, totalTokens: 14 } as UIMessage['usage'],
+  } as MessageChunk;
+  acc.append(finishOnly);
+  assert.equal(acc.snapshot()[1].usage?.completionTokens, 4);
+});

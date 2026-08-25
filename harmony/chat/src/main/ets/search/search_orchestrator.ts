@@ -268,7 +268,10 @@ export const buildQueryVariants = (
   deps: OrchestratorDeps = {},
 ): string[] => {
   const today: string = (deps.today ?? ((): string => new Date().toISOString().substring(0, 10)))();
-  const variants: string[] = [query.trim()]; // linkedSetOf → 数组+includes
+  // 规范化一次,所有 variant 基于同一形态(原 query 带首尾空白时后续变体会残留)
+  const q: string = query.trim();
+  const query2 = q;
+  const variants: string[] = [q]; // linkedSetOf → 数组+includes
   let timeText: string | null = null;
   if (recencyDays !== null) timeText = `last ${recencyDays} days`;
   else if (timeRange === 'day') timeText = `today ${today}`;
@@ -279,21 +282,21 @@ export const buildQueryVariants = (
     if (!variants.includes(v)) variants.push(v);
   };
   if (topic === 'news' || timeRange !== 'any') {
-    const parts: string[] = [query, 'news'];
+    const parts: string[] = [query2, 'news'];
     if (timeText !== null) parts.push(timeText);
     push(parts.join(' '));
   }
   if (topic === 'market' || looksLikeMarketQuery(query)) {
-    push(`${query} market share shipment sales Counterpoint Canalys IDC`);
+    push(`${query2} market share shipment sales Counterpoint Canalys IDC`);
   }
   if (topic === 'technical') {
-    push(`${query} documentation GitHub issue release`);
+    push(`${query2} documentation GitHub issue release`);
   }
   if (topic === 'finance') {
-    push(`${query} finance stock market latest`);
+    push(`${query2} finance stock market latest`);
   }
   if (depth === 'deep') {
-    push(`${query} site:reuters.com OR site:apnews.com OR site:bloomberg.com OR site:canalys.com OR site:idc.com`);
+    push(`${query2} site:reuters.com OR site:apnews.com OR site:bloomberg.com OR site:canalys.com OR site:idc.com`);
   }
   const limit: number = depth === 'quick' ? 1 : depth === 'deep' ? 4 : 3;
   return variants.filter((v: string) => v.trim().length > 0).slice(0, limit);
@@ -335,6 +338,7 @@ const distinctKeepOrder = (list: string[]): string[] => {
 export const orchestratorCanonicalizeUrl = (url: string): string =>
   canonicalizeUrlWithTracker(url, ['fbclid', 'gclid', 'igshid', 'mc_cid', 'mc_eid', 'yclid']);
 
+// 域键含端口(IPv6 保留方括号;丢端口会把不同服务经标题别名误合并)
 const domainOf = (url: string): string => {
   try {
     const m: RegExpExecArray | null = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]*)/.exec(url.trim());
@@ -342,8 +346,15 @@ const domainOf = (url: string): string => {
     let authority: string = m[1];
     const at: number = authority.lastIndexOf('@');
     if (at >= 0) authority = authority.substring(at + 1);
+    if (authority.startsWith('[')) {
+      const close: number = authority.indexOf(']');
+      const host: string = close >= 0 ? authority.substring(0, close + 1) : authority;
+      return host.toLowerCase();
+    }
     const colon: number = authority.indexOf(':');
-    const host: string = colon >= 0 ? authority.substring(0, colon) : authority;
+    const host: string = colon >= 0 && /^\d+$/.test(authority.substring(colon + 1))
+      ? authority.substring(0, colon) + authority.substring(colon) // host:port
+      : authority;
     return host.toLowerCase().replace(/^www\./, '');
   } catch {
     return '';
@@ -375,11 +386,21 @@ const mergeResults = (
   for (const sourceResult of results) {
     if (!sourceResult.outcome.ok || sourceResult.outcome.result === undefined) continue;
     sourceResult.outcome.result.items.forEach((item, rank: number) => {
+      // 空 URL/空标题条目不入合并(空 canonical 会让所有无 URL 项共享一个键)
+      if (item.url.trim().length === 0 || item.title.trim().length === 0) return;
       const canonical: string = orchestratorCanonicalizeUrl(item.url);
       const domain: string = domainOf(item.url);
-      const titleKey: string = domain + '|' + normalizedTitle(item.title);
-      const existing: OrchestratedSearchItem | undefined = byKey.get(canonical) ?? byTitle.get(titleKey);
-      if (existing === undefined) {
+      const normalized: string = normalizedTitle(item.title);
+      // 保守标题键:域非空 + 归一化标题足够长,防不同文章同名误合并
+      const titleKeyEligible: boolean = domain.length > 0 && normalized.length >= 3;
+      const titleKey: string = titleKeyEligible ? `${domain}|${normalized}` : '';
+      const existing: OrchestratedSearchItem | undefined = canonical.length > 0
+        ? byKey.get(canonical)
+        : undefined;
+      const byTitleHit: OrchestratedSearchItem | undefined = titleKeyEligible
+        ? byTitle.get(titleKey) : undefined;
+      const mergedInto: OrchestratedSearchItem | undefined = existing ?? byTitleHit;
+      if (mergedInto === undefined) {
         const hitBoost: number = queryTokens.filter((token: string) =>
           containsIgnoreCase(item.title, token) || containsIgnoreCase(item.text, token)
         ).length * 3;
@@ -401,26 +422,38 @@ const mergeResults = (
           freshnessScore: fresh,
           images: distinctKeepOrder(item.images).slice(0, 5),
         };
-        byKey.set(canonical, created);
-        byTitle.set(titleKey, created);
+        if (canonical.length > 0) byKey.set(canonical, created);
+        if (titleKeyEligible) byTitle.set(titleKey, created);
       } else {
-        if (!existing.sourceServices.includes(sourceResult.request.source.name)) {
-          existing.sourceServices.push(sourceResult.request.source.name);
+        // 合并命中(含标题别名路径)后回写 canonical 索引:后续同 URL
+        // 不同标题的条目不得再新建重复项
+        if (canonical.length > 0 && byKey.get(canonical) === undefined) {
+          byKey.set(canonical, mergedInto);
         }
-        existing.duplicateCount += 1;
-        existing.score += 12;
-        if (item.text.length > existing.text.length) existing.text = item.text;
-        if (existing.publishedAt === null && item.publishedAt !== null) {
-          existing.publishedAt = item.publishedAt;
-          existing.freshnessScore = freshnessScore(existing.publishedAt, topic, timeRange);
+        if (!mergedInto.sourceServices.includes(sourceResult.request.source.name)) {
+          mergedInto.sourceServices.push(sourceResult.request.source.name);
         }
-        if (item.images.length > 0 && existing.images.length < 5) {
-          existing.images = distinctKeepOrder(existing.images.concat(item.images)).slice(0, 5);
+        mergedInto.duplicateCount += 1;
+        mergedInto.score += 12;
+        if (item.text.length > mergedInto.text.length) mergedInto.text = item.text;
+        if (mergedInto.publishedAt === null && item.publishedAt !== null) {
+          mergedInto.publishedAt = item.publishedAt;
+          mergedInto.freshnessScore = freshnessScore(mergedInto.publishedAt, topic, timeRange);
+        }
+        if (item.images.length > 0 && mergedInto.images.length < 5) {
+          mergedInto.images = distinctKeepOrder(mergedInto.images.concat(item.images)).slice(0, 5);
         }
       }
     });
   }
-  const list: OrchestratedSearchItem[] = Array.from(byKey.values());
+  // byKey 中混有"标题合并回写的既有项"(与 byTitle 同引用)——用去重集合收集
+  const seen = new Set<OrchestratedSearchItem>();
+  const list: OrchestratedSearchItem[] = [];
+  for (const item of Array.from(byKey.values())) {
+    if (seen.has(item)) continue;
+    seen.add(item);
+    list.push(item);
+  }
   list.sort((a: OrchestratedSearchItem, b: OrchestratedSearchItem): number =>
     (b.score - a.score) || (b.duplicateCount - a.duplicateCount) ||
     (b.freshnessScore - a.freshnessScore) || (a.sourceRank - b.sourceRank));

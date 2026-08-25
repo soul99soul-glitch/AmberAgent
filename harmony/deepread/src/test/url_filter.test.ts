@@ -149,3 +149,33 @@ test('gate: private url allowed only when BOTH flags on', () => {
   assert.equal(urlAllowedForBackgroundFetch('http://localhost:8080', true, true), true);
   assert.equal(urlAllowedForBackgroundFetch('http://10.0.0.1', true, true), true);
 });
+
+// ===== Phase9 SSRF 全形态回归 =====
+test('inet_aton 全形态私网地址被拒绝(整数/十六进制/八进制/短格式)', () => {
+  assert.equal(urlAllowedForBackgroundFetch('http://2130706433/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://0x7f000001/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://017700000001/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://127.1/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://0x7f.1/', false, false), false);
+});
+
+test('IPv4-mapped IPv6 私网地址被拒绝(dotted 与十六进制尾)', () => {
+  assert.equal(urlAllowedForBackgroundFetch('http://[::ffff:127.0.0.1]/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://[::ffff:7f00:1]/', false, false), false);
+});
+
+test('公网全形态地址仍放行(整数 8.8.8.8 / 短格式 8.8)', () => {
+  assert.equal(urlAllowedForBackgroundFetch('http://134744072/', false, false), true);
+  assert.equal(urlAllowedForBackgroundFetch('http://8.8/', false, false), true);
+});
+
+test('userinfo 不构成绕过:attacker@127.0.0.1 仍按私网拒绝', () => {
+  assert.equal(urlAllowedForBackgroundFetch('http://attacker@127.0.0.1/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://u@[::1]/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://user@8.8.8.8/', false, false), true);
+});
+
+test('多重 @ userinfo 也被正确剥离(a@b@127.0.0.1)', () => {
+  assert.equal(urlAllowedForBackgroundFetch('http://a@b@127.0.0.1/', false, false), false);
+  assert.equal(urlAllowedForBackgroundFetch('http://a@b@8.8.8.8/', false, false), true);
+});

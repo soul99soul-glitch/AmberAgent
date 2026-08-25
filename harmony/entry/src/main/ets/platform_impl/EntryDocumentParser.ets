@@ -158,6 +158,11 @@ const readFileBytes = (path: string): Uint8Array => {
 //   uncompressedSize,不足即抛 — 非静默)
 // D-123:导出供 SkillStore(zip 技能包导入)复用
 export const inflateRawEntry = async (data: Uint8Array, expectedSize: number): Promise<Uint8Array> => {
+  // 声明值是归档内不可信输入:分配前拒绝超限(压缩炸弹防护,与域层 64MB 上限同口径)
+  const MAX_INFLATE_OUTPUT_BYTES: number = 64 * 1024 * 1024;
+  if (expectedSize > MAX_INFLATE_OUTPUT_BYTES) {
+    throw new Error(`inflate output exceeds limit: ${expectedSize}`);
+  }
   const inCopy: Uint8Array = new Uint8Array(data); // subarray .buffer 偏移剥离
   const outCap: number = Math.max(expectedSize, 1);
   const strm: zlib.ZStream = {

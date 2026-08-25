@@ -62,13 +62,33 @@ const miniAppDnsResolve: (host: string) => Promise<string[]> = async (host: stri
   }
 };
 
-// 从 html 提取 https 图片 src(src 属性;html 校验器已保证 img src 仅 data:/https:)
+// 从 html 提取 https 图片 src(img 与 source 的 src 属性 — 校验器两者都放行,
+// 只提 img 会让 <source src> 被拦截器阻断);数量上限防海量外链
+const MAX_PREFETCH_IMAGE_URLS: number = 32;
+// 并发上限 + 总字节预算:全量 Promise.all 会瞬时打满连接与内存
+const PREFETCH_IMAGE_CONCURRENCY: number = 4;
+const PREFETCH_IMAGE_TOTAL_BYTES: number = 8 * 1024 * 1024;
+
+// holder:预取总字节预算 / 成功计数(闭包内可变)
+interface PrefetchBudgetHolder {
+  remainingBytes: number;
+}
+
+interface FetchedCountHolder {
+  count: number;
+}
+
+interface BytesUsedHolder {
+  bytes: number;
+}
+
 const extractHttpsImageUrls = (html: string): string[] => {
   const out: string[] = [];
-  const pattern: RegExp = /<img\b[^>]*\bsrc\s*=\s*["'](https:\/\/[^"']+)["']/gi;
+  const pattern: RegExp = /<(?:img|source)\b[^>]*\bsrc\s*=\s*["'](https:\/\/[^"']+)["']/gi;
   let m: RegExpExecArray | null;
   while ((m = pattern.exec(html)) !== null) {
     if (m[1] !== undefined && out.indexOf(m[1]) < 0) out.push(m[1]);
+    if (out.length >= MAX_PREFETCH_IMAGE_URLS) break;
   }
   return out;
 };
@@ -209,20 +229,39 @@ struct MiniAppRunnerPage {
     this.prefetchStarted = true;
     const urls: string[] = extractHttpsImageUrls(app.htmlContent);
     if (urls.length === 0) return;
-    // 并发预取全部 https 图片入缓存;全部完成后才 refresh(此前 fetchedCount
-    //   必为 0,onInterceptRequest 只会返回空响应 — 并发链不被丢弃)
+    // 有界并发预取 + 总字节预算(剩余预算耗尽后未开始的 URL 直接置阻断响应);
+    // 全部完成后才 refresh(此前 fetchedCount 必为 0,onInterceptRequest 只会
+    // 返回空响应 — 并发链不被丢弃)
+    const budget: PrefetchBudgetHolder = { remainingBytes: PREFETCH_IMAGE_TOTAL_BYTES };
+    const fetched: FetchedCountHolder = { count: 0 };
     const tasks: Promise<boolean>[] = [];
-    for (const url of urls) {
-      tasks.push(this.fetchAndCacheImage(url));
-    }
-    Promise.all(tasks).then((oks: boolean[]): void => {
-      if (!this.alive) return; // 离页后不再刷新已销毁的 controller
-      let fetchedCount: number = 0;
-      for (const ok of oks) {
-        if (ok) fetchedCount += 1;
+    const queue: string[] = [...urls];
+    const runWorker = async (): Promise<void> => {
+      for (;;) {
+        const next: string | undefined = queue.shift();
+        if (next === undefined) return;
+        // 预留单图上限再发请求(完成后按实际字节退还);预算不足覆盖单次
+        // 最大响应时不再请求,直接置阻断响应 — 严格总预算上限
+        if (budget.remainingBytes < MINI_APP_MAX_IMAGE_BYTES) {
+          this.imageCache.set(next, this.blockedResponse());
+          continue;
+        }
+        budget.remainingBytes -= MINI_APP_MAX_IMAGE_BYTES;
+        const used: BytesUsedHolder = { bytes: 0 };
+        const ok: boolean = await this.fetchAndCacheImage(next, used);
+        if (ok) fetched.count++;
+        // 按实际字节退还预留(失败请求全额退还;单图上限已限单次峰值)
+        budget.remainingBytes += MINI_APP_MAX_IMAGE_BYTES - used.bytes;
       }
-      if (fetchedCount > 0) {
-        // 刷新触发 onInterceptRequest 重放,命中缓存返回字节流
+    };
+    for (let i: number = 0; i < PREFETCH_IMAGE_CONCURRENCY; i++) {
+      tasks.push(runWorker().then((): boolean => true));
+    }
+    Promise.all(tasks).then((): void => {
+      if (!this.alive) return; // 离页后不再刷新已销毁的 controller
+      if (fetched.count > 0) {
+        // 刷新触发 onInterceptRequest 重放,命中缓存返回字节流;
+        // 全部失败/阻断时不刷新(避免整页重载丢状态且无可用缓存)
         this.controller.refresh();
       }
     }).catch((e: Error): void => {
@@ -230,7 +269,7 @@ struct MiniAppRunnerPage {
     });
   }
 
-  private async fetchAndCacheImage(url: string): Promise<boolean> {
+  private async fetchAndCacheImage(url: string, used: BytesUsedHolder): Promise<boolean> {
     const app: MiniAppRecord | null = this.state.app;
     const platform: MiniAppPlatform | null = this.platform;
     if (app === null || platform === null) return false;
@@ -244,6 +283,7 @@ struct MiniAppRunnerPage {
     }
     try {
       const bytes: Uint8Array = await this.fetchImageBytes(url);
+      used.bytes = bytes.byteLength;
       const contentType: string = this.sniffImageContentType(bytes);
       const response: WebResourceResponse = new WebResourceResponse();
       const buffer: ArrayBuffer = bytes.buffer.slice(

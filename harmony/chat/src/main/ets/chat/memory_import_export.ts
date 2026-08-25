@@ -160,7 +160,9 @@ export const importMemoriesFrom = async (
   root: string, deps: MemoryImportExportDeps,
 ): Promise<MemoryImportResult> => {
   const resolvedRoot: string = await resolveExistingRoot(root, deps.fs);
-  const existingRecords: MemoryRecord[] = await deps.getAllRecords();
+  // 去重索引须可变:固定快照下,前一个文件插入的记录不进索引,
+  // 导入包内相同内容的文件会互相重复插入(id=0 双插)
+  const known: MemoryRecord[] = [...await deps.getAllRecords()];
   let imported: number = 0;
   for (const dir of [joinPath(resolvedRoot, 'memories'), joinPath(resolvedRoot, 'archive')]) {
     if (!await deps.fs.exists(dir)) continue;
@@ -168,15 +170,20 @@ export const importMemoriesFrom = async (
     for (const file of files) {
       if (!file.endsWith('.mem.md')) continue;
       const decoded: MemoryRecord = decodeMemoryFrontmatter(await deps.fs.readText(file));
-      const existing: MemoryRecord | undefined = existingRecords.find(
+      const existing: MemoryRecord | undefined = known.find(
         (record: MemoryRecord): boolean =>
           record.scope === decoded.scope
           && record.kind === decoded.kind
           && normalize(record.content) === normalize(decoded.content));
-      await deps.upsertRecord({
+      const inserted: MemoryRecord = await deps.upsertRecord({
         ...decoded,
         id: existing !== undefined ? existing.id : 0,
       });
+      if (existing === undefined) {
+        // 新插入的记录以 upsert 返回值(含已分配 id)进入去重索引 —
+        // 用 decoded(id=0) 会让导入包内重复文件再次按新增插入
+        known.push(inserted);
+      }
       imported++;
     }
   }

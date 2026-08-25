@@ -15,9 +15,21 @@ const compactsEventsKey = (conversationId: string): string => `compacts/${conver
 
 class EntryCompactStore implements CompactStore {
   private readonly kv: KeyValueStore;
+  // 同会话写串行:insert/recordEvent 都是 read-modify-write,并发会互相覆盖
+  // (丢摘要/丢审计行)
+  private readonly writeTails: Map<string, Promise<void>> = new Map();
 
   constructor(kv: KeyValueStore) {
     this.kv = kv;
+  }
+
+  private enqueueWrite(conversationId: string, op: () => Promise<void>): Promise<void> {
+    const previous: Promise<void> = this.writeTails.get(conversationId) ?? Promise.resolve();
+    const next: Promise<void> = previous.catch((): void => {}).then(op);
+    this.writeTails.set(conversationId, next);
+    return next.finally((): void => {
+      if (this.writeTails.get(conversationId) === next) this.writeTails.delete(conversationId);
+    });
   }
 
   async getCompacts(conversationId: string): Promise<ConversationCompact[]> {
@@ -31,27 +43,35 @@ class EntryCompactStore implements CompactStore {
     }
   }
 
-  async insertCompact(compact: ConversationCompact): Promise<void> {
-    const list: ConversationCompact[] = await this.getCompacts(compact.conversationId);
-    await this.kv.put(compactsKey(compact.conversationId), JSON.stringify([...list, compact]));
-  }
-
-  async deleteByConversation(conversationId: string): Promise<void> {
-    await this.kv.delete(compactsKey(conversationId));
-  }
-
-  async recordEvent(conversationId: string, eventType: string,
-    summaryId: string | null, message: string): Promise<void> {
-    const key: string = compactsEventsKey(conversationId);
-    const existing: string | null = await this.kv.get(key);
-    const line: string = JSON.stringify({
-      created_at_ms: Date.now(),
-      conversation_id: conversationId,
-      event_type: eventType,
-      summary_id: summaryId,
-      message,
+  insertCompact(compact: ConversationCompact): Promise<void> {
+    return this.enqueueWrite(compact.conversationId, async (): Promise<void> => {
+      const list: ConversationCompact[] = await this.getCompacts(compact.conversationId);
+      await this.kv.put(compactsKey(compact.conversationId), JSON.stringify([...list, compact]));
     });
-    await this.kv.put(key, `${existing ?? ''}${line}\n`);
+  }
+
+  deleteByConversation(conversationId: string): Promise<void> {
+    // 入同一写队列:invalidate 与飞行中 precompact 的 read-put 竞态会把
+    // 已失效的摘要写回复活
+    return this.enqueueWrite(conversationId, async (): Promise<void> => {
+      await this.kv.delete(compactsKey(conversationId));
+    });
+  }
+
+  recordEvent(conversationId: string, eventType: string,
+    summaryId: string | null, message: string): Promise<void> {
+    return this.enqueueWrite(conversationId, async (): Promise<void> => {
+      const key: string = compactsEventsKey(conversationId);
+      const existing: string | null = await this.kv.get(key);
+      const line: string = JSON.stringify({
+        created_at_ms: Date.now(),
+        conversation_id: conversationId,
+        event_type: eventType,
+        summary_id: summaryId,
+        message,
+      });
+      await this.kv.put(key, `${existing ?? ''}${line}\n`);
+    });
   }
 }
 

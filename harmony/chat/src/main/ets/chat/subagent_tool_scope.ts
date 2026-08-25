@@ -4,6 +4,7 @@
 // boundary also removes subagent_* tools so public supervisor tools never enter a child run.
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessagePart, UIMessagePartText } from './message.ts';
 import type { AgentTool } from './tool.ts';
 import { makeAgentTool, makeInputSchemaObj } from './tool.ts';
@@ -25,9 +26,9 @@ const isDiscoveryTool = (name: string): boolean =>
   name === TOOL_POLICY_EXPLAIN_TOOL_NAME;
 
 const executeJsonTool = async (
-  tool: AgentTool, input: JsonValue,
+  tool: AgentTool, input: JsonValue, signal?: AbortSignalLike,
 ): Promise<JsonObject> => {
-  const parts: UIMessagePart[] = await tool.execute(input);
+  const parts: UIMessagePart[] = await tool.execute(input, signal);
   const textPart: UIMessagePartText = parts[0] as UIMessagePartText;
   return JSON.parse(textPart.text) as JsonObject;
 };
@@ -79,8 +80,8 @@ const createScopedToolsListTool = (registry: ToolRegistry): AgentTool => {
         description: 'Include scoped tool input schema. Defaults to false.',
       },
     }),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-      const basePayload: JsonObject = await executeJsonTool(baseTool, input);
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+      const basePayload: JsonObject = await executeJsonTool(baseTool, input, signal);
       const baseTools: JsonValue = basePayload['tools'];
       const tools: JsonValue[] = Array.isArray(baseTools)
         ? baseTools.map((value: JsonValue): JsonObject => scopedListItem(value as JsonObject))
@@ -112,8 +113,8 @@ const createScopedToolPolicyExplainTool = (registry: ToolRegistry): AgentTool =>
       },
       ['tool_name'],
     ),
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
-      const source: JsonObject = await executeJsonTool(baseTool, input);
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
+      const source: JsonObject = await executeJsonTool(baseTool, input, signal);
       const payload: JsonObject = {
         scoped: true,
         status: source['status'],

@@ -8,6 +8,7 @@
 //     decode 严格度 = kotlinx:类型错/枚举非法 → null;缺字段 → 默认,id 缺失生成)
 //   - data class 相等 → JSON 串相等比较(update 短路,同 search_prefs D-070 登记)
 import type { KeyValueStore } from '@amber/chat-domain';
+import { sharedKvMutex } from './AtomicJsonFile.ets';
 import {
   decodeLorebooks, decodeModeInjections, encodeLorebooks, encodeModeInjections,
 } from '@amber/chat-domain';
@@ -41,22 +42,24 @@ export const saveLorebooks = async (kv: KeyValueStore, list: Lorebook[]): Promis
 };
 
 // update(:49-56):next == current 短路(JSON 串相等)
-export const updateModeInjections = async (
+export const updateModeInjections = (
   kv: KeyValueStore,
   transform: (current: PromptInjection[]) => PromptInjection[],
-): Promise<void> => {
-  const current: PromptInjection[] = await loadModeInjections(kv);
-  const next: PromptInjection[] = transform(current);
-  if (encodeModeInjections(next) === encodeModeInjections(current)) return;
-  await saveModeInjections(kv, next);
-};
+): Promise<void> =>
+  sharedKvMutex.withLock(MODE_INJECTIONS_KEY, async (): Promise<void> => {
+    const current: PromptInjection[] = await loadModeInjections(kv);
+    const next: PromptInjection[] = transform(current);
+    if (encodeModeInjections(next) === encodeModeInjections(current)) return;
+    await saveModeInjections(kv, next);
+  });
 
-export const updateLorebooks = async (
+export const updateLorebooks = (
   kv: KeyValueStore,
   transform: (current: Lorebook[]) => Lorebook[],
-): Promise<void> => {
-  const current: Lorebook[] = await loadLorebooks(kv);
-  const next: Lorebook[] = transform(current);
-  if (encodeLorebooks(next) === encodeLorebooks(current)) return;
-  await saveLorebooks(kv, next);
-};
+): Promise<void> =>
+  sharedKvMutex.withLock(LOREBOOKS_KEY, async (): Promise<void> => {
+    const current: Lorebook[] = await loadLorebooks(kv);
+    const next: Lorebook[] = transform(current);
+    if (encodeLorebooks(next) === encodeLorebooks(current)) return;
+    await saveLorebooks(kv, next);
+  });

@@ -30,6 +30,18 @@ const REASONING_LEVELS: ReasoningLevel[] = ['auto', 'off', 'low', 'medium', 'hig
 const REASONING_LABELS: string[] = ['自动', '关闭', '低', '中', '高', '超高', '最大'];
 
 
+interface HeaderDraft {
+  uid: string;
+  name: string;
+  value: string;
+}
+
+interface BodyDraft {
+  uid: string;
+  key: string;
+  value: JsonValue;
+}
+
 @Entry
 @Component
 struct ChatAssistantsPage {
@@ -50,10 +62,11 @@ struct ChatAssistantsPage {
   // D-049:请求自定义(PropertyEditor.kt) — headers 直接编辑;bodies 的
   //   JSON 值以文本态编辑(editBodyTexts),解析成功才落 editBodies,
   //   失败行内报错(editBodyErrors)并保留旧值(Android :160-176 语义)
-  @State editHeaders: CustomHeader[] = [];
-  @State editBodies: CustomBody[] = [];
-  @State editBodyTexts: string[] = [];
-  @State editBodyErrors: string[] = [];
+  @State editHeaders: HeaderDraft[] = [];
+  private draftSeq: number = 1;
+  @State editBodies: BodyDraft[] = [];
+  @State bodyTexts: Map<string, string> = new Map<string, string>();
+  @State bodyErrors: Map<string, string> = new Map<string, string>();
   @State showEditor: boolean = false;
 
   aboutToAppear(): void {
@@ -79,11 +92,16 @@ struct ChatAssistantsPage {
     this.editStreamOutput = a.streamOutput;
     this.editToolProfile = a.toolProfile;
     this.editHeaders = a.customHeaders.map(
-      (h: CustomHeader): CustomHeader => ({ name: h.name, value: h.value }));
+      (h: CustomHeader): HeaderDraft =>
+        ({ uid: `h${this.draftSeq++}`, name: h.name, value: h.value }));
     this.editBodies = a.customBodies.map(
-      (b: CustomBody): CustomBody => ({ key: b.key, value: b.value }));
-    this.editBodyTexts = a.customBodies.map((b: CustomBody): string => JSON.stringify(b.value));
-    this.editBodyErrors = a.customBodies.map((): string => '');
+      (b: CustomBody): BodyDraft => ({ uid: `b${this.draftSeq++}`, key: b.key, value: b.value }));
+    this.bodyTexts.clear();
+    this.bodyErrors.clear();
+    for (const b of this.editBodies) {
+      this.bodyTexts.set(b.uid, JSON.stringify(b.value));
+      this.bodyErrors.set(b.uid, '');
+    }
     this.showEditor = true;
   }
 
@@ -99,9 +117,10 @@ struct ChatAssistantsPage {
     this.editStreamOutput = true;
     this.editToolProfile = 'full';
     this.editHeaders = [];
+    this.draftSeq = 1;
     this.editBodies = [];
-    this.editBodyTexts = [];
-    this.editBodyErrors = [];
+    this.bodyTexts.clear();
+    this.bodyErrors.clear();
     this.showEditor = true;
   }
 
@@ -130,68 +149,85 @@ struct ChatAssistantsPage {
 
   // ===== D-049 请求自定义行操作(数组整体替换触发 @State 刷新) =====
 
-  private setHeaderName(index: number, v: string): void {
-    const next: CustomHeader[] = [...this.editHeaders];
-    next[index] = { name: v, value: next[index].value };
-    this.editHeaders = next;
+  private setHeaderName(uid: string, v: string): void {
+    this.editHeaders = this.editHeaders.map((h: HeaderDraft): HeaderDraft =>
+      h.uid === uid ? { uid: h.uid, name: v, value: h.value } : h);
   }
 
-  private setHeaderValue(index: number, v: string): void {
-    const next: CustomHeader[] = [...this.editHeaders];
-    next[index] = { name: next[index].name, value: v };
-    this.editHeaders = next;
+  private setHeaderValue(uid: string, v: string): void {
+    this.editHeaders = this.editHeaders.map((h: HeaderDraft): HeaderDraft =>
+      h.uid === uid ? { uid: h.uid, name: h.name, value: v } : h);
   }
 
-  private removeHeader(index: number): void {
-    this.editHeaders = this.editHeaders.filter((_: CustomHeader, i: number): boolean => i !== index);
+  private removeHeader(uid: string): void {
+    this.editHeaders = this.editHeaders.filter((h: HeaderDraft): boolean => h.uid !== uid);
   }
 
   private addHeader(): void {
     // Android PropertyEditor.kt:108-113 — 追加 CustomHeader("", "")
-    this.editHeaders = [...this.editHeaders, { name: '', value: '' }];
+    // uid 草稿模型:数组索引 key 在删中间行后会让 ArkUI 复用错位(输入值/组合态串行)
+    this.editHeaders = [...this.editHeaders,
+      { uid: `h${this.draftSeq++}`, name: '', value: '' } as HeaderDraft];
   }
 
-  private setBodyKey(index: number, v: string): void {
-    const next: CustomBody[] = [...this.editBodies];
-    next[index] = { key: v, value: next[index].value };
-    this.editBodies = next;
+  private setBodyKey(uid: string, v: string): void {
+    this.editBodies = this.editBodies.map((b: BodyDraft): BodyDraft =>
+      b.uid === uid ? { uid: b.uid, key: v, value: b.value } : b);
   }
 
   // Android :160-176 — 逐键解析;非法 JSON 行内报错(msg take 100)且保留旧值
-  private setBodyValueText(index: number, v: string): void {
-    const texts: string[] = [...this.editBodyTexts];
-    texts[index] = v;
-    this.editBodyTexts = texts;
-    const errs: string[] = [...this.editBodyErrors];
+  // 文本/错误以 uid 为键:并行数组按索引对齐在删中间行后会整体错位;
+  // 每次 set 新 Map 触发 @State 刷新(原地 set 不重建)
+  private setBodyValueText(uid: string, v: string): void {
+    const texts: Map<string, string> = new Map<string, string>(this.bodyTexts);
+    texts.set(uid, v);
+    this.bodyTexts = texts;
+    const errs: Map<string, string> = new Map<string, string>(this.bodyErrors);
     try {
       const parsed: JsonValue = JSON.parse(v) as JsonValue;
-      const bodies: CustomBody[] = [...this.editBodies];
-      bodies[index] = { key: bodies[index].key, value: parsed };
-      this.editBodies = bodies;
-      errs[index] = '';
+      this.editBodies = this.editBodies.map((b: BodyDraft): BodyDraft =>
+        b.uid === uid ? { uid: b.uid, key: b.key, value: parsed } : b);
+      errs.set(uid, '');
     } catch (e) {
       const msg: string = e instanceof Error ? e.message : String(e);
-      errs[index] = `无效 JSON: ${msg.substring(0, 100)}`;
+      errs.set(uid, `无效 JSON: ${msg.substring(0, 100)}`);
     }
-    this.editBodyErrors = errs;
+    this.bodyErrors = errs;
   }
 
-  private removeBody(index: number): void {
-    this.editBodies = this.editBodies.filter((_: CustomBody, i: number): boolean => i !== index);
-    this.editBodyTexts = this.editBodyTexts.filter((_: string, i: number): boolean => i !== index);
-    this.editBodyErrors = this.editBodyErrors.filter((_: string, i: number): boolean => i !== index);
+  private removeBody(uid: string): void {
+    this.editBodies = this.editBodies.filter((b: BodyDraft): boolean => b.uid !== uid);
+    const texts: Map<string, string> = new Map<string, string>(this.bodyTexts);
+    texts.delete(uid);
+    this.bodyTexts = texts;
+    const errs: Map<string, string> = new Map<string, string>(this.bodyErrors);
+    errs.delete(uid);
+    this.bodyErrors = errs;
   }
 
   private addBody(): void {
     // Android :213-218 — 追加 CustomBody("", JsonPrimitive("")),文本态显示 ""
-    this.editBodies = [...this.editBodies, { key: '', value: '' }];
-    this.editBodyTexts = [...this.editBodyTexts, '""'];
-    this.editBodyErrors = [...this.editBodyErrors, ''];
+    const uid: string = `b${this.draftSeq++}`;
+    this.editBodies = [...this.editBodies, { uid: uid, key: '', value: '' } as BodyDraft];
+    const texts: Map<string, string> = new Map<string, string>(this.bodyTexts);
+    texts.set(uid, '""');
+    this.bodyTexts = texts;
+    const errs: Map<string, string> = new Map<string, string>(this.bodyErrors);
+    errs.set(uid, '');
+    this.bodyErrors = errs;
+  }
+
+  private bodyTextOf(uid: string): string {
+    return this.bodyTexts.get(uid) ?? '""';
+  }
+
+  private bodyErrorOf(uid: string): string {
+    return this.bodyErrors.get(uid) ?? '';
   }
 
   // 保存前归一:header name/value、body key trim(Android 逐键 trim 等价在保存点收敛)
   private normalizedHeaders(): CustomHeader[] {
-    return this.editHeaders.map((h: CustomHeader): CustomHeader => ({
+    return this.editHeaders.map((h: HeaderDraft): CustomHeader => ({
       name: h.name.trim(), value: h.value.trim(),
     }));
   }
@@ -486,23 +522,23 @@ struct ChatAssistantsPage {
           // ── D-049 自定义请求头(PropertyEditor.kt:47-121) ──
           Text('自定义请求头')
             .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 6, top: 4 })
-          ForEach(this.editHeaders, (h: CustomHeader, i: number): void => {
+          ForEach(this.editHeaders, (h: HeaderDraft): void => {
             Row() {
               TextInput({ text: h.name, placeholder: 'Header 名' })
                 .fontSize(13).height(38).backgroundColor(SURFACE)
                 .layoutWeight(1)
-                .onChange((v: string): void => this.setHeaderName(i, v))
+                .onChange((v: string): void => this.setHeaderName(h.uid, v))
               TextInput({ text: h.value, placeholder: '值' })
                 .fontSize(13).height(38).backgroundColor(SURFACE)
                 .layoutWeight(1).margin({ left: 8 })
-                .onChange((v: string): void => this.setHeaderValue(i, v))
+                .onChange((v: string): void => this.setHeaderValue(h.uid, v))
               Text('删除')
                 .fontSize(12).fontColor(ERROR)
                 .padding({ left: 10 })
-                .onClick((): void => this.removeHeader(i))
+                .onClick((): void => this.removeHeader(h.uid))
             }
             .width('100%').margin({ bottom: 8 })
-          }, (h: CustomHeader, i: number): string => `h-${i}`)
+          }, (h: HeaderDraft): string => h.uid)
           Text('+ 添加 Header')
             .fontSize(13).fontColor(ACCENT)
             .padding({ top: 4, bottom: 4 })
@@ -512,35 +548,36 @@ struct ChatAssistantsPage {
           // ── D-049 自定义请求体(PropertyEditor.kt:124-226) ──
           Text('自定义请求体(JSON 合并)')
             .fontSize(12).fontColor(INK3).width('100%').margin({ bottom: 6, top: 4 })
-          ForEach(this.editBodies, (b: CustomBody, i: number): void => {
+          ForEach(this.editBodies, (b: BodyDraft): void => {
             Column() {
               Row() {
                 TextInput({ text: b.key, placeholder: 'Body 键' })
                   .fontSize(13).height(38).backgroundColor(SURFACE)
                   .layoutWeight(1)
-                  .onChange((v: string): void => this.setBodyKey(i, v))
+                  .onChange((v: string): void => this.setBodyKey(b.uid, v))
                 Text('删除')
                   .fontSize(12).fontColor(ERROR)
                   .padding({ left: 10 })
-                  .onClick((): void => this.removeBody(i))
+                  .onClick((): void => this.removeBody(b.uid))
               }
               .width('100%').margin({ bottom: 6 })
-              TextArea({ text: this.editBodyTexts[i] ?? '', placeholder: 'JSON 值,如 {"thinking":{"type":"enabled"}}' })
+              TextArea({ text: this.bodyTextOf(b.uid), placeholder: 'JSON 值,如 {"thinking":{"type":"enabled"}}' })
                 .fontSize(12).backgroundColor(SURFACE)
                 .height(72)
-                .onChange((v: string): void => this.setBodyValueText(i, v))
-              if (this.editBodyErrors[i] !== undefined && this.editBodyErrors[i].length > 0) {
-                Text(this.editBodyErrors[i])
+                .onChange((v: string): void => this.setBodyValueText(b.uid, v))
+              if (this.bodyErrorOf(b.uid).length > 0) {
+                Text(this.bodyErrorOf(b.uid))
                   .fontSize(11).fontColor(ERROR)
                   .width('100%').margin({ top: 4 })
               }
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
-          }, (b: CustomBody, i: number): string => `b-${i}`)
+          }, (b: BodyDraft): string => b.uid)
           Text('+ 添加 Body')
             .fontSize(13).fontColor(ACCENT)
             .padding({ top: 4, bottom: 4 })
             .margin({ bottom: 8 })
+            .onClick((): void => this.addBody())
 
           Row() {
             Text('取消')

@@ -101,7 +101,12 @@ struct MiniAppSettingsPage {
     this.setting = next;
     platform.saveSetting(next).catch((e: Error): void => {
       this.toast(`保存失败:${e.message}`);
-      this.setting = current;
+      // 失败回滚到最新持久化态,而非回调开始时的旧快照(期间可能有其它开关已生效)
+      platform.refreshSetting().then((fresh: MiniAppSetting): void => {
+        this.setting = fresh;
+      }).catch((): void => {
+        this.setting = current;
+      });
     });
   }
 

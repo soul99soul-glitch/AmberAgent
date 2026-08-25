@@ -143,6 +143,21 @@ test('repository: list 排序 is_pinned DESC, update_at DESC;assistantId 过滤'
   assert.equal(all[0].isPinned, true);
 });
 
+test('repository: 同 update_at 的列表顺序按 id 升序稳定(分页边界不重复/遗漏)', async () => {
+  const repo = createMemoryConversationRepository(fixedNow);
+  const mk = (id: string, updateAt: string): Conversation =>
+    makeConversation(id, [], { title: id, updateAt, createAt: '2026-07-28T00:00:00.000Z' });
+  await repo.save(mk('bbb', '2026-07-28T10:00:00.000Z'));
+  await repo.save(mk('aaa', '2026-07-28T10:00:00.000Z'));
+  await repo.save(mk('ccc', '2026-07-28T10:00:00.000Z'));
+  const first = await repo.list();
+  const second = await repo.list();
+  assert.deepEqual(first.map((s): string => s.id), ['aaa', 'bbb', 'ccc'],
+    '同毫秒更新按 id ASC 兜底');
+  assert.deepEqual(second.map((s): string => s.id), ['aaa', 'bbb', 'ccc'],
+    '两次读取顺序一致(不受 Map 插入序影响)');
+});
+
 test('repository: listRecent limit;search 标题子串(ASCII 大小写不敏感)同序', async () => {
   const repo = createMemoryConversationRepository(fixedNow);
   const mk = (id: string, title: string, updateAt: string): Conversation =>

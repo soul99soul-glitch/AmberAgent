@@ -88,7 +88,9 @@ struct NovelWorkspacePage {
     this.reloadToken++;
     if (this.currentUnsub !== null) {
       this.currentUnsub();
-      this.currentUnsub = null;
+const unsub: (() => void) | null = this.currentUnsub;
+        this.currentUnsub = null;
+        if (unsub !== null) unsub(); // 终结即退订,emitter 不再持有页面闭包
     }
   }
 

@@ -512,7 +512,11 @@ export class AgentCronManager {
         init.updatedAtMs = Date.now();
         return makeAgentCronTask(init);
       }));
-    await this.agentTaskStore.update(id, { status: 'RUNNING', error: '' });
+    await this.agentTaskStore.update(id, {
+      status: 'RUNNING',
+      error: null,
+      lastErrorCode: null,
+    });
   }
 
   // :214-229
@@ -526,7 +530,12 @@ export class AgentCronManager {
         init.updatedAtMs = Date.now();
         return makeAgentCronTask(init);
       }));
-    await this.agentTaskStore.update(id, { status: 'COMPLETED', summary: 'Cron run completed.' });
+    await this.agentTaskStore.update(id, {
+      status: 'COMPLETED',
+      summary: 'Cron run completed.',
+      error: null,
+      lastErrorCode: null,
+    });
   }
 
   // :231-246
@@ -540,7 +549,11 @@ export class AgentCronManager {
         init.updatedAtMs = Date.now();
         return makeAgentCronTask(init);
       }));
-    await this.agentTaskStore.update(id, { status: 'FAILED', error: message.substring(0, 500) });
+    await this.agentTaskStore.update(id, {
+      status: 'FAILED',
+      error: message.substring(0, 500),
+      lastErrorCode: 'cron_run_failed',
+    });
   }
 
   // :248-260
@@ -728,6 +741,7 @@ export class AgentCronManager {
       updatedAtMs: task.updatedAtMs,
       sourceToolName: 'cron_task_create',
       cancelCapability: false,
+      spec: { enabled: task.enabled },
       summary: `cron=${task.cronExpression}; timezone=${task.timezoneId}; ` +
         `next_run_at_ms=${task.nextRunAtMs !== null ? task.nextRunAtMs : 'none'}`,
       error: task.lastError,

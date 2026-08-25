@@ -11,6 +11,7 @@
 //   与 ToolProfileFilter(助手 toolProfile 字段鸿蒙未建)= P1。
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { AgentTool } from './tool.ts';
 import type { ToolRisk, ToolInvocationPolicy } from './tool_policy.ts';
 import {
@@ -104,8 +105,8 @@ export const createToolRegistry = (tools: AgentTool[]): ToolRegistry => {
       mandatoryApproval: e.tool.mandatoryApproval,
       parameters: (): InputSchemaObj | null =>
         withDisplayTitleHint(e.tool.parameters(), e.tool.name),
-      execute: (input: JsonValue): Promise<UIMessagePart[]> =>
-        e.tool.execute(input).then(
+      execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
+        e.tool.execute(input, signal).then(
           (parts: UIMessagePart[]): UIMessagePart[] =>
             enforceOutputBudget(parts, e.metadata.outputBudgetChars)),
     })),

@@ -31,6 +31,7 @@
 //   协议级 onError 默认仅 Kotlin Log → 注入 hook,默认 noop(日志适配同例)。
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { newId } from './ids.ts';
 
 // ===== 常量(jsonRpc.kt/methods.kt/Protocol.kt) =====
@@ -72,7 +73,10 @@ export class McpTimeoutError extends Error {
 
 export interface McpTransport {
   start(): Promise<void>;
-  send(message: JsonObject): Promise<void>;
+  // timeoutMs:本条消息底层 HTTP 请求的读超时(缺省由 transport/平台决定)
+  send(message: JsonObject, timeoutMs?: number): Promise<void>;
+  // Streamable 专用:initialize 协商出的协议版本回写(后续请求头携带)
+  setProtocolVersion?(version: string): void;
   close(): Promise<void>;
   onClose(block: () => void): void;
   onError(block: (e: Error) => void): void;
@@ -186,6 +190,9 @@ export class McpClient {
         : null;
       this.serverInstructions = typeof init['instructions'] === 'string'
         ? init['instructions'] as string : null;
+      if (this.transport !== null && this.transport.setProtocolVersion !== undefined) {
+        this.transport.setProtocolVersion(protocolVersion);
+      }
       await this.notification('notifications/initialized', null);
     } catch (error) {
       await this.close();
@@ -201,7 +208,8 @@ export class McpClient {
 
   // Protocol.kt:437-522(strict capabilities 默认 true — ClientOptions:70-73)
   private request(method: string, params: JsonObject | null,
-    timeoutMs: number = MCP_DEFAULT_REQUEST_TIMEOUT_MS): Promise<JsonValue> {
+    timeoutMs: number = MCP_DEFAULT_REQUEST_TIMEOUT_MS,
+    signal?: AbortSignalLike): Promise<JsonValue> {
     if (this.transport === null) throw new Error('Not connected');
     const transport: McpTransport = this.transport;
     // enforceStrictCapabilities:assertCapabilityForMethod(Client.kt:214-256)
@@ -213,17 +221,52 @@ export class McpClient {
       }
     }
 
+    // 已 aborted:不再建 pending、不发送,直接取消语义返回
+    if (signal !== undefined && signal.aborted) {
+      const early: Error = new Error('MCP request aborted');
+      early.name = 'AbortError';
+      return Promise.reject(early);
+    }
     const id: string = hexRequestId();
     const message: JsonObject = params !== null
       ? { id, method, params, jsonrpc: JSONRPC_VERSION }
       : { id, method, jsonrpc: JSONRPC_VERSION };
 
+    // Stop 取消:删除 pending、取消底层 HTTP、通知服务端 cancelled、
+    // 以 AbortError 结算 done(race 直含 done → 即使 transport.send 挂起也能立即结算)
+    let settled: boolean = false;
+    const onAbort = (): void => {
+      if (settled) return;
+      const entry = this.pending.get(id);
+      if (entry === undefined) return;
+      this.pending.delete(id);
+      this.suppressLateResponse(id, timeoutMs);
+      void transport.cancelPending?.(id);
+      const note: JsonObject = {
+        method: 'notifications/cancelled',
+        params: { requestId: id, reason: 'Client aborted' },
+        jsonrpc: JSONRPC_VERSION,
+      };
+      transport.send(note).catch((): void => {});
+      const err: Error = new Error('MCP request aborted');
+      err.name = 'AbortError';
+      entry.reject(err);
+    };
     const done: Promise<JsonValue> = new Promise((resolve, reject): void => {
       this.pending.set(id, { resolve, reject });
     });
     // JS 工件:send 失败后 handler 按 SDK 语义残留(doClose 才结算);此时 done
     //   无人 await → 预挂 noop 防 unhandledRejection 噪音(不改变可观察行为)
     done.catch((): void => {});
+    if (signal !== undefined && signal.addEventListener !== undefined) {
+      signal.addEventListener('abort', onAbort);
+    }
+    const detachAbortListener = (): void => {
+      settled = true;
+      if (signal !== undefined && signal.removeEventListener !== undefined) {
+        signal.removeEventListener('abort', onAbort);
+      }
+    };
 
     const cancel = (reason: McpError): void => {
       this.pending.delete(id);
@@ -250,14 +293,23 @@ export class McpClient {
       if (timer !== null) clearTimeout(timer);
     };
     // The timeout covers both transport acceptance and response completion.
-    const sendAndWait: Promise<JsonValue> = transport.send(message).then(() => done);
-    return Promise.race([sendAndWait, timeout])
+    // race 直含 done:abort 触发的 done 拒绝无需等待 transport.send 完成
+    const sendAndWait: Promise<JsonValue> = transport.send(message, timeoutMs).then(() => done);
+    return Promise.race([sendAndWait, timeout, done])
       .then((value: JsonValue): JsonValue => {
+        detachAbortListener();
         clearTimer();
         return value;
       })
       .catch((cause: Error): Promise<JsonValue> => {
+        detachAbortListener();
         clearTimer();
+        if (signal !== undefined && signal.aborted) {
+          // abort 已触发:transport 晚到的错误统一按取消语义,不覆盖 AbortError
+          const err: Error = new Error('MCP request aborted');
+          err.name = 'AbortError';
+          throw err;
+        }
         if (!timedOut) {
           this.pending.delete(id);
           this.suppressLateResponse(id, timeoutMs);
@@ -300,10 +352,11 @@ export class McpClient {
 
   // Client.kt:473-474 callTool(request, options);McpManager 传 timeout=120s
   async callTool(name: string, args: JsonObject,
-    timeoutMs: number = MCP_DEFAULT_REQUEST_TIMEOUT_MS): Promise<McpCallToolResult> {
+    timeoutMs: number = MCP_DEFAULT_REQUEST_TIMEOUT_MS,
+    signal?: AbortSignalLike): Promise<McpCallToolResult> {
     const result: JsonValue = await this.request('tools/call', {
       name, arguments: args,
-    } as JsonObject, timeoutMs);
+    } as JsonObject, timeoutMs, signal);
     const obj: JsonObject = isObj(result) ? result : {};
     const raw = Array.isArray(obj['content']) ? obj['content'] as JsonValue[] : [];
     const content: McpContentBlock[] = raw.map((c: JsonValue): McpContentBlock => {

@@ -189,8 +189,10 @@ const summaryOf = (row: ConversationRow): ConversationSummary => ({
   updateAt: new Date(row.update_at).toISOString(),
 });
 
+// 同毫秒更新时按 id 升序兜底,保证列表顺序稳定(分页边界不重复/遗漏)
 const byPinnedThenUpdated = (a: ConversationRow, b: ConversationRow): number =>
-  (b.is_pinned - a.is_pinned) || (b.update_at - a.update_at);
+  (b.is_pinned - a.is_pinned) || (b.update_at - a.update_at) ||
+  (a.id < b.id ? -1 : (a.id > b.id ? 1 : 0));
 
 export const createMemoryConversationRepository = (
   now: () => string = nowIso,

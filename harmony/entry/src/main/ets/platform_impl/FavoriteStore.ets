@@ -53,24 +53,37 @@ export const listFavorites = async (): Promise<FavoriteEntry[]> => {
   return list;
 };
 
-export const addFavorite = async (entry: FavoriteEntry): Promise<void> => {
-  const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
-  const list: FavoriteEntry[] = decode(raw);
-  list.push(entry);
-  await getChatKvStore().put(FAVORITES_KEY, encode(list));
+// 写串行:收藏增删都是 read-modify-write,快速连续操作会互相覆盖
+// (同时收藏两条只剩一条;删除与新增并发时删除被旧快照写回)
+let favoriteWriteTail: Promise<void> = Promise.resolve();
+
+const enqueueFavoriteWrite = (op: () => Promise<void>): Promise<void> => {
+  const run: Promise<void> = favoriteWriteTail.catch((): void => {}).then(op);
+  favoriteWriteTail = run.then((): void => {}, (): void => {});
+  return run;
 };
 
-export const removeFavorite = async (id: string): Promise<void> => {
-  const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
-  const next: FavoriteEntry[] =
-    decode(raw).filter((f: FavoriteEntry): boolean => f.id !== id);
-  await getChatKvStore().put(FAVORITES_KEY, encode(next));
-};
+export const addFavorite = (entry: FavoriteEntry): Promise<void> =>
+  enqueueFavoriteWrite(async (): Promise<void> => {
+    const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
+    const list: FavoriteEntry[] = decode(raw);
+    list.push(entry);
+    await getChatKvStore().put(FAVORITES_KEY, encode(list));
+  });
+
+export const removeFavorite = (id: string): Promise<void> =>
+  enqueueFavoriteWrite(async (): Promise<void> => {
+    const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
+    const next: FavoriteEntry[] =
+      decode(raw).filter((f: FavoriteEntry): boolean => f.id !== id);
+    await getChatKvStore().put(FAVORITES_KEY, encode(next));
+  });
 
 // 会话删除级联(对齐 FavoriteDAO.deleteByConversation)
-export const removeFavoritesOfConversation = async (conversationId: string): Promise<void> => {
-  const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
-  const next: FavoriteEntry[] =
-    decode(raw).filter((f: FavoriteEntry): boolean => f.conversationId !== conversationId);
-  await getChatKvStore().put(FAVORITES_KEY, encode(next));
-};
+export const removeFavoritesOfConversation = (conversationId: string): Promise<void> =>
+  enqueueFavoriteWrite(async (): Promise<void> => {
+    const raw: string | null = await getChatKvStore().get(FAVORITES_KEY);
+    const next: FavoriteEntry[] =
+      decode(raw).filter((f: FavoriteEntry): boolean => f.conversationId !== conversationId);
+    await getChatKvStore().put(FAVORITES_KEY, encode(next));
+  });

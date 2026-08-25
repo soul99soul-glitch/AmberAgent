@@ -67,6 +67,11 @@ interface RuntimeRun {
   pendingFinishedTranscript: SubAgentRun | null;
 }
 
+// holder:超时标记(timer 回调先置位再 abort,防 runner AbortError 竞速混淆来源)
+interface TimeoutFlagHolder {
+  timedOut: boolean;
+}
+
 class AsyncMutex {
   private tail: Promise<void> = Promise.resolve();
 
@@ -284,6 +289,9 @@ export class SubAgentManager {
     }
 
     let historyGrant: SessionAccessGrant | null = null;
+    // 只撤销本次 start() 新铸造的 grant;session_grant_id 带入的外部 grant
+    // 所有权不在本运行,失败时不得误删
+    let ownsHistoryGrant: boolean = false;
     if (isHistoryReader(effectiveDefinition) && task.sourceSessionIds.length > 0) {
       historyGrant = this.deps.sessionAccessGrantStore.create(
         task.sourceSessionIds,
@@ -291,6 +299,7 @@ export class SubAgentManager {
         task.objective,
         parentConversationId,
       );
+      ownsHistoryGrant = true;
     } else if (task.sessionGrantId.trim().length > 0) {
       historyGrant = this.deps.sessionAccessGrantStore.get(task.sessionGrantId);
     }
@@ -324,7 +333,9 @@ export class SubAgentManager {
     });
     const runtimeRun: RuntimeRun = {
       snapshot: run,
-      controller: null,
+      // controller 在创建 runtimeRun 时即存在:admission 后任意 await 窗口内
+      // cancel() 都能立刻 abort,launchRun 启动前也会复查 signal
+      controller: new LocalAbortController(),
       terminalMutex: new AsyncMutex(),
       taskRegistered: false,
       pendingTerminalTaskUpdate: null,
@@ -355,30 +366,45 @@ export class SubAgentManager {
       },
     );
     if (admissionError !== null) {
+      // admission 拒绝:撤销刚铸造的 history grant,不留无主授权
+      if (historyGrant !== null && ownsHistoryGrant) {
+        this.deps.sessionAccessGrantStore.revoke(historyGrant.grantId);
+      }
       return errorPayload(admissionError.code, admissionError.message);
     }
 
-    const outputExists: boolean = await this.deps.transcript.exists(transcriptPath);
-    await this.deps.agentTaskStore.register(
-      this.toAgentTaskSnapshot(run, outputExists),
-      async (): Promise<boolean> => {
-        await this.cancel(runId);
-        return true;
-      },
-    );
-    runtimeRun.taskRegistered = true;
-    const pendingTaskUpdate: TerminalTaskUpdate | null = runtimeRun.pendingTerminalTaskUpdate;
-    runtimeRun.pendingTerminalTaskUpdate = null;
-    if (pendingTaskUpdate !== null) {
-      this.scheduleTaskUpdate(runId, pendingTaskUpdate);
-    }
-    await appendSubAgentTranscriptEvent(
-      this.deps.transcript, transcriptPath, 'started', this.deps.now(), this.runToPayload(run));
-    runtimeRun.startedTranscriptWritten = true;
-    const pendingFinished: SubAgentRun | null = runtimeRun.pendingFinishedTranscript;
-    runtimeRun.pendingFinishedTranscript = null;
-    if (pendingFinished !== null) {
-      await this.appendFinishedTranscript(pendingFinished);
+    try {
+      const outputExists: boolean = await this.deps.transcript.exists(transcriptPath);
+      await this.deps.agentTaskStore.register(
+        this.toAgentTaskSnapshot(run, outputExists),
+        async (): Promise<boolean> => {
+          await this.cancel(runId);
+          return true;
+        },
+      );
+      runtimeRun.taskRegistered = true;
+      const pendingTaskUpdate: TerminalTaskUpdate | null = runtimeRun.pendingTerminalTaskUpdate;
+      runtimeRun.pendingTerminalTaskUpdate = null;
+      if (pendingTaskUpdate !== null) {
+        this.scheduleTaskUpdate(runId, pendingTaskUpdate);
+      }
+      await appendSubAgentTranscriptEvent(
+        this.deps.transcript, transcriptPath, 'started', this.deps.now(), this.runToPayload(run));
+      runtimeRun.startedTranscriptWritten = true;
+      const pendingFinished: SubAgentRun | null = runtimeRun.pendingFinishedTranscript;
+      runtimeRun.pendingFinishedTranscript = null;
+      if (pendingFinished !== null) {
+        await this.appendFinishedTranscript(pendingFinished);
+      }
+    } catch (error) {
+      // 初始化失败:撤销自有 grant + 尽力收口 failed,不留幽灵 running
+      if (historyGrant !== null && ownsHistoryGrant) {
+        this.deps.sessionAccessGrantStore.revoke(historyGrant.grantId);
+      }
+      try {
+        await this.finish(runId, makeSubAgentResult({ status: 'failed', error: errorMessage(error) }));
+      } catch { /* 收口尽力而为 */ }
+      throw error;
     }
 
     this.liveTexts.set(runId, '');
@@ -387,7 +413,12 @@ export class SubAgentManager {
     this.partsListeners.set(runId, new Set<(parts: UIMessagePart[]) => void>());
     this.capLiveState();
 
-    void this.launchRun(runtimeRun, allowedTools);
+    // 顶层 catch:finish/transcript 等后续步骤的 rejection 也必须收口,防 unhandled
+    this.launchRun(runtimeRun, allowedTools).catch(async (error: unknown): Promise<void> => {
+      try {
+        await this.finish(runId, makeSubAgentResult({ status: 'failed', error: errorMessage(error) }));
+      } catch { /* 收口尽力而为 */ }
+    });
     return this.runToPayload(run);
   }
 
@@ -493,8 +524,13 @@ export class SubAgentManager {
 
   private async launchRun(runtimeRun: RuntimeRun, allowedTools: AgentTool[]): Promise<void> {
     const run: SubAgentRun = runtimeRun.snapshot;
-    const controller: LocalAbortController = new LocalAbortController();
-    runtimeRun.controller = controller;
+    // controller 在 start() 创建 runtimeRun 时即已存在;启动前被取消(admission 后
+    // 的 await 窗口内 cancel)则不再启动 runner,避免 finish(cancelled) 后又开跑
+    const controller: LocalAbortController | null = runtimeRun.controller;
+    if (controller === null || controller.signal.aborted) return;
+    // 超时标记:abort() 会同步触发 runner 以 AbortError 竞速先 settle,
+    // 不能靠异常类型区分超时/用户取消,必须用显式 flag
+    const timeoutFlag: TimeoutFlagHolder = { timedOut: false };
     let result: SubAgentResult;
     try {
       result = await this.runWithTimeout(
@@ -508,22 +544,35 @@ export class SubAgentManager {
         ),
         run.definition.timeoutMs,
         controller,
+        timeoutFlag,
       );
     } catch (error) {
-      if (controller.signal.aborted ||
-        (error instanceof Error && error.name === 'AbortError')) return;
-      result = makeSubAgentResult({ status: 'failed', error: errorMessage(error) });
+      if (timeoutFlag.timedOut) {
+        // 超时必须收口:否则 run/task 永久 RUNNING 并占用并发额度
+        result = makeSubAgentResult({
+          status: 'timed_out',
+          summary: 'Subagent run timed out.',
+        });
+      } else if (controller.signal.aborted) {
+        // 用户取消:cancel() 已 finish(cancelled)(abort 同步置位,由本 signal
+        // 触发的 AbortError 必然伴随 aborted=true;独立的 AbortError 走 failed)
+        return;
+      } else {
+        result = makeSubAgentResult({ status: 'failed', error: errorMessage(error) });
+      }
     }
     await this.finish(run.runId, result, this.liveTexts.get(run.runId) ?? '');
   }
 
   private runWithTimeout(
     run: Promise<SubAgentResult>, timeoutMs: number, controller: LocalAbortController,
+    timeoutFlag: TimeoutFlagHolder,
   ): Promise<SubAgentResult> {
     let timer: ReturnType<typeof setTimeout> | null = null;
     const timeout: Promise<SubAgentResult> = new Promise<SubAgentResult>(
       (_resolve, reject): void => {
         timer = setTimeout((): void => {
+          timeoutFlag.timedOut = true;
           controller.abort();
           reject(new SubAgentTimeoutCancellation());
         }, timeoutMs);

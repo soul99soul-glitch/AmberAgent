@@ -25,6 +25,21 @@ import type { SubAgentTranscriptPort, SubAgentTranscriptTail } from '@amber/chat
 const DOMAIN: number = 0x0001;
 const TAG: string = 'Chat.SubAgentStore';
 
+// 段级规范化(沙箱内无 symlink,lexical 等价):'..' 弹栈,'.' 与空段忽略
+const normalizeSegments = (p: string): string => {
+  const parts: string[] = p.split('/');
+  const out: string[] = [];
+  for (const part of parts) {
+    if (part.length === 0 || part === '.') continue;
+    if (part === '..') {
+      out.pop();
+      continue;
+    }
+    out.push(part);
+  }
+  return `/${out.join('/')}`;
+};
+
 const filesDirPath = (): string => {
   const ctx: Context = AppStorage.get<Context>('abilityContext') as Context;
   return ctx.filesDir;
@@ -93,8 +108,13 @@ export const createEntrySubAgentTranscriptPort = (): SubAgentTranscriptPort => (
 
   isPathInside: (root: string, path: string): Promise<boolean> => {
     if (root.length === 0 || path.length === 0) return Promise.resolve(false);
-    // 沙箱内路径恒为规范(无 .. 解析需要);prefix + '/' 判定
-    return Promise.resolve(path === root || path.startsWith(`${root}/`));
+    // 相对路径维持旧语义直接拒绝(不参与规范化,防误放宽)
+    if (!path.startsWith('/')) return Promise.resolve(false);
+    // 段级规范化后再判 containment:`root/../outside` 这类未解析 .. 的路径
+    // 不能靠裸 startsWith 放行
+    const normRoot: string = normalizeSegments(root);
+    const normPath: string = normalizeSegments(path);
+    return Promise.resolve(normPath === normRoot || normPath.startsWith(`${normRoot}/`));
   },
 
   readTail: (path: string, maxBytes: number): Promise<SubAgentTranscriptTail> => {
@@ -107,18 +127,23 @@ export const createEntrySubAgentTranscriptPort = (): SubAgentTranscriptPort => (
           const empty: SubAgentTranscriptTail = { text: '', startsAfterFileStart: false };
           return Promise.resolve(empty);
         }
-        // Harmony fileIo.readSync 无 offset 入参;整文件读入后取末尾 maxBytes
-        const buffer: ArrayBuffer = new ArrayBuffer(size);
-        fileIo.readSync(file.fd, buffer);
-        const full: string =
-          util.TextDecoder.create('utf-8').decodeToString(new Uint8Array(buffer));
-        if (size > maxBytes) {
-          const slice: string = full.substring(full.length - maxBytes);
-          const tail: SubAgentTranscriptTail = { text: slice, startsAfterFileStart: true };
-          return Promise.resolve(tail);
+        // SDK readSync 支持 offset/length/position:按字节窗只读末尾 maxBytes,
+        // 不再整文件入内存;窗口首字节可能是多字节字符的续字节 → 前移到字符边界
+        const start: number = Math.max(size - maxBytes, 0);
+        const length: number = size - start;
+        const buffer: ArrayBuffer = new ArrayBuffer(length);
+        const read: number = fileIo.readSync(file.fd, buffer, {
+          offset: start, length,
+        });
+        const bytes: Uint8Array = new Uint8Array(buffer, 0, read);
+        let begin: number = 0;
+        while (begin < bytes.length && (bytes[begin] & 0xC0) === 0x80) {
+          begin++;
         }
-        const fullTail: SubAgentTranscriptTail = { text: full, startsAfterFileStart: false };
-        return Promise.resolve(fullTail);
+        const text: string = util.TextDecoder.create('utf-8')
+          .decodeToString(bytes.subarray(begin));
+        const tail: SubAgentTranscriptTail = { text, startsAfterFileStart: start > 0 };
+        return Promise.resolve(tail);
       } finally {
         fileIo.closeSync(file);
       }

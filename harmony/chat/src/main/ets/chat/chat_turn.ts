@@ -27,6 +27,7 @@ import { makeUIMessage, finishAssistantMessage } from './message.ts';
 import { MessageStreamAccumulator } from './stream_accumulator.ts';
 import type { Assistant } from './assistant.ts';
 import { assembleInternalMessages } from './context_assembly.ts';
+import { fitMessagesToTokenBudget } from './context_compact.ts';
 import type {
   MessageTransformer, OutputMessageTransformer, TransformerContext,
 } from './transformer_pipeline.ts';
@@ -126,6 +127,10 @@ export interface ChatTurnDeps {
   //   动态块序最前(memory → loopBudget → generativeUi → recentChats),
   //   组装时拼在 extraSystemBlocks 之前;每次组装调用时取数
   memorySystemBlocks?: () => Promise<string[]>;
+  // 发送边界最终预算:组装完 system/agentSoul/memory/动态块之后、transforms 之前
+  //   对 assembled 再 fit 一次 — prepare 阶段的 fit 不含这些后置块,超长
+  //   soul/memory/工具 prompt 仍会把最终请求顶出上下文窗
+  finalTokenBudget?: number;
   // D-077b:动态 system 块供给(GenerationHandler.kt:726-736 — memory/generativeUi/
   //   recentChats 之 recentChats 子集;loopBudget 由 tool_loop 前置);
   //   每次组装调用时取数(Android 每次 generateInternal 重算语义)
@@ -187,7 +192,7 @@ export const runChatTurn = async (
   const preparedMessages: UIMessage[] = deps.prepareContextMessages !== undefined
     ? await deps.prepareContextMessages(baseMessages)
     : baseMessages;
-  const assembled: UIMessage[] = assembleInternalMessages({
+  const assembledBase: UIMessage[] = assembleInternalMessages({
     messages: preparedMessages,
     assistant: deps.assistant,
     agentSoul: deps.agentSoul ?? '',
@@ -201,6 +206,11 @@ export const runChatTurn = async (
       ...(deps.extraSystemBlocks !== undefined ? await deps.extraSystemBlocks() : []),
     ],
   });
+  // 发送边界兜底 fit:后置 system 块参与总预算后才不超窗(system 本身按 Android
+  // 语义保留不裁,普通历史从最旧侧收)
+  const assembled: UIMessage[] = deps.finalTokenBudget !== undefined
+    ? fitMessagesToTokenBudget(assembledBase, deps.finalTokenBudget)
+    : assembledBase;
   const internalMessages: UIMessage[] = await applyInputTransformers(
     assembled, deps.inputTransformers, ctx);
   // D-071a:视觉兜底重建闭包(prepareInternalMessages(forceImageToText = true),

@@ -88,7 +88,7 @@ test('scheduler.abort: signal reaches collectRun; run rejects with abort; cleanu
   // 等 collectRun 真正开始(进入 supervisor 需要 createRunContext 的异步步)
   const deadline = Date.now() + 10_000;
   while (callCount === 0 && Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise<void>((r): void => { setTimeout(r, 10); });
   }
   assert.ok(callCount > 0, 'collectRun must be invoked');
   assert.ok(seenSignal !== undefined, 'collectRun must receive the scheduler signal');
@@ -154,7 +154,7 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
   // 等 A 进入 collectRun
   const started = Date.now() + 10_000;
   while (aCollectCalls === 0 && Date.now() < started) {
-    await new Promise(r => setTimeout(r, 10));
+    await new Promise<void>((r): void => { setTimeout(r, 10); });
   }
   assert.ok(aCollectCalls > 0);
 
@@ -171,7 +171,7 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
 
   const settleDeadline = Date.now() + 15_000;
   while (scheduler.isRunning('tA') && Date.now() < settleDeadline) {
-    await new Promise(r => setTimeout(r, 50));
+    await new Promise<void>((r): void => { setTimeout(r, 50); });
   }
   assert.equal(scheduler.isRunning('tA'), false, 'all runs settle after gate release');
   assert.ok(isRunningAtCancel.length >= 1, 'A/B finally both fired cancelRunning');
@@ -222,7 +222,8 @@ test('scheduler: concurrent REPLACE admission — later caller aborts the earlie
       let timer: ReturnType<typeof setTimeout>;
       if (signal !== undefined && !signal.aborted && typeof signal.addEventListener === 'function') {
         onAbortRef = (): void => { finish(new Error('aborted')); };
-        signal.addEventListener('abort', onAbortRef, { once: true });
+        // AbortSignalLike 仅两参(abort 至多一次,无需 once)
+        signal.addEventListener('abort', onAbortRef);
       }
       timer = setTimeout((): void => finish(), 60_000);
       gate.then((): void => finish(), (): void => finish());
@@ -237,18 +238,18 @@ test('scheduler: concurrent REPLACE admission — later caller aborts the earlie
   });
   // A 挂在 gate 上
   const runA = scheduler.run('tR', 'A', { force: true });
-  runA.then((): void => runOutcomes.push('A-ok'), (e: Error): void => runOutcomes.push(`A-err:${e.message}`));
+  runA.then((): void => { runOutcomes.push('A-ok'); }, (e: Error): void => { runOutcomes.push(`A-err:${e.message}`); });
   const started = Date.now() + 10_000;
-  while (runCounter === 0 && Date.now() < started) await new Promise(r => setTimeout(r, 10));
+  while (runCounter === 0 && Date.now() < started) await new Promise<void>((r): void => { setTimeout(r, 10); });
   assert.ok(runCounter > 0, 'A entered collectRun');
 
   // B、C 相隔 50ms 并发 REPLACE(旧实现:两者都会通过准入 → 都跑完;
   // 新实现:C 的准入会 abort B 的注册)
   const runB = scheduler.run('tR', 'B', { force: true });
-  runB.then((): void => runOutcomes.push('B-ok'), (e: Error): void => runOutcomes.push(`B-err:${e.message}`));
-  await new Promise(r => setTimeout(r, 50));
+  runB.then((): void => { runOutcomes.push('B-ok'); }, (e: Error): void => { runOutcomes.push(`B-err:${e.message}`); });
+  await new Promise<void>((r): void => { setTimeout(r, 50); });
   const runC = scheduler.run('tR', 'C', { force: true });
-  runC.then((): void => runOutcomes.push('C-ok'), (e: Error): void => runOutcomes.push(`C-err:${e.message}`));
+  runC.then((): void => { runOutcomes.push('C-ok'); }, (e: Error): void => { runOutcomes.push(`C-err:${e.message}`); });
 
   // C 进入准入后 5s 超时等 A → 先开 gate 让链路流动
   await new Promise(r => setTimeout(r, 1_000));

@@ -9,6 +9,7 @@
 //   - systemPrompt 的 Model 参 → ChatModel(provider_model.ts 既有抽象)
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { UIMessage, UIMessagePart } from './message.ts';
 import type { ChatModel, ChatToolDefinition } from './provider_model.ts';
 
@@ -36,7 +37,9 @@ export interface AgentTool {
   // Tool.kt:19-24 注释语义:绕过普通 auto-approval 与 run 内信任,仅
   //   "auto approve high-risk tools" 设置可无人值守执行(如 wm_eval)
   mandatoryApproval: boolean;
-  execute: (input: JsonValue) => Promise<UIMessagePart[]>;
+  // signal:调用方(工具循环)的取消信号 — 网络/长任务工具(MCP、搜索)应消费;
+  //   其余工具忽略即可(可选参数,全部既有实现兼容)
+  execute: (input: JsonValue, signal?: AbortSignalLike) => Promise<UIMessagePart[]>;
 }
 
 export interface AgentToolOpts {
@@ -47,7 +50,7 @@ export interface AgentToolOpts {
   needsApproval?: boolean;
   allowsAutoApproval?: boolean;
   mandatoryApproval?: boolean;
-  execute: (input: JsonValue) => Promise<UIMessagePart[]>;
+  execute: (input: JsonValue, signal?: AbortSignalLike) => Promise<UIMessagePart[]>;
 }
 
 export const makeAgentTool = (opts: AgentToolOpts): AgentTool => ({

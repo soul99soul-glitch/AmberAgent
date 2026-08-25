@@ -4,6 +4,8 @@ import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getModelRegistry, prepareCouncilManager } from '../di/AppContainer.ets';
 import { LENS_PRESETS, CORE_SEATS, makeRuntimeSetting } from '@amber/deepread-domain';
+import type { ModelCouncilRuntimeSetting } from '@amber/deepread-domain';
+import { getAgentPromptSettingsPort } from '../di/AppContainer.ets';
 import type { ModelConfig, ModelCouncilRolePreset, CouncilTaskInput, ModelCouncilMode } from '@amber/deepread-domain';
 
 const DOMAIN: number = 0x0001;
@@ -11,6 +13,22 @@ const TAG: string = 'DeepRead.Council';
 
 
 const ROUND_OPTIONS: number[] = [2, 3, 4, 5];
+
+// 持久化 setting → makeRuntimeSetting 入参(仅覆盖字段,缺省走默认)
+const baseToInit = (base: ModelCouncilRuntimeSetting): Record<string, Object | null> => {
+  const init: Record<string, Object | null> = {};
+  init['enabled'] = base.enabled;
+  init['defaultSeats'] = base.defaultSeats;
+  init['synthesisModelId'] = base.synthesisModelId;
+  init['maxSeats'] = base.maxSeats;
+  init['defaultRounds'] = base.defaultRounds;
+  init['maxRounds'] = base.maxRounds;
+  init['seatTimeoutMs'] = base.seatTimeoutMs;
+  init['totalTimeoutMs'] = base.totalTimeoutMs;
+  init['outputBudgetChars'] = base.outputBudgetChars;
+  init['showSeatOutputs'] = base.showSeatOutputs;
+  return init;
+};
 
 @Entry
 @Component
@@ -25,12 +43,18 @@ struct CouncilPage {
   private pageAlive: boolean = false;
   private loadToken: number = 0;
 
+  private persistedSetting: ModelCouncilRuntimeSetting | null = null;
+
   aboutToAppear(): void {
     this.pageAlive = true;
     const token: number = ++this.loadToken;
     this.loadModels(token).catch((e: Error): void => {
       if (this.pageAlive && token === this.loadToken) this.errorMsg = String(e);
     });
+    // 读取持久化 council 设置(enabled 门/席位/预算/超时/裁判模型)
+    getAgentPromptSettingsPort().getCouncilSetting().then((persisted: ModelCouncilRuntimeSetting): void => {
+      if (this.pageAlive && token === this.loadToken) this.persistedSetting = persisted;
+    }).catch((): void => {});
   }
 
   aboutToDisappear(): void {
@@ -66,7 +90,19 @@ struct CouncilPage {
     this.errorMsg = '';
     this.starting = true;
     try {
-      const setting = makeRuntimeSetting({ defaultRounds: this.rounds, maxRounds: 5 });
+      // 持久化设置为基础,本轮 UI 选择的轮数覆盖;禁用态直接拦截。
+      // 读取未完成时先 await(否则可用默认 enabled=true 绕过禁用开关)
+      const base: ModelCouncilRuntimeSetting = this.persistedSetting !== null
+        ? this.persistedSetting
+        : await getAgentPromptSettingsPort().getCouncilSetting();
+      if (!base.enabled) {
+        this.errorMsg = '模型议会已在设置中关闭';
+        return;
+      }
+      const init: Record<string, Object | null> = baseToInit(base);
+      init['defaultRounds'] = this.rounds;
+      init['maxRounds'] = Math.max(base.maxRounds, this.rounds);
+      const setting: ModelCouncilRuntimeSetting = makeRuntimeSetting(init);
       const mgr = await prepareCouncilManager(setting);
       const input: CouncilTaskInput = {
         mode: this.mode,

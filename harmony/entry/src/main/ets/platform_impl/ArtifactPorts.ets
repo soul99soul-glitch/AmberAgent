@@ -45,6 +45,28 @@ const mapMethod = (method: string): http.RequestMethod => {
 export const createArtifactHttpPort = (): ArtifactHttpPort =>
   async (req: ArtifactHttpRequest): Promise<ArtifactHttpResponse> => {
     const httpRequest: http.HttpRequest = http.createHttp();
+    // Content-Length 预检:响应头阶段发现超限立即 destroy 中断接收,
+    // 不等整包收完才截断(内存峰值防护)
+    let oversizeMessage: string | null = null;
+    const maxBytes: number | undefined = req.maxResponseBytes;
+    if (maxBytes !== undefined && maxBytes > 0) {
+      httpRequest.on('headersReceive', (headerFields: Object): void => {
+        // header 名大小写不敏感;chunked 无长度时本预检退化为收后截断(平台
+        // requestInStream 流式收体属后续接线,登记)
+        const rec: Record<string, string> = headerFields as Record<string, string>;
+        let lenRaw: string | undefined;
+        Object.keys(rec).forEach((name: string): void => {
+          if (name.toLowerCase() === 'content-length') lenRaw = String(rec[name]);
+        });
+        if (lenRaw === undefined) return;
+        const len: number = Number.parseInt(lenRaw, 10);
+        if (Number.isFinite(len) && len > maxBytes) {
+          oversizeMessage =
+            `Response Content-Length ${len} exceeds limit ${maxBytes} bytes`;
+          try { httpRequest.destroy(); } catch { /* 已销毁 */ }
+        }
+      });
+    }
     try {
       const header: Record<string, string> = {};
       Object.keys(req.headers).forEach((name: string): void => {
@@ -64,6 +86,10 @@ export const createArtifactHttpPort = (): ArtifactHttpPort =>
         options.extraData = req.body;
       }
       const resp: http.HttpResponse = await httpRequest.request(req.url, options);
+      // destroy 后 SDK 可能 resolve(而非 reject)空/部分响应 → 必须复查
+      if (oversizeMessage !== null) {
+        throw new Error(oversizeMessage);
+      }
       const headers: Record<string, string> = {};
       if (resp.header !== undefined && resp.header !== null) {
         const rec: Record<string, string> = resp.header as Record<string, string>;
@@ -85,8 +111,13 @@ export const createArtifactHttpPort = (): ArtifactHttpPort =>
         headers,
         body,
       };
+    } catch (e) {
+      if (oversizeMessage !== null) {
+        throw new Error(oversizeMessage);
+      }
+      throw e instanceof Error ? e : new Error(String(e));
     } finally {
-      httpRequest.destroy();
+      try { httpRequest.destroy(); } catch { /* 已销毁(oversize 路径) */ }
     }
   };
 

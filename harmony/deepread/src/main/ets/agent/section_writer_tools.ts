@@ -310,7 +310,9 @@ export const createSectionWriterTools = (
           keyEntities: mergeStrings(current.keyEntities, stringListFrom(obj, 'key_entities', ENTITY_MAX_CHARS), KEY_ENTITIES_MAX),
           references: mergeReadingLinks(current.references, references, READING_LINKS_REF_MAX),
         };
-        if (!hasOverviewContent(next)) return current;
+        // 主字段不足:合法的 keyEntities/references 仍保留(不整回 current 丢弃),
+        // 只是不标记 READY/必需写
+        if (!hasOverviewContent(next)) return next;
         markRequiredWrite();
         return withSectionQuality(
           withSectionStatus(next, 'OVERVIEW', 'READY'),
@@ -361,7 +363,8 @@ export const createSectionWriterTools = (
           corePoints: corePoints.length > 0 ? corePoints : current.corePoints,
           references: mergeReadingLinks(current.references, references, READING_LINKS_REF_MAX),
         };
-        if (!hasNarrativeContent(next)) return current;
+        // 主字段不足:合法 timeline/references 仍保留,只不标 READY
+        if (!hasNarrativeContent(next)) return next;
         markRequiredWrite();
         return withSectionQuality(
           withSectionStatus(next, 'NARRATIVE', 'READY'),
@@ -409,7 +412,8 @@ export const createSectionWriterTools = (
           analysis: nextAnalysis,
           references: mergeReadingLinks(current.references, parseReadingLinks(obj, 'references'), READING_LINKS_REF_MAX),
         };
-        if (!hasAnalysisContent(next)) return current;
+        // 主字段不足:合法 references 仍保留,只不标 READY
+        if (!hasAnalysisContent(next)) return next;
         markRequiredWrite();
         return withSectionQuality(
           withSectionStatus(next, 'ANALYSIS', 'READY'),
@@ -496,7 +500,7 @@ export const createSectionWriterTools = (
           heroCaption: heroUrl !== null && heroCaptionClean !== null ? heroCaptionClean : current.heroCaption,
           heroImageConfidence: heroUrl !== null ? IMAGE_CONFIDENCE.HERO : current.heroImageConfidence,
           imageAssets: mergeImageAssets(current.imageAssets, [...(heroAsset !== null ? [heroAsset] : []), ...incomingAssets], IMAGE_ASSETS_MAX),
-          visualDiagnostics: buildVisualDiagnostics(current.visualDiagnostics, heroCandidate, heroReason, incomingAssets),
+          visualDiagnostics: buildVisualDiagnostics(current.visualDiagnostics, heroCandidate, heroReason, incomingAssets, params.imageCandidates),
         };
         if (heroUrl === null && incomingAssets.length === 0) return current;
         markVisibleWrite();
@@ -916,18 +920,24 @@ const buildVisualDiagnostics = (
   heroCandidate: ScoredImageCandidate | null,
   heroReason: string | null,
   inlineAssets: DeepReadImageAsset[],
+  imageCandidates: ScoredImageCandidate[] = [],
 ): DeepReadOutput['visualDiagnostics'] => {
-  // 简化版:candidateCount + heroSelection + inlineSelections + rejectedImages
-  // 完整版需 imageCandidates 池(这里 inlineAssets 已经过 withCandidateEvidence)
+  // candidateCount/rejectedImages 基于完整候选池(inline 子集会低报,
+  // reject 候选此前恒空 — 诊断失真)
   const prevCount = previous?.candidateCount ?? 0;
+  const selectedUrls = new Set<string>(inlineAssets.map(a => a.url));
+  if (heroCandidate !== null) selectedUrls.add(heroCandidate.url);
+  const rejected = imageCandidates
+    .filter(c => !selectedUrls.has(c.url) && c.confidence === 'reject')
+    .map(c => ({ url: c.url, reason: c.selectionReason, score: c.score }));
   return {
-    candidateCount: Math.max(prevCount, inlineAssets.length),
+    candidateCount: Math.max(prevCount, Math.max(imageCandidates.length, inlineAssets.length)),
     heroSelection: heroCandidate !== null ? {
       url: heroCandidate.url,
       reason: heroReason ?? selectionReasonFor(heroCandidate, ''),
     } : (previous?.heroSelection ?? null),
     inlineSelections: inlineAssets.map(a => ({ url: a.url, reason: a.selectionReason ?? '' })).slice(0, 6),
-    rejectedImages: previous?.rejectedImages ?? [],
+    rejectedImages: rejected.length > 0 ? rejected : (previous?.rejectedImages ?? []),
   };
 };
 

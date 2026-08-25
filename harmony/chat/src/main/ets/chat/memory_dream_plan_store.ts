@@ -158,6 +158,11 @@ export interface MemoryDreamPlanDaoPort {
   markDismissed: (id: string, dismissedAt: number) => Promise<void>;
   // OnConflictStrategy.REPLACE
   insert: (entity: MemoryDreamPlanEntity) => Promise<void>;
+  // 可选原子能力:同事务完成「dismiss 全量 pending + insert」—
+  // 两次独立 DAO 调用并发交错会留下多个 pending;JSON 存储实现提供
+  replacePendingAndInsert?: (
+    status: string, dismissedAt: number, entity: MemoryDreamPlanEntity,
+  ) => Promise<void>;
 }
 
 const toPersisted = (entity: MemoryDreamPlanEntity): PersistedMemoryDreamPlan => ({
@@ -218,9 +223,13 @@ export const createMemoryDreamPlanStore = (
     plan: MemoryDreamPlan, source: MemoryDreamPlanSource,
     now: number = Date.now(),
   ): Promise<PersistedMemoryDreamPlan> => {
-    await dao.updatePendingStatus('dismissed', now);
     const entity: MemoryDreamPlanEntity = toEntity(plan, 'pending', source, now, null, null);
-    await dao.insert(entity);
+    if (dao.replacePendingAndInsert !== undefined) {
+      await dao.replacePendingAndInsert('dismissed', now, entity);
+    } else {
+      await dao.updatePendingStatus('dismissed', now);
+      await dao.insert(entity);
+    }
     return toPersisted(entity);
   },
   // recordAutoRun(:73-93)— 直接插一条 dismissed/auto 记录(不动存量 pending)
@@ -232,8 +241,12 @@ export const createMemoryDreamPlanStore = (
     plan: MemoryDreamPlan, source: MemoryDreamPlanSource,
     now: number = Date.now(),
   ): Promise<PersistedMemoryDreamPlan> => {
-    await dao.updatePendingStatus('dismissed', now);
     const entity: MemoryDreamPlanEntity = toEntity(plan, 'applied', source, now, now, null);
+    if (dao.replacePendingAndInsert !== undefined) {
+      await dao.replacePendingAndInsert('dismissed', now, entity);
+      return toPersisted(entity);
+    }
+    await dao.updatePendingStatus('dismissed', now);
     await dao.insert(entity);
     return toPersisted(entity);
   },

@@ -283,14 +283,15 @@ class OhosMcpHttpPort implements McpHttpPort {
 
   // 非流式请求(SSE POST send / DELETE terminate)
   async request(method: string, url: string, headers: Array<[string, string]>,
-    body: string | null, requestId?: string): Promise<McpHttpResponse> {
+    body: string | null, requestId?: string, timeoutMs?: number): Promise<McpHttpResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const options: http.HttpRequestOptions = {
       method: mapMethod(method),
       header: headerRecord(headers),
       expectDataType: http.HttpDataType.STRING,
       connectTimeout: 15000,
-      readTimeout: 20000,
+      // domain 层 tools/call 超时 120s:固定 20s 会提前掐断长工具调用
+      readTimeout: timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : 20000,
       usingCache: false,
     };
     if (body !== null && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
@@ -351,11 +352,21 @@ class OhosMcpHttpPort implements McpHttpPort {
 
     return httpRequest.requestInStream(url, options)
       .then((code: number): McpSseStream => {
+        const contentType: string | null = headerFind(respHeaders, 'content-type');
         if (code < 200 || code >= 300) {
           // ktor sseSession 非 2xx → SSEClientException(status+contentType)
           this.releaseRequest(requestKey, httpRequest);
           throw new McpSseOpenError(
-            `SSE open failed (HTTP ${code})`, code, headerFind(respHeaders, 'content-type'));
+            `SSE open failed (HTTP ${code})`, code, contentType);
+        }
+        // 2xx 但非事件流(JSON-only 服务器):按 SSE 打开会喂坏 SseAssembler,
+        // 必须抛带 contentType 的错误让上层进入 JSON-only fallback 分支
+        if (contentType === null
+          || contentType.split(';')[0].trim().toLowerCase() !== 'text/event-stream') {
+          this.releaseRequest(requestKey, httpRequest);
+          throw new McpSseOpenError(
+            `SSE open failed: unexpected content type ${contentType ?? '<none>'}`,
+            code, contentType);
         }
         return stream;
       })
@@ -369,14 +380,14 @@ class OhosMcpHttpPort implements McpHttpPort {
 
   // Streamable POST:event-stream 响应 → 行流即时返回;否则缓冲全文到 dataEnd。
   postStream(url: string, headers: Array<[string, string]>,
-    body: string, requestId?: string): Promise<McpPostStreamResponse> {
+    body: string, requestId?: string, timeoutMs?: number): Promise<McpPostStreamResponse> {
     const httpRequest: http.HttpRequest = http.createHttp();
     const options: http.HttpRequestOptions = {
       method: http.RequestMethod.POST,
       header: headerRecord(headers),
       expectDataType: http.HttpDataType.ARRAY_BUFFER,
       connectTimeout: 15000,
-      readTimeout: 120000,
+      readTimeout: timeoutMs !== undefined && timeoutMs > 0 ? timeoutMs : 120000,
       usingCache: false,
       extraData: body,
     };

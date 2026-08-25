@@ -343,3 +343,48 @@ test('store: subscribe — publish 推送 list 快照', async () => {
   await store.register(sampleSnapshot('z'));
   assert.deepEqual(seen, [['z']]);
 });
+
+test('store: update 的 error/lastErrorCode — undefined 保留、null 显式清除(retry 成功语义)', async () => {
+  const files = new MemFiles();
+  const store: AgentTaskStore = await AgentTaskStore.create(makeStoreDeps(files));
+  await store.register(sampleSnapshot('e1', 'FAILED'));
+  await store.update('e1', { error: 'boom', lastErrorCode: 'x1' });
+  // 未提供字段 → 保留
+  const kept: AgentTaskSnapshot | null = store.read('e1');
+  assert.ok(kept !== null);
+  assert.equal(kept.error, 'boom');
+  assert.equal(kept.lastErrorCode, 'x1');
+  await store.update('e1', { status: 'RUNNING' });
+  const kept2: AgentTaskSnapshot | null = store.read('e1');
+  assert.ok(kept2 !== null);
+  assert.equal(kept2.error, 'boom');
+  // null → 清除(retry 成功 / subagent 正常收口)
+  await store.update('e1', { status: 'COMPLETED', error: null, lastErrorCode: null });
+  const cleared: AgentTaskSnapshot | null = store.read('e1');
+  assert.ok(cleared !== null);
+  assert.equal(cleared.error, null);
+  assert.equal(cleared.lastErrorCode, null);
+});
+
+test('recovery: 禁用的 cron 任务重启后不复活为 SCHEDULED(spec.enabled=false)', async () => {
+  const recovery: AgentTaskRecoveryManager = new AgentTaskRecoveryManager(
+    async (): Promise<boolean> => false,
+  );
+  const disabled: AgentTaskSnapshot = makeAgentTaskSnapshot({
+    taskId: 'cron-off', type: 'cron', title: 'off',
+    status: 'RUNNING', createdAtMs: 1000,
+    spec: { enabled: false },
+  });
+  const out: AgentTaskSnapshot = await recovery.recoverOnStartup(disabled, 2000);
+  assert.equal(out.status, 'CANCELLED');
+  assert.equal(out.queueState, 'TERMINAL');
+  assert.equal(out.recoveryState, 'CLEANUP_ONLY');
+  // spec.enabled 缺失(旧数据)→ 维持原启用恢复语义
+  const legacy: AgentTaskSnapshot = makeAgentTaskSnapshot({
+    taskId: 'cron-old', type: 'cron', title: 'old',
+    status: 'RUNNING', createdAtMs: 1000,
+  });
+  const out2: AgentTaskSnapshot = await recovery.recoverOnStartup(legacy, 2000);
+  assert.equal(out2.status, 'QUEUED');
+  assert.equal(out2.queueState, 'SCHEDULED');
+});

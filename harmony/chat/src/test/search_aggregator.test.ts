@@ -229,3 +229,25 @@ test('aggregator:全失败 → status empty;max_results 串数字 intOrNull', as
   const r2 = await searchAggregatorSearch(settings, { query: 'q', max_results: 5.5 }, exec, DEPS);
   assert.equal(r2['status'], 'empty');
 });
+
+test('aggregator:merge — 同域同题不同 URL 经标题别名合并;空 URL/空标题不入聚合', async () => {
+  const s1 = svc('bing_local', 'id-1');
+  const s2 = svc('exa', 'id-2');
+  const settings = makeSettings([s1, s2], ['id-1', 'id-2']);
+  const exec: SearchExecutor = (o) => {
+    if (o.id === 'id-1') {
+      return Promise.resolve(okResult([
+        item('Same Long Enough Title', 'https://x.test/one', 'first'),
+        item('', 'https://x.test/no-title', 'dropped'),
+      ]));
+    }
+    return Promise.resolve(okResult([
+      item('Same Long Enough Title', 'https://x.test/two', 'second'),
+      item('Has Title', '', 'dropped'),
+    ]));
+  };
+  const r = await searchAggregatorSearch(settings, { query: 'q' }, exec, DEPS);
+  const items = r['items'] as JsonObject[];
+  assert.equal(items.length, 1, '同域同题合并 + 空 URL/空标题被过滤');
+  assert.equal(items[0]['duplicate_count'], 2);
+});

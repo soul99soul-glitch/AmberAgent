@@ -83,7 +83,9 @@ class OhosHttpClient implements HttpClient {
       };
       const onAbort = (): void => {
         hilog.warn(DOMAIN, TAG, 'fetch aborted: %{public}s', safeUrl);
-        fail(new Error(`${safeUrl} fetch aborted`));
+        const abortError: Error = new Error(`${safeUrl} fetch aborted`);
+        abortError.name = 'AbortError'; // 下游按名称识别取消(区别于网络失败)
+        fail(abortError);
       };
 
       if (signal?.aborted) {
@@ -214,7 +216,9 @@ class OhosHttpClient implements HttpClient {
       };
       const onAbort = (): void => {
         hilog.warn(DOMAIN, TAG, 'fetchStream aborted: %{public}s', safeUrl);
-        fail(new Error(`${safeUrl} stream aborted`), 'fetchStream aborted: %{public}s');
+        const abortError: Error = new Error(`${safeUrl} stream aborted`);
+        abortError.name = 'AbortError'; // 同 fetch:取消与网络失败可区分
+        fail(abortError, 'fetchStream aborted: %{public}s');
       };
 
       if (signal?.aborted) {

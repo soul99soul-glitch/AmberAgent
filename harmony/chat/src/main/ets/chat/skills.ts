@@ -847,6 +847,9 @@ export const collectWorkspaceSkillFiles = async (
     let relativeName: string = lastSlash < 0 ? normalized : normalized.substring(lastSlash + 1);
     if (relativeName.trim().length === 0) relativeName = 'SKILL.md';
     const files: Map<string, string> = new Map<string, string>();
+    if (bytes.length > MAX_SKILL_FILE_BYTES) {
+      throw new Error(`Skill file ${normalized} exceeds ${MAX_SKILL_FILE_BYTES} bytes`);
+    }
     files.set(canonicalSkillFileName(relativeName), utf8Decode(bytes));
     return files;
   }
@@ -862,8 +865,11 @@ export const collectWorkspaceSkillFiles = async (
         await walk(entry.path, root);
       } else if (isLikelyTextSkillFile(entry.name)) {
         const key: string = relative.trim().length === 0 ? entry.name : relative;
-        // :372 — workspace walk 分支无 4MB 上限(readBytes 直读,quirk 保留)
+        // 单文件与 zip 条目同口径 4MB 上限(防超大文件整读入内存)
         const data: Uint8Array = await workspace.readBytes(entry.path);
+        if (data.length > MAX_SKILL_FILE_BYTES) {
+          throw new Error(`Skill file ${entry.path} exceeds ${MAX_SKILL_FILE_BYTES} bytes`);
+        }
         files.set(canonicalSkillFileName(key), utf8Decode(data));
       }
     }

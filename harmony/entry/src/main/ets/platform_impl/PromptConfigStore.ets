@@ -16,6 +16,7 @@
 //   显式 class/interface;索引签名/索引访问类型禁用)
 
 import { fileIo } from '@kit.CoreFileKit';
+import { sharedKvMutex } from './AtomicJsonFile.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 import type {
@@ -375,20 +376,22 @@ export const createEntryAgentPromptSettingsPort = (
     const doc: AgentRuntimeDoc = await readDoc(kv);
     return parseSubAgentSetting(doc['subAgent']);
   },
-  updateSubAgentSetting: async (next: SubAgentRuntimeSetting): Promise<void> => {
-    const doc: AgentRuntimeDoc = await readDoc(kv);
-    doc['subAgent'] = subAgentSettingToJson(next) as JsonValue;
-    await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(doc));
-  },
+  updateSubAgentSetting: (next: SubAgentRuntimeSetting): Promise<void> =>
+    sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<void> => {
+      const doc: AgentRuntimeDoc = await readDoc(kv);
+      doc['subAgent'] = subAgentSettingToJson(next) as JsonValue;
+      await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(doc));
+    }),
   getCouncilSetting: async (): Promise<ModelCouncilRuntimeSetting> => {
     const doc: AgentRuntimeDoc = await readDoc(kv);
     return parseCouncilSetting(doc['modelCouncil']);
   },
-  updateCouncilSetting: async (next: ModelCouncilRuntimeSetting): Promise<void> => {
-    const doc: AgentRuntimeDoc = await readDoc(kv);
-    doc['modelCouncil'] = councilSettingToJson(next) as JsonValue;
-    await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(doc));
-  },
+  updateCouncilSetting: (next: ModelCouncilRuntimeSetting): Promise<void> =>
+    sharedKvMutex.withLock(AGENT_RUNTIME_KEY, async (): Promise<void> => {
+      const doc: AgentRuntimeDoc = await readDoc(kv);
+      doc['modelCouncil'] = councilSettingToJson(next) as JsonValue;
+      await kv.put(AGENT_RUNTIME_KEY, JSON.stringify(doc));
+    }),
 });
 
 // agent_prompts 目录绝对路径(Repository filesDir 入参)

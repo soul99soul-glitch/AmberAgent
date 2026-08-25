@@ -39,6 +39,29 @@ struct AssistantImporter {
     }
     try {
       const obj = JSON.parse(text) as ImportedAssistant;
+      // 运行时字段校验:类型断言不验证 JSON(name:123 会在 doImport 抛错卡死)
+      if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+        this.parsed = null;
+        this.errorMsg = '内容必须是 JSON 对象';
+        return;
+      }
+      if (obj.name !== undefined && typeof obj.name !== 'string') {
+        this.parsed = null;
+        this.errorMsg = 'name 必须是字符串';
+        return;
+      }
+      if (obj.systemPrompt !== undefined && typeof obj.systemPrompt !== 'string') {
+        this.parsed = null;
+        this.errorMsg = 'systemPrompt 必须是字符串';
+        return;
+      }
+      const numField = (v: number | undefined): boolean =>
+        v === undefined || (typeof v === 'number' && Number.isFinite(v));
+      if (!numField(obj.temperature) || !numField(obj.topP) || !numField(obj.maxTokens)) {
+        this.parsed = null;
+        this.errorMsg = 'temperature/topP/maxTokens 必须是数字';
+        return;
+      }
       this.parsed = obj;
       this.errorMsg = '';
       this.doneMsg = '';
@@ -65,30 +88,45 @@ struct AssistantImporter {
     return this.parsed !== null && this.parsed.maxTokens !== undefined ? String(this.parsed.maxTokens) : '';
   }
 
-  private async doImport(): Promise<void> {
-    if (this.parsed === null) return;
-    this.importing = true;
-    const p: ImportedAssistant = this.parsed;
-    const name: string = p.name !== undefined ? p.name.trim() : '';
-    if (name.length === 0) {
-      this.errorMsg = 'name 不能为空';
-      this.importing = false;
-      return;
+  private backTimer: number = -1;
+
+  aboutToDisappear(): void {
+    if (this.backTimer >= 0) {
+      clearTimeout(this.backTimer); // 用户已手动返回时不再弹出下一页
+      this.backTimer = -1;
     }
-    const kv = getChatKvStore();
-    const list: Assistant[] | null = await loadAssistants(kv);
-    const base: Assistant[] = list === null ? [] : list.slice();
-    const created: Assistant = makeAssistant({
-      name: name,
-      systemPrompt: p.systemPrompt !== undefined ? p.systemPrompt : '',
-      temperature: p.temperature !== undefined ? p.temperature : null,
-      topP: p.topP !== undefined ? p.topP : null,
-      maxTokens: p.maxTokens !== undefined && p.maxTokens > 0 ? p.maxTokens : null,
-    });
-    await saveAssistants(kv, [...base, created]);
-    this.importing = false;
-    this.doneMsg = '已导入,返回列表…';
-    setTimeout((): void => { router.back(); }, 600);
+  }
+
+  private async doImport(): Promise<void> {
+    // 重入门:进行中/已完成的导入不重复执行(load-modify-save 并发会互相覆盖)
+    if (this.parsed === null || this.importing || this.doneMsg.length > 0) return;
+    this.importing = true;
+    try {
+      const p: ImportedAssistant = this.parsed;
+      const name: string = p.name !== undefined ? p.name.trim() : '';
+      if (name.length === 0) {
+        this.errorMsg = 'name 不能为空';
+        return;
+      }
+      const kv = getChatKvStore();
+      const list: Assistant[] | null = await loadAssistants(kv);
+      const base: Assistant[] = list === null ? [] : list.slice();
+      const created: Assistant = makeAssistant({
+        name: name,
+        systemPrompt: p.systemPrompt !== undefined ? p.systemPrompt : '',
+        temperature: p.temperature !== undefined ? p.temperature : null,
+        topP: p.topP !== undefined ? p.topP : null,
+        maxTokens: p.maxTokens !== undefined && p.maxTokens > 0 ? p.maxTokens : null,
+      });
+      await saveAssistants(kv, [...base, created]);
+      this.doneMsg = '已导入,返回列表…';
+      this.backTimer = setTimeout((): void => { router.back(); }, 600);
+    } catch (e) {
+      // 存储/解析失败:页面呈现原因(不产生 unhandled rejection)
+      this.errorMsg = `导入失败:${e instanceof Error ? e.message : String(e)}`;
+    } finally {
+      this.importing = false;
+    }
   }
 
   @Builder fieldLabel(text: string): void {

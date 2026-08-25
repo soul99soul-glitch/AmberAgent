@@ -106,30 +106,48 @@ export type MemoryDreamApplyOpResult =
 
 // :172 dreamPlan.value ?: return → no_plan;:178-185 apply → hasChanges →
 //   markApplied 否则 markDismissed
-export const applyMemoryDreamPlanOp = async (
+// 单飞互斥:apply 涉及「读 pending→长时间应用→mark」多步,并发调用会双应用
+// (重复 supersede/归档/事件);单进程内串行即可
+let dreamApplyTail: Promise<void> = Promise.resolve();
+
+export const applyMemoryDreamPlanOp = (
   deps: MemoryDreamApplyOpDeps,
 ): Promise<MemoryDreamApplyOpResult> => {
-  const persisted = await deps.planStore.getPendingPlan();
+  const run: Promise<MemoryDreamApplyOpResult> = dreamApplyTail
+    .catch((): void => {})
+    .then(async (): Promise<MemoryDreamApplyOpResult> => {
+      const persisted = await deps.planStore.getPendingPlan();
   if (persisted === null) return { kind: 'no_plan' };
   const applied: MemoryDreamPlan = await runMemoryDreamApply(persisted.plan, deps.applier);
-  if (memoryDreamPlanHasChanges(applied)) {
-    await deps.planStore.markApplied(persisted.id);
-    return { kind: 'applied' };
-  }
-  await deps.planStore.markDismissed(persisted.id);
-  return { kind: 'dismissed_empty' };
+      if (memoryDreamPlanHasChanges(applied)) {
+        await deps.planStore.markApplied(persisted.id);
+        return { kind: 'applied' };
+      }
+      await deps.planStore.markDismissed(persisted.id);
+      return { kind: 'dismissed_empty' };
+    });
+  dreamApplyTail = run.then((): void => {}, (): void => {});
+  return run;
 };
 
 // ===== dismissDreamPlan(VM :200-204)=====
 
 // dreamPlan.value ?: return → false;否则 markDismissed → true
-export const dismissMemoryDreamPlanOp = async (
+export const dismissMemoryDreamPlanOp = (
   planStore: MemoryDreamPlanStore,
 ): Promise<boolean> => {
-  const persisted = await planStore.getPendingPlan();
-  if (persisted === null) return false;
-  await planStore.markDismissed(persisted.id);
-  return true;
+  // 与 apply 同链串行:apply 长时间执行期间的 dismiss 若即时落库,
+  // 随后的 markApplied 会把用户已忽略的计划改回 applied
+  const run: Promise<boolean> = dreamApplyTail
+    .catch((): void => {})
+    .then(async (): Promise<boolean> => {
+      const persisted = await planStore.getPendingPlan();
+      if (persisted === null) return false;
+      await planStore.markDismissed(persisted.id);
+      return true;
+    });
+  dreamApplyTail = run.then((): void => {}, (): void => {});
+  return run;
 };
 
 // ===== 候选操作面 =====

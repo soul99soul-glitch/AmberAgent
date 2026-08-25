@@ -227,11 +227,32 @@ export const getAgentPromptConfigRepository =
     return promptConfigRepository;
   };
 
+// agent_prompt_config 工具的 settings 端口:共享单例 + subagent 更新后同步刷新
+// hydrate 缓存 — 否则工具路径改配置后,manager 的同步读仍拿到旧快照(进程内不生效)
+class ToolSettingsPortWithCacheRefresh implements AgentPromptSettingsPort<ModelCouncilRuntimeSetting> {
+  getSubAgentSetting(): Promise<SubAgentRuntimeSetting> {
+    return hydrateSubAgentSetting();
+  }
+
+  async updateSubAgentSetting(next: SubAgentRuntimeSetting): Promise<void> {
+    await getAgentPromptSettingsPort().updateSubAgentSetting(next);
+    cachedSubAgentSetting = next;
+  }
+
+  getCouncilSetting(): Promise<ModelCouncilRuntimeSetting> {
+    return getAgentPromptSettingsPort().getCouncilSetting();
+  }
+
+  updateCouncilSetting(next: ModelCouncilRuntimeSetting): Promise<void> {
+    return getAgentPromptSettingsPort().updateCouncilSetting(next);
+  }
+}
+
 // agent_prompt_config 工具 deps(LocalTools.kt:98-100 lazy + :183 装配)
 export const getAgentPromptConfigTool = (): AgentTool =>
   createAgentPromptConfigTool<ModelCouncilRuntimeSetting, ModelCouncilSeat>({
     repository: getAgentPromptConfigRepository(),
-    settings: createEntryAgentPromptSettingsPort(getChatKvStore()),
+    settings: new ToolSettingsPortWithCacheRefresh(),
   });
 
 // D-129:AgentPermissionBroker 单例(Koin system 模块 — AgentPermissionBroker
@@ -258,11 +279,17 @@ export const getPermissionsStatusTool = (): AgentTool =>
 let agentTaskStorePromise: Promise<AgentTaskStore> | null = null;
 export const getAgentTaskStore = (): Promise<AgentTaskStore> => {
   if (agentTaskStorePromise === null) {
-    agentTaskStorePromise = AgentTaskStore.create({
+    const init: Promise<AgentTaskStore> = AgentTaskStore.create({
       taskDir: agentCronTaskDir(),
       appFilesDir: agentCronFilesDir(),
       files: createEntryAgentTaskFilePort(),
     });
+    // 失败不缓存 rejected Promise,否则依赖方(如 subagent manager)的重试
+    // 会永远复用同一个失败结果
+    init.catch((): void => {
+      if (agentTaskStorePromise === init) agentTaskStorePromise = null;
+    });
+    agentTaskStorePromise = init;
   }
   return agentTaskStorePromise;
 };
@@ -432,28 +459,40 @@ const getSubAgentRunner = (): SubAgentRunner => {
 
 // Manager 单例(Koin single 等价;deps 复用共享 store/transcript/time/path)
 let subAgentManager: SubAgentManager | null = null;
+let subAgentManagerInit: Promise<SubAgentManager> | null = null;
 export const getSubAgentManager = async (): Promise<SubAgentManager> => {
-  if (subAgentManager === null) {
-    await hydrateSubAgentSetting();
-    const deps: SubAgentManagerDeps = {
-      getSubAgentSetting: (): SubAgentRuntimeSetting => {
-        // 同步读缓存;manager 每次 start/listBuiltIns/runtimeSummary 调用
-        //   前由调用方确保已水合(ChatPage 发送前 await hydrateSubAgentSetting)
-        return cachedSubAgentSetting ?? makeSubAgentRuntimeSetting();
-      },
-      runner: getSubAgentRunner(),
-      agentTaskStore: await getAgentTaskStore(),
-      sessionAccessGrantStore: getSessionGrantStore(),
-      transcript: createEntrySubAgentTranscriptPort(),
-      newId: (): string => util.generateRandomUUID(false),
-      now: (): number => Date.now(),
-      sleep: (ms: number): Promise<void> =>
-        new Promise<void>((resolve): void => { setTimeout(resolve, ms); }),
-      transcriptPathForRun: (runId: string): string => subAgentTranscriptPathForRun(runId),
-    };
-    subAgentManager = new SubAgentManager(deps);
+  if (subAgentManager !== null) return subAgentManager;
+  // Promise 单例:并发首访不得创建双 manager(双 runs Map/双任务注册)
+  if (subAgentManagerInit === null) {
+    subAgentManagerInit = (async (): Promise<SubAgentManager> => {
+      await hydrateSubAgentSetting();
+      const deps: SubAgentManagerDeps = {
+        getSubAgentSetting: (): SubAgentRuntimeSetting => {
+          // 同步读缓存;manager 每次 start/listBuiltIns/runtimeSummary 调用
+          //   前由调用方确保已水合(ChatPage 发送前 await hydrateSubAgentSetting)
+          return cachedSubAgentSetting ?? makeSubAgentRuntimeSetting();
+        },
+        runner: getSubAgentRunner(),
+        agentTaskStore: await getAgentTaskStore(),
+        sessionAccessGrantStore: getSessionGrantStore(),
+        transcript: createEntrySubAgentTranscriptPort(),
+        newId: (): string => util.generateRandomUUID(false),
+        now: (): number => Date.now(),
+        sleep: (ms: number): Promise<void> =>
+          new Promise<void>((resolve): void => { setTimeout(resolve, ms); }),
+        transcriptPathForRun: (runId: string): string => subAgentTranscriptPathForRun(runId),
+      };
+      const manager: SubAgentManager = new SubAgentManager(deps);
+      subAgentManager = manager;
+      return manager;
+    })();
   }
-  return subAgentManager;
+  try {
+    return await subAgentManagerInit;
+  } catch (e) {
+    subAgentManagerInit = null; // 失败不缓存,允许后续重试
+    throw e instanceof Error ? e : new Error(String(e));
+  }
 };
 
 // 五件公共工具(ChatService.kt:2299 per-conversation;parentToolsProvider 捕获

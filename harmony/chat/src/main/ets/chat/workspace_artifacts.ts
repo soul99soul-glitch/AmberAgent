@@ -62,6 +62,10 @@ import type { XmlPullFactory, ZipEntryTextProvider } from './xml_pull.ts';
 export const MAX_HTTP_BODY_BYTES: number = 512 * 1024;
 export const MAX_DOWNLOAD_BYTES: number = 128 * 1024 * 1024;
 export const MAX_ARCHIVE_BYTES: number = 256 * 1024 * 1024;
+// 归档总输出上限:单条目 64MB 上限挡不住「大量 64MB 条目」的解压炸弹;
+// tar.gz 的 ISIZE 是 gzip trailer 声明(mod 2^32),同样不可信
+const MAX_ARCHIVE_OUTPUT_BYTES: number = 256 * 1024 * 1024;
+
 export const MAX_ARCHIVE_ENTRY_BYTES: number = 64 * 1024 * 1024;
 export const MAX_IMAGE_BYTES: number = 64 * 1024 * 1024;
 export const MAX_WORKSPACE_TEMP_FILE_BYTES: number = 64 * 1024 * 1024;
@@ -74,6 +78,9 @@ export interface ArtifactHttpRequest {
   headers: Record<string, string>;
   body: string | null;
   timeoutMs: number;
+  // 响应体上限(字节):平台在响应头阶段按 Content-Length 预检,
+  // 超限立即中断,避免整包收完才发现超限的内存峰值
+  maxResponseBytes?: number;
 }
 
 export interface ArtifactHttpResponse {
@@ -554,7 +561,10 @@ export const createWorkspaceArtifactTools = (
     }
     const body: string | null = toolInputString(input, 'body');
     const resp: ArtifactHttpResponse =
-      await deps.http({ method, url, headers, body, timeoutMs: timeout });
+      await deps.http({
+        method, url, headers, body, timeoutMs: timeout,
+        maxResponseBytes: MAX_HTTP_BODY_BYTES,
+      });
     const capped: Uint8Array = resp.body.subarray(0, MAX_HTTP_BODY_BYTES);
     const text: string = utf8Decode(capped);
     return {
@@ -583,7 +593,17 @@ export const createWorkspaceArtifactTools = (
     let tarBytes: Uint8Array = bytes;
     if (type === 'targz') {
       const gz: { payload: Uint8Array; isize: number } = gunzipSplit(bytes);
+      // ISIZE 是 trailer 声明(mod 2^32),先按总输出上限拒绝再分配
+      if (gz.isize > MAX_ARCHIVE_OUTPUT_BYTES) {
+        throw new Error('Archive total uncompressed size exceeds the allowed limit');
+      }
       tarBytes = await deps.inflateRaw(gz.payload, gz.isize);
+      if (tarBytes.length > MAX_ARCHIVE_OUTPUT_BYTES) {
+        throw new Error('Archive total uncompressed size exceeds the allowed limit');
+      }
+      if (tarBytes.length !== gz.isize) {
+        throw new Error('Corrupted gzip archive: inflated size does not match trailer');
+      }
     }
     let off: number = 0;
     while (out.length < limit) {
@@ -601,6 +621,9 @@ export const createWorkspaceArtifactTools = (
   ): Promise<{ files: number; directories: number; bytes: number }> => {
     const stats = { files: 0, directories: 0, bytes: 0 };
     const writeOne = async (target: string, data: Uint8Array): Promise<void> => {
+      if (stats.bytes + data.length > MAX_ARCHIVE_OUTPUT_BYTES) {
+        throw new Error('Archive total uncompressed size exceeds the allowed limit');
+      }
       if (!overwrite) {
         let exists: boolean = false;
         try {
@@ -618,6 +641,14 @@ export const createWorkspaceArtifactTools = (
     const type: ArchiveType = archiveTypeOf(path);
     if (type === 'zip') {
       const entries: ZipEntryRecord[] = readZipEntries(bytes);
+      // 预累加声明解压总量:条目级上限挡不住多大量级,先拒绝再动手
+      let declaredTotal: number = 0;
+      for (const e of entries) {
+        declaredTotal += e.uncompressedSize;
+        if (declaredTotal > MAX_ARCHIVE_OUTPUT_BYTES) {
+          throw new Error('Archive total uncompressed size exceeds the allowed limit');
+        }
+      }
       for (const e of entries) {
         const target: string = safeArchiveTarget(destination, e.name);
         if (e.name.endsWith('/')) {
@@ -634,6 +665,10 @@ export const createWorkspaceArtifactTools = (
               `Archive entry ${e.name} exceeds the ${MAX_ARCHIVE_ENTRY_BYTES} byte limit`);
           }
           data = await deps.inflateRaw(raw, e.uncompressedSize);
+          // 实际输出与声明不符 = 损坏/截断,不得把不完整文件当成功写入
+          if (data.length !== e.uncompressedSize) {
+            throw new Error(`Archive entry ${e.name} inflate size mismatch`);
+          }
         } else {
           throw new Error(`Unsupported zip compression method ${e.method}: ${e.name}`);
         }
@@ -648,7 +683,17 @@ export const createWorkspaceArtifactTools = (
     let tarBytes: Uint8Array = bytes;
     if (type === 'targz') {
       const gz: { payload: Uint8Array; isize: number } = gunzipSplit(bytes);
+      // ISIZE 是 trailer 声明(mod 2^32),先按总输出上限拒绝再分配
+      if (gz.isize > MAX_ARCHIVE_OUTPUT_BYTES) {
+        throw new Error('Archive total uncompressed size exceeds the allowed limit');
+      }
       tarBytes = await deps.inflateRaw(gz.payload, gz.isize);
+      if (tarBytes.length > MAX_ARCHIVE_OUTPUT_BYTES) {
+        throw new Error('Archive total uncompressed size exceeds the allowed limit');
+      }
+      if (tarBytes.length !== gz.isize) {
+        throw new Error('Corrupted gzip archive: inflated size does not match trailer');
+      }
     }
     let off: number = 0;
     while (true) {
@@ -738,7 +783,10 @@ export const createWorkspaceArtifactTools = (
             const url: string = toolInputRequiredString(input, 'url');
             requireHttpUrl(url);
             const resp: ArtifactHttpResponse = await deps.http(
-              { method: 'GET', url, headers: {}, body: null, timeoutMs: 30000 });
+              {
+                method: 'GET', url, headers: {}, body: null, timeoutMs: 30000,
+                maxResponseBytes: MAX_DOWNLOAD_BYTES,
+              });
             if (resp.status < 200 || resp.status > 299) {
               throw new Error(`Download failed with HTTP ${resp.status}`);
             }

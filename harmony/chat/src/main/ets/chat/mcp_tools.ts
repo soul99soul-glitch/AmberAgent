@@ -18,11 +18,12 @@
 //     (字段级 RMW 由 entry 保证,与 McpSettingsPort 既有注释同)
 
 import type { JsonObject, JsonValue } from './json.ts';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { makeAgentTool } from './tool.ts';
 import type { AgentTool, InputSchemaObj } from './tool.ts';
 import type { UIMessagePart } from './message.ts';
 import { McpManager } from './mcp_manager.ts';
-import type { McpSettingsPort } from './mcp_manager.ts';
+import type { McpMessagePart, McpSettingsPort } from './mcp_manager.ts';
 import type { McpServerConfig, McpTool, McpStatus } from './mcp_config.ts';
 import { parseMcpServersFromJson } from './mcp_import.ts';
 
@@ -136,6 +137,7 @@ export interface McpManagementToolsDeps {
   manager: McpManager;
   // D-123:skills 子系统落地后由 entry 恒传;缺省 → 不出 mcp_import_from_skill
   skills?: McpSkillManagerPort;
+  assistantIds?: string[];
 }
 
 // SkillManager 读面(McpManagementTools.kt:26/143-147 用例最小集)
@@ -210,14 +212,14 @@ export const createMcpManagementTools = (deps: McpManagementToolsDeps): AgentToo
     }),
     needsApproval: true,
     allowsAutoApproval: true,
-    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+    execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
       const obj: JsonObject = isObj(input) ? input : {};
       const serverId: string | null = contentOrNull(obj['server_id']);
       const serverName: string | null = contentOrNull(obj['name']);
       const toolName: string | null = contentOrNull(obj['tool_name']);
       if (toolName === null) throw new Error('tool_name is required');
       return deps.manager.callConfiguredTool(serverId, serverName, toolName,
-        mcpArgumentsObject(input));
+        mcpArgumentsObject(input), signal, deps.assistantIds);
     },
   }),
   makeAgentTool({
@@ -319,29 +321,42 @@ export const toolOutputPreview = (parts: UIMessagePart[]): string => {
 export interface McpServerToolsDeps {
   manager: McpManager;
   activity?: McpToolActivityPort;
+  // 本轮 assistant 的 MCP server 快照(防全局 provider 被并发页面改写)
+  assistantIds?: string[];
 }
 
 export const createMcpServerTools = (deps: McpServerToolsDeps): AgentTool[] => {
-  const tools: McpTool[] = deps.manager.getAllAvailableTools();
+  const tools: McpTool[] = deps.manager.getAllAvailableTools(deps.assistantIds);
   const counts: Map<string, number> = new Map();
   for (const tool of tools) counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+  const usedNames: Set<string> = new Set<string>();
   return tools.map((tool: McpTool): AgentTool => {
     const duplicate: boolean = (counts.get(tool.name) ?? 0) > 1;
     const serverSuffix: string = (tool.serverId ?? 'unknown').replace(/[^A-Za-z0-9_]/g, '_');
-    const exposedName: string = duplicate
+    // 全局唯一分配:同 server 重名工具/不同 server 清洗后 suffix 碰撞都会让
+    // createToolRegistry 抛 Duplicate 并阻断整轮工具构建
+    const baseName: string = duplicate
       ? `mcp__${tool.name}__${serverSuffix}` : `mcp__${tool.name}`;
+    let exposedName: string = baseName;
+    if (usedNames.has(baseName)) {
+      let seq: number = 2;
+      while (usedNames.has(`${baseName}__${seq}`)) seq++;
+      exposedName = `${baseName}__${seq}`;
+    }
+    usedNames.add(exposedName);
     return makeAgentTool({
       name: exposedName,
       description: tool.description ?? '',
       parameters: (): InputSchemaObj | null => tool.inputSchema,
       needsApproval: tool.needsApproval,
-      execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      execute: async (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> => {
         const toolCallId: string | null = deps.activity !== undefined
           ? deps.activity.startTool(exposedName, '调用 MCP 工具', JSON.stringify(input), 'MCP')
           : null;
         try {
           if (!isObj(input)) throw new Error(`Element ${typeof input} is not a JsonObject`);
-          const result: UIMessagePart[] = await deps.manager.callTool(tool.name, input, tool.serverId);
+          const result: McpMessagePart[] = await deps.manager.callTool(
+            tool.name, input, tool.serverId, signal, deps.assistantIds);
           if (deps.activity !== undefined && toolCallId !== null) {
             deps.activity.complete(toolCallId, toolOutputPreview(result));
           }

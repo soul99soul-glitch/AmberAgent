@@ -19,7 +19,7 @@ import {
 } from './error.ts';
 import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builder.ts';
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
-import type { NovelModelRunning, NovelModelRequest, NovelModelEvent } from './model_running.ts';
+import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModelStream } from './model_running.ts';
 import type { NovelProjectRepository } from './repository.ts';
 
 // ===== 运行事件 / 句柄 =====
@@ -325,6 +325,8 @@ export class NovelCreation {
       let settled: boolean = false;
       let idleTimer: ReturnType<typeof setTimeout>;
 
+      // 先置 noop 再 start:适配器同步抛错时 idle timer 触发 finish 不踩 TDZ
+      let unsub: () => void = (): void => {};
       const finish = (fn: () => void): void => {
         if (settled) return;
         settled = true;
@@ -344,8 +346,16 @@ export class NovelCreation {
       };
 
       resetIdle();
-      const stream = this.modelRunning.start(request);
-      const unsub: () => void = stream.subscribe((evt: NovelModelEvent): void => {
+      // start/subscribe 同步抛错(适配器配置/资源分配失败):走 failed 收口并清 timer
+      let stream: NovelModelStream;
+      try {
+        stream = this.modelRunning.start(request);
+      } catch (e) {
+        finish(() => { reject(providerError(`模型启动失败:${String(e)}`)); });
+        return;
+      }
+      try {
+        unsub = stream.subscribe((evt: NovelModelEvent): void => {
         if (settled) return;
         resetIdle();
         if (evt.kind === 'status') {
@@ -362,6 +372,14 @@ export class NovelCreation {
           }
           emitter.emit({ kind: 'delta', text: evt.text });
         } else if (evt.kind === 'replace') {
+          // replace 语义 = 全文替换,同样受输出上限约束(超限取消并拒绝)
+          if (evt.text.length > MAX_OUTPUT_CHARS) {
+            finish(() => {
+              this.modelRunning.cancel(request.runId);
+              reject(outputTooLarge(MAX_OUTPUT_CHARS));
+            });
+            return;
+          }
           buffer = evt.text;
           live.partial = buffer;
           emitter.emit({ kind: 'replace', text: evt.text });
@@ -371,7 +389,16 @@ export class NovelCreation {
           finish(() => { reject(providerError(evt.message)); });
         }
         // activity:忽略
-      });
+        });
+        if (settled) {
+          // subscribe 同步回放终结事件(合法行为):赋值真实退订后立即调用,
+          // 否则 emitter 持有不再触发的订阅闭包
+          unsub();
+        }
+      } catch (e) {
+        finish(() => { reject(providerError(`模型订阅失败:${String(e)}`)); });
+        return;
+      }
     });
   }
 

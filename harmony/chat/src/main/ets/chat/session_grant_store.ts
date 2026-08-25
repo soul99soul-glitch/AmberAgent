@@ -112,6 +112,11 @@ export class SessionAccessGrantStore {
       grant.usedChars + Math.max(chars, 0), grant.maxChars);
   }
 
+  // 撤销:subagent admission 被拒或初始化失败时,不留无主授权
+  revoke(grantId: string): void {
+    this.grants.delete(grantId);
+  }
+
   get(grantId: string): SessionAccessGrant | null {
     return this.grants.get(grantId) ?? null;
   }

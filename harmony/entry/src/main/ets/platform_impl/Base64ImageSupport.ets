@@ -20,21 +20,33 @@ import { getFilesRepository } from './ManagedFileStore.ets';
 
 // BitmapFactory.decodeByteArray + compressToPng:不可解码 → null
 const reencodeToPng = async (bytes: Uint8Array): Promise<Uint8Array | null> => {
+  const buffer: ArrayBuffer = bytes.buffer.slice(
+    bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const source: image.ImageSource = image.createImageSource(buffer);
   try {
-    const buffer: ArrayBuffer = bytes.buffer.slice(
-      bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    const source: image.ImageSource = image.createImageSource(buffer);
     const pixelMap: image.PixelMap = await source.createPixelMap();
     try {
       const packer: image.ImagePacker = image.createImagePacker();
-      const packed: ArrayBuffer = await packer.packToData(
-        pixelMap, { format: 'image/png', quality: 100 });
-      return new Uint8Array(packed);
+      try {
+        const packed: ArrayBuffer = await packer.packToData(
+          pixelMap, { format: 'image/png', quality: 100 });
+        return new Uint8Array(packed);
+      } finally {
+        await packer.release(); // ImagePacker 也是 native 资源(同 ImageCompress 模式)
+      }
     } finally {
       pixelMap.release();
     }
+  } finally {
+    await source.release(); // ImageSource 泄漏会累积 native 解码资源
+  }
+};
+
+// 包装:不可解码 → null(FilesManager.kt:240-246 keeping data url part 语义)
+const reencodeToPngSafe = async (bytes: Uint8Array): Promise<Uint8Array | null> => {
+  try {
+    return await reencodeToPng(bytes);
   } catch {
-    // undecodable → keeping data url part(FilesManager.kt:240-246)
     return null;
   }
 };
@@ -81,7 +93,8 @@ const saveUploadImage = async (pngBytes: Uint8Array): Promise<string> => {
 };
 
 const ENTRY_BASE64_IMAGE_DEPS: Base64ImageDeps = {
-  reencodeToPng, saveUploadImage,
+  reencodeToPng: reencodeToPngSafe,
+  saveUploadImage,
 };
 
 export const createEntryBase64ImageTransformer = (): OutputMessageTransformer =>

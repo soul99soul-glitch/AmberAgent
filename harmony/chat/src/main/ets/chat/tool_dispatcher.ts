@@ -398,7 +398,7 @@ export class AgentToolDispatcher {
       this.log(`execute: ${resolved.name} argKeys=${argKeys}`);
       const executed: UIMessagePartTool = await this.executeResolvedToolWithRetry(
         tool, resolved, retrySetting,
-        (): Promise<UIMessagePart[]> => resolved.execute(args), signal);
+        (): Promise<UIMessagePart[]> => resolved.execute(args, signal), signal);
       const hooked: ToolInvocationResult = await this.runAfterHooks(
         request, { output: executed.output, metadata: {} });
       return withHookMetadata({ ...executed, output: hooked.output }, hooked.metadata);

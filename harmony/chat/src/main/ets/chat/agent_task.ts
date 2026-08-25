@@ -410,6 +410,18 @@ export class AgentTaskRecoveryManager {
       });
     }
     if (snapshot.type === 'cron') {
+      // 禁用的 cron 任务重启后不得复活为待调度(spec.enabled 缺失的旧数据视为启用)
+      if (snapshot.spec !== null && snapshot.spec['enabled'] === false) {
+        return copyAgentTaskSnapshot(snapshot, {
+          status: 'CANCELLED',
+          queueState: 'TERMINAL',
+          recoveryState: 'CLEANUP_ONLY',
+          cancelCapability: false,
+          outputRef,
+          lastHeartbeatMs: nowMs,
+          updatedAtMs: nowMs,
+        });
+      }
       return copyAgentTaskSnapshot(snapshot, {
         status: 'QUEUED',
         queueState: 'SCHEDULED',
@@ -591,8 +603,10 @@ export class AgentTaskStore {
             ? agentTaskStatusToQueueState(status, current.type)
             : current.queueState),
         summary: patch.summary !== undefined && patch.summary !== null ? patch.summary : current.summary,
-        error: patch.error !== undefined && patch.error !== null ? patch.error : current.error,
-        lastErrorCode: patch.lastErrorCode !== undefined && patch.lastErrorCode !== null
+        // error/lastErrorCode:undefined=保留(未提供),null/''=显式清除 —
+        // retry 成功与 subagent 正常收口传 null 意图是清掉旧错误,旧语义会永远保留
+        error: patch.error !== undefined ? patch.error : current.error,
+        lastErrorCode: patch.lastErrorCode !== undefined
           ? patch.lastErrorCode
           : current.lastErrorCode,
         outputPath: patch.outputPath !== undefined && patch.outputPath !== null

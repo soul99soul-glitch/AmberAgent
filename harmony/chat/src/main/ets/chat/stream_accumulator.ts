@@ -198,7 +198,11 @@ class MutableMessage {
     } else {
       this.parts.push({
         ...deltaPart,
-        url: `data:image/png;base64,${deltaPart.url}`,
+        // 已是完整 data URI(如 JPEG/WebP)保持原样,只给裸 base64 补 PNG 前缀,
+        // 避免拼出 data:image/png;base64,data:image/jpeg;... 双前缀
+        url: deltaPart.url.startsWith('data:')
+          ? deltaPart.url
+          : `data:image/png;base64,${deltaPart.url}`,
       });
     }
   }
@@ -263,7 +267,14 @@ export class MessageStreamAccumulator {
 
   append(chunk: MessageChunk): void {
     const choice = chunk.choices.length > 0 ? chunk.choices[0] : undefined;
-    if (choice === undefined) return;
+    if (choice === undefined) {
+      // usage-only 尾块(choices:[] + usage,stream_options.include_usage 的常见形态):
+      // 不能整块丢弃,否则流式对话 token 统计丢失
+      if (chunk.usage !== null) {
+        this.active.usage = mergeUsage(this.active.usage, chunk.usage);
+      }
+      return;
+    }
     const finalMessage = choice.message;
     if (choice.delta === null && finalMessage !== null) {
       this.replaceActive(finalMessage);
@@ -273,7 +284,13 @@ export class MessageStreamAccumulator {
       return;
     }
     const delta = choice.delta !== null ? choice.delta : finalMessage;
-    if (delta === null) return;
+    if (delta === null) {
+      // finish-only chunk(无 delta/message):usage 仍须合并且 active 需收口
+      if (chunk.usage !== null) {
+        this.active.usage = mergeUsage(this.active.usage, chunk.usage);
+      }
+      return;
+    }
 
     if (this.active.role !== delta.role) {
       this.prefix.push(this.active.snapshot());
@@ -303,9 +320,16 @@ export class MessageStreamAccumulator {
 
 export const appendChunkToMessage = (msg: UIMessage, chunk: MessageChunk): UIMessage => {
   const choice = chunk.choices.length > 0 ? chunk.choices[0] : undefined;
-  if (choice === undefined) return msg;
+  if (choice === undefined) {
+    if (chunk.usage === null) return msg;
+    return { ...msg, usage: mergeUsage(msg.usage, chunk.usage) };
+  }
   const delta = choice.delta !== null ? choice.delta : choice.message;
-  if (delta === null) return msg;
+  if (delta === null) {
+    // finish-only chunk:无内容但可能携带 usage,不能整块丢
+    if (chunk.usage === null) return msg;
+    return { ...msg, usage: mergeUsage(msg.usage, chunk.usage) };
+  }
 
   let newParts: UIMessagePart[] = msg.parts;
   for (const deltaPart of delta.parts) {
@@ -335,7 +359,12 @@ export const appendChunkToMessage = (msg: UIMessage, chunk: MessageChunk): UIMes
     newAnnotations = merged;
   }
 
-  return { ...msg, parts: newParts, annotations: newAnnotations };
+  return {
+    ...msg,
+    parts: newParts,
+    annotations: newAnnotations,
+    usage: chunk.usage !== null ? mergeUsage(msg.usage, chunk.usage) : msg.usage,
+  };
 };
 
 const appendPartImmutable = (acc: UIMessagePart[], deltaPart: UIMessagePart): UIMessagePart[] => {
@@ -361,7 +390,9 @@ const appendPartImmutable = (acc: UIMessagePart[], deltaPart: UIMessagePart): UI
           metadata: deltaPart.metadata !== null ? deltaPart.metadata : last.metadata,
         }];
       }
-      return [...acc, { ...deltaPart, url: `data:image/png;base64,${deltaPart.url}` }];
+      return [...acc, { ...deltaPart, url: deltaPart.url.startsWith('data:')
+        ? deltaPart.url
+        : `data:image/png;base64,${deltaPart.url}` }];
     }
     case 'reasoning': {
       if (deltaPart.reasoning.length === 0 && deltaPart.metadata === null) return acc;
@@ -402,7 +433,11 @@ export const handleMessageChunk = (
     throw new Error('messages must not be empty');
   }
   const choice = chunk.choices.length > 0 ? chunk.choices[0] : undefined;
-  if (choice === undefined) return messages;
+  if (choice === undefined) {
+    if (chunk.usage === null) return messages;
+    const last = messages[messages.length - 1];
+    return [...messages.slice(0, -1), { ...last, usage: mergeUsage(last.usage, chunk.usage) }];
+  }
   const message = choice.delta !== null ? choice.delta : choice.message;
   if (message === null) return messages;
   const last = messages[messages.length - 1];

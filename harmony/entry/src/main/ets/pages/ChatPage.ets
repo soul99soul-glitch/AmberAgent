@@ -7,6 +7,7 @@
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
 import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, USER_BG, USER_INK } from '../design/tokens.ets';
+import type { AbortSignalLike } from '@amber/deepread-domain';
 import { router, promptAction, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { inputMethod } from '@kit.IMEKit';
@@ -39,7 +40,7 @@ import {
   convertSteerToFollowup, runAppendUserMessage,
   persistPendingQueue, persistPendingQueueWithEvent, loadPendingQueue, recordPendingQueueEvent,
   reasoningCardStateExpanded, onReasoningExpandedChange,
-  makeCompactPolicy, prepareContext, invalidateCompacts,
+  makeCompactPolicy, prepareContext, invalidateCompacts, estimateContextWindow,
   copyValidCompactsToConversation, ContextCompactionFailedError,
   conversationWithMessagesAsNodes,
   runChatTurnWithTools, runToolLoopContinuation, runRegenerateAtWithTools,
@@ -661,6 +662,11 @@ interface RuntimeHolder {
   rt: ChatRuntime | null;
 }
 
+// holder 模式:drain 的 append 失败时跨 then 回灌该 dispatch
+interface PendingRequeueHolder {
+  msg: PendingUserMessage | null;
+}
+
 // D-048:排队消息 chip 视图模型
 interface PendingChipRow {
   id: string;
@@ -694,6 +700,7 @@ struct ChatPage {
   private hasShownOnce: boolean = false;
   private generationToken: number = 0;
   private favSeq: number = 0;
+  private searchSettingsSeq: number = 0;
   @State greetName: string = '';
   @State cursorOn: boolean = true;
   @State rows: MsgRow[] = [];
@@ -1022,10 +1029,21 @@ struct ChatPage {
     }
   }
 
+  // 搜索偏好加载(序号守卫:旧的迟到 load 不得覆盖后发起的 load)
+  private refreshSearchSettings(): void {
+    const seq: number = ++this.searchSettingsSeq;
+    loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
+      if (!this.pageAlive || seq !== this.searchSettingsSeq) return;
+      this.searchSettings = s;
+    }).catch((): void => {});
+  }
+
   onPageShow(): void {
     this.pageVisible = true;
     this.themeTick = Date.now();
     this.attachKeyboardListener();
+    // D-070 补:从搜索设置页返回后重载偏好,否则继续用旧工具组/旧开关
+    this.refreshSearchSettings();
     if (!this.hasShownOnce) {
       this.hasShownOnce = true;
       return;
@@ -1190,40 +1208,46 @@ struct ChatPage {
     });
     // D-070:搜索 SDK 运行时装配(幂等)+ 搜索偏好加载(SearchTools 工具组接线)
     ensureSearchSdk();
-    loadSearchPrefs(getChatKvStore()).then((s: SearchSettings): void => {
-      this.searchSettings = s;
-    });
+    this.refreshSearchSettings();
     // D-131:AgentTaskTools 水合(异步单例就绪后入目录;ChatService.kt:2299 无条件)
     getAgentTaskTools().then((tools: AgentTool[]): void => {
+      if (!this.pageAlive) return;
       this.agentTaskToolsCache = tools;
     });
     // D-130:cron 四工具水合(异步单例就绪后入目录;LocalTools.kt:181 位)
     getAgentCronTools().then((tools: AgentTool[]): void => {
+      if (!this.pageAlive) return;
       this.agentCronToolsCache = tools;
     });
     // D-071b:OCR 种子加载(providers/ocr_model/ocr_prompt 快照)
     loadOcrSeed(getChatKvStore()).then((seed: OcrSeed): void => {
+      if (!this.pageAlive) return;
       this.ocrSeed = seed;
     });
     // D-087:compress 任务模型选择快照(resolveTaskChatModel(compressModelId),
     //   未设 = AUTO → findById 必失 → 回退当前 chat 模型,语义逐字)
     loadTaskModelIds().then((ids): void => {
+      if (!this.pageAlive) return;
       resolveTaskChatModelChoice(ids.compressModelId).then((choice): void => {
+        if (!this.pageAlive) return;
         this.compressChoice = choice;
         this.taskChoicesLoaded = true;
       });
     });
     // D-094:任务提示词快照(compress 同步位;缺失键 → DEFAULT_*)
     loadTaskPrompts().then((prompts: TaskPrompts): void => {
+      if (!this.pageAlive) return;
       this.taskPromptsCache = prompts;
     });
     // D-072:agent_runtime 快照加载(enableTimeReminder 等;缺失/损坏 → 默认 false)
     loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
+      if (!this.pageAlive) return;
       this.agentRuntime = snap;
     });
     // MiniApp:miniapp setting 快照(enabled 门;transform 调用时读,
     //   Android ctx.settings.agentRuntime.miniApp 语义)
     loadMiniAppSetting(getChatKvStore()).then((setting: MiniAppSetting): void => {
+      if (!this.pageAlive) return;
       this.miniAppSetting = setting;
     });
     // D-120:MCP manager 初始化(settings hydrate → 订阅回放真值,
@@ -1249,9 +1273,11 @@ struct ChatPage {
     });
     // D-075:mode_injections/lorebooks 快照(缺失/损坏 → [])
     loadModeInjections(getChatKvStore()).then((list: PromptInjection[]): void => {
+      if (!this.pageAlive) return;
       this.modeInjections = list;
     });
     loadLorebooks(getChatKvStore()).then((list: Lorebook[]): void => {
+      if (!this.pageAlive) return;
       this.lorebooks = list;
     });
     const params = router.getParams() as Record<string, string>;
@@ -1832,14 +1858,22 @@ struct ChatPage {
 
   // ===== D-110:ContextUsageIndicator(ChatInputUsage.kt:77-162) =====
 
+  private compactLoadSeq: number = 0;
+  private reasoningPickerSeq: number = 0;
+
   private refreshContextCompacts(): void {
     const conv: Conversation | null = this.conversation;
     if (conv === null) {
       this.contextCompacts = [];
       return;
     }
-    getCompactStore().getCompacts(conv.id)
+    // 序号 + 会话身份双守卫:快速切换会话时旧摘要不得写入新会话的足迹
+    const seq: number = ++this.compactLoadSeq;
+    const convId: string = conv.id;
+    getCompactStore().getCompacts(convId)
       .then((cs: ConversationCompact[]): void => {
+        if (!this.pageAlive || seq !== this.compactLoadSeq) return;
+        if (this.conversation === null || this.conversation.id !== convId) return;
         this.contextCompacts = cs;
       })
       .catch((): void => {});
@@ -1941,6 +1975,7 @@ struct ChatPage {
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
           .then((): Promise<Conversation> => runRegenerateAtWithTools(conv, nodeId, {
           assistant: rt.assistant,
+          finalTokenBudget: this.finalTokenBudgetOf(rt),
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
           agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
           inputTransformers: this.buildInputTransformers(rt),
@@ -2306,6 +2341,8 @@ struct ChatPage {
     this.ensureFullConversationForMutation().then((): void => {
       if (this.conversation === null || this.sending) return;
       this.runSendEdit(text);
+    }).catch((e: Error): void => {
+      this.errorMsg = e.message;
     });
   }
 
@@ -2420,6 +2457,15 @@ struct ChatPage {
   // D-087:compact 生成 provider(ConversationContextEngine.kt:408-410/:689)—
   //   压缩任务模型(resolveTaskChatModel(compressModelId),未设=AUTO→chat 模型)
   //   + TextGenerationParams(model) 最小参;快照未加载/无模型 → chat 运行态兜底
+  // 发送边界最终预算(D-055 补充):forceRatio × 上下文窗 — 组装完 agentSoul/
+  // memory/工具 prompt 等后置 system 块后,chat 域在发送边界再做一次兜底 fit,
+  // 否则 prepare 阶段的 fit 不含这些块,超长 prompt 仍会顶出窗口
+  private finalTokenBudgetOf(rt: ChatRuntime): number {
+    const cc = this.agentRuntime.contextCompaction;
+    const window: number = estimateContextWindow(rt.modelContextWindowTokens);
+    return Math.max(Math.trunc(window * cc.forceRatio), 4000);
+  }
+
   private compressProvider(rt: ChatRuntime): ChatStreamProvider {
     const choice: ChatProviderChoice | null = this.compressChoice;
     if (choice === null) return asChatStreamProvider(rt.api, () => rt.params);
@@ -2570,6 +2616,8 @@ struct ChatPage {
       createdAt: Date.now(),
     }).then((): void => {
       promptAction.showToast({ message: '已收藏', duration: 1200 });
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `收藏失败:${e.message}`, duration: 1800 });
     });
   }
 
@@ -2816,16 +2864,22 @@ struct ChatPage {
   //   choice=null(无模型配置)→ 清空段集,ReasoningPicker 不渲染。
   //   Android ChatInputComposers.kt:293-314 thinking footer 装配对应。
   private refreshReasoningPicker(choice: ChatProviderChoice | null): void {
+    // 入口统一失效在途请求(null 分支也要递增,防旧模型迟到回调复活档位)
+    const seq: number = ++this.reasoningPickerSeq;
     if (choice === null) {
       this.reasoningLevels = [];
       this.currentReasoningLevel = '';
+      this.currentModelId = '';
       return;
     }
     this.reasoningLevels = reasoningLevelsForModel(choice.model);
     this.currentModelId = choice.model.id;
     // 当前档位 = assistant 按模型记忆(无记忆 → 模型默认档位)
     const modelId: string = choice.model.id;
+    // 模型序号守卫:快速切换模型时,旧模型的迟到结果不得覆盖新模型档位
     getChatAssistants().then((assistants: Assistant[]): void => {
+      if (!this.pageAlive || seq !== this.reasoningPickerSeq) return;
+      if (this.currentModelId !== modelId) return;
       const assistantId: string = this.conversation !== null ? this.conversation.assistantId : '';
       let picked: Assistant | null = null;
       for (const a of assistants) {
@@ -2942,12 +2996,15 @@ struct ChatPage {
           settings: getMcpSettingsStore(),
           manager: getMcpManager(),
           skills: getSkillManager(),
+          assistantIds: [...rt.assistant.mcpServers],
         }),
         // D-122:activityStore 事件面接线(ChatService.kt:2262-2274 —
         //   startTool/complete/fail 三段;scope 由终表统一包覆,见 tools 组装)
         ...createMcpServerTools({
           manager: getMcpManager(),
           activity: this.mcpActivityPort(),
+          // 按轮快照:全局 assistantIdsProvider 会被栈内其它 ChatPage 改写
+          assistantIds: [...rt.assistant.mcpServers],
         }),
         // D-085c:memory_* 四件(ChatService.kt:2280 addAll(createMemoryTools),
         //   位置 = MCP 之后/ConversationContextTools 之前);
@@ -3203,8 +3260,9 @@ struct ChatPage {
       needsApproval: tool.needsApproval,
       allowsAutoApproval: tool.allowsAutoApproval,
       mandatoryApproval: tool.mandatoryApproval,
-      execute: (input: JsonValue): Promise<UIMessagePart[]> =>
-        store.withConversation(scopeId, (): Promise<UIMessagePart[]> => tool.execute(input)),
+      execute: (input: JsonValue, signal?: AbortSignalLike): Promise<UIMessagePart[]> =>
+        store.withConversation(scopeId,
+          (): Promise<UIMessagePart[]> => tool.execute(input, signal)),
     }));
   }
 
@@ -3455,12 +3513,21 @@ struct ChatPage {
       });
   }
 
+  // 出队后派发失败回灌:头插回**当前**队列并持久化(不能回写旧快照 —
+  // 期间可能有并发入队,且 KV 已是 dequeue 后状态)
+  private requeueDispatchAtHead(dispatch: PendingUserMessage): void {
+    const current: PendingUserMessage[] = this.pendingQueue;
+    this.pendingQueue = [dispatch, ...current];
+    this.syncPendingRows();
+    this.persistQueueWithEvent('enqueue', dispatch.id, dispatch.mode.toLowerCase())
+      .catch((e: Error): void => { this.errorMsg = e.message; });
+  }
+
   // 生成完成(成功/失败/中断)后出队下一条继续派发(Android 循环逐条 catch 后继续)
   private drainPendingQueue(): void {
     if (this.pendingDrainActive || this.sending || this.appendActive || this.conversation === null) return;
     if (conversationHasPendingOrUnexecutedTools(this.conversation)) return;
-    const previous: PendingUserMessage[] = this.pendingQueue;
-    const dq: DequeueNextResult = dequeueNextPendingUserMessage(previous);
+    const dq: DequeueNextResult = dequeueNextPendingUserMessage(this.pendingQueue);
     if (dq.next === null) return;
     const prep = preparePendingMessageForDispatch(dq.rest, dq.next);
     this.pendingQueue = prep.rest;
@@ -3472,11 +3539,14 @@ struct ChatPage {
         if (!prep.dispatch.answer) {
           this.pendingDrainActive = true;
           this.appendActive = true;
+          // holder:append 失败时回灌该 dispatch(闭包内重赋值,ArkTS 收窄限制)
+          const requeue: PendingRequeueHolder = { msg: null };
           // Phase 5 全量 invariant:append 落库前确保完整会话(窗口未全量先补全)
           this.ensureFullConversationForMutation().then((): void => {
             if (this.conversation === null) {
               this.appendActive = false;
               this.pendingDrainActive = false;
+              this.requeueDispatchAtHead(prep.dispatch);
               return;
             }
             runAppendUserMessage(this.conversation as Conversation, prep.dispatch.parts,
@@ -3487,21 +3557,38 @@ struct ChatPage {
                 this.refreshRowsAfterConversationChange(previous, out);
                 this.scrollToBottom();
               })
-              .catch((e: Error): void => { this.errorMsg = e.message; })
+              .catch((e: Error): void => {
+                this.errorMsg = e.message;
+                requeue.msg = prep.dispatch;
+              })
               .then((): void => {
                 this.appendActive = false;
                 this.pendingDrainActive = false;
+                if (requeue.msg !== null) {
+                  // 已出队未落库 → 回灌保消息;本轮停轮避免 失败→重试 死循环,
+                  // 下次用户操作/生成结束再触发 drain
+                  this.requeueDispatchAtHead(requeue.msg);
+                  return;
+                }
                 this.drainPendingQueue();
               });
+          }).catch((e: Error): void => {
+            // 补全失败:回灌 + 复位双标志,否则 pending queue 永久停滞
+            this.appendActive = false;
+            this.pendingDrainActive = false;
+            this.requeueDispatchAtHead(prep.dispatch);
+            this.errorMsg = e.message;
           });
           return;
         }
-        this.sendParts(prep.dispatch.parts, prep.dispatch.id);
+        this.sendParts(prep.dispatch.parts, prep.dispatch.id,
+          (): void => this.requeueDispatchAtHead(prep.dispatch));
       })
       .catch((e: Error): void => {
-        this.pendingQueue = previous;
-        this.syncPendingRows();
+        // dequeue 持久化失败:内存已是 rest — 头演回 dispatch 保消息(KV 仍是旧态,
+        // 回灌的 enqueue 持久化失败则内存已保住,尽力而为)
         this.pendingDrainActive = false;
+        this.requeueDispatchAtHead(prep.dispatch);
         this.errorMsg = e.message;
       });
   }
@@ -3561,7 +3648,12 @@ struct ChatPage {
           this.enqueuePendingParts(inputParts, true, 'STEER');
           return;
         }
-        if (this.appendActive) return;
+        if (this.appendActive) {
+          // 上一个「只追加不生成」还在跑:同样入队(answer=false,drain 时走 append 路径),
+          // 不能清空输入后静默丢弃消息
+          this.enqueuePendingParts(inputParts, false);
+          return;
+        }
         this.appendActive = true;
         // Phase 5 全量 invariant:append 落库前确保完整会话(窗口未全量先补全)
         this.ensureFullConversationForMutation().then((): void => {
@@ -3581,6 +3673,10 @@ struct ChatPage {
               this.appendActive = false;
               this.drainPendingQueue();
             });
+        }).catch((e: Error): void => {
+          // 补全失败必须复位,否则 appendActive 永久 true、后续长按发送全部被吞
+          this.appendActive = false;
+          this.errorMsg = e.message;
         });
       });
     });
@@ -3702,12 +3798,27 @@ struct ChatPage {
     });
   }
 
-  private sendParts(inputParts: UIMessagePart[], dispatchMessageId: string = ''): void {
+  private sendParts(
+    inputParts: UIMessagePart[], dispatchMessageId: string = '',
+    onPrepareFailed?: () => void,
+  ): void {
     if (this.conversation === null) return;
+    // 同步占位:ensureFull 是异步的,两次发送会在回调里才检查 sending,
+    // 双双基于同一旧快照开跑并互相覆盖保存(此处占位后 runSendParts 里的赋值幂等)
+    if (this.sending) return;
+    this.sending = true;
     // Phase 5 全量 invariant:生成必须基于完整会话(窗口未全量时先补全再开跑)
     this.ensureFullConversationForMutation().then((): void => {
-      if (this.conversation === null) return;
+      if (this.conversation === null) {
+        this.sending = false;
+        if (onPrepareFailed !== undefined) onPrepareFailed();
+        return;
+      }
       this.runSendParts(inputParts, dispatchMessageId);
+    }).catch((e: Error): void => {
+      this.sending = false;
+      this.errorMsg = e.message;
+      if (onPrepareFailed !== undefined) onPrepareFailed();
     });
   }
 
@@ -3745,6 +3856,7 @@ struct ChatPage {
         await this.prepareSubAgentTools(conv);
         const deps: ChatTurnDeps = {
           assistant: rt.assistant,
+          finalTokenBudget: this.finalTokenBudgetOf(rt),
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724;
           //   buildAgentSoulPrompt 空白 → '' 自然滤除)
           agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),

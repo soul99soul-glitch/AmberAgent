@@ -153,13 +153,23 @@ export const saveSearchPrefs = async (store: KeyValueStore, data: SearchSettings
   ]);
 };
 
+// 按存储实例串行化 load→transform→save:快速连续改设置时并发快照
+// 会互相覆盖(丢一次修改);WeakMap 键 = store 身份,测试多实例不互扰
+const updateQueues: WeakMap<object, Promise<void>> = new WeakMap<object, Promise<void>>();
+
 // update(:49-56):next == current 短路(JSON 串相等,偏差登记)
-export const updateSearchPrefs = async (
+export const updateSearchPrefs = (
   store: KeyValueStore,
   transform: (current: SearchSettings) => SearchSettings,
 ): Promise<void> => {
-  const current: SearchSettings = await loadSearchPrefs(store);
-  const next: SearchSettings = transform(current);
-  if (JSON.stringify(next) === JSON.stringify(current)) return;
-  await saveSearchPrefs(store, next);
+  const storeKey: object = store as unknown as object;
+  const previous: Promise<void> = updateQueues.get(storeKey) ?? Promise.resolve();
+  const run: Promise<void> = previous.catch((): void => {}).then(async (): Promise<void> => {
+    const current: SearchSettings = await loadSearchPrefs(store);
+    const next: SearchSettings = transform(current);
+    if (JSON.stringify(next) === JSON.stringify(current)) return;
+    await saveSearchPrefs(store, next);
+  });
+  updateQueues.set(storeKey, run.then((): void => {}, (): void => {}));
+  return run;
 };
