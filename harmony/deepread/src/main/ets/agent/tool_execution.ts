@@ -36,6 +36,7 @@ export interface PermissionDecision {
 export interface ToolDefinition {
   name: string;
   description: string;
+  schema?: object;
   allowsAutoApproval: boolean;       // 是否允许自动批准
   isHighRisk: boolean;
   // 真实 execute 由调用方提供(plan 3 由 SectionWriterTools 实现)

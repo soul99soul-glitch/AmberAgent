@@ -170,20 +170,18 @@ export const generateStages = async (
   }
 
   try {
-    context.writer.markRunning(stages);
-
     // 顺序 if(OVERVIEW → NARRATIVE → ANALYSIS → EXTENDED_READING)
     if (stages.includes('OVERVIEW')) {
-      await runSupervisor(deps, context, 'OVERVIEW', signal);
+      await runStage(deps, context, topicId, topicTitle, 'OVERVIEW', signal);
     }
     if (stages.includes('NARRATIVE')) {
-      await runSupervisor(deps, context, 'NARRATIVE', signal);
+      await runStage(deps, context, topicId, topicTitle, 'NARRATIVE', signal);
     }
     if (stages.includes('ANALYSIS')) {
-      await runSupervisor(deps, context, 'ANALYSIS', signal);
+      await runStage(deps, context, topicId, topicTitle, 'ANALYSIS', signal);
     }
     if (stages.includes('EXTENDED_READING')) {
-      await runSupervisor(deps, context, 'EXTENDED_READING', signal);
+      await runStage(deps, context, topicId, topicTitle, 'EXTENDED_READING', signal);
     }
 
     // finish 判定
@@ -220,6 +218,23 @@ export const generateStages = async (
     persist(deps, topicId, topicTitle, out);
     return { ok: hasAnyReady(out), output: out, error: hasAnyReady(out) ? null : msg };
   }
+};
+
+const runStage = async (
+  deps: RunManagerDeps,
+  context: RunContext,
+  topicId: string,
+  topicTitle: string,
+  stage: DeepReadGenerationStage,
+  signal?: AbortSignalLike,
+): Promise<void> => {
+  const running: DeepReadOutput = context.writer.markRunning([stage]);
+  persist(deps, topicId, topicTitle, {
+    ...running,
+    generationPhase: 'WRITING',
+    generationComplete: false,
+  });
+  await runSupervisor(deps, context, stage, signal);
 };
 
 // runSupervisor helper:组装 tryFallback 注入

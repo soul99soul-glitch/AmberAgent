@@ -5,14 +5,14 @@
 // 通知调度(Phase 7)用 @kit.NotificationKit 接入。
 
 import type {
-  RunManagerDeps, AiClient, UIMessage, Tool,
-  DeepReadOutput, DeepReadScheduler, HttpClient, Storage,
+  RunManagerDeps, AiClient, UIMessage, Tool, ToolDefinition,
+  DeepReadOutput, DeepReadScheduler, DeepReadCacheEntry, Observable, HttpClient, Storage,
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat,
 } from '@amber/deepread-domain';
 import {
-  run, makeEmptyDeepReadOutput, isInterruptedPhase, createSourcePrefetcher,
+  isInterruptedPhase, createScheduler, createSourcePrefetcher,
   createStorageModelRegistry, createModelCouncilManager, ModelCouncilManager,
   createNovelCreation, NovelCreation, createFileNovelRepository,
   DeepReadPlaybookRepository,
@@ -28,6 +28,7 @@ import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
+import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Context } from '@kit.AbilityKit';
 import type {
@@ -187,6 +188,147 @@ export const getAiClient = (): AiClient => getAppContainer().aiClient;
 export const getRepository = (): DeepReadRepository => getAppContainer().repository;
 export const getFileStore = (): FileStore => getAppContainer().fileStore;
 export const getModelRegistry = (): ModelRegistry => getAppContainer().modelRegistry;
+
+interface DeepReadRunRepository {
+  get: (topicId: string, title: string) => DeepReadOutput | null;
+  save: (topicId: string, title: string, output: DeepReadOutput) => void;
+  clear: (topicId: string) => void;
+}
+
+class DeepReadRunRepositoryAdapter implements DeepReadRunRepository {
+  private readonly repository: DeepReadRepository;
+  private readonly cache: Map<string, DeepReadCacheEntry> = new Map<string, DeepReadCacheEntry>();
+
+  constructor(repository: DeepReadRepository) {
+    this.repository = repository;
+  }
+
+  async hydrate(): Promise<void> {
+    const rows: DeepReadCacheEntry[] = await this.repository.listHistory(100);
+    for (const row of rows) this.cache.set(row.topicId, row);
+  }
+
+  get(topicId: string, _title: string): DeepReadOutput | null {
+    const entry: DeepReadCacheEntry | undefined = this.cache.get(topicId);
+    if (entry === undefined || entry.expiresAt <= Date.now()) return null;
+    return entry.output;
+  }
+
+  save(topicId: string, title: string, output: DeepReadOutput): void {
+    const now: number = Date.now();
+    const previous: DeepReadCacheEntry | undefined = this.cache.get(topicId);
+    const entry: DeepReadCacheEntry = {
+      topicId,
+      title,
+      sourceUrl: previous?.sourceUrl ?? null,
+      output,
+      phase: output.generationPhase,
+      attemptCount: previous?.attemptCount ?? 0,
+      lastError: firstOutputError(output),
+      createdAt: previous?.createdAt ?? now,
+      updatedAt: now,
+      expiresAt: now + 24 * 60 * 60 * 1000,
+    };
+    this.cache.set(topicId, entry);
+    this.repository.upsert(entry).catch((e: Error): void => {
+      hilog.warn(DOMAIN, TAG, 'DeepRead save failed: %{public}s', e.message);
+    });
+  }
+
+  clear(topicId: string): void {
+    this.cache.delete(topicId);
+    this.repository.delete(topicId).catch((e: Error): void => {
+      hilog.warn(DOMAIN, TAG, 'DeepRead clear failed: %{public}s', e.message);
+    });
+  }
+}
+
+const firstOutputError = (output: DeepReadOutput): string | null => {
+  const states: string[] = ['OVERVIEW', 'NARRATIVE', 'ANALYSIS', 'EXTENDED_READING'];
+  for (const stage of states) {
+    const error: string | null | undefined = output.sectionStates[stage]?.errorMessage;
+    if (error !== undefined && error !== null && error.length > 0) return error;
+  }
+  return null;
+};
+
+const toolToModelTool = (tool: ToolDefinition): Tool => ({
+  name: tool.name,
+  description: tool.description,
+  schema: tool.schema ?? {},
+  execute: tool.execute,
+});
+
+let deepReadScheduler: DeepReadScheduler | null = null;
+let deepReadSchedulerInit: Promise<DeepReadScheduler> | null = null;
+
+export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
+  if (deepReadScheduler !== null) return Promise.resolve(deepReadScheduler);
+  if (deepReadSchedulerInit !== null) return deepReadSchedulerInit;
+  deepReadSchedulerInit = (async (): Promise<DeepReadScheduler> => {
+    const container: Container = getAppContainer();
+    const runRepository: DeepReadRunRepositoryAdapter =
+      new DeepReadRunRepositoryAdapter(container.repository);
+    try {
+      await runRepository.hydrate();
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'DeepRead cache hydrate failed; continuing with empty cache: %{public}s', String(e));
+    }
+    const model: string = await container.storage.get<string>('ai_model', 'deepseek-chat');
+    const playbook: string = (await getDeepReadPlaybookRepository().read()).markdown;
+    const collectRun = (
+      messages: UIMessage[],
+      _label: string,
+      signal?: import('@amber/deepread-domain').AbortSignalLike,
+      tools?: ToolDefinition[],
+    ): Promise<UIMessage[]> => container.aiClient.generateText({
+      model,
+      messages,
+      tools: tools?.map(toolToModelTool),
+      maxSteps: 32,
+      autoApproveTools: true,
+      autoApproveHighRiskTools: true,
+      autoApprovedToolNames: tools?.map((tool: ToolDefinition): string => tool.name),
+      signal,
+    });
+    const runManager: RunManagerDeps = {
+      prefetcher: container.prefetcher,
+      aiClient: container.aiClient,
+      model,
+      playbookMarkdown: playbook,
+      collectRun,
+      repository: runRepository,
+      nowIso: (): string => new Date().toISOString().slice(0, 10),
+    };
+    const scheduler: DeepReadScheduler = createScheduler({
+      runManager,
+      observeOutput: (topicId: string): Observable<DeepReadOutput> =>
+        mapCacheEntryObservable(container.repository.observe(topicId)),
+      isInterruptedPhase,
+      createAbortController: (): import('@amber/deepread-domain').AbortControllerLike =>
+        createEntryAbortController(),
+      notifier: container.notifier,
+    });
+    deepReadScheduler = scheduler;
+    return scheduler;
+  })();
+  deepReadSchedulerInit.catch((): void => { deepReadSchedulerInit = null; });
+  return deepReadSchedulerInit;
+};
+
+const mapCacheEntryObservable = (
+  observable: Observable<DeepReadCacheEntry | null>,
+): Observable<DeepReadOutput> => ({
+  subscribe: (callback: (output: DeepReadOutput) => void): (() => void) => observable.subscribe(
+    (entry: DeepReadCacheEntry | null): void => {
+      if (entry !== null) callback(entry.output);
+    },
+  ),
+  getCurrent: (): DeepReadOutput | undefined => {
+    const entry: DeepReadCacheEntry | null | undefined = observable.getCurrent();
+    return entry === null || entry === undefined ? undefined : entry.output;
+  },
+});
 
 // D-127:DeepReadPlaybookRepository 单例(BoardModule.kt:80-83 Koin single)—
 //   根 filesDir/deep_read_playbook/;默认 markdown = rawfile

@@ -8,8 +8,9 @@
 
 import type { UIMessage } from './message.ts';
 import { makeUserMessage } from './message.ts';
-import type { AbortSignalLike } from '../platform/runtime_api.ts';
+import type { AbortControllerLike, AbortSignalLike } from '../platform/runtime_api.ts';
 import type { SectionWriterTools } from './section_writer_tools.ts';
+import type { ToolDefinition } from './tool_execution.ts';
 import type { DeepReadEvidencePack, EvidenceCard, DeepReadArticlePlan } from '../research/evidence_pack.ts';
 import { cardsFor } from '../research/evidence_pack.ts';
 import type { DeepReadGenerationStage } from '../domain/enums.ts';
@@ -28,6 +29,7 @@ export type CollectRunFn = (
   messages: UIMessage[],
   statusLabel: string,
   signal?: AbortSignalLike,
+  tools?: ToolDefinition[],
 ) => Promise<UIMessage[]>;
 
 // ===== buildPrompt(照搬 Android :661-739) =====
@@ -259,10 +261,16 @@ export const runStageSupervisorLoop = async (
         throw new Error('aborted');
       }
       const beforeWrites = writer.requiredWriteCount;
-      // signal 传入 collectRun:等待中的模型调用应随 abort 取消。
-      // 注:withTimeout 超时仅结束本 pass 的 await,后台 straggler 的写入依赖
-      // collectRun 实现侧对 signal/自身超时的遵守(JS 无结构化取消,登记限制)。
-      messages = await withTimeout(stageTimeoutMs, ctx.collectRun(messages, `深度阅读 ${STAGE_LABELS[stage]}`, ctx.signal));
+      messages = await withTimeout(
+        stageTimeoutMs,
+        (stageSignal: AbortSignalLike): Promise<UIMessage[]> => ctx.collectRun(
+          messages,
+          `深度阅读 ${STAGE_LABELS[stage]}`,
+          stageSignal,
+          writer.tools(new Set<DeepReadGenerationStage>([stage])),
+        ),
+        ctx.signal,
+      );
       const stageReady = statusOf(writer.current(), stage) === 'READY';
       // 0.1: 无 coverageReport,supplementWritten 永远 true
       const supplementWritten = writer.requiredWriteCount > initialRequiredWrites;
@@ -321,16 +329,66 @@ export class TimeoutError extends Error {
   constructor(message = 'stage timeout') { super(message); this.name = 'TimeoutError'; }
 }
 
-const withTimeout = async <T>(ms: number, p: Promise<T>): Promise<T> => {
-  if (ms <= 0) return p;
+class StageAbortSignal implements AbortSignalLike {
+  aborted: boolean = false;
+  private listeners: Array<() => void> = [];
+
+  addEventListener(type: string, listener: () => void): void {
+    if (type !== 'abort') return;
+    if (this.aborted) {
+      listener();
+      return;
+    }
+    this.listeners.push(listener);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    if (type !== 'abort') return;
+    const index: number = this.listeners.indexOf(listener);
+    if (index >= 0) this.listeners.splice(index, 1);
+  }
+
+  abort(): void {
+    if (this.aborted) return;
+    this.aborted = true;
+    const pending: Array<() => void> = this.listeners;
+    this.listeners = [];
+    for (const listener of pending) listener();
+  }
+}
+
+class StageAbortController implements AbortControllerLike {
+  readonly signal: StageAbortSignal = new StageAbortSignal();
+
+  abort(): void {
+    this.signal.abort();
+  }
+}
+
+const withTimeout = async <T>(
+  ms: number,
+  operation: (signal: AbortSignalLike) => Promise<T>,
+  parentSignal?: AbortSignalLike,
+): Promise<T> => {
+  const controller: StageAbortController = new StageAbortController();
+  let timedOut: boolean = false;
+  const cascade = (): void => { controller.abort(); };
+  parentSignal?.addEventListener?.('abort', cascade);
+  if (parentSignal?.aborted === true) controller.abort();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new TimeoutError()), ms);
+  const timeoutPromise: Promise<never> = new Promise<never>((_, reject) => {
+    timer = setTimeout((): void => {
+      timedOut = true;
+      controller.abort();
+      reject(new TimeoutError());
+    }, Math.max(ms, 0));
   });
   try {
-    return await Promise.race([p, timeoutPromise]);
+    if (ms <= 0) return await operation(controller.signal);
+    return await Promise.race([operation(controller.signal), timeoutPromise]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    parentSignal?.removeEventListener?.('abort', cascade);
   }
 };
 

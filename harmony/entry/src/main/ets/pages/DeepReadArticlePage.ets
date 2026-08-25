@@ -13,10 +13,13 @@
 import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import type { DeepReadOutput } from '@amber/deepread-domain';
-import { firstFailureMessage, isComplete } from '@amber/deepread-domain';
-import { ArticleRenderer } from '../components/ArticleRenderer.ets';
+import type {
+  DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput, DeepReadScheduler, RunResult,
+} from '@amber/deepread-domain';
+import { displayHeroImageUrl, firstFailureMessage, isComplete, STAGE_ORDER } from '@amber/deepread-domain';
+import { MarkdownText } from '../components/MarkdownText.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
+import { getDeepReadScheduler, getRepository } from '../di/AppContainer.ets';
 import {
   BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT,
   BODY, META, TITLE,
@@ -50,8 +53,15 @@ struct DeepReadArticlePage {
   @State fontScale: number = FONT_SCALE_DEFAULT;
   // G5-S1:重新生成确认对话框
   @State showRegenerateDialog: boolean = false;
+  private pageAlive: boolean = false;
+  private pageToken: number = 0;
+  private unsubscribeOutput: (() => void) | null = null;
+  private unsubscribeRunning: (() => void) | null = null;
+  private scheduler: DeepReadScheduler | null = null;
 
   aboutToAppear(): void {
+    this.pageAlive = true;
+    const token: number = ++this.pageToken;
     const rawParams: object = router.getParams() as object;
     if (rawParams === null || rawParams === undefined) {
       hilog.error(DOMAIN, TAG, 'aboutToAppear: router.getParams() is null');
@@ -62,15 +72,174 @@ struct DeepReadArticlePage {
     const params: ArticleParams = rawParams as ArticleParams;
     this.topicId = params.topicId ?? '';
     this.title = params.title ?? '';
+    if (this.topicId.length === 0 || this.title.length === 0) {
+      this.errorMsg = '文章参数缺失';
+      this.running = false;
+      return;
+    }
     hilog.info(DOMAIN, TAG, 'aboutToAppear: topicId=%{public}s title=%{public}s', this.topicId, this.title);
-    this.generateArticle();
+    this.loadArticle(token, false).catch((e: Error): void => {
+      if (this.pageAlive && token === this.pageToken) {
+        this.errorMsg = e.message;
+        this.running = false;
+      }
+    });
+  }
+
+  aboutToDisappear(): void {
+    this.pageAlive = false;
+    this.pageToken++;
+    if (this.unsubscribeOutput !== null) {
+      this.unsubscribeOutput();
+      this.unsubscribeOutput = null;
+    }
+    if (this.unsubscribeRunning !== null) {
+      this.unsubscribeRunning();
+      this.unsubscribeRunning = null;
+    }
+  }
+
+  private async loadArticle(token: number, force: boolean): Promise<void> {
+    const repository = getRepository();
+    const cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
+    if (!this.pageAlive || token !== this.pageToken) return;
+    if (!force && cached !== null) {
+      this.applyOutput(cached.output, token);
+      if (isComplete(cached.output)) {
+        this.running = false;
+        return;
+      }
+    }
+    this.scheduler = await getDeepReadScheduler();
+    if (!this.pageAlive || token !== this.pageToken) return;
+    if (this.unsubscribeOutput !== null) this.unsubscribeOutput();
+    this.unsubscribeOutput = repository.observe(this.topicId).subscribe((entry: DeepReadCacheEntry | null): void => {
+      if (!this.pageAlive || token !== this.pageToken || entry === null) return;
+      this.applyOutput(entry.output, token);
+    });
+    if (this.unsubscribeRunning !== null) this.unsubscribeRunning();
+    this.unsubscribeRunning = this.scheduler.observeRunning(this.topicId).subscribe((running: boolean): void => {
+      if (!this.pageAlive || token !== this.pageToken) return;
+      this.running = running;
+      if (running && this.currentStage.length === 0) this.currentStage = '收集来源';
+    });
+    this.running = true;
+    this.errorMsg = '';
+    this.currentStage = force ? '收集来源' : this.phaseLabel(cached?.output ?? null);
+    const result: RunResult = await this.scheduler.run(this.topicId, this.title, { force });
+    if (!this.pageAlive || token !== this.pageToken) return;
+    if (result.output !== null) this.applyOutput(result.output, token);
+    if (!result.ok && result.error !== 'aborted') {
+      this.errorMsg = result.error ?? '深度阅读生成失败';
+    }
+    this.running = false;
+  }
+
+  private applyOutput(next: DeepReadOutput, token: number): void {
+    if (!this.pageAlive || token !== this.pageToken) return;
+    this.output = next;
+    this.currentStage = this.phaseLabel(next);
+    if (next.generationPhase === 'COMPLETE' || isComplete(next)) this.errorMsg = '';
+  }
+
+  private phaseLabel(output: DeepReadOutput | null): string {
+    if (output === null) return '收集来源';
+    if (output.generationPhase === 'COLLECTING') return '收集来源';
+    if (output.generationPhase === 'PLANNING') return '规划文章';
+    if (output.generationPhase === 'WRITING') {
+      for (const stage of STAGE_ORDER) {
+        if (output.sectionStates[stage]?.status === 'RUNNING') return this.stageLabel(stage);
+      }
+      return '撰写文章';
+    }
+    if (output.generationPhase === 'COMPLETE' || isComplete(output)) return '完成';
+    if (firstFailureMessage(output) !== null) return '生成失败';
+    return '等待生成';
+  }
+
+  private stageLabel(stage: DeepReadGenerationStage): string {
+    if (stage === 'OVERVIEW') return '撰写概览';
+    if (stage === 'NARRATIVE') return '撰写时间轴叙事';
+    if (stage === 'ANALYSIS') return '撰写深度分析';
+    return '整理扩展阅读';
+  }
+
+  private heroImageUrl(): string | null {
+    return this.output === null ? null : displayHeroImageUrl(this.output);
+  }
+
+  private inlineImageAssets(): DeepReadImageAsset[] {
+    if (this.output === null) return [];
+    const hero: string | null = this.heroImageUrl();
+    return this.output.imageAssets.filter((asset: DeepReadImageAsset): boolean => asset.url !== hero);
+  }
+
+  private diagramCode(): string {
+    if (this.output === null || this.output.diagram === null) return '';
+    return '```json\\n' + JSON.stringify(this.output.diagram, null, 2) + '\\n```';
+  }
+
+  private markdownContent(): string {
+    if (this.output === null) return '';
+    const o: DeepReadOutput = this.output;
+    const lines: string[] = [];
+    if (o.summary.trim().length > 0) lines.push('## 概览', '', o.summary.trim(), '');
+    if (o.keyEntities.length > 0) lines.push('**关键实体**：' + o.keyEntities.join('、'), '');
+    if (o.timeline !== null && o.timeline.length > 0) {
+      lines.push('## 时间轴叙事', '');
+      for (const item of o.timeline) lines.push(`- **${item.date}** ${item.event}`);
+      lines.push('');
+    }
+    if (o.corePoints !== null && o.corePoints.length > 0) {
+      lines.push('## 核心要点', '');
+      for (const item of o.corePoints) {
+        lines.push(`- ${item.point}`);
+        if (item.supporting !== null && item.supporting.trim().length > 0) lines.push(`  ${item.supporting}`);
+      }
+      lines.push('');
+    }
+    if (o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) {
+      lines.push('## 深度分析', '', '### 核心分歧', '', o.analysis.coreDispute.trim(), '');
+    }
+    if (o.analysis.perspectives.length > 0) {
+      lines.push('### 各方立场', '');
+      for (const item of o.analysis.perspectives) lines.push(`- **${item.holder ?? '观点'}**：${item.viewpoint}`);
+      lines.push('');
+    }
+    if (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) {
+      lines.push('### 影响分析', '', o.analysis.implications.trim(), '');
+    }
+    if (o.analysis.quotes.length > 0) {
+      lines.push('### 引述', '');
+      for (const item of o.analysis.quotes) lines.push(`> ${item.text}${item.attribution === null ? '' : ` ——${item.attribution}`}`);
+      lines.push('');
+    }
+    if (o.extendedReading.length > 0) {
+      lines.push('## 扩展阅读', '');
+      for (const item of o.extendedReading) lines.push(`- [${item.title}](${item.url})`);
+      lines.push('');
+    }
+    if (o.references.length > 0) {
+      lines.push('## 参考来源', '');
+      o.references.forEach((item, index): void => {
+        lines.push(`${index + 1}. [${item.title}](${item.url})`);
+      });
+    }
+    return lines.join('\n');
   }
 
   generateArticle(): void {
+    const token: number = ++this.pageToken;
     this.output = null;
-    this.currentStage = '不可用';
-    this.errorMsg = '当前 Harmony 版本尚未接通深度阅读生成器与持久化，暂不能生成文章。';
-    this.running = false;
+    this.errorMsg = '';
+    this.running = true;
+    this.currentStage = '收集来源';
+    this.loadArticle(token, true).catch((e: Error): void => {
+      if (this.pageAlive && token === this.pageToken) {
+        this.errorMsg = e.message;
+        this.running = false;
+      }
+    });
   }
 
   // G5-S1:字号缩放 — zoom in/out
@@ -146,47 +315,67 @@ struct DeepReadArticlePage {
             .borderRadius(50)
             .margin({ top: 16 })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-        } else if (this.errorMsg.length > 0) {
-          // 错误状态
+        } else if (this.errorMsg.length > 0 && this.output === null) {
+          // 首次生成失败,保留明确重试入口
           Column() {
             Text('生成失败').fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 12 })
             Text(this.errorMsg).fontSize(META).fontColor(INK3).margin({ top: 6 })
-            Text('返回').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
-              .onClick(() => { router.back(); })
+            Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
+              .onClick((): void => { this.generateArticle(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
         } else if (this.output !== null) {
-          // 真实文章渲染 — ArticleRenderer 统一渲染全量块
+          // DeepReadOutput 统一组装为 Markdown,复用聊天侧原生 MarkdownText
           Scroll() {
             Column() {
-              // ── 标题:衬线大字(页级,非文章块) ──
               Text(this.title)
                 .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
                 .fontFamily('serif')
                 .lineHeight(34).maxLines(3)
-
-              // ── 状态 ──
+              if (this.heroImageUrl() !== null) {
+                Image(this.heroImageUrl() as string)
+                  .width('100%').height(220)
+                  .objectFit(ImageFit.Cover)
+                  .borderRadius(14).clip(true)
+                  .margin({ top: 14 })
+              }
               Text(this.currentStage).fontSize(META).fontColor(INK3).margin({ top: 10 })
-
-              // ── 分隔线 ──
               Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 4 })
-
-              // ── G5-S1:部分错误提示(DeepReadPartialErrorNotice) ──
               if (this.partialError().length > 0) {
                 this.PartialErrorNotice(this.partialError())
               }
-
-              // ── G5-S1:模板降级提示(TemplateFallbackNotice) ──
               if (this.templateFallbackMessage().length > 0) {
                 this.TemplateFallbackNotice(this.templateFallbackMessage())
               }
-
-              // ── 文章全量块(Hero/summary/entities/timeline/corePoints/analysis/diagram/refs) ──
-              ArticleRenderer({
-                output: this.output,
-                fontSizeMultiplier: this.fontScale,
+              MarkdownText({
+                content: this.markdownContent(),
+                fontSize: BODY * this.fontScale,
+                fontColor: INK2,
               })
-
-              // ── G5-S1:重新生成按钮(已有 output 时显示) ──
+              if (this.inlineImageAssets().length > 0) {
+                ForEach(this.inlineImageAssets(), (asset: DeepReadImageAsset) => {
+                  Column() {
+                    Image(asset.url)
+                      .width('100%').height(180)
+                      .objectFit(ImageFit.Cover)
+                      .borderRadius(14).clip(true)
+                    if (asset.caption !== null && asset.caption.trim().length > 0) {
+                      Text(asset.caption).fontSize(META).fontColor(INK3).margin({ top: 4 })
+                    }
+                  }
+                  .width('100%').margin({ top: 14 })
+                })
+              }
+              if (this.output.diagram !== null) {
+                Column() {
+                  Text('图解').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
+                  MarkdownText({
+                    content: this.diagramCode(),
+                    fontSize: META,
+                    fontColor: INK3,
+                  })
+                }
+                .width('100%').margin({ top: 14 })
+              }
               Row() {
                 Text('重新生成').fontSize(BODY).fontColor(ACCENT)
               }

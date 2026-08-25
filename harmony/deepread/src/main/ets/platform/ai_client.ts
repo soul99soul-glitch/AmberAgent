@@ -1,5 +1,5 @@
 import type { AbortSignalLike } from './runtime_api.ts';
-import type { UIMessage } from '../agent/message.ts';
+import type { UIMessage, UIMessagePartText } from '../agent/message.ts';
 // AiClient — OpenAI-compatible chat completion 客户端
 // UIMessage 从 agent/message.ts 导入(真正的 typed interface)
 
@@ -9,6 +9,9 @@ export interface Tool {
   name: string;
   description: string;
   schema: object;  // JSON schema
+  // DeepRead writer tools provide the local execution bridge. Platform clients
+  // may omit this field for ordinary model tools.
+  execute?: (input: string) => Promise<UIMessagePartText[]>;
 }
 
 // generateText 参数(ArkTS 显式 interface,不用内联对象字面量类型)
