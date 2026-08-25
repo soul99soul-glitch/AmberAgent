@@ -17,6 +17,15 @@ export interface SlashCommand {
   title: string;
   description: string;
   accent: boolean;
+  marker?: string;
+  group?: string;
+  insertText?: string;
+}
+
+export interface QuickMessage {
+  id: string;
+  title: string;
+  content: string;
 }
 
 @Component
@@ -27,35 +36,54 @@ export struct SlashCommandPanel {
 
   build(): void {
     if (this.visible) {
-      Column() {
-        if (this.commands.length > 0) {
-          ForEach(this.commands, (cmd: SlashCommand, i: number) => {
-            Row() {
-              Text(`/${cmd.title}`)
-                .fontSize(BODY).fontColor(cmd.accent ? ACCENT : INK)
-                .fontWeight(FontWeight.Medium)
-              Text(cmd.description)
-                .fontSize(LABEL).fontColor(INK3)
+      Scroll() {
+        Column() {
+          if (this.commands.length > 0) {
+            ForEach(this.commands, (cmd: SlashCommand, i: number) => {
+              if (cmd.group !== undefined && (i === 0 || this.commands[i - 1].group !== cmd.group)) {
+                Text(cmd.group)
+                  .fontSize(META).fontColor(INK3).fontWeight(FontWeight.Medium)
+                  .width('100%').padding({ left: 12, right: 12, top: i === 0 ? 8 : 10, bottom: 4 })
+              }
+              Row() {
+                Text(cmd.marker === undefined ? `/${cmd.title}` : cmd.marker)
+                  .fontSize(BODY).fontColor(cmd.accent ? ACCENT : INK)
+                  .fontWeight(FontWeight.Medium)
+                  .constraintSize({ minWidth: 28, maxWidth: 96 })
+                  .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                Column() {
+                  Text(cmd.title)
+                    .fontSize(BODY).fontColor(INK)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  Text(cmd.description)
+                    .fontSize(LABEL).fontColor(INK3)
+                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
                 .layoutWeight(1).margin({ left: 8 })
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .width('100%')
+              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+              .onClick((): void => { this.onSelect(cmd); })
+              if (i < this.commands.length - 1 && this.commands[i + 1].group === cmd.group) {
+                Divider().color(LINE).strokeWidth(0.5).margin({ left: 12 })
+              }
+            }, (cmd: SlashCommand, i: number): string => `slash-${cmd.id}-${i}`)
+          } else {
+            // G2-S4:空匹配行(对齐 Android SlashCommandEmptyRow)
+            Row() {
+              Text('无匹配命令')
+                .fontSize(LABEL).fontColor(INK3)
             }
             .width('100%')
-            .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-            .onClick((): void => { this.onSelect(cmd); })
-            if (i < this.commands.length - 1) {
-              Divider().color(LINE).strokeWidth(0.5)
-            }
-          }, (cmd: SlashCommand, i: number): string => `slash-${cmd.id}`)
-        } else {
-          // G2-S4:空匹配行(对齐 Android SlashCommandEmptyRow)
-          Row() {
-            Text('无匹配命令')
-              .fontSize(LABEL).fontColor(INK3)
+            .padding({ left: 12, right: 12, top: 10, bottom: 10 })
           }
-          .width('100%')
-          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
         }
+        .width('100%')
       }
+      .height('auto')
+      .constraintSize({ maxHeight: 320 })
+      .scrollable(ScrollDirection.Vertical)
+      .scrollBar(BarState.Off)
       .width('100%')
       .backgroundColor(SURFACE)
       .borderRadius(12)
@@ -73,11 +101,12 @@ export const buildSlashCommands = (
   subAgentEnabled: boolean,
   subAgentMode: string,
   enabledSkills: SlashCommand[] = [],
+  quickMessages: QuickMessage[] = [],
 ): SlashCommand[] => {
   const commands: SlashCommand[] = [
-    { id: 'core.clear', title: 'clear', description: '清空当前输入框', accent: false },
-    { id: 'core.compact', title: 'compact', description: '立即压缩当前对话上下文', accent: false },
-    { id: 'core.deepread', title: 'deepread', description: '全屏打开深度阅读面板', accent: true },
+    { id: 'core.clear', title: 'clear', description: '清空当前输入框', accent: false, group: '命令' },
+    { id: 'core.compact', title: 'compact', description: '立即压缩当前对话上下文', accent: false, group: '命令' },
+    { id: 'core.deepread', title: 'deepread', description: '全屏打开深度阅读面板', accent: true, group: '命令' },
   ];
   if (subAgentEnabled) {
     commands.push({
@@ -85,11 +114,33 @@ export const buildSlashCommands = (
       title: 'subagent',
       description: '引导 Agent 灵活使用 SubAgent',
       accent: false,
+      group: '命令',
     });
+  }
+  if (quickMessages.length > 0) {
+    for (const quick of quickMessages) {
+      commands.push({
+        id: `quick.${quick.id}`,
+        title: quick.title.trim().length > 0 ? quick.title : '快捷消息',
+        description: quick.content,
+        accent: false,
+        marker: 'Q',
+        group: '快捷消息',
+        insertText: quick.content,
+      });
+    }
   }
   // G2-S4:动态 skill 命令(由调用方从 SkillManager.listSkills() 装配传入)
   for (const skill of enabledSkills) {
-    commands.push(skill);
+    commands.push({
+      id: skill.id,
+      title: skill.title,
+      description: skill.description,
+      accent: skill.accent,
+      marker: skill.marker === undefined ? 'S' : skill.marker,
+      group: '技能',
+      insertText: skill.insertText,
+    });
   }
   return commands;
 };

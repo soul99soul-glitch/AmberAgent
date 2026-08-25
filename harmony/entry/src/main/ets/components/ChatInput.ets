@@ -17,7 +17,7 @@
 //   ❌ 用量面板(后续迭代)
 
 import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2 } from '../design/tokens.ets';
-import { SlashCommandPanel, SlashCommand, buildSlashCommands } from './SlashCommandPanel.ets';
+import { SlashCommandPanel, SlashCommand, QuickMessage, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
 
 @Component
@@ -32,6 +32,7 @@ export struct ChatInput {
   @Prop subAgentMode: string = 'roster';
   // G2-S4:动态 skill 斜杠命令(由 ChatPage 从 SkillManager 装配)
   @Prop skillCommands: SlashCommand[] = [];
+  @Prop quickMessages: QuickMessage[] = [];
   onTextChange: (value: string) => void = (_v: string): void => {};
   onSend: () => void = (): void => {};
   onStop: () => void = (): void => {};
@@ -64,7 +65,8 @@ export struct ChatInput {
 
   // 过滤匹配当前输入的命令(输入 /c → 匹配 clear/compact)
   private getSlashCommands(): SlashCommand[] {
-    const all: SlashCommand[] = buildSlashCommands(this.subAgentEnabled, this.subAgentMode, this.skillCommands);
+    const all: SlashCommand[] = buildSlashCommands(
+      this.subAgentEnabled, this.subAgentMode, this.skillCommands, this.quickMessages);
     if (!this.isSlashVisible()) return [];
     // 去掉前导 / 或 ／ 得到查询
     const query: string = this.text.substring(1).toLowerCase();
@@ -87,10 +89,14 @@ export struct ChatInput {
       } else {
         this.onInsertText('请根据这个任务的复杂度，主动拆分并灵活调用合适的 subagent 并行处理；等待它们返回后，再综合成一个可执行的结论：');
       }
+    } else if (cmd.id.startsWith('quick.')) {
+      this.onInsertText(cmd.insertText === undefined ? cmd.description : cmd.insertText);
     } else if (cmd.id.startsWith('skill.')) {
       // G2-S4:/skill-* → 插入 use_skill 引导(ChatInputComposers.kt:895-899)
       const skillId: string = cmd.id.substring('skill.'.length);
-      this.onInsertText(`请先调用 use_skill(skill_id="${skillId}") 执行技能，然后根据结果回答：`);
+      this.onInsertText(cmd.insertText === undefined
+        ? `请先调用 use_skill(skill_id="${skillId}") 执行技能，然后根据结果回答：`
+        : cmd.insertText);
     }
   }
 

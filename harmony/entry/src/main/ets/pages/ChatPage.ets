@@ -133,6 +133,7 @@ import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
+import type { QuickMessage } from '../components/SlashCommandPanel.ets';
 import { ContextUsageIndicator } from '../components/ChatInputUsage.ets';
 import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
@@ -695,6 +696,27 @@ interface PendingChipRow {
   preview: string;
 }
 
+const QUICK_MESSAGES_KEY: string = 'quick_messages';
+
+function decodeQuickMessages(raw: string | null): QuickMessage[] {
+  if (raw === null) return [];
+  try {
+    const parsed: QuickMessage[] = JSON.parse(raw) as QuickMessage[];
+    if (!Array.isArray(parsed)) return [];
+    const out: QuickMessage[] = [];
+    for (const item of parsed) {
+      if (typeof item.id !== 'string' || typeof item.title !== 'string' || typeof item.content !== 'string') {
+        continue;
+      }
+      if (item.content.trim().length === 0) continue;
+      out.push({ id: item.id, title: item.title, content: item.content });
+    }
+    return out;
+  } catch (_e) {
+    return [];
+  }
+}
+
 @Entry
 @Component
 struct ChatPage {
@@ -723,6 +745,7 @@ struct ChatPage {
   private generationToken: number = 0;
   private favSeq: number = 0;
   private searchSettingsSeq: number = 0;
+  private quickMessagesSeq: number = 0;
   @State greetName: string = '';
   @State cursorOn: boolean = true;
   @State rows: MsgRow[] = [];
@@ -734,6 +757,7 @@ struct ChatPage {
   @State streamingTail: UIMessage[] = [];
   @State suggestions: string[] = [];
   @State inputText: string = '';
+  @State quickMessages: QuickMessage[] = [];
   @State sending: boolean = false;
   // D-087:任务模型选择快照(compress/title/suggestion;aboutToAppear 异步加载,
   //   与 ocrSeed/searchSettings 同档;null = 未解析或无可用模型 → 回退 chat 运行态)
@@ -1052,6 +1076,16 @@ struct ChatPage {
     }
   }
 
+  private refreshQuickMessages(): void {
+    const seq: number = ++this.quickMessagesSeq;
+    getChatKvStore().get(QUICK_MESSAGES_KEY).then((raw: string | null): void => {
+      if (!this.pageAlive || seq !== this.quickMessagesSeq) return;
+      this.quickMessages = decodeQuickMessages(raw);
+    }).catch((): void => {
+      if (this.pageAlive && seq === this.quickMessagesSeq) this.quickMessages = [];
+    });
+  }
+
   // 搜索偏好加载(序号守卫:旧的迟到 load 不得覆盖后发起的 load)
   private refreshSearchSettings(): void {
     const seq: number = ++this.searchSettingsSeq;
@@ -1219,6 +1253,7 @@ struct ChatPage {
       } }, (): void => { this.greetOpacity = 0; });
     }, 3200);
     // 每次进入(含从选择器返回)刷新模型标签
+    this.refreshQuickMessages();
     describeChatModel().then((label: string): void => {
       if (this.pageAlive && this.pageVisible) this.modelLabel = label;
     });    // D-110:上下文窗口快照(ModelRegistry.MODEL_CONTEXT_WINDOW 注册表查询
@@ -4727,6 +4762,7 @@ struct ChatPage {
           hasImages: this.pendingImages.length > 0,
           subAgentEnabled: this.subAgentEnabled,
           subAgentMode: this.subAgentMode,
+          quickMessages: this.quickMessages,
           // 1:1 原型 send 键 color/bg .18s ease:输入变化经 animateTo 驱动
           onTextChange: (v: string): void => {
             animateTo({ duration: 180, curve: Curve.EaseOut }, (): void => {
