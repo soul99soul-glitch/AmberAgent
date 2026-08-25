@@ -18,8 +18,8 @@ struct SettingExperimentalPage {
       Scroll() {
         Column() {
           SectionHeader({ label: '智能体' })
-          NavRow({ label: '子代理', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingExperimentalSubAgentPageFull'); } })
-          NavRow({ label: '模型议会', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingExperimentalModelCouncilPageFull'); } })
+          NavRow({ label: '子代理', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
+          NavRow({ label: '模型议会', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
 
           SectionHeader({ label: '内容' })
           NavRow({ label: '网页挂载', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })

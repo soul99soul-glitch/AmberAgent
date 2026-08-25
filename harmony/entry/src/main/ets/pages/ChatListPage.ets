@@ -131,6 +131,13 @@ struct ChatListPage {
     router.pushUrl({ url: 'pages/ChatPage', params: params });
   }
 
+  private openSearch(): void {
+    const params: Record<string, string> = {};
+    const query: string = this.searchText.trim();
+    if (query.length > 0) params['query'] = query;
+    router.pushUrl({ url: 'pages/SearchPage', params: params });
+  }
+
   private newConversation(): void {
     router.pushUrl({ url: 'pages/ChatPage' });
   }
@@ -460,6 +467,7 @@ struct ChatListPage {
             .backgroundColor(Color.Transparent)
             .layoutWeight(1)
             .margin({ left: 16 })
+            .onClick((): void => { this.openSearch(); })
             .onChange((value: string): void => { this.searchText = value; this.refresh(); })
           if (this.searchText.length > 0) {
             Row() {

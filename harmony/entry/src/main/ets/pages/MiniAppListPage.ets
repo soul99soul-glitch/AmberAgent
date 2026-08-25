@@ -6,6 +6,7 @@
 // 导出:DocumentViewPicker 保存,失败降级写 filesDir/Download 并 toast 路径。
 
 import { router, promptAction } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -209,7 +210,7 @@ struct MiniAppListPage {
   topBar(): void {
     Row() {
       Row() {
-        Text('←').fontSize(24).fontColor(INK)
+        Icon({ name: 'back', iconSize: 20, color: INK })
       }
       .width(44).height(44)
       .justifyContent(FlexAlign.Center)

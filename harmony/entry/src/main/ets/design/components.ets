@@ -35,6 +35,7 @@ export struct BtnInk {
   text: string = '';
   fieldEnabled: boolean = true;
   onClicked: () => void = (): void => {};
+  @State private pressed: boolean = false; // Android pressable() 0.975 语义
   build(): void {
     Text(this.text)
       .fontSize(BODY).fontWeight(FontWeight.Medium)
@@ -42,6 +43,13 @@ export struct BtnInk {
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
       .backgroundColor(this.fieldEnabled ? INK : SURFACE2)
+      .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
+      .opacity(this.pressed ? 0.85 : 1)
+      .onTouch((e: TouchEvent): void => {
+        if (!this.fieldEnabled) return;
+        if (e.type === TouchType.Down) this.pressed = true;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      })
       .onClick((): void => { if (this.fieldEnabled) this.onClicked(); })
   }
 }
@@ -54,6 +62,7 @@ export struct BtnAccent {
   text: string = '';
   fieldEnabled: boolean = true;
   onClicked: () => void = (): void => {};
+  @State private pressed: boolean = false; // Android pressable() 0.975 语义
   build(): void {
     Text(this.text)
       .fontSize(BODY).fontWeight(FontWeight.Medium)
@@ -61,6 +70,13 @@ export struct BtnAccent {
       .padding({ left: 16, right: 16, top: 8, bottom: 8 })
       .borderRadius(15)
       .backgroundColor(this.fieldEnabled ? ACCENT : SURFACE2)
+      .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
+      .opacity(this.pressed ? 0.85 : 1)
+      .onTouch((e: TouchEvent): void => {
+        if (!this.fieldEnabled) return;
+        if (e.type === TouchType.Down) this.pressed = true;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      })
       .onClick((): void => { if (this.fieldEnabled) this.onClicked(); })
   }
 }

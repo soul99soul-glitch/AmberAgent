@@ -16,6 +16,7 @@
 //   命中缓存返回字节流;未授权/失败 → 空响应(Android blockedResponse 语义)。
 
 import { router, promptAction } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { webview } from '@kit.ArkWeb';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { http, connection } from '@kit.NetworkKit';
@@ -454,7 +455,7 @@ struct MiniAppRunnerPage {
   topBar(app: MiniAppRecord): void {
     Row() {
       Row() {
-        Text('←').fontSize(24).fontColor(INK)
+        Icon({ name: 'back', iconSize: 20, color: INK })
       }
       .width(44).height(44)
       .justifyContent(FlexAlign.Center)

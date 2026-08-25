@@ -4,6 +4,7 @@
 // (github vs github-trending-today 等)且不落盘 — 开关对热榜页完全无效。
 // 刷新间隔控件移除:当前无任何调度消费者,保留即假设置。
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { AmberSwitch } from '../design/components.ets';
 import { INK, INK3, SURFACE, LINE, BG, ACCENT, BODY, META, TITLE } from '../design/tokens.ets';
 import { NEWSNOW_PRESETS } from '../platform_impl/NewsNowProvider.ets';
@@ -63,7 +64,7 @@ struct HotListSourceSettingsPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
+        Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick((): void => { router.back(); })
         Text('热榜来源').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }

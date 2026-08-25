@@ -9,6 +9,7 @@
 // 请求自定义语义(Android PropertyEditor.kt 忠实):header name/value trim;
 //   body value = JSON,逐键解析,非法 JSON 行内报错并保留旧值(:160-176)
 import { ACCENT,BG,ERROR,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import type {
   Assistant, ReasoningLevel, CustomHeader, CustomBody, JsonValue, MainAgentToolProfile,
@@ -343,7 +344,7 @@ struct ChatAssistantsPage {
     Column() {
       Row() {
         Row() {
-          Text('←').fontSize(24).fontColor(INK)
+          Icon({ name: 'back', iconSize: 20, color: INK })
         }
         .width(44).height(44)
         .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)

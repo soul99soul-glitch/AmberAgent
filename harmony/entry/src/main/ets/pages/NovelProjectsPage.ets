@@ -1,5 +1,6 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
@@ -95,7 +96,7 @@ struct NovelProjectsPage {
       Column() {
         // 顶栏
         Row() {
-          Text('←').fontSize(24).fontColor(INK).onClick(() => { router.back(); })
+          Icon({ name: 'back', iconSize: 20, color: INK }).onClick(() => { router.back(); })
           Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily('serif').margin({ left: 12 })
           Blank()

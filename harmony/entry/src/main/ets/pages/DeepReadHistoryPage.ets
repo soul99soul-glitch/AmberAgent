@@ -2,6 +2,7 @@
 // 列出已生成的 DeepRead 文章(标题 + 日期 + 状态),点击重新打开;空状态
 // Android 基准: feature/ui/pages/deepread/DeepReadHistoryPage.kt
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import type { DeepReadCacheEntry } from '@amber/deepread-domain';
 import { getRepository } from '../di/AppContainer.ets';
 import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
@@ -68,7 +69,7 @@ struct DeepReadHistoryPage {
     Column() {
       // 标题栏
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick((): void => { router.back(); })
+        Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick((): void => { router.back(); })
         Text('深度阅读历史').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
           .margin({ left: 12 }).layoutWeight(1)
       }

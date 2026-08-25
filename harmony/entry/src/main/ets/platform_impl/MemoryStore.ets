@@ -123,6 +123,26 @@ const deleteMemory = (id: number): Promise<void> =>
     await writeAll(deleteMemoryRecord(all, id));
   });
 
+const updatePinned = (id: number, pinned: boolean): Promise<MemoryRecord> =>
+  enqueueWrite(async (): Promise<MemoryRecord> => {
+    const all: MemoryRecord[] = await readAll();
+    const index: number = all.findIndex((r: MemoryRecord): boolean => r.id === id);
+    if (index < 0) throw new Error(`Memory record #${id} not found`);
+    const row: MemoryRecord = all[index];
+    const updated: MemoryRecord = {
+      id: row.id, content: row.content, scope: row.scope, kind: row.kind,
+      assistantId: row.assistantId, sourceConversationId: row.sourceConversationId,
+      sourceMessageIds: row.sourceMessageIds, supersedesIds: row.supersedesIds,
+      expiresAt: row.expiresAt, confidence: row.confidence, pinned,
+      archived: row.archived, createdAt: row.createdAt, updatedAt: Date.now(),
+      lastUsedAt: row.lastUsedAt,
+    };
+    const next: MemoryRecord[] = [...all];
+    next[index] = updated;
+    await writeAll(next);
+    return updated;
+  });
+
 // getMemoriesOfAssistant(DAO :16-17)— 桶精确匹配,插入序
 const listMemoriesOfAssistant = async (assistantId: string): Promise<AssistantMemory[]> =>
   memoriesOfAssistant(await readAll(), assistantId);
@@ -379,13 +399,18 @@ export interface MemoryLibraryOps {
   deleteMemory: (id: number) => Promise<void>;
   // MemoryEventDAO :15-16 — created_at DESC LIMIT :limit(VM getRecentEventsFlow(100))
   getRecentEvents: (limit: number) => Promise<MemoryEvent[]>;
+  listBucketRecords: (bucket: string) => Promise<MemoryRecord[]>;
+  updatePinned: (id: number, pinned: boolean) => Promise<MemoryRecord>;
 }
 
 export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
   listBucket: listMemoriesOfAssistant,
+  listBucketRecords: async (bucket: string): Promise<MemoryRecord[]> =>
+    (await readAll()).filter((record: MemoryRecord): boolean => record.assistantId === bucket),
   addMemory,
   updateContent,
   deleteMemory,
+  updatePinned,
   getRecentEvents,
 });
 

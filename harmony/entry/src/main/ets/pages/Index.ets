@@ -11,6 +11,7 @@
 //   输入框回车 → ChatPage
 
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import type { ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import { SearchField } from '../components/ui/SearchField.ets';
@@ -105,9 +106,7 @@ struct Index {
       Row() {
         // 左: history icon(44 热区)
         Row() {
-          Text('☰')
-            .fontSize(22)
-            .fontColor(INK2)
+          Icon({ name: 'menu', iconSize: 22, color: INK2 })
         }
         .width(44).height(44)
         .justifyContent(FlexAlign.Center)
@@ -132,9 +131,7 @@ struct Index {
 
         // 右: edit icon(44 热区)
         Row() {
-          Text('✎')
-            .fontSize(22)
-            .fontColor(INK2)
+          Icon({ name: 'edit', iconSize: 20, color: INK2 })
         }
         .width(44).height(44)
         .justifyContent(FlexAlign.Center)
@@ -260,17 +257,18 @@ struct Index {
           .onSubmit((): void => { this.send(); })
 
         // 发送按钮(有文本时 accent, 无文本时灰)
-        Text('↑')
-          .fontSize(21)
-          .fontColor(this.inputText.trim().length > 0 ? ACCENT_INK : INK4)
-          .width(48)
-          .height(48)
-          .borderRadius(999)
-          .backgroundColor(this.inputText.trim().length > 0 ? this.accentColorStore : SURFACE2)
-          .border({ width: 1, color: this.inputText.trim().length > 0 ? this.accentColorStore : LINE })
-          .textAlign(TextAlign.Center)
-          .margin({ left: 9 })
-          .onClick((): void => { this.send(); })
+        Row() {
+          Icon({ name: 'arrow_up', iconSize: 20,
+            color: this.inputText.trim().length > 0 ? ACCENT_INK : INK4 })
+        }
+        .width(48)
+        .height(48)
+        .borderRadius(999)
+        .justifyContent(FlexAlign.Center)
+        .backgroundColor(this.inputText.trim().length > 0 ? this.accentColorStore : SURFACE2)
+        .border({ width: 1, color: this.inputText.trim().length > 0 ? this.accentColorStore : LINE })
+        .margin({ left: 9 })
+        .onClick((): void => { this.send(); })
       }
       .width('100%')
       .padding({ left: 14, right: 14, top: 10, bottom: 14 })

@@ -18,6 +18,9 @@ export struct Icon {
   @Prop color: string = INK2;
 
   private symbol(): Resource {
+    if (this.name === 'back') return $r('sys.symbol.chevron_left');
+    if (this.name === 'menu') return $r('sys.symbol.list_bullet');
+    if (this.name === 'arrow_up') return $r('sys.symbol.arrow_up');
     if (this.name === 'search') return $r('sys.symbol.magnifyingglass');
     if (this.name === 'gear') return $r('sys.symbol.gearshape');
     if (this.name === 'star') return $r('sys.symbol.star');

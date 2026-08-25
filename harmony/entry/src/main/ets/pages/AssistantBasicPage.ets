@@ -1,9 +1,11 @@
 // AssistantBasicPage — 助手基础信息编辑
-// 真实写回:name / systemPrompt / avatar emoji(Avatar emoji 变体)。
-// 占位字段(领域暂无对应,P1 登记):description / model(选项占位)。
+// 真实写回:name / systemPrompt / avatar emoji / chatModelId。
+// Assistant 域模型没有 description，页面展示 systemPrompt 的只读摘要。
 import { router } from '@kit.ArkUI';
-import { loadAssistants, saveAssistants, patchAssistant } from '@amber/chat-domain';
-import type { Assistant, Avatar } from '@amber/chat-domain';
+import {
+  loadAssistants, saveAssistants, patchAssistant, loadProviders, hasUsableAuth,
+} from '@amber/chat-domain';
+import type { Assistant, Avatar, ProviderSetting } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 import { PillSelect } from '../components/ui/Select.ets';
@@ -17,28 +19,54 @@ interface RouterParams {
 struct AssistantBasicPage {
   @State loaded: boolean = false;
   @State editName: string = '';
-  @State editDescription: string = '';
   @State editAvatarEmoji: string = '';
   @State editSystemPrompt: string = '';
+  @State modelOptions: string[] = [];
+  @State modelIds: string[] = [];
   @State editModelIndex: number = 0;
   @State saving: boolean = false;
   private assistantId: string = '';
-  private models: string[] = ['默认模型', 'GPT-4o (占位)', 'Claude (占位)', 'Gemini (占位)'];
+  private pageAlive: boolean = false;
+  private loadSeq: number = 0;
 
   aboutToAppear(): void {
+    this.pageAlive = true;
     const params = router.getParams() as RouterParams;
     this.assistantId = params !== null && params.assistantId !== undefined ? params.assistantId : '';
     this.refresh();
   }
 
+  aboutToDisappear(): void {
+    this.pageAlive = false;
+  }
+
   private async refresh(): Promise<void> {
-    const list: Assistant[] | null = await loadAssistants(getChatKvStore());
-    if (list === null) { this.loaded = true; return; }
-    const found: Assistant | null = list.find((a: Assistant): boolean => a.id === this.assistantId) ?? null;
-    if (found !== null) {
-      this.editName = found.name;
-      this.editSystemPrompt = found.systemPrompt;
-      this.editAvatarEmoji = this.emojiOf(found);
+    const seq: number = ++this.loadSeq;
+    const kv = getChatKvStore();
+    const list: Assistant[] | null = await loadAssistants(kv);
+    const providers: ProviderSetting[] | null = await loadProviders(kv);
+    if (!this.pageAlive || seq !== this.loadSeq) return;
+    if (list !== null) {
+      const found: Assistant | null = list.find((a: Assistant): boolean => a.id === this.assistantId) ?? null;
+      if (found !== null) {
+        this.editName = found.name;
+        this.editSystemPrompt = found.systemPrompt;
+        this.editAvatarEmoji = this.emojiOf(found);
+        this.modelOptions = [];
+        this.modelIds = [];
+        if (providers !== null) {
+          for (const provider of providers) {
+            if (!hasUsableAuth(provider)) continue;
+            for (const model of provider.models) {
+              if (model.type !== 'chat') continue;
+              this.modelIds.push(model.id);
+              this.modelOptions.push(`${provider.name} · ${model.modelId}`);
+            }
+          }
+        }
+        const selected: number = this.modelIds.indexOf(found.chatModelId ?? '');
+        this.editModelIndex = selected >= 0 ? selected : 0;
+      }
     }
     this.loaded = true;
   }
@@ -53,6 +81,7 @@ struct AssistantBasicPage {
   private async save(): Promise<void> {
     if (this.assistantId.length === 0) { router.back(); return; }
     this.saving = true;
+    const seq: number = this.loadSeq;
     const kv = getChatKvStore();
     const list: Assistant[] | null = await loadAssistants(kv);
     const base: Assistant[] = list === null ? [] : list.slice();
@@ -62,10 +91,13 @@ struct AssistantBasicPage {
       return patchAssistant(a, {
         name: this.editName,
         systemPrompt: this.editSystemPrompt,
+        chatModelId: this.modelIds.length > 0 && this.editModelIndex >= 0
+          && this.editModelIndex < this.modelIds.length ? this.modelIds[this.editModelIndex] : null,
         avatar: emoji.length > 0 ? { type: 'emoji', content: emoji } : { type: 'dummy' },
       });
     });
     await saveAssistants(kv, next);
+    if (!this.pageAlive || seq !== this.loadSeq) return;
     this.saving = false;
     router.back();
   }
@@ -103,14 +135,15 @@ struct AssistantBasicPage {
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
 
-            // 描述(占位)
+            // 域模型没有 description，展示系统提示词摘要，避免伪造可保存字段。
             Column() {
-              this.fieldLabel('描述')
-              TextArea({ text: this.editDescription, placeholder: '一句话描述这个助手做什么(可选)' })
-                .fontSize(BODY).height(72).backgroundColor(SURFACE)
-                .borderRadius(12).border({ width: 1, color: LINE })
+              this.fieldLabel('描述预览')
+              Text(this.editSystemPrompt.trim().length > 200
+                ? this.editSystemPrompt.trim().substring(0, 200) + '…'
+                : this.editSystemPrompt.trim().length > 0 ? this.editSystemPrompt.trim() : '暂无系统提示词')
+                .fontSize(BODY).fontColor(INK2).height(72)
+                .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
                 .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-                .onChange((v: string): void => { this.editDescription = v; })
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
 
@@ -132,18 +165,18 @@ struct AssistantBasicPage {
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
 
-            // 模型(占位选项)
+            // 模型：仅展示真实 provider 模型，并保存 Assistant.chatModelId。
             Column() {
               this.fieldLabel('模型')
-              Row() {
-                Text('当前模型').fontSize(BODY).fontColor(INK).layoutWeight(1)
+              if (this.modelOptions.length === 0) {
+                Text('暂无可用 Provider 模型').fontSize(BODY).fontColor(INK3)
+                  .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+              } else {
                 PillSelect({
-                  options: this.models, selectedIndex: this.editModelIndex,
+                  options: this.modelOptions, selectedIndex: this.editModelIndex,
                   onSelect: (i: number): void => { this.editModelIndex = i; },
                 })
               }
-              .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
-              .backgroundColor(SURFACE).borderRadius(12).border({ width: 1, color: LINE })
             }
             .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 14 })
 

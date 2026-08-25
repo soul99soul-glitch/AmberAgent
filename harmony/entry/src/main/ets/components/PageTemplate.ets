@@ -30,7 +30,7 @@ export struct PageTitleBar {
     Row() {
       if (this.showBack) {
         Row() {
-          Text('←').fontSize(24).fontColor(INK)
+          Icon({ name: 'back', iconSize: 22, color: INK })
         }
         .width(44).height(44)
         .justifyContent(FlexAlign.Center)
@@ -96,6 +96,7 @@ export struct NavRow {
   // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
   @Prop showChevron: boolean = true;
   onRowClick: () => void = (): void => {};
+  @State private pressed: boolean = false;
 
   build(): void {
     Row() {
@@ -112,15 +113,17 @@ export struct NavRow {
           .margin({ right: 8 })
       }
       if (this.showChevron) {
-        Text('›')
-          .fontSize(BODY)
-          .fontColor(INK4)
+        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
       }
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
+    .backgroundColor(this.pressed ? SURFACE2 : SURFACE)
     .border(this.isLast ? { width: 0 } : { width: { bottom: 0.5 }, color: { bottom: LINE } })
+    .onTouch((e: TouchEvent): void => {
+      if (e.type === TouchType.Down) this.pressed = true;
+      else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+    })
     .onClick((): void => { this.onRowClick(); })
   }
 }

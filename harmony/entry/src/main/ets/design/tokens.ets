@@ -24,10 +24,17 @@ export let CODE_BG: string = '#EDEAE1';    // 行内代码/工具调用背景
 
 // ── 强调色 ──
 export let ACCENT: string = '#B8623A';     // 陶土色 — 选择/当前使用
-export const ACCENT_INK: string = '#FFFFFF'; // accent 填充上的文字
+export let ACCENT_INK: string = '#FFFFFF'; // accent 填充上的文字(亮 accent 用深字)
 export let ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
-export const SIGNAL: string = '#5E9C6E';   // 活跃/在线绿(区别于 accent)
-export const ERROR: string = '#C2553F';    // 危险红
+export let SIGNAL: string = '#5E9C6E';   // 活跃/在线指示(Android 2026-06-10 起别名 accent)
+export let ERROR: string = '#C2553F';    // 危险红(深浅主题分档)
+
+// Android AmberTokens.accentInkFor:亮色 accent(如 Sage)上用深字,否则白
+const accentInkFor = (accent: string): string => {
+  if (accent === '#5E9C6E') return '#0F150E'; // sage-green
+  if (accent === '#D9A441' || accent === '#C9A461') return '#1A1408'; // gold
+  return '#FFFFFF';
+};
 
 // ── 状态色(上下文用量/压缩等活动指示;中等明度,深浅主题通用) ──
 export const STATUS_BLUE: string = '#4F86D6';   // 压缩中/信息
@@ -69,6 +76,7 @@ export const applyTheme = (dark: boolean): void => {
     USER_BG = '#ECE8DF'; USER_INK = '#1B1A17'; CODE_BG = '#211F1A';
     BG_FADE_START = '#00161512'; BG_FADE_END = '#161512'; BG_GLASS = '#CC161512';
     STATUS_BLUE_LIGHT = '#1B2638';
+    ERROR = '#FF8F86'; // Material dark error(原固定 #C2553F 在深色下过暗)
   } else {
     BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
     INK = '#1B1A17'; INK2 = '#57544C'; INK3 = '#8F8B80'; INK4 = '#B6B1A4';
@@ -76,14 +84,20 @@ export const applyTheme = (dark: boolean): void => {
     USER_BG = '#1B1A17'; USER_INK = '#F6F4EE'; CODE_BG = '#EDEAE1';
     BG_FADE_START = '#00F4F2EC'; BG_FADE_END = '#F4F2EC'; BG_GLASS = '#CCF4F2EC';
     STATUS_BLUE_LIGHT = '#E8F0FE';
+    ERROR = '#C93A2F'; // Material light error
   }
   ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
+  // signal 随 accent(Android 别名决策);accentInk 按 accent 亮度
+  SIGNAL = ACCENT;
+  ACCENT_INK = accentInkFor(ACCENT);
 };
 
 // setAccentColor — 强调色切换(色板五选一)
 export const setAccentColor = (hex: string): void => {
   ACCENT = hex;
   ACCENT_LIGHT = accentLightFor(hex, darkTheme);
+  SIGNAL = hex;
+  ACCENT_INK = accentInkFor(hex);
 };
 
 // ── 字号(对齐设计稿 px 值) ──

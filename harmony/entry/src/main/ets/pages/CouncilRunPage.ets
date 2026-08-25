@@ -1,5 +1,6 @@
 // CouncilRunPage — 议会运行面板:按席位分页查看逐字流式输出 + 综合裁决 + 结果
 import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getCouncilManager } from '../di/AppContainer.ets';
 import type { ModelCouncilManager } from '@amber/deepread-domain';
@@ -153,7 +154,7 @@ struct CouncilRunPage {
     Column() {
       // 顶栏
       Row() {
-        Text('←').fontSize(18).fontColor(INK3).onClick(() => { router.back(); })
+        Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick(() => { router.back(); })
         Text('@Council').fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
           .fontFamily('serif').margin({ left: 12 })
         Blank()

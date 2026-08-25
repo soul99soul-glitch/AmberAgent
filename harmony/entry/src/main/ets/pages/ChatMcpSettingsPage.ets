@@ -584,7 +584,7 @@ struct ChatMcpSettingsPage {
     Column() {
       // 顶栏(:126-147)— 返回 + MCP 设置 + 导入/添加(双 trailing → 保留 inline,对齐 PageTitleBar 样式)
       Row() {
-        Text('←').fontSize(24).fontColor(INK)
+        Icon({ name: 'back', iconSize: 20, color: INK })
           .onClick((): void => { router.back(); })
         Text('MCP 设置')
           .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)

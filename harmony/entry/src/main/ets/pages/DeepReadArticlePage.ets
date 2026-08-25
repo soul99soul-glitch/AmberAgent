@@ -11,6 +11,7 @@
 // 保留原有 run() 逻辑,仅增强 UI 层。
 
 import { router } from '@kit.ArkUI';
+import { Icon } from '../components/ui/Icon.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { DeepReadOutput } from '@amber/deepread-domain';
 import { firstFailureMessage, isComplete } from '@amber/deepread-domain';
@@ -108,7 +109,7 @@ struct DeepReadArticlePage {
       Column() {
         // ── 顶栏:返回 + 标题(衬线) + 字号缩放按钮 ──
         Row() {
-          Text('←').fontSize(18).fontColor(INK3)
+          Icon({ name: 'back', iconSize: 20, color: INK3 })
             .onClick(() => { router.back(); })
           Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily('serif').margin({ left: 12 }).layoutWeight(1)
