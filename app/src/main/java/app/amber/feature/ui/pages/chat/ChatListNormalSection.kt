@@ -75,18 +75,17 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toInstant
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.CursorPointer01
-import me.rerere.hugeicons.stroke.Tick01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.MousePointer2
+import com.composables.icons.lucide.Check
 import app.amber.core.context.ActiveCompactBoundary
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactLifecycleStatus
 import app.amber.core.context.ConversationCompact
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import app.amber.core.settings.getAssistantById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
@@ -376,9 +375,7 @@ internal fun ChatListNormal(
     val useTimelineHaze by remember {
         derivedStateOf { !state.isScrollInProgress }
     }
-    val chatAssistant = remember(settings.assistants, conversation.assistantId) {
-        settings.getAssistantById(conversation.assistantId)
-    }
+    val chatRegexes = settings.regexes
 
     LaunchedEffect(conversation.id, state) {
         snapshotFlow {
@@ -418,12 +415,12 @@ internal fun ChatListNormal(
         conversation.id,
         chatTimelinePlan,
         timelineLoading,
-        chatAssistant,
+        chatRegexes,
     ) {
         snapshotFlow {
             state.markdownPrewarmTexts(
                 messageNodes = conversation.messageNodes,
-                assistant = chatAssistant,
+                regexes = chatRegexes,
                 loadingLastMessage = timelineLoading,
                 timelinePlan = chatTimelinePlan,
             )
@@ -644,7 +641,6 @@ internal fun ChatListNormal(
                                         isLoadingMessage,
                                         settings.providers,
                                         settings.chatModelId,
-                                        chatAssistant?.chatModelId,
                                     ) {
                                         node.currentMessage.modelId?.let { settings.findModelById(it) }
                                             ?: if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
@@ -656,7 +652,7 @@ internal fun ChatListNormal(
                                     ChatMessage(
                                         node = node,
                                         model = messageModel,
-                                        assistant = chatAssistant,
+                                        regexes = chatRegexes,
                                         loading = isLoadingMessage,
                                         timelineLoading = timelineLoading,
                                         onRegenerate = {
@@ -761,7 +757,6 @@ internal fun ChatListNormal(
                                         isLoadingMessage,
                                         settings.providers,
                                         settings.chatModelId,
-                                        chatAssistant?.chatModelId,
                                     ) {
                                         node.currentMessage.modelId?.let { settings.findModelById(it) }
                                             ?: if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
@@ -774,7 +769,7 @@ internal fun ChatListNormal(
                                         node = node,
                                         item = virtualItem,
                                         model = messageModel,
-                                        assistant = chatAssistant,
+                                        regexes = chatRegexes,
                                         loading = isLoadingMessage,
                                         onRegenerate = {
                                             onRegenerate(node.currentMessage)
@@ -978,7 +973,7 @@ internal fun ChatListNormal(
                                 selectedItems.clear()
                             }
                         ) {
-                            Icon(HugeIcons.Cancel01, null)
+                            Icon(Lucide.X, null)
                         }
                     }
                     Tooltip(
@@ -999,7 +994,7 @@ internal fun ChatListNormal(
                                 }
                             }
                         ) {
-                            Icon(HugeIcons.CursorPointer01, null)
+                            Icon(Lucide.MousePointer2, null)
                         }
                     }
                     Tooltip(
@@ -1028,7 +1023,7 @@ internal fun ChatListNormal(
                                 }
                             }
                         ) {
-                            Icon(HugeIcons.Tick01, null)
+                            Icon(Lucide.Check, null)
                         }
                     }
                 }
@@ -1104,7 +1099,7 @@ private fun BackToBottomButton(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
-                    imageVector = HugeIcons.ArrowDown01,
+                    imageVector = Lucide.ArrowDown,
                     contentDescription = null,
                     tint = chatTheme.inkSoft,
                     modifier = Modifier.size(16.dp),

@@ -10,14 +10,14 @@ import kotlinx.serialization.json.Json
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.cache.LruCache
 import app.amber.common.cache.SingleFileCacheStore
 import app.amber.core.ai.prompts.resolveVisionRecognitionPrompt
-import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import org.koin.core.component.KoinComponent
@@ -69,7 +69,12 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                         parts = message.parts.map { part ->
                             when {
                                 part is UIMessagePart.Image && part.url.isNotBlank() -> {
-                                    UIMessagePart.Text(performImageRecognition(part))
+                                    UIMessagePart.Text(
+                                        performImageRecognition(
+                                            part = part,
+                                            settings = ctx.settings,
+                                        )
+                                    )
                                 }
 
                                 else -> part
@@ -85,10 +90,10 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
 
     suspend fun performImageRecognition(
         part: UIMessagePart.Image,
+        settings: Settings,
         promptOverride: String? = null,
         useCache: Boolean = true,
     ): String {
-        val settings = get<SettingsAggregator>().settingsFlow.value
         val model = settings.findModelById(settings.ocrModelId)
             ?: throw VisualRecognitionException("请先配置视觉识别模型")
         if (Modality.IMAGE !in model.inputModalities) {
@@ -107,9 +112,9 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
             }
         }
 
-        val provider = get<ProviderManager>().getProviderByType(providerSetting)
+        val provider = get<ProviderCatalog>().text(providerSetting)
         val result = runCatching {
-            provider.generateText(
+            provider.complete(
                 providerSetting = providerSetting,
                 messages = listOf(
                     UIMessage.system(prompt),

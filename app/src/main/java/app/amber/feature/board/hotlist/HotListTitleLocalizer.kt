@@ -8,7 +8,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.boardRequestBodies
@@ -21,7 +21,7 @@ import kotlin.uuid.Uuid
 
 class HotListTitleLocalizer(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val json: Json,
 ) {
     suspend fun localize(
@@ -97,7 +97,7 @@ class HotListTitleLocalizer(
         val prompt = buildPrompt(targets)
         return try {
             val response = withTimeout(MODEL_TIMEOUT_MS) {
-                providerManager.getProviderByType(provider).generateText(
+                providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(
                         UIMessage.system("你是 AmberAgent 的中文资讯标题编辑。仅输出合法 JSON。"),

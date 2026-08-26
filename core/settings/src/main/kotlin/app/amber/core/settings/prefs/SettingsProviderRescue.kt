@@ -80,7 +80,7 @@ class SettingsProviderRescue(
                 if (!entry.isDirectory && entry.name == "settings.json") {
                     val settingsJson = zip.readBytes().decodeToString()
                     return@runCatching CachedSettingsBackup(
-                        settings = json.decodeFromString<Settings>(settingsJson),
+                        settings = json.decodeSettingsDroppingLegacySearchService(settingsJson),
                         refs = secretRedactor.extractRefsFromSettingsJson(json, settingsJson),
                     )
                 }
@@ -103,7 +103,7 @@ class SettingsProviderRescue(
         if (displaySetting.looksLikeDefaultIdentity() && !backup.displaySetting.looksLikeDefaultIdentity()) {
             return true
         }
-        if (assistants.size < backup.assistants.size || quickMessages.size < backup.quickMessages.size) {
+        if (quickMessages.size < backup.quickMessages.size) {
             return true
         }
         if (mcpServers.size < backup.mcpServers.size || modeInjections.size < backup.modeInjections.size) {
@@ -137,9 +137,23 @@ class SettingsProviderRescue(
             modelGroupSessionDefaults = backup.modelGroupSessionDefaults.filter { it.groupId.isNotBlank() },
             providers = backup.providers,
             imageModelsSeededVersion = backup.imageModelsSeededVersion,
-            assistantId = backup.assistantId,
-            assistants = backup.assistants,
-            assistantTags = backup.assistantTags,
+            systemPrompt = backup.systemPrompt,
+            temperature = backup.temperature,
+            topP = backup.topP,
+            contextMessageSize = backup.contextMessageSize,
+            streamOutput = backup.streamOutput,
+            messageTemplate = backup.messageTemplate,
+            presetMessages = backup.presetMessages,
+            regexes = backup.regexes,
+            reasoningLevel = backup.reasoningLevel,
+            maxTokens = backup.maxTokens,
+            customHeaders = backup.customHeaders,
+            customBodies = backup.customBodies,
+            rememberedReasoningLevelsByModelId = backup.rememberedReasoningLevelsByModelId,
+            enabledSkills = backup.enabledSkills,
+            enabledMcpServerIds = backup.enabledMcpServerIds,
+            enabledModeInjectionIds = backup.enabledModeInjectionIds,
+            enabledLorebookIds = backup.enabledLorebookIds,
             searchServices = backup.searchServices,
             searchCommonOptions = backup.searchCommonOptions,
             searchServiceSelected = backup.searchServiceSelected,
@@ -154,8 +168,6 @@ class SettingsProviderRescue(
             mcpServers = backup.mcpServers,
             webDavConfig = backup.webDavConfig,
             s3Config = backup.s3Config,
-            ttsProviders = backup.ttsProviders,
-            selectedTTSProviderId = backup.selectedTTSProviderId,
             modeInjections = backup.modeInjections,
             lorebooks = backup.lorebooks,
             quickMessages = backup.quickMessages,
@@ -182,7 +194,6 @@ class SettingsProviderRescue(
         providerRecoveryScore() +
             searchRecoveryScore() +
             (if (!displaySetting.looksLikeDefaultIdentity()) 80 else 0) +
-            assistants.size * 5 +
             quickMessages.size * 3 +
             mcpServers.size * 5 +
             modeInjections.size * 3 +

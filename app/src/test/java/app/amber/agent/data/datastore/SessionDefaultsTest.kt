@@ -2,10 +2,6 @@ package app.amber.core.settings
 
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
-import app.amber.core.model.Assistant
-import app.amber.core.model.reasoningLevelForModel
-import app.amber.core.model.withChatModelReasoningMemory
-import app.amber.core.model.withReasoningLevelForModel
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import kotlin.uuid.Uuid
@@ -25,10 +21,7 @@ class SessionDefaultsTest {
         )
         val model = Model(modelId = "gpt-5.4")
 
-        val resolved = settings.resolveSessionDefaults(
-            assistant = Assistant(),
-            model = model,
-        )
+        val resolved = settings.resolveSessionDefaults(model)
 
         assertEquals(ReasoningLevel.HIGH, resolved.reasoningLevel)
         assertEquals(64, resolved.contextMessageSize)
@@ -38,6 +31,9 @@ class SessionDefaultsTest {
     @Test
     fun `explicit assistant session settings win over model group defaults`() {
         val settings = Settings(
+            reasoningLevel = ReasoningLevel.OFF,
+            contextMessageSize = 12,
+            maxTokens = 512,
             modelGroupSessionDefaults = listOf(
                 ModelGroupSessionDefault(
                     groupId = "openai_reasoning",
@@ -49,14 +45,7 @@ class SessionDefaultsTest {
         )
         val model = Model(modelId = "gpt-5.4")
 
-        val resolved = settings.resolveSessionDefaults(
-            assistant = Assistant(
-                reasoningLevel = ReasoningLevel.OFF,
-                contextMessageSize = 12,
-                maxTokens = 512,
-            ),
-            model = model,
-        )
+        val resolved = settings.resolveSessionDefaults(model)
 
         assertEquals(ReasoningLevel.OFF, resolved.reasoningLevel)
         assertEquals(12, resolved.contextMessageSize)
@@ -68,21 +57,18 @@ class SessionDefaultsTest {
         assertEquals(
             ReasoningLevel.MEDIUM,
             Settings().resolveSessionDefaults(
-                assistant = Assistant(),
                 model = Model(modelId = "gpt-5.4"),
             ).reasoningLevel,
         )
         assertEquals(
             ReasoningLevel.HIGH,
             Settings().resolveSessionDefaults(
-                assistant = Assistant(),
                 model = Model(modelId = "DeepSeek-V4-Pro"),
             ).reasoningLevel,
         )
         assertEquals(
             ReasoningLevel.AUTO,
             Settings().resolveSessionDefaults(
-                assistant = Assistant(),
                 model = Model(modelId = "glm-5"),
             ).reasoningLevel,
         )
@@ -92,12 +78,12 @@ class SessionDefaultsTest {
     fun `assistant reasoning memory restores per selected model`() {
         val gptModelId = Uuid.parse("11111111-1111-1111-1111-111111111111")
         val kimiModelId = Uuid.parse("22222222-2222-2222-2222-222222222222")
-        val assistant = Assistant(
+        val settings = Settings(
             chatModelId = gptModelId,
             reasoningLevel = ReasoningLevel.HIGH,
         )
 
-        val onKimi = assistant.withChatModelReasoningMemory(
+        val onKimi = settings.withChatModelReasoningMemory(
             currentModelId = gptModelId,
             currentDefaultReasoningLevel = ReasoningLevel.MEDIUM,
             selectedModelId = kimiModelId,
@@ -123,9 +109,9 @@ class SessionDefaultsTest {
     fun `slash reasoning selection is remembered for current model`() {
         val gptModelId = Uuid.parse("33333333-3333-3333-3333-333333333333")
 
-        val assistant = Assistant().withReasoningLevelForModel(gptModelId, ReasoningLevel.XHIGH)
+        val settings = Settings().withReasoningLevelForModel(gptModelId, ReasoningLevel.XHIGH)
 
-        assertEquals(ReasoningLevel.XHIGH, assistant.reasoningLevel)
-        assertEquals(ReasoningLevel.XHIGH, assistant.reasoningLevelForModel(gptModelId, ReasoningLevel.MEDIUM))
+        assertEquals(ReasoningLevel.XHIGH, settings.reasoningLevel)
+        assertEquals(ReasoningLevel.XHIGH, settings.reasoningLevelForModel(gptModelId, ReasoningLevel.MEDIUM))
     }
 }

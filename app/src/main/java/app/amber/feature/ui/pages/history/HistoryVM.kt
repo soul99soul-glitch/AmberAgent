@@ -5,15 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.cachedIn
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ChatService
@@ -23,19 +16,9 @@ private const val TAG = "HistoryVM"
 
 class HistoryVM(
     private val conversationRepo: ConversationRepository,
-    private val settingsStore: SettingsAggregator,
     private val chatService: ChatService,
 ) : ViewModel() {
-    val assistant = settingsStore.settingsFlow
-        .map { it.getCurrentAssistant() }
-        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
-
-    val conversations = settingsStore.settingsFlow
-        .map { it.getCurrentAssistant().id }
-        .distinctUntilChanged()
-        .flatMapLatest { assistantId ->
-            conversationRepo.getConversationsOfAssistantPaging(assistantId)
-        }
+    val conversations = conversationRepo.getConversationsPaging()
         .catch {
             Log.e(TAG, "Error: ${it.message}")
         }
@@ -62,9 +45,8 @@ class HistoryVM(
     }
 
     fun deleteAllConversations() {
-        val assistant = assistant.value ?: return
         viewModelScope.launch {
-            chatService.deleteConversationsOfAssistant(assistant.id)
+            chatService.deleteAllConversations()
         }
     }
 

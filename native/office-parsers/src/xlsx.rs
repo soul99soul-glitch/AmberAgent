@@ -3,7 +3,7 @@
 //! `WorkspaceArtifactTools.xlsx` branch uses a custom in-app helper that we
 //! preserve as the fallback path).
 //!
-//! Output shape mirrors `pptx.rs` for visual consistency:
+//! Output is a Markdown pipe-table representation:
 //!
 //! ```text
 //! ## Sheet: <name>
@@ -26,8 +26,7 @@
 //!   string variants when present, raw float otherwise).
 //! - Empty cells become a single ASCII space inside the pipe column for
 //!   shape stability (matches markdown table convention).
-//! - Sheets with zero non-empty rows produce just the heading + a blank
-//!   line — same shape pptx.rs uses for slides with no content.
+//! - Sheets with zero non-empty rows produce just the heading + a blank line.
 
 use calamine::{open_workbook_auto, Data, Reader};
 

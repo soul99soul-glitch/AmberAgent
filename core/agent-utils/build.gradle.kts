@@ -14,4 +14,6 @@ kotlin {
 
 dependencies {
     api(libs.kotlinx.serialization.json)
+    implementation(libs.jetbrains.markdown)
+    testImplementation(libs.junit)
 }

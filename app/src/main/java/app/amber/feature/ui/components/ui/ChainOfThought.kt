@@ -40,12 +40,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Sparkles
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Sparkles
 import app.amber.agent.R
 
 private val LocalCardColor = staticCompositionLocalOf { Color.White }
@@ -144,7 +144,7 @@ fun <T> ChainOfThought(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                                imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.primary,
@@ -412,14 +412,14 @@ private class ChainOfThoughtScopeImpl : ChainOfThoughtScope {
                 // 指示器：onClick 显示向右箭头，content 显示展开/折叠箭头
                 if (onClick != null) {
                     Icon(
-                        imageVector = HugeIcons.ArrowRight01,
+                        imageVector = Lucide.ArrowRight,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else if (hasContent) {
                     Icon(
-                        imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                        imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -504,17 +504,17 @@ private fun ChainOfThoughtPreview() {
                         .fillMaxWidth()
                         .padding(16.dp),
                     steps = listOf(
-                        StepData("Searching the web", HugeIcons.Search01, "3 results", hasContent = true),
-                        StepData("Reading documents", HugeIcons.Sparkles, "Completed", hasOnClick = true),
+                        StepData("Searching the web", Lucide.Search, "3 results", hasContent = true),
+                        StepData("Reading documents", Lucide.Sparkles, "Completed", hasOnClick = true),
                         StepData(
                             "Analyzing results (controlled)",
-                            HugeIcons.Sparkles,
+                            Lucide.Sparkles,
                             "In progress",
                             hasContent = true,
                             controlled = true
                         ),
                         StepData("Step without icon", null, null),
-                        StepData("Final step", HugeIcons.Sparkles, "Done"),
+                        StepData("Final step", Lucide.Sparkles, "Done"),
                     ),
                     collapsedVisibleCount = 2,
                 ) { step ->

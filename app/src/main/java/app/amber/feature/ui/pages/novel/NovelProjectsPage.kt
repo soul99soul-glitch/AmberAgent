@@ -65,11 +65,11 @@ import app.amber.feature.ui.theme.LocalAmberType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.BookOpen01
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.MoreVertical
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.BookOpenText
+import com.composables.icons.lucide.Trash
+import com.composables.icons.lucide.EllipsisVertical
 import org.koin.androidx.compose.koinViewModel
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -207,7 +207,7 @@ fun NovelProjectsPage(
                 contentColor = tokens.bg,
                 shape = CircleShape,
             ) {
-                Icon(HugeIcons.Add01, contentDescription = "新建项目")
+                Icon(Lucide.Plus, contentDescription = "新建项目")
             }
         },
     ) { padding ->
@@ -420,7 +420,7 @@ private fun NovelProjectCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            NovelIconCircle(icon = HugeIcons.BookOpen01)
+            NovelIconCircle(icon = Lucide.BookOpenText)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     text = project.name.ifBlank { "未命名项目" },
@@ -438,7 +438,7 @@ private fun NovelProjectCard(
             }
             Box {
                 NovelIconButton(
-                    icon = HugeIcons.MoreVertical,
+                    icon = Lucide.EllipsisVertical,
                     contentDescription = "更多操作",
                     onClick = { menuExpanded = true },
                 )
@@ -471,7 +471,7 @@ private fun NovelProjectCard(
                         },
                         leadingIcon = {
                             Icon(
-                                HugeIcons.Delete02,
+                                Lucide.Trash,
                                 contentDescription = null,
                                 tint = workspace.red,
                                 modifier = Modifier.size(18.dp),

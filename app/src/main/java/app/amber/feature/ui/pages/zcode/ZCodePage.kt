@@ -39,8 +39,8 @@ import com.dokar.sonner.ToastType
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.QrCodeScan
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ScanQrCode
 import org.koin.compose.koinInject
 
 /**
@@ -151,7 +151,7 @@ fun ZCodePage(
                 trailingIcon = {
                     IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
                         Icon(
-                            imageVector = HugeIcons.QrCodeScan,
+                            imageVector = Lucide.ScanQrCode,
                             contentDescription = "扫描二维码",
                         )
                     }

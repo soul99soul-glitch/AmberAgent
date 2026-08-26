@@ -1,7 +1,7 @@
 package app.amber.feature.ui.pages.developer
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.FileScript
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.FileCode2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -51,7 +51,7 @@ fun DeveloperPage(vm: DeveloperVM = koinViewModel()) {
                         Text(text = "Developer")
                     },
                     icon = {
-                        Icon(HugeIcons.FileScript, null)
+                        Icon(Lucide.FileCode2, null)
                     }
                 )
             }

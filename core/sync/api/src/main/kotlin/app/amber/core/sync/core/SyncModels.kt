@@ -214,7 +214,7 @@ data class SyncRestoreRequest(
      * implicitly preserves conversations and ignores this flag.
      *
      * User intent: "对话整个覆盖掉了也不太好" — a restore is usually about
-     * picking up provider configs / assistants / files from another device,
+     * picking up provider configs / Amber profile / files from another device,
      * not wiping the locally-typed chat history.
      */
     val preserveConversations: Boolean = true,

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -42,6 +43,8 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -66,6 +69,7 @@ import sh.calvin.reorderable.ReorderableColumn
 import kotlin.uuid.Uuid
 
 private val SearchCardShape = RoundedCornerShape(18.dp)
+private const val MAX_SEARCH_RESULT_SIZE = 30
 
 private data class SearchV2Colors(
     val cardBg: Color,
@@ -100,6 +104,7 @@ internal fun SearchHeroCard(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     val t = searchV2Colors()
+    val webSearchLabel = stringResource(R.string.setting_page_search_agent_search)
     Surface(
         shape = SearchCardShape,
         color = t.cardBg,
@@ -137,6 +142,9 @@ internal fun SearchHeroCard(
                 Switch(
                     checked = enabled,
                     onCheckedChange = onCheckedChange,
+                    modifier = Modifier.semantics {
+                        contentDescription = webSearchLabel
+                    },
                     trackColor = t.accent,
                     trackColorUnchecked = t.modelLogoBg,
                     thumbColor = t.cardBg,
@@ -222,41 +230,50 @@ internal fun SearchServiceListCard(
                 trailing = stringResource(R.string.setting_page_search_drag_priority),
                 modifier = Modifier.padding(top = 8.dp),
             )
-            ReorderableColumn(
-                list = services,
-                onSettle = onServiceMove,
-                modifier = Modifier.fillMaxWidth(),
-            ) { index, service, isDragging ->
-                ReorderableItem {
-                    val scale by animateFloatAsState(
-                        targetValue = if (isDragging) 0.985f else 1f,
-                        label = "searchServiceDragScale",
-                    )
-                    ConfiguredSearchRow(
-                        service = service,
-                        rank = index + 1,
-                        checked = service.id in enabledServiceIds,
-                        showDivider = index < services.lastIndex,
-                        modifier = Modifier.graphicsLayer {
-                            scaleX = scale
-                            scaleY = scale
-                        },
-                        dragHandle = {
-                            val haptic = LocalHapticFeedback.current
-                            DragDots(
-                                modifier = Modifier.longPressDraggableHandle(
-                                    onDragStarted = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-                                    },
-                                    onDragStopped = {
-                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
-                                    },
+            if (services.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.setting_page_search_no_configured_services),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    color = searchV2Colors().inkFaint,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                ReorderableColumn(
+                    list = services,
+                    onSettle = onServiceMove,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { index, service, isDragging ->
+                    ReorderableItem {
+                        val scale by animateFloatAsState(
+                            targetValue = if (isDragging) 0.985f else 1f,
+                            label = "searchServiceDragScale",
+                        )
+                        ConfiguredSearchRow(
+                            service = service,
+                            rank = index + 1,
+                            checked = service.id in enabledServiceIds,
+                            showDivider = index < services.lastIndex,
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                            },
+                            dragHandle = {
+                                val haptic = LocalHapticFeedback.current
+                                DragDots(
+                                    modifier = Modifier.longPressDraggableHandle(
+                                        onDragStarted = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                        },
+                                        onDragStopped = {
+                                            haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                        },
+                                    )
                                 )
-                            )
-                        },
-                        onCheckedChange = { onServiceEnabledChange(service, it) },
-                        onClick = { onEditService(service) },
-                    )
+                            },
+                            onCheckedChange = { onServiceEnabledChange(service, it) },
+                            onClick = { onEditService(service) },
+                        )
+                    }
                 }
             }
         }
@@ -421,6 +438,7 @@ private fun ServiceRowV2(
             Switch(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
+                modifier = Modifier.semantics { contentDescription = title },
                 trackColor = t.accent,
                 trackColorUnchecked = t.modelLogoBg,
                 thumbColor = t.cardBg,
@@ -484,22 +502,32 @@ private fun ServiceLogo(
 @Composable
 private fun DragDots(modifier: Modifier = Modifier) {
     val t = searchV2Colors()
-    Canvas(modifier.size(width = 16.dp, height = 26.dp)) {
-        val radius = 1.5.dp.toPx()
-        val gapX = 6.dp.toPx()
-        val gapY = 6.dp.toPx()
-        val startX = (size.width - gapX) / 2f
-        val startY = (size.height - gapY * 2f) / 2f
-        repeat(3) { row ->
-            repeat(2) { col ->
-                drawCircle(
-                    color = t.inkFaint,
-                    radius = radius,
-                    center = androidx.compose.ui.geometry.Offset(
-                        x = startX + col * gapX,
-                        y = startY + row * gapY,
-                    ),
-                )
+    val dragDescription = stringResource(R.string.setting_page_search_drag_priority)
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .semantics {
+                contentDescription = dragDescription
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(width = 16.dp, height = 26.dp)) {
+            val radius = 1.5.dp.toPx()
+            val gapX = 6.dp.toPx()
+            val gapY = 6.dp.toPx()
+            val startX = (size.width - gapX) / 2f
+            val startY = (size.height - gapY * 2f) / 2f
+            repeat(3) { row ->
+                repeat(2) { col ->
+                    drawCircle(
+                        color = t.inkFaint,
+                        radius = radius,
+                        center = androidx.compose.ui.geometry.Offset(
+                            x = startX + col * gapX,
+                            y = startY + row * gapY,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -542,6 +570,8 @@ private fun SubGroupLabel(
                 fontSize = 11.sp,
                 color = t.inkFaint,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 112.dp),
             )
         }
     }
@@ -585,7 +615,7 @@ internal fun SearchCommonOptionsCard(
                     )
                 }
                 SearchResultStepper(
-                    value = settings.searchCommonOptions.resultSize,
+                    value = settings.searchCommonOptions.resultSize.coerceIn(1, MAX_SEARCH_RESULT_SIZE),
                     onValueChange = { value ->
                         onUpdate(settings.searchCommonOptions.copy(resultSize = value))
                     },
@@ -613,8 +643,9 @@ private fun SearchResultStepper(
         ) {
             StepperButton(
                 icon = Lucide.Minus,
+                contentDescription = stringResource(R.string.setting_search_decrease_result_count),
                 enabled = value > 1,
-                onClick = { onValueChange((value - 1).coerceIn(1, 50)) },
+                onClick = { onValueChange((value - 1).coerceIn(1, MAX_SEARCH_RESULT_SIZE)) },
             )
             StepperNumberField(
                 value = value,
@@ -622,8 +653,9 @@ private fun SearchResultStepper(
             )
             StepperButton(
                 icon = Lucide.Plus,
-                enabled = value < 50,
-                onClick = { onValueChange((value + 1).coerceIn(1, 50)) },
+                contentDescription = stringResource(R.string.setting_search_increase_result_count),
+                enabled = value < MAX_SEARCH_RESULT_SIZE,
+                onClick = { onValueChange((value + 1).coerceIn(1, MAX_SEARCH_RESULT_SIZE)) },
             )
         }
     }
@@ -649,7 +681,7 @@ private fun StepperNumberField(
         val digits = raw.filter { it.isDigit() }.take(3)
         text = digits
         val parsed = digits.toIntOrNull() ?: return
-        val coerced = parsed.coerceIn(1, 50)
+        val coerced = parsed.coerceIn(1, MAX_SEARCH_RESULT_SIZE)
         if (coerced != parsed) {
             text = coerced.toString()
         }
@@ -676,8 +708,8 @@ private fun StepperNumberField(
         ),
         cursorBrush = SolidColor(t.accent),
         modifier = Modifier
-            .width(44.dp)
-            .height(30.dp)
+            .width(48.dp)
+            .height(48.dp)
             .onFocusChanged { state ->
                 val wasFocused = focused
                 focused = state.isFocused
@@ -703,19 +735,20 @@ private fun StepperNumberField(
 @Composable
 private fun StepperButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
     enabled: Boolean,
     onClick: () -> Unit,
 ) {
     val t = searchV2Colors()
     Box(
         modifier = Modifier
-            .size(30.dp)
+            .size(48.dp)
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            contentDescription = contentDescription,
             modifier = Modifier.size(16.dp),
             tint = if (enabled) t.inkSoft else t.inkFaint.copy(alpha = 0.45f),
         )
@@ -771,6 +804,7 @@ private fun RecommendationRow(
                 fontWeight = FontWeight.Medium,
                 color = t.accent,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = detail,

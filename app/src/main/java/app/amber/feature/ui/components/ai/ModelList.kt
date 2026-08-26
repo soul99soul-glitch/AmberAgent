@@ -86,20 +86,20 @@ import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.isCodexOAuthReviewModel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiMagic
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.Brain02
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.DragDropHorizontal
-import me.rerere.hugeicons.stroke.Favourite
-import me.rerere.hugeicons.stroke.Image03
-import me.rerere.hugeicons.stroke.Message01
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Text
-import me.rerere.hugeicons.stroke.Tools
-import me.rerere.hugeicons.stroke.Wrench01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.Brain
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.GripHorizontal
+import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.Images
+import com.composables.icons.lucide.MessageCircle
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Type
+import com.composables.icons.lucide.Hammer
+import com.composables.icons.lucide.Wrench
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.findModelById
@@ -139,10 +139,6 @@ fun ModelSelector(
     clearContentDescription: String? = null,
     preferredInputModality: Modality? = null,
     onClear: (() -> Unit)? = null,
-    // Phase 3.5 thinking-level segment：仅 chat 主入口（ChatPage TopBar / ChatInput）传入这两个
-    // 参数即可在 active model 卡片下显示 reasoning 切换段；其他调用方默认 null 即不渲染
-    currentAssistant: app.amber.core.model.Assistant? = null,
-    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
     /** Fully custom trigger; receives the open-picker callback. Null = built-in triggers. */
     customTrigger: (@Composable (openPicker: () -> Unit) -> Unit)? = null,
     onSelect: (Model) -> Unit
@@ -184,7 +180,7 @@ fun ModelSelector(
                     color = tokens.ink,
                 )
                 Icon(
-                    imageVector = HugeIcons.ArrowDown01,
+                    imageVector = Lucide.ArrowDown,
                     contentDescription = null,
                     tint = tokens.ink3,
                     modifier = Modifier.size(14.dp),
@@ -214,7 +210,7 @@ fun ModelSelector(
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 Icon(
-                    imageVector = HugeIcons.ArrowDown01,
+                    imageVector = Lucide.ArrowDown,
                     contentDescription = null,
                     tint = theme.accent,
                     modifier = Modifier.size(12.dp),
@@ -226,8 +222,8 @@ fun ModelSelector(
                         modifier = Modifier.size(48.dp),
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = clearContentDescription ?: "Clear",
+                            imageVector = Lucide.X,
+                            contentDescription = clearContentDescription ?: stringResource(R.string.clear),
                             tint = theme.inkFaint,
                             modifier = Modifier.size(14.dp),
                         )
@@ -302,8 +298,8 @@ fun ModelSelector(
                         enabled = enabled,
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Cancel01,
-                            contentDescription = clearContentDescription ?: "Clear"
+                            imageVector = Lucide.X,
+                            contentDescription = clearContentDescription ?: stringResource(R.string.clear)
                         )
                     }
                 }
@@ -324,7 +320,7 @@ fun ModelSelector(
                 )
             } else {
                 Icon(
-                    imageVector = HugeIcons.Brain02,
+                    imageVector = Lucide.Brain,
                     contentDescription = stringResource(R.string.setting_model_page_chat_model),
                     modifier = Modifier.size(20.dp)
                 )
@@ -415,8 +411,6 @@ fun ModelSelector(
                     providers = filteredProviderSettings,
                     modelType = type,
                     preferredInputModality = preferredInputModality,
-                    currentAssistant = currentAssistant,
-                    onUpdateAssistant = onUpdateAssistant,
                     onSelect = { selectedModel ->
                         onSelect(selectedModel)
                         scope.launch {
@@ -499,8 +493,6 @@ private fun ColumnScope.ModelList(
     providers: List<ProviderSetting>,
     modelType: ModelType,
     preferredInputModality: Modality? = null,
-    currentAssistant: app.amber.core.model.Assistant? = null,
-    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
     onSelect: (Model) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -512,7 +504,7 @@ private fun ColumnScope.ModelList(
     val modelIndex = remember(providers, modelType) {
         providers.buildModelProviderIndex(modelType)
     }
-    val favoriteModels = remember(settings.value.favoriteModels, modelIndex) {
+    val allFavoriteModels = remember(settings.value.favoriteModels, modelIndex) {
         settings.value.favoriteModels.mapNotNull { modelId ->
             val entry = modelIndex[modelId] ?: return@mapNotNull null
             if (entry.provider.isCodexOAuthProvider() && entry.model.isCodexOAuthReviewModel()) return@mapNotNull null
@@ -521,6 +513,11 @@ private fun ColumnScope.ModelList(
     }
 
     var searchKeywords by remember { mutableStateOf("") }
+    val favoriteModels = remember(allFavoriteModels, searchKeywords) {
+        allFavoriteModels.filter { (model, _) ->
+            model.displayName.contains(searchKeywords, ignoreCase = true)
+        }
+    }
 
     val typeFilteredModelsByProvider = remember(providers, modelType, preferredInputModality) {
         providers.associate { provider ->
@@ -537,6 +534,8 @@ private fun ColumnScope.ModelList(
             }
         }
     }
+    val hasSearchResults = favoriteModels.isNotEmpty() ||
+        searchFilteredModelsByProvider.values.any { it.isNotEmpty() }
 
     // 计算当前选中模型的位置
     val selectedModelPosition = remember(currentModel, favoriteModels, providers, typeFilteredModelsByProvider) {
@@ -584,28 +583,30 @@ private fun ColumnScope.ModelList(
         initialFirstVisibleItemIndex = selectedModelPosition
     )
     val reorderableState = rememberReorderableLazyListState(lazyListState) { from, to ->
-        // 计算favorite models在列表中的位置偏移
-        var favoriteStartIndex = 0
-        if (providers.isEmpty()) {
-            favoriteStartIndex = 1 // no providers item
-        }
-        if (favoriteModels.isNotEmpty()) {
-            favoriteStartIndex += 1 // favorite header
-        }
-
-        val fromIndex = from.index - favoriteStartIndex
-        val toIndex = to.index - favoriteStartIndex
-
-        // 只处理favorite models范围内的拖拽
-        if (fromIndex >= 0 && toIndex >= 0 &&
-            fromIndex < favoriteModels.size && toIndex < favoriteModels.size
-        ) {
-            val newFavoriteModels = settings.value.favoriteModels.toMutableList().apply {
-                add(toIndex, removeAt(fromIndex))
+        if (searchKeywords.isBlank()) {
+            // 计算favorite models在列表中的位置偏移
+            var favoriteStartIndex = 0
+            if (providers.isEmpty()) {
+                favoriteStartIndex = 1 // no providers item
             }
-            coroutineScope.launch {
-                settingsStore.update { oldSettings ->
-                    oldSettings.copy(favoriteModels = newFavoriteModels)
+            if (favoriteModels.isNotEmpty()) {
+                favoriteStartIndex += 1 // favorite header
+            }
+
+            val fromIndex = from.index - favoriteStartIndex
+            val toIndex = to.index - favoriteStartIndex
+
+            // 只处理favorite models范围内的拖拽
+            if (fromIndex >= 0 && toIndex >= 0 &&
+                fromIndex < favoriteModels.size && toIndex < favoriteModels.size
+            ) {
+                val newFavoriteModels = settings.value.favoriteModels.toMutableList().apply {
+                    add(toIndex, removeAt(fromIndex))
+                }
+                coroutineScope.launch {
+                    settingsStore.update { oldSettings ->
+                        oldSettings.copy(favoriteModels = newFavoriteModels)
+                    }
                 }
             }
         }
@@ -646,10 +647,11 @@ private fun ColumnScope.ModelList(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(9.dp),
             modifier = Modifier
-                .padding(horizontal = 13.dp, vertical = 10.dp),
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 13.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Search01,
+                imageVector = Lucide.Search,
                 contentDescription = null,
                 tint = chatTheme.inkFaint,
                 modifier = Modifier.size(18.dp),
@@ -670,18 +672,22 @@ private fun ColumnScope.ModelList(
                     }
                     inner()
                 },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
             )
             if (searchKeywords.isNotEmpty()) {
-                Icon(
-                    imageVector = HugeIcons.Cancel01,
-                    contentDescription = stringResource(R.string.cancel),
-                    tint = chatTheme.inkFaint,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(androidx.compose.foundation.shape.CircleShape)
-                        .clickable { searchKeywords = "" },
-                )
+                IconButton(
+                    onClick = { searchKeywords = "" },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Lucide.X,
+                        contentDescription = stringResource(R.string.cancel),
+                        tint = chatTheme.inkFaint,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
             }
         }
     }
@@ -704,6 +710,17 @@ private fun ColumnScope.ModelList(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.extendColors.gray6,
                     modifier = Modifier.padding(8.dp)
+                )
+            }
+        }
+
+        if (providers.isNotEmpty() && searchKeywords.isNotBlank() && !hasSearchResults) {
+            item(key = "search-empty") {
+                Text(
+                    text = stringResource(R.string.model_list_no_matches),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.extendColors.gray6,
+                    modifier = Modifier.padding(vertical = 20.dp, horizontal = 8.dp),
                 )
             }
         }
@@ -753,7 +770,7 @@ private fun ColumnScope.ModelList(
                         ) {
                             Icon(
                                 HeartIcon,
-                                contentDescription = null,
+                                contentDescription = stringResource(R.string.favorite_remove),
                                 modifier = Modifier.size(20.dp),
                                 tint = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
                             )
@@ -824,7 +841,7 @@ private fun ColumnScope.ModelList(
                         )
                         // chevron: rotates -90°→0° on expand (like the HTML sample)
                         Icon(
-                            imageVector = HugeIcons.ArrowDown01,
+                            imageVector = Lucide.ArrowDown,
                             contentDescription = null,
                             tint = tokens.ink3,
                             modifier = Modifier
@@ -1170,7 +1187,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
         // chat — 所有 CHAT 模型默认显示
         if (model.type == ModelType.CHAT) {
             Icon(
-                imageVector = HugeIcons.Message01,
+                imageVector = Lucide.MessageCircle,
                 contentDescription = "chat",
                 modifier = Modifier.size(14.dp),
                 tint = tint,
@@ -1180,7 +1197,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
         val hasImg = model.outputModalities.fastAny { it == Modality.IMAGE } ||
             model.inputModalities.fastAny { it == Modality.IMAGE }
         Icon(
-            imageVector = if (hasImg) HugeIcons.Image03 else HugeIcons.Text,
+            imageVector = if (hasImg) Lucide.Images else Lucide.Type,
             contentDescription = if (hasImg) "image" else "text",
             modifier = Modifier.size(14.dp),
             tint = tint,
@@ -1188,7 +1205,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
         // tool wrench —— TOOL ability
         if (model.abilities.contains(app.amber.ai.provider.ModelAbility.TOOL)) {
             Icon(
-                imageVector = HugeIcons.Wrench01,
+                imageVector = Lucide.Wrench,
                 contentDescription = "tool",
                 modifier = Modifier.size(14.dp),
                 tint = tint,
@@ -1197,7 +1214,7 @@ private fun V3CapabilityIcons(model: Model, tint: Color) {
         // sci/magic —— REASONING ability（设计稿是原子/sci 图标，库里最接近 AiMagic）
         if (model.abilities.contains(app.amber.ai.provider.ModelAbility.REASONING)) {
             Icon(
-                imageVector = HugeIcons.AiMagic,
+                imageVector = Lucide.WandSparkles,
                 contentDescription = "reasoning",
                 modifier = Modifier.size(14.dp),
                 tint = tint,
@@ -1231,9 +1248,9 @@ fun ModelModalityTag(model: Model) {
         model.inputModalities.fastForEach { modality ->
             Icon(
                 imageVector = when (modality) {
-                    Modality.TEXT -> HugeIcons.Text
-                    Modality.IMAGE -> HugeIcons.Image03
-                    Modality.AUDIO -> HugeIcons.Text
+                    Modality.TEXT -> Lucide.Type
+                    Modality.IMAGE -> Lucide.Images
+                    Modality.AUDIO -> Lucide.Type
                 },
                 contentDescription = null,
                 modifier = Modifier
@@ -1242,16 +1259,16 @@ fun ModelModalityTag(model: Model) {
             )
         }
         Icon(
-            imageVector = HugeIcons.ArrowRight01,
+            imageVector = Lucide.ArrowRight,
             contentDescription = null,
             modifier = Modifier.size(LocalTextStyle.current.lineHeight.toDp())
         )
         model.outputModalities.fastForEach { modality ->
             Icon(
                 imageVector = when (modality) {
-                    Modality.TEXT -> HugeIcons.Text
-                    Modality.IMAGE -> HugeIcons.Image03
-                    Modality.AUDIO -> HugeIcons.Text
+                    Modality.TEXT -> Lucide.Type
+                    Modality.IMAGE -> Lucide.Images
+                    Modality.AUDIO -> Lucide.Type
                 },
                 contentDescription = null,
                 modifier = Modifier
@@ -1271,7 +1288,7 @@ fun ModelAbilityTag(model: Model) {
                     type = TagType.WARNING
                 ) {
                     Icon(
-                        imageVector = HugeIcons.Tools,
+                        imageVector = Lucide.Hammer,
                         contentDescription = null,
                         modifier = Modifier.size(LocalTextStyle.current.lineHeight.toDp())
                     )
@@ -1488,8 +1505,10 @@ private fun FavoriteToggleIcon(
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     IconButton(onClick = onToggle) {
         Icon(
-            imageVector = if (favorite) HeartIcon else HugeIcons.Favourite,
-            contentDescription = null,
+            imageVector = if (favorite) HeartIcon else Lucide.Heart,
+            contentDescription = stringResource(
+                if (favorite) R.string.favorite_remove else R.string.favorite_add
+            ),
             modifier = Modifier.size(20.dp),
             tint = when {
                 favorite -> chatTheme.accent

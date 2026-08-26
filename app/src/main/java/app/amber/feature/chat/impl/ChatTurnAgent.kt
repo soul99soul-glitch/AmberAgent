@@ -10,17 +10,16 @@ import app.amber.feature.chat.api.ChatTurnInput
 import kotlinx.coroutines.flow.last
 import app.amber.ai.ui.UIMessage
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.Generator
 import app.amber.core.service.ConversationAccess
 import java.time.Instant
 import kotlin.uuid.Uuid
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import app.amber.core.model.Assistant
 import app.amber.core.model.Conversation
 
 class ChatTurnAgent(
-    private val generationHandler: GenerationHandler,
+    private val generator: Generator,
     private val sessionResolver: ChatSessionResolver,
     private val conversationAccess: ConversationAccess,
 ) : Agent<ChatTurnInput, ChatTurnArtifact> {
@@ -41,13 +40,12 @@ class ChatTurnAgent(
         val checkpointCoalescer = StreamCheckpointCoalescer()
 
         try {
-            generationHandler.generateText(
+            generator.generateText(
                 settings = session.settings,
                 model = session.model,
                 messages = session.messages,
                 inputTransformers = session.inputTransformers,
                 outputTransformers = session.outputTransformers,
-                assistant = session.assistant,
                 memories = session.memories,
                 tools = session.tools,
                 maxSteps = input.maxToolIterations,
@@ -188,7 +186,6 @@ data class ChatSession(
     val messages: List<UIMessage>,
     val inputTransformers: List<app.amber.core.ai.transformers.InputMessageTransformer>,
     val outputTransformers: List<app.amber.core.ai.transformers.OutputMessageTransformer>,
-    val assistant: Assistant,
     val memories: List<app.amber.core.model.AssistantMemory>?,
     val tools: List<app.amber.ai.core.Tool>,
     val autoApproveTools: Boolean,

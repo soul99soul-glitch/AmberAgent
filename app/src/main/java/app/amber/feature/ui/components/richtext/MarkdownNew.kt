@@ -80,9 +80,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.mapLatest
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.Tick01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.Check
 import app.amber.agent.R
 import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
@@ -95,7 +95,7 @@ import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.theme.NotoSerifSC
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
-import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import app.amber.core.agent.utils.markdown.CjkCompatibleGfmFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
@@ -129,7 +129,7 @@ private fun preProcess(content: String): String {
 // ---- HTML generation ----
 
 private val flavour by lazy {
-    GFMFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
+    CjkCompatibleGfmFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
 }
 
 private val parser by lazy { MarkdownParser(flavour) }
@@ -525,7 +525,7 @@ private fun HtmlListItem(
                         ) {
                             if (isChecked) {
                                 Icon(
-                                    imageVector = HugeIcons.Tick01,
+                                    imageVector = Lucide.Check,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
                                 )
@@ -716,7 +716,7 @@ private fun HtmlTable(element: Element, onClickCitation: (String) -> Unit) {
                 .padding(4.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Download01,
+                imageVector = Lucide.Download,
                 contentDescription = stringResource(R.string.table_export),
                 modifier = Modifier.size(16.dp),
             )

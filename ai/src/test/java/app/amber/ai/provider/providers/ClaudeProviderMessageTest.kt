@@ -8,13 +8,11 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
-import java.lang.reflect.InvocationTargetException
 
 /**
  * Unit tests for ClaudeProvider message building logic.
@@ -28,23 +26,15 @@ import java.lang.reflect.InvocationTargetException
  */
 class ClaudeProviderMessageTest {
 
-    private lateinit var provider: ClaudeProvider
+    private lateinit var adapter: AnthropicMessagesAdapter
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        adapter = AnthropicMessagesAdapter()
     }
 
-    // Helper to invoke private buildMessages method via reflection
-    private fun invokeBuildMessages(messages: List<UIMessage>): JsonArray {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessages",
-            List::class.java,
-            Boolean::class.javaPrimitiveType
-        )
-        method.isAccessible = true
-        return method.invoke(provider, messages, false) as JsonArray
-    }
+    private fun invokeBuildMessages(messages: List<UIMessage>): JsonArray =
+        adapter.encodeConversation(messages, promptCaching = false)
 
     @Test
     fun `multi-round tool calls should produce tool_use followed by tool_result`() {
@@ -119,8 +109,8 @@ class ClaudeProviderMessageTest {
                 )
             )
             fail("Expected image encoding failure")
-        } catch (error: InvocationTargetException) {
-            assertTrue(error.cause is ImageEncodingException)
+        } catch (error: ImageEncodingException) {
+            // Expected: missing content URI must not be silently dropped.
         }
     }
 

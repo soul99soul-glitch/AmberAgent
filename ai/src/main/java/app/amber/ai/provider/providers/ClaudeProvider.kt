@@ -9,48 +9,26 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonArrayBuilder
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.encodeToJsonElement
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import app.amber.ai.core.MessageRole
-import app.amber.ai.core.ReasoningLevel
-import app.amber.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
-import app.amber.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
-import app.amber.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
-import app.amber.ai.core.TokenUsage
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.ModelAbility
-import app.amber.ai.provider.Provider
+import app.amber.ai.provider.ImageModelGateway
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.ImageGenerationResult
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.UIMessage
-import app.amber.ai.ui.UIMessageChoice
-import app.amber.ai.ui.UIMessagePart
-import app.amber.ai.ui.withStreamToolIndex
 import app.amber.ai.util.KeyRoulette
 import app.amber.ai.util.configureReferHeaders
-import app.amber.ai.util.encodeBase64
 import app.amber.ai.util.json
-import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.parseErrorDetail
 import app.amber.ai.util.stringSafe
 import app.amber.ai.util.toHeaders
 import app.amber.common.http.await
-import app.amber.common.http.jsonPrimitiveOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -59,57 +37,61 @@ import okhttp3.Response
 import okhttp3.sse.EventSource
 import okhttp3.sse.EventSourceListener
 import okhttp3.sse.EventSources
-import kotlin.time.Clock
 
 private const val TAG = "ClaudeProvider"
 private const val ANTHROPIC_VERSION = "2023-06-01"
 
-class ClaudeProvider(private val client: OkHttpClient, context: Context? = null) : Provider<ProviderSetting.Claude> {
+class ClaudeProvider(
+    private val client: OkHttpClient,
+    context: Context? = null,
+) : TextModelGateway<ProviderSetting.Claude>, ImageModelGateway<ProviderSetting.Claude> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
+    private val messagesAdapter = AnthropicMessagesAdapter()
 
     override suspend fun listModels(providerSetting: ProviderSetting.Claude): List<Model> =
         withContext(Dispatchers.IO) {
-            val request = Request.Builder()
-                .url("${providerSetting.baseUrl}/models")
-                .addHeader("x-api-key", keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString()))
+            val apiKey = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
+            val catalogRequest = Request.Builder()
+                .url(providerSetting.baseUrl.trimEnd('/') + "/models")
+                .header("x-api-key", apiKey)
                 .addHeader("anthropic-version", ANTHROPIC_VERSION)
-                .get()
                 .build()
-
-            val response = client.newCall(request).execute()
-            if (!response.isSuccessful) {
-                error("Failed to get models: ${response.code} ${response.body?.string()}")
+            val payload = client.newCall(catalogRequest).execute().use { response ->
+                val body = response.body.string()
+                check(response.isSuccessful) {
+                    "Anthropic model catalog failed: HTTP ${response.code} ${body.take(300)}"
+                }
+                body
             }
-
-            val bodyStr = response.body?.string() ?: ""
-            val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-            val data = bodyJson["data"]?.jsonArray ?: return@withContext emptyList()
-
-            data.mapNotNull { modelJson ->
-                val modelObj = modelJson.jsonObject
-                val id = modelObj["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
-                val displayName = modelObj["display_name"]?.jsonPrimitive?.contentOrNull ?: id
-
-                Model(
-                    modelId = id,
-                    displayName = displayName,
-                )
-            }
+            decodeModelCatalog(payload)
         }
 
+    private fun decodeModelCatalog(payload: String): List<Model> =
+        json.parseToJsonElement(payload).jsonObject["data"]
+            ?.jsonArray
+            ?.mapNotNull { item ->
+                val fields = item.jsonObject
+                val modelId = fields["id"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+                Model(
+                    modelId = modelId,
+                    displayName = fields["display_name"]?.jsonPrimitive?.contentOrNull ?: modelId,
+                )
+            }
+            .orEmpty()
+
     override suspend fun generateImage(
-        providerSetting: ProviderSetting,
+        providerSetting: ProviderSetting.Claude,
         params: ImageGenerationParams
     ): ImageGenerationResult {
         error("Claude provider does not support image generation")
     }
 
-    override suspend fun generateText(
+    override suspend fun complete(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): MessageChunk = withContext(Dispatchers.IO) {
-        val requestBody = buildMessageRequest(providerSetting, messages, params)
+        val requestBody = messagesAdapter.encodeRequest(providerSetting, messages, params, streaming = false)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
@@ -129,34 +111,15 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         val bodyStr = response.body?.string() ?: ""
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
 
-        // 从 JsonObject 中提取必要的信息
-        val id = bodyJson["id"]?.jsonPrimitive?.contentOrNull ?: ""
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: ""
-        val content = bodyJson["content"]?.jsonArray ?: JsonArray(emptyList())
-        val stopReason = bodyJson["stop_reason"]?.jsonPrimitive?.contentOrNull ?: "unknown"
-        val usage = parseTokenUsage(bodyJson)
-
-        MessageChunk(
-            id = id,
-            model = model,
-            choices = listOf(
-                UIMessageChoice(
-                    index = 0,
-                    delta = null,
-                    message = parseMessage(content),
-                    finishReason = stopReason
-                )
-            ),
-            usage = usage
-        )
+        messagesAdapter.decodeCompletion(bodyJson)
     }
 
-    override suspend fun streamText(
+    override suspend fun stream(
         providerSetting: ProviderSetting.Claude,
         messages: List<UIMessage>,
         params: TextGenerationParams
     ): Flow<MessageChunk> = callbackFlow {
-        val requestBody = buildMessageRequest(providerSetting, messages, params, stream = true)
+        val requestBody = messagesAdapter.encodeRequest(providerSetting, messages, params, streaming = true)
         val request = Request.Builder()
             .url("${providerSetting.baseUrl}/messages")
             .headers(params.customHeaders.toHeaders())
@@ -198,70 +161,19 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
             ) {
                 terminationGuard.observe(type, data)
                 logStreamEvent(type, data)
-                if (data == "[DONE]") return
-
-                val dataJson = json.parseToJsonElement(data).jsonObject
-                when (type) {
-                    "message_stop" -> {
-                        Log.d(TAG, "Stream ended")
-                        close()
-                        return
+                when (val signal = messagesAdapter.decodeStreamEvent(type, id, data)) {
+                    is AnthropicStreamSignal.Emit -> {
+                        // Blocking send provides backpressure instead of dropping token deltas.
+                        if (trySendBlocking(signal.chunk).isFailure) eventSource.cancel()
                     }
 
-                    "error" -> {
-                        val error = dataJson["error"]?.parseErrorDetail()
-                        close(error)
-                        return
+                    is AnthropicStreamSignal.Failure -> {
+                        eventSource.cancel()
+                        close(signal.cause)
                     }
-                }
 
-                var deltaMessage = parseMessage(buildJsonArray {
-                    val contentBlockObj = dataJson["content_block"]?.jsonObject
-                    val deltaObj = dataJson["delta"]?.jsonObject
-                    if (contentBlockObj != null) {
-                        add(contentBlockObj)
-                    }
-                    if (deltaObj != null) {
-                        add(deltaObj)
-                    }
-                })
-                val finishReason = claudeStreamFinishReason(dataJson)
-                // content_block_start/delta 事件顶层的 index 是并行 tool use 的唯一关联键:
-                // input_json_delta 不带 tool id, 不注入 index 时 merge 层只能回退到
-                // "最后一个 Tool", 并行 tool 的参数会串线
-                val blockIndex = dataJson["index"]?.jsonPrimitive?.intOrNull
-                if (blockIndex != null && deltaMessage.parts.any { it is UIMessagePart.Tool }) {
-                    deltaMessage = deltaMessage.copy(
-                        parts = deltaMessage.parts.map { part ->
-                            if (part is UIMessagePart.Tool) part.withStreamToolIndex(blockIndex) else part
-                        }
-                    )
-                }
-                val tokenUsage = parseTokenUsage(dataJson)
-                val shouldEmit = shouldEmitClaudeStreamChunk(
-                    hasParts = deltaMessage.parts.isNotEmpty(),
-                    hasUsage = tokenUsage != null,
-                    finishReason = finishReason,
-                )
-                if (!shouldEmit) return
-
-                val messageChunk = MessageChunk(
-                    id = id ?: "",
-                    model = "",
-                    choices = listOf(
-                        UIMessageChoice(
-                            index = 0,
-                            delta = deltaMessage,
-                            message = null,
-                            finishReason = finishReason
-                        )
-                    ),
-                    usage = tokenUsage
-                )
-                // 阻塞式发送形成背压, 避免 buffer 满时静默丢 token
-                if (trySendBlocking(messageChunk).isFailure) {
-                    eventSource.cancel()
-                    return
+                    AnthropicStreamSignal.Stop -> close()
+                    AnthropicStreamSignal.Ignore -> Unit
                 }
             }
 
@@ -300,374 +212,9 @@ class ClaudeProvider(private val client: OkHttpClient, context: Context? = null)
         }
     }
 
-    internal fun claudeStreamFinishReason(dataJson: JsonObject): String? =
-        (dataJson["delta"] as? JsonObject)
-            ?.get("stop_reason")
-            ?.jsonPrimitive
-            ?.contentOrNull
-
-    internal fun shouldEmitClaudeStreamChunk(
-        hasParts: Boolean,
-        hasUsage: Boolean,
-        finishReason: String?,
-    ): Boolean = hasParts || hasUsage || finishReason != null
-
-    private fun buildMessageRequest(
-        providerSetting: ProviderSetting.Claude,
-        messages: List<UIMessage>,
-        params: TextGenerationParams,
-        stream: Boolean = false
-    ): JsonObject {
-        fun cacheControlEphemeral() = buildJsonObject { put("type", "ephemeral") }
-
-        return buildJsonObject {
-            put("model", params.model.modelId)
-            put("messages", buildMessages(messages, providerSetting.promptCaching))
-            put("max_tokens", params.maxTokens ?: 64_000)
-
-            if (params.temperature != null && !params.reasoningLevel.isEnabled) put(
-                "temperature",
-                params.temperature
-            )
-            if (params.topP != null) put("top_p", params.topP)
-
-            put("stream", stream)
-
-            // system prompt
-            val systemMessage = messages.firstOrNull { it.role == MessageRole.SYSTEM }
-            val systemTextParts = systemMessage?.parts?.filterIsInstance<UIMessagePart.Text>().orEmpty()
-            if (systemTextParts.isNotEmpty()) {
-                val cacheDisabled = systemTextParts.any { part ->
-                    part.metadata?.get(SYSTEM_PROMPT_CACHE_CONTROL_METADATA)?.jsonPrimitive?.contentOrNull == SYSTEM_PROMPT_CACHE_DISABLED
-                }
-                val explicitCacheIndex = systemTextParts.indexOfLast { part ->
-                    part.metadata?.get(SYSTEM_PROMPT_CACHE_CONTROL_METADATA)?.jsonPrimitive?.contentOrNull == SYSTEM_PROMPT_CACHE_EPHEMERAL
-                }
-                val cacheIndex = explicitCacheIndex.takeIf { it >= 0 }
-                put("system", buildJsonArray {
-                    systemTextParts.forEachIndexed { index, part ->
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", part.text)
-                            if (providerSetting.promptCaching && !cacheDisabled && index == cacheIndex) {
-                                put("cache_control", cacheControlEphemeral())
-                            }
-                        })
-                    }
-                })
-            }
-
-            // 处理 thinking
-            // Anthropic 新 API: adaptive 模式 + output_config.effort 控制强度
-            // 旧的 type=enabled + budget_tokens 在 Opus 4.7+ 上已不支持
-            if (params.model.abilities.contains(ModelAbility.REASONING)) {
-                when (params.reasoningLevel) {
-                    ReasoningLevel.OFF -> {
-                        put("thinking", buildJsonObject { put("type", "disabled") })
-                    }
-
-                    ReasoningLevel.AUTO -> {
-                        put("thinking", buildJsonObject {
-                            put("type", "adaptive")
-                            put("display", "summarized")
-                        })
-                    }
-
-                    else -> {
-                        put("thinking", buildJsonObject {
-                            put("type", "adaptive")
-                            put("display", "summarized")
-                        })
-                        put("output_config", buildJsonObject {
-                            put("effort", params.reasoningLevel.effort)
-                        })
-                    }
-                }
-            }
-
-            // 处理工具
-            if (params.model.abilities.contains(ModelAbility.TOOL) && params.tools.isNotEmpty()) {
-                putJsonArray("tools") {
-                    params.tools.forEachIndexed { index, tool ->
-                        add(buildJsonObject {
-                            put("name", tool.name)
-                            put("description", tool.description)
-                            put("input_schema", json.encodeToJsonElement(tool.parameters()))
-                            if (providerSetting.promptCaching && index == params.tools.lastIndex) {
-                                put("cache_control", cacheControlEphemeral())
-                            }
-                        })
-                    }
-                }
-            }
-        }.mergeCustomBody(params.customBody)
-    }
-
-    private fun buildMessages(messages: List<UIMessage>, promptCaching: Boolean) = buildJsonArray {
-        messages
-            .filter { it.isValidToUpload() && it.role != MessageRole.SYSTEM }
-            .forEach { message ->
-                if (message.role == MessageRole.ASSISTANT) {
-                    addAssistantMessage(message)
-                } else {
-                    addUserMessage(message)
-                }
-            }
-    }.let { messagesArray ->
-        if (!promptCaching) return@let messagesArray
-        insertMessagesCacheControl(messagesArray)
-    }
-
-    /**
-     * 在倒数第二条非 tool_result 的 user message 的最后一个 content block 上插入 cache_control
-     */
-    private fun insertMessagesCacheControl(messages: JsonArray): JsonArray {
-        // 找出所有非 tool_result 的 user message 的索引
-        val realUserIndices = messages.mapIndexedNotNull { index, msg ->
-            val obj = msg.jsonObject
-            if (obj["role"]?.jsonPrimitive?.contentOrNull == "user") {
-                val content = obj["content"]?.jsonArray
-                val isToolResult = content?.any {
-                    it.jsonObject["type"]?.jsonPrimitive?.contentOrNull == "tool_result"
-                } == true
-                if (!isToolResult) index else null
-            } else null
-        }
-
-        // 取倒数第二条
-        val targetIndex = if (realUserIndices.size >= 2) {
-            realUserIndices[realUserIndices.size - 2]
-        } else return messages
-
-        // 在目标 message 的最后一个 content block 上添加 cache_control
-        return JsonArray(messages.mapIndexed { index, msg ->
-            if (index == targetIndex) {
-                val obj = msg.jsonObject
-                val content = obj["content"]?.jsonArray ?: return@mapIndexed msg
-                val newContent = JsonArray(content.mapIndexed { contentIndex, block ->
-                    if (contentIndex == content.lastIndex) {
-                        JsonObject(block.jsonObject + mapOf("cache_control" to buildJsonObject {
-                            put(
-                                "type",
-                                "ephemeral"
-                            )
-                        }))
-                    } else block
-                })
-                JsonObject(obj + mapOf("content" to newContent))
-            } else msg
-        })
-    }
-
-    private fun JsonArrayBuilder.addAssistantMessage(message: UIMessage) {
-        val groups = groupPartsByToolBoundary(message.parts)
-        val contentBuffer = mutableListOf<JsonObject>()
-
-        for (group in groups) {
-            when (group) {
-                is PartGroup.Content -> {
-                    group.parts.mapNotNull { it.toContentBlock() }.forEach { contentBuffer.add(it) }
-                }
-
-                is PartGroup.Tools -> {
-                    // 添加 tool_use 到内容缓冲
-                    group.tools.forEach { contentBuffer.add(it.toToolUseBlock()) }
-
-                    // 输出 assistant 消息
-                    add(buildJsonObject {
-                        put("role", "assistant")
-                        putJsonArray("content") { contentBuffer.forEach { add(it) } }
-                    })
-                    contentBuffer.clear()
-
-                    // 紧跟 tool_result
-                    add(buildJsonObject {
-                        put("role", "user")
-                        putJsonArray("content") {
-                            group.tools.forEach { add(it.toToolResultBlock()) }
-                        }
-                    })
-                }
-            }
-        }
-
-        // 输出剩余内容
-        if (contentBuffer.isNotEmpty()) {
-            add(buildJsonObject {
-                put("role", "assistant")
-                putJsonArray("content") { contentBuffer.forEach { add(it) } }
-            })
-        }
-    }
-
-    private fun JsonArrayBuilder.addUserMessage(message: UIMessage) {
-        add(buildJsonObject {
-            put("role", message.role.name.lowercase())
-            putJsonArray("content") {
-                message.parts.mapNotNull { it.toContentBlock() }.forEach { add(it) }
-            }
-        })
-    }
-
-    private fun UIMessagePart.toContentBlock(): JsonObject? = when (this) {
-        is UIMessagePart.Text -> buildJsonObject {
-            put("type", "text")
-            put("text", text)
-        }
-
-        is UIMessagePart.Image -> buildJsonObject {
-            val encoded = encodeBase64(withPrefix = false).getOrThrow()
-            put("type", "image")
-            put("source", buildJsonObject {
-                put("type", "base64")
-                put("media_type", encoded.mimeType)
-                put("data", encoded.base64)
-            })
-        }
-
-        is UIMessagePart.Reasoning -> {
-            // Anthropic requires redacted_thinking blocks to be replayed as-is on tool rounds.
-            val redactedData = metadata?.get("redacted_thinking_data")?.jsonPrimitive?.contentOrNull
-            if (redactedData != null) {
-                buildJsonObject {
-                    put("type", "redacted_thinking")
-                    put("data", redactedData)
-                }
-            } else {
-                buildJsonObject {
-                    put("type", "thinking")
-                    put("thinking", reasoning)
-                    metadata?.forEach { (key, value) ->
-                        if (key != "redacted_thinking_data") put(key, value)
-                    }
-                }
-            }
-        }
-
-        else -> null
-    }
-
-    private fun UIMessagePart.Tool.toToolUseBlock() = buildJsonObject {
-        put("type", "tool_use")
-        put("id", toolCallId)
-        put("name", toolName)
-        put("input", inputAsJson())
-    }
-
-    private fun UIMessagePart.Tool.toToolResultBlock() = buildJsonObject {
-        put("type", "tool_result")
-        put("tool_use_id", toolCallId)
-        putJsonArray("content") {
-            output.mapNotNull { it.toContentBlock() }.forEach { add(it) }
-        }
-    }
-
-    private fun parseMessage(content: JsonArray): UIMessage {
-        val parts = mutableListOf<UIMessagePart>()
-
-        content.forEach { contentBlock ->
-            val block = contentBlock.jsonObject
-            val type = block["type"]?.jsonPrimitive?.contentOrNull
-
-            when (type) {
-                "text", "text_delta" -> {
-                    val text = block["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                    if (text.isNotEmpty()) {
-                        parts.add(UIMessagePart.Text(text))
-                    }
-                }
-
-                "thinking", "thinking_delta", "signature_delta" -> {
-                    val thinking = block["thinking"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val signature = block["signature"]?.jsonPrimitive?.contentOrNull
-                    if (thinking.isNotEmpty() || signature != null) {
-                        val reasoning = UIMessagePart.Reasoning(
-                            reasoning = thinking,
-                            createdAt = Clock.System.now(),
-                            finishedAt = null
-                        )
-                        if (signature != null) {
-                            reasoning.metadata = buildJsonObject {
-                                put("signature", signature)
-                            }
-                        }
-                        parts.add(reasoning)
-                    }
-                }
-
-                "redacted_thinking" -> {
-                    // Payload is encrypted/redacted by the provider; never log it.
-                    // Must store and replay as redacted_thinking on subsequent tool rounds.
-                    val data = block["data"]?.jsonPrimitive?.contentOrNull
-                    if (data != null) {
-                        val reasoning = UIMessagePart.Reasoning(
-                            reasoning = "",
-                            createdAt = Clock.System.now(),
-                            finishedAt = null,
-                        )
-                        reasoning.metadata = buildJsonObject {
-                            put("redacted_thinking_data", data)
-                        }
-                        parts.add(reasoning)
-                    }
-                }
-
-                "tool_use" -> {
-                    val id = block["id"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val name = block["name"]?.jsonPrimitive?.contentOrNull ?: ""
-                    val input = block["input"]?.jsonObject ?: JsonObject(emptyMap())
-                    parts.add(
-                        UIMessagePart.Tool(
-                            toolCallId = id,
-                            toolName = name,
-                            input = if (input.isEmpty()) "" else json.encodeToString(input),
-                            output = emptyList()
-                        )
-                    )
-                }
-
-                "input_json_delta" -> {
-                    val input = block["partial_json"]?.jsonPrimitive?.contentOrNull
-                    parts.add(
-                        UIMessagePart.Tool(
-                            toolCallId = "",
-                            toolName = "",
-                            input = input ?: "",
-                            output = emptyList()
-                        )
-                    )
-                }
-            }
-        }
-
-        return UIMessage(
-            role = MessageRole.ASSISTANT,
-            parts = parts
-        )
-    }
-
     private fun logStreamEvent(type: String?, data: String) {
         if (!Log.isLoggable(TAG, Log.VERBOSE)) return
         Log.v(TAG, "onEvent: type=$type chars=${data.length}")
     }
 
-    private fun parseTokenUsage(bodyJson: JsonObject?): TokenUsage? {
-        if (bodyJson == null) return null
-
-        // 回退到标准 usage 字段
-        val usageJson = bodyJson["usage"]?.jsonObject
-            ?: bodyJson["message"]?.jsonObject?.get("usage")?.jsonObject
-            ?: return null
-        val inputTokens = usageJson["input_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-        val cachedInputTokens = usageJson["cache_read_input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
-        val cachedCreationTokens = usageJson["cache_creation_input_tokens"]?.jsonPrimitiveOrNull?.intOrNull ?: 0
-        val completionTokens = usageJson["output_tokens"]?.jsonPrimitive?.intOrNull ?: 0
-        val promptTokens = inputTokens + cachedInputTokens + cachedCreationTokens
-        return TokenUsage(
-            promptTokens = promptTokens,
-            completionTokens = completionTokens,
-            totalTokens = promptTokens + completionTokens,
-            cachedTokens = cachedInputTokens,
-        )
-    }
 }

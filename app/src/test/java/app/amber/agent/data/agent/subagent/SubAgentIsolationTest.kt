@@ -4,7 +4,6 @@ import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.settings.Settings
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantRegex
 import app.amber.core.settings.SpeculativeToolExecutionSetting
 import org.junit.Assert.assertEquals
@@ -15,16 +14,11 @@ import kotlin.uuid.Uuid
 
 class SubAgentIsolationTest {
     @Test
-    fun isolatedAssistantDoesNotInheritParentContextSurfaces() {
-        val parent = Assistant(
-            name = "Parent",
+    fun isolatedSettingsDoNotInheritParentContextSurfaces() {
+        val parent = Settings(
             systemPrompt = "parent prompt",
             contextMessageSize = 20,
-            enableMemory = true,
-            useGlobalMemory = true,
-            enableRecentChatsReference = true,
             presetMessages = listOf(UIMessage.user("previous user message")),
-            quickMessageIds = setOf(Uuid.random()),
             regexes = listOf(
                 AssistantRegex(
                     id = Uuid.random(),
@@ -33,11 +27,15 @@ class SubAgentIsolationTest {
                     replaceString = "redacted",
                 )
             ),
-            mcpServers = setOf(Uuid.random()),
-            modeInjectionIds = setOf(Uuid.random()),
-            lorebookIds = setOf(Uuid.random()),
+            enabledMcpServerIds = setOf(Uuid.random()),
+            enabledModeInjectionIds = setOf(Uuid.random()),
+            enabledLorebookIds = setOf(Uuid.random()),
             enabledSkills = setOf("workspace-writer"),
-            enableTimeReminder = true,
+            agentRuntime = AgentRuntimeSetting(
+                enableCoreMemory = true,
+                enableRecentChatsReference = true,
+                enableTimeReminder = true,
+            ),
         )
         val definition = SubAgentDefinition(
             id = "reader",
@@ -47,24 +45,22 @@ class SubAgentIsolationTest {
             toolAllowlist = setOf("file_read"),
         )
 
-        val isolated = parent.toIsolatedSubAgentAssistant(definition)
+        val isolated = parent.toIsolatedSubAgentSettings().copy(systemPrompt = definition.systemPrompt)
 
-        assertEquals("Reader", isolated.name)
         assertEquals(definition.systemPrompt, isolated.systemPrompt)
         assertTrue(isolated.streamOutput)
         assertEquals(0, isolated.contextMessageSize)
-        assertFalse(isolated.enableMemory)
-        assertFalse(isolated.useGlobalMemory)
-        assertFalse(isolated.enableRecentChatsReference)
+        assertFalse(isolated.agentRuntime.enableCoreMemory)
+        assertFalse(isolated.agentRuntime.enableRecentChatsReference)
         assertTrue(isolated.presetMessages.isEmpty())
-        assertTrue(isolated.quickMessageIds.isEmpty())
+        assertTrue(isolated.quickMessages.isEmpty())
         assertTrue(isolated.regexes.isEmpty())
         assertTrue(isolated.mcpServers.isEmpty())
-        assertTrue(isolated.localTools.isEmpty())
-        assertTrue(isolated.modeInjectionIds.isEmpty())
-        assertTrue(isolated.lorebookIds.isEmpty())
+        assertTrue(isolated.enabledMcpServerIds.isEmpty())
+        assertTrue(isolated.enabledModeInjectionIds.isEmpty())
+        assertTrue(isolated.enabledLorebookIds.isEmpty())
         assertTrue(isolated.enabledSkills.isEmpty())
-        assertFalse(isolated.enableTimeReminder)
+        assertFalse(isolated.agentRuntime.enableTimeReminder)
         assertEquals("{{ message }}", isolated.messageTemplate)
     }
 

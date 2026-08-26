@@ -70,12 +70,12 @@ import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 import app.amber.feature.ui.theme.LocalAmberTokens
 import com.dokar.sonner.ToastType
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowReloadHorizontal
-import me.rerere.hugeicons.stroke.BubbleChat
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.UserGroup
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.MessageCircle
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Users
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -321,7 +321,7 @@ private fun CouncilRoomTopBar(
                 )
                 if (modeControlsEnabled) {
                     Icon(
-                        imageVector = HugeIcons.ArrowDown01,
+                        imageVector = Lucide.ArrowDown,
                         contentDescription = "切换模式",
                         tint = chatTheme.inkFaint,
                         modifier = Modifier
@@ -341,7 +341,7 @@ private fun CouncilRoomTopBar(
             modifier = Modifier.councilPressBounce(membersInteraction),
         ) {
             Icon(
-                imageVector = HugeIcons.UserGroup,
+                imageVector = Lucide.Users,
                 contentDescription = "成员与综合",
                 tint = workspace.muted,
             )
@@ -354,7 +354,7 @@ private fun CouncilRoomTopBar(
             modifier = Modifier.councilPressBounce(settingsInteraction),
         ) {
             Icon(
-                imageVector = HugeIcons.Settings03,
+                imageVector = Lucide.Settings,
                 contentDescription = "议会设置",
                 tint = workspace.muted,
             )
@@ -473,14 +473,14 @@ private fun CouncilModePanel(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 CouncilModeRow(
-                    icon = HugeIcons.BubbleChat,
+                    icon = Lucide.MessageCircle,
                     title = "自由群聊",
                     subtitle = "成员各自发散、互相补充",
                     active = current == CouncilRoomMode.EXPLORE,
                     onClick = { onSelect(CouncilRoomMode.EXPLORE) },
                 )
                 CouncilModeRow(
-                    icon = HugeIcons.ArrowReloadHorizontal,
+                    icon = Lucide.RefreshCw,
                     title = "辩论",
                     subtitle = "逐位轮流、互相质疑与补充",
                     active = current == CouncilRoomMode.DEBATE,

@@ -22,6 +22,7 @@ import app.amber.ai.core.InputSchema
 import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -95,46 +96,19 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
 
             val request = Request.Builder()
                 .url(serviceOptions.customUrl)
-                .post(body.toString().toRequestBody())
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer ${serviceOptions.apiKey}")
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<GrokResponse>(it)
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("response failed #${response.code}: ${response.body?.string().orEmpty()}")
                 }
-
-                val messageOutput = responseBody.output.firstOrNull {
-                    it.type == "message" && it.role == "assistant"
-                }
-                val textContent = messageOutput?.content?.firstOrNull {
-                    it.type == "output_text"
-                }
-
-                val answer = textContent?.text
-
-                val items = textContent?.annotations
-                    ?.filter { it.type == "url_citation" && !it.url.isNullOrBlank() }
-                    ?.distinctBy { it.url }
-                    ?.take(commonOptions.resultSize)
-                    ?.map { annotation ->
-                        SearchResultItem(
-                            title = annotation.url!!,
-                            url = annotation.url,
-                            text = ""
-                        )
-                    } ?: emptyList()
 
                 return@withContext Result.success(
-                    SearchResult(
-                        answer = answer,
-                        items = items
-                    )
+                    mapGrokSearchResponse(response.body?.string().orEmpty(), commonOptions.resultSize)
                 )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }
@@ -147,9 +121,38 @@ object GrokSearchService : SearchService<SearchServiceOptions.GrokOptions> {
         return Result.failure(Exception("Scraping is not supported for Grok"))
     }
 
+    internal fun mapGrokSearchResponse(body: String, resultSize: Int): SearchResult {
+        val response = json.decodeFromString<GrokResponse>(body)
+        val textContent = response.output
+            .firstOrNull { it.type == "message" && it.role == "assistant" }
+            ?.content
+            ?.firstOrNull { it.type == "output_text" }
+
+        val titlesByUrl = textContent?.annotations.orEmpty()
+            .asSequence()
+            .filter { it.type == "url_citation" && !it.url.isNullOrBlank() }
+            .associate { it.url!! to it.title?.takeIf(String::isNotBlank) }
+        val citationUrls = (titlesByUrl.keys + response.citations)
+            .distinct()
+            .take(resultSize)
+        val items = citationUrls.map { url ->
+            SearchResultItem(
+                title = titlesByUrl[url] ?: url,
+                url = url,
+                text = ""
+            )
+        }
+
+        return SearchResult(
+            answer = textContent?.text,
+            items = items
+        )
+    }
+
     @Serializable
     private data class GrokResponse(
-        val output: List<GrokOutputItem> = emptyList()
+        val output: List<GrokOutputItem> = emptyList(),
+        val citations: List<String> = emptyList(),
     )
 
     @Serializable

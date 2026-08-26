@@ -1,7 +1,7 @@
 package app.amber.feature.ui.pages.log
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Delete01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
@@ -73,7 +73,7 @@ fun LogPage() {
                             logs = Logging.getRecentLogs()
                         }
                     ) {
-                        Icon(HugeIcons.Delete01, null)
+                        Icon(Lucide.Trash2, null)
                     }
                 },
                 scrollBehavior = scrollBehavior,

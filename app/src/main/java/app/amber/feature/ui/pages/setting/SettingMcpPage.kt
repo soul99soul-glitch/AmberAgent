@@ -1,13 +1,13 @@
 package app.amber.feature.ui.pages.setting
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.FileImport
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Cancel01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.FileInput
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.X
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -74,6 +74,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -162,14 +164,20 @@ fun SettingMcpPage(vm: SettingVM = koinViewModel()) {
                             showImportDialog = true
                         }
                     ) {
-                        Icon(HugeIcons.FileImport, null)
+                        Icon(
+                            Lucide.FileInput,
+                            contentDescription = stringResource(R.string.setting_mcp_page_import_title),
+                        )
                     }
                     IconButton(
                         onClick = {
                             creationState.open(McpServerConfig.StreamableHTTPServer())
                         }
                     ) {
-                        Icon(HugeIcons.Add01, null)
+                        Icon(
+                            Lucide.Plus,
+                            contentDescription = stringResource(R.string.add),
+                        )
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -283,14 +291,20 @@ private fun McpServerItem(
                         scope.launch { dismissBoxState.reset() }
                     }
                 ) {
-                    Icon(HugeIcons.Cancel01, null)
+                    Icon(
+                        Lucide.X,
+                        contentDescription = stringResource(R.string.cancel),
+                    )
                 }
                 FilledTonalIconButton(
                     onClick = {
                         onDelete()
                     }
                 ) {
-                    Icon(HugeIcons.Delete01, null)
+                    Icon(
+                        Lucide.Trash2,
+                        contentDescription = stringResource(R.string.delete),
+                    )
                 }
             }
         },
@@ -368,11 +382,11 @@ private fun McpServerItem(
                         onClick = {
                             onEdit(item)
                         },
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(48.dp),
                     ) {
                         Icon(
-                            HugeIcons.Settings03,
-                            null,
+                            Lucide.Settings,
+                            contentDescription = stringResource(R.string.setting_mcp_page_edit_server),
                             modifier = Modifier.size(20.dp),
                             tint = workspace.muted,
                         )
@@ -492,14 +506,15 @@ private fun McpServerConfig.transportLabel(): String = when (this) {
     is McpServerConfig.StreamableHTTPServer -> "Streamable HTTP"
 }
 
+@Composable
 private fun McpStatus.statusLabel(): String = when (this) {
-    McpStatus.Idle -> "Idle"
-    McpStatus.Connecting -> "Connecting"
-    McpStatus.Connected -> "Connected"
-    is McpStatus.Reconnecting -> "Reconnecting"
-    is McpStatus.Error -> "Error"
-    McpStatus.NeedsAuthorization -> "Needs auth"
-    McpStatus.Authorizing -> "Authorizing"
+    McpStatus.Idle -> stringResource(R.string.setting_mcp_status_idle)
+    McpStatus.Connecting -> stringResource(R.string.setting_mcp_status_connecting)
+    McpStatus.Connected -> stringResource(R.string.setting_mcp_status_connected)
+    is McpStatus.Reconnecting -> stringResource(R.string.setting_mcp_status_reconnecting)
+    is McpStatus.Error -> stringResource(R.string.setting_mcp_status_error)
+    McpStatus.NeedsAuthorization -> stringResource(R.string.setting_mcp_status_needs_authorization)
+    McpStatus.Authorizing -> stringResource(R.string.setting_mcp_status_authorizing)
 }
 
 @Composable
@@ -593,6 +608,7 @@ private fun McpCommonOptionsConfigure(
     config: McpServerConfig,
     update: (McpServerConfig) -> Unit
 ) {
+    val enableLabel = stringResource(R.string.setting_mcp_page_enable)
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -619,6 +635,7 @@ private fun McpCommonOptionsConfigure(
                 Spacer(Modifier.weight(1f))
                 Switch(
                     checked = config.commonOptions.enable,
+                    modifier = Modifier.semantics { contentDescription = enableLabel },
                     onCheckedChange = { enabled ->
                         update(
                             when (config) {
@@ -858,7 +875,7 @@ private fun McpCommonOptionsConfigure(
                             )
                         }) {
                             Icon(
-                                HugeIcons.Delete01,
+                                Lucide.Trash2,
                                 contentDescription = stringResource(R.string.setting_mcp_page_delete_header)
                             )
                         }
@@ -884,7 +901,7 @@ private fun McpCommonOptionsConfigure(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
-                        HugeIcons.Add01,
+                        Lucide.Plus,
                         contentDescription = stringResource(R.string.setting_mcp_page_add_header)
                     )
                     Spacer(Modifier.width(4.dp))
@@ -956,6 +973,8 @@ private fun McpToolCard(
     onNeedsApprovalChange: (Boolean) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val needsApprovalLabel = stringResource(R.string.setting_mcp_page_needs_approval)
+    val enableLabel = stringResource(R.string.setting_mcp_page_enable)
     Card(
         colors = CardDefaults.cardColors(
             containerColor = CustomColors.listItemColors.containerColor
@@ -992,6 +1011,7 @@ private fun McpToolCard(
                     )
                     Switch(
                         checked = tool.needsApproval,
+                        modifier = Modifier.semantics { contentDescription = needsApprovalLabel },
                         onCheckedChange = onNeedsApprovalChange,
                         size = SwitchSize.Small
                     )
@@ -1002,11 +1022,12 @@ private fun McpToolCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "启用",
+                        text = stringResource(R.string.setting_mcp_page_enable),
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Switch(
                         checked = tool.enable,
+                        modifier = Modifier.semantics { contentDescription = enableLabel },
                         onCheckedChange = onEnableChange,
                         size = SwitchSize.Small
                     )
@@ -1014,11 +1035,13 @@ private fun McpToolCard(
                 // 展开/收起按钮
                 IconButton(
                     onClick = { expanded = !expanded },
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(48.dp)
                 ) {
                     Icon(
-                        if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
-                        contentDescription = null,
+                        if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
+                        contentDescription = stringResource(
+                            if (expanded) R.string.code_block_collapse else R.string.code_block_expand
+                        ),
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -1123,7 +1146,7 @@ private fun McpImportModal(
                         }
                     }
                 }) {
-                    Text("预览")
+                    Text(stringResource(R.string.setting_mcp_page_import_preview))
                 }
                 Button(
                     enabled = preview != null && !busy,
@@ -1152,7 +1175,15 @@ private fun McpImportModal(
                         }
                     }
                 ) {
-                    Text(if (busy) "导入中…" else "批准并导入")
+                    Text(
+                        stringResource(
+                            if (busy) {
+                                R.string.setting_mcp_page_importing
+                            } else {
+                                R.string.setting_mcp_page_import_approve
+                            }
+                        )
+                    )
                 }
             }
         }
@@ -1179,11 +1210,21 @@ private fun McpImportPreviewCard(preview: McpImportPreview) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "预览 · ${preview.serverCount} 个服务器 · ${preview.headerNameCount} 个 header",
+                    stringResource(
+                        R.string.setting_mcp_page_import_preview_summary,
+                        preview.serverCount,
+                        preview.headerNameCount,
+                    ),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    if (preview.risk == "high") "高风险" else "普通风险",
+                    stringResource(
+                        if (preview.risk == "high") {
+                            R.string.setting_mcp_page_import_risk_high
+                        } else {
+                            R.string.setting_mcp_page_import_risk_normal
+                        }
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (preview.risk == "high") {
                         MaterialTheme.colorScheme.error
@@ -1203,7 +1244,11 @@ private fun McpImportPreviewCard(preview: McpImportPreview) {
                     )
                     Text(
                         "transport: ${if (server.transport == McpImportTransport.SSE) "sse" else "streamable_http"} · origin: ${server.origin}" +
-                            if (server.risk == "high") " · 风险高" else "",
+                            if (server.risk == "high") {
+                                stringResource(R.string.setting_mcp_page_import_risk_high_suffix)
+                            } else {
+                                ""
+                            },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

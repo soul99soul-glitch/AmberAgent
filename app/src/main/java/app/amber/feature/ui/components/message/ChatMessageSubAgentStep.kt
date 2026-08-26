@@ -46,8 +46,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.http.jsonObjectOrNull
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.MagicWand01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.WandSparkles
 import app.amber.feature.subagent.SubAgentDefinitions
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentRunStatus
@@ -141,7 +141,7 @@ fun SubAgentTaskStepView(
     AgentToolCallCapsule(
         title = title,
         toolName = "subagent_task",
-        icon = HugeIcons.MagicWand01,
+        icon = Lucide.WandSparkles,
         kind = AgentToolKind.GENERIC,
         status = effectiveStatus.toAgentToolStatus(),
         loading = loading && isRunning,

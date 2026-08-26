@@ -14,11 +14,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
+import com.composables.icons.lucide.Lucide
 import app.amber.agent.R
-import me.rerere.hugeicons.stroke.Book03
-import me.rerere.hugeicons.stroke.Favourite
-import me.rerere.hugeicons.stroke.Zap
+import com.composables.icons.lucide.BookText
+import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.Zap
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
@@ -55,19 +55,19 @@ fun ExtensionsPage() {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.QuickMessages) },
-                        leadingContent = { Icon(HugeIcons.Zap, null) },
-                        headlineContent = { Text(stringResource(R.string.assistant_page_quick_messages)) },
+                        leadingContent = { Icon(Lucide.Zap, null) },
+                        headlineContent = { Text(stringResource(R.string.quick_messages_page_title)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_quick_messages_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Favorite) },
-                        leadingContent = { Icon(HugeIcons.Favourite, null) },
+                        leadingContent = { Icon(Lucide.Heart, null) },
                         headlineContent = { Text(stringResource(R.string.favorite_page_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_page_favorites_desc)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Prompts) },
-                        leadingContent = { Icon(HugeIcons.Book03, null) },
+                        leadingContent = { Icon(Lucide.BookText, null) },
                         headlineContent = { Text(stringResource(R.string.extensions_page_prompts)) },
                         supportingContent = { Text(stringResource(R.string.extensions_page_prompts_desc)) },
                     )

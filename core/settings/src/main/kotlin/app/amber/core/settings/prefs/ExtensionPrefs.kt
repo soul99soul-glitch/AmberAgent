@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.map
 import app.amber.core.infra.AppScope
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.settings.BackupReminderConfig
-import app.amber.core.settings.DEFAULT_SYSTEM_TTS_ID
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.WebDavConfig
 import app.amber.core.model.Lorebook
@@ -26,18 +25,19 @@ import app.amber.core.settings.secret.SecretRedactor
 import app.amber.core.settings.secret.SecretStore
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.toMutableStateFlow
-import app.amber.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
 data class ExtensionPrefsData(
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
-    val ttsProviders: List<TTSProviderSetting> = emptyList(),
-    val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val modeInjections: List<PromptInjection.ModeInjection> = emptyList(),
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
+    val enabledSkills: Set<String> = emptySet(),
+    val enabledMcpServerIds: Set<Uuid> = emptySet(),
+    val enabledModeInjectionIds: Set<Uuid> = emptySet(),
+    val enabledLorebookIds: Set<Uuid> = emptySet(),
     val backupReminderConfig: BackupReminderConfig = BackupReminderConfig(),
     val syncSettings: SyncSettings = SyncSettings(),
     val routingQuickMessagesSeededVersion: Int = 0,
@@ -87,13 +87,6 @@ class ExtensionPrefs(
                     redactor.rehydrateS3(it, refs)
                 }
             } ?: S3Config(),
-            ttsProviders = p[PreferencesKeys.TTS_PROVIDERS]?.let { raw ->
-                raw.decodeJsonOrNull<List<TTSProviderSetting>>()?.let {
-                    redactor.rehydrateTtsProviders(it, refs)
-                }
-            } ?: emptyList(),
-            selectedTTSProviderId = p[PreferencesKeys.SELECTED_TTS_PROVIDER]
-                ?.let { it.parseUuidOrNull() } ?: DEFAULT_SYSTEM_TTS_ID,
             modeInjections = p[PreferencesKeys.MODE_INJECTIONS]?.let {
                 it.decodeJsonOrNull<List<PromptInjection.ModeInjection>>()
             } ?: emptyList(),
@@ -103,6 +96,18 @@ class ExtensionPrefs(
             quickMessages = p[PreferencesKeys.QUICK_MESSAGES]?.let {
                 it.decodeJsonOrNull<List<QuickMessage>>()
             } ?: emptyList(),
+            enabledSkills = p[PreferencesKeys.AMBER_ENABLED_SKILLS]?.let {
+                it.decodeJsonOrNull<Set<String>>()
+            } ?: emptySet(),
+            enabledMcpServerIds = p[PreferencesKeys.AMBER_ENABLED_MCP_SERVER_IDS]?.let {
+                it.decodeJsonOrNull<Set<Uuid>>()
+            } ?: emptySet(),
+            enabledModeInjectionIds = p[PreferencesKeys.AMBER_ENABLED_MODE_INJECTION_IDS]?.let {
+                it.decodeJsonOrNull<Set<Uuid>>()
+            } ?: emptySet(),
+            enabledLorebookIds = p[PreferencesKeys.AMBER_ENABLED_LOREBOOK_IDS]?.let {
+                it.decodeJsonOrNull<Set<Uuid>>()
+            } ?: emptySet(),
             backupReminderConfig = p[PreferencesKeys.BACKUP_REMINDER_CONFIG]?.let {
                 it.decodeJsonOrNull<BackupReminderConfig>()
             } ?: BackupReminderConfig(),
@@ -119,11 +124,16 @@ class ExtensionPrefs(
         p[PreferencesKeys.MCP_SERVERS] = JsonInstant.encodeToString(data.mcpServers)
         p[PreferencesKeys.WEBDAV_CONFIG] = JsonInstant.encodeToString(data.webDavConfig)
         p[PreferencesKeys.S3_CONFIG] = JsonInstant.encodeToString(data.s3Config)
-        p[PreferencesKeys.TTS_PROVIDERS] = JsonInstant.encodeToString(data.ttsProviders)
-        p[PreferencesKeys.SELECTED_TTS_PROVIDER] = data.selectedTTSProviderId.toString()
         p[PreferencesKeys.MODE_INJECTIONS] = JsonInstant.encodeToString(data.modeInjections)
         p[PreferencesKeys.LOREBOOKS] = JsonInstant.encodeToString(data.lorebooks)
         p[PreferencesKeys.QUICK_MESSAGES] = JsonInstant.encodeToString(data.quickMessages)
+        p[PreferencesKeys.AMBER_ENABLED_SKILLS] = JsonInstant.encodeToString(data.enabledSkills)
+        p[PreferencesKeys.AMBER_ENABLED_MCP_SERVER_IDS] =
+            JsonInstant.encodeToString(data.enabledMcpServerIds)
+        p[PreferencesKeys.AMBER_ENABLED_MODE_INJECTION_IDS] =
+            JsonInstant.encodeToString(data.enabledModeInjectionIds)
+        p[PreferencesKeys.AMBER_ENABLED_LOREBOOK_IDS] =
+            JsonInstant.encodeToString(data.enabledLorebookIds)
         p[PreferencesKeys.BACKUP_REMINDER_CONFIG] =
             JsonInstant.encodeToString(data.backupReminderConfig)
         p[PreferencesKeys.SYNC_SETTINGS] = JsonInstant.encodeToString(data.syncSettings)

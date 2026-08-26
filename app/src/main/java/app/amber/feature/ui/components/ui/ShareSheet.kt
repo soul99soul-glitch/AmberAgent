@@ -24,8 +24,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.ProviderSetting
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Share03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Share2
 import app.amber.core.utils.JsonInstant
 import kotlin.io.encoding.Base64
 
@@ -69,7 +69,7 @@ fun ShareSheet(
                             }
                         }
                     ) {
-                        Icon(HugeIcons.Share03, null)
+                        Icon(Lucide.Share2, null)
                     }
                 }
 

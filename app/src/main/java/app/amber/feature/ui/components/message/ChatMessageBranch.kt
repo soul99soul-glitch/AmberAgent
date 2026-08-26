@@ -18,9 +18,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowRight
 import app.amber.ai.core.MessageRole
 import app.amber.core.model.MessageNode
 
@@ -46,7 +46,7 @@ fun ChatMessageBranchSelector(
     ) {
         if (node.messages.size > 1) {
             Icon(
-                imageVector = HugeIcons.ArrowLeft01,
+                imageVector = Lucide.ArrowLeft,
                 contentDescription = "Prev",
                 modifier = Modifier
                     .clip(CircleShape)
@@ -75,7 +75,7 @@ fun ChatMessageBranchSelector(
             )
 
             Icon(
-                imageVector = HugeIcons.ArrowRight01,
+                imageVector = Lucide.ArrowRight,
                 contentDescription = "Next",
                 modifier = Modifier
                     .clip(CircleShape)

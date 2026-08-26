@@ -1,6 +1,12 @@
 package app.amber.agent.di
 
+import app.amber.ai.provider.ProviderCatalog
+import app.amber.ai.provider.providers.ClaudeProvider
+import app.amber.ai.provider.providers.GoogleProvider
+import app.amber.ai.provider.providers.OpenAIProvider
+import app.amber.ai.provider.providers.openai.StoredResponseApi
 import app.amber.core.ai.Generator
+import app.amber.core.ai.ChatRunCoordinator
 import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRegistry
 import app.amber.core.agent.runtime.AgentRunner
@@ -19,6 +25,7 @@ import app.amber.core.di.workspaceModule
 import app.amber.core.service.ConversationAccess
 import app.amber.feature.chat.impl.ChatSessionResolver
 import app.amber.feature.modelcouncil.ModelCouncilTextRunner
+import app.amber.feature.runtime.StoredResponseGateway
 import app.amber.feature.subagent.SubAgentRunner
 import org.junit.Test
 import org.koin.core.annotation.KoinInternalApi
@@ -27,18 +34,11 @@ import kotlin.reflect.KClass
 import kotlin.test.assertTrue
 
 /**
- * Catches the bug class Codex review surfaced at HEAD 26081410:
- * `class GenerationSubAgentRunner(generationHandler: Generator)`
- * constructor-injected the `Generator` interface, but Koin only
- * registered the concrete `GenerationHandler` — opening any chat page
- * threw `NoDefinitionFoundException`.
- *
- * Phase D cascade lifted several interfaces into api modules
- * (`core/ai/generation/api`, `feature/chat/api`, `feature/subagent`,
- * `feature/modelcouncil`, …), so every concrete `single { Impl(...) }`
- * with consumers asking for the interface needs an alias
- * `single<Interface> { get<Impl>() }`. This test asserts the alias
- * exists for every interface listed in [requiredAliases].
+ * Verifies that constructor-injected API interfaces have Koin aliases for
+ * their concrete owners. A missing `Generator` alias previously caused chat
+ * startup to throw `NoDefinitionFoundException`.
+ * Bindings use `single<Interface> { get<Impl>() }`; this test asserts the
+ * alias exists for every interface listed in [requiredAliases].
  *
  * NOTE: We tried `Module.verify()` first. It catches these alias gaps
  * (it found three — AgentEventStore, SubAgentRunner,
@@ -83,6 +83,16 @@ class KoinModulesVerifyTest {
         AgentRunner::class,
         SubAgentRunner::class,
         ModelCouncilTextRunner::class,
+        StoredResponseApi::class,
+        StoredResponseGateway::class,
+    )
+
+    private val requiredConcreteBindings: List<KClass<*>> = listOf(
+        OpenAIProvider::class,
+        GoogleProvider::class,
+        ClaudeProvider::class,
+        ProviderCatalog::class,
+        ChatRunCoordinator::class,
     )
 
     @OptIn(KoinInternalApi::class)
@@ -96,10 +106,11 @@ class KoinModulesVerifyTest {
             .toSet()
 
         val missing = requiredAliases.filterNot { it in boundTypes }
+        val missingConcrete = requiredConcreteBindings.filterNot { it in boundTypes }
         assertTrue(
-            actual = missing.isEmpty(),
-            message = "Missing Koin alias bindings: ${missing.map { it.qualifiedName }}. " +
-                "Add `single<I> { get<Impl>() }` in the module that registers each Impl.",
+            actual = missing.isEmpty() && missingConcrete.isEmpty(),
+            message = "Missing Koin bindings: aliases=${missing.map { it.qualifiedName }}, " +
+                "concrete=${missingConcrete.map { it.qualifiedName }}.",
         )
     }
 }

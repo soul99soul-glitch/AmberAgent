@@ -61,8 +61,8 @@ import app.amber.feature.ui.components.ui.workspaceBorder
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BookOpen01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.BookOpenText
 
 /** Shared motion timings for novel pages — keep transitions soft and short. */
 object NovelMotion {
@@ -144,7 +144,7 @@ fun NovelEmptyState(
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
-    icon: ImageVector = HugeIcons.BookOpen01,
+    icon: ImageVector = Lucide.BookOpenText,
     actionLabel: String? = null,
     onAction: (() -> Unit)? = null,
 ) {

@@ -102,7 +102,7 @@ object GenerativeUiPlanner {
                         // Image gen wanted but not configured. Tell the user
                         // why instead of silently fall back to a bad SVG.
                         appendLine("The user asked for a photographic / painted image but no image-generation model is configured.")
-                        appendLine("Briefly tell them to set one in Settings → 模型 → 生图模型 (or per-assistant), then offer a quick SVG sketch as a temporary alternative if it would still be useful.")
+                        appendLine("Briefly tell them to set one in Settings → 模型 → 生图模型, then offer a quick SVG sketch as a temporary alternative if it would still be useful.")
                     }
                 }
 

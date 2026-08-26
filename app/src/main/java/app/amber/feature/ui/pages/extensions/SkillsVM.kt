@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillMetadata
@@ -55,6 +54,20 @@ class SkillsVM(
         viewModelScope.launch(Dispatchers.IO) {
             skillManager.deleteSkill(name)
             refreshSkills()
+        }
+    }
+
+    fun setSkillEnabled(name: String, enabled: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            settingsStore.update { settings ->
+                settings.copy(
+                    enabledSkills = if (enabled) {
+                        settings.enabledSkills + name
+                    } else {
+                        settings.enabledSkills - name
+                    },
+                )
+            }
         }
     }
 
@@ -126,15 +139,8 @@ class SkillsVM(
 
     private suspend fun enableSkill(name: String) {
         settingsStore.update { settings ->
-            val currentAssistantId = settings.getCurrentAssistant().id
             settings.copy(
-                assistants = settings.assistants.map { assistant ->
-                    if (assistant.id == currentAssistantId) {
-                        assistant.copy(enabledSkills = assistant.enabledSkills + name)
-                    } else {
-                        assistant
-                    }
-                }
+                enabledSkills = settings.enabledSkills + name,
             )
         }
     }

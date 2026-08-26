@@ -183,6 +183,7 @@ private fun ProviderGroup(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(min = 48.dp)
                 .clickable(onClick = onToggle)
                 .padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -242,6 +243,7 @@ private fun ModelLine(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clickable(onClick = onClick)
             .padding(top = 6.dp, bottom = 6.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,

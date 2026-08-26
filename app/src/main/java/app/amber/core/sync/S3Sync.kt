@@ -9,6 +9,7 @@ import kotlinx.serialization.json.Json
 import app.amber.core.files.FileFolders
 import app.amber.core.files.SkillPaths
 import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.AppDatabase
 import app.amber.core.sync.copyToBackupEntryWithinLimit
@@ -224,7 +225,7 @@ class S3Sync(
                         "settings.json" -> {
                             val settingsJson = readZipEntryTextWithinLimit(zipIn)
                             try {
-                                stagedSettings = json.decodeFromString<Settings>(settingsJson)
+                                stagedSettings = json.decodeSettingsDroppingLegacySearchService(settingsJson)
                                 Log.i(TAG, "restoreFromBackupFile: Settings staged successfully")
                             } catch (e: Exception) {
                                 Log.e(TAG, "restoreFromBackupFile: Failed to restore settings", e)

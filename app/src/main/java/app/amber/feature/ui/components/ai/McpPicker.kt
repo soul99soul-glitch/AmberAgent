@@ -23,14 +23,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.Icon1stBracket
-import me.rerere.hugeicons.stroke.McpServer
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.Braces
+import com.composables.icons.lucide.ServerCog
 import app.amber.core.ai.mcp.McpManager
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.ai.mcp.McpStatus
-import app.amber.core.model.Assistant
+import app.amber.core.settings.Settings
 import app.amber.feature.ui.components.ui.Tag
 import app.amber.feature.ui.components.ui.TagType
 import org.koin.compose.koinInject
@@ -38,10 +38,10 @@ import org.koin.compose.koinInject
 
 @Composable
 fun McpPicker(
-    assistant: Assistant,
+    settings: Settings,
     servers: List<McpServerConfig>,
     modifier: Modifier = Modifier,
-    onUpdateAssistant: (Assistant) -> Unit
+    onUpdateSettings: (Settings) -> Unit,
 ) {
     val mcpManager = koinInject<McpManager>()
     LazyColumn(
@@ -59,22 +59,22 @@ fun McpPicker(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     when (status) {
-                        McpStatus.Idle -> Icon(HugeIcons.Icon1stBracket, null)
+                        McpStatus.Idle -> Icon(Lucide.Braces, null)
                         McpStatus.Connecting -> CircularProgressIndicator(
                             modifier = Modifier.size(
                                 24.dp
                             )
                         )
 
-                        McpStatus.Connected -> Icon(HugeIcons.McpServer, null)
+                        McpStatus.Connected -> Icon(Lucide.ServerCog, null)
                         is McpStatus.Reconnecting -> CircularProgressIndicator(
                             modifier = Modifier.size(24.dp)
                         )
-                        is McpStatus.Error -> Icon(HugeIcons.Alert01, null)
+                        is McpStatus.Error -> Icon(Lucide.TriangleAlert, null)
                         McpStatus.Authorizing -> CircularProgressIndicator(
                             modifier = Modifier.size(24.dp)
                         )
-                        McpStatus.NeedsAuthorization -> Icon(HugeIcons.Alert01, null)
+                        McpStatus.NeedsAuthorization -> Icon(Lucide.TriangleAlert, null)
                     }
                     Column(
                         modifier = Modifier.weight(1f),
@@ -109,25 +109,21 @@ fun McpPicker(
                         }
                     }
                     Switch(
-                        checked = server.id in assistant.mcpServers,
+                        checked = server.id in settings.enabledMcpServerIds,
                         onCheckedChange = {
                             if (it) {
-                                val newServers = assistant.mcpServers.toMutableSet()
+                                val newServers = settings.enabledMcpServerIds.toMutableSet()
                                 newServers.add(server.id)
                                 newServers.removeIf { servers.none { s -> s.id == server.id } } // remove invalid servers
-                                onUpdateAssistant(
-                                    assistant.copy(
-                                        mcpServers = newServers.toSet()
-                                    )
+                                onUpdateSettings(
+                                    settings.copy(enabledMcpServerIds = newServers.toSet())
                                 )
                             } else {
-                                val newServers = assistant.mcpServers.toMutableSet()
+                                val newServers = settings.enabledMcpServerIds.toMutableSet()
                                 newServers.remove(server.id)
                                 newServers.removeIf { servers.none { s -> s.id == server.id } } //  remove invalid servers
-                                onUpdateAssistant(
-                                    assistant.copy(
-                                        mcpServers = newServers.toSet()
-                                    )
+                                onUpdateSettings(
+                                    settings.copy(enabledMcpServerIds = newServers.toSet())
                                 )
                             }
                         }

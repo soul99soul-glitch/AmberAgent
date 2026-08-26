@@ -53,8 +53,8 @@ internal object SearchOrchestrator {
         val timeRange = explicitTimeRange ?: if (topic == "news") "week" else "any"
         val recencyDays = params.int("recency_days")?.coerceIn(1, 366)
         val maxResults = params.int("max_results")
-            ?.coerceIn(1, 40)
-            ?: settings.searchCommonOptions.resultSize.coerceIn(1, 40)
+            ?.coerceIn(1, 30)
+            ?: settings.searchCommonOptions.resultSize.coerceIn(1, 30)
         val allowWebView = params.boolean("allow_webview") ?: false
         val requestedServices = params.serviceSelectors()
         val sources = buildSources(settings, requestedServices, query = query, topic = topic).take(MAX_SOURCES)
@@ -864,7 +864,6 @@ internal object SearchOrchestrator {
             is SearchServiceOptions.MetasoOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.OllamaOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.PerplexityOptions -> options.apiKey.isNotBlank()
-            is SearchServiceOptions.AmberAgentSearchOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.SerperOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.SerpApiOptions -> options.apiKey.isNotBlank()
             is SearchServiceOptions.TavilyOptions -> options.apiKey.isNotBlank()

@@ -10,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService
 
 internal const val BACKUP_SECRET_MASK = "__MASKED_BY_AMBERAGENT_BACKUP__"
 
@@ -27,7 +28,7 @@ internal fun Json.restoreBackupSecrets(exported: Settings, local: Settings): Set
     val exportedEl = parseToJsonElement(encodeToString(exported))
     val localEl = parseToJsonElement(encodeToString(local))
     val merged = mergeMaskedSecrets(exportedEl, localEl)
-    return decodeFromString(merged.toString())
+    return decodeSettingsDroppingLegacySearchService(merged.toString())
 }
 
 private fun mergeMaskedSecrets(exported: JsonElement, local: JsonElement?): JsonElement = when {
@@ -54,7 +55,8 @@ internal fun maskBackupSecrets(element: JsonElement): JsonElement = when (elemen
         element.mapValues { (key, value) ->
             when {
                 key.isSensitiveBackupKey() -> JsonPrimitive(BACKUP_SECRET_MASK)
-                key.equals("headers", ignoreCase = true) -> maskHeaderCollection(value)
+                key.equals("headers", ignoreCase = true) ||
+                    key.equals("customHeaders", ignoreCase = true) -> maskHeaderCollection(value)
                 else -> maskBackupSecrets(value)
             }
         }

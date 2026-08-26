@@ -16,6 +16,8 @@ data class NovelWorkspaceUndoRecord(
     val parentCommitId: String?,
     /** path → previous content (null = the file did not exist before that commit). */
     val files: Map<String, String?>,
+    /** Restore the exact branch gate state that existed before this commit. */
+    val unresolvedBefore: NovelWorkspaceUnresolvedFile? = null,
 )
 
 object NovelWorkspaceUndo {

@@ -105,7 +105,11 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                             horizontalArrangement = Arrangement.spacedBy(7.dp),
                         ) {
                             Text("//", style = type.eyebrow, color = t.accent)
-                            Text("提供商", style = type.eyebrow, color = t.ink3)
+                            Text(
+                                stringResource(R.string.setting_page_providers),
+                                style = type.eyebrow,
+                                color = t.ink3,
+                            )
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -122,7 +126,11 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                                 ProviderLiveDot()
                             }
                             Text(
-                                text = "${provider.name} · ${provider.providerAuthLabel()} · ${provider.models.size} 模型",
+                                text = "${provider.name} · ${provider.providerAuthLabel()} · " +
+                                    stringResource(
+                                        R.string.setting_provider_page_model_count,
+                                        provider.models.size,
+                                    ),
                                 style = type.meta.copy(fontSize = 10.5.sp),
                                 color = t.ink3,
                                 maxLines = 1,
@@ -132,7 +140,7 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                         }
                     }
                     ProviderGhostButton(
-                        text = "导出",
+                        text = stringResource(R.string.export_title),
                         onClick = { shareSheetState.show(provider) },
                     )
                 }

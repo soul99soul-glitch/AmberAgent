@@ -9,7 +9,7 @@ import kotlinx.coroutines.launch
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.CapabilityFlagsData
@@ -114,7 +114,7 @@ class DebugVM(
 
             val conversation = Conversation(
                 id = Uuid.random(),
-                assistantId = DEFAULT_ASSISTANT_ID,
+                assistantId = AMBER_AGENT_ID,
                 title = "超大对话测试 (${sizeMB}MB)",
                 messageNodes = messageNodes,
             )
@@ -140,7 +140,7 @@ class DebugVM(
 
             val conversation = Conversation(
                 id = Uuid.random(),
-                assistantId = DEFAULT_ASSISTANT_ID,
+                assistantId = AMBER_AGENT_ID,
                 title = "${messageCount}条消息测试",
                 messageNodes = messageNodes,
             )

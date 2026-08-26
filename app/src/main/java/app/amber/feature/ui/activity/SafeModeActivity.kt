@@ -24,24 +24,16 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import app.amber.agent.R
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.feature.ui.theme.AmberAgentTheme
 import app.amber.core.utils.CrashHandler
-import org.koin.android.ext.android.inject
 
 class SafeModeActivity : ComponentActivity() {
-    private val settingsStore by inject<SettingsAggregator>()
-
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +42,6 @@ class SafeModeActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             AmberAgentTheme {
-                val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
                 val context = LocalContext.current
 
                 Scaffold(
@@ -70,13 +61,6 @@ class SafeModeActivity : ComponentActivity() {
                             text = stringResource(R.string.safe_mode_description),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Text(
-                            text = stringResource(
-                                R.string.safe_mode_current_assistant,
-                                settings.getCurrentAssistant().name.ifEmpty { stringResource(R.string.safe_mode_default_assistant) }),
-                            style = MaterialTheme.typography.bodyLarge,
                         )
 
                         if (stackTrace != null) {

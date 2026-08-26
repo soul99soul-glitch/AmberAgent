@@ -25,7 +25,6 @@ import kotlin.uuid.Uuid
 
 class ConversationHistoryTools(
     private val conversationRepo: ConversationRepository,
-    private val currentConversationProvider: suspend () -> Conversation,
     private val grantStore: SessionAccessGrantStore,
 ) {
     fun tools(): List<Tool> = listOf(
@@ -42,34 +41,21 @@ class ConversationHistoryTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("query", stringProp("Optional title keyword."))
-                    put("scope", stringProp("current_assistant or all. Default current_assistant."))
                     put("limit", intProp("Maximum sessions, default 12, capped at 50."))
                 }
             )
         },
         execute = { input ->
             val query = input.obj["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val scope = input.scope()
             val limit = input.obj["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 50) ?: 12
-            val current = currentConversationProvider()
             val sessions = if (query.isBlank()) {
-                if (scope == "all") {
-                    conversationRepo.getRecentConversationSummaries(limit)
-                } else {
-                    conversationRepo.getRecentConversationSummaries(current.assistantId, limit)
-                }
+                conversationRepo.getRecentConversationSummaries(limit)
             } else {
-                val flow = if (scope == "all") {
-                    conversationRepo.searchConversations(query)
-                } else {
-                    conversationRepo.searchConversationsOfAssistant(current.assistantId, query)
-                }
-                flow.first().take(limit)
+                conversationRepo.searchConversations(query).first().take(limit)
             }
             val sessionSummaries = sessions.map { it.toSessionSummary() }
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("status", "ok")
-                put("scope", scope)
                 put("query", query)
                 put("sessions", buildJsonArray {
                     sessionSummaries.forEach { add(it) }
@@ -85,7 +71,6 @@ class ConversationHistoryTools(
             InputSchema.Obj(
                 properties = buildJsonObject {
                     put("query", stringProp("Keyword query to search in historical transcript text."))
-                    put("scope", stringProp("current_assistant or all. Default current_assistant."))
                     put("session_ids", arrayProp("Optional list of session ids to restrict search."))
                     put("limit", intProp("Maximum hits, default 10, capped at 30."))
                 },
@@ -94,22 +79,16 @@ class ConversationHistoryTools(
         },
         execute = { input ->
             val query = input.obj["query"]?.jsonPrimitive?.contentOrNull.orEmpty()
-            val scope = input.scope()
             val limit = input.obj["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 30) ?: 10
             val sessionIds = input.stringArray("session_ids").toSet()
-            val currentAssistantId = currentConversationProvider().assistantId
             val hits = mutableListOf<app.amber.agent.data.db.fts.MessageSearchResult>()
             for (hit in conversationRepo.searchMessages(query)) {
                 if (sessionIds.isNotEmpty() && hit.conversationId !in sessionIds) continue
-                if (scope != "all") {
-                    if (hit.assistantId != currentAssistantId.toString()) continue
-                }
                 hits += hit
                 if (hits.size >= limit) break
             }
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("status", "ok")
-                put("scope", scope)
                 put("query", query)
                 put("hits", buildJsonArray {
                     hits.forEach { hit ->
@@ -347,7 +326,6 @@ class ConversationHistoryTools(
 
     private suspend fun Conversation.toSessionSummary() = buildJsonObject {
         put("session_id", id.toString())
-        put("assistant_id", assistantId.toString())
         put("title", title)
         put("created_at", createAt.toEpochMilli())
         put("updated_at", updateAt.toEpochMilli())
@@ -363,9 +341,6 @@ class ConversationHistoryTools(
     }
 
     private val JsonElement.obj get() = jsonObject
-
-    private fun JsonElement.scope(): String =
-        obj["scope"]?.jsonPrimitive?.contentOrNull?.takeIf { it == "all" } ?: "current_assistant"
 
     private fun JsonElement.stringArray(name: String): List<String> =
         runCatching { obj[name]?.jsonArray }.getOrNull()

@@ -1,8 +1,8 @@
 package app.amber.feature.ui.pages.favorite
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Favourite
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Heart
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -145,7 +145,7 @@ private fun FavoriteHeader(count: Int) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Favourite,
+                icon = Lucide.Heart,
                 tone = WorkspaceTone.Accent,
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -179,7 +179,7 @@ private fun FavoriteEmptyState() {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Favourite,
+                icon = Lucide.Heart,
                 tone = WorkspaceTone.Neutral,
             )
             Text(
@@ -232,8 +232,8 @@ private fun SwipeableFavoriteCard(
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 Icon(
-                    imageVector = HugeIcons.Delete01,
-                    contentDescription = stringResource(R.string.assistant_page_remove),
+                    imageVector = Lucide.Trash2,
+                    contentDescription = stringResource(R.string.favorite_remove),
                     tint = workspace.red,
                 )
             }
@@ -270,7 +270,7 @@ private fun FavoriteCard(
             verticalAlignment = Alignment.Top,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Favourite,
+                icon = Lucide.Heart,
                 tone = WorkspaceTone.Accent,
             )
             Column(

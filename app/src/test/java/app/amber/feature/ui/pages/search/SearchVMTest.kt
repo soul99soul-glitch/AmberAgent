@@ -18,7 +18,6 @@ class SearchVMTest {
         nodeId = if (source == SearchHitSource.BODY) "node-$id" else null,
         messageId = if (source == SearchHitSource.BODY) "message-$id" else null,
         conversationId = "conversation-$id",
-        assistantId = "assistant-1",
         title = "Title $id",
         updateAt = Instant.EPOCH,
         snippet = "[$id]",

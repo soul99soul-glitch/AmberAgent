@@ -6,13 +6,9 @@ import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.amber.agent.data.model.nativebridge.RegexTransformerNative
 import app.amber.agent.ui.components.richtext.nativebridge.MarkdownParserNative
-import app.amber.common.http.evaluateJsonExpr
-import app.amber.core.json.expr.JsonExprNative
 import app.amber.core.sync.core.SyncCrypto
 import app.amber.core.sync.core.SyncCryptoNative
 import app.amber.feature.deepread.nativebridge.ReaderExtractorNative
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
@@ -35,7 +31,6 @@ class NativePathDeviceBenchmarkTest {
 
     @After
     fun resetNativeConfigs() {
-        JsonExprNative.config = JsonExprNative.DisabledConfig
         ReaderExtractorNative.config = ReaderExtractorNative.DisabledConfig
         SyncCryptoNative.config = SyncCryptoNative.DisabledConfig
     }
@@ -47,7 +42,6 @@ class NativePathDeviceBenchmarkTest {
             Build.SUPPORTED_ABIS.any { it == "arm64-v8a" },
         )
 
-        JsonExprNative.config = EnabledJsonExprConfig
         ReaderExtractorNative.config = EnabledReaderExtractorConfig
         SyncCryptoNative.config = EnabledSyncCryptoConfig
 
@@ -58,15 +52,6 @@ class NativePathDeviceBenchmarkTest {
             renderMarkdownHtmlJvm(markdownSample)
         }
         assertNotNull(MarkdownParserNative.renderHtml("hello"))
-
-        val jsonNative = measure("json_expr_native", iterations = 2_000) {
-            evaluateJsonExpr("balance.total + bonuses[1] * 3", jsonRoot)
-        }
-        JsonExprNative.config = JsonExprNative.DisabledConfig
-        val jsonJvm = measure("json_expr_jvm", iterations = 2_000) {
-            evaluateJsonExpr("balance.total + bonuses[1] * 3", jsonRoot)
-        }
-        assertEquals("156", evaluateJsonExpr("balance.total + bonuses[1] * 3", jsonRoot))
 
         val regexNative = measure("regex_native", iterations = 1_000) {
             RegexTransformerNative.apply(regexInput, regexFind, regexReplace)
@@ -103,8 +88,6 @@ class NativePathDeviceBenchmarkTest {
         listOf(
             markdownNative,
             markdownJvm,
-            jsonNative,
-            jsonJvm,
             regexNative,
             regexJvm,
             syncNative,
@@ -152,16 +135,6 @@ class NativePathDeviceBenchmarkTest {
                 "avgUs=${"%.3f".format(avgUs)} checksum=$checksum"
     }
 
-    private object EnabledJsonExprConfig : JsonExprNative.Config {
-        override fun enabled(): Boolean = true
-        override fun onLoadFailure(error: Throwable) {
-            throw AssertionError("json-expr failed to load", error)
-        }
-        override fun onNativePanic(stage: String, error: Throwable?) {
-            throw AssertionError("json-expr native failure at $stage", error)
-        }
-    }
-
     private object EnabledReaderExtractorConfig : ReaderExtractorNative.Config {
         override fun enabled(): Boolean = true
         override fun onLoadFailure(error: Throwable) {
@@ -199,15 +172,6 @@ class NativePathDeviceBenchmarkTest {
                 appendLine()
             }
         }
-
-        private val jsonRoot = JsonObject(
-            mapOf(
-                "balance" to JsonObject(mapOf("total" to JsonPrimitive(120))),
-                "bonuses" to kotlinx.serialization.json.JsonArray(
-                    listOf(JsonPrimitive(5), JsonPrimitive(12)),
-                ),
-            ),
-        )
 
         private val regexInput = buildString {
             repeat(80) { i ->

@@ -14,7 +14,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.hasUsableAuth
 import app.amber.ai.provider.providers.GoogleProvider
@@ -59,7 +59,7 @@ val PROVIDER_CONFIG_TOOL_NAMES = setOf(
     TOOL_SETTINGS_SET_MODEL_SLOT,
 )
 
-/** 拉模型目录的注入点 —— 生产默认走 ProviderManager（与 UI 设置页同路径），测试注入 fake。 */
+/** 拉模型目录的注入点 —— 生产默认走 ProviderCatalog（与 UI 设置页同路径），测试注入 fake。 */
 fun interface ProviderModelFetcher {
     suspend fun fetch(provider: ProviderSetting): List<Model>
 }
@@ -67,9 +67,10 @@ fun interface ProviderModelFetcher {
 fun createProviderConfigTools(
     settingsStore: SettingsAggregator,
     secretStore: SecretStore,
-    providerManager: ProviderManager,
+    providerCatalog: ProviderCatalog,
+    googleProvider: GoogleProvider,
     modelFetcher: ProviderModelFetcher = ProviderModelFetcher { provider ->
-        providerManager.getProviderByType(provider).listModels(provider)
+        providerCatalog.text(provider).listModels(provider)
     },
 ): List<Tool> {
     // Google OAuth state lives in the provider's encrypted token store, not in
@@ -79,8 +80,7 @@ fun createProviderConfigTools(
     val oauthStatusResolver: (ProviderSetting) -> GoogleGeminiAuthStatus? = { provider ->
         if (provider is ProviderSetting.Google) {
             runCatching {
-                (providerManager.getProviderByType(provider) as? GoogleProvider)
-                    ?.oauthAuthStatus(provider)
+                googleProvider.oauthAuthStatus(provider)
             }.getOrElse { GoogleGeminiAuthStatus.clientUnavailable() }
         } else {
             null

@@ -38,23 +38,22 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiMagic
-import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.Brain02
-import me.rerere.hugeicons.stroke.ChartHistogram
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Database02
-import me.rerere.hugeicons.stroke.Developer
-import me.rerere.hugeicons.stroke.GlobalSearch
-import me.rerere.hugeicons.stroke.ImageUpload
-import me.rerere.hugeicons.stroke.LookTop
-import me.rerere.hugeicons.stroke.Megaphone01
-import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.Rocket01
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Sun01
-import me.rerere.hugeicons.stroke.WavingHand01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.Brain
+import com.composables.icons.lucide.ChartNoAxesColumnIncreasing
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.DatabaseZap
+import com.composables.icons.lucide.SquareCode
+import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.ImageUp
+import com.composables.icons.lucide.SearchCheck
+import com.composables.icons.lucide.Package
+import com.composables.icons.lucide.Rocket
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Sun
+import com.composables.icons.lucide.Hand
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.isNotConfigured
@@ -104,7 +103,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                 navController.navigate(Screen.Developer)
                             }
                         ) {
-                            Icon(HugeIcons.Developer, "Developer")
+                            Icon(Lucide.SquareCode, "Developer")
                         }
                     }
                 },
@@ -141,7 +140,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     colors = settingListColors,
                 ) {
                     item(
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Sun01) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Sun) },
                         trailingContent = {
                             Select(
                                 options = ColorMode.entries,
@@ -169,7 +168,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Settings03) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Settings) },
                         supportingContent = { Text(stringResource(R.string.setting_page_display_setting_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
                     )
@@ -187,37 +186,37 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Brain02) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Brain) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_memory_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Package) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Package) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.LookTop) },
+                        leadingContent = { SettingLeadingIcon(Lucide.SearchCheck) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_execution_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Alert01) },
+                        leadingContent = { SettingLeadingIcon(Lucide.TriangleAlert) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_permissions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSandbox) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Code) },
+                        leadingContent = { SettingLeadingIcon(Lucide.CodeXml) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimental) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Rocket01) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Rocket) },
                         supportingContent = { Text(stringResource(R.string.setting_page_experimental_features_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_experimental_features)) },
                     )
@@ -235,27 +234,21 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Brain02) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Brain) },
                         supportingContent = { Text(stringResource(R.string.setting_page_providers_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.AiMagic) },
+                        leadingContent = { SettingLeadingIcon(Lucide.WandSparkles) },
                         supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.GlobalSearch) },
+                        leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
                         supportingContent = { Text(stringResource(R.string.setting_page_search_service_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
-                    )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingTTS) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Megaphone01) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_tts_service_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_tts_service)) },
                     )
                 }
             }
@@ -274,13 +267,13 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.Database02) },
+                        leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
                         supportingContent = { Text("Google 云同步、本地加密备份与完整数据恢复") },
                         headlineContent = { Text("同步与备份") },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.ImageUpload) },
+                        leadingContent = { SettingLeadingIcon(Lucide.ImageUp) },
                         supportingContent = {
                             if (storageState.first == -1) {
                                 Text(stringResource(R.string.calculating))
@@ -301,7 +294,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         // P7-03：存储占用与按时间清理会话。
                         onClick = { navController.navigate(Screen.SettingStorage) },
-                        leadingContent = { SettingLeadingIcon(HugeIcons.ChartHistogram) },
+                        leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
                         supportingContent = { Text("存储占用分类统计与按时间清理会话（置顶保留）") },
                         headlineContent = { Text("存储占用与清理") },
                     )
@@ -350,7 +343,7 @@ private fun ProviderConfigWarningCard(navController: Navigator) {
                     Text(stringResource(R.string.setting_page_config_api_desc))
                 },
                 leadingContent = {
-                    SettingLeadingIcon(HugeIcons.Alert01, tone = WorkspaceTone.Warning)
+                    SettingLeadingIcon(Lucide.TriangleAlert, tone = WorkspaceTone.Warning)
                 },
                 colors = ListItemDefaults.colors(
                     containerColor = Color.Transparent,

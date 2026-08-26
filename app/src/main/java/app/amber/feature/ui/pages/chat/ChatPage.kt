@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -92,13 +93,13 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.LeftToRightListBullet
-import me.rerere.hugeicons.stroke.Menu03
-import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Time02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.List
+import com.composables.icons.lucide.Menu
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Clock
 import app.amber.agent.R
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -107,9 +108,6 @@ import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.ai.mcp.McpToolNamespace
 import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.settings.Settings
-import app.amber.core.settings.getAssistantById
-import app.amber.core.settings.getCurrentAssistant
-import app.amber.core.model.Assistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.files.FilesManager
 import app.amber.core.context.ActiveCompactBoundary
@@ -122,7 +120,6 @@ import app.amber.core.service.PendingUserMessage
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ai.ChatInput
-import app.amber.feature.ui.components.ai.ModelSelector
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.components.ds.BlinkingCursor
@@ -303,14 +300,12 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         }
     }
 
-    val chatAssistant = remember(setting.assistants, conversation.assistantId) {
-        setting.getAssistantById(conversation.assistantId)
-    }
+    val chatRegexes = setting.regexes
     val compactInTimelineActive = isCompacting || compactLifecycleState.isActive
     val activeGeneration = loadingJob != null || pendingUserMessages.isNotEmpty() || compactInTimelineActive
     val chatTimelinePlan = rememberChatTimelinePlan(
         conversation = conversation,
-        assistant = chatAssistant,
+        regexes = chatRegexes,
         showAssistantBubble = setting.displaySetting.showAssistantBubble,
         loading = loadingJob != null,
         activeGeneration = activeGeneration,
@@ -536,7 +531,6 @@ private fun ChatPageContent(
         }
     }
 
-    TTSAutoPlay(vm = vm, setting = setting, conversation = conversation)
     val pendingQueueCount = pendingUserMessages.size
 
     // 用 Box 强制 z-order：chatTheme.bg → bloom → Scaffold（透明）
@@ -550,7 +544,6 @@ private fun ChatPageContent(
     // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
     var modelMenuOpen by remember { mutableStateOf(false) }
     Box(modifier = Modifier.fillMaxSize().background(chatThemeBg)) {
-        AssistantBackground(setting = setting)
         // V3 Whisper：空白态满强度 bloom；进入对话按设计稿"蓝光晕去掉 → 干净浅灰白"。
         // 转场用 700ms tween 缓慢淡出，避免发送瞬间硬切。
         // Paper/Midnight 设计稿 (themes.jsx haloConvo) 要求对话态保留 faint 底光氛围
@@ -608,16 +601,7 @@ private fun ChatPageContent(
                         previewMode = !previewMode
                     },
                     onUpdateChatModel = {
-                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
-                    },
-                    onUpdateAssistant = { updated ->
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { a ->
-                                    if (a.id == updated.id) updated else a
-                                }
-                            )
-                        )
+                        vm.setChatModel(model = it)
                     },
                     onUpdateTitle = {
                         vm.updateTitle(it)
@@ -747,21 +731,9 @@ private fun ChatPageContent(
                         )
                     },
                     onUpdateChatModel = {
-                        vm.setChatModel(assistant = setting.getCurrentAssistant(), model = it)
+                        vm.setChatModel(model = it)
                     },
-                    onUpdateAssistant = {
-                        vm.updateSettings(
-                            setting.copy(
-                                assistants = setting.assistants.map { assistant ->
-                                    if (assistant.id == it.id) {
-                                        it
-                                    } else {
-                                        assistant
-                                    }
-                                }
-                            )
-                        )
-                    },
+                    onUpdateSettings = { vm.updateSettings(it) },
                     onUpdateSearchService = { index ->
                         vm.updateSettings(
                             setting.copy(
@@ -1022,7 +994,7 @@ private fun ChatPageContent(
 
             // Graphite TopModelMenu —— 从 header 正下方 (innerPadding.top) 卷帘展开、覆盖内容区
             // 的服务商/模型手风琴下拉（替代旧 ModalBottomSheet）。
-            val chatModelIdForMenu = setting.getCurrentAssistant().chatModelId ?: setting.chatModelId
+            val chatModelIdForMenu = setting.chatModelId
             val chatProvidersForMenu = setting.providers.filter { p ->
                 p.enabled && p.models.any { it.type == ModelType.CHAT }
             }
@@ -1036,7 +1008,7 @@ private fun ChatPageContent(
                 currentProviderId = currentProviderIdForMenu,
                 currentModelId = chatModelIdForMenu,
                 onSelect = { model ->
-                    vm.setChatModel(assistant = setting.getCurrentAssistant(), model = model)
+                    vm.setChatModel(model = model)
                     modelMenuOpen = false
                 },
                 onClose = { modelMenuOpen = false },
@@ -1605,7 +1577,6 @@ private fun TopBar(
     onClickMenu: () -> Unit,
     onNewChat: () -> Unit,
     onUpdateChatModel: (Model) -> Unit,
-    onUpdateAssistant: (Assistant) -> Unit,
     onUpdateTitle: (String) -> Unit,
     modelMenuOpen: Boolean,
     onToggleModelMenu: () -> Unit,
@@ -1638,7 +1609,7 @@ private fun TopBar(
                 if (!bigScreen) {
                     Box(
                         modifier = Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             // V3: ripple 改圆形 (默认矩形 ripple 跟 36dp 方块大小一致, 看着丑)
                             .clip(androidx.compose.foundation.shape.CircleShape)
                             .clickable { onBack() },
@@ -1647,12 +1618,14 @@ private fun TopBar(
                         AmberHeaderBackArrow()
                     }
                 }
-                // Graphite §6.2 ChatHeader title block: line 1 = bold session title (sans),
-                // line 2 = the model-id row that triggers the model menu (ModelSelector owns
-                // the picker + its onClick/popup — preserved as-is).
                 Column(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalArrangement = Arrangement.spacedBy(1.dp),
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxHeight()
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .clickable { onToggleModelMenu() },
+                    horizontalAlignment = Alignment.Start,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     val amberTokens = LocalAmberTokens.current
                     val amberType = LocalAmberType.current
@@ -1676,8 +1649,6 @@ private fun TopBar(
                     )
                     Row(
                         modifier = Modifier
-                            .clip(androidx.compose.foundation.shape.CircleShape)
-                            .clickable { onToggleModelMenu() }
                             // 上下内距 3 收紧标题↔model；左内距 12→4，整组向左靠
                             .padding(start = 4.dp, top = 3.dp, end = 12.dp, bottom = 3.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1698,7 +1669,7 @@ private fun TopBar(
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         Icon(
-                            imageVector = HugeIcons.ArrowDown01,
+                            imageVector = Lucide.ArrowDown,
                             contentDescription = null,
                             tint = amberTokens.ink3,
                             // 箭头 14→13，陪着字号一起缩
@@ -1770,7 +1741,7 @@ private fun TopBar(
                 // surrounding circle"，仅渲染 26dp ink 描线图标，无背景圆。
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(48.dp)
                         // V3: ripple 改圆形
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .clickable { onNewChat() },
@@ -1789,7 +1760,7 @@ private fun TopBar(
 /**
  * 顶栏返回箭头：延续抽象细线语言（1.6dp 圆帽 ink 线，同 [AmberHeaderPlus] 的 +）。
  * 顶栏左上一度是汉堡（三条横线，开 ChatDrawer），侧边栏被 Session 首页取代后
- * 改为返回箭头；不用 HugeIcons 描线图标（用户反馈过与细线不像一个界面）。
+ * 改为返回箭头，与当前顶栏的细线语言保持一致。
  */
 @Composable
 private fun AmberHeaderBackArrow() {
@@ -1810,7 +1781,7 @@ private fun AmberHeaderBackArrow() {
 
 /**
  * “新会话”极简标记：1.6dp 圆角 ink 细条交叉成一个 +，与顶栏箭头/细线元素同一套
- * 抽象细线语言 —— 取代之前具象的 HugeIcons 描线图标（用户反馈两者"不像一个界面里的元素"）。
+ * 抽象细线语言，与返回箭头和其他顶栏元素保持一致。
  */
 @Composable
 private fun AmberHeaderPlus(arm: androidx.compose.ui.unit.Dp = 18.dp) {
@@ -1865,7 +1836,7 @@ private fun OutcomeUnknownCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Time02,
+                imageVector = Lucide.Clock,
                 contentDescription = null,
                 tint = workspace.amber,
                 modifier = Modifier.size(18.dp),
@@ -1886,20 +1857,20 @@ private fun OutcomeUnknownCard(
             }
             WorkspaceIconButton(
                 onClick = onAbandon,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(48.dp),
                 size = 28.dp,
                 iconSize = 14.dp,
                 tone = WorkspaceTone.Danger,
-                icon = HugeIcons.Cancel01,
+                icon = Lucide.X,
                 contentDescription = "放弃",
             )
             WorkspaceIconButton(
                 onClick = onRetry,
-                modifier = Modifier.size(28.dp),
+                modifier = Modifier.size(48.dp),
                 size = 28.dp,
                 iconSize = 14.dp,
                 tone = WorkspaceTone.Success,
-                icon = HugeIcons.Refresh01,
+                icon = Lucide.RefreshCw,
                 contentDescription = "确认重试",
             )
         }

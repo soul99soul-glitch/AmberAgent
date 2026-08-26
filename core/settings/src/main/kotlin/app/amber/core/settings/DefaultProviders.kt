@@ -19,7 +19,7 @@ val SeedMiniMaxM3ModelId = Uuid.parse("c7e8a911-3b4d-4f2a-8c1e-0d7f2a3b4c5f")
 
 /**
  * gpt-image-2 entry seeded into the built-in OpenAI provider. Set as
- * ModelType.IMAGE so it appears in the new assistant "生图模型" picker
+ * ModelType.IMAGE so it appears in Amber's "生图模型" picker
  * (ModelType.IMAGE filter) and does NOT pollute the chat-model dropdown.
  * Output modality is IMAGE only — input is the user's text prompt.
  */

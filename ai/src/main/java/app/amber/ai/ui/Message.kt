@@ -25,6 +25,7 @@ import kotlin.uuid.Uuid
 
 internal const val STREAM_TOOL_INDEX_METADATA_KEY = "stream_tool_index"
 internal const val STREAM_TOOL_ARGS_REPLACE_METADATA_KEY = "stream_tool_args_replace"
+internal const val STREAM_TOOL_FALLBACK_ID_METADATA_KEY = "stream_tool_fallback_id"
 
 // 公共消息抽象, 具体的Provider实现会转换为API接口需要的DTO
 //
@@ -481,10 +482,18 @@ sealed class UIMessagePart {
             // 而不是流式 append, 否则 delta 累积 + done 全量会重复拼接 input
             val replaceArgs = other.isStreamArgsReplace()
             val incoming = if (replaceArgs) other.withoutStreamArgsReplace() else other
+            val currentUsesFallbackId = hasStreamFallbackId()
+            val incomingUsesFallbackId = incoming.hasStreamFallbackId()
             return Tool(
                 // OpenAI 流式 tool delta 的真实 id 可能晚于首个 (blank id) delta 到达,
                 // 必须采纳后到的非空 id, 否则下游按 toolCallId 回填执行结果会失败
-                toolCallId = toolCallId.ifBlank { incoming.toolCallId },
+                toolCallId = when {
+                    currentUsesFallbackId && !incomingUsesFallbackId && incoming.toolCallId.isNotBlank() -> {
+                        incoming.toolCallId
+                    }
+
+                    else -> toolCallId.ifBlank { incoming.toolCallId }
+                },
                 toolName = if (replaceArgs) incoming.toolName.ifBlank { toolName } else toolName + incoming.toolName,
                 input = when {
                     !replaceArgs -> input + incoming.input
@@ -494,7 +503,11 @@ sealed class UIMessagePart {
                 },
                 output = output + incoming.output,
                 approvalState = approvalState,
-                metadata = if (incoming.metadata != null) incoming.metadata else metadata,
+                metadata = when {
+                    incomingUsesFallbackId && !currentUsesFallbackId -> metadata
+                    incoming.metadata != null -> incoming.metadata
+                    else -> metadata
+                },
             )
         }
     }
@@ -553,6 +566,9 @@ internal fun UIMessagePart.Tool.withStreamArgsReplace(): UIMessagePart.Tool {
 
 internal fun UIMessagePart.Tool.isStreamArgsReplace(): Boolean =
     metadata?.get(STREAM_TOOL_ARGS_REPLACE_METADATA_KEY)?.jsonPrimitive?.booleanOrNull == true
+
+internal fun UIMessagePart.Tool.hasStreamFallbackId(): Boolean =
+    metadata?.get(STREAM_TOOL_FALLBACK_ID_METADATA_KEY)?.jsonPrimitive?.booleanOrNull == true
 
 /**
  * 剥离 replace 控制标记 (返回防御性 copy)。merge 结果与新建 part 都不应携带

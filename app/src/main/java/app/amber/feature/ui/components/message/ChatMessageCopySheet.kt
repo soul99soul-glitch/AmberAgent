@@ -29,9 +29,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Copy01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Copy
 import app.amber.agent.R
 import app.amber.core.utils.copyMessageToClipboard
 
@@ -64,7 +64,7 @@ fun ChatMessageCopySheet(
                         onDismissRequest()
                     }
                 ) {
-                    Icon(HugeIcons.Cancel01, null)
+                    Icon(Lucide.X, null)
                 }
 
                 Text(
@@ -79,7 +79,7 @@ fun ChatMessageCopySheet(
                     }
                 ) {
                     Icon(
-                        imageVector = HugeIcons.Copy01,
+                        imageVector = Lucide.Copy,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )

@@ -2,7 +2,7 @@ package app.amber.feature.modelcouncil
 
 import kotlinx.coroutines.CancellationException
 import app.amber.ai.core.ReasoningLevel
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
@@ -14,13 +14,13 @@ import kotlin.uuid.Uuid
 
 /**
  * In-process [ModelCouncilTextRunner] — streams seat output via the configured
- * [ProviderManager] for a provider+model combination from settings.
+ * [ProviderCatalog] for a provider+model combination from settings.
  *
  * Extracted from ModelCouncilManager.kt in Phase 1 god-class slimming
  * (companion split alongside [ExternalCliModelCouncilRunner]).
  */
 class ProviderModelCouncilTextRunner(
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
 ) : ModelCouncilTextRunner {
     override suspend fun generate(
         settings: Settings,
@@ -35,7 +35,7 @@ class ProviderModelCouncilTextRunner(
     ): ModelCouncilTextResult {
         val model = settings.findModelById(modelId) ?: error("Model not found: $modelId")
         val provider = model.findProvider(settings.providers) ?: error("Provider not found for model: ${model.displayName}")
-        val providerImpl = providerManager.getProviderByType(provider)
+        val providerImpl = providerCatalog.text(provider)
         val messages = buildList {
             add(UIMessage.system(systemPrompt))
             // User turn carries the synthesized prompt text plus any images the
@@ -93,7 +93,7 @@ class ProviderModelCouncilTextRunner(
                     emitSkippedNoChange++
                 }
             }
-            providerImpl.streamText(
+            providerImpl.stream(
                 providerSetting = provider,
                 messages = messages,
                 params = params,

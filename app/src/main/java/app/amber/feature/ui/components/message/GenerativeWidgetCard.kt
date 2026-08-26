@@ -84,15 +84,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowExpand01
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.FileZip
-import me.rerere.hugeicons.stroke.Pause
-import me.rerere.hugeicons.stroke.Play
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Expand
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.FileArchive
+import com.composables.icons.lucide.Pause
+import com.composables.icons.lucide.Play
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.ai.generative.GenerativeWidgetSanitizeStatus
 import app.amber.core.ai.generative.GenerativeWidgetSanitizer
@@ -456,7 +456,7 @@ fun ExpandedGenerativeWidgetDialog(
                                     }
                                 },
                             ) {
-                                Icon(HugeIcons.FileZip, contentDescription = "分享 ZIP")
+                                Icon(Lucide.FileArchive, contentDescription = "分享 ZIP")
                             }
                         }
                         IconButton(
@@ -501,10 +501,10 @@ fun ExpandedGenerativeWidgetDialog(
                                 }
                             },
                         ) {
-                            Icon(HugeIcons.Download01, contentDescription = "保存 JPG")
+                            Icon(Lucide.Download, contentDescription = "保存 JPG")
                         }
                         IconButton(onClick = onDismissRequest) {
-                            Icon(HugeIcons.Cancel01, contentDescription = "关闭")
+                            Icon(Lucide.X, contentDescription = "关闭")
                         }
                     }
                     BoxWithConstraints(
@@ -1441,7 +1441,7 @@ private fun GuizangHtmlDeckWebView(
                         runDeckAction("window.__amberDeckPrev && window.__amberDeckPrev();")
                     },
                 ) {
-                    Icon(HugeIcons.ArrowLeft01, contentDescription = "上一页")
+                    Icon(Lucide.ArrowLeft, contentDescription = "上一页")
                 }
                 Text(
                     text = if (slideCount > 0) "${currentSlide + 1}/$slideCount" else "0/0",
@@ -1450,7 +1450,7 @@ private fun GuizangHtmlDeckWebView(
                 )
                 IconButton(onClick = { setLowPowerMode(!lowPower) }) {
                     Icon(
-                        if (lowPower) HugeIcons.Play else HugeIcons.Pause,
+                        if (lowPower) Lucide.Play else Lucide.Pause,
                         contentDescription = if (lowPower) "恢复动画" else "低功耗",
                     )
                 }
@@ -1459,7 +1459,7 @@ private fun GuizangHtmlDeckWebView(
                         runDeckAction("window.__amberDeckNext && window.__amberDeckNext();")
                     },
                 ) {
-                    Icon(HugeIcons.ArrowRight01, contentDescription = "下一页")
+                    Icon(Lucide.ArrowRight, contentDescription = "下一页")
                 }
             }
         }

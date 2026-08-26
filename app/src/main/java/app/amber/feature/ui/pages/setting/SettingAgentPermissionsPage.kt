@@ -22,11 +22,11 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.Layers02
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Zap
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.Layers
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Zap
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
@@ -49,7 +49,7 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
     if (showHighRiskAutoApproveDialog) {
         AlertDialog(
             onDismissRequest = { showHighRiskAutoApproveDialog = false },
-            icon = { Icon(HugeIcons.Alert01, null) },
+            icon = { Icon(Lucide.TriangleAlert, null) },
             title = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_confirm_title)) },
             text = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_confirm_desc)) },
             confirmButton = {
@@ -99,13 +99,13 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingSystemAccess) },
-                        leadingContent = { Icon(HugeIcons.Settings03, null) },
+                        leadingContent = { Icon(Lucide.Settings, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_system_access_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_system_access)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingCapabilityPermissions) },
-                        leadingContent = { Icon(HugeIcons.Layers02, null) },
+                        leadingContent = { Icon(Lucide.Layers, null) },
                         supportingContent = { Text("按能力分组管理 disabled/ask/auto 策略，查看最近审批记录（需在 Debug 页开启 capability_permissions）") },
                         headlineContent = { Text("Capability 权限") },
                     )
@@ -118,7 +118,7 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_agent_permissions_approval_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Zap, null) },
+                        leadingContent = { Icon(Lucide.Zap, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_auto_approve_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_auto_approve)) },
                         trailingContent = {
@@ -137,7 +137,7 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Alert01, null) },
+                        leadingContent = { Icon(Lucide.TriangleAlert, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_high_risk_auto_approve)) },
                         trailingContent = {

@@ -41,7 +41,6 @@ import app.amber.core.ai.mcp.transport.SseClientTransport
 import app.amber.core.ai.mcp.transport.StreamableHttpClientTransport
 import app.amber.core.event.AppEventBus
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.FilesManager
 import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.checkDifferent
@@ -139,10 +138,9 @@ class McpManager(
 
     fun getAllAvailableTools(): List<McpTool> {
         val settings = settingsStore.settingsFlow.value
-        val assistant = settings.getCurrentAssistant()
         val mcpServers = settings.mcpServers
             .filter {
-                it.commonOptions.enable && it.id in assistant.mcpServers
+                it.commonOptions.enable && it.id in settings.enabledMcpServerIds
             }
             .flatMap {
                 it.commonOptions.tools.filter { tool -> tool.enable }
@@ -156,10 +154,9 @@ class McpManager(
      */
     fun getAllAvailableToolRefs(): List<McpToolRef> {
         val settings = settingsStore.settingsFlow.value
-        val assistant = settings.getCurrentAssistant()
         return settings.mcpServers
             .filter {
-                it.commonOptions.enable && it.id in assistant.mcpServers
+                it.commonOptions.enable && it.id in settings.enabledMcpServerIds
             }
             .flatMap { server ->
                 server.commonOptions.tools

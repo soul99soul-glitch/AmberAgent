@@ -59,13 +59,13 @@ import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.hugeicons.stroke.Time02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.Clock
 import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
@@ -710,7 +710,7 @@ private fun SandboxStepPeek(
                     modifier = Modifier.size(18.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.Cancel01,
+                        imageVector = Lucide.X,
                         contentDescription = stringResource(R.string.stop),
                         tint = workspace.amber,
                         modifier = Modifier.size(10.dp),
@@ -759,7 +759,7 @@ private fun SandboxStepArrow(
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = if (left) HugeIcons.ArrowLeft01 else HugeIcons.ArrowRight01,
+            imageVector = if (left) Lucide.ArrowLeft else Lucide.ArrowRight,
             contentDescription = null,
             modifier = Modifier.size(9.dp),
             tint = theme.inkSoft.copy(alpha = if (enabled) 1f else 0.28f),
@@ -791,12 +791,12 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
                 imageVector = when (status) {
-                    ToolActivityStatus.SUCCEEDED -> HugeIcons.Tick01
+                    ToolActivityStatus.SUCCEEDED -> Lucide.Check
                     ToolActivityStatus.FAILED,
                     ToolActivityStatus.TIMED_OUT,
-                    ToolActivityStatus.CANCELLED -> HugeIcons.Cancel01
-                    ToolActivityStatus.INTERRUPTED -> HugeIcons.Time02
-                    else -> HugeIcons.Tick01 // 运行中也显示勾 (表示已开始/在进行)
+                    ToolActivityStatus.CANCELLED -> Lucide.X
+                    ToolActivityStatus.INTERRUPTED -> Lucide.Clock
+                    else -> Lucide.Check // 运行中也显示勾 (表示已开始/在进行)
                 },
                 contentDescription = null,
                 tint = ink,

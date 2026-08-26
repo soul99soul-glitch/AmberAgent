@@ -4,7 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import app.amber.ai.core.ReasoningLevel
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.agent.R
@@ -21,7 +21,7 @@ import kotlin.uuid.Uuid
 class AiAuxiliaryGenerator(
     private val context: Context,
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val conversationRepo: ConversationRepository,
     private val conversationAccess: ConversationAccess,
 ) {
@@ -42,8 +42,8 @@ class AiAuxiliaryGenerator(
             val model = settings.resolveTaskChatModel(settings.titleModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
+            val providerHandler = providerCatalog.text(provider)
+            val result = providerHandler.complete(
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.user(
@@ -96,8 +96,8 @@ class AiAuxiliaryGenerator(
                 )
             }
 
-            val providerHandler = providerManager.getProviderByType(provider)
-            val result = providerHandler.generateText(
+            val providerHandler = providerCatalog.text(provider)
+            val result = providerHandler.complete(
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.user(

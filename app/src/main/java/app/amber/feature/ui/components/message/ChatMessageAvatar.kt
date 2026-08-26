@@ -22,7 +22,6 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.R
-import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
 import app.amber.feature.ui.components.ui.AutoAIIcon
 import app.amber.feature.ui.components.ui.UIAvatar
@@ -81,84 +80,44 @@ fun ChatMessageUserAvatar(
 @Composable
 fun ChatMessageAssistantAvatar(
     message: UIMessage,
-    loading: Boolean,
     model: Model?,
-    assistant: Assistant?,
     modifier: Modifier = Modifier,
 ) {
     val settings = LocalSettings.current
     val showIcon = settings.displaySetting.showModelIcon
-    val useAssistantAvatar = assistant?.useAssistantAvatar == true
-    if (message.role == MessageRole.ASSISTANT && (model != null || useAssistantAvatar)) {
+    val showName = settings.displaySetting.showModelName
+    if (message.role == MessageRole.ASSISTANT && model != null && (showIcon || showName)) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
             modifier = modifier
         ) {
-            if (useAssistantAvatar) {
-                if (showIcon) {
-                    UIAvatar(
-                        name = assistant.name,
-                        modifier = Modifier.size(32.dp),
-                        value = assistant.avatar,
-                        loading = loading,
+            // V3 Whisper: model 名 + 6px 绿点状态（取代 provider 图标）。
+            if (showIcon) {
+                androidx.compose.foundation.layout.Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .androidxBackgroundCircle(
+                            app.amber.feature.ui.pages.chat.LocalChatTheme.current.modelStatusDot
+                        ),
+                )
+            }
+            if (showName) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "amber",
+                        style = LocalAmberType.current.meta.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                        ),
+                        color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
+                        maxLines = 1,
                     )
-                }
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if(settings.displaySetting.showModelName) {
+                    if (settings.displaySetting.showDateBelowName) {
                         Text(
-                            text = assistant.name.ifEmpty { stringResource(R.string.assistant_page_default_assistant) },
-                            style = MaterialTheme.typography.titleSmallEmphasized,
-                            maxLines = 1,
+                            text = message.createdAt.toJavaLocalDateTime().toLocalString(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.inkFaint,
                         )
-                        if (settings.displaySetting.showDateBelowName) {
-                            Text(
-                                text = message.createdAt.toJavaLocalDateTime().toLocalString(),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = LocalContentColor.current.copy(alpha = 0.8f),
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
-            } else if (model != null) {
-                // V3 Whisper: model 名 + 6px 绿点状态（取代 provider 图标）。
-                // chat1.md L463：'纯黑 DeepSeek V4 Pro，去掉 on 胶囊；改用 6px 绿色状态点做轻量信号'。
-                if (showIcon) {
-                    androidx.compose.foundation.layout.Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .androidxBackgroundCircle(
-                                app.amber.feature.ui.pages.chat.LocalChatTheme.current.modelStatusDot
-                            ),
-                    )
-                }
-                Column(
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if(settings.displaySetting.showModelName) {
-                        Text(
-                            // Graphite §6.2 "Assistant turn": the brand label is the mono
-                            // `amber` wordmark in accent (mono = machine-fact, the mono/sans
-                            // split is the signature). Still the Agent group identity, not the
-                            // underlying model id — switch concrete model from the TopBar.
-                            text = "amber",
-                            // .meta = JetBrains Mono machine-fact style; wordmark is 700 + accent.
-                            style = LocalAmberType.current.meta.copy(
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                            ),
-                            color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
-                            maxLines = 1,
-                        )
-                        if (settings.displaySetting.showDateBelowName) {
-                            Text(
-                                text = message.createdAt.toJavaLocalDateTime().toLocalString(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.inkFaint,
-                            )
-                        }
                     }
                 }
             }

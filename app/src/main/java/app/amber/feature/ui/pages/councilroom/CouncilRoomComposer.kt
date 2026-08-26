@@ -83,12 +83,12 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowUp02
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Image02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Image
 import org.koin.compose.koinInject
 
 /**
@@ -270,7 +270,7 @@ fun CouncilRoomComposer(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Add01,
+                            imageVector = Lucide.Plus,
                             contentDescription = "添加附件",
                             tint = if (attachExpanded) tokens.accent else tokens.ink3,
                             modifier = Modifier
@@ -305,7 +305,7 @@ fun CouncilRoomComposer(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    imageVector = HugeIcons.Image02,
+                                    imageVector = Lucide.Image,
                                     contentDescription = "图片",
                                     tint = tokens.ink3,
                                     modifier = Modifier.size(23.dp),
@@ -322,7 +322,7 @@ fun CouncilRoomComposer(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    imageVector = HugeIcons.File02,
+                                    imageVector = Lucide.FileText,
                                     contentDescription = "文件",
                                     tint = tokens.ink3,
                                     modifier = Modifier.size(23.dp),
@@ -423,7 +423,7 @@ fun CouncilRoomComposer(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (showStop) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
+                        imageVector = if (showStop) Lucide.X else Lucide.ArrowUp,
                         contentDescription = if (showStop) "停止" else "发送",
                         tint = sendIconTint,
                         modifier = Modifier.size(22.dp),
@@ -595,7 +595,7 @@ private fun CouncilAttachmentStrip(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Icon(
-                            imageVector = HugeIcons.File02,
+                            imageVector = Lucide.FileText,
                             contentDescription = null,
                             tint = tokens.ink3,
                             modifier = Modifier.size(18.dp),
@@ -632,7 +632,7 @@ private fun AttachmentRemoveBadge(onClick: () -> Unit, modifier: Modifier = Modi
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = HugeIcons.Cancel01,
+            imageVector = Lucide.X,
             contentDescription = "移除附件",
             tint = Color.White,
             modifier = Modifier.size(12.dp),

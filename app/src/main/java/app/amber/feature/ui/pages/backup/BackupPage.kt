@@ -42,14 +42,14 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CloudSavingDone01
-import me.rerere.hugeicons.stroke.Database02
-import me.rerere.hugeicons.stroke.Delete02
-import me.rerere.hugeicons.stroke.Download04
-import me.rerere.hugeicons.stroke.FileImport
-import me.rerere.hugeicons.stroke.Folder02
-import me.rerere.hugeicons.stroke.Upload02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Cloud
+import com.composables.icons.lucide.DatabaseZap
+import com.composables.icons.lucide.Trash
+import com.composables.icons.lucide.CloudDownload
+import com.composables.icons.lucide.FileInput
+import com.composables.icons.lucide.FolderOpen
+import com.composables.icons.lucide.Upload
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.Checkbox
 import androidx.compose.ui.Alignment
@@ -329,7 +329,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
                     headlineContent = { Text("Google 账号") },
                     supportingContent = {
                         Text(
@@ -361,7 +361,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     }
                 )
                 item(
-                    leadingContent = { Icon(HugeIcons.CloudSavingDone01, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.Cloud, contentDescription = null) },
                     headlineContent = { Text("备份状态") },
                     supportingContent = {
                         BackupStatusContent(
@@ -401,7 +401,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
                     headlineContent = { Text("上传") },
                     supportingContent = {
                         Text(if (googleAvailable) "把当前数据保存到 Google Drive" else "Google Drive 尚未配置")
@@ -420,7 +420,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     } else {
                         null
                     },
-                    leadingContent = { Icon(HugeIcons.Download04, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.CloudDownload, contentDescription = null) },
                     headlineContent = { Text("下载") },
                     supportingContent = {
                         Text(if (googleAvailable) "从 Google Drive 恢复到这台设备" else "Google Drive 尚未配置")
@@ -431,7 +431,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
             if (providerV2Enabled) {
                 CardGroup(title = { SectionLabel("WebDAV") }) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
                         headlineContent = { Text("服务器配置") },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -486,7 +486,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                     item(
                         onClick = { vm.requestExport(ExportSource.WebDav) },
-                        leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
                         headlineContent = { Text("上传") },
                         supportingContent = { Text("把当前数据作为新快照保存到 WebDAV") },
                     )
@@ -509,7 +509,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 CardGroup(title = { SectionLabel("本地文件夹") }) {
                     item(
                         onClick = { folderPickerLauncher.launch(null) },
-                        leadingContent = { Icon(HugeIcons.Folder02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.FolderOpen, contentDescription = null) },
                         headlineContent = { Text(if (folderInfo != null) "更换文件夹" else "选择文件夹") },
                         supportingContent = {
                             Text(
@@ -522,13 +522,13 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                     item(
                         onClick = { vm.refreshLocalFolderSnapshots() },
-                        leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
                         headlineContent = { Text("读取快照") },
                         supportingContent = { Text("列出所选文件夹里的同步快照") },
                     )
                     item(
                         onClick = { vm.requestExport(ExportSource.LocalFolder) },
-                        leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
                         headlineContent = { Text("上传") },
                         supportingContent = { Text("把当前数据作为新快照保存到文件夹") },
                     )
@@ -554,7 +554,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     onClick = {
                         createDocumentLauncher.launch(LocalBackupRepository.suggestedFileName())
                     },
-                    leadingContent = { Icon(HugeIcons.Upload02, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.Upload, contentDescription = null) },
                     headlineContent = { Text("导出") },
                     supportingContent = {
                         Text(
@@ -569,7 +569,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                         vm.clearPendingImport()
                         openDocumentLauncher.launch(arrayOf(SYNC_ARCHIVE_MIME, "application/zip", "*/*"))
                     },
-                    leadingContent = { Icon(HugeIcons.FileImport, contentDescription = null) },
+                    leadingContent = { Icon(Lucide.FileInput, contentDescription = null) },
                     headlineContent = { Text("导入") },
                     supportingContent = {
                         Text("从本地备份文件恢复到这台设备")
@@ -817,7 +817,7 @@ private fun CloudSnapshotPickerDialog(
                         }
                         TextButton(onClick = { onDelete(snapshot) }) {
                             Icon(
-                                HugeIcons.Delete02,
+                                Lucide.Trash,
                                 contentDescription = "删除",
                                 modifier = Modifier.size(16.dp),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1026,7 +1026,7 @@ private fun ProviderSnapshotRow(
         }
         TextButton(onClick = onDelete) {
             Icon(
-                HugeIcons.Delete02,
+                Lucide.Trash,
                 contentDescription = "删除",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,

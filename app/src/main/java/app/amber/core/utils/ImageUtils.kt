@@ -8,9 +8,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import androidx.exifinterface.media.ExifInterface
-import com.drew.imaging.ImageMetadataReader
-import com.drew.imaging.png.PngChunkType
-import com.drew.metadata.png.PngDirectory
 import com.google.zxing.BinaryBitmap
 import com.google.zxing.MultiFormatReader
 import com.google.zxing.RGBLuminanceSource
@@ -225,30 +222,6 @@ object ImageUtils {
         }.onFailure {
             it.printStackTrace()
         }.getOrNull()
-    }
-
-    /**
-     * 获取酒馆角色卡中的角色元数据（如果存在）
-     *
-     * @param context Android上下文
-     * @param uri 图片URI
-     * @return Result<String> 包含角色元数据的Result对象
-     */
-    fun getTavernCharacterMeta(context: Context, uri: Uri): Result<String> = runCatching {
-        val metadata = context.contentResolver.openInputStream(uri)?.use { ImageMetadataReader.readMetadata(it) }
-        if (metadata == null) error("Metadata is null, please check if the image is a character card")
-        if (!metadata.containsDirectoryOfType(PngDirectory::class.java)) error("No PNG directory found, please check if the image is a character card")
-
-        val pngDirectory = metadata.getDirectoriesOfType(PngDirectory::class.java)
-            .firstOrNull { directory ->
-                directory.pngChunkType == PngChunkType.tEXt
-                    && directory.getString(PngDirectory.TAG_TEXTUAL_DATA).startsWith("[chara:")
-            } ?: error("No tEXt chunk found, please check if the image is a character card")
-
-        val value = pngDirectory.getString(PngDirectory.TAG_TEXTUAL_DATA)
-
-        val regex = Regex("""\[chara:\s*(.+?)]""")
-        return Result.success(regex.find(value)?.groupValues?.get(1) ?: error("No character data found"))
     }
 
     data class ImageInfo(

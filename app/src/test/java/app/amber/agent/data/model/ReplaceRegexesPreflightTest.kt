@@ -163,18 +163,15 @@ class ReplaceRegexesPreflightTest {
     }
 
     @Test fun invalid_replacement_is_skipped_without_aborting_batch() {
-        val assistant = Assistant(
-            id = Uuid.random(),
-            regexes = listOf(
-                rule("bad", "$"),
-                rule("good", "better"),
-            ),
+        val regexes = listOf(
+            rule("bad", "$"),
+            rule("good", "better"),
         )
 
         assertEquals(
             "bad better",
             "bad good".replaceRegexes(
-                assistant = assistant,
+                regexes = regexes,
                 scope = USER,
                 visual = false,
             ),

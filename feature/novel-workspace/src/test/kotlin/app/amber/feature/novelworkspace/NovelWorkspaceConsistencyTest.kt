@@ -345,6 +345,10 @@ class NovelWorkspaceConsistencyTest {
         val entry = NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")
         assertEquals(5, entry?.fromOrdinal)
         assertEquals("COMMIT-X", entry?.sinceCommitId)
+        NovelWorkspaceUnresolvedStore.set(dir, "主线", 7, "COMMIT-LATER")
+        assertEquals(5, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
+        NovelWorkspaceUnresolvedStore.set(dir, "主线", 3, "COMMIT-EARLIER")
+        assertEquals(3, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
         NovelWorkspaceUnresolvedStore.clear(dir, "主线")
         assertNull(NovelWorkspaceUnresolvedStore.entryFor(dir, "主线"))
     }

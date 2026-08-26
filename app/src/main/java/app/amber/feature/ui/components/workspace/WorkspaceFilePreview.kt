@@ -42,9 +42,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Share01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Share
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import java.io.File
@@ -125,9 +125,9 @@ fun WorkspaceFilePreview(
                             )
                         },
                     ) {
-                        Icon(HugeIcons.Share01, contentDescription = "分享")
+                        Icon(Lucide.Share, contentDescription = "分享")
                     }
-                    IconButton(onClick = onDismiss) { Icon(HugeIcons.Cancel01, contentDescription = "关闭") }
+                    IconButton(onClick = onDismiss) { Icon(Lucide.X, contentDescription = "关闭") }
                 }
                 when (val c = content) {
                     null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }

@@ -21,7 +21,7 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.findProvider
@@ -58,7 +58,7 @@ class AndroidMiniAppUserConfirmation(
 class MiniAppAiBridge(
     private val context: Context,
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
 ) {
     private val prefs = context.getSharedPreferences("mini_app_ai_budget", Context.MODE_PRIVATE)
 
@@ -80,7 +80,7 @@ class MiniAppAiBridge(
             }
             add(UIMessage.user(prompt))
         }
-        val result = providerManager.getProviderByType(provider).generateText(
+        val result = providerCatalog.text(provider).complete(
             providerSetting = provider,
             messages = messages,
             params = TextGenerationParams(

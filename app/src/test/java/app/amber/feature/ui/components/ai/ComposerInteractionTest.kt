@@ -27,7 +27,7 @@ import org.robolectric.annotation.GraphicsMode
  * design §6.2 InputBar) — criterion 5.
  *
  * Why the gate is tested through a harness rather than by rendering `ChatInput` directly:
- * the public `ChatInput` composable is deeply coupled — it pulls `ProviderManager`,
+ * the public `ChatInput` composable is deeply coupled — it pulls `ProviderCatalog`,
  * `FilesManager`, and `OkHttpClient` from Koin via `koinInject(...)`, registers several
  * `rememberLauncherForActivityResult(...)` (which require a hosting Activity), and takes a live
  * `Conversation` / `Settings` / `ChatInputState` / `HazeState`. There is no mock framework on the

@@ -13,7 +13,6 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillMetadata
@@ -468,13 +467,9 @@ private fun buildSkillArray(skills: List<SkillMetadata>) = buildJsonArray {
 
 private suspend fun updateEnabledSkill(settingsStore: SettingsAggregator, name: String, enable: Boolean) {
     settingsStore.update { settings ->
-        val currentId = settings.getCurrentAssistant().id
+        val next = if (enable) settings.enabledSkills + name else settings.enabledSkills - name
         settings.copy(
-            assistants = settings.assistants.map { assistant ->
-                if (assistant.id != currentId) return@map assistant
-                val next = if (enable) assistant.enabledSkills + name else assistant.enabledSkills - name
-                assistant.copy(enabledSkills = next)
-            }
+            enabledSkills = next,
         )
     }
 }

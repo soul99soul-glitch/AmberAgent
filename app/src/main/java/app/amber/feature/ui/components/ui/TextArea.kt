@@ -43,9 +43,9 @@ import com.dokar.sonner.ToastType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.FileImport
-import me.rerere.hugeicons.stroke.FullScreen
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.FileInput
+import com.composables.icons.lucide.Maximize
 import app.amber.agent.R
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.modifier.onClick
@@ -133,7 +133,7 @@ fun TextArea(
                 ) {
                     if (enableFullscreen) {
                         Icon(
-                            imageVector = HugeIcons.FullScreen,
+                            imageVector = Lucide.Maximize,
                             contentDescription = stringResource(R.string.text_area_fullscreen_edit),
                             modifier = Modifier
                                 .onClick(onClick = {
@@ -144,7 +144,7 @@ fun TextArea(
                     }
 
                     Icon(
-                        imageVector = HugeIcons.FileImport,
+                        imageVector = Lucide.FileInput,
                         contentDescription = stringResource(R.string.text_area_import_from_file),
                         modifier = Modifier
                             .onClick(onClick = {

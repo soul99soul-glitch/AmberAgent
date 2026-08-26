@@ -7,12 +7,11 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
-import app.amber.core.model.Assistant
 
 class TransformerContext(
     val context: Context,
     val model: Model,
-    val assistant: Assistant,
+    /** Global Amber runtime settings for this transformation. */
     val settings: Settings,
     val processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     val forceImageToText: Boolean = false,
@@ -71,12 +70,11 @@ suspend fun List<UIMessage>.transforms(
     transformers: List<MessageTransformer>,
     context: Context,
     model: Model,
-    assistant: Assistant,
     settings: Settings,
     processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
     forceImageToText: Boolean = false,
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings, processingStatus, forceImageToText)
+    val ctx = TransformerContext(context, model, settings, processingStatus, forceImageToText)
     return transformers.fold(this) { acc, transformer ->
         val output = transformer.transform(ctx, acc)
         if (output !== acc) {
@@ -94,10 +92,9 @@ suspend fun List<UIMessage>.visualTransforms(
     transformers: List<MessageTransformer>,
     context: Context,
     model: Model,
-    assistant: Assistant,
     settings: Settings,
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings)
+    val ctx = TransformerContext(context, model, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
             val output = transformer.visualTransform(ctx, acc)
@@ -119,12 +116,11 @@ suspend fun List<UIMessage>.visualTransformsStreamingTail(
     transformers: List<MessageTransformer>,
     context: Context,
     model: Model,
-    assistant: Assistant,
     settings: Settings,
 ): List<UIMessage> {
     val tailIndex = indexOfLast { it.role == MessageRole.ASSISTANT }
     if (tailIndex < 0) return this
-    val ctx = TransformerContext(context, model, assistant, settings)
+    val ctx = TransformerContext(context, model, settings)
     var tail = this[tailIndex]
     var changed = false
     transformers.forEach { transformer ->
@@ -152,10 +148,9 @@ suspend fun List<UIMessage>.onGenerationFinish(
     transformers: List<MessageTransformer>,
     context: Context,
     model: Model,
-    assistant: Assistant,
     settings: Settings,
 ): List<UIMessage> {
-    val ctx = TransformerContext(context, model, assistant, settings)
+    val ctx = TransformerContext(context, model, settings)
     return transformers.fold(this) { acc, transformer ->
         if (transformer is OutputMessageTransformer) {
             transformer.onGenerationFinish(ctx, acc).also { output ->

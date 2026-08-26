@@ -39,16 +39,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Zap
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Zap
 import app.amber.agent.R
 import app.amber.core.model.QuickMessage
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.RikkaConfirmDialog
+import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceTextButton
@@ -71,12 +71,12 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = stringResource(R.string.assistant_page_quick_messages),
+                title = stringResource(R.string.quick_messages_page_title),
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(
-                            imageVector = HugeIcons.Add01,
+                            imageVector = Lucide.Plus,
                             contentDescription = stringResource(R.string.quick_messages_page_empty_action),
                             modifier = Modifier.size(20.dp),
                         )
@@ -144,7 +144,7 @@ fun QuickMessagesPage(vm: QuickMessagesVM = koinViewModel()) {
         )
     }
 
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = deleteTarget != null,
         title = stringResource(R.string.quick_messages_page_delete_title),
         confirmText = stringResource(R.string.delete),
@@ -177,12 +177,12 @@ private fun QuickMessagesHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Zap,
+                icon = Lucide.Zap,
                 tone = WorkspaceTone.Accent,
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = stringResource(R.string.assistant_page_quick_messages),
+                    text = stringResource(R.string.quick_messages_page_title),
                     style = MaterialTheme.typography.titleSmall,
                     color = workspace.ink,
                 )
@@ -217,7 +217,7 @@ private fun QuickMessagesEmptyState(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Zap,
+                icon = Lucide.Zap,
                 tone = WorkspaceTone.Neutral,
             )
             Text(
@@ -263,7 +263,7 @@ private fun QuickMessageCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Zap,
+                icon = Lucide.Zap,
                 tone = WorkspaceTone.Accent,
             )
             Column(
@@ -288,7 +288,7 @@ private fun QuickMessageCard(
             Box {
                 WorkspaceIconButton(
                     onClick = { menuExpanded = true },
-                    icon = HugeIcons.MoreVertical,
+                    icon = Lucide.EllipsisVertical,
                     contentDescription = stringResource(R.string.skills_page_more_actions),
                     showBorder = false,
                     containerColor = workspace.paper,
@@ -301,7 +301,7 @@ private fun QuickMessageCard(
                         text = { Text(stringResource(R.string.edit)) },
                         leadingIcon = {
                             Icon(
-                                imageVector = HugeIcons.Edit01,
+                                imageVector = Lucide.Pencil,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
                             )
@@ -315,7 +315,7 @@ private fun QuickMessageCard(
                         text = { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) },
                         leadingIcon = {
                             Icon(
-                                imageVector = HugeIcons.Delete01,
+                                imageVector = Lucide.Trash2,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(20.dp),
@@ -363,13 +363,13 @@ private fun EditQuickMessageDialog(
                 NotionQuickMessageField(
                     value = quickMessageTitle,
                     onValueChange = { quickMessageTitle = it },
-                    label = { Text(stringResource(R.string.assistant_page_quick_message_title)) },
+                    label = { Text(stringResource(R.string.quick_messages_page_title_label)) },
                     singleLine = true,
                 )
                 NotionQuickMessageField(
                     value = quickMessageContent,
                     onValueChange = { quickMessageContent = it },
-                    label = { Text(stringResource(R.string.assistant_page_quick_message_content)) },
+                    label = { Text(stringResource(R.string.quick_messages_page_content_label)) },
                     minLines = 4,
                     maxLines = 8,
                 )
@@ -384,7 +384,7 @@ private fun EditQuickMessageDialog(
                     disabledContentColor = workspace.faint,
                 ),
             ) {
-                Text(stringResource(R.string.assistant_page_save))
+                Text(stringResource(R.string.common_save))
             }
         },
         dismissButton = {

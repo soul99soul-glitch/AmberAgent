@@ -51,7 +51,7 @@ data class ToolLedgerContext(
 /**
  * A composite tool reached a nested human-approval checkpoint before it
  * performed the requested operation. The dispatcher turns this into the
- * normal top-level pending tool state so GenerationHandler can persist
+ * normal top-level pending tool state so the run coordinator can persist
  * WAITING_USER and resume the same call later.
  */
 class ToolExecutionPause(
@@ -65,24 +65,6 @@ class AgentToolDispatcher(
     private val permissionDecisionResolver: PermissionDecisionResolver,
     private val hooks: List<ToolInvocationHook> = emptyList(),
 ) {
-    fun shouldPauseForApproval(
-        toolDef: Tool?,
-        tool: UIMessagePart.Tool,
-        autoApproveTools: Boolean,
-        autoApproveHighRiskTools: Boolean = false,
-        autoApprovedToolNames: Set<String> = emptySet(),
-        capabilityPermissions: CapabilityPermissionState? = null,
-        permissionContext: CapabilityPermissionContext? = null,
-    ): Boolean = permissionDecisionResolver.shouldPauseForApproval(
-        toolDef = toolDef,
-        tool = tool,
-        autoApproveTools = autoApproveTools,
-        autoApproveHighRiskTools = autoApproveHighRiskTools,
-        autoApprovedToolNames = autoApprovedToolNames,
-        capabilityPermissions = capabilityPermissions,
-        permissionContext = permissionContext,
-    )
-
     fun resolveDecision(
         toolDef: Tool?,
         tool: UIMessagePart.Tool,

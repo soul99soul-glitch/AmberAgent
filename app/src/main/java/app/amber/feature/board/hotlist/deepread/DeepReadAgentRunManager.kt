@@ -25,7 +25,7 @@ import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
 import app.amber.feature.tools.DeepReadToolDescriptionContext
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.Generator
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
@@ -37,7 +37,7 @@ import kotlin.uuid.Uuid
 
 class DeepReadAgentRunManager(
     private val settingsStore: SettingsAggregator,
-    private val generationHandler: GenerationHandler,
+    private val generator: Generator,
     private val hotListRepository: HotListRepository,
     private val toolSetFactory: AgentToolSetFactory,
     private val sourcePrefetcher: DeepReadSourcePrefetcher,
@@ -53,7 +53,6 @@ class DeepReadAgentRunManager(
         val settings: Settings,
         val hiddenSettings: Settings,
         val model: Model,
-        val assistant: app.amber.core.model.Assistant,
         val topicTitle: String,
         val seedUrl: String?,
         val evidencePack: DeepReadEvidencePack,
@@ -356,15 +355,15 @@ class DeepReadAgentRunManager(
                 allowTitleFallback = seedUrl.isNullOrBlank(),
                 ttlDays = settings.agentRuntime.todayBoard.deepReadCacheTtlDays,
             )
-            val hiddenSettings = settings.toIsolatedSubAgentSettings()
-            val assistant = DeepReadHiddenAssistantFactory.create(settings)
+            val hiddenSettings = DeepReadHiddenAssistantFactory.create(
+                settings.toIsolatedSubAgentSettings(),
+            )
             val playbook = playbookRepository.read()
 
             writer.markPhase(planningPhase)
             val articlePlan = generateArticlePlan(
                 settings = hiddenSettings,
                 model = model,
-                assistant = assistant,
                 topicTitle = topicTitle,
                 evidencePack = evidencePack,
                 playbookMarkdown = playbook.markdown,
@@ -374,7 +373,6 @@ class DeepReadAgentRunManager(
                     settings = settings,
                     hiddenSettings = hiddenSettings,
                     model = model,
-                    assistant = assistant,
                     topicTitle = topicTitle,
                     seedUrl = seedUrl,
                     evidencePack = evidencePack,
@@ -475,7 +473,6 @@ class DeepReadAgentRunManager(
                         settings = context.hiddenSettings,
                         model = context.model,
                         messages = messages,
-                        assistant = context.assistant,
                         tools = stageTools,
                         writerToolNames = stageWriterToolNamesSet,
                         statusLabel = "深度阅读 ${stage.label}",
@@ -541,18 +538,16 @@ class DeepReadAgentRunManager(
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
-        assistant: app.amber.core.model.Assistant,
         tools: List<app.amber.ai.core.Tool>,
         writerToolNames: Set<String>,
         statusLabel: String,
     ): List<UIMessage> {
         var latest = messages
         suspend fun runWith(stream: Boolean) {
-            generationHandler.generateText(
-                settings = settings,
+            generator.generateText(
+                settings = settings.copy(streamOutput = stream),
                 model = model,
                 messages = messages,
-                assistant = assistant.copy(streamOutput = stream),
                 memories = emptyList(),
                 tools = tools,
                 maxSteps = MAX_GENERATION_STEPS,
@@ -569,11 +564,11 @@ class DeepReadAgentRunManager(
             }
         }
         try {
-            runWith(stream = assistant.streamOutput)
+            runWith(stream = settings.streamOutput)
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
             if (error.isDeepReadTimeoutLike()) throw error
-            Log.w(TAG, "deep read stream failed; retrying through non-stream GenerationHandler path", error)
+            Log.w(TAG, "deep read stream failed; retrying through non-stream generator path", error)
             latest = messages
             runWith(stream = false)
         }
@@ -583,7 +578,6 @@ class DeepReadAgentRunManager(
     private suspend fun generateArticlePlan(
         settings: Settings,
         model: Model,
-        assistant: app.amber.core.model.Assistant,
         topicTitle: String,
         evidencePack: DeepReadEvidencePack,
         playbookMarkdown: String,
@@ -591,7 +585,7 @@ class DeepReadAgentRunManager(
         val fallback = researchHarness.fallbackPlan(topicTitle, evidencePack)
         val messages = runCatching {
             collectRun(
-                settings = settings,
+                settings = settings.copy(streamOutput = false),
                 model = model,
                 messages = listOf(
                     UIMessage.user(
@@ -602,7 +596,6 @@ class DeepReadAgentRunManager(
                         )
                     )
                 ),
-                assistant = assistant.copy(streamOutput = false),
                 tools = emptyList(),
                 writerToolNames = emptySet(),
                 statusLabel = "深度阅读 结构规划",

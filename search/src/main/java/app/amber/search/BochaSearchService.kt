@@ -58,6 +58,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+            require(serviceOptions.apiKey.isNotBlank()) { "Bocha API key is required" }
 
             val body = buildJsonObject {
                 put("query", JsonPrimitive(query))
@@ -72,32 +73,14 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (response.isSuccessful) {
-                val bodyRaw = response.body.string()
-                val bochaResponse = runCatching {
-                    json.decodeFromString<BochaResponse>(bodyRaw)
-                }.onFailure {
-                    error("Failed to decode Bocha response (${bodyRaw.length} chars): ${it.message}")
-                }.getOrThrow()
-
-                if (bochaResponse.code != 200) {
-                    error("Bocha API error: ${bochaResponse.msg ?: "Unknown error"}")
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("Bocha response failed #${response.code}: ${response.body?.string().orEmpty()}")
                 }
 
                 return@withContext Result.success(
-                    SearchResult(
-                        items = bochaResponse.data?.webPages?.value?.map {
-                            SearchResultItem(
-                                title = it.name,
-                                url = it.url,
-                                text = it.summary ?: it.snippet,
-                            )
-                        } ?: emptyList()
-                    )
+                    mapBochaSearchResponse(response.body?.string().orEmpty(), commonOptions.resultSize)
                 )
-            } else {
-                error("Bocha response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }
@@ -110,16 +93,30 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
         return Result.failure(Exception("Scraping is not supported for Bocha"))
     }
 
+    internal fun mapBochaSearchResponse(body: String, resultSize: Int): SearchResult {
+        val response = json.decodeFromString<BochaResponse>(body)
+        if (response.code != 200) {
+            error("Bocha API error: ${response.msg ?: "code ${response.code}"}")
+        }
+        return SearchResult(
+            items = response.data?.webPages?.value.orEmpty().take(resultSize).map {
+                SearchResultItem(
+                    title = it.name,
+                    url = it.url,
+                    text = it.summary ?: it.snippet,
+                    publishedAt = it.datePublished,
+                )
+            }
+        )
+    }
+
     @Serializable
     data class BochaResponse(
-        @SerialName("code")
         val code: Int,
         @SerialName("log_id")
         val logId: String? = null,
-        @SerialName("msg")
         val msg: String? = null,
-        @SerialName("data")
-        val data: BochaData? = null
+        val data: BochaData? = null,
     )
 
     @Serializable
@@ -135,7 +132,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
     @Serializable
     data class BochaQueryContext(
         @SerialName("originalQuery")
-        val originalQuery: String
+        val originalQuery: String = ""
     )
 
     @Serializable
@@ -161,7 +158,7 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
         @SerialName("displayUrl")
         val displayUrl: String? = null,
         @SerialName("snippet")
-        val snippet: String,
+        val snippet: String = "",
         @SerialName("summary")
         val summary: String? = null,
         @SerialName("siteName")
@@ -170,6 +167,8 @@ object BochaSearchService : SearchService<SearchServiceOptions.BochaOptions> {
         val siteIcon: String? = null,
         @SerialName("dateLastCrawled")
         val dateLastCrawled: String? = null,
+        @SerialName("datePublished")
+        val datePublished: String? = null,
         @SerialName("cachedPageUrl")
         val cachedPageUrl: String? = null,
         @SerialName("language")

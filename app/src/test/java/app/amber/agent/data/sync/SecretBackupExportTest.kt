@@ -1,10 +1,12 @@
 package app.amber.agent.data.sync
 
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.CustomHeader
 import app.amber.core.ai.mcp.McpCommonOptions
 import app.amber.core.ai.mcp.McpServerConfig
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.Settings
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.WebDavConfig
 import app.amber.core.settings.secret.SecretCipher
 import app.amber.core.settings.secret.SecretRedactor
@@ -13,9 +15,14 @@ import app.amber.core.settings.secret.SecretStoreBackend
 import app.amber.core.sync.core.SyncMode
 import app.amber.core.sync.core.SyncRedactor
 import app.amber.core.sync.encodeSettingsForBackup
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import app.amber.core.sync.s3.S3Config
-import app.amber.tts.provider.TTSProviderSetting
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,27 +68,24 @@ class SecretBackupExportTest {
         ),
         webDavConfig = WebDavConfig(url = "https://dav.example", username = "dav-user", password = "dav-export-pass"),
         s3Config = S3Config(accessKeyId = "AKIA-EXPORT", secretAccessKey = "s3-export-secret"),
-        ttsProviders = listOf(TTSProviderSetting.Groq(apiKey = "groq-export-key")),
     )
 
     private fun exportedSettingsJson(settings: Settings, mode: SyncMode): String {
         val redacted = redactor.redactForExport(
             providers = settings.providers,
-            assistants = settings.assistants,
+            customHeaders = settings.customHeaders,
             searchServices = settings.searchServices,
             mcpServers = settings.mcpServers,
             webDavConfig = settings.webDavConfig,
             s3Config = settings.s3Config,
-            ttsProviders = settings.ttsProviders,
         )
         val redactedSettings = settings.copy(
             providers = redacted.providers,
-            assistants = redacted.assistants,
+            customHeaders = redacted.customHeaders,
             searchServices = redacted.searchServices,
             mcpServers = redacted.mcpServers,
             webDavConfig = redacted.webDavConfig,
             s3Config = redacted.s3Config,
-            ttsProviders = redacted.ttsProviders,
         )
         val syncRedactor = SyncRedactor(JsonInstant)
         return redactor.settingsJsonWithRefs(
@@ -99,7 +103,6 @@ class SecretBackupExportTest {
         assertFalse(json.contains("mcp-export-token"))
         assertFalse(json.contains("dav-export-pass"))
         assertFalse(json.contains("s3-export-secret"))
-        assertFalse(json.contains("groq-export-key"))
         assertTrue(json.contains("\"secretRefs\""))
         assertTrue(json.contains(SecretRedactor.MASK_STRING))
     }
@@ -123,7 +126,6 @@ class SecretBackupExportTest {
         assertFalse("webdav username must not leak", json.contains("dav-user"))
         assertFalse("s3 accessKeyId must not leak", json.contains("AKIA-EXPORT"))
         assertFalse(json.contains("s3-export-secret"))
-        assertFalse(json.contains("groq-export-key"))
     }
 
     @Test
@@ -134,5 +136,60 @@ class SecretBackupExportTest {
         assertTrue(refs.any { it.scope == "provider" && it.fieldName == "apiKey" })
         assertTrue(refs.any { it.scope == "mcp" && it.fieldName == "header:Authorization" })
         refs.forEach { ref -> assertTrue(ref.mask.startsWith(SecretRedactor.MASK_STRING)) }
+    }
+
+    @Test
+    fun `restore keeps global Amber header refs`() {
+        val settings = Settings(
+            customHeaders = listOf(CustomHeader("Authorization", "Bearer amber")),
+        )
+        val json = exportedSettingsJson(settings, SyncMode.FULL)
+
+        val refs = redactor.extractRefsFromSettingsJson(JsonInstant, json)
+        val profileRef = refs.single { it.scope == "assistant" }
+        val restored = redactor.rehydrateCustomHeaders(
+            listOf(CustomHeader("Authorization", profileRef.mask)),
+            refs.associateBy { it.descriptor().key },
+        )
+
+        assertEquals(AMBER_AGENT_ID.toString(), profileRef.ownerId)
+        assertEquals("Bearer amber", restored.single().value)
+    }
+
+    @Test
+    fun `standard restore merges local secret before flattening legacy assistants`() {
+        val legacyId = kotlin.uuid.Uuid.random()
+        val local = Settings(
+            customHeaders = listOf(CustomHeader("Authorization", "Bearer local-v1")),
+        )
+        val base = JsonInstant.parseToJsonElement(JsonInstant.encodeToString(Settings())).jsonObject
+        val legacyProfile = buildJsonObject {
+            put("id", JsonPrimitive(legacyId.toString()))
+            put(
+                "customHeaders",
+                JsonArray(
+                    listOf(
+                        buildJsonObject {
+                            put("name", JsonPrimitive("Authorization"))
+                            put("value", JsonPrimitive("__MASKED_BY_AMBERAGENT_SYNC__"))
+                        }
+                    )
+                ),
+            )
+        }
+        val historical = JsonObject(
+            base.toMutableMap().apply {
+                this["assistantId"] = JsonPrimitive(legacyId.toString())
+                this["assistants"] = JsonArray(listOf(legacyProfile))
+            }
+        ).toString()
+
+        val restored = SyncRedactor(JsonInstant).decodeSettingsForRestore(
+            settingsJson = historical,
+            mode = SyncMode.STANDARD,
+            localSettings = local,
+        )
+
+        assertEquals("Bearer local-v1", restored.customHeaders.single().value)
     }
 }

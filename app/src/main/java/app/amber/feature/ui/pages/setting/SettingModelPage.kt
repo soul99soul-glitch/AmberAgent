@@ -53,18 +53,18 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.registry.ModelRegistry
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Brain02
-import me.rerere.hugeicons.stroke.FileZip
-import me.rerere.hugeicons.stroke.MagicWand01
-import me.rerere.hugeicons.stroke.Message01
-import me.rerere.hugeicons.stroke.MessageMultiple01
-import me.rerere.hugeicons.stroke.Notebook01
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.View
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Brain
+import com.composables.icons.lucide.FileArchive
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.MessageCircle
+import com.composables.icons.lucide.MessagesSquare
+import com.composables.icons.lucide.NotebookTabs
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Eye
 import app.amber.agent.R
 import app.amber.core.ai.vision.VisionModelHealthChecker
 import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
@@ -189,7 +189,7 @@ private fun DefaultChatModelSetting(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Message01,
+                icon = Lucide.MessageCircle,
                 size = 36.dp,
                 iconSize = 20.dp,
                 tone = WorkspaceTone.Accent,
@@ -240,7 +240,7 @@ private fun DefaultImageGenerationModelSetting(
     SettingModelRow(
         title = stringResource(R.string.setting_model_page_image_gen_model),
         description = stringResource(R.string.setting_model_page_image_gen_model_desc),
-        icon = HugeIcons.MagicWand01,
+        icon = Lucide.WandSparkles,
         trailing = {
             WorkspaceTextButton(
                 text = "提示词",
@@ -260,8 +260,7 @@ private fun DefaultImageGenerationModelSetting(
             providers = settings.providers.filter { it.hasUsableAuth() },
             // Filter by IMAGE so the picker only shows gpt-image-2 / Nano
             // Banana / Codex Image — not chat models. Keep allowClear so the
-            // user can opt out globally (assistants still resolve via their
-            // per-assistant override, fallback to no tool if both are null).
+            // user can clear the explicit choice and return to authenticated auto-selection.
             allowClear = true,
             modelType = ModelType.IMAGE,
             emptyLabel = stringResource(R.string.setting_model_page_image_gen_model_empty),
@@ -439,7 +438,7 @@ private fun DefaultTitleModelSetting(
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_title_model),
         description = stringResource(R.string.setting_model_page_title_model_desc),
-        icon = HugeIcons.Notebook01,
+        icon = Lucide.NotebookTabs,
         modelId = settings.titleModelId,
         providers = settings.providers,
         allowClear = true,
@@ -478,7 +477,7 @@ private fun DefaultSuggestionModelSetting(
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_suggestion_model),
         description = stringResource(R.string.setting_model_page_suggestion_model_desc),
-        icon = HugeIcons.MessageMultiple01,
+        icon = Lucide.MessagesSquare,
         modelId = settings.suggestionModelId,
         providers = settings.providers,
         allowClear = true,
@@ -514,20 +513,20 @@ private fun DefaultOcrModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
-    val providerManager = koinInject<ProviderManager>()
+    val providerCatalog = koinInject<ProviderCatalog>()
     val health by produceState(
         initialValue = VisionModelHealthChecker.checking(),
         key1 = settings.ocrModelId,
         key2 = settings.providers,
     ) {
         value = withContext(Dispatchers.IO) {
-            VisionModelHealthChecker.probe(settings, providerManager)
+            VisionModelHealthChecker.probe(settings, providerCatalog)
         }
     }
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_ocr_model),
         description = "${stringResource(R.string.setting_model_page_ocr_model_desc)} · ${health.label}",
-        icon = HugeIcons.View,
+        icon = Lucide.Eye,
         modelId = settings.ocrModelId,
         providers = settings.providers,
         preferredInputModality = Modality.IMAGE,
@@ -561,7 +560,7 @@ private fun DefaultCompressModelSetting(
     ModelTaskSetting(
         title = stringResource(R.string.setting_model_page_compress_model),
         description = stringResource(R.string.setting_model_page_compress_model_desc),
-        icon = HugeIcons.FileZip,
+        icon = Lucide.FileArchive,
         modelId = settings.compressModelId,
         providers = settings.providers,
         allowClear = true,
@@ -603,7 +602,7 @@ private fun DefaultMemoryWorkerModelSetting(
     SettingModelRow(
         title = "记忆提取模型",
         description = "用于对话结束后提取候选记忆，轻量稳定即可",
-        icon = HugeIcons.Settings03,
+        icon = Lucide.Settings,
     ) {
         ModelPickerRow(
             description = if (followsCompress) {
@@ -656,7 +655,7 @@ private fun DefaultDaydreamModelSetting(
     SettingModelRow(
         title = "Daydream 模型",
         description = "用于后台整理、合并和审查记忆，建议选择推理更强的模型",
-        icon = HugeIcons.Brain02,
+        icon = Lucide.Brain,
     ) {
         ModelPickerRow(
             description = if (followsCompress) {
@@ -891,7 +890,7 @@ private fun ModelPromptSheet(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         Text(
-                            text = stringResource(R.string.assistant_page_thinking_budget),
+                            text = stringResource(R.string.model_settings_thinking_budget),
                             style = MaterialTheme.typography.titleSmall,
                         )
                         NotionReasoningSelector(
@@ -1029,10 +1028,10 @@ private fun ModelGroupSessionDefaultsSheet(
                             // Graphite §3: the context-message count is a machine-fact → MONO.
                             textStyle = LocalAmberType.current.meta,
                             label = {
-                                Text(stringResource(R.string.assistant_page_context_message_size))
+                                Text(stringResource(R.string.model_settings_context_message_size))
                             },
                             placeholder = {
-                                Text(stringResource(R.string.assistant_page_context_message_unlimited))
+                                Text(stringResource(R.string.model_settings_context_message_unlimited))
                             },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             singleLine = true,
@@ -1179,7 +1178,7 @@ private fun GroupDefaultsEntry(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            SettingModelLeadingIcon(HugeIcons.Settings03)
+            SettingModelLeadingIcon(Lucide.Settings)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),

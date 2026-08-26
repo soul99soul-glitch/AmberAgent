@@ -12,7 +12,6 @@ import kotlinx.coroutines.launch
 import app.amber.document.nativebridge.OfficeNativeSwitch
 import app.amber.highlight.nativebridge.HighlightNativeSwitch
 import app.amber.agent.AppScope
-import app.amber.core.json.expr.JsonExprNative
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.core.sync.core.SyncCryptoNative
 import app.amber.agent.data.model.nativebridge.RegexNativeSwitch
@@ -99,7 +98,6 @@ class NativePathBootstrap(
         HighlightNativeSwitch.config = HighlightConfigImpl()
         MarkdownNativeSwitch.config = MarkdownConfigImpl()
         RegexNativeSwitch.config = RegexConfigImpl()
-        JsonExprNative.config = JsonExprConfigImpl()
         ReaderExtractorNative.config = ReaderExtractorConfigImpl()
         SyncCryptoNative.config = SyncCryptoConfigImpl()
 
@@ -244,13 +242,10 @@ class NativePathBootstrap(
 
     private inner class OfficeConfigImpl : OfficeNativeSwitch.Config {
         override fun enabled(): Boolean = !killSwitchCached && prefs.flow.value.office
-        override fun samplingRate(): Float = sampleRate()
         override fun onLoadFailure(error: Throwable) =
             recordLoad(OfficeNativeSwitch.COMPONENT_NAME, error)
         override fun onNativePanic(stage: String, error: Throwable?) =
             recordPanic(OfficeNativeSwitch.COMPONENT_NAME, stage, error)
-        override fun onDiff(stage: String, equal: Boolean, jvmSummary: String, nativeSummary: String) =
-            recordDiff(OfficeNativeSwitch.COMPONENT_NAME, stage, equal, jvmSummary, nativeSummary)
     }
 
     private inner class HighlightConfigImpl : HighlightNativeSwitch.Config {
@@ -285,14 +280,6 @@ class NativePathBootstrap(
             recordPanic(RegexNativeSwitch.COMPONENT_NAME, stage, error)
         override fun onDiff(stage: String, equal: Boolean, jvmSummary: String, nativeSummary: String) =
             recordDiff(RegexNativeSwitch.COMPONENT_NAME, stage, equal, jvmSummary, nativeSummary)
-    }
-
-    private inner class JsonExprConfigImpl : JsonExprNative.Config {
-        override fun enabled(): Boolean = !killSwitchCached
-        override fun onLoadFailure(error: Throwable) =
-            recordLoad(JsonExprNative.COMPONENT_NAME, error)
-        override fun onNativePanic(stage: String, error: Throwable?) =
-            recordPanic(JsonExprNative.COMPONENT_NAME, stage, error)
     }
 
     private inner class ReaderExtractorConfigImpl : ReaderExtractorNative.Config {

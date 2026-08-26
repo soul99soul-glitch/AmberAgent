@@ -23,8 +23,8 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessageAnnotation
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.BuildConfig
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.message.ChatMessageVirtualItem
@@ -118,7 +118,7 @@ private fun List<UIMessageAnnotation>.compactRenderToken(): String {
 
 internal fun LazyListState.markdownPrewarmTexts(
     messageNodes: List<MessageNode>,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     loadingLastMessage: Boolean,
     timelinePlan: ChatTimelinePlan,
 ): List<String> {
@@ -137,7 +137,7 @@ internal fun LazyListState.markdownPrewarmTexts(
     return buildList {
         for (index in start..end) {
             if (loadingLastMessage && index == messageNodes.lastIndex) continue
-            addAll(messageNodes[index].markdownPrewarmTexts(assistant))
+            addAll(messageNodes[index].markdownPrewarmTexts(regexes))
             if (size >= MarkdownPrewarmMaxTexts) break
         }
     }.take(MarkdownPrewarmMaxTexts)
@@ -146,7 +146,7 @@ internal fun LazyListState.markdownPrewarmTexts(
 @Composable
 internal fun rememberChatTimelinePlan(
     conversation: Conversation,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     showAssistantBubble: Boolean,
     loading: Boolean,
     activeGeneration: Boolean,
@@ -160,7 +160,7 @@ internal fun rememberChatTimelinePlan(
     val timelineLoading = loading && !postSendState.waitingForAssistantContent
     return remember(
         conversation.messageNodes,
-        assistant,
+        regexes,
         showAssistantBubble,
         timelineLoading,
         hasHistoryLoadingItem,
@@ -174,7 +174,7 @@ internal fun rememberChatTimelinePlan(
         ) {
             buildChatTimelinePlan(
                 conversation = conversation,
-                assistant = assistant,
+                assistant = regexes,
                 showAssistantBubble = showAssistantBubble,
                 timelineLoading = timelineLoading,
                 hasHistoryLoadingItem = hasHistoryLoadingItem,
@@ -328,7 +328,7 @@ internal class ChatVirtualItemCache(
 
     fun getOrBuild(
         node: MessageNode,
-        assistant: Assistant?,
+        regexes: List<AssistantRegex>,
         showAssistantBubble: Boolean,
         loading: Boolean,
         lastMessage: Boolean,
@@ -336,7 +336,7 @@ internal class ChatVirtualItemCache(
     ): List<ChatMessageVirtualItem>? {
         val key = ChatVirtualItemCacheKey.of(
             node = node,
-            assistant = assistant,
+            regexes = regexes,
             showAssistantBubble = showAssistantBubble,
             loading = loading,
             lastMessage = lastMessage,
@@ -349,7 +349,7 @@ internal class ChatVirtualItemCache(
         misses++
         val value = buildChatMessageVirtualItems(
             node = node,
-            assistant = assistant,
+            assistant = regexes,
             showAssistantBubble = showAssistantBubble,
             loading = loading,
             lastMessage = lastMessage,
@@ -405,7 +405,7 @@ private data class ChatVirtualItemCacheKey(
     companion object {
         fun of(
             node: MessageNode,
-            assistant: Assistant?,
+            regexes: List<AssistantRegex>,
             showAssistantBubble: Boolean,
             loading: Boolean,
             lastMessage: Boolean,
@@ -417,7 +417,7 @@ private data class ChatVirtualItemCacheKey(
                 messageId = message.id,
                 messageIdentity = System.identityHashCode(message),
                 partsIdentity = System.identityHashCode(message.parts),
-                assistantSignature = assistant.renderSignature(),
+                assistantSignature = regexes.renderSignature(),
                 showAssistantBubble = showAssistantBubble,
                 loading = loading,
                 lastMessage = lastMessage,
@@ -427,10 +427,9 @@ private data class ChatVirtualItemCacheKey(
     }
 }
 
-private fun Assistant?.renderSignature(): Int {
-    if (this == null) return 0
-    var result = id.hashCode()
-    regexes.forEach { regex ->
+private fun List<AssistantRegex>.renderSignature(): Int {
+    var result = 1
+    forEach { regex ->
         result = 31 * result + regex.id.hashCode()
         result = 31 * result + regex.enabled.hashCode()
         result = 31 * result + regex.findRegex.hashCode()
@@ -443,7 +442,7 @@ private fun Assistant?.renderSignature(): Int {
 
 internal fun buildChatTimelinePlan(
     conversation: Conversation,
-    assistant: Assistant?,
+    assistant: List<AssistantRegex>?,
     showAssistantBubble: Boolean,
     timelineLoading: Boolean,
     hasHistoryLoadingItem: Boolean,
@@ -451,6 +450,7 @@ internal fun buildChatTimelinePlan(
     postSendState: PostSendTimelineState,
     virtualItemCache: ChatVirtualItemCache,
 ): ChatTimelinePlan {
+    val regexes = assistant.orEmpty()
     val protectedAssistantMessageIndexes = conversation.messageNodes.tailAssistantMessageIndexes()
     // Built in reading order (oldest → newest, slices in reading order), then
     // reversed once at the end: the timeline LazyColumn uses reverseLayout, so
@@ -469,7 +469,7 @@ internal fun buildChatTimelinePlan(
             val isLoadingMessage = timelineLoading && isLastMessage
             val virtualItems = virtualItemCache.getOrBuild(
                 node = node,
-                assistant = assistant,
+                regexes = regexes,
                 showAssistantBubble = showAssistantBubble,
                 loading = isLoadingMessage,
                 lastMessage = isLastMessage,
@@ -616,7 +616,7 @@ internal fun TimelineSelectableMessageItem(
     }
 }
 
-private fun MessageNode.markdownPrewarmTexts(assistant: Assistant?): List<String> {
+private fun MessageNode.markdownPrewarmTexts(regexes: List<AssistantRegex>): List<String> {
     val message = currentMessage
     val scope = if (message.role == MessageRole.USER) {
         AssistantAffectScope.USER
@@ -628,7 +628,7 @@ private fun MessageNode.markdownPrewarmTexts(assistant: Assistant?): List<String
         .mapNotNull { part ->
             MessageRenderCache.visualRegexText(
                 text = part.text,
-                assistant = assistant,
+                regexes = regexes,
                 scope = scope,
             )
                 .takeIf { it.isNotBlank() }

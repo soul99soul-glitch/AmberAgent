@@ -42,8 +42,8 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import io.github.g00fy2.quickie.QRResult
 import io.github.g00fy2.quickie.ScanQRCode
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.QrCodeScan
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ScanQrCode
 import org.koin.androidx.compose.koinViewModel
 
 /**
@@ -138,7 +138,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 enabled = !ui.checking,
             ) {
                 Icon(
-                    imageVector = HugeIcons.QrCodeScan,
+                    imageVector = Lucide.ScanQrCode,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                 )

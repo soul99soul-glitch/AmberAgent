@@ -1,9 +1,9 @@
 package app.amber.feature.ui.pages.setting.components
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Refresh03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.RotateCw
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -28,8 +28,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.BalanceOption
+import app.amber.ai.provider.BalanceResultPath
 import app.amber.ai.provider.ProviderSetting
-import app.amber.common.http.isJsonExprValid
 import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -64,12 +64,12 @@ fun SettingProviderBalanceOption(
             ) {
                 if (expand) {
                     Icon(
-                        imageVector = HugeIcons.ArrowUp01,
+                        imageVector = Lucide.ArrowUp,
                         contentDescription = null,
                     )
                 } else {
                     Icon(
-                        imageVector = HugeIcons.ArrowDown01,
+                        imageVector = Lucide.ArrowDown,
                         contentDescription = null,
                     )
                 }
@@ -94,7 +94,7 @@ fun SettingProviderBalanceOption(
                     value = balanceOption.resultPath,
                     onValueChange = { onEdit(balanceOption.copy(resultPath = it)) },
                     label = { Text(stringResource(R.string.setting_provider_page_balance_json_key)) },
-                    isError = !isJsonExprValid(balanceOption.resultPath),
+                    isError = !BalanceResultPath.isValid(balanceOption.resultPath),
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = JetbrainsMono)
                 )
@@ -108,7 +108,7 @@ fun SettingProviderBalanceOption(
                         }
                     }
                 ) {
-                    Icon(HugeIcons.Refresh03, null)
+                    Icon(Lucide.RotateCw, null)
                 }
             }
         }

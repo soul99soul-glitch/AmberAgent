@@ -1,7 +1,7 @@
 package app.amber.feature.ui.pages.search
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Refresh01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RefreshCw
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,12 +9,14 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +66,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.uuid.Uuid
 
+private fun SearchFilter.labelRes(): Int = when (this) {
+    SearchFilter.ALL -> R.string.search_page_filter_all
+    SearchFilter.CONVERSATIONS -> R.string.search_page_filter_conversations
+    SearchFilter.MESSAGES -> R.string.search_page_filter_messages
+}
+
 @Composable
 fun SearchPage(vm: SearchVM = koinViewModel()) {
     val navController = LocalNavController.current
@@ -109,7 +117,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                         enabled = !vm.isRebuilding,
                     ) {
                         Icon(
-                            HugeIcons.Refresh01,
+                            Lucide.RefreshCw,
                             contentDescription = stringResource(R.string.search_page_rebuild_button)
                         )
                     }
@@ -145,6 +153,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -152,7 +161,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                     FilterChip(
                         selected = vm.searchFilter == filter,
                         onClick = { vm.onFilterChange(filter) },
-                        label = { Text(filter.label) },
+                        label = { Text(stringResource(filter.labelRes())) },
                     )
                 }
             }
@@ -192,7 +201,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
                             ) {
                                 item {
                                     Text(
-                                        text = "Recent conversations",
+                                        text = stringResource(R.string.search_page_recent_conversations),
                                         style = MaterialTheme.typography.titleSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -238,7 +247,7 @@ fun SearchPage(vm: SearchVM = koinViewModel()) {
 
                     else -> {
                         LazyColumn(
-                            contentPadding = PaddingValues(horizontal = 16.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
@@ -380,16 +389,21 @@ private fun SearchResultItem(
                     text = formattedTime,
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink3,
+                    maxLines = 1,
                 )
                 // P8-04: 命中来源标记（标题/正文）。
                 Text(
                     text = when {
-                        result.titleMatched && result.hitSource == SearchHitSource.BODY -> "· 标题 + 正文命中"
-                        result.titleMatched -> "· 标题命中"
-                        else -> "· 正文命中"
+                        result.titleMatched && result.hitSource == SearchHitSource.BODY ->
+                            stringResource(R.string.search_page_hit_title_and_body)
+                        result.titleMatched -> stringResource(R.string.search_page_hit_title)
+                        else -> stringResource(R.string.search_page_hit_body)
                     },
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.ink3,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

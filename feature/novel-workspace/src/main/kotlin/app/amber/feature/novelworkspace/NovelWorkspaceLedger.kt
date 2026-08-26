@@ -204,6 +204,40 @@ object NovelWorkspaceLedger {
             .mapNotNull { NovelWorkspacePaths.chapterOrdinalFromPath(it) }
             .sorted()
     }
+
+    /** Resolve branch metadata; legacy imports without branch.md are safe only with one head. */
+    fun branchId(
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore,
+        branchSlug: String,
+    ): String? {
+        val path = NovelWorkspacePaths.branchPrefix(branchSlug) + "/branch.md"
+        val metadata = store.read(path)
+            ?: return ledger.heads.keys.singleOrNull()
+        val metadataId = NovelWorkspaceMarkdown.parseFile(metadata)
+            .fields["id"]
+            ?.takeIf { it.isNotBlank() }
+        return metadataId?.takeIf { it in ledger.heads }
+    }
+
+    /** Chapter ordinals owned by the durable branch head, excluding dirty working files. */
+    fun committedChapterOrdinals(
+        store: NovelWorkspaceStore,
+        ledger: NovelWorkspaceLedgerStore,
+        branchSlug: String,
+    ): List<Int> {
+        val branchId = branchId(store, ledger, branchSlug) ?: return emptyList()
+        val prefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters/"
+        return ledger.headOf(branchId)
+            ?.files
+            .orEmpty()
+            .keys
+            .asSequence()
+            .filter { it.startsWith(prefix) }
+            .mapNotNull(NovelWorkspacePaths::chapterOrdinalFromPath)
+            .sorted()
+            .toList()
+    }
 }
 
 @Serializable

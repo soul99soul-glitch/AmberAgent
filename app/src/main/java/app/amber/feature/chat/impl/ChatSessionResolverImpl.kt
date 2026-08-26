@@ -14,7 +14,6 @@ import app.amber.core.ai.transformers.RegexOutputTransformer
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.core.ai.transformers.ThinkTagTransformer
 import app.amber.core.ai.transformers.TimeReminderTransformer
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.Conversation
@@ -37,7 +36,6 @@ class ChatSessionResolverImpl(
         val settings = settingsStore.settingsFlow.value
         val model = settings.getCurrentChatModel()
             ?: throw IllegalStateException("No chat model configured")
-        val assistant = settings.getCurrentAssistant()
         val conversation = chatService.getConversationFlow(conversationId).value
 
         val inputTransformers = listOf(
@@ -76,7 +74,6 @@ class ChatSessionResolverImpl(
                 add(templateTransformer)
             },
             outputTransformers = outputTransformers,
-            assistant = assistant,
             memories = memories,
             tools = tools,
             autoApproveTools = settings.agentRuntime.autoApproveAllToolCalls ||

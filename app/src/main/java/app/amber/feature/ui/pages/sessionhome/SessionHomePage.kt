@@ -59,11 +59,11 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.modelcouncil.CouncilRoomManager
 import app.amber.feature.modelcouncil.CouncilRoomOpResult
@@ -83,19 +83,19 @@ import kotlin.uuid.Uuid
 import kotlinx.coroutines.launch
 import androidx.compose.material3.Text
 import app.amber.feature.ui.pages.chat.ChatDrawerVM
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BookOpen01
-import me.rerere.hugeicons.stroke.BubbleChat
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Clock01
-import me.rerere.hugeicons.stroke.MessageAdd01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Earth
-import me.rerere.hugeicons.stroke.LayoutGrid
-import me.rerere.hugeicons.stroke.Pen01
-import me.rerere.hugeicons.stroke.Pin
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Settings03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.BookOpenText
+import com.composables.icons.lucide.MessageCircle
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.MessageSquarePlus
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Earth
+import com.composables.icons.lucide.Grid2x2
+import com.composables.icons.lucide.Pen
+import com.composables.icons.lucide.Pin
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Settings
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -135,12 +135,11 @@ fun SessionHomePage() {
         scope.launch {
             val targetConversationId = Uuid.random()
             val councilSettings = settingsStore.settingsFlow.value
-            val assistant = councilSettings.getCurrentAssistant()
             val councilConversation = Conversation.ofId(
                 id = targetConversationId,
-                assistantId = assistant.id,
+                assistantId = AMBER_AGENT_ID,
                 newConversation = true,
-            ).updateCurrentMessages(assistant.presetMessages)
+            ).updateCurrentMessages(councilSettings.presetMessages)
             conversationRepo.insertConversation(councilConversation)
             val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
                 seat.toCouncilParticipant().copy(
@@ -149,8 +148,8 @@ fun SessionHomePage() {
             }
             val result = councilRoomManager.openRoom(
                 conversationId = targetConversationId,
-                hostAssistantId = assistant.id,
-                hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
+                hostAssistantId = AMBER_AGENT_ID,
+                hostName = "Amber",
                 objective = "多模型协作讨论",
                 initialGuests = guests,
                 maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
@@ -305,7 +304,7 @@ fun SessionHomePage() {
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = HugeIcons.MessageAdd01,
+                imageVector = Lucide.MessageSquarePlus,
                 contentDescription = stringResource(R.string.chat_page_new_message),
                 modifier = Modifier.size(24.dp),
                 tint = tokens.accentInk,
@@ -382,13 +381,13 @@ private fun HomeHeader(
 
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(48.dp)
                 .clip(CircleShape)
                 .clickable(onClick = onOpenSettings),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = HugeIcons.Settings03,
+                imageVector = Lucide.Settings,
                 contentDescription = stringResource(R.string.settings),
                 modifier = Modifier.size(20.dp),
                 tint = tokens.ink2,
@@ -398,14 +397,21 @@ private fun HomeHeader(
         Spacer(Modifier.width(10.dp))
 
         // 头像点击进资料页（onUpdate=null 时 UIAvatar 不弹换头像框，仅响应 onClick）
-        UIAvatar(
-            name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
-            value = settings.displaySetting.userAvatar,
-            size = 34.dp,
-            containerColor = tokens.accent,
-            showEditBadge = false,
-            onClick = onOpenProfile,
-        )
+        Box(
+            modifier = Modifier
+                .size(48.dp)
+                .clip(CircleShape)
+                .clickable(onClick = onOpenProfile),
+            contentAlignment = Alignment.Center,
+        ) {
+            UIAvatar(
+                name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                value = settings.displaySetting.userAvatar,
+                size = 34.dp,
+                containerColor = tokens.accent,
+                showEditBadge = false,
+            )
+        }
     }
 }
 
@@ -437,7 +443,7 @@ private fun HomeSearchField(onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Search01,
+                imageVector = Lucide.Search,
                 contentDescription = null,
                 modifier = Modifier.size(17.dp),
                 tint = tokens.ink3,
@@ -477,11 +483,11 @@ private fun HomeFeatureRail(
 ) {
     val tokens = LocalAmberTokens.current
     val features = listOf(
-        FeatureEntry(HugeIcons.BookOpen01, "深度阅读", onDeepRead),
-        FeatureEntry(HugeIcons.LayoutGrid, "小应用", onMiniApps),
-        FeatureEntry(HugeIcons.Pen01, "小说创作", onNovel),
-        FeatureEntry(HugeIcons.Earth, "站点", onWebMount),
-        FeatureEntry(HugeIcons.BubbleChat, "模型议会", onCouncil),
+        FeatureEntry(Lucide.BookOpenText, "深度阅读", onDeepRead),
+        FeatureEntry(Lucide.Grid2x2, "小应用", onMiniApps),
+        FeatureEntry(Lucide.Pen, "小说创作", onNovel),
+        FeatureEntry(Lucide.Earth, "站点", onWebMount),
+        FeatureEntry(Lucide.MessageCircle, "模型议会", onCouncil),
     )
 
     Row(
@@ -559,7 +565,7 @@ private fun ContinueSectionHeader(count: Int) {
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Icon(
-            imageVector = HugeIcons.Clock01,
+            imageVector = Lucide.Clock,
             contentDescription = null,
             modifier = Modifier.size(14.dp),
             tint = tokens.accent,
@@ -630,13 +636,13 @@ private fun ContinueCandidateRow(
             Spacer(Modifier.width(8.dp))
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .clickable(onClick = onDismiss),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = HugeIcons.Cancel01,
+                    imageVector = Lucide.X,
                     contentDescription = "暂时隐藏",
                     modifier = Modifier.size(15.dp),
                     tint = tokens.ink4,
@@ -731,7 +737,7 @@ private fun HomeSessionRow(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        imageVector = if (isDelete) HugeIcons.Delete01 else HugeIcons.Pin,
+                        imageVector = if (isDelete) Lucide.Trash2 else Lucide.Pin,
                         contentDescription = if (isDelete) "删除" else "置顶",
                         modifier = Modifier.size(17.dp),
                         tint = if (isDelete) tokens.accentInk else tokens.accent,
@@ -782,7 +788,7 @@ private fun HomeSessionRow(
                         )
                         if (conversation.isPinned) {
                             Icon(
-                                imageVector = HugeIcons.Pin,
+                                imageVector = Lucide.Pin,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                                 tint = tokens.accent,

@@ -32,12 +32,12 @@ import app.amber.core.settings.PreferencesKeys
  * dogfood pass and the Stage-4 parity rig complete; see
  * `docs/td-rust-1a-renderer-switch-design.md` for the rollout gate criteria.
  *
- * `regex` default `true` is **safe because `Assistant.replaceRegexes`
+ * `regex` default `true` is **safe because the profile regex pipeline
  * preflights the rule set** for JVM-only syntax (lookbehind / backref /
  * possessive in patterns; literal-`$` / `$<name>` in replacements) — if
  * any rule uses JVM-only constructs, the whole batch routes to the JVM
  * fallback so semantic parity is preserved. See `RegexNativeSwitch` class
- * KDoc + `containsJvmOnlyRegexSyntax` in Assistant.kt.
+ * KDoc + `containsJvmOnlyRegexSyntax` in the regex transformer.
  *
  * `sampleRate` defaults to `0` — diff sampling is off because there's no
  * dashboard to monitor and the rendering paths diverge cosmetically on the
@@ -57,7 +57,7 @@ import app.amber.core.settings.PreferencesKeys
 data class NativePathPrefsData(
     val office: Boolean = true,
     val highlight: Boolean = true,
-    val regex: Boolean = true,         // safe — Assistant.kt preflights JVM-only syntax
+    val regex: Boolean = true,         // safe — the transformer preflights JVM-only syntax
     val markdownHtml: Boolean = true,
     val markdownAst: Boolean = false,  // false = JVM tree; true = NativeMdTree as renderer's primary AST (bc6716b7); default false until dogfood + parity rig pass
     /**

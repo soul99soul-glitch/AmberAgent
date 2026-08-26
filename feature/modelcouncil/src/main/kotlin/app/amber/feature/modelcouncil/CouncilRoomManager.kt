@@ -30,7 +30,7 @@ import kotlin.uuid.Uuid
 
 /**
  * Host-action vocabulary — explicit runtime affordances for the room's host
- * (the conversation's main Assistant). Each variant maps 1:1 to a host message
+ * (the conversation's canonical Amber identity). Each variant maps 1:1 to a host message
  * + a guest turn trigger. PR2 wires the generation side; PR1 only carries them
  * through the state machine and emits the host message.
  *
@@ -185,7 +185,7 @@ class CouncilRoomManager(
     /**
      * Open a Room for a conversation. Fails if one already exists and is not
      * terminal. The host participant is materialized from [hostAssistantId]
-     * (the conversation's main Assistant).
+     * (the conversation's canonical Amber identity).
      *
      * Returns the new Room id (= conversationId) on Ok.
      */
@@ -231,11 +231,10 @@ class CouncilRoomManager(
             // Resolve the host's model display name so the host bubble can show it.
             // When a hostModelIdOverride is supplied it takes priority (matches
             // resolveHostModelId()'s resolution order), so the bubble shows the model
-            // the host will ACTUALLY run on, not the Assistant's configured model.
+            // the host will ACTUALLY run on, not a stale room-level model.
             val settings = settingsFlow.value
             val hostModelName = run {
                 val modelId = hostModelIdOverride?.let { settings.findModelById(it)?.id }
-                    ?: settings.assistants.firstOrNull { it.id == hostAssistantId }?.chatModelId
                     ?: settings.chatModelId
                 settings.findModelById(modelId)?.displayName.orEmpty()
             }

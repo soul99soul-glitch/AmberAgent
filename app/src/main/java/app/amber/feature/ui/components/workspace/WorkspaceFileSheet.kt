@@ -8,6 +8,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,12 +57,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Folder01
-import me.rerere.hugeicons.stroke.Refresh01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Folder
+import com.composables.icons.lucide.RefreshCw
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -244,16 +247,16 @@ private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            IconButton(onClick = onRefresh, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    HugeIcons.Refresh01,
+                    Lucide.RefreshCw,
                     contentDescription = "刷新",
                     modifier = Modifier.size(20.dp),
                 )
             }
-            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+            IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    HugeIcons.Cancel01,
+                    Lucide.X,
                     contentDescription = "关闭",
                     modifier = Modifier.size(20.dp),
                 )
@@ -330,21 +333,17 @@ private fun Breadcrumb(
     onNavigate: (String) -> Unit,
     onNavigateUp: () -> Unit,
 ) {
-    // Whole row is the back-to-parent target; per-segment Surfaces below have their own
-    // clickable that consumes the tap before it bubbles, so jumping to a specific
-    // ancestor still works. The previous design only made the small ArrowLeft icon
-    // tappable, which is a tiny target on a wide bar.
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = currentPath.isNotEmpty(), onClick = onNavigateUp)
+            .horizontalScroll(rememberScrollState())
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (currentPath.isNotEmpty()) {
-            IconButton(onClick = onNavigateUp, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onNavigateUp, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    imageVector = HugeIcons.ArrowLeft01,
+                    imageVector = Lucide.ArrowLeft,
                     contentDescription = "返回上级",
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -353,12 +352,9 @@ private fun Breadcrumb(
             Spacer(Modifier.width(2.dp))
         }
         Surface(
-            // Always enable the inner clickable so the tap is consumed even when this
-            // segment IS the current path — otherwise it bubbles to the outer Row's
-            // back-to-parent click and tapping a path label silently navigates up. When
-            // already at this level the onClick is a no-op.
             modifier = Modifier
-                .clickable { if (currentPath.isNotEmpty()) onNavigate("") }
+                .heightIn(min = 48.dp)
+                .clickable(enabled = currentPath.isNotEmpty()) { onNavigate("") }
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             color = Color.Transparent,
         ) {
@@ -382,12 +378,9 @@ private fun Breadcrumb(
                 val pathSoFar = parts.subList(0, index + 1).joinToString("/")
                 val isCurrent = index == parts.lastIndex
                 Surface(
-                    // Same as the "/" segment above — keep clickable enabled so the
-                    // tap is consumed even when isCurrent (otherwise it bubbles to the
-                    // outer Row's onNavigateUp). On the current segment the onClick is
-                    // a no-op.
                     modifier = Modifier
-                        .clickable { if (!isCurrent) onNavigate(pathSoFar) }
+                        .heightIn(min = 48.dp)
+                        .clickable(enabled = !isCurrent) { onNavigate(pathSoFar) }
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                     color = Color.Transparent,
                 ) {
@@ -414,13 +407,14 @@ private fun FolderRow(folder: WorkspaceFileItem, onClick: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 8.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Folder01,
+            imageVector = Lucide.Folder,
             contentDescription = null,
             modifier = Modifier.size(20.dp),
             tint = MaterialTheme.colorScheme.primary,
@@ -458,7 +452,7 @@ private fun FileRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.File02,
+            imageVector = Lucide.FileText,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
@@ -499,7 +493,7 @@ private fun RecentFileRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.File02,
+            imageVector = Lucide.FileText,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),

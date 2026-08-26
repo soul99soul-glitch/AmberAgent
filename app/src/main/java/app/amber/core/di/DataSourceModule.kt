@@ -14,19 +14,21 @@ import kotlinx.serialization.json.Json
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
+import app.amber.ai.provider.providers.ClaudeProvider
+import app.amber.ai.provider.providers.GoogleProvider
+import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.common.http.AcceptLanguageBuilder
 import app.amber.agent.BuildConfig
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
-import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.ChatRunCoordinator
 import app.amber.core.ai.Generator
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppSearchBridge
 import app.amber.core.settings.prefs.AgentPrefs
-import app.amber.core.settings.prefs.AssistantPrefs
 import app.amber.core.settings.prefs.ChatPrefs
 import app.amber.core.settings.prefs.ExtensionPrefs
 import app.amber.core.settings.prefs.NativePathPrefs
@@ -120,15 +122,11 @@ val dataSourceModule = module {
     }
 
     single {
-        ChatPrefs(dataStore = get<Context>().settingsStore, scope = get())
+        ChatPrefs(dataStore = get<Context>().settingsStore, scope = get(), secretStore = get())
     }
 
     single {
         ExtensionPrefs(dataStore = get<Context>().settingsStore, scope = get(), secretStore = get())
-    }
-
-    single {
-        AssistantPrefs(dataStore = get<Context>().settingsStore, scope = get(), secretStore = get())
     }
 
     single {
@@ -187,7 +185,6 @@ val dataSourceModule = module {
             providerPrefs = get(),
             chatPrefs = get(),
             extensionPrefs = get(),
-            assistantPrefs = get(),
             scope = get(),
             secretRedactor = get(),
         )
@@ -221,6 +218,7 @@ val dataSourceModule = module {
                 AppDatabase.MIGRATION_12_13,
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
+                AppDatabase.MIGRATION_15_16,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -288,11 +286,11 @@ val dataSourceModule = module {
 
     single { get<AgentRuntimeDatabase>().agentRuntimeDao() }
 
-    single { TemplateTransformer(settingsStore = get()) }
+    single { TemplateTransformer() }
 
     single { MiniAppSearchBridge(settingsStore = get()) }
 
-    single { MiniAppAiBridge(context = get(), settingsStore = get(), providerManager = get()) }
+    single { MiniAppAiBridge(context = get(), settingsStore = get(), providerCatalog = get()) }
 
     single {
         get<AppDatabase>().conversationDao()
@@ -487,7 +485,7 @@ val dataSourceModule = module {
         app.amber.feature.runtime.OpenAIStoredResponseGateway(
             resumeStore = get(),
             settingsStore = get(),
-            providerManager = get(),
+            storedResponseApi = get(),
         )
     }
 
@@ -558,9 +556,9 @@ val dataSourceModule = module {
     }
 
     single {
-        GenerationHandler(
+        ChatRunCoordinator(
             context = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             json = get(),
             memoryRepo = get(),
             memoryRecallStore = get(),
@@ -573,7 +571,7 @@ val dataSourceModule = module {
             capabilityPermissionStore = get(),
         )
     }
-    single<Generator> { get<GenerationHandler>() }
+    single<Generator> { get<ChatRunCoordinator>() }
 
     single<OkHttpClient> {
         val acceptLang = AcceptLanguageBuilder.fromAndroid(get())
@@ -630,8 +628,18 @@ val dataSourceModule = module {
             .build().also { SearchService.init(it, get()) }
     }
 
+    single { OpenAIProvider(client = get(), context = get()) }
+    single { GoogleProvider(client = get(), context = get()) }
+    single { ClaudeProvider(client = get(), context = get()) }
+    single<app.amber.ai.provider.providers.openai.StoredResponseApi> {
+        get<OpenAIProvider>().storedResponses
+    }
     single {
-        ProviderManager(client = get(), context = get())
+        ProviderCatalog(
+            openAIProvider = get(),
+            googleProvider = get(),
+            claudeProvider = get(),
+        )
     }
 
     single<HttpClient> {

@@ -28,7 +28,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,29 +44,24 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Archive01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.FavouriteCircle
-import me.rerere.hugeicons.stroke.GitFork
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Refresh03
-import me.rerere.hugeicons.stroke.QuoteUp
-import me.rerere.hugeicons.stroke.Share04
-import me.rerere.hugeicons.stroke.StopCircle
-import me.rerere.hugeicons.stroke.TextSelection
-import me.rerere.hugeicons.stroke.VolumeHigh
-import me.rerere.hugeicons.stroke.WebDesign01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.Archive
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.GitFork
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.Quote
+import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.TextSelect
+import com.composables.icons.lucide.PanelsTopLeft
 import app.amber.agent.R
 import app.amber.core.model.MessageNode
-import app.amber.feature.ui.components.ui.RikkaConfirmDialog
+import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.workspaceColors
-import app.amber.feature.ui.context.LocalSettings
-import app.amber.feature.ui.context.LocalTTSState
 import app.amber.core.utils.copyMessageToClipboard
-import app.amber.core.utils.extractQuotedContentAsText
 import app.amber.core.utils.toLocalString
 import app.amber.core.utils.toQuoteBlock
 
@@ -110,14 +104,14 @@ fun ColumnScope.ChatMessageActionButtons(
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
         MessageActionIconButton(
-            imageVector = HugeIcons.Copy01,
+            imageVector = Lucide.Copy,
             contentDescription = stringResource(R.string.copy),
             enabled = interactionEnabled,
             onClick = { context.copyMessageToClipboard(message) },
         )
 
         MessageActionIconButton(
-            imageVector = HugeIcons.Refresh03,
+            imageVector = Lucide.RotateCw,
             contentDescription = stringResource(R.string.regenerate),
             enabled = interactionEnabled,
             onClick = {
@@ -129,33 +123,8 @@ fun ColumnScope.ChatMessageActionButtons(
             },
         )
 
-        if (message.role == MessageRole.ASSISTANT) {
-            val tts = LocalTTSState.current
-            val settings = LocalSettings.current
-            val isSpeaking by tts.isSpeaking.collectAsState()
-            val isAvailable by tts.isAvailable.collectAsState()
-            MessageActionIconButton(
-                imageVector = if (isSpeaking) HugeIcons.StopCircle else HugeIcons.VolumeHigh,
-                contentDescription = stringResource(R.string.tts),
-                enabled = interactionEnabled && isAvailable,
-                onClick = {
-                    if (!isSpeaking) {
-                        val text = message.toText()
-                        val textToSpeak = if (settings.displaySetting.ttsOnlyReadQuoted) {
-                            text.extractQuotedContentAsText() ?: text
-                        } else {
-                            text
-                        }
-                        tts.speak(textToSpeak)
-                    } else {
-                        tts.stop()
-                    }
-                },
-            )
-        }
-
         MessageActionIconButton(
-            imageVector = HugeIcons.MoreVertical,
+            imageVector = Lucide.EllipsisVertical,
             contentDescription = stringResource(R.string.more_options),
             enabled = interactionEnabled,
             onClick = {
@@ -171,7 +140,7 @@ fun ColumnScope.ChatMessageActionButtons(
     }
 
     // Regenerate confirmation dialog
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = showRegenerateConfirm,
         title = stringResource(R.string.regenerate),
         confirmText = stringResource(R.string.confirm),
@@ -275,7 +244,7 @@ fun ChatMessageActionsSheet(
                     // V3: copy 提到第一项 (跟旧 actions row 顺序一致)
                     if (onCopy != null) {
                         MessageActionRow(
-                            icon = HugeIcons.Copy01,
+                            icon = Lucide.Copy,
                             text = stringResource(R.string.copy),
                             workspace = workspace,
                             onClick = {
@@ -287,7 +256,7 @@ fun ChatMessageActionsSheet(
                     }
                     if (onQuote != null && hasTextContent) {
                         MessageActionRow(
-                            icon = HugeIcons.QuoteUp,
+                            icon = Lucide.Quote,
                             text = stringResource(R.string.chat_message_quote),
                             workspace = workspace,
                             onClick = {
@@ -299,7 +268,7 @@ fun ChatMessageActionsSheet(
                     }
                     if (onSaveToWorkspace != null) {
                         MessageActionRow(
-                            icon = HugeIcons.Archive01,
+                            icon = Lucide.Archive,
                             text = "保存到 Workspace",
                             workspace = workspace,
                             onClick = {
@@ -311,7 +280,7 @@ fun ChatMessageActionsSheet(
                     }
                     if (onRegenerate != null) {
                         MessageActionRow(
-                            icon = HugeIcons.Refresh03,
+                            icon = Lucide.RotateCw,
                             text = stringResource(R.string.regenerate),
                             workspace = workspace,
                             onClick = {
@@ -322,7 +291,7 @@ fun ChatMessageActionsSheet(
                         MessageActionDivider(workspace)
                     }
                     MessageActionRow(
-                        icon = HugeIcons.TextSelection,
+                        icon = Lucide.TextSelect,
                         text = stringResource(R.string.select_and_copy),
                         workspace = workspace,
                         onClick = {
@@ -333,7 +302,7 @@ fun ChatMessageActionsSheet(
                     // V3: 移除 "render_with_webview" (网页视图渲染) 项
                     MessageActionDivider(workspace)
                     MessageActionRow(
-                        icon = HugeIcons.Edit01,
+                        icon = Lucide.Pencil,
                         text = stringResource(R.string.edit),
                         workspace = workspace,
                         onClick = {
@@ -343,7 +312,7 @@ fun ChatMessageActionsSheet(
                     )
                     MessageActionDivider(workspace)
                     MessageActionRow(
-                        icon = HugeIcons.Share04,
+                        icon = Lucide.Share2,
                         text = stringResource(R.string.share),
                         workspace = workspace,
                         onClick = {
@@ -353,7 +322,7 @@ fun ChatMessageActionsSheet(
                     )
                     MessageActionDivider(workspace)
                     MessageActionRow(
-                        icon = HugeIcons.GitFork,
+                        icon = Lucide.GitFork,
                         text = stringResource(R.string.create_fork),
                         workspace = workspace,
                         onClick = {
@@ -364,7 +333,7 @@ fun ChatMessageActionsSheet(
                     if (onToggleFavorite != null) {
                         MessageActionDivider(workspace)
                         MessageActionRow(
-                            icon = HugeIcons.FavouriteCircle,
+                            icon = Lucide.Heart,
                             text = stringResource(
                                 if (isFavorite) R.string.chat_message_remove_favorite
                                 else R.string.chat_message_add_favorite
@@ -378,7 +347,7 @@ fun ChatMessageActionsSheet(
                     }
                     MessageActionDivider(workspace)
                     MessageActionRow(
-                        icon = HugeIcons.Delete01,
+                        icon = Lucide.Trash2,
                         text = stringResource(R.string.delete),
                         workspace = workspace,
                         danger = true,

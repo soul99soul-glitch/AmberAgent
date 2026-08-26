@@ -6,7 +6,7 @@ import kotlin.uuid.Uuid
 
 /**
  * Abstraction over the host's tool-augmented generation, declared in this
- * module but implemented in `:app` (which owns [ProviderManager],
+ * module but implemented in `:app` (which owns [ProviderCatalog],
  * [app.amber.feature.runtime.AgentToolDispatcher] and the tool factories).
  *
  * The council orchestration code ([CouncilRoomManager]) only needs the *ability*

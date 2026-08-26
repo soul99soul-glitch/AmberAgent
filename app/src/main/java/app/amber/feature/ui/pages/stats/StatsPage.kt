@@ -1,11 +1,11 @@
 package app.amber.feature.ui.pages.stats
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ChartColumn
-import me.rerere.hugeicons.stroke.Cpu
-import me.rerere.hugeicons.stroke.Message01
-import me.rerere.hugeicons.stroke.Rocket01
-import me.rerere.hugeicons.stroke.Zap
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChartColumn
+import com.composables.icons.lucide.Cpu
+import com.composables.icons.lucide.MessageCircle
+import com.composables.icons.lucide.Rocket
+import com.composables.icons.lucide.Zap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -360,13 +360,13 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
         ) {
             StatCard(
                 modifier = Modifier.weight(1f),
-                icon = HugeIcons.ChartColumn,
+                icon = Lucide.ChartColumn,
                 label = stringResource(R.string.stats_page_total_conversations),
                 value = formatCount(stats.totalConversations.toLong()),
             )
             StatCard(
                 modifier = Modifier.weight(1f),
-                icon = HugeIcons.Message01,
+                icon = Lucide.MessageCircle,
                 label = stringResource(R.string.stats_page_total_messages),
                 value = formatCount(stats.totalMessages.toLong()),
             )
@@ -377,13 +377,13 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
         ) {
             StatCard(
                 modifier = Modifier.weight(1f),
-                icon = HugeIcons.Cpu,
+                icon = Lucide.Cpu,
                 label = stringResource(R.string.stats_page_input_tokens),
                 value = formatTokens(stats.totalPromptTokens),
             )
             StatCard(
                 modifier = Modifier.weight(1f),
-                icon = HugeIcons.Cpu,
+                icon = Lucide.Cpu,
                 label = stringResource(R.string.stats_page_output_tokens),
                 value = formatTokens(stats.totalCompletionTokens),
             )
@@ -391,14 +391,14 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
         if (stats.totalCachedTokens > 0) {
             StatCard(
                 modifier = Modifier.fillMaxWidth(),
-                icon = HugeIcons.Zap,
+                icon = Lucide.Zap,
                 label = stringResource(R.string.stats_page_cached_tokens),
                 value = formatTokens(stats.totalCachedTokens),
             )
         }
         StatCard(
             modifier = Modifier.fillMaxWidth(),
-            icon = HugeIcons.Rocket01,
+            icon = Lucide.Rocket,
             label = stringResource(R.string.stats_page_launch_count),
             value = formatCount(stats.launchCount.toLong()),
         )

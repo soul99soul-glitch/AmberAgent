@@ -7,7 +7,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIBrand
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.ui.ToolApprovalState
@@ -15,7 +15,6 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.infra.AppScope
 import app.amber.core.model.MainAgentToolProfile
 import app.amber.core.settings.prefs.AgentPrefs
-import app.amber.core.settings.prefs.AssistantPrefs
 import app.amber.core.settings.prefs.ChatPrefs
 import app.amber.core.settings.prefs.ExtensionPrefs
 import app.amber.core.settings.prefs.ProviderPrefs
@@ -89,7 +88,8 @@ class ProviderConfigToolsTest {
     private lateinit var settingsStore: SettingsAggregator
     private lateinit var secretStore: SecretStore
     private lateinit var secretBackend: SecretStoreBackend
-    private lateinit var providerManager: ProviderManager
+    private lateinit var providerCatalog: ProviderCatalog
+    private lateinit var googleProvider: app.amber.ai.provider.providers.GoogleProvider
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     private val openAiProvider = ProviderSetting.OpenAI(
@@ -155,14 +155,19 @@ class ProviderConfigToolsTest {
             searchPrefs = SearchPrefs(dataStore, appScope, secretStore),
             agentPrefs = AgentPrefs(dataStore, appScope),
             providerPrefs = ProviderPrefs(dataStore, appScope, secretStore),
-            chatPrefs = ChatPrefs(dataStore, appScope),
+            chatPrefs = ChatPrefs(dataStore, appScope, secretStore),
             extensionPrefs = ExtensionPrefs(dataStore, appScope, secretStore),
-            assistantPrefs = AssistantPrefs(dataStore, appScope, secretStore),
             scope = appScope,
             secretRedactor = SecretRedactor(secretStore),
         )
         withTimeout(5_000) { settingsStore.settingsFlow.first { !it.init } }
-        providerManager = ProviderManager(OkHttpClient(), context)
+        val httpClient = OkHttpClient()
+        googleProvider = app.amber.ai.provider.providers.GoogleProvider(httpClient, context)
+        providerCatalog = ProviderCatalog(
+            openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
+            googleProvider = googleProvider,
+            claudeProvider = app.amber.ai.provider.providers.ClaudeProvider(httpClient, context),
+        )
     }
 
     @After
@@ -193,7 +198,7 @@ class ProviderConfigToolsTest {
     }
 
     private fun tools(modelFetcher: ProviderModelFetcher = ProviderModelFetcher { emptyList() }): List<Tool> =
-        createProviderConfigTools(settingsStore, secretStore, providerManager, modelFetcher)
+        createProviderConfigTools(settingsStore, secretStore, providerCatalog, googleProvider, modelFetcher)
 
     private fun tool(name: String, modelFetcher: ProviderModelFetcher = ProviderModelFetcher { emptyList() }): Tool =
         tools(modelFetcher).first { it.name == name }
@@ -271,7 +276,13 @@ class ProviderConfigToolsTest {
             },
         )
         val result = runTool(
-            createProviderConfigTools(settingsStore, brokenStore, providerManager, ProviderModelFetcher { emptyList() })
+            createProviderConfigTools(
+                settingsStore,
+                brokenStore,
+                providerCatalog,
+                googleProvider,
+                ProviderModelFetcher { emptyList() },
+            )
                 .first { it.name == TOOL_PROVIDER_CONFIG_STATUS },
             """{}""",
         )
@@ -307,7 +318,7 @@ class ProviderConfigToolsTest {
                 providers = listOf(googleOAuthProvider),
             )
         )
-        val refresh = createProviderConfigTools(settingsStore, secretStore, providerManager)
+        val refresh = createProviderConfigTools(settingsStore, secretStore, providerCatalog, googleProvider)
             .first { it.name == TOOL_PROVIDER_REFRESH_MODELS }
         val result = runTool(
             refresh,

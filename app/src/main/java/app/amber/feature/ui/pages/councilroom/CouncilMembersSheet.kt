@@ -35,8 +35,8 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.pages.chat.LocalChatTheme
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowReloadHorizontal
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.RefreshCw
 
 /**
  * Council members & synthesis as a bottom sheet (opened from the room top bar's
@@ -133,7 +133,7 @@ fun CouncilMembersSheet(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.ArrowReloadHorizontal,
+                                imageVector = Lucide.RefreshCw,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                             )

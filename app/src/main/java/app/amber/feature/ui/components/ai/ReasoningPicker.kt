@@ -35,9 +35,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.amber.ai.core.ReasoningLevel
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Idea
-import me.rerere.hugeicons.stroke.Idea01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Lightbulb
+import com.composables.icons.lucide.LightbulbOff
 import app.amber.agent.R
 import app.amber.feature.ui.components.ui.ToggleSurface
 import app.amber.feature.ui.components.ui.icons.ReasoningHigh
@@ -139,8 +139,8 @@ fun ReasoningPicker(
                 )
                 Icon(
                     imageVector = when (reasoningLevel) {
-                        ReasoningLevel.OFF -> HugeIcons.Idea
-                        ReasoningLevel.AUTO -> HugeIcons.Idea01
+                        ReasoningLevel.OFF -> Lucide.LightbulbOff
+                        ReasoningLevel.AUTO -> Lucide.Lightbulb
                         ReasoningLevel.LOW -> ReasoningLow
                         ReasoningLevel.MEDIUM -> ReasoningMedium
                         ReasoningLevel.HIGH -> ReasoningHigh
@@ -269,8 +269,8 @@ private fun ReasoningScale(
 @Composable
 private fun ReasoningIcon(level: ReasoningLevel) {
     when (level) {
-        ReasoningLevel.OFF -> Icon(HugeIcons.Idea, null)
-        ReasoningLevel.AUTO -> Icon(HugeIcons.Idea01, null)
+        ReasoningLevel.OFF -> Icon(Lucide.LightbulbOff, null)
+        ReasoningLevel.AUTO -> Icon(Lucide.Lightbulb, null)
         ReasoningLevel.LOW -> Icon(ReasoningLow, null)
         ReasoningLevel.MEDIUM -> Icon(ReasoningMedium, null)
         ReasoningLevel.HIGH -> Icon(ReasoningHigh, null)

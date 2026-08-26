@@ -40,10 +40,10 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Settings03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Settings
 import app.amber.agent.R
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionCapability
@@ -129,7 +129,7 @@ fun SettingSystemAccessPage(
             item("summary") {
                 CardGroup(title = { Text("权限中心") }) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Settings03, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.Settings, contentDescription = null) },
                         headlineContent = { Text("核心运行时权限") },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -213,7 +213,7 @@ fun SettingSystemAccessPage(
             item("external_file_access") {
                 CardGroup(title = { Text("外部文件访问范围") }) {
                     item(
-                        leadingContent = { Icon(HugeIcons.File02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.FileText, contentDescription = null) },
                         headlineContent = { Text("全文件访问 allowlist") },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -321,9 +321,9 @@ private fun CardGroupScope.permissionItem(
         leadingContent = {
             Icon(
                 imageVector = if (capability.risk == AgentPermissionRisk.High) {
-                    HugeIcons.Alert01
+                    Lucide.TriangleAlert
                 } else {
-                    HugeIcons.Settings03
+                    Lucide.Settings
                 },
                 contentDescription = null,
                 tint = when (capability.risk) {

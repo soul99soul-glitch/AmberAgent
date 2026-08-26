@@ -1,7 +1,7 @@
 package app.amber.feature.board.agent
 
 import android.util.Log
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.BoardRepository
@@ -22,7 +22,7 @@ import kotlin.uuid.Uuid
  */
 class BoardAgent(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val boardRepository: BoardRepository,
 ) {
     suspend fun run(
@@ -88,7 +88,7 @@ class BoardAgent(
         }
         lastCallFailureReason = null
         return runCatching {
-            val response = providerManager.getProviderByType(provider).generateText(
+            val response = providerCatalog.text(provider).complete(
                 providerSetting = provider,
                 messages = listOf(
                     UIMessage.system("你是 AmberAgent 的「今日看板」助理。基于用户提供的信号产出结构化 JSON 看板。仅输出 JSON，不要代码围栏、不要前后解释。"),

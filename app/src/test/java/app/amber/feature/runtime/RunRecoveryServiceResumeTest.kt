@@ -18,7 +18,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.MessageNode
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
@@ -164,7 +164,7 @@ class RunRecoveryServiceResumeTest : DurableRuntimeTestBase() {
         partialId: Uuid = Uuid.random(),
     ): Conversation = Conversation(
         id = conversationId,
-        assistantId = DEFAULT_ASSISTANT_ID,
+        assistantId = AMBER_AGENT_ID,
         messageNodes = listOf(
             MessageNode.of(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("question")))),
             MessageNode.of(

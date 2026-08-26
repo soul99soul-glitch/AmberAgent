@@ -61,12 +61,12 @@ import app.amber.highlight.HighlightTextColorPalette
 import app.amber.highlight.Highlighter
 import app.amber.highlight.LocalHighlighter
 import app.amber.highlight.buildHighlightText
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.Download04
-import me.rerere.hugeicons.stroke.Eye
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.CloudDownload
+import com.composables.icons.lucide.Eye
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalNavController
@@ -226,7 +226,7 @@ fun HighlightCodeBlock(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = if (isExpanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                                    imageVector = if (isExpanded) Lucide.ArrowUp else Lucide.ArrowDown,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                     modifier = Modifier.size(textStyle.fontSize.toDp())
@@ -421,7 +421,7 @@ private fun HighlightCodeActions(
             val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
 
             Icon(
-                imageVector = HugeIcons.Download04,
+                imageVector = Lucide.CloudDownload,
                 contentDescription = stringResource(id = R.string.chat_page_save),
                 tint = iconTint,
                 modifier = Modifier
@@ -457,7 +457,7 @@ private fun HighlightCodeActions(
             )
 
             Icon(
-                imageVector = HugeIcons.Copy01,
+                imageVector = Lucide.Copy,
                 contentDescription = stringResource(id = R.string.code_block_copy),
                 tint = iconTint,
                 modifier = Modifier
@@ -473,7 +473,7 @@ private fun HighlightCodeActions(
 
             if (completeCodeBlock && (language == "html" || language == "svg")) {
                 Icon(
-                    imageVector = HugeIcons.Eye,
+                    imageVector = Lucide.Eye,
                     contentDescription = stringResource(id = R.string.code_block_preview),
                     tint = iconTint,
                     modifier = Modifier

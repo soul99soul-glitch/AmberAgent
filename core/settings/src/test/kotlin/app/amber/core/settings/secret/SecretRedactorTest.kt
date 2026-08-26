@@ -10,7 +10,6 @@ import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.settings.WebDavConfig
 import app.amber.core.sync.s3.S3Config
 import app.amber.search.SearchServiceOptions
-import app.amber.tts.provider.TTSProviderSetting
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -131,7 +130,7 @@ class SecretRedactorTest {
     // ---------------- 其余设置类型轻量 round-trip ----------------
 
     @Test
-    fun `search tts webdav s3 round-trip through redactor`() {
+    fun `search webdav s3 round-trip through redactor`() {
         val store = fakeSecretStore()
         val redactor = SecretRedactor(store)
         val out = mutableMapOf<String, SecretReference>()
@@ -145,15 +144,6 @@ class SecretRedactorTest {
         val rehydratedSearch = redactor.rehydrateSearchServices(redactedSearch, out)
         assertEquals("tavily-key-111", (rehydratedSearch[0] as SearchServiceOptions.TavilyOptions).apiKey)
         assertEquals("sx-pass", (rehydratedSearch[1] as SearchServiceOptions.SearXNGOptions).password)
-
-        val tts = listOf(
-            TTSProviderSetting.OpenAI(apiKey = "tts-key-222"),
-            TTSProviderSetting.SystemTTS(),
-        )
-        val redactedTts = redactor.redactTtsProviders(tts, emptyMap(), out)
-        assertFalse(JsonInstant.encodeToString(redactedTts).contains("tts-key-222"))
-        val rehydratedTts = redactor.rehydrateTtsProviders(redactedTts, out)
-        assertEquals("tts-key-222", (rehydratedTts[0] as TTSProviderSetting.OpenAI).apiKey)
 
         val webDav = WebDavConfig(url = "https://dav.example", username = "dav-user", password = "dav-pass")
         val redactedWebDav = redactor.redactWebDav(webDav, emptyMap(), out)

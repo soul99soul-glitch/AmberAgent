@@ -47,8 +47,8 @@ import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.SlidersHorizontal
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.SlidersHorizontal
 import kotlin.uuid.Uuid
 
 @Composable
@@ -146,7 +146,7 @@ fun ProviderTemplatePickerSheet(
                     ProviderTemplateRow(
                         name = stringResource(R.string.setting_provider_page_template_custom_blank_title),
                         subtitle = stringResource(R.string.setting_provider_page_template_custom_blank_subtitle),
-                        leadingIcon = HugeIcons.SlidersHorizontal,
+                        leadingIcon = Lucide.SlidersHorizontal,
                         tagText = "custom",
                         onClick = { closeAndPick(ProviderSetting.OpenAI(), false) },
                     )

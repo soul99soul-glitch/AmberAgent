@@ -51,7 +51,7 @@ fun computeAIIconByName(name: String): String? {
         PATTERN_MIMO.containsMatchIn(lowerName) -> "xiaomimimo.svg"
         PATTERN_FISH.containsMatchIn(lowerName) -> "fish-audio.svg"
         PATTERN_LONGCAT.containsMatchIn(lowerName) -> "longcat-color.svg"
-        PATTERN_AMBERAGENT.containsMatchIn(lowerName) -> "amberagent.svg"
+        PATTERN_AMBERAGENT.containsMatchIn(lowerName) -> "graphite_agent_mark"
         PATTERN_SEARCH_LINKUP.containsMatchIn(lowerName) -> "linkup.png"
         PATTERN_SEARCH_BING.containsMatchIn(lowerName) -> "bing.png"
         PATTERN_SEARCH_TAVILY.containsMatchIn(lowerName) -> "tavily.png"
@@ -68,7 +68,7 @@ fun computeAIIconByName(name: String): String? {
     return result
 }
 
-private val PATTERN_AMBERAGENT = Regex("amberagent|rikka|auto")
+private val PATTERN_AMBERAGENT = Regex("amberagent|auto")
 private val PATTERN_OPENAI = Regex("(gpt|openai|o\\d)")
 private val PATTERN_GEMINI = Regex("(gemini|nano-banana)")
 private val PATTERN_GOOGLE = Regex("google")

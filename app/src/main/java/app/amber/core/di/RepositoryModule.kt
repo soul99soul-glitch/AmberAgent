@@ -9,7 +9,6 @@ import app.amber.core.files.SkillManager
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FavoriteRepository
 import app.amber.core.repository.FilesRepository
-import app.amber.core.repository.GenMediaRepository
 import app.amber.core.repository.ImageGenerationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.memory.recall.MemoryRecallStore
@@ -33,17 +32,13 @@ val repositoryModule = module {
     }
 
     single {
-        GenMediaRepository(get())
-    }
-
-    single {
         AgentPromptConfigRepository(get())
     }
 
     single {
         ImageGenerationRepository(
             settingsStore = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             filesManager = get(),
             promptConfigRepository = get(),
         )

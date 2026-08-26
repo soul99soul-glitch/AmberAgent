@@ -46,28 +46,30 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.FullScreen
+import app.amber.ai.core.ReasoningLevel
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Maximize
 import app.amber.agent.R
 import app.amber.feature.subagent.SubAgentMode
-import app.amber.core.model.reasoningLevelForModel
-import app.amber.core.model.withReasoningLevelForModel
 import app.amber.core.settings.defaultReasoningLevelForModel
-import app.amber.core.settings.getCurrentAssistant
+import app.amber.core.settings.getAmberQuickMessages
 import app.amber.core.settings.getCurrentChatModel
-import app.amber.core.settings.getQuickMessagesOfAssistant
 import app.amber.core.files.FilesManager
 import app.amber.core.files.SkillManager
 import app.amber.core.files.SkillMetadata
 import app.amber.core.model.QuickMessage
+import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.hooks.ChatInputState
@@ -112,29 +114,32 @@ internal fun TextInputRow(
     modifier: Modifier = Modifier,
     minimalChrome: Boolean = false,
     hidePlaceholder: Boolean = false,
-    // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到当前 assistant.
+    // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到全局 Settings.
     // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
-    onUpdateAssistant: ((app.amber.core.model.Assistant) -> Unit)? = null,
+    onUpdateSettings: ((app.amber.core.settings.Settings) -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
     val skillManager: SkillManager = koinInject()
-    val assistant = settings.getCurrentAssistant()
+    val webMountManager: WebMountManager = koinInject()
+    val webMountEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
-    val quickMessages = remember(settings.quickMessages, assistant.quickMessageIds) {
-        settings.getQuickMessagesOfAssistant(assistant)
+    val quickMessages = remember(settings.quickMessages, webMountEnabled) {
+        settings.getAmberQuickMessages().filterNot { quickMessage ->
+            !webMountEnabled && quickMessage.title.equals("webmount", ignoreCase = true)
+        }
     }
     val enabledSkills by produceState(
         initialValue = emptyList<SkillMetadata>(),
-        key1 = assistant.enabledSkills,
+        key1 = settings.enabledSkills,
         key2 = skillManager,
     ) {
-        value = if (assistant.enabledSkills.isEmpty()) {
+        value = if (settings.enabledSkills.isEmpty()) {
             emptyList()
         } else {
             withContext(Dispatchers.IO) {
                 skillManager.listSkills()
-                    .filter { skill -> skill.name in assistant.enabledSkills }
+                    .filter { skill -> skill.name in settings.enabledSkills }
                     .sortedBy { skill -> skill.name.lowercase(Locale.getDefault()) }
             }
         }
@@ -291,22 +296,32 @@ internal fun TextInputRow(
                             }
                         },
                         // V3: thinking footer 数据来自当前 settings, 不为空且 model 支持 reasoning 时渲染
-                        thinkingFooter = onUpdateAssistant?.let { update ->
+                        thinkingFooter = onUpdateSettings?.let { update ->
                             {
                                 val currentModel = settings.getCurrentChatModel()
                                 val hasReasoning = currentModel?.abilities?.contains(
                                     app.amber.ai.provider.ModelAbility.REASONING
                                 ) == true
                                 if (hasReasoning) {
-                                    val currentLevel = assistant.reasoningLevelForModel(
-                                        modelId = currentModel.id,
-                                        defaultReasoningLevel = settings.defaultReasoningLevelForModel(currentModel),
-                                    )
+                                    val currentLevel = settings.rememberedReasoningLevelsByModelId[
+                                        currentModel.id.toString()
+                                    ] ?: if (settings.reasoningLevel == ReasoningLevel.AUTO) {
+                                        settings.defaultReasoningLevelForModel(currentModel)
+                                    } else {
+                                        settings.reasoningLevel
+                                    }
                                     SlashCommandThinkingFooter(
                                         currentLevel = currentLevel,
                                         levels = app.amber.feature.ui.components.ai.reasoningLevelsForModel(currentModel),
                                         onChange = { level ->
-                                            update(assistant.withReasoningLevelForModel(currentModel.id, level))
+                                            update(
+                                                settings.copy(
+                                                    reasoningLevel = level,
+                                                    rememberedReasoningLevelsByModelId =
+                                                        settings.rememberedReasoningLevelsByModelId +
+                                                            (currentModel.id.toString() to level),
+                                                )
+                                            )
                                         },
                                     )
                                 }
@@ -446,7 +461,11 @@ internal fun TextInputRow(
             placeholder = {
                 if (!hidePlaceholder) {
                     Text(
-                        text = if (minimalChrome) "输入消息" else stringResource(R.string.chat_input_placeholder),
+                        text = if (minimalChrome) {
+                            stringResource(R.string.chat_input_compose_placeholder)
+                        } else {
+                            stringResource(R.string.chat_input_placeholder)
+                        },
                         color = workspace.faint,
                     )
                 }
@@ -477,7 +496,10 @@ internal fun TextInputRow(
                             isFullScreen = !isFullScreen
                         },
                     ) {
-                        Icon(HugeIcons.FullScreen, null)
+                        Icon(
+                            Lucide.Maximize,
+                            contentDescription = stringResource(R.string.chat_input_fullscreen_editor),
+                        )
                     }
                 }
             } else {
@@ -593,7 +615,7 @@ private fun SlashCommandThinkingFooter(
     ) {
         HorizontalDivider(color = workspace.hairline)
         Text(
-            text = "思考等级",
+            text = stringResource(R.string.chat_input_reasoning_level),
             color = workspace.faint,
             fontSize = 12.sp,
             modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 6.dp),
@@ -675,7 +697,11 @@ private fun QuickMessageButton(
     state: ChatInputState,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val quickMessagesLabel = stringResource(R.string.quick_messages_page_title)
     IconButton(
+        modifier = Modifier.semantics(mergeDescendants = true) {
+            contentDescription = quickMessagesLabel
+        },
         onClick = {
             expanded = !expanded
         }) {

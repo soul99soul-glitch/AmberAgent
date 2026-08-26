@@ -6,8 +6,9 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.Provider
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ImageModelGateway
+import app.amber.ai.provider.TextModelGateway
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.ImageGenerationResult
@@ -18,7 +19,7 @@ import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.AILoggingManager
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.GenerationHandler
+import app.amber.core.ai.ChatRunCoordinator
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.transformers.InputMessageTransformer
@@ -31,9 +32,8 @@ import app.amber.core.context.TokenBudgetFitter
 import app.amber.core.context.TokenFitProvenance
 import app.amber.core.infra.AppScope
 import app.amber.core.memory.recall.MemoryRecallStore
-import app.amber.core.model.Assistant
 import app.amber.core.model.Conversation
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.MessageNode
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.settings.AgentRuntimeSetting
@@ -84,32 +84,28 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * P0-02 runtime production-chain canaries — Phase 1+ of the Android/iOS
- * capability parity plan (docs/plans/2026-08-13-android-ios-capability-parity-closure-plan.md).
- *
- * The file-level chains (Novel, Workspace, Artifact) live in
- * [ProductionChainCanaryTest]; this class covers the four durable-runtime
- * chains that were TODO in Phase 0:
+ * Durable-runtime production-chain canaries. File and artifact chains live in
+ * [ProductionChainCanaryTest]; this class covers four cross-component
+ * invariants:
  *
  *  1. stream → tool call → approval → side effect → tool result → next turn →
- *     durable terminal (P1-02 + P1-03, `durable_tool_effects` +
- *     `typed_run_terminal`).
+ *     durable terminal.
  *  2. stream → stop → the target run is cancelled, other runs unaffected
- *     (P1-05 `RunOwnershipRegistry` — stop is scoped to (conversationId,
- *     runId) and stale runs cannot be cancelled).
- *  3. process death → checkpoint → resume/reconcile (P1-02 recovery rules:
+ *     (`RunOwnershipRegistry` scopes stop to (conversationId, runId), so a
+ *     stale run cannot be cancelled).
+ *  3. process death → checkpoint → resume/reconcile (recovery rules:
  *     STARTED non-idempotent → OUTCOME_UNKNOWN, never silently re-run;
  *     PREPARED → re-enters approval reusing the same effectId).
  *  4. prompt assembly → transformer → mailbox/steer → final token fit →
- *     provider (P1-04 — the single hard fit at the provider boundary).
+ *     provider, with a single hard fit at the provider boundary.
  *
- * Canary rules (plan P0-02 acceptance):
- *  - Real production components only: GenerationHandler, AgentToolDispatcher
+ * Canary rules:
+ *  - Real production components only: ChatRunCoordinator, AgentToolDispatcher
  *    (write-ahead), RoomToolEffectLedger, RoomRunTerminalStore,
  *    RunRecoveryService, RunOwnershipRegistry, TokenBudgetFitter. Fakes sit
  *    only at the external boundaries: the provider stream (a scripted
- *    `Provider<ProviderSetting.OpenAI>` registered into the real
- *    ProviderManager), the approval UI action (flipping the tool part to
+ *    `TextModelGateway<ProviderSetting.OpenAI>` registered into the real
+ *    ProviderCatalog), the approval UI action (flipping the tool part to
  *    `Approved`, as the approval card does), and process death (dropping
  *    every component instance and rebuilding over the SAME persisted store —
  *    in-memory Room keeps its data until close(), mirroring the SQLite file
@@ -166,7 +162,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("已写入 /tmp/canary.txt。"))),
             ),
         )
-        val handler = generationHandler(provider, flags)
+        val handler = chatRunCoordinator(provider, flags)
         val conversation = canaryConversation(conversationId, listOf(UIMessage.user("$MARKER_WRITE 写入一个文件")))
         conversationRepository().insertConversation(conversation)
         runTerminalStore.begin(runId, conversationId.toString(), null)
@@ -245,7 +241,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 MARKER_FINISH to CanaryProvider.Script(listOf(textChunk("另一个会话的完整回复"))),
             ),
         )
-        val handler = generationHandler(provider, flags)
+        val handler = chatRunCoordinator(provider, flags)
         val registry = RunOwnershipRegistry()
         val runIdStop = "canary-chain2-run-stop"
         val runIdFinish = "canary-chain2-run-finish"
@@ -265,7 +261,6 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                     settings = settings,
                     model = model,
                     messages = listOf(UIMessage.user("$MARKER_STOP 写一篇长文")),
-                    assistant = canaryAssistant(),
                     conversation = canaryConversation(convStop, listOf(UIMessage.user("$MARKER_STOP 写一篇长文"))),
                     runId = runIdStop,
                     onTerminal = { },
@@ -278,7 +273,6 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                     settings = settings,
                     model = model,
                     messages = listOf(UIMessage.user("$MARKER_FINISH 帮我总结")),
-                    assistant = canaryAssistant(),
                     conversation = canaryConversation(convFinish, listOf(UIMessage.user("$MARKER_FINISH 帮我总结"))),
                     runId = runIdFinish,
                     onTerminal = { },
@@ -286,8 +280,8 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             }.onSuccess { outcomes[runIdFinish] = null }.onFailure { outcomes[runIdFinish] = it }
         }
         // P1-05: both runs register ownership (assistantId, conversationId, runId).
-        assertTrue(registry.register(DEFAULT_ASSISTANT_ID.toString(), convStop.toString(), runIdStop, jobStop))
-        assertTrue(registry.register(DEFAULT_ASSISTANT_ID.toString(), convFinish.toString(), runIdFinish, jobFinish))
+        assertTrue(registry.register(AMBER_AGENT_ID.toString(), convStop.toString(), runIdStop, jobStop))
+        assertTrue(registry.register(AMBER_AGENT_ID.toString(), convFinish.toString(), runIdFinish, jobFinish))
 
         // Both runs stream in parallel; run-stop is mid-stream when we stop it.
         withTimeout(20_000) { while (chunksStop.isEmpty()) yield() }
@@ -376,7 +370,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         )
 
         // Round 1 — approval pause, exactly like chain 1.
-        val handler = generationHandler(provider, flags)
+        val handler = chatRunCoordinator(provider, flags)
         val round1 = runRound(
             handler, settings, model, conversation.currentMessages, conversation, runId,
             tools = listOf(toolDef),
@@ -398,7 +392,6 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                     settings = settings,
                     model = model,
                     messages = approveTool(round1.lastMessages, "call_chain3_1"),
-                    assistant = canaryAssistant(),
                     tools = listOf(toolDef),
                     conversation = conversation,
                     runId = runId,
@@ -446,7 +439,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         assertEquals("effectId=${effect.effectId}", ToolEffectStatus.RECONCILED, ledgerAfter.get(effect.effectId)!!.status)
         completeExecution.set(true)
         runTerminalStore.begin(runId, conversationId.toString(), null) // resume the same runId
-        val handler2 = generationHandler(provider, flags)
+        val handler2 = chatRunCoordinator(provider, flags)
         val round3 = runRound(
             handler2, settings, model, approveTool(round1.lastMessages, "call_chain3_1"), conversation, runId,
             tools = listOf(toolDef),
@@ -488,7 +481,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("副作用已生效，任务完成。"))),
             ),
         )
-        val handlerPrepared = generationHandler(providerPrepared, flags)
+        val handlerPrepared = chatRunCoordinator(providerPrepared, flags)
         val roundPrepared1 = runRound(
             handlerPrepared, settings, model, conversationPrepared.currentMessages, conversationPrepared, runIdPrepared,
             tools = listOf(preparedToolDef),
@@ -565,7 +558,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("查询完成，未发现异常。"))),
             ),
         )
-        val handler = generationHandler(provider, flags)
+        val handler = chatRunCoordinator(provider, flags)
         // Transformer that expands the current user request AFTER prompt
         // assembly (the OCR-style growth that previously made requests
         // silently over-budget).
@@ -649,7 +642,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         conversationRepository().insertConversation(tooLargeConversation)
         runTerminalStore.begin(tooLargeRunId, tooLargeConversationId.toString(), null)
         val provider2 = CanaryProvider(scripts = mapOf(MARKER_TOO_LARGE to CanaryProvider.Script(listOf(textChunk("不可达")))))
-        val handler2 = generationHandler(provider2, flags)
+        val handler2 = chatRunCoordinator(provider2, flags)
         val receivedBefore = provider2.received.size
         val tooLargeOutcome = runRound(
             handler2, settings, model,
@@ -706,6 +699,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
 
     private fun canarySettings(model: Model, provider: ProviderSetting.OpenAI): Settings = Settings(
         providers = listOf(provider.copy(models = listOf(model))),
+        systemPrompt = "You are the canary assistant.",
         agentRuntime = AgentRuntimeSetting(
             agentSoulMarkdown = "",
             enableRecentChatsReference = false,
@@ -719,22 +713,22 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         ),
     )
 
-    private fun canaryAssistant() = Assistant(
-        id = DEFAULT_ASSISTANT_ID,
-        name = "Canary",
-        systemPrompt = "You are the canary assistant.",
-    )
-
     private fun canaryConversation(id: Uuid, messages: List<UIMessage>): Conversation =
         Conversation(
             id = id,
-            assistantId = DEFAULT_ASSISTANT_ID,
+            assistantId = AMBER_AGENT_ID,
             messageNodes = messages.map { MessageNode.of(it) },
         )
 
-    private fun generationHandler(providerImpl: CanaryProvider, flags: CapabilityFlags): GenerationHandler {
-        val providerManager = ProviderManager(OkHttpClient(), context)
-        providerManager.registerProvider("openai", providerImpl)
+    private fun chatRunCoordinator(providerImpl: CanaryProvider, flags: CapabilityFlags): ChatRunCoordinator {
+        val httpClient = OkHttpClient()
+        val providerCatalog = ProviderCatalog(
+            openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
+            googleProvider = app.amber.ai.provider.providers.GoogleProvider(httpClient, context),
+            claudeProvider = app.amber.ai.provider.providers.ClaudeProvider(httpClient, context),
+            openAITextGateway = providerImpl,
+            openAIImageGateway = providerImpl,
+        )
         val conversationRepo = conversationRepository()
         val memoryRepo = MemoryRepository(
             memoryDAO = database.memoryDao(),
@@ -743,7 +737,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             appDatabase = database,
         )
         val contextEngine = ConversationContextEngine(
-            providerManager = providerManager,
+            providerCatalog = providerCatalog,
             json = json,
             contextRepository = ConversationContextRepository(
                 compactDAO = database.conversationCompactDao(),
@@ -754,9 +748,9 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             capabilitySnapshotBuilder = AgentCapabilitySnapshotBuilder(),
             promptConfigRepository = AgentPromptConfigRepository(context),
         )
-        return GenerationHandler(
+        return ChatRunCoordinator(
             context = context,
-            providerManager = providerManager,
+            providerCatalog = providerCatalog,
             json = json,
             memoryRepo = memoryRepo,
             memoryRecallStore = MemoryRecallStore(memoryRepo),
@@ -781,7 +775,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
     }
 
     private suspend fun runRound(
-        handler: GenerationHandler,
+        handler: ChatRunCoordinator,
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
@@ -799,7 +793,6 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 model = model,
                 messages = messages,
                 inputTransformers = inputTransformers,
-                assistant = canaryAssistant(),
                 tools = tools,
                 maxSteps = 8,
                 autoApproveTools = false,
@@ -884,7 +877,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
  */
 private class CanaryProvider(
     private val scripts: Map<String, Script>,
-) : Provider<ProviderSetting.OpenAI> {
+) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
 
     data class Script(
         val chunks: List<MessageChunk>,
@@ -895,13 +888,13 @@ private class CanaryProvider(
 
     override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> = emptyList()
 
-    override suspend fun generateText(
+    override suspend fun complete(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): MessageChunk = error("chain canaries use the streaming path only")
 
-    override suspend fun streamText(
+    override suspend fun stream(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
@@ -917,7 +910,7 @@ private class CanaryProvider(
     }
 
     override suspend fun generateImage(
-        providerSetting: ProviderSetting,
+        providerSetting: ProviderSetting.OpenAI,
         params: ImageGenerationParams,
     ): ImageGenerationResult = error("not used")
 

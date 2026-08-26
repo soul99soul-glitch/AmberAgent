@@ -25,8 +25,7 @@ object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent 
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val assistant = ctx.assistant
-        if (assistant.regexes.isEmpty()) return messages
+        if (ctx.settings.regexes.isEmpty()) return messages
         var changed = false
         val transformed = messages.map { message ->
             val next = transformMessage(ctx, message)
@@ -40,7 +39,6 @@ object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent 
         ctx: TransformerContext,
         message: UIMessage,
     ): UIMessage {
-        val assistant = ctx.assistant
         val scope = when (message.role) {
             MessageRole.ASSISTANT -> AssistantAffectScope.ASSISTANT
             else -> return message
@@ -49,13 +47,13 @@ object RegexOutputTransformer : TailSafeOutputMessageTransformer, KoinComponent 
         val parts = message.parts.map { part ->
             when (part) {
                 is UIMessagePart.Text -> {
-                    val text = part.text.replaceRegexes(assistant, scope, visual = false)
+                    val text = part.text.replaceRegexes(ctx.settings.regexes, scope, visual = false)
                     if (text != part.text) changed = true
                     if (text == part.text) part else part.copy(text = text)
                 }
 
                 is UIMessagePart.Reasoning -> {
-                    val reasoning = part.reasoning.replaceRegexes(assistant, scope, visual = false)
+                    val reasoning = part.reasoning.replaceRegexes(ctx.settings.regexes, scope, visual = false)
                     if (reasoning != part.reasoning) changed = true
                     if (reasoning == part.reasoning) part else part.copy(reasoning = reasoning)
                 }

@@ -13,9 +13,7 @@ import app.amber.core.ai.Generator
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.getCurrentChatModel
-import app.amber.core.model.Assistant
 
 interface SubAgentRunner {
     /**
@@ -47,7 +45,7 @@ interface SubAgentRunner {
 }
 
 class GenerationSubAgentRunner(
-    private val generationHandler: Generator,
+    private val generator: Generator,
 ) : SubAgentRunner {
     override suspend fun run(
         settings: Settings,
@@ -61,14 +59,17 @@ class GenerationSubAgentRunner(
         consumeSteerMessages: suspend () -> List<UIMessage>,
         previousAnswer: String,
     ): SubAgentResult {
-        val isolatedSettings = settings.toIsolatedSubAgentSettings()
+        val isolatedSettings = settings.toIsolatedSubAgentSettings().copy(
+            systemPrompt = definition.systemPrompt,
+            temperature = definition.temperature ?: settings.temperature,
+            reasoningLevel = definition.reasoningLevel ?: settings.reasoningLevel,
+        )
         // Per-role model: explicit override → fallback to current chat model.
         // If the user removed/renamed the configured model after saving the override,
         // fall through silently rather than failing the run.
         val model = definition.modelId?.let { settings.findModelById(it) }
             ?: settings.getCurrentChatModel()
             ?: error("Current chat model is not configured")
-        val assistant = settings.getCurrentAssistant().toIsolatedSubAgentAssistant(definition)
         val messages = listOf(UIMessage.user(buildTaskPrompt(definition, task, previousAnswer)))
         val reportCapture = SubAgentReportCapture()
         var latest = messages
@@ -76,11 +77,10 @@ class GenerationSubAgentRunner(
         var generationError: Throwable? = null
 
         try {
-            generationHandler.generateText(
+            generator.generateText(
                 settings = isolatedSettings,
                 model = model,
                 messages = messages,
-                assistant = assistant,
                 memories = emptyList(),
                 tools = tools + reportCapture.tool(),
                 maxSteps = definition.maxTurns,
@@ -151,11 +151,10 @@ class GenerationSubAgentRunner(
                 """.trimIndent()
             )
             try {
-                generationHandler.generateText(
+                generator.generateText(
                     settings = isolatedSettings,
                     model = model,
                     messages = latest,
-                    assistant = assistant,
                     memories = emptyList(),
                     tools = tools + reportCapture.tool(),
                     maxSteps = SUBAGENT_REPORT_RETRY_STEPS,
@@ -295,33 +294,21 @@ class GenerationSubAgentRunner(
     }
 }
 
-fun Assistant.toIsolatedSubAgentAssistant(definition: SubAgentDefinition) = copy(
-    name = definition.name,
-    systemPrompt = definition.systemPrompt,
-    // streamOutput must be true so GenerationHandler emits per-token Messages chunks.
-    // Without it the underlying provider buffers the whole response and we get just one
-    // chunk at the end — UI live view stays empty until the run finishes, then jumps
-    // straight to the final text. Cost: per-chunk transformer pass, negligible.
-    streamOutput = true,
-    contextMessageSize = 0,
-    enableMemory = false,
-    useGlobalMemory = false,
-    enableRecentChatsReference = false,
-    presetMessages = emptyList(),
-    quickMessageIds = emptySet(),
-    regexes = emptyList(),
-    mcpServers = emptySet(),
-    localTools = emptyList(),
-    modeInjectionIds = emptySet(),
-    lorebookIds = emptySet(),
-    enabledSkills = emptySet(),
-    enableTimeReminder = false,
-    messageTemplate = "{{ message }}",
-    temperature = definition.temperature ?: temperature,
-    reasoningLevel = definition.reasoningLevel ?: reasoningLevel,
-)
-
 fun Settings.toIsolatedSubAgentSettings(): Settings = copy(
+    // Keep the subagent on the same provider/model catalog, but remove every
+    // parent-only prompt and extension surface from its generation snapshot.
+    systemPrompt = "",
+    contextMessageSize = 0,
+    streamOutput = true,
+    messageTemplate = "{{ message }}",
+    presetMessages = emptyList(),
+    quickMessages = emptyList(),
+    regexes = emptyList(),
+    mcpServers = emptyList(),
+    enabledMcpServerIds = emptySet(),
+    enabledModeInjectionIds = emptySet(),
+    enabledLorebookIds = emptySet(),
+    enabledSkills = emptySet(),
     agentRuntime = agentRuntime.copy(
         enableCoreMemory = false,
         enableShortTermMemory = false,

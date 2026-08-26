@@ -7,10 +7,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.BalanceResultPath
 import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
 import app.amber.common.http.await
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -372,7 +375,15 @@ class ProviderUsageClient(
         }
         return ProviderUsageStatus(
             title = "${provider.name} Balance",
-            metrics = listOf(ProviderUsageMetric("balance", detail = JSONObject(text).getByPath(provider.balanceOption.resultPath))),
+            metrics = listOf(
+                ProviderUsageMetric(
+                    "balance",
+                    detail = BalanceResultPath.extract(
+                        Json.parseToJsonElement(text).jsonObject,
+                        provider.balanceOption.resultPath,
+                    ),
+                ),
+            ),
         )
     }
 
@@ -424,18 +435,6 @@ class ProviderUsageClient(
                 else -> null
             }
         }
-
-    private fun JSONObject.getByPath(path: String): String? {
-        var current: Any? = this
-        path.split(".").forEach { segment ->
-            current = when (current) {
-                is JSONObject -> (current as JSONObject).opt(segment)
-                is JSONArray -> segment.toIntOrNull()?.let { (current as JSONArray).opt(it) }
-                else -> null
-            }
-        }
-        return current?.toString()
-    }
 
     private fun JSONObject.findArray(name: String): JSONArray? {
         if (has(name) && opt(name) is JSONArray) return optJSONArray(name)

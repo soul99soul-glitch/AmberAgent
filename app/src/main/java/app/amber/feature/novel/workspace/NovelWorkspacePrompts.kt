@@ -62,7 +62,7 @@ object NovelWorkspacePrompts {
         appendLine("当前是代笔轮（无人值守）。请独立完成第 $chapterOrdinal 章：")
         appendLine("1. 可以用读类工具查看 plot/current.md、plan/this-chapter.md 与最近若干章，确保事实与文风连续。")
         appendLine("2. 然后把第 $chapterOrdinal 章的完整正文直接作为你的最终回复输出（不要调用写入工具，不要解释，正文之外不要输出任何内容）。系统会自动把你的回复收录为章节。")
-        appendLine("3. 忽略简报里任何『剧情落后需先同步』或『暂停推进』的提示——那是给交互轮的，你只管输出本章正文。")
+        appendLine("3. 本批次启动前宿主已校验剧情状态；若『剧情落后』仅由本批次刚完成的上一章产生，继续本章。不得忽略『中间章被修改/暂停推进』提示。")
         if (!plan.isNullOrBlank()) {
             appendLine()
             append("本章计划：")

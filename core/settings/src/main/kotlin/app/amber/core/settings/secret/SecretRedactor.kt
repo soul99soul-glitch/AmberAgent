@@ -7,19 +7,21 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.ai.mcp.McpServerConfig
-import app.amber.core.model.Assistant
+import app.amber.core.settings.LegacyAssistantProfile
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.WebDavConfig
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.core.sync.s3.S3Config
 import app.amber.search.SearchServiceOptions
-import app.amber.tts.provider.TTSProviderSetting
 import java.net.URI
 
 private const val TAG = "SecretRedactor"
@@ -78,6 +80,16 @@ class SecretRedactor(private val secretStore: SecretStore) {
             }.getOrNull()
         } ?: emptyMap()
 
+    /**
+     * Strict reference decoding for write/migration boundaries. A missing key is the
+     * empty map; an explicitly present malformed value fails the enclosing operation.
+     */
+    internal fun readRefsStrict(p: Preferences): Map<String, SecretReference> =
+        p[PreferencesKeys.SECRET_REFS]?.let { raw ->
+            JsonInstant.decodeFromString<List<SecretReference>>(raw)
+                .associateBy { it.descriptor().key }
+        } ?: emptyMap()
+
     fun writeRefs(p: MutablePreferences, refs: Map<String, SecretReference>) {
         if (refs.isEmpty()) {
             p.remove(PreferencesKeys.SECRET_REFS)
@@ -98,9 +110,26 @@ class SecretRedactor(private val secretStore: SecretStore) {
     fun extractRefsFromSettingsJson(json: Json, settingsJson: String): List<SecretReference> =
         runCatching {
             val obj = json.parseToJsonElement(settingsJson).jsonObject
-            json.decodeFromString<List<SecretReference>>(
-                obj["secretRefs"]?.toString() ?: "[]"
+            val refs = json.decodeFromString<List<SecretReference>>(
+                obj[EXPORT_SECRET_REFS_KEY]?.toString() ?: "[]"
             )
+            val sourceProfileId = obj["amberProfile"]
+                ?.jsonObject
+                ?.get("id")
+                ?.jsonPrimitive
+                ?.contentOrNull
+                ?: obj["assistantId"]?.jsonPrimitive?.contentOrNull
+            refs.mapNotNull { ref ->
+                if (ref.scope != "assistant") return@mapNotNull ref
+                if (sourceProfileId != null && ref.ownerId != sourceProfileId) return@mapNotNull null
+                val canonical = ref.copy(ownerId = AMBER_AGENT_ID.toString())
+                if (canonical.ownerId != ref.ownerId) {
+                    secretStore.read(ref.descriptor())?.let { value ->
+                        secretStore.update(canonical.descriptor(), value)
+                    }
+                }
+                canonical
+            }
         }.getOrNull() ?: emptyList()
 
     // ---------------- redact（保存/导出边界：明文 → SecretStore） ----------------
@@ -179,21 +208,36 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    fun redactAssistants(
-        assistants: List<Assistant>,
+    /** Redact the single Amber custom-header list under one stable owner. */
+    fun redactCustomHeaders(
+        headers: List<CustomHeader>,
         existingRefs: Map<String, SecretReference>,
         out: MutableMap<String, SecretReference>,
-    ): List<Assistant> = assistants.map { assistant ->
-        if (assistant.customHeaders.isEmpty()) {
-            assistant
-        } else {
-            assistant.copy(
-                customHeaders = assistant.customHeaders.redactHeaders(
-                    "assistant", assistant.id.toString(), existingRefs, out,
-                )
+    ): List<CustomHeader> = headers.redactHeaders(
+        "assistant", AMBER_AGENT_ID.toString(), existingRefs, out,
+    )
+
+    /** Legacy profile helper retained only for the one-time migration decoder. */
+    internal fun redactLegacyAssistantProfile(
+        profile: LegacyAssistantProfile,
+        existingRefs: Map<String, SecretReference>,
+        out: MutableMap<String, SecretReference>,
+    ): LegacyAssistantProfile = if (profile.customHeaders.isEmpty()) {
+        profile
+    } else {
+        profile.copy(
+            customHeaders = profile.customHeaders.redactHeaders(
+                "assistant", AMBER_AGENT_ID.toString(), existingRefs, out,
             )
-        }
+        )
     }
+
+    /** Legacy list helper retained only for old migration fixtures. */
+    internal fun redactLegacyAssistants(
+        assistants: List<LegacyAssistantProfile>,
+        existingRefs: Map<String, SecretReference>,
+        out: MutableMap<String, SecretReference>,
+    ): List<LegacyAssistantProfile> = assistants.map { redactLegacyAssistantProfile(it, existingRefs, out) }
 
     fun redactSearchServices(
         services: List<SearchServiceOptions>,
@@ -256,10 +300,6 @@ class SecretRedactor(private val secretStore: SecretStore) {
             )
 
             is SearchServiceOptions.BochaOptions -> service.copy(
-                apiKey = redactSecret("search", ownerId, "apiKey", service.apiKey, existingRefs, out)
-            )
-
-            is SearchServiceOptions.AmberAgentSearchOptions -> service.copy(
                 apiKey = redactSecret("search", ownerId, "apiKey", service.apiKey, existingRefs, out)
             )
 
@@ -407,49 +447,6 @@ class SecretRedactor(private val secretStore: SecretStore) {
         is McpServerConfig.StreamableHTTPServer -> copy(url = url)
     }
 
-    fun redactTtsProviders(
-        providers: List<TTSProviderSetting>,
-        existingRefs: Map<String, SecretReference>,
-        out: MutableMap<String, SecretReference>,
-    ): List<TTSProviderSetting> = providers.map { provider ->
-        val ownerId = provider.id.toString()
-        when (provider) {
-            is TTSProviderSetting.OpenAI -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.Gemini -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.SystemTTS -> provider
-
-            is TTSProviderSetting.MiniMax -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.Qwen -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.Groq -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.XAI -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.MiMo -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-
-            is TTSProviderSetting.FishAudio -> provider.copy(
-                apiKey = redactSecret("tts", ownerId, "apiKey", provider.apiKey, existingRefs, out)
-            )
-        }
-    }
-
     fun redactWebDav(
         config: WebDavConfig,
         existingRefs: Map<String, SecretReference>,
@@ -501,23 +498,21 @@ class SecretRedactor(private val secretStore: SecretStore) {
     /** 聚合器全量 redact：产出各域持久化形式 + 完整 refs map。 */
     fun redactSettings(
         providers: List<ProviderSetting>,
-        assistants: List<Assistant>,
+        customHeaders: List<CustomHeader>,
         searchServices: List<SearchServiceOptions>,
         mcpServers: List<McpServerConfig>,
         webDavConfig: WebDavConfig,
         s3Config: S3Config,
-        ttsProviders: List<TTSProviderSetting>,
         existingRefs: Map<String, SecretReference>,
     ): RedactedSettings {
         val out = mutableMapOf<String, SecretReference>()
         return RedactedSettings(
             providers = redactProviders(providers, existingRefs, out),
-            assistants = redactAssistants(assistants, existingRefs, out),
+            customHeaders = redactCustomHeaders(customHeaders, existingRefs, out),
             searchServices = redactSearchServices(searchServices, existingRefs, out),
             mcpServers = redactMcpServers(mcpServers, existingRefs, out),
             webDavConfig = redactWebDav(webDavConfig, existingRefs, out),
             s3Config = redactS3(s3Config, existingRefs, out),
-            ttsProviders = redactTtsProviders(ttsProviders, existingRefs, out),
             refs = out,
         )
     }
@@ -560,18 +555,31 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    fun rehydrateAssistants(
-        assistants: List<Assistant>,
+    internal fun rehydrateLegacyAssistantProfile(
+        profile: LegacyAssistantProfile,
         refs: Map<String, SecretReference>,
-    ): List<Assistant> = assistants.map { assistant ->
-        if (assistant.customHeaders.isEmpty()) {
-            assistant
-        } else {
-            assistant.copy(
-                customHeaders = assistant.customHeaders.rehydrateHeaders(refs, "assistant", assistant.id.toString())
-            )
-        }
+    ): LegacyAssistantProfile = if (profile.customHeaders.isEmpty()) {
+        profile
+    } else {
+        profile.copy(
+            customHeaders = profile.customHeaders.rehydrateHeaders(refs, "assistant", profile.id.toString())
+        )
     }
+
+    fun rehydrateCustomHeaders(
+        headers: List<CustomHeader>,
+        refs: Map<String, SecretReference>,
+    ): List<CustomHeader> = headers.rehydrateHeaders(
+        refs,
+        "assistant",
+        AMBER_AGENT_ID.toString(),
+    )
+
+    /** Legacy list helper retained only for old migration fixtures. */
+    internal fun rehydrateLegacyAssistants(
+        assistants: List<LegacyAssistantProfile>,
+        refs: Map<String, SecretReference>,
+    ): List<LegacyAssistantProfile> = assistants.map { rehydrateLegacyAssistantProfile(it, refs) }
 
     fun rehydrateSearchServices(
         services: List<SearchServiceOptions>,
@@ -633,10 +641,6 @@ class SecretRedactor(private val secretStore: SecretStore) {
             )
 
             is SearchServiceOptions.BochaOptions -> service.copy(
-                apiKey = rehydrateSecret(refs, "search", ownerId, "apiKey", service.apiKey)
-            )
-
-            is SearchServiceOptions.AmberAgentSearchOptions -> service.copy(
                 apiKey = rehydrateSecret(refs, "search", ownerId, "apiKey", service.apiKey)
             )
 
@@ -721,48 +725,6 @@ class SecretRedactor(private val secretStore: SecretStore) {
         }
     }
 
-    fun rehydrateTtsProviders(
-        providers: List<TTSProviderSetting>,
-        refs: Map<String, SecretReference>,
-    ): List<TTSProviderSetting> = providers.map { provider ->
-        val ownerId = provider.id.toString()
-        when (provider) {
-            is TTSProviderSetting.OpenAI -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.Gemini -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.SystemTTS -> provider
-
-            is TTSProviderSetting.MiniMax -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.Qwen -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.Groq -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.XAI -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.MiMo -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-
-            is TTSProviderSetting.FishAudio -> provider.copy(
-                apiKey = rehydrateSecret(refs, "tts", ownerId, "apiKey", provider.apiKey)
-            )
-        }
-    }
-
     fun rehydrateWebDav(
         config: WebDavConfig,
         refs: Map<String, SecretReference>,
@@ -816,20 +778,18 @@ class SecretRedactor(private val secretStore: SecretStore) {
      */
     fun redactForExport(
         providers: List<ProviderSetting>,
-        assistants: List<Assistant>,
+        customHeaders: List<CustomHeader>,
         searchServices: List<SearchServiceOptions>,
         mcpServers: List<McpServerConfig>,
         webDavConfig: WebDavConfig,
         s3Config: S3Config,
-        ttsProviders: List<TTSProviderSetting>,
     ): RedactedSettings = redactSettings(
         providers = providers,
-        assistants = assistants,
+        customHeaders = customHeaders,
         searchServices = searchServices,
         mcpServers = mcpServers,
         webDavConfig = webDavConfig,
         s3Config = s3Config,
-        ttsProviders = ttsProviders,
         existingRefs = emptyMap(),
     )
 
@@ -853,11 +813,10 @@ class SecretRedactor(private val secretStore: SecretStore) {
 /** redact 后的各域持久化数据 + 完整 refs map。 */
 data class RedactedSettings(
     val providers: List<ProviderSetting>,
-    val assistants: List<Assistant>,
+    val customHeaders: List<CustomHeader>,
     val searchServices: List<SearchServiceOptions>,
     val mcpServers: List<McpServerConfig>,
     val webDavConfig: WebDavConfig,
     val s3Config: S3Config,
-    val ttsProviders: List<TTSProviderSetting>,
     val refs: Map<String, SecretReference>,
 )

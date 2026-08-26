@@ -60,7 +60,6 @@ interface SearchService<T : SearchServiceOptions> {
                 is SearchServiceOptions.FirecrawlOptions -> FirecrawlSearchService
                 is SearchServiceOptions.JinaOptions -> JinaSearchService
                 is SearchServiceOptions.BochaOptions -> BochaSearchService
-                is SearchServiceOptions.AmberAgentSearchOptions -> AmberAgentSearchService
                 is SearchServiceOptions.GrokOptions -> GrokSearchService
             } as SearchService<T>
         }
@@ -138,9 +137,8 @@ sealed class SearchServiceOptions {
         val DEFAULT = BingLocalOptions()
 
         val TYPES = mapOf(
-            BingLocalOptions::class to "Bing HTML 兜底",
-            AmberAgentSearchOptions::class to "AmberAgent",
-            ZhipuOptions::class to "智谱",
+            BingLocalOptions::class to "Bing HTML fallback",
+            ZhipuOptions::class to "Zhipu",
             TavilyOptions::class to "Tavily",
             ExaOptions::class to "Exa",
             SearXNGOptions::class to "SearXNG",
@@ -148,12 +146,12 @@ sealed class SearchServiceOptions {
             BraveOptions::class to "Brave",
             SerperOptions::class to "Serper",
             SerpApiOptions::class to "SerpAPI",
-            MetasoOptions::class to "秘塔",
+            MetasoOptions::class to "Metaso",
             OllamaOptions::class to "Ollama",
             PerplexityOptions::class to "Perplexity",
             FirecrawlOptions::class to "Firecrawl",
             JinaOptions::class to "Jina",
-            BochaOptions::class to "博查",
+            BochaOptions::class to "Bocha",
             GrokOptions::class to "Grok",
         )
     }
@@ -271,14 +269,6 @@ sealed class SearchServiceOptions {
         override val id: Uuid = Uuid.random(),
         val apiKey: String = "",
         val summary: Boolean = true,
-    ) : SearchServiceOptions()
-
-    @Serializable
-    @SerialName("amber_agent")
-    data class AmberAgentSearchOptions(
-        override val id: Uuid = Uuid.random(),
-        val apiKey: String = "",
-        val depth: String = "standard",
     ) : SearchServiceOptions()
 
     @Serializable

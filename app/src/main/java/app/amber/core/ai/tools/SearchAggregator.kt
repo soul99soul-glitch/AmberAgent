@@ -231,6 +231,7 @@ internal object SearchAggregator {
                         sourceRank = index + 1,
                         duplicateCount = 1,
                         score = sourceBoost + hitBoost + freshnessBoost - index,
+                        publishedAt = item.publishedAt,
                         images = item.images.take(5),
                     )
                 } else {
@@ -239,6 +240,9 @@ internal object SearchAggregator {
                     existing.score += 8
                     if (item.text.length > existing.text.length) {
                         existing.text = item.text
+                    }
+                    if (existing.publishedAt.isNullOrBlank() && !item.publishedAt.isNullOrBlank()) {
+                        existing.publishedAt = item.publishedAt
                     }
                     // Merge images from duplicate sources, rebuild list to stay immutable-safe
                     if (item.images.isNotEmpty() && existing.images.size < 5) {
@@ -313,7 +317,6 @@ internal object SearchAggregator {
     }
 
     private fun SearchServiceOptions.serviceAliases(): List<String> = when (this) {
-        is SearchServiceOptions.AmberAgentSearchOptions -> listOf("amber_agent", "amberagent")
         is SearchServiceOptions.BingLocalOptions -> listOf("bing", "bing_local", "bing html", "bing html fallback")
         is SearchServiceOptions.BochaOptions -> listOf("bocha", "博查")
         is SearchServiceOptions.BraveOptions -> listOf("brave")
@@ -400,6 +403,7 @@ private data class AggregatedSearchItem(
     val sourceRank: Int,
     var duplicateCount: Int,
     var score: Int,
+    var publishedAt: String? = null,
     var images: List<String> = emptyList(),
 ) {
     fun toJson(index: Int, maxImages: Int = 5): JsonElement = buildJsonObject {
@@ -415,7 +419,7 @@ private data class AggregatedSearchItem(
         put("source_rank", sourceRank)
         put("duplicate_count", duplicateCount)
         put("rank_score", score)
-        put("published_at", JsonNull)
+        put("published_at", publishedAt?.let(::JsonPrimitive) ?: JsonNull)
         val cappedImages = images.distinct().take(maxImages.coerceIn(0, 5))
         if (cappedImages.isNotEmpty()) {
             put("images", buildJsonArray {

@@ -128,4 +128,26 @@ class NovelWorkspaceLedgerTest {
     fun `missing ledger is empty`() {
         assertEquals(NovelWorkspaceLedgerStore(), NovelWorkspaceLedger.load(tempFolder.root))
     }
+
+    @Test
+    fun `branch id uses the sole ledger head for legacy imports without branch metadata`() {
+        val directory = tempFolder.newFolder("legacy-branch")
+        val store = NovelWorkspaceStore(directory)
+        assertEquals(
+            "B-1",
+            NovelWorkspaceLedger.branchId(store, NovelWorkspaceLedgerStore(heads = mapOf("B-1" to "C-1")), "主线"),
+        )
+        store.write("branches/主线/branch.md", "---\nid: B-MISSING\n---\n")
+        assertNull(
+            NovelWorkspaceLedger.branchId(store, NovelWorkspaceLedgerStore(heads = mapOf("B-1" to "C-1")), "主线"),
+        )
+        store.delete("branches/主线/branch.md")
+        assertNull(
+            NovelWorkspaceLedger.branchId(
+                store,
+                NovelWorkspaceLedgerStore(heads = mapOf("B-1" to "C-1", "B-2" to "C-2")),
+                "主线",
+            ),
+        )
+    }
 }

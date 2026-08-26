@@ -24,8 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.Color
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.core.utils.openUrl
 import app.amber.feature.ui.components.message.MessageRenderCache
 import app.amber.feature.ui.context.LocalSettings
@@ -74,15 +74,15 @@ internal const val STREAMING_CODE_HIGHLIGHT_MAX_BLOCKS = 32
 @Composable
 fun StreamingSingleTextMarkdown(
     text: String,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     modifier: Modifier = Modifier,
     streaming: Boolean = true,
     onSettled: (() -> Unit)? = null,
 ) {
-    val renderSource = remember(text, assistant) {
+    val renderSource = remember(text, regexes) {
         MessageRenderCache.visualRegexText(
             text = text,
-            assistant = assistant,
+            regexes = regexes,
             scope = AssistantAffectScope.ASSISTANT,
         )
     }

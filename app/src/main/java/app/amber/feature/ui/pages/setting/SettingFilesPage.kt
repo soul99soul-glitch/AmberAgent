@@ -1,8 +1,8 @@
 package app.amber.feature.ui.pages.setting
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.Delete01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -219,7 +219,7 @@ private fun FileItem(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Image02,
+                            imageVector = Lucide.Image,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -231,7 +231,7 @@ private fun FileItem(
                     modifier = Modifier.align(Alignment.TopEnd)
                 ) {
                     Icon(
-                        HugeIcons.Delete01,
+                        Lucide.Trash2,
                         contentDescription = stringResource(R.string.setting_files_page_delete_content_description)
                     )
                 }

@@ -15,6 +15,7 @@ import app.amber.core.agent.utils.long
 import app.amber.core.agent.utils.requiredString
 import app.amber.core.agent.utils.string
 import app.amber.core.ai.transformers.OcrTransformer
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.webmount.primitives.WebViewScreenshot
 
 internal fun createScreenshotTool(deps: WebMountDeps): Tool = Tool(
@@ -117,7 +118,10 @@ internal fun createVisualSnapshotTool(deps: WebMountDeps): Tool = Tool(
     },
 )
 
-internal fun createVisualReadTool(deps: WebMountDeps): Tool = Tool(
+internal fun createVisualReadTool(
+    deps: WebMountDeps,
+    settingsStore: SettingsAggregator,
+): Tool = Tool(
     name = "wm_visual_read",
     description = """
         Read a small visual region from a WebMount page using the configured vision recognition model.
@@ -188,6 +192,7 @@ internal fun createVisualReadTool(deps: WebMountDeps): Tool = Tool(
                     }
                     val vision = OcrTransformer.performImageRecognition(
                         part = UIMessagePart.Image(dataUrl),
+                        settings = settingsStore.settingsFlow.value,
                         promptOverride = prompt,
                         useCache = false,
                     )

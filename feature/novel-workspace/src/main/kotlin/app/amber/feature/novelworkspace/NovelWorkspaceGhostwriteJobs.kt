@@ -13,6 +13,8 @@ import kotlinx.serialization.json.Json
 @Serializable
 data class NovelWorkspaceGhostwriteJob(
     val id: String,
+    /** Changes on every resume/retry so an older Worker cannot regain write ownership. */
+    val executionId: String = "",
     val branchSlug: String,
     val targetChapterCount: Int,
     /** Manuscript ordinal just before the job's first chapter was committed. */
@@ -24,6 +26,8 @@ data class NovelWorkspaceGhostwriteJob(
     @Serializable(with = NovelWorkspaceInstantSerializer::class)
     val updatedAt: Instant,
 ) {
+    val executionKey: String get() = executionId.ifBlank { id }
+
     val isTerminal: Boolean get() =
         status == STATUS_COMPLETED || status == STATUS_FAILED || status == STATUS_CANCELLED
 
@@ -44,6 +48,7 @@ object NovelWorkspaceGhostwriteJobs {
     private fun dir(projectDirectory: File): File =
         File(File(projectDirectory, NovelWorkspaceLedger.DIRECTORY_NAME), DIR)
 
+    @Synchronized
     fun save(job: NovelWorkspaceGhostwriteJob, projectDirectory: File) {
         val directory = dir(projectDirectory)
         if (!directory.exists() && !directory.mkdirs()) {
@@ -76,13 +81,103 @@ object NovelWorkspaceGhostwriteJobs {
     fun listActive(projectDirectory: File): List<NovelWorkspaceGhostwriteJob> =
         decodeAll(projectDirectory).filter { !it.isTerminal }
 
+    @Synchronized
+    fun activeFor(projectDirectory: File, branchSlug: String): NovelWorkspaceGhostwriteJob? =
+        listActive(projectDirectory).firstOrNull { it.branchSlug == branchSlug }
+
+    /** Atomically claim the branch for a new batch inside this app process. */
+    @Synchronized
+    fun saveIfNoActive(job: NovelWorkspaceGhostwriteJob, projectDirectory: File): Boolean {
+        if (activeFor(projectDirectory, job.branchSlug) != null) return false
+        save(job, projectDirectory)
+        return true
+    }
+
+    /** Reactivate the same failed batch so its durable cursor and target stay intact. */
+    @Synchronized
+    fun restartFailed(
+        projectDirectory: File,
+        jobId: String,
+        expectedExecutionId: String? = null,
+    ): NovelWorkspaceGhostwriteJob? {
+        val current = load(projectDirectory, jobId) ?: return null
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED) return null
+        if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
+        if (activeFor(projectDirectory, current.branchSlug) != null) return null
+        return current.copy(
+            executionId = java.util.UUID.randomUUID().toString().uppercase(),
+            status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+            reason = null,
+            updatedAt = Instant.now(),
+        ).also { save(it, projectDirectory) }
+    }
+
+    /** Resume only the paused durable state and invalidate the previous Worker execution. */
+    @Synchronized
+    fun restartPaused(
+        projectDirectory: File,
+        jobId: String,
+        expectedExecutionId: String? = null,
+    ): NovelWorkspaceGhostwriteJob? {
+        val current = load(projectDirectory, jobId) ?: return null
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_PAUSED) return null
+        if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
+        return current.copy(
+            executionId = java.util.UUID.randomUUID().toString().uppercase(),
+            status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+            reason = null,
+            updatedAt = Instant.now(),
+        ).also { save(it, projectDirectory) }
+    }
+
+    /** Persist a state change only when the latest durable state still matches. */
+    @Synchronized
+    fun transition(
+        projectDirectory: File,
+        jobId: String,
+        expectedStatuses: Set<String>,
+        newStatus: String,
+        reason: String? = null,
+        expectedExecutionId: String? = null,
+    ): NovelWorkspaceGhostwriteJob? {
+        val current = load(projectDirectory, jobId) ?: return null
+        if (current.status !in expectedStatuses) return null
+        if (expectedExecutionId != null && current.executionKey != expectedExecutionId) return null
+        return current.copy(
+            status = newStatus,
+            reason = reason,
+            updatedAt = Instant.now(),
+        ).also { save(it, projectDirectory) }
+    }
+
+    /** Serialize the final owner check with pause/cancel transitions. */
+    @Synchronized
+    fun <T> withRunningOwner(
+        projectDirectory: File,
+        jobId: String,
+        executionId: String,
+        block: () -> T,
+    ): T? {
+        val current = load(projectDirectory, jobId) ?: return null
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
+            current.executionKey != executionId
+        ) return null
+        return block()
+    }
+
     /**
      * Latest failed job, if any — surfaced by the UI so a dead batch's reason is
      * not silent (the worker posts no failure notification of its own).
      */
-    fun latestFailed(projectDirectory: File): NovelWorkspaceGhostwriteJob? =
+    fun latestFailed(
+        projectDirectory: File,
+        branchSlug: String? = null,
+    ): NovelWorkspaceGhostwriteJob? =
         decodeAll(projectDirectory)
-            .filter { it.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED }
+            .filter {
+                it.status == NovelWorkspaceGhostwriteJob.STATUS_FAILED &&
+                    (branchSlug == null || it.branchSlug == branchSlug)
+            }
             .maxByOrNull { it.updatedAt }
 
     private fun decodeAll(projectDirectory: File): List<NovelWorkspaceGhostwriteJob> {
@@ -103,9 +198,10 @@ object NovelWorkspaceGhostwriteJobs {
         File(dir(projectDirectory), "$jobId.json").delete()
     }
 
-    /** Progress = manuscript chapters committed since the job started. */
+    /** Progress = durable branch-head chapters committed since the job started. */
     fun progress(job: NovelWorkspaceGhostwriteJob, store: NovelWorkspaceStore): Int {
-        val ordinals = NovelWorkspaceLedger.workingChapterOrdinals(store, job.branchSlug)
+        val ledger = NovelWorkspaceLedger.load(store.rootDirectory)
+        val ordinals = NovelWorkspaceLedger.committedChapterOrdinals(store, ledger, job.branchSlug)
         val currentMax = ordinals.maxOrNull() ?: job.startOrdinal
         return (currentMax - job.startOrdinal).coerceIn(0, job.targetChapterCount)
     }

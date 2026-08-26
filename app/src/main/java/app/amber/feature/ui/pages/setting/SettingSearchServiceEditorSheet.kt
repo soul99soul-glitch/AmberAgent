@@ -215,10 +215,6 @@ private fun SearchServiceOptionsEditor(
             BochaOptions(options) { onUpdateOptions(it) }
         }
 
-        is SearchServiceOptions.AmberAgentSearchOptions -> {
-            AmberAgentSearchOptions(options) { onUpdateOptions(it) }
-        }
-
         is SearchServiceOptions.GrokOptions -> {
             GrokOptions(options) { onUpdateOptions(it) }
         }
@@ -257,7 +253,7 @@ private fun TavilyOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -275,7 +271,7 @@ private fun TavilyOptions(
 
     FormItem(
         label = {
-            Text("Depth")
+            Text(stringResource(R.string.search_editor_depth))
         }
     ) {
         val depthOptions = listOf("basic", "advanced")
@@ -308,7 +304,7 @@ private fun ExaOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -333,7 +329,7 @@ fun ZhipuOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -356,7 +352,7 @@ private fun SearXNGOptions(
 ) {
     FormItem(
         label = {
-            Text("API URL")
+            Text(stringResource(R.string.search_editor_api_url))
         }
     ) {
         OutlinedTextField(
@@ -374,7 +370,7 @@ private fun SearXNGOptions(
 
     FormItem(
         label = {
-            Text("Engines")
+            Text(stringResource(R.string.search_editor_engines))
         }
     ) {
         OutlinedTextField(
@@ -392,7 +388,7 @@ private fun SearXNGOptions(
 
     FormItem(
         label = {
-            Text("Language")
+            Text(stringResource(R.string.search_editor_language))
         }
     ) {
         OutlinedTextField(
@@ -410,7 +406,7 @@ private fun SearXNGOptions(
 
     FormItem(
         label = {
-            Text("Username")
+            Text(stringResource(R.string.search_editor_username))
         }
     ) {
         OutlinedTextField(
@@ -428,7 +424,7 @@ private fun SearXNGOptions(
 
     FormItem(
         label = {
-            Text("Password")
+            Text(stringResource(R.string.search_editor_password))
         }
     ) {
         OutlinedTextField(
@@ -452,7 +448,7 @@ private fun SearchLinkUpOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -470,7 +466,7 @@ private fun SearchLinkUpOptions(
 
     FormItem(
         label = {
-            Text("Depth")
+            Text(stringResource(R.string.search_editor_depth))
         }
     ) {
         val depthOptions = listOf("standard", "deep")
@@ -503,7 +499,7 @@ private fun BraveOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -527,7 +523,7 @@ private fun SerperOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -547,7 +543,7 @@ private fun SerpApiOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -568,7 +564,7 @@ private fun MetasoOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -592,7 +588,7 @@ private fun OllamaOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -616,7 +612,7 @@ private fun PerplexityOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -634,7 +630,7 @@ private fun PerplexityOptions(
 
     FormItem(
         label = {
-            Text("Max Tokens")
+            Text(stringResource(R.string.search_editor_max_tokens))
         }
     ) {
         OutlinedTextField(
@@ -653,7 +649,7 @@ private fun PerplexityOptions(
 
     FormItem(
         label = {
-            Text("Max Tokens / Page")
+            Text(stringResource(R.string.search_editor_max_tokens_per_page))
         }
     ) {
         OutlinedTextField(
@@ -678,7 +674,7 @@ private fun FirecrawlOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -702,7 +698,7 @@ private fun JinaOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -720,7 +716,7 @@ private fun JinaOptions(
 
     FormItem(
         label = {
-            Text("Search URL")
+            Text(stringResource(R.string.search_editor_search_url))
         }
     ) {
         OutlinedTextField(
@@ -741,7 +737,7 @@ private fun JinaOptions(
 
     FormItem(
         label = {
-            Text("Scrape URL")
+            Text(stringResource(R.string.search_editor_scrape_url))
         }
     ) {
         OutlinedTextField(
@@ -768,7 +764,7 @@ private fun BochaOptions(
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -786,10 +782,10 @@ private fun BochaOptions(
 
     FormItem(
         label = {
-            Text("Summary")
+            Text(stringResource(R.string.search_editor_summary))
         },
         description = {
-            Text("Enable summary generation")
+            Text(stringResource(R.string.search_editor_summary_desc))
         },
         tail = {
             Switch(
@@ -807,64 +803,13 @@ private fun BochaOptions(
 }
 
 @Composable
-private fun AmberAgentSearchOptions(
-    options: SearchServiceOptions.AmberAgentSearchOptions,
-    onUpdateOptions: (SearchServiceOptions.AmberAgentSearchOptions) -> Unit
-) {
-    FormItem(
-        label = {
-            Text("API Key")
-        }
-    ) {
-        OutlinedTextField(
-            value = options.apiKey,
-            onValueChange = {
-                onUpdateOptions(
-                    options.copy(
-                        apiKey = it
-                    )
-                )
-            },
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-
-    FormItem(
-        label = {
-            Text("Depth")
-        }
-    ) {
-        val depthOptions = listOf("standard", "deep")
-        SingleChoiceSegmentedButtonRow(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            depthOptions.forEachIndexed { index, depth ->
-                SegmentedButton(
-                    shape = SegmentedButtonDefaults.itemShape(index = index, count = depthOptions.size),
-                    onClick = {
-                        onUpdateOptions(
-                            options.copy(
-                                depth = depth
-                            )
-                        )
-                    },
-                    selected = options.depth == depth
-                ) {
-                    Text(depth.replaceFirstChar { it.uppercase() })
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun GrokOptions(
     options: SearchServiceOptions.GrokOptions,
     onUpdateOptions: (SearchServiceOptions.GrokOptions) -> Unit
 ) {
     FormItem(
         label = {
-            Text("API Key")
+            Text(stringResource(R.string.search_editor_api_key))
         }
     ) {
         OutlinedTextField(
@@ -882,7 +827,7 @@ private fun GrokOptions(
 
     FormItem(
         label = {
-            Text("Model")
+            Text(stringResource(R.string.search_editor_model))
         }
     ) {
         OutlinedTextField(
@@ -900,7 +845,7 @@ private fun GrokOptions(
 
     FormItem(
         label = {
-            Text("Custom URL")
+            Text(stringResource(R.string.search_editor_custom_url))
         }
     ) {
         OutlinedTextField(
@@ -918,7 +863,7 @@ private fun GrokOptions(
 
     FormItem(
         label = {
-            Text("System Prompt")
+            Text(stringResource(R.string.search_editor_system_prompt))
         }
     ) {
         OutlinedTextField(

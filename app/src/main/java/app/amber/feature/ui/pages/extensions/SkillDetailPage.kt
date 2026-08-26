@@ -55,7 +55,7 @@ import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.Trash2
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.RikkaConfirmDialog
+import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
@@ -148,7 +148,7 @@ fun SkillDetailPage(skillName: String) {
         )
     }
 
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = mcpImportPreview != null,
         title = "确认导入 MCP",
         confirmText = "确认导入",
@@ -163,7 +163,7 @@ fun SkillDetailPage(skillName: String) {
         }
     }
 
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = deleteTarget != null,
         title = stringResource(R.string.skill_detail_page_delete_file),
         confirmText = stringResource(R.string.delete),

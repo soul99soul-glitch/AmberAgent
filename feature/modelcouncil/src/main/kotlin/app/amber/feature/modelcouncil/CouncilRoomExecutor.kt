@@ -317,7 +317,7 @@ class CouncilRoomExecutor(
      * Generate a HOST turn (opening / steer) and STREAM it back through the sink,
      * exactly like a guest turn — so the host's proposition types in live instead
      * of popping in whole. The host has no own modelId; [hostModelId] is the
-     * caller-resolved conversation Assistant model, and [systemPrompt]/[userPrompt]
+ * caller-resolved global Settings model, and [systemPrompt]/[userPrompt]
      * are the host-specific prompts.
      */
     suspend fun generateHostTurn(
@@ -537,8 +537,8 @@ private fun nowMs(): Long = System.currentTimeMillis()
 
 /**
  * Resolve the host's model id for generation.
- * Priority: room.hostModelIdOverride → host assistant's chatModelId →
- * settings.chatModelId. Returns null only if none resolves to a real model
+ * Priority: room.hostModelIdOverride → settings.chatModelId. Returns null only
+ * if the setting does not resolve to a real model
  * (caller surfaces the error to the user).
  */
 fun resolveHostModelId(room: CouncilRoom, settings: Settings): Uuid? {
@@ -553,7 +553,6 @@ fun resolveHostModelId(room: CouncilRoom, settings: Settings): Uuid? {
     // Fallback to the room-snapshot override (covers rooms opened with a host
     // model before the live setting existed, or settings cleared).
     room.hostModelIdOverride?.let { if (settings.findModelById(it) != null) return it }
-    val assistant = settings.assistants.firstOrNull { it.id == room.hostAssistantId }
-    val candidateId = assistant?.chatModelId ?: settings.chatModelId
+    val candidateId = settings.chatModelId
     return settings.findModelById(candidateId)?.id
 }

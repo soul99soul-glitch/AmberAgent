@@ -3,98 +3,10 @@ package app.amber.core.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import app.amber.ai.core.MessageRole
-import app.amber.ai.provider.CustomBody
-import app.amber.ai.provider.CustomHeader
 import app.amber.ai.ui.UIMessage
-import app.amber.ai.core.ReasoningLevel
-import app.amber.core.model.LocalToolOption
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope
 import kotlin.uuid.Uuid
-
-@Serializable
-data class Assistant(
-    val id: Uuid = Uuid.random(),
-    val chatModelId: Uuid? = null, // 如果为null, 使用全局默认模型
-    val imageGenerationModelId: Uuid? = null, // 如果为null, 回退到全局 Settings.imageGenerationModelId; 仍为 null 时不启用 generate_image 工具
-    val name: String = "",
-    val avatar: Avatar = Avatar.Dummy,
-    val useAssistantAvatar: Boolean = false, // 使用助手头像替代模型头像
-    val tags: List<Uuid> = emptyList(),
-    val systemPrompt: String = "",
-    val temperature: Float? = null,
-    val topP: Float? = null,
-    val contextMessageSize: Int = 0,
-    val streamOutput: Boolean = true,
-    val enableMemory: Boolean = false,
-    val useGlobalMemory: Boolean = false, // 使用全局共享记忆而非助手隔离记忆
-    val enableRecentChatsReference: Boolean = false,
-    val messageTemplate: String = "{{ message }}",
-    val presetMessages: List<UIMessage> = emptyList(),
-    val quickMessageIds: Set<Uuid> = emptySet(),
-    val regexes: List<AssistantRegex> = emptyList(),
-    val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
-    val maxTokens: Int? = null,
-    val customHeaders: List<CustomHeader> = emptyList(),
-    val customBodies: List<CustomBody> = emptyList(),
-    val mcpServers: Set<Uuid> = emptySet(),
-    val localTools: List<LocalToolOption> = listOf(LocalToolOption.TimeInfo),
-    val toolProfile: MainAgentToolProfile = MainAgentToolProfile.FULL,
-    val background: String? = null,
-    val backgroundOpacity: Float = 1.0f,
-    val modeInjectionIds: Set<Uuid> = emptySet(),      // 关联的模式注入 ID
-    val lorebookIds: Set<Uuid> = emptySet(),            // 关联的 Lorebook ID
-    val enabledSkills: Set<String> = emptySet(),        // 启用的 skill 名称列表
-    val enableTimeReminder: Boolean = false,            // 时间间隔提醒注入
-    val rememberedReasoningLevelsByModelId: Map<String, ReasoningLevel> = emptyMap(),
-)
-
-fun Assistant.reasoningLevelForModel(
-    modelId: Uuid?,
-    defaultReasoningLevel: ReasoningLevel,
-): ReasoningLevel {
-    val remembered = modelId?.let { rememberedReasoningLevelsByModelId[it.toString()] }
-    return remembered ?: if (reasoningLevel == ReasoningLevel.AUTO) {
-        defaultReasoningLevel
-    } else {
-        reasoningLevel
-    }
-}
-
-fun Assistant.withReasoningLevelForModel(
-    modelId: Uuid?,
-    level: ReasoningLevel,
-): Assistant {
-    val remembered = if (modelId == null) {
-        rememberedReasoningLevelsByModelId
-    } else {
-        rememberedReasoningLevelsByModelId + (modelId.toString() to level)
-    }
-    return copy(
-        reasoningLevel = level,
-        rememberedReasoningLevelsByModelId = remembered,
-    )
-}
-
-fun Assistant.withChatModelReasoningMemory(
-    currentModelId: Uuid?,
-    currentDefaultReasoningLevel: ReasoningLevel,
-    selectedModelId: Uuid,
-    selectedDefaultReasoningLevel: ReasoningLevel,
-): Assistant {
-    val currentLevel = reasoningLevelForModel(currentModelId, currentDefaultReasoningLevel)
-    val remembered = if (currentModelId == null) {
-        rememberedReasoningLevelsByModelId
-    } else {
-        rememberedReasoningLevelsByModelId + (currentModelId.toString() to currentLevel)
-    }
-    val selectedLevel = remembered[selectedModelId.toString()] ?: selectedDefaultReasoningLevel
-    return copy(
-        chatModelId = selectedModelId,
-        reasoningLevel = selectedLevel,
-        rememberedReasoningLevelsByModelId = remembered,
-    )
-}
 
 @Serializable
 data class QuickMessage(
@@ -275,7 +187,3 @@ fun extractContextForMatching(
         .takeLast(scanDepth)
         .joinToString("\n") { it.toText() }
 }
-
-@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
-val DEFAULT_ASSISTANT_ID: kotlin.uuid.Uuid =
-    kotlin.uuid.Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")

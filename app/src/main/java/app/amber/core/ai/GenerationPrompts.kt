@@ -6,7 +6,6 @@ import kotlinx.serialization.json.put
 import app.amber.ai.provider.Model
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.JsonInstantPretty
@@ -179,36 +178,6 @@ internal fun buildLongTermMemoryPrompt(memories: List<AssistantMemory>) =
         description = "These are stable preferences, recurring interests, plans, and facts distilled for use across future conversations.",
         memories = memories,
     )
-
-internal suspend fun buildRecentChatsPrompt(
-    assistant: Assistant,
-    conversationRepo: ConversationRepository
-): String {
-    val recentConversations = conversationRepo.getRecentConversations(
-        assistantId = assistant.id,
-        limit = 10,
-    )
-    if (recentConversations.isNotEmpty()) {
-        return buildString {
-            appendLine()
-            append("**Recent Chats**")
-            appendLine()
-            append("These are some of the user's recent conversations. You can use them to understand user preferences:")
-            appendLine()
-            val json = buildJsonArray {
-                recentConversations.forEach { conversation ->
-                    add(buildJsonObject {
-                        put("title", conversation.title)
-                        put("last_chat", conversation.updateAt.toLocalDate())
-                    })
-                }
-            }
-            append(JsonInstantPretty.encodeToString(json))
-            appendLine()
-        }
-    }
-    return ""
-}
 
 internal suspend fun buildRecentChatsPrompt(conversationRepo: ConversationRepository): String {
     val recentConversations = conversationRepo.getRecentConversations(limit = 10)

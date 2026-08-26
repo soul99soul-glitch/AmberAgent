@@ -1,7 +1,7 @@
 package app.amber.core.ai.vision
 
 import app.amber.ai.provider.Modality
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
 import app.amber.ai.util.encodeBase64
@@ -79,7 +79,7 @@ object ImageAttachmentValidator {
     suspend fun firstBlockingIssueForSend(
         parts: List<UIMessagePart>,
         settings: Settings,
-        providerManager: ProviderManager,
+        providerCatalog: ProviderCatalog,
     ): ImageAttachmentStatus? {
         firstBlockingIssue(parts, settings)?.let { return it }
 
@@ -88,7 +88,7 @@ object ImageAttachmentValidator {
             .any { it.kind == ImageAttachmentStatusKind.FALLBACK }
         if (!needsVisionFallback) return null
 
-        val health = VisionModelHealthChecker.probe(settings, providerManager)
+        val health = VisionModelHealthChecker.probe(settings, providerCatalog)
         return if (health.isAvailable) {
             null
         } else {

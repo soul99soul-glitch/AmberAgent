@@ -77,27 +77,15 @@ import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
 import app.amber.core.memory.dream.MemoryDreamNotifier
 import app.amber.feature.ui.activity.SafeModeActivity
-import app.amber.feature.ui.components.ui.TTSController
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalSharedTransitionScope
-import app.amber.feature.ui.context.LocalTTSState
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.containsPreference
 import app.amber.feature.ui.hooks.readBooleanPreference
 import app.amber.feature.ui.hooks.readStringPreference
-import app.amber.feature.ui.hooks.rememberCustomTtsState
 import app.amber.core.utils.openUrl
-import app.amber.feature.ui.pages.assistant.AssistantPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantBasicPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantDetailPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantExtensionsPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantLocalToolPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantMcpPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantMemoryPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantPromptPage
-import app.amber.feature.ui.pages.assistant.detail.AssistantRequestPage
 import app.amber.feature.ui.pages.backup.BackupPage
 import app.amber.feature.ui.pages.chat.ChatPage
 import app.amber.feature.ui.pages.councilroom.CouncilRoomPage
@@ -112,7 +100,6 @@ import app.amber.feature.ui.pages.favorite.FavoritePage
 import app.amber.feature.ui.pages.history.HistoryPage
 import app.amber.feature.ui.pages.sessionhome.SessionHomePage
 import app.amber.feature.ui.pages.profile.ProfilePage
-import app.amber.feature.ui.pages.imggen.ImageGenPage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
 import app.amber.feature.ui.pages.synara.SynaraConnectPage
 import app.amber.feature.ui.pages.synara.SynaraConnection
@@ -165,7 +152,6 @@ import app.amber.feature.ui.pages.setting.SettingSandboxPage
 import app.amber.feature.ui.pages.setting.SettingSearchPage
 import app.amber.feature.ui.pages.setting.SettingSlidesFontPage
 import app.amber.feature.ui.pages.setting.SettingSystemAccessPage
-import app.amber.feature.ui.pages.setting.SettingTTSPage
 import app.amber.feature.ui.pages.share.handler.ShareHandlerPage
 import app.amber.feature.ui.pages.stats.StatsPage
 import app.amber.feature.ui.pages.webview.WebViewPage
@@ -398,7 +384,6 @@ class RouteActivity : ComponentActivity() {
     fun AppRoutes() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
-        val tts = rememberCustomTtsState()
         val eventBus = koinInject<AppEventBus>()
 
         val notificationLink = remember { notificationDeepLinkFrom(intent) }
@@ -453,12 +438,11 @@ class RouteActivity : ComponentActivity() {
             this@RouteActivity.navStack = backStack
             this@RouteActivity.newIntentHandler = { currentIntent = it }
         }
-        LaunchedEffect(backStack, tts) {
+        LaunchedEffect(backStack) {
             eventBus.events.collect { event ->
                 when (event) {
                     // MCP OAuth 回调由 McpOAuthCoordinator 订阅消费，这里无需处理
                     is AppEvent.McpOAuthCallback -> Unit
-                    is AppEvent.Speak -> tts.speak(event.text)
                     is AppEvent.OpenDeepRead -> backStack.add(
                         Screen.DeepRead(
                             topicId = event.topicId,
@@ -491,7 +475,6 @@ class RouteActivity : ComponentActivity() {
                 LocalSettings provides settings,
                 LocalHighlighter provides highlighter,
                 LocalToaster provides toastState,
-                LocalTTSState provides tts,
             ) {
                 Toaster(
                     state = toastState,
@@ -500,7 +483,6 @@ class RouteActivity : ComponentActivity() {
                     alignment = Alignment.TopCenter,
                     showCloseButton = true,
                 )
-                TTSController()
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -588,42 +570,6 @@ class RouteActivity : ComponentActivity() {
                                 FavoritePage()
                             }
 
-                            entry<Screen.Assistant> {
-                                AssistantPage()
-                            }
-
-                            entry<Screen.AssistantDetail> { key ->
-                                AssistantDetailPage(key.id)
-                            }
-
-                            entry<Screen.AssistantBasic> { key ->
-                                AssistantBasicPage(key.id)
-                            }
-
-                            entry<Screen.AssistantPrompt> { key ->
-                                AssistantPromptPage(key.id)
-                            }
-
-                            entry<Screen.AssistantMemory> { key ->
-                                AssistantMemoryPage(key.id)
-                            }
-
-                            entry<Screen.AssistantRequest> { key ->
-                                AssistantRequestPage(key.id)
-                            }
-
-                            entry<Screen.AssistantMcp> { key ->
-                                AssistantMcpPage(key.id)
-                            }
-
-                            entry<Screen.AssistantLocalTool> { key ->
-                                AssistantLocalToolPage(key.id)
-                            }
-
-                            entry<Screen.AssistantInjections> { key ->
-                                AssistantExtensionsPage(key.id)
-                            }
-
                             entry<Screen.LiveCompanion> {
                                 LiveCompanionPage()
                             }
@@ -657,10 +603,6 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.Backup> {
                                 BackupPage()
-                            }
-
-                            entry<Screen.ImageGen> {
-                                ImageGenPage()
                             }
 
                             entry<Screen.WebView> { key ->
@@ -738,10 +680,6 @@ class RouteActivity : ComponentActivity() {
 
                             entry<Screen.SettingSearch> {
                                 SettingSearchPage()
-                            }
-
-                            entry<Screen.SettingTTS> {
-                                SettingTTSPage()
                             }
 
                             entry<Screen.SettingMcp> {
@@ -986,33 +924,6 @@ sealed interface Screen : NavKey {
     data object Favorite : Screen
 
     @Serializable
-    data object Assistant : Screen
-
-    @Serializable
-    data class AssistantDetail(val id: String) : Screen
-
-    @Serializable
-    data class AssistantBasic(val id: String) : Screen
-
-    @Serializable
-    data class AssistantPrompt(val id: String) : Screen
-
-    @Serializable
-    data class AssistantMemory(val id: String) : Screen
-
-    @Serializable
-    data class AssistantRequest(val id: String) : Screen
-
-    @Serializable
-    data class AssistantMcp(val id: String) : Screen
-
-    @Serializable
-    data class AssistantLocalTool(val id: String) : Screen
-
-    @Serializable
-    data class AssistantInjections(val id: String) : Screen
-
-    @Serializable
     data object LiveCompanion : Screen
 
     /** Configure LAN connection to a Mac-hosted Synara workbench. */
@@ -1044,9 +955,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object Backup : Screen
-
-    @Serializable
-    data object ImageGen : Screen
 
     @Serializable
     data class WebView(val url: String = "", val content: String = "") : Screen
@@ -1104,9 +1012,6 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingSearch : Screen
-
-    @Serializable
-    data object SettingTTS : Screen
 
     @Serializable
     data object SettingMcp : Screen

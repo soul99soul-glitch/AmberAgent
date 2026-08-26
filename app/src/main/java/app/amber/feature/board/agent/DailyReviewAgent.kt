@@ -2,7 +2,7 @@ package app.amber.feature.board.agent
 
 import android.util.Log
 import kotlinx.coroutines.withTimeout
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.BoardRepository
@@ -37,7 +37,7 @@ import kotlin.uuid.Uuid
  */
 class DailyReviewAgent(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val boardRepository: BoardRepository,
     private val conversationRepository: ConversationRepository,
     private val appUsageCollector: AppUsageCollector,
@@ -192,7 +192,7 @@ class DailyReviewAgent(
         val provider = model.findProvider(settings.providers) ?: return null
         return withTimeout(90_000L) {
             runCatching {
-                val response = providerManager.getProviderByType(provider).generateText(
+                val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(
                         UIMessage.system("你是 AmberAgent 的「今日复盘」助理。根据用户提供的数据生成中文 Markdown 任务复盘。直接输出 Markdown，不要代码围栏。"),

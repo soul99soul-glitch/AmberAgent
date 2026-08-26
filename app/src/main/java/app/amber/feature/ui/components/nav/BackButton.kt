@@ -5,8 +5,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
 import app.amber.agent.R
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
@@ -20,7 +20,7 @@ fun BackButton(modifier: Modifier = Modifier) {
         modifier = modifier,
     ) {
         Icon(
-            imageVector = HugeIcons.ArrowLeft01,
+            imageVector = Lucide.ArrowLeft,
             contentDescription = stringResource(R.string.back),
             tint = workspace.ink,
         )

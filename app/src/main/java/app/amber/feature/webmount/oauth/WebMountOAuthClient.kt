@@ -6,6 +6,7 @@ import android.net.Uri
 import android.util.Log
 import androidx.browser.customtabs.CustomTabsIntent
 import io.ktor.client.HttpClient
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -189,6 +190,7 @@ class WebMountOAuthClient(
                 pendingStore.consume(state)
                 ConnectResult.Success(token)
             }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 Log.e(TAG, "OAuth connect failed for $providerId", error)
                 ConnectResult.Failed(error.message ?: error.toString())
             }

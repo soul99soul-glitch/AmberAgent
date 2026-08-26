@@ -23,8 +23,8 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.PerfFlags
 import app.amber.agent.Screen
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.core.model.MessageNode
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.feature.ui.components.richtext.MarkdownParseResult
@@ -118,7 +118,7 @@ internal sealed interface BlockAttachment {
 }
 
 internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     showAssistantBubble: Boolean,
     loading: Boolean,
     lastMessage: Boolean,
@@ -134,7 +134,7 @@ internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
                 .let { text ->
                     MessageRenderCache.visualRegexText(
                         text = text,
-                        assistant = assistant,
+                        regexes = regexes,
                         scope = AssistantAffectScope.ASSISTANT,
                     )
                 }
@@ -145,7 +145,7 @@ internal fun MessageNode.chatMessageVirtualizationPrewarmTexts(
 
 internal fun buildChatMessageVirtualItems(
     node: MessageNode,
-    assistant: Assistant?,
+    assistant: List<AssistantRegex>?,
     showAssistantBubble: Boolean,
     loading: Boolean,
     lastMessage: Boolean,
@@ -190,7 +190,7 @@ internal fun buildChatMessageVirtualItems(
                     if (part is UIMessagePart.Text) {
                         val content = MessageRenderCache.visualRegexText(
                             text = part.text,
-                            assistant = assistant,
+                            regexes = assistant.orEmpty(),
                             scope = AssistantAffectScope.ASSISTANT,
                         )
                         if (GenerativeWidgetParser.containsWidgetFence(content)) {
@@ -271,7 +271,7 @@ internal fun ChatMessageVirtualItemContent(
     modifier: Modifier = Modifier,
     loading: Boolean = false,
     model: Model? = null,
-    assistant: Assistant? = null,
+    regexes: List<AssistantRegex> = emptyList(),
     lastMessage: Boolean = false,
     onFork: () -> Unit,
     onRegenerate: () -> Unit,
@@ -307,8 +307,6 @@ internal fun ChatMessageVirtualItemContent(
                     ChatMessageAssistantAvatar(
                         message = message,
                         model = model,
-                        assistant = assistant,
-                        loading = loading,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -322,7 +320,7 @@ internal fun ChatMessageVirtualItemContent(
         is ChatMessageVirtualItem.Thinking -> {
             ProvideTextStyle(textStyle) {
                 MessagePartsBlock(
-                    assistant = assistant,
+                    regexes = regexes,
                     role = message.role,
                     // SubAgentTaskStep is fanned back out to its underlying tools — MessagePartsBlock
                     // calls groupMessageParts again and will re-coalesce them into one card.
@@ -348,7 +346,7 @@ internal fun ChatMessageVirtualItemContent(
         is ChatMessageVirtualItem.ThinkingStepItem -> {
             ProvideTextStyle(textStyle) {
                 MessagePartsBlock(
-                    assistant = assistant,
+                    regexes = regexes,
                     role = message.role,
                     parts = when (val step = item.step) {
                         is ThinkingStep.ReasoningStep -> listOf(step.reasoning)
@@ -377,14 +375,14 @@ internal fun ChatMessageVirtualItemContent(
                         VirtualizedAssistantText(
                             fullMessageParts = message.parts,
                             part = item.block.part,
-                            assistant = assistant,
+                            regexes = regexes,
                             markdownChild = null,
                             showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,
                             onGenerativeWidgetAction = onGenerativeWidgetAction,
                         )
                     } else {
                         MessagePartsBlock(
-                            assistant = assistant,
+                            regexes = regexes,
                             role = message.role,
                             parts = listOf(item.block.part),
                             loading = loading,
@@ -409,7 +407,7 @@ internal fun ChatMessageVirtualItemContent(
                     VirtualizedAssistantText(
                         fullMessageParts = message.parts,
                         part = item.block.part as UIMessagePart.Text,
-                        assistant = assistant,
+                        regexes = regexes,
                         markdownChild = item,
                         attachments = item.attachments,
                         showAssistantBubble = LocalSettings.current.displaySetting.showAssistantBubble,

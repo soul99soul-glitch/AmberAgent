@@ -60,13 +60,13 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.Notebook01
-import me.rerere.hugeicons.stroke.Refresh03
-import me.rerere.hugeicons.stroke.Share03
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.TransactionHistory
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.NotebookTabs
+import com.composables.icons.lucide.RotateCw
+import com.composables.icons.lucide.Share2
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.History
 import app.amber.agent.Screen
 import app.amber.agent.Screen.DeepRead
 import app.amber.feature.board.TodayBoardHotListFilterMode
@@ -143,10 +143,10 @@ fun TodayBoardPage() {
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.DeepReadHistory) }) {
-                        Icon(HugeIcons.TransactionHistory, contentDescription = "深度阅读历史")
+                        Icon(Lucide.History, contentDescription = "深度阅读历史")
                     }
                     IconButton(onClick = { navController.navigate(Screen.SettingTodayBoard) }) {
-                        Icon(HugeIcons.Settings03, contentDescription = "设置")
+                        Icon(Lucide.Settings, contentDescription = "设置")
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -272,23 +272,23 @@ private fun HotListActionSheet(
             Hairline()
             TopicActionRow(
                 label = "深度阅读",
-                icon = HugeIcons.Notebook01,
+                icon = Lucide.NotebookTabs,
                 onClick = onDeepRead,
             )
             TopicActionRow(
                 label = "重新生成",
-                icon = HugeIcons.Refresh03,
+                icon = Lucide.RotateCw,
                 onClick = onRegenerate,
             )
             TopicActionRow(
                 label = "打开原文",
-                icon = HugeIcons.ArrowRight01,
+                icon = Lucide.ArrowRight,
                 enabled = topic.primaryUrl() != null,
                 onClick = onOpenOriginal,
             )
             TopicActionRow(
                 label = "分享",
-                icon = HugeIcons.Share03,
+                icon = Lucide.Share2,
                 onClick = onShare,
             )
             Spacer(Modifier.height(20.dp))

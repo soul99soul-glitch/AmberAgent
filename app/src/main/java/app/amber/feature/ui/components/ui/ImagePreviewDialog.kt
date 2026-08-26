@@ -47,8 +47,8 @@ import com.jvziyaoyao.scale.image.pager.ImagePager
 import com.jvziyaoyao.scale.zoomable.pager.rememberZoomablePagerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Download01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Download
 import app.amber.core.files.FilesManager
 import app.amber.feature.ui.context.LocalToaster
 import org.koin.compose.koinInject
@@ -272,7 +272,7 @@ fun ImagePreviewDialog(
                                 }
                             },
                         ) {
-                            Icon(HugeIcons.Download01, null, tint = Color.White)
+                            Icon(Lucide.Download, null, tint = Color.White)
                         }
                     }
                 }

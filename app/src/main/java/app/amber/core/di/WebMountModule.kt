@@ -36,6 +36,7 @@ import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.tools.WebMountPageSnapshotCache
 import app.amber.feature.webmount.tools.WebMountPrimitiveTools
 import app.amber.feature.webmount.usersites.UserSiteRegistry
+import app.amber.core.settings.prefs.SettingsAggregator
 import org.koin.dsl.module
 
 /**
@@ -145,6 +146,7 @@ val webMountModule = module {
             profileBridge = get(),
             userSiteRegistry = get(),
             oauthStore = get(),
+            settingsStore = get<SettingsAggregator>(),
         )
     }
 }

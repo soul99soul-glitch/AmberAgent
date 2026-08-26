@@ -55,8 +55,8 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import app.amber.ai.ui.UIMessagePart
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.MagicWand01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.WandSparkles
 import app.amber.feature.modelcouncil.ModelCouncilManager
 import app.amber.feature.modelcouncil.ModelCouncilRolePresets
 import app.amber.feature.subagent.SubAgentManager
@@ -113,7 +113,7 @@ fun CouncilTaskStepView(
     AgentToolCallCapsule(
         title = title,
         toolName = "model_council",
-        icon = HugeIcons.MagicWand01,
+        icon = Lucide.WandSparkles,
         kind = AgentToolKind.GENERIC,
         status = parsedStatus.toAgentToolStatus(),
         loading = loading && isRunning,
@@ -229,7 +229,7 @@ private fun ModelCouncilRunSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(
-                    imageVector = HugeIcons.MagicWand01,
+                    imageVector = Lucide.WandSparkles,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                     tint = workspace.muted,

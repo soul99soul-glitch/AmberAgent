@@ -1,7 +1,7 @@
 package app.amber.feature.ui.pages.chat
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Alert01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.TriangleAlert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -58,7 +58,7 @@ fun ConversationSizeWarningDialog(
         onDismissRequest = onDismiss,
         icon = {
             Icon(
-                imageVector = HugeIcons.Alert01,
+                imageVector = Lucide.TriangleAlert,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.tertiary
             )

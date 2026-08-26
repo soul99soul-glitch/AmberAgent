@@ -41,9 +41,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Package01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.PackageOpen
 import app.amber.agent.R
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
@@ -316,7 +316,7 @@ internal fun ContextCompactInProgressMarker(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Icon(
-                    imageVector = HugeIcons.Package01,
+                    imageVector = Lucide.PackageOpen,
                     contentDescription = null,
                     modifier = Modifier.size(16.dp),
                     tint = workspace.muted,
@@ -377,7 +377,7 @@ internal fun ContextCompactMarker(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Package01,
+                imageVector = Lucide.PackageOpen,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = workspace.muted,
@@ -465,7 +465,7 @@ internal fun PendingUserMessageBubble(
                             modifier = Modifier.size(26.dp),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.Cancel01,
+                                imageVector = Lucide.X,
                                 contentDescription = "取消排队消息",
                                 tint = cancelTint,
                                 modifier = Modifier.size(15.dp),

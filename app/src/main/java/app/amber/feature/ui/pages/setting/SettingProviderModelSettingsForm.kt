@@ -1,10 +1,10 @@
 package app.amber.feature.ui.pages.setting
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Delete01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -470,7 +470,7 @@ private fun ModelCustomHeaders(
     val type = LocalAmberType.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         ModelAdvancedSectionLabel(
-            text = stringResource(R.string.assistant_page_custom_headers),
+            text = stringResource(R.string.provider_custom_headers),
             count = headers.size,
         )
 
@@ -492,8 +492,8 @@ private fun ModelCustomHeaders(
                         color = t.ink3,
                     )
                     ProviderSmallIconButton(
-                        imageVector = HugeIcons.Delete01,
-                        contentDescription = stringResource(R.string.assistant_page_delete_header),
+                        imageVector = Lucide.Trash2,
+                        contentDescription = stringResource(R.string.provider_delete_header),
                         onClick = {
                             val updatedHeaders = headers.toMutableList()
                             updatedHeaders.removeAt(index)
@@ -509,7 +509,7 @@ private fun ModelCustomHeaders(
                         updatedHeaders[index] = updatedHeaders[index].copy(name = it.trim())
                         onUpdate(updatedHeaders)
                     },
-                    placeholder = stringResource(R.string.assistant_page_header_name),
+                    placeholder = stringResource(R.string.provider_header_name),
                     mono = true,
                 )
                 ProviderTextField(
@@ -520,7 +520,7 @@ private fun ModelCustomHeaders(
                         updatedHeaders[index] = updatedHeaders[index].copy(value = it.trim())
                         onUpdate(updatedHeaders)
                     },
-                    placeholder = stringResource(R.string.assistant_page_header_value),
+                    placeholder = stringResource(R.string.provider_header_value),
                     mono = true,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -529,8 +529,8 @@ private fun ModelCustomHeaders(
         }
 
         ProviderGhostButton(
-            text = stringResource(R.string.assistant_page_add_header),
-            imageVector = HugeIcons.Add01,
+            text = stringResource(R.string.provider_add_header),
+            imageVector = Lucide.Plus,
             onClick = {
                 val updatedHeaders = headers.toMutableList()
                 updatedHeaders.add(CustomHeader("", ""))
@@ -551,7 +551,7 @@ private fun ModelCustomBodies(
     val type = LocalAmberType.current
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         ModelAdvancedSectionLabel(
-            text = stringResource(R.string.assistant_page_custom_bodies),
+            text = stringResource(R.string.provider_custom_bodies),
             count = customBodies.size,
         )
 
@@ -576,8 +576,8 @@ private fun ModelCustomBodies(
                         color = t.ink3,
                     )
                     ProviderSmallIconButton(
-                        imageVector = HugeIcons.Delete01,
-                        contentDescription = stringResource(R.string.assistant_page_delete_body),
+                        imageVector = Lucide.Trash2,
+                        contentDescription = stringResource(R.string.provider_delete_body),
                         onClick = {
                             val updatedBodies = customBodies.toMutableList()
                             updatedBodies.removeAt(index)
@@ -593,7 +593,7 @@ private fun ModelCustomBodies(
                         updatedBodies[index] = updatedBodies[index].copy(key = it.trim())
                         onUpdate(updatedBodies)
                     },
-                    placeholder = stringResource(R.string.assistant_page_body_key),
+                    placeholder = stringResource(R.string.provider_body_key),
                     mono = true,
                 )
                 ProviderTextField(
@@ -608,12 +608,12 @@ private fun ModelCustomBodies(
                             jsonParseError = null
                         } catch (e: Exception) {
                             jsonParseError = context.getString(
-                                R.string.assistant_page_invalid_json,
+                                R.string.provider_invalid_json,
                                 e.message?.take(100) ?: ""
                             )
                         }
                     },
-                    placeholder = stringResource(R.string.assistant_page_body_value),
+                    placeholder = stringResource(R.string.provider_body_value),
                     mono = true,
                     singleLine = false,
                     minHeight = 98.dp,
@@ -631,8 +631,8 @@ private fun ModelCustomBodies(
         }
 
         ProviderGhostButton(
-            text = stringResource(R.string.assistant_page_add_body),
-            imageVector = HugeIcons.Add01,
+            text = stringResource(R.string.provider_add_body),
+            imageVector = Lucide.Plus,
             onClick = {
                 val updatedBodies = customBodies.toMutableList()
                 updatedBodies.add(CustomBody("", JsonPrimitive("")))
@@ -783,7 +783,7 @@ private fun ProviderOverrideSettings(
                         )
                     }
                     ProviderSmallIconButton(
-                        imageVector = HugeIcons.Edit01,
+                        imageVector = Lucide.Pencil,
                         contentDescription = "Edit override",
                         onClick = {
                             editingProvider = providerOverride
@@ -791,7 +791,7 @@ private fun ProviderOverrideSettings(
                         },
                     )
                     ProviderSmallIconButton(
-                        imageVector = HugeIcons.Cancel01,
+                        imageVector = Lucide.X,
                         contentDescription = "Remove override",
                         onClick = { onUpdateProviderOverride(null) },
                     )
@@ -801,7 +801,7 @@ private fun ProviderOverrideSettings(
         } else {
             ProviderGhostButton(
                 text = stringResource(R.string.setting_provider_page_add_provider_override),
-                imageVector = HugeIcons.Add01,
+                imageVector = Lucide.Plus,
                 accent = false,
                 onClick = {
                     editingProvider = parentProvider?.copyProvider(

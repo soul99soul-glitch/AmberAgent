@@ -31,6 +31,10 @@ class BackupSettingsRedactorTest {
                     })))
                 })
             })))
+            put("customHeaders", JsonArray(listOf(buildJsonObject {
+                put("name", "Authorization")
+                put("value", "Bearer amber")
+            })))
         }
 
         val masked = maskBackupSecrets(input).jsonObject
@@ -51,5 +55,8 @@ class BackupSettingsRedactorTest {
             .jsonArray[0].jsonObject
         assertEquals("Authorization", header["first"]!!.jsonPrimitive.contentOrNull)
         assertEquals(BACKUP_SECRET_MASK, header["second"]!!.jsonPrimitive.contentOrNull)
+        val customHeader = masked["customHeaders"]!!.jsonArray[0].jsonObject
+        assertEquals("Authorization", customHeader["name"]!!.jsonPrimitive.contentOrNull)
+        assertEquals(BACKUP_SECRET_MASK, customHeader["value"]!!.jsonPrimitive.contentOrNull)
     }
 }

@@ -30,10 +30,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft02
-import me.rerere.hugeicons.stroke.ArrowRight02
-import me.rerere.hugeicons.stroke.Tick01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.Check
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 
 /**
@@ -242,7 +242,7 @@ private fun ResultPill(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                imageVector = HugeIcons.Tick01,
+                imageVector = Lucide.Check,
                 contentDescription = null,
                 modifier = Modifier.size(10.dp),
                 tint = theme.toolDoneBadgeInk,
@@ -278,7 +278,7 @@ private fun ResultPill(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                imageVector = HugeIcons.ArrowLeft02,
+                imageVector = Lucide.ArrowLeft,
                 contentDescription = "prev",
                 modifier = Modifier
                     .size(9.dp)
@@ -292,7 +292,7 @@ private fun ResultPill(
                 letterSpacing = 0.4.sp,
             )
             Icon(
-                imageVector = HugeIcons.ArrowRight02,
+                imageVector = Lucide.ArrowRight,
                 contentDescription = "next",
                 modifier = Modifier
                     .size(9.dp)

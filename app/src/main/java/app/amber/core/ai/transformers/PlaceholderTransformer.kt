@@ -10,11 +10,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
-import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.core.settings.getCurrentAssistant
-import app.amber.core.model.Assistant
-import org.koin.core.component.KoinComponent
-import org.koin.core.component.get
+import app.amber.core.settings.Settings
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -26,9 +22,8 @@ import java.util.TimeZone
 
 data class PlaceholderCtx(
     val context: Context,
-    val settingsStore: SettingsAggregator,
+    val settings: Settings,
     val model: Model,
-    val assistant: Assistant,
 )
 
 interface PlaceholderProvider {
@@ -101,15 +96,15 @@ object DefaultPlaceholderProvider : PlaceholderProvider {
         }
 
         placeholder("nickname", { Text(stringResource(R.string.placeholder_nickname)) }) {
-            it.settingsStore.settingsFlow.value.displaySetting.userNickname.ifBlank { "user" }
+            it.settings.displaySetting.userNickname.ifBlank { "user" }
         }
 
         placeholder("char", { Text(stringResource(R.string.placeholder_char)) }) {
-            it.assistant.name.ifBlank { "assistant" }
+            "AmberAgent"
         }
 
         placeholder("user", { Text(stringResource(R.string.placeholder_user)) }) {
-            it.settingsStore.settingsFlow.value.displaySetting.userNickname.ifBlank { "user" }
+            it.settings.displaySetting.userNickname.ifBlank { "user" }
         }
     }
 
@@ -134,20 +129,19 @@ object DefaultPlaceholderProvider : PlaceholderProvider {
     }
 }
 
-object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
+object PlaceholderTransformer : InputMessageTransformer {
     private val defaultProvider = DefaultPlaceholderProvider
 
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val settingsStore = get<SettingsAggregator>()
         return messages.map {
             it.copy(
                 parts = it.parts.map { part ->
                     if (part is UIMessagePart.Text) {
                         part.copy(
-                            text = replacePlaceholders(text = part.text, ctx = ctx, settingsStore = settingsStore)
+                            text = replacePlaceholders(text = part.text, ctx = ctx)
                         )
                     } else {
                         part
@@ -160,18 +154,16 @@ object PlaceholderTransformer : InputMessageTransformer, KoinComponent {
     private fun replacePlaceholders(
         text: String,
         ctx: TransformerContext,
-        settingsStore: SettingsAggregator
     ): String {
         var result = text
 
-        val ctx = PlaceholderCtx(
+        val placeholderCtx = PlaceholderCtx(
             context = ctx.context,
-            settingsStore = settingsStore,
+            settings = ctx.settings,
             model = ctx.model,
-            assistant = ctx.assistant
         )
         defaultProvider.placeholders.forEach { (key, placeholderInfo) ->
-            val value = placeholderInfo.resolver(ctx)
+            val value = placeholderInfo.resolver(placeholderCtx)
             result = result
                 .replace(oldValue = "{{$key}}", newValue = value, ignoreCase = true)
                 .replace(oldValue = "{$key}", newValue = value, ignoreCase = true)

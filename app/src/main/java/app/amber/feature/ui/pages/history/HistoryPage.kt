@@ -1,10 +1,10 @@
 package app.amber.feature.ui.pages.history;
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Pin
-import me.rerere.hugeicons.stroke.PinOff
-import me.rerere.hugeicons.stroke.GlobalSearch
-import me.rerere.hugeicons.stroke.Delete01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Pin
+import com.composables.icons.lucide.PinOff
+import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.Trash2
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -92,7 +92,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                         }
                     ) {
                         Icon(
-                            HugeIcons.GlobalSearch,
+                            Lucide.ScanSearch,
                             contentDescription = stringResource(R.string.history_page_search_messages)
                         )
                     }
@@ -101,7 +101,7 @@ fun HistoryPage(vm: HistoryVM = koinViewModel()) {
                             showDeleteAllDialog = true
                         }
                     ) {
-                        Icon(HugeIcons.Delete01, contentDescription = stringResource(R.string.history_page_delete_all))
+                        Icon(Lucide.Trash2, contentDescription = stringResource(R.string.history_page_delete_all))
                     }
                 }
             )
@@ -219,7 +219,7 @@ private fun SwipeableConversationItem(
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Icon(
-                    imageVector = HugeIcons.Delete01,
+                    imageVector = Lucide.Trash2,
                     contentDescription = stringResource(R.string.history_page_delete),
                     tint = workspace.red
                 )
@@ -261,7 +261,7 @@ private fun ConversationItem(
                 ) {
                     if (conversation.isPinned) {
                         Icon(
-                            imageVector = HugeIcons.Pin,
+                            imageVector = Lucide.Pin,
                             contentDescription = null,
                             tint = accent,
                             modifier = Modifier.size(16.dp),
@@ -291,7 +291,7 @@ private fun ConversationItem(
                     onClick = onTogglePin
                 ) {
                     Icon(
-                        if (conversation.isPinned) HugeIcons.PinOff else HugeIcons.Pin,
+                        if (conversation.isPinned) Lucide.PinOff else Lucide.Pin,
                         contentDescription = if (conversation.isPinned) stringResource(R.string.history_page_unpin) else stringResource(
                             R.string.history_page_pin
                         ),

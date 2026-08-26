@@ -28,7 +28,6 @@ fun ShareHandlerPage(text: String, streamUris: List<String>) {
     val filesManager: FilesManager = koinInject()
 
     LaunchedEffect(text, streamUris) {
-        vm.selectAmberAgent()
         // Stage shared files into the POSIX workspace mirror under /workspace/uploads/
         // so the Agent's terminal/file tools can actually find them. Pre-mirror code path
         // dropped these into filesDir/upload/<uuid>, which the Agent never sees — leading

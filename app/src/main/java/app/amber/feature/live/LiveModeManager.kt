@@ -18,7 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.agent.AppScope
 import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -29,13 +29,13 @@ import app.amber.feature.ui.theme.AmberAgentTheme
 class LiveModeManager(
     private val context: Context,
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val appScope: AppScope,
 ) {
     private val _state = MutableStateFlow(LiveModeUiState())
     val state: StateFlow<LiveModeUiState> = _state.asStateFlow()
 
-    private val analyzer = LiveAnalyzer(providerManager)
+    private val analyzer = LiveAnalyzer(providerCatalog)
     private val screenshotter = LiveScreenshotter(context)
     private val bubble = LiveBubbleWindow()
 

@@ -20,6 +20,7 @@ import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
 import app.amber.search.SearchService.Companion.keyRoulette
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -69,43 +70,33 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+            require(serviceOptions.apiKey.isNotBlank()) { "LinkUp API key is required" }
             val body = buildJsonObject {
                 put("q", JsonPrimitive(query))
                 put("depth", JsonPrimitive(serviceOptions.depth))
                 put("outputType", JsonPrimitive("sourcedAnswer"))
-                put("includeImages", JsonPrimitive("false"))
+                put("includeImages", false)
+                put("maxResults", commonOptions.resultSize)
             }
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
             val request = Request.Builder()
                 .url("https://api.linkup.so/v1/search")
-                .post(body.toString().toRequestBody())
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .build()
 
             Log.i(TAG, "search: $query")
 
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<LinkUpSearchResponse>(it)
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("response failed #${response.code}: ${response.body?.string().orEmpty()}")
                 }
 
                 return@withContext Result.success(
-                    SearchResult(
-                        answer = responseBody.answer,
-                        items = responseBody.sources.take(commonOptions.resultSize).map {
-                            SearchResultItem(
-                                title = it.name,
-                                url = it.url,
-                                text = it.snippet
-                            )
-                        }
-                    )
+                    mapLinkUpSearchResponse(response.body?.string().orEmpty(), commonOptions.resultSize)
                 )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }
@@ -117,6 +108,7 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
     ): Result<ScrapedResult> = withContext(Dispatchers.IO) {
         runCatching {
             val url = params["url"]?.jsonPrimitive?.content ?: error("url is required")
+            require(serviceOptions.apiKey.isNotBlank()) { "LinkUp API key is required" }
             val body = buildJsonObject {
                 put("url", JsonPrimitive(url))
                 put("includeRawHtml", JsonPrimitive(false))
@@ -127,17 +119,17 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
 
             val request = Request.Builder()
                 .url("https://api.linkup.so/v1/fetch")
-                .post(body.toString().toRequestBody())
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer $apiKey")
                 .addHeader("Content-Type", "application/json")
                 .build()
 
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val responseBody = response.body.string().let {
-                    json.decodeFromString<LinkUpFetchResponse>(it)
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("response failed #${response.code}: ${response.body?.string().orEmpty()}")
                 }
 
+                val responseBody = json.decodeFromString<LinkUpFetchResponse>(response.body?.string().orEmpty())
                 return@withContext Result.success(
                     ScrapedResult(
                         urls = listOf(
@@ -148,23 +140,38 @@ object LinkUpService : SearchService<SearchServiceOptions.LinkUpOptions> {
                         )
                     )
                 )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
             }
         }
     }
 
+    internal fun mapLinkUpSearchResponse(body: String, resultSize: Int): SearchResult {
+        val response = json.decodeFromString<LinkUpSearchResponse>(body)
+        val sources = (response.sources + response.results).distinctBy { it.url }
+        return SearchResult(
+            answer = response.answer,
+            items = sources.take(resultSize).map {
+                SearchResultItem(
+                    title = it.name?.takeIf(String::isNotBlank) ?: it.url,
+                    url = it.url,
+                    text = it.snippet ?: it.content.orEmpty()
+                )
+            }
+        )
+    }
+
     @Serializable
     data class LinkUpSearchResponse(
-        val answer: String,
-        val sources: List<Source>
+        val answer: String? = null,
+        val sources: List<Source> = emptyList(),
+        val results: List<Source> = emptyList(),
     )
 
     @Serializable
     data class Source(
-        val name: String,
+        val name: String? = null,
         val url: String,
-        val snippet: String
+        val snippet: String? = null,
+        val content: String? = null,
     )
 
     @Serializable

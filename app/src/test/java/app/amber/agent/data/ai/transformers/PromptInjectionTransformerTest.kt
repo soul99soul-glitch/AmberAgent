@@ -9,7 +9,7 @@ import app.amber.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
 import app.amber.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.Assistant
+import app.amber.core.settings.Settings
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.PromptInjection
 import app.amber.core.model.Lorebook
@@ -21,12 +21,12 @@ import kotlin.uuid.Uuid
 class PromptInjectionTransformerTest {
 
     // region Helper functions
-    private fun createAssistant(
+    private fun createSettings(
         modeInjectionIds: Set<Uuid> = emptySet(),
         lorebookIds: Set<Uuid> = emptySet()
-    ) = Assistant(
-        modeInjectionIds = modeInjectionIds,
-        lorebookIds = lorebookIds
+    ) = Settings(
+        enabledModeInjectionIds = modeInjectionIds,
+        enabledLorebookIds = lorebookIds
     )
 
     private fun createModeInjection(
@@ -137,7 +137,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(),
+            settings = createSettings(),
             modeInjections = emptyList(),
             lorebooks = emptyList()
         )
@@ -161,7 +161,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -180,7 +180,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(), // No linked injections
+            settings = createSettings(), // No linked injections
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -206,7 +206,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -235,7 +235,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -272,7 +272,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -314,7 +314,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -349,7 +349,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -370,7 +370,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = listOf(UIMessage.user("Hello")),
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -403,7 +403,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -436,7 +436,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -470,7 +470,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -503,7 +503,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -530,7 +530,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -569,7 +569,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(id1, id2)),
+            settings = createSettings(modeInjectionIds = setOf(id1, id2)),
             modeInjections = injections,
             lorebooks = emptyList()
         )
@@ -610,7 +610,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(id1, id2)),
+            settings = createSettings(modeInjectionIds = setOf(id1, id2)),
             modeInjections = injections,
             lorebooks = emptyList()
         )
@@ -645,7 +645,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(id1, id2, id3)),
+            settings = createSettings(modeInjectionIds = setOf(id1, id2, id3)),
             modeInjections = injections,
             lorebooks = emptyList()
         )
@@ -678,7 +678,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -706,7 +706,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -736,7 +736,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -765,7 +765,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -794,7 +794,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -824,7 +824,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -857,7 +857,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -891,7 +891,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -929,7 +929,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -961,7 +961,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(lorebookIds = setOf(lorebookId)),
+            settings = createSettings(lorebookIds = setOf(lorebookId)),
             modeInjections = emptyList(),
             lorebooks = listOf(lorebook)
         )
@@ -1004,7 +1004,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(id1, id2, id3)),
+            settings = createSettings(modeInjectionIds = setOf(id1, id2, id3)),
             modeInjections = injections,
             lorebooks = emptyList()
         )
@@ -1043,7 +1043,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(
+            settings = createSettings(
                 modeInjectionIds = setOf(modeId),
                 lorebookIds = setOf(lorebookId)
             ),
@@ -1062,7 +1062,7 @@ class PromptInjectionTransformerTest {
     fun `collectInjections should return empty for no matching conditions`() {
         val result = collectInjections(
             messages = listOf(UIMessage.user("Hello")),
-            assistant = createAssistant(),
+            settings = createSettings(),
             modeInjections = listOf(createModeInjection()),
             lorebooks = emptyList()
         )
@@ -1082,7 +1082,7 @@ class PromptInjectionTransformerTest {
 
         val result = collectInjections(
             messages = listOf(UIMessage.user("Hello")),
-            assistant = createAssistant(modeInjectionIds = setOf(id1, id2)),
+            settings = createSettings(modeInjectionIds = setOf(id1, id2)),
             modeInjections = injections,
             lorebooks = emptyList()
         )
@@ -1187,7 +1187,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -1222,7 +1222,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )
@@ -1257,7 +1257,7 @@ class PromptInjectionTransformerTest {
 
         val result = transformMessages(
             messages = messages,
-            assistant = createAssistant(modeInjectionIds = setOf(injectionId)),
+            settings = createSettings(modeInjectionIds = setOf(injectionId)),
             modeInjections = listOf(injection),
             lorebooks = emptyList()
         )

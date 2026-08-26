@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -71,14 +72,14 @@ import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.android.appTempFolder
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Camera01
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Files02
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.MusicNote01
-import me.rerere.hugeicons.stroke.Video01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Camera
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Files
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Video
 import app.amber.agent.R
 import app.amber.core.ai.vision.ImageAttachmentStatus
 import app.amber.core.ai.vision.ImageAttachmentStatusKind
@@ -182,7 +183,7 @@ internal fun MediaFileInputRow(
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
                         ),
-                        leading = { AttachmentLeadingIcon(icon = HugeIcons.Video01) },
+                        leading = { AttachmentLeadingIcon(icon = Lucide.Video) },
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -195,7 +196,7 @@ internal fun MediaFileInputRow(
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
                         ),
-                        leading = { AttachmentLeadingIcon(icon = HugeIcons.MusicNote01) },
+                        leading = { AttachmentLeadingIcon(icon = Lucide.Music) },
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -208,7 +209,7 @@ internal fun MediaFileInputRow(
                             displayNameByRelativePath = displayNameByRelativePath,
                             displayNameByFileName = displayNameByFileName
                         ),
-                        leading = { AttachmentLeadingIcon(icon = HugeIcons.File02) },
+                        leading = { AttachmentLeadingIcon(icon = Lucide.FileText) },
                         onRemove = { removePart(part, part.url) }
                     )
                 }
@@ -227,44 +228,47 @@ private fun ImageAttachmentPreview(
 ) {
     Box(
         modifier = Modifier
-            .size(24.dp)
+            .size(48.dp)
             .clickable(
                 enabled = status.blocksSend,
                 onClick = onStatusClick,
-            )
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        // CHECKING 状态显示一个旋转的加载指示器，而不是几乎不可见的灰色小点
-        // 这样用户能明确知道图片正在被处理（大图片压缩可能需要较长时间）
-        if (status.kind == ImageAttachmentStatusKind.CHECKING) {
-            androidx.compose.material3.CircularProgressIndicator(
-                modifier = Modifier
-                    .size(12.dp)
-                    .align(Alignment.TopEnd),
-                color = MaterialTheme.colorScheme.primary,
-                strokeWidth = 1.5.dp,
-            )
-        } else {
+        Box(modifier = Modifier.size(24.dp)) {
             Surface(
-                modifier = Modifier
-                    .size(7.dp)
-                    .align(Alignment.TopEnd),
-                shape = CircleShape,
-                color = status.dotColor(),
-                tonalElevation = 0.dp,
-                shadowElevation = 0.dp,
-            ) {}
+                modifier = Modifier.fillMaxSize(),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                AsyncImage(
+                    model = url,
+                    contentDescription = stringResource(R.string.chat_input_attachment_status),
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            // CHECKING 状态显示一个旋转的加载指示器，而不是几乎不可见的灰色小点
+            // 这样用户能明确知道图片正在被处理（大图片压缩可能需要较长时间）
+            if (status.kind == ImageAttachmentStatusKind.CHECKING) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier
+                        .size(12.dp)
+                        .align(Alignment.TopEnd),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 1.5.dp,
+                )
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .size(7.dp)
+                        .align(Alignment.TopEnd),
+                    shape = CircleShape,
+                    color = status.dotColor(),
+                    tonalElevation = 0.dp,
+                    shadowElevation = 0.dp,
+                ) {}
+            }
         }
     }
 }
@@ -296,7 +300,7 @@ private fun AttachmentChip(
         ProvideTextStyle(MaterialTheme.typography.labelSmall) {
             Row(
                 modifier = Modifier
-                    .height(32.dp)
+                    .heightIn(min = 32.dp)
                     .padding(start = 8.dp, end = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
@@ -311,13 +315,13 @@ private fun AttachmentChip(
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .size(22.dp)
+                        .size(48.dp)
                         .clickable(onClick = onRemove),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
-                        imageVector = HugeIcons.Cancel01,
-                        contentDescription = null,
+                        imageVector = Lucide.X,
+                        contentDescription = stringResource(R.string.chat_input_remove_attachment),
                         tint = chipInk.copy(alpha = 0.72f),
                         modifier = Modifier.size(14.dp)
                     )
@@ -500,7 +504,7 @@ internal fun useCropLauncher(
 @Composable
 internal fun ImagePickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
-        Icon(HugeIcons.Image02, null)
+        Icon(Lucide.Image, null)
     }, text = {
         Text(stringResource(R.string.photo))
     }) {
@@ -517,7 +521,7 @@ fun TakePicButton(onLaunchCamera: () -> Unit = {}) {
         permissionState = cameraPermission
     ) {
         BigIconTextButton(icon = {
-            Icon(HugeIcons.Camera01, null)
+            Icon(Lucide.Camera, null)
         }, text = {
             Text(stringResource(R.string.take_picture))
         }) {
@@ -534,7 +538,7 @@ fun TakePicButton(onLaunchCamera: () -> Unit = {}) {
 @Composable
 fun VideoPickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
-        Icon(HugeIcons.Video01, null)
+        Icon(Lucide.Video, null)
     }, text = {
         Text(stringResource(R.string.video))
     }) {
@@ -545,7 +549,7 @@ fun VideoPickButton(onClick: () -> Unit = {}) {
 @Composable
 fun AudioPickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
-        Icon(HugeIcons.MusicNote01, null)
+        Icon(Lucide.Music, null)
     }, text = {
         Text(stringResource(R.string.audio))
     }) {
@@ -556,7 +560,7 @@ fun AudioPickButton(onClick: () -> Unit = {}) {
 @Composable
 fun FilePickButton(onClick: () -> Unit = {}) {
     BigIconTextButton(icon = {
-        Icon(HugeIcons.Files02, null)
+        Icon(Lucide.Files, null)
     }, text = {
         Text(stringResource(R.string.upload_file))
     }) {
@@ -607,7 +611,7 @@ private fun BigIconTextButtonPreview() {
         modifier = Modifier.padding(16.dp)
     ) {
         BigIconTextButton(icon = {
-            Icon(HugeIcons.Image02, null)
+            Icon(Lucide.Image, null)
         }, text = {
             Text(stringResource(R.string.photo))
         }) {}

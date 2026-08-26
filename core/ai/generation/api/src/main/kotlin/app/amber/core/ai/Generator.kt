@@ -2,7 +2,6 @@ package app.amber.core.ai
 
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.Conversation
 import app.amber.core.settings.Settings
@@ -16,25 +15,19 @@ import app.amber.ai.ui.UIMessage
 import kotlin.uuid.Uuid
 
 /**
- * Generation interface lifted out of `class GenerationHandler` in `:app` for
- * cascade decoupling (Phase D cascade T4.2). Consumers (subagent, board,
- * chat impl, DeepRead) now depend on this api module instead of the heavy
- * concrete class.
- *
- * The `:app` side declares `class GenerationHandler(...) : Generator` and
- * supplies the actual implementation (~1200 LOC with Memory / ProviderManager
- * / ConversationRepository deps). This api module owns nothing but the
- * type signatures + the streaming wire-format data classes.
+ * Generation contract shared by chat, subagent, board, DeepRead and Novel.
+ * `:app` binds the single `ChatRunCoordinator` implementation; this API module
+ * owns only the consumer-facing signatures and streaming update types.
  */
 interface Generator {
 
     fun generateText(
+        /** Global Amber runtime settings for this generation. */
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
         inputTransformers: List<InputMessageTransformer> = emptyList(),
         outputTransformers: List<OutputMessageTransformer> = emptyList(),
-        assistant: Assistant,
         memories: List<AssistantMemory>? = null,
         tools: List<Tool> = emptyList(),
         maxSteps: Int = 256,
@@ -48,9 +41,9 @@ interface Generator {
         runId: String? = null,
         onTerminal: (suspend (GenerationTerminal) -> Unit)? = null,
         /**
-         * P6-01: non-null enables server-side stored OpenAI Responses
-         * streaming for this call (store=true + cursor persistence + reconnect
-         * + recovery). Only the main chat path sets it, under the
+         * Non-null enables server-side stored OpenAI Responses streaming for
+         * this call (store=true + cursor persistence + reconnect + recovery).
+         * Only the main chat path sets it, under the
          * openai_responses_resume capability flag + user toggle + strict
          * official-endpoint match; other callers keep the default.
          */
@@ -61,12 +54,12 @@ interface Generator {
 
 /**
  * Typed end-of-flow signal reported by [Generator.generateText] via
- * [Generator.generateText.onTerminal] — P1-03 (Typed Run Terminal).
+ * [Generator.generateText.onTerminal].
  *
  * The flow only reports the outcomes that must be persisted *from inside* the
  * flow body; COMPLETED / CANCELLED / FAILED are decided by the caller after
  * the flow ends and the conversation is persisted (COMPLETED must never be
- * published before assistant result + messages + terminal are durable).
+ * published before the generated result + messages + terminal are durable).
  */
 sealed interface GenerationTerminal {
     /**

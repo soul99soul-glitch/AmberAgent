@@ -115,7 +115,7 @@ data class Conversation(
     companion object {
         fun ofId(
             id: Uuid,
-            assistantId: Uuid = DEFAULT_ASSISTANT_ID,
+            assistantId: Uuid = AMBER_AGENT_ID,
             messages: List<MessageNode> = emptyList(),
             newConversation: Boolean = false
         ) = Conversation(

@@ -16,10 +16,10 @@ import app.amber.core.repository.ConversationRepository
 
 internal const val SEARCH_RECENT_CONVERSATION_LIMIT = 20
 
-enum class SearchFilter(val label: String) {
-    ALL("All"),
-    CONVERSATIONS("Conversations"),
-    MESSAGES("Messages"),
+enum class SearchFilter {
+    ALL,
+    CONVERSATIONS,
+    MESSAGES,
 }
 
 internal fun filterSearchResults(

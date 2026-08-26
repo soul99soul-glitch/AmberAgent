@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
  * variant only requires a new `data object` with a fresh `@SerialName` —
  * never rename or remove an existing one without a migration.
  *
- * Used as `List<LocalToolOption>` on Assistant configurations; the catalog
+ * Used as `List<LocalToolOption>` on the Amber profile; the catalog
  * builder [LocalTools.getTools] reads the list and adds the matching tools
  * to the agent's runtime tool surface.
  *
@@ -32,8 +32,14 @@ sealed class LocalToolOption {
     @SerialName("clipboard")
     data object Clipboard : LocalToolOption()
 
+    /**
+     * Legacy persisted discriminator. Kept only so existing assistant JSON can
+     * still be decoded after the speech capability was retired; it is not
+     * exposed by the tool picker or registered by the runtime tool registry.
+     */
     @Serializable
     @SerialName("tts")
+    @Deprecated("Text-to-speech was retired; this is a persistence tombstone")
     data object Tts : LocalToolOption()
 
     @Serializable

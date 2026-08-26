@@ -94,21 +94,20 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.android.appTempFolder
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowUp01
-import me.rerere.hugeicons.stroke.ArrowUp02
-import me.rerere.hugeicons.stroke.Book03
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Camera01
-import me.rerere.hugeicons.stroke.Files02
-import me.rerere.hugeicons.stroke.Image02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.BookText
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Camera
+import com.composables.icons.lucide.Files
+import com.composables.icons.lucide.Image
 import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -118,9 +117,7 @@ import app.amber.core.context.CompactLifecycleState
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.findModelById
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.files.FilesManager
-import app.amber.core.model.Assistant
 import app.amber.core.model.Conversation
 import app.amber.core.usage.ProviderUsageClient
 import app.amber.core.service.PendingUserMessageMode
@@ -182,7 +179,7 @@ fun ChatInput(
     onNextSandbox: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onUpdateChatModel: (Model) -> Unit,
-    onUpdateAssistant: (Assistant) -> Unit,
+    onUpdateSettings: (Settings) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onCancelClick: () -> Unit,
     onSendClick: (PendingUserMessageMode, List<UIMessagePart>) -> Unit,
@@ -191,8 +188,7 @@ fun ChatInput(
     onCompactContext: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
-    val providerManager = koinInject<ProviderManager>()
-    val assistant = settings.getCurrentAssistant()
+    val providerCatalog = koinInject<ProviderCatalog>()
     val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
     val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
@@ -251,7 +247,7 @@ fun ChatInput(
                     ImageAttachmentValidator.firstBlockingIssueForSend(
                         parts = parts,
                         settings = settings,
-                        providerManager = providerManager,
+                        providerCatalog = providerCatalog,
                     )
                 }
                 if (blockingIssue != null) {
@@ -281,7 +277,7 @@ fun ChatInput(
                     ImageAttachmentValidator.firstBlockingIssueForSend(
                         parts = parts,
                         settings = settings,
-                        providerManager = providerManager,
+                        providerCatalog = providerCatalog,
                     )
                 }
                 if (blockingIssue != null) {
@@ -320,7 +316,7 @@ fun ChatInput(
         ProviderUsageClient(httpClient)
     }
     val scope = rememberCoroutineScope()
-    val selectedChatModelId = assistant.chatModelId ?: settings.chatModelId
+    val selectedChatModelId = settings.chatModelId
     val chatModel = remember(settings.providers, selectedChatModelId) {
         settings.providers.findModelById(selectedChatModelId)
     }
@@ -628,7 +624,7 @@ fun ChatInput(
                 //    capsule (animated width via animateContentSize; + rotates to ×).
                 Row(
                     modifier = Modifier
-                        .height(46.dp)
+                        .height(48.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
                         .animateContentSize(animationSpec = tween(220, easing = FastOutSlowInEasing)),
@@ -636,13 +632,13 @@ fun ChatInput(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .clickable { expandToggle(ExpandState.Files) },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Add01,
+                            imageVector = Lucide.Plus,
                             contentDescription = stringResource(R.string.more_options),
                             // 与发送按钮图标同色（浅灰 ink3），不再用更深的 ink2
                             tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink3,
@@ -697,7 +693,7 @@ fun ChatInput(
                             modifier = Modifier.fillMaxWidth(),
                             minimalChrome = true,
                             hidePlaceholder = hideComposerPlaceholder,
-                            onUpdateAssistant = onUpdateAssistant,
+                            onUpdateSettings = onUpdateSettings,
                         )
                     }
                 }
@@ -739,7 +735,7 @@ fun ChatInput(
                             scaleX = sendScale
                             scaleY = sendScale
                         }
-                        .size(46.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(sendFill)
                         .combinedClickable(
@@ -758,8 +754,10 @@ fun ChatInput(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (sendStopState) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
-                        contentDescription = if (sendStopState) "stop" else "send",
+                        imageVector = if (sendStopState) Lucide.X else Lucide.ArrowUp,
+                        contentDescription = stringResource(
+                            if (sendStopState) R.string.stop else R.string.send,
+                        ),
                         tint = sendIconTint,
                         modifier = Modifier.size(22.dp),
                     )
@@ -802,7 +800,7 @@ private fun InlineAttachmentActions(
     ) {
         PermissionManager(permissionState = cameraPermission) {
             InlineAttachmentIcon(
-                icon = HugeIcons.Camera01,
+                icon = Lucide.Camera,
                 contentDescription = stringResource(R.string.take_picture),
                 onClick = {
                     if (cameraPermission.allRequiredPermissionsGranted) {
@@ -814,12 +812,12 @@ private fun InlineAttachmentActions(
             )
         }
         InlineAttachmentIcon(
-            icon = HugeIcons.Image02,
+            icon = Lucide.Image,
             contentDescription = stringResource(R.string.photo),
             onClick = onPickImage,
         )
         InlineAttachmentIcon(
-            icon = HugeIcons.Files02,
+            icon = Lucide.Files,
             contentDescription = stringResource(R.string.upload_file),
             onClick = onPickFile,
         )
@@ -835,7 +833,7 @@ private fun InlineAttachmentIcon(
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,

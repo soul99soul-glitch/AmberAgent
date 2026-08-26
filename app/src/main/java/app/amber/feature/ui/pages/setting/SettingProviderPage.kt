@@ -1,12 +1,12 @@
 package app.amber.feature.ui.pages.setting
 
 import android.net.Uri
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Camera01
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ChartBarLine
-import me.rerere.hugeicons.stroke.Share01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Camera
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.ChartNoAxesCombined
+import com.composables.icons.lucide.Share
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -110,7 +110,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
     Scaffold(
         topBar = {
             ProviderRegistryTopBar(
-                title = "提供商",
+                title = stringResource(R.string.setting_page_providers),
                 onBack = { navController.popBackStack() },
                 actions = {
                     ImportProviderButton {
@@ -153,7 +153,7 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             ProviderTerminalFilter(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = "筛选提供商_",
+                placeholder = stringResource(R.string.setting_provider_page_filter_placeholder),
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
             )
 
@@ -167,7 +167,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
             ) {
                 if (onlineProviders.isNotEmpty()) {
                     item("online_label") {
-                        ProviderSectionLabel("在线", count = onlineProviders.size)
+                        ProviderSectionLabel(
+                            stringResource(R.string.setting_provider_page_online),
+                            count = onlineProviders.size,
+                        )
                     }
                     item("online_group") {
                         Column(Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
@@ -186,7 +189,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 }
                 if (disabledProviders.isNotEmpty()) {
                     item("disabled_label") {
-                        ProviderSectionLabel("未启用", count = disabledProviders.size)
+                        ProviderSectionLabel(
+                            stringResource(R.string.setting_provider_page_disabled),
+                            count = disabledProviders.size,
+                        )
                     }
                     item("disabled_group") {
                         Column(
@@ -266,17 +272,21 @@ private fun ProviderAggregateStrip(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.ChartBarLine,
+            imageVector = Lucide.ChartNoAxesCombined,
             contentDescription = null,
             tint = t.accent,
             modifier = Modifier.size(14.dp),
         )
         Spacer(Modifier.width(9.dp))
-        ProviderStat(providerCount, "提供商")
+        ProviderStat(providerCount, stringResource(R.string.setting_page_providers))
         ProviderStatSep()
-        ProviderStat(modelCount, "模型")
+        ProviderStat(modelCount, stringResource(R.string.setting_provider_page_models))
         ProviderStatSep()
-        ProviderStat(onlineCount, "在线", accent = true)
+        ProviderStat(
+            onlineCount,
+            stringResource(R.string.setting_provider_page_online),
+            accent = true,
+        )
     }
 }
 
@@ -330,8 +340,8 @@ private fun ImportProviderButton(
     }
 
     ProviderIconButton(
-        imageVector = HugeIcons.Share01,
-        contentDescription = null,
+        imageVector = Lucide.Share,
+        contentDescription = stringResource(R.string.setting_provider_page_import_dialog_title),
         rotate180 = true,
         onClick = { showImportDialog = true },
     )
@@ -461,14 +471,14 @@ private fun ProviderImportDialog(
                 )
                 ProviderCommandButton(
                     text = stringResource(R.string.setting_provider_page_scan_qr_code),
-                    imageVector = HugeIcons.Camera01,
+                    imageVector = Lucide.Camera,
                     onClick = onScanQr,
                     accent = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ProviderCommandButton(
                     text = stringResource(R.string.setting_provider_page_select_from_gallery),
-                    imageVector = HugeIcons.Image02,
+                    imageVector = Lucide.Image,
                     onClick = onPickImage,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -514,7 +524,11 @@ private fun ProviderEditorSheet(
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 Text("//", style = type.eyebrow, color = t.accent)
-                Text("新建", style = type.eyebrow, color = t.ink3)
+                Text(
+                    stringResource(R.string.setting_provider_page_new),
+                    style = type.eyebrow,
+                    color = t.ink3,
+                )
             }
             Text(
                 text = title,
@@ -554,8 +568,8 @@ private fun AddButton(
     var editingProvider by remember { mutableStateOf<ProviderSetting?>(null) }
 
     ProviderGhostButton(
-        text = "添加",
-        imageVector = HugeIcons.Add01,
+        text = stringResource(R.string.setting_provider_page_add),
+        imageVector = Lucide.Plus,
         onClick = { showPicker = true },
     )
 
@@ -645,7 +659,10 @@ private fun ProviderItem(
         ) {
             ProviderAuthBadge(provider.providerAuthLabel())
             Text(
-                text = "${provider.models.size} 个",
+                text = stringResource(
+                    R.string.setting_provider_page_model_count,
+                    provider.models.size,
+                ),
                 style = type.meta.copy(fontSize = 11.sp),
                 color = if (provider.models.isNotEmpty()) t.ink2 else t.ink4,
                 maxLines = 1,

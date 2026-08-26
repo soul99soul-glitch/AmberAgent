@@ -23,15 +23,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Clock02
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Pin
-import me.rerere.hugeicons.stroke.PinOff
-import me.rerere.hugeicons.stroke.SourceCode
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.AlarmClock
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Pin
+import com.composables.icons.lucide.PinOff
+import com.composables.icons.lucide.FileCode2
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -83,7 +83,7 @@ fun MiniAppGridCard(
                 )
                 if (app.pinned) {
                     Icon(
-                        imageVector = HugeIcons.Pin,
+                        imageVector = Lucide.Pin,
                         contentDescription = "已置顶",
                         modifier = Modifier.size(14.dp),
                         tint = tokens.accent,
@@ -109,7 +109,7 @@ fun MiniAppGridCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = HugeIcons.MoreVertical,
+                        imageVector = Lucide.EllipsisVertical,
                         contentDescription = "更多操作",
                         modifier = Modifier.size(16.dp),
                         tint = workspace.muted,
@@ -122,7 +122,7 @@ fun MiniAppGridCard(
                     DropdownMenuItem(
                         text = { Text(if (app.pinned) "取消置顶" else "置顶") },
                         leadingIcon = {
-                            Icon(if (app.pinned) HugeIcons.PinOff else HugeIcons.Pin, contentDescription = null)
+                            Icon(if (app.pinned) Lucide.PinOff else Lucide.Pin, contentDescription = null)
                         },
                         onClick = {
                             menuExpanded = false
@@ -131,7 +131,7 @@ fun MiniAppGridCard(
                     )
                     DropdownMenuItem(
                         text = { Text("版本历史") },
-                        leadingIcon = { Icon(HugeIcons.Clock02, contentDescription = null) },
+                        leadingIcon = { Icon(Lucide.AlarmClock, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onVersions()
@@ -139,7 +139,7 @@ fun MiniAppGridCard(
                     )
                     DropdownMenuItem(
                         text = { Text("导出 HTML") },
-                        leadingIcon = { Icon(HugeIcons.Download01, contentDescription = null) },
+                        leadingIcon = { Icon(Lucide.Download, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onExport()
@@ -147,7 +147,7 @@ fun MiniAppGridCard(
                     )
                     DropdownMenuItem(
                         text = { Text("编辑源码") },
-                        leadingIcon = { Icon(HugeIcons.SourceCode, contentDescription = null) },
+                        leadingIcon = { Icon(Lucide.FileCode2, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onEditSource()
@@ -155,7 +155,7 @@ fun MiniAppGridCard(
                     )
                     DropdownMenuItem(
                         text = { Text("重命名") },
-                        leadingIcon = { Icon(HugeIcons.Edit01, contentDescription = null) },
+                        leadingIcon = { Icon(Lucide.Pencil, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onRename()
@@ -163,7 +163,7 @@ fun MiniAppGridCard(
                     )
                     DropdownMenuItem(
                         text = { Text("删除") },
-                        leadingIcon = { Icon(HugeIcons.Delete01, contentDescription = null) },
+                        leadingIcon = { Icon(Lucide.Trash2, contentDescription = null) },
                         onClick = {
                             menuExpanded = false
                             onDelete()

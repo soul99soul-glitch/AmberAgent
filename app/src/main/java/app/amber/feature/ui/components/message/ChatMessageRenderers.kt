@@ -28,8 +28,8 @@ import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.core.ai.generative.GenerativeWidgetSegment
 import app.amber.feature.ui.components.richtext.MarkdownBlock
@@ -44,7 +44,7 @@ import app.amber.feature.ui.theme.JetbrainsMono
 internal fun VirtualizedAssistantText(
     fullMessageParts: List<UIMessagePart>,
     part: UIMessagePart.Text,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     markdownChild: ChatMessageVirtualItem.MarkdownChild?,
     attachments: List<BlockAttachment> = emptyList(),
     showAssistantBubble: Boolean,
@@ -88,7 +88,7 @@ internal fun VirtualizedAssistantText(
                         AssistantMarkdownBlockOrWidgets(
                             content = MessageRenderCache.visualRegexText(
                                 text = part.text,
-                                assistant = assistant,
+                                regexes = regexes,
                                 scope = AssistantAffectScope.ASSISTANT,
                             ),
                             streaming = false,
@@ -101,7 +101,7 @@ internal fun VirtualizedAssistantText(
                 AssistantMarkdownBlockOrWidgets(
                     content = MessageRenderCache.visualRegexText(
                         text = part.text,
-                        assistant = assistant,
+                        regexes = regexes,
                         scope = AssistantAffectScope.ASSISTANT,
                     ),
                     streaming = false,

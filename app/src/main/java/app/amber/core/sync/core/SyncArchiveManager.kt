@@ -28,6 +28,8 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.secret.SecretRedactor
 import app.amber.agent.data.db.AppDatabase
+import app.amber.agent.data.db.canonicalizeAmberOwnership
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.agent.data.db.fts.MessageFtsManager
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
@@ -264,21 +266,19 @@ class SyncArchiveManager(
             // TODO(P7-02): 自定义口令/版本化加密头与“含 secrets 的备份”属于 P7-02 范围。
             val redacted = secretRedactor.redactForExport(
                 providers = settings.providers,
-                assistants = settings.assistants,
+                customHeaders = settings.customHeaders,
                 searchServices = settings.searchServices,
                 mcpServers = settings.mcpServers,
                 webDavConfig = settings.webDavConfig,
                 s3Config = settings.s3Config,
-                ttsProviders = settings.ttsProviders,
             )
             val redactedSettings = settings.copy(
                 providers = redacted.providers,
-                assistants = redacted.assistants,
+                customHeaders = redacted.customHeaders,
                 searchServices = redacted.searchServices,
                 mcpServers = redacted.mcpServers,
                 webDavConfig = redacted.webDavConfig,
                 s3Config = redacted.s3Config,
-                ttsProviders = redacted.ttsProviders,
             )
             val settingsJson = redactor.encodeSettings(redactedSettings, mode)
             writeTextEntry(
@@ -491,14 +491,8 @@ class SyncArchiveManager(
             mode = manifest.mode,
             localSettings = currentSettings,
         )
-        // [Review #1 fix] CONFIG_ONLY only adopts the providers list from
-        // the backup. Replacing the whole Settings object would orphan
-        // local conversations whose `assistantId` points at assistants that
-        // exist only in the backup's `assistants` list, leaving "assistant
-        // not found" / silent misroute behaviour. With this contract, the
-        // user's pain ("don't make me re-input provider configs") is fully
-        // solved while keeping their custom assistants, quick messages,
-        // lorebooks, and conversation references intact.
+        // CONFIG_ONLY only adopts provider credentials and leaves the local
+        // Amber profile, conversations, prompts and extensions untouched.
         val finalSettings = when (scope) {
             RestoreScope.EVERYTHING ->
                 decodedSettings.copy(syncSettings = currentSettings.syncSettings)
@@ -562,10 +556,14 @@ class SyncArchiveManager(
         // P1-01: 备份不含明文 —— 恢复时先把备份携带的 reference 写回 DataStore，
         // 掩码值走 redact keep 规则找回本机 secret；跨设备恢复时本机没有对应
         // secret 的字段保持未设置，用户重新录入。
-        settingsStore.restoreSecretRefs(
-            secretRedactor.extractRefsFromSettingsJson(json, restoredSettingsJson)
+        val restoredRefs = secretRedactor.extractRefsFromSettingsJson(json, restoredSettingsJson)
+        settingsStore.restoreSecretRefs(restoredRefs)
+        val refsByKey = restoredRefs.associateBy { it.descriptor().key }
+        settingsStore.update(
+            finalSettings.copy(
+                customHeaders = secretRedactor.rehydrateCustomHeaders(finalSettings.customHeaders, refsByKey),
+            )
         )
-        settingsStore.update(finalSettings)
     }
 
     private fun cursorRowToJson(table: String, cursor: Cursor): JsonObject = buildJsonObject {
@@ -621,6 +619,8 @@ class SyncArchiveManager(
                     db.execSQL("DELETE FROM sqlite_sequence WHERE name IN ($names)")
                 }
             }
+            val profileId = AMBER_AGENT_ID.toString()
+            canonicalizeAmberOwnership(db, profileId)
             restoreToken?.let { writeDatabaseRestoreMarker(db, it) }
             db.setTransactionSuccessful()
         } finally {

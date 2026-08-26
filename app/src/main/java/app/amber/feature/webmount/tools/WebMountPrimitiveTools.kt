@@ -1,6 +1,7 @@
 package app.amber.feature.webmount.tools
 
 import app.amber.ai.core.Tool
+import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
@@ -42,6 +43,7 @@ class WebMountPrimitiveTools(
     private val profileBridge: ProfileBridge,
     private val userSiteRegistry: UserSiteRegistry,
     private val oauthStore: WebMountOAuthTokenStore,
+    private val settingsStore: SettingsAggregator,
 ) {
     private val deps = WebMountDeps(pool, activityStore)
 
@@ -102,7 +104,7 @@ class WebMountPrimitiveTools(
 
     private val screenshotTool by lazy { createScreenshotTool(deps) }
     private val visualSnapshotTool by lazy { createVisualSnapshotTool(deps) }
-    private val visualReadTool by lazy { createVisualReadTool(deps) }
+    private val visualReadTool by lazy { createVisualReadTool(deps, settingsStore) }
 
     private val networkInspectTool by lazy { createNetworkInspectTool(deps) }
     private val fetchReplayTool by lazy { createFetchReplayTool(deps) }

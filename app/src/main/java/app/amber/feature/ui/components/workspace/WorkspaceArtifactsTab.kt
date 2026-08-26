@@ -34,8 +34,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Archive01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Archive
 import app.amber.agent.data.workspace.Artifact
 import app.amber.agent.data.workspace.ArtifactSourceKind
 import app.amber.agent.data.workspace.ArtifactParseStatus
@@ -109,7 +109,7 @@ private fun ArtifactRow(artifact: Artifact, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            imageVector = HugeIcons.Archive01,
+            imageVector = Lucide.Archive,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),

@@ -71,7 +71,7 @@ fun AutoAIIcon(
         TextAvatar(text = name, modifier = modifier, loading = loading, color = color)
         return
     }
-    if (path == "amberagent.svg") {
+    if (path == "graphite_agent_mark") {
         AmberAgentIcon(
             name = name,
             modifier = modifier,
@@ -96,13 +96,16 @@ private fun AmberAgentIcon(
     loading: Boolean = false,
     color: Color = MaterialTheme.colorScheme.secondaryContainer,
 ) {
+    val darkMode = LocalDarkMode.current
     Surface(
         modifier = modifier.size(24.dp),
         shape = rememberAvatarShape(loading),
         color = color,
     ) {
         Image(
-            painter = painterResource(R.drawable.graphite_agent_mark),
+            painter = painterResource(
+                if (darkMode) R.drawable.graphite_agent_mark_dark else R.drawable.graphite_agent_mark
+            ),
             contentDescription = name,
             modifier = Modifier.padding(4.dp),
         )

@@ -43,10 +43,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import kotlinx.coroutines.CancellationException
 import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.BalanceResultPath
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.OpenAIAuthMode
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.availableAuthModes
 import app.amber.ai.provider.fixedBaseUrl
@@ -96,10 +98,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.PowerService
-import me.rerere.hugeicons.stroke.Refresh03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Power
+import com.composables.icons.lucide.RotateCw
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import org.koin.compose.koinInject
@@ -175,11 +177,13 @@ private fun ProviderDeleteDialog(
                     ProviderCommandButton(
                         text = stringResource(R.string.cancel),
                         onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
                     )
                     ProviderCommandButton(
                         text = stringResource(R.string.delete),
                         onClick = onConfirm,
                         accent = true,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -670,6 +674,7 @@ private fun ProviderAccountSection(
                     onValueChange = {
                         onEdit(provider.copy(balanceOption = provider.balanceOption.copy(resultPath = it.trim())))
                     },
+                    isError = !BalanceResultPath.isValid(provider.balanceOption.resultPath),
                     mono = true,
                 )
             }
@@ -699,14 +704,14 @@ private fun ProviderConsoleActions(
             ProviderConnectionTester(internalProvider = provider)
             Spacer(Modifier.weight(1f))
             ProviderIconButton(
-                imageVector = HugeIcons.Delete01,
-                contentDescription = null,
+                imageVector = Lucide.Trash2,
+                contentDescription = stringResource(R.string.delete),
                 tint = t.ink3,
                 onClick = onDelete,
             )
             ProviderIconButton(
-                imageVector = HugeIcons.Refresh03,
-                contentDescription = null,
+                imageVector = Lucide.RotateCw,
+                contentDescription = stringResource(R.string.setting_model_page_reset_to_default),
                 tint = if (provider.isUsingDefaultBaseUrl()) t.ink4 else t.ink3,
                 onClick = { if (!provider.isUsingDefaultBaseUrl()) onReset() },
             )
@@ -768,7 +773,7 @@ private fun CodexOAuthConsole(
     val toaster = LocalToaster.current
     val scope = rememberCoroutineScope()
     val httpClient = koinInject<OkHttpClient>()
-    val providerManager = koinInject<ProviderManager>()
+    val providerCatalog = koinInject<ProviderCatalog>()
     val authStore = remember(context) { OpenAICodexAuthStore(context) }
     val oauthClient = remember(httpClient, authStore) { OpenAICodexOAuthClient(httpClient, authStore) }
     var oauthTokens by remember(provider.id) { mutableStateOf(authStore.get(provider.id)) }
@@ -793,7 +798,7 @@ private fun CodexOAuthConsole(
             oauthDeviceCode = null
             oauthVerificationUrl = null
             val fetchedModels = runCatching {
-                providerManager.getProviderByType(provider)
+                providerCatalog.text(provider)
                     .listModels(provider.codexOAuthReadyCopy())
                     .sortedBy { it.modelId }
             }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
@@ -807,6 +812,8 @@ private fun CodexOAuthConsole(
                 context.getString(R.string.setting_provider_page_codex_oauth_login_success_with_models, fetchedModels.size),
                 type = ToastType.Success,
             )
+        } catch (error: CancellationException) {
+            throw error
         } catch (e: Exception) {
             toaster.show(
                 context.getString(R.string.setting_provider_page_codex_oauth_login_failed, e.message ?: e.toString()),
@@ -891,7 +898,7 @@ private fun CodexOAuthConsole(
                     oauthBusy = true
                     try {
                         val fetchedModels = runCatching {
-                            providerManager.getProviderByType(provider)
+                            providerCatalog.text(provider)
                                 .listModels(provider.codexOAuthReadyCopy())
                                 .sortedBy { it.modelId }
                         }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
@@ -992,6 +999,8 @@ private fun GeminiOAuthConsole(
                 context.getString(R.string.setting_provider_page_gemini_oauth_login_success, tokens.email ?: "Google 账号"),
                 type = ToastType.Success,
             )
+        } catch (error: CancellationException) {
+            throw error
         } catch (e: Exception) {
             toaster.show(
                 context.getString(R.string.setting_provider_page_gemini_oauth_login_failed, e.message ?: e.toString()),

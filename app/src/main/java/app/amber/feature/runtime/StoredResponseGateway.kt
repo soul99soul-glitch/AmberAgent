@@ -1,10 +1,8 @@
 package app.amber.feature.runtime
 
-import app.amber.ai.provider.ProviderManager
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.ResponseCursor
 import app.amber.ai.provider.ResponseResumeStore
-import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.ai.provider.providers.openai.StoredResponseApi
 import app.amber.ai.provider.providers.openai.supportsResponsesResume
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -39,7 +37,7 @@ interface StoredResponseGateway {
 class OpenAIStoredResponseGateway(
     private val resumeStore: ResponseResumeStore,
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val storedResponseApi: StoredResponseApi,
 ) : StoredResponseGateway {
 
     override suspend fun resolve(runId: String): StoredResponseGateway.StoredResponseSession? {
@@ -56,14 +54,10 @@ class OpenAIStoredResponseGateway(
         ) {
             return StoredResponseGateway.StoredResponseSession(cursor, providerSetting = null, api = null)
         }
-        val provider = providerManager.getProviderByType(providerSetting) as? OpenAIProvider
-        if (provider == null) {
-            return StoredResponseGateway.StoredResponseSession(cursor, providerSetting, api = null)
-        }
         return StoredResponseGateway.StoredResponseSession(
             cursor = cursor,
             providerSetting = providerSetting,
-            api = provider.storedResponses,
+            api = storedResponseApi,
         )
     }
 }

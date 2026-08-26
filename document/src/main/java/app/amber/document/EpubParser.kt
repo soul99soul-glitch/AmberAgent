@@ -2,73 +2,61 @@ package app.amber.document
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
-import java.io.File
 import java.io.InputStream
+import java.io.File
+import java.net.URI
 import java.util.zip.ZipFile
 
-private data class ManifestItem(
-    val id: String,
+private data class EpubManifestItem(
     val href: String,
-    val mediaType: String
+    val mediaType: String,
 )
 
+/** Reads EPUB content in the order declared by the package spine. */
 object EpubParser {
     private const val DEFAULT_MAX_CHARS = 512_000
-    private const val MAX_ENTRY_BYTES = 8L * 1024 * 1024
+    private const val MAX_XML_BYTES = 8L * 1024 * 1024
     private const val MAX_SPINE_ENTRIES = 2_000
 
-    fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String {
-        return try {
-            ZipFile(file).use { zip ->
-                val opfPath = findOpfPath(zip)
-                    ?: return "Unable to find OPF file in EPUB"
-                val opfDir = opfPath.substringBeforeLast('/', "")
-
-                val opfEntry = zip.getEntry(opfPath)
-                    ?: return "Unable to read OPF file in EPUB"
-                val (manifest, spine) = zip.getInputStream(opfEntry).use {
-                    parseOpf(BoundedInputStream(it, MAX_ENTRY_BYTES))
+    fun parse(file: File, maxChars: Int = DEFAULT_MAX_CHARS): String = try {
+        ZipFile(file).use { zip ->
+            val opfPath = findOpfPath(zip) ?: return "Unable to find OPF file in EPUB"
+            val opfEntry = zip.getEntry(opfPath) ?: return "Unable to read OPF file in EPUB"
+            val (manifest, spine) = zip.getInputStream(opfEntry).use { input ->
+                parsePackage(BoundedInputStream(input, MAX_XML_BYTES))
+            }
+            val output = StringBuilder()
+            var truncated = false
+            for (id in spine.take(MAX_SPINE_ENTRIES)) {
+                val item = manifest[id] ?: continue
+                if (!item.mediaType.contains("html", ignoreCase = true)) continue
+                val path = resolveZipPath(opfPath, item.href)
+                val entry = zip.getEntry(path) ?: continue
+                val content = zip.getInputStream(entry).use { input ->
+                    parseXhtml(BoundedInputStream(input, MAX_XML_BYTES))
                 }
-
-                val result = StringBuilder()
-                for (itemId in spine.take(MAX_SPINE_ENTRIES)) {
-                    val item = manifest[itemId] ?: continue
-                    if (!item.mediaType.contains("html")) continue
-
-                    val itemPath = if (opfDir.isEmpty()) item.href else "$opfDir/${item.href}"
-                    val entry = zip.getEntry(itemPath) ?: continue
-                    val content = zip.getInputStream(entry).use {
-                        parseXhtml(BoundedInputStream(it, MAX_ENTRY_BYTES))
-                    }
-                    if (content.isNotBlank()) {
-                        result.append(content)
-                        result.append("\n\n")
-                    }
-                    if (result.length > maxChars) {
-                        result.setLength(maxChars)
-                        result.append("\n[TRUNCATED: EPUB text exceeds $maxChars characters]")
+                if (content.isNotBlank()) {
+                    output.append(content).append("\n\n")
+                    if (output.length > maxChars) {
+                        truncated = true
                         break
                     }
                 }
-
-                result.toString().trim().ifEmpty { "No readable content found in EPUB file" }
             }
-        } catch (e: Exception) {
-            "Error parsing EPUB file: ${e.message}"
+            (if (truncated) limit(output.toString(), maxChars) else output.toString().trim())
+                .ifBlank { "No readable content found in EPUB file" }
         }
+    } catch (e: Exception) {
+        "Error parsing EPUB file: ${e.message}"
     }
 
     private fun findOpfPath(zip: ZipFile): String? {
-        val containerEntry = zip.getEntry("META-INF/container.xml") ?: return null
-        return zip.getInputStream(containerEntry).use { stream ->
-            val factory = XmlPullParserFactory.newInstance()
-            factory.isNamespaceAware = true
-            val parser = factory.newPullParser()
-            parser.setInput(stream, "UTF-8")
-
+        val entry = zip.getEntry("META-INF/container.xml") ?: return null
+        return zip.getInputStream(entry).use { input ->
+            val parser = newParser(BoundedInputStream(input, MAX_XML_BYTES))
             while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-                if (parser.eventType == XmlPullParser.START_TAG && parser.name == "rootfile") {
-                    return@use parser.getAttributeValue(null, "full-path")
+                if (parser.eventType == XmlPullParser.START_TAG && parser.localName() == "rootfile") {
+                    return@use parser.attribute("full-path")
                 }
                 parser.next()
             }
@@ -76,169 +64,136 @@ object EpubParser {
         }
     }
 
-    private fun parseOpf(inputStream: InputStream): Pair<Map<String, ManifestItem>, List<String>> {
-        val factory = XmlPullParserFactory.newInstance()
-        factory.isNamespaceAware = true
-        val parser = factory.newPullParser()
-        parser.setInput(inputStream, "UTF-8")
-
-        val manifest = mutableMapOf<String, ManifestItem>()
+    private fun parsePackage(input: InputStream): Pair<Map<String, EpubManifestItem>, List<String>> {
+        val parser = newParser(input)
+        val manifest = mutableMapOf<String, EpubManifestItem>()
         val spine = mutableListOf<String>()
-
         while (parser.eventType != XmlPullParser.END_DOCUMENT) {
             if (parser.eventType == XmlPullParser.START_TAG) {
-                when (parser.name) {
+                when (parser.localName()) {
                     "item" -> {
-                        val id = parser.getAttributeValue(null, "id") ?: ""
-                        val href = parser.getAttributeValue(null, "href") ?: ""
-                        val mediaType = parser.getAttributeValue(null, "media-type") ?: ""
-                        if (id.isNotEmpty()) {
-                            manifest[id] = ManifestItem(id, href, mediaType)
+                        val id = parser.attribute("id")
+                        val href = parser.attribute("href")
+                        if (!id.isNullOrBlank() && !href.isNullOrBlank()) {
+                            manifest[id] = EpubManifestItem(href, parser.attribute("media-type").orEmpty())
                         }
                     }
+                    "itemref" -> parser.attribute("idref")?.let(spine::add)
+                }
+            }
+            parser.next()
+        }
+        return manifest to spine
+    }
 
-                    "itemref" -> {
-                        val idref = parser.getAttributeValue(null, "idref") ?: ""
-                        if (idref.isNotEmpty()) {
-                            spine.add(idref)
+    private fun parseXhtml(input: InputStream): String = try {
+        val parser = newParser(input, namespaceAware = false)
+        val result = StringBuilder()
+        val lists = ArrayDeque<Pair<String, Int>>()
+        var inBody = false
+
+        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+            when (parser.eventType) {
+                XmlPullParser.START_TAG -> {
+                    val tag = parser.localName().lowercase()
+                    when (tag) {
+                        "body" -> inBody = true
+                        "ol", "ul" -> if (inBody) lists.addLast(tag to 0)
+                        "li" -> if (inBody) {
+                            val list = lists.lastOrNull()
+                            if (list?.first == "ol") {
+                                val next = list.second + 1
+                                lists.removeLast()
+                                lists.addLast(list.first to next)
+                                result.append(next).append(". ")
+                            } else {
+                                result.append("- ")
+                            }
                         }
+                        "br" -> if (inBody) result.append('\n')
+                        "img" -> if (inBody) {
+                            parser.attribute("alt")?.takeIf { it.isNotBlank() }
+                                ?.let { result.append("[image: ").append(it).append(']') }
+                        }
+                        "h1", "h2", "h3", "h4", "h5", "h6" -> if (inBody) {
+                            result.append("#".repeat(tag[1].digitToInt())).append(' ')
+                        }
+                        "strong", "b" -> if (inBody) result.append("**")
+                        "em", "i" -> if (inBody) result.append('*')
+                        "hr" -> if (inBody) result.append("\n---\n")
+                        "blockquote" -> if (inBody) result.append("> ")
+                    }
+                }
+                XmlPullParser.TEXT, XmlPullParser.CDSECT -> if (inBody) {
+                    val text = parser.text.orEmpty().replace(Regex("\\s+"), " ")
+                    if (text.isNotBlank()) result.append(text)
+                }
+                XmlPullParser.END_TAG -> {
+                    val tag = parser.localName().lowercase()
+                    when (tag) {
+                        "body" -> inBody = false
+                        "p", "div", "h1", "h2", "h3", "h4", "h5", "h6" -> {
+                            if (inBody) result.append("\n\n")
+                        }
+                        "li" -> if (inBody) result.append('\n')
+                        "ol", "ul" -> if (inBody && lists.isNotEmpty()) {
+                            lists.removeLast()
+                            result.append('\n')
+                        }
+                        "strong", "b" -> if (inBody) result.append("**")
+                        "em", "i" -> if (inBody) result.append('*')
+                        "blockquote" -> if (inBody) result.append('\n')
                     }
                 }
             }
             parser.next()
         }
 
-        return manifest to spine
+        result.toString().replace(Regex("\\n{3,}"), "\n\n").trim()
+    } catch (_: Exception) {
+        ""
     }
 
-    private fun parseXhtml(inputStream: InputStream): String {
-        return try {
-            val factory = XmlPullParserFactory.newInstance()
-            factory.isNamespaceAware = false
-            val parser = factory.newPullParser()
-            parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
-            parser.setInput(inputStream, "UTF-8")
-
-            val result = StringBuilder()
-            val tagStack = ArrayDeque<String>()
-            var inBody = false
-            var listCounter = 0
-
-            while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-                when (parser.eventType) {
-                    XmlPullParser.START_TAG -> {
-                        val tag = parser.name.lowercase()
-                        tagStack.addLast(tag)
-
-                        when (tag) {
-                            "body" -> inBody = true
-                            "ol" -> listCounter = 0
-                            "li" -> {
-                                val parentTag = tagStack.dropLast(1).lastOrNull()
-                                if (parentTag == "ol") {
-                                    listCounter++
-                                    result.append("$listCounter. ")
-                                } else {
-                                    result.append("- ")
-                                }
-                            }
-
-                            "br" -> result.append("\n")
-                            "img" -> {
-                                if (inBody) {
-                                    val alt = parser.getAttributeValue(null, "alt")
-                                    if (!alt.isNullOrBlank()) {
-                                        result.append("[image: $alt]")
-                                    }
-                                }
-                            }
-
-                            "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                                if (inBody) {
-                                    val level = tag[1].digitToInt()
-                                    result.append("${"#".repeat(level)} ")
-                                }
-                            }
-
-                            "strong", "b" -> {
-                                if (inBody) result.append("**")
-                            }
-
-                            "em", "i" -> {
-                                if (inBody) result.append("*")
-                            }
-
-                            "hr" -> {
-                                if (inBody) result.append("\n---\n")
-                            }
-
-                            "blockquote" -> {
-                                if (inBody) result.append("> ")
-                            }
-                        }
-                    }
-
-                    XmlPullParser.TEXT -> {
-                        if (inBody) {
-                            val text = parser.text
-                                ?.replace('\n', ' ')
-                                ?.replace('\r', ' ')
-                                ?.replace("\\s+".toRegex(), " ")
-                            if (!text.isNullOrBlank()) {
-                                result.append(text)
-                            }
-                        }
-                    }
-
-                    XmlPullParser.END_TAG -> {
-                        val tag = parser.name.lowercase()
-                        if (tagStack.isNotEmpty()) tagStack.removeLast()
-
-                        when (tag) {
-                            "body" -> inBody = false
-                            "p", "div" -> {
-                                if (inBody) result.append("\n\n")
-                            }
-
-                            "h1", "h2", "h3", "h4", "h5", "h6" -> {
-                                if (inBody) result.append("\n\n")
-                            }
-
-                            "li" -> {
-                                if (inBody) result.append("\n")
-                            }
-
-                            "ul", "ol" -> {
-                                if (inBody) result.append("\n")
-                            }
-
-                            "br" -> {}
-                            "strong", "b" -> {
-                                if (inBody) result.append("**")
-                            }
-
-                            "em", "i" -> {
-                                if (inBody) result.append("*")
-                            }
-
-                            "blockquote" -> {
-                                if (inBody) result.append("\n")
-                            }
-                        }
-                    }
-                }
-                try {
-                    parser.next()
-                } catch (_: Exception) {
-                    break
-                }
-            }
-
-            result.toString()
-                .replace(Regex("\n{3,}"), "\n\n")
-                .trim()
-        } catch (e: Exception) {
-            ""
+    private fun resolveZipPath(sourcePath: String, target: String): String {
+        val raw = target.substringBefore('#').substringBefore('?')
+        val decoded = runCatching { URI(raw).path }.getOrNull() ?: raw
+        val combined = if (decoded.startsWith('/')) {
+            decoded.drop(1)
+        } else {
+            val base = sourcePath.substringBeforeLast('/', "")
+            if (base.isBlank()) decoded else "$base/$decoded"
         }
+        val parts = ArrayDeque<String>()
+        combined.split('/').forEach { part ->
+            when (part) {
+                "", "." -> Unit
+                ".." -> if (parts.isNotEmpty()) parts.removeLast()
+                else -> parts.addLast(part)
+            }
+        }
+        return parts.joinToString("/")
+    }
+
+    private fun newParser(input: InputStream, namespaceAware: Boolean = true): XmlPullParser {
+        val factory = XmlPullParserFactory.newInstance().apply {
+            isNamespaceAware = namespaceAware
+        }
+        return factory.newPullParser().also {
+            it.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            it.setInput(input, "UTF-8")
+        }
+    }
+
+    private fun XmlPullParser.localName(): String = name.substringAfterLast(':')
+
+    private fun XmlPullParser.attribute(name: String): String? = (0 until attributeCount)
+        .asSequence()
+        .firstOrNull { getAttributeName(it).substringAfterLast(':') == name }
+        ?.let { getAttributeValue(it) }
+
+    private fun limit(text: String, maxChars: Int): String {
+        val trimmed = text.trim()
+        val limit = maxChars.coerceAtLeast(0)
+        return trimmed.take(limit) + "\n[TRUNCATED: EPUB text exceeds $maxChars characters]"
     }
 }

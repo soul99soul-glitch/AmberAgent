@@ -386,8 +386,6 @@ val cargoBuildSyncCrypto =
     registerCargoBuild("cargoBuildSyncCrypto", "../native/sync-crypto", "sync_crypto")
 val cargoBuildMarkdownPreprocess =
     registerCargoBuild("cargoBuildMarkdownPreprocess", "../native/markdown-preprocess", "markdown_preprocess")
-val cargoBuildJsonExpr =
-    registerCargoBuild("cargoBuildJsonExpr", "../native/json-expr", "json_expr")
 val cargoBuildHtmlDiffNormalizer =
     registerCargoBuild("cargoBuildHtmlDiffNormalizer", "../native/html-diff-normalizer", "html_diff_normalizer")
 
@@ -398,7 +396,6 @@ afterEvaluate {
         dependsOn(cargoBuildReaderExtractor)
         dependsOn(cargoBuildSyncCrypto)
         dependsOn(cargoBuildMarkdownPreprocess)
-        dependsOn(cargoBuildJsonExpr)
         dependsOn(cargoBuildHtmlDiffNormalizer)
     }
 }
@@ -406,7 +403,6 @@ afterEvaluate {
 val requiredRustSharedLibraries = listOf(
     "highlight_parser",
     "html_diff_normalizer",
-    "json_expr",
     "markdown_parser",
     "markdown_preprocess",
     "office_parsers",
@@ -640,10 +636,6 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
-    // Image metadata extractor
-    // https://github.com/drewnoakes/metadata-extractor
-    implementation(libs.metadata.extractor)
-
     // Haze (background blur)
     implementation(libs.haze)
     implementation(libs.haze.materials)
@@ -709,13 +701,12 @@ dependencies {
 
     // lucide icons
     implementation(libs.lucide.icons)
-    implementation(libs.huge.icons)
 
     // image viewer
     implementation(libs.image.viewer)
 
     // JLatexMath
-    // https://github.com/rikkahub/jlatexmath-android
+    // https://github.com/noties/jlatexmath-android
     implementation(libs.jlatexmath)
     implementation(libs.jlatexmath.font.greek)
     implementation(libs.jlatexmath.font.cyrillic)
@@ -738,9 +729,9 @@ dependencies {
     implementation(project(":document"))
     implementation(project(":highlight"))
     implementation(project(":search"))
-    implementation(project(":tts"))
     implementation(project(":common"))
     implementation(project(":core:app-infra"))
+    implementation(project(":core:agent-utils"))
     implementation(project(":core:model"))
     implementation(project(":core:settings"))
     implementation(project(":core:event"))

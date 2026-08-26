@@ -1,0 +1,75 @@
+AmberAgent Android - third-party notices and provenance
+=======================================================
+
+This file covers the components changed by the 2026-08-25 Android product
+detachment work. It supplements, and does not replace, the AmberAgent LICENSE
+or the complete license texts distributed by the named upstream projects.
+
+Current product
+---------------
+
+AmberAgent is distributed under the terms in LICENSE. The current source
+repository is https://github.com/soul99soul-glitch/AmberAgent.
+
+Third-party components in the affected runtime surface
+-------------------------------------------------------
+
+* JetBrains Markdown 0.7.8
+  Source: https://github.com/JetBrains/markdown
+  License: Apache License 2.0.
+
+* Compose Icons - Lucide 1.1.0
+  Source: https://github.com/composablehorizons/compose-icons
+  License declared by the published Maven artifact: MIT License.
+  The generated vectors are based on Lucide icons:
+  https://github.com/lucide-icons/lucide (ISC License). Lucide's license
+  identifies a subset of icons derived from Feather; those icons remain under
+  the Feather MIT License, Copyright (c) 2013-present Cole Bemis. Complete
+  Compose Icons and Lucide/Feather texts are packaged at
+  assets/licenses/compose-icons/LICENSE and assets/licenses/lucide/LICENSE.
+
+* JLaTeXMath Android 0.2.0 and its Greek/Cyrillic font modules
+  Source: https://github.com/noties/jlatexmath-android/tree/v0.2.0
+  License: GNU GPL version 2 or later with the upstream JLaTeXMath linking
+  exception for the core and Cyrillic module; the Greek module declares GNU
+  GPL version 2 as upstream states, without that exception. Upstream copyright notices:
+  Copyright (C) 2009-2011 DENIZET Calixte; Copyright (C) Kris Coolsaet,
+  Nico Van Cleemput, and Kurt Vermeulen; Copyright 2004-2007 Universiteit
+  Gent.
+
+  Bundled fonts carry their own terms. The AMS eufb/eufm/msam/msbm fonts are
+  Copyright (c) 1997, 2009 American Mathematical Society and use SIL Open Font
+  License 1.1 with Reserved Font Names. Computer Modern and Cyrillic fonts use
+  the Knuth terms; Greek fonts use GNU GPL version 2 only; dsrom has its stated
+  free-use terms; stmary and rsfs are identified by upstream as public domain.
+  The applicable upstream notices and full texts are packaged at
+  assets/licenses/jlatexmath/LICENSE, assets/licenses/jlatexmath/COPYING, and
+  assets/licenses/jlatexmath/fonts/.
+
+  AmberAgent carries six derived asset overlays from that v0.2.0 source to
+  preserve two Android glyph mappings. On 2026-08-25 AmberAgent duplicated
+  the existing Omega and rightleftharpoons glyphs at U+E000 and U+E001,
+  updated the corresponding XML maps/metrics, and renamed the two modified
+  font files to amber_jlm_cmr10_pua.ttf and amber_jlm_msam10_pua.ttf so they
+  are not presented as the unmodified upstream fonts. No new glyph artwork
+  was introduced.
+
+* requery sqlite-android, commit
+  0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0
+  Source: https://github.com/requery/sqlite-android
+  License: Apache License 2.0.
+
+Historical provenance retained intentionally
+---------------------------------------------
+
+AmberAgent Android has direct historical fork lineage from RikkaHub. The
+current runtime no longer resolves the RikkaHub Maven forks, routes requests
+to the retired Rikka search endpoint, or presents RikkaHub as the current
+product repository. This engineering cleanup does not erase historical
+authorship, Git provenance, copyright, trademark, or license obligations.
+
+Historical reference: https://github.com/rikkahub/rikkahub at tag 2.4.11,
+commit b270766f06671d7456ce3d248622dc667648b6d1. Its repository LICENSE and
+the AmberAgent LICENSE remain the controlling texts for their respective
+covered material. No legal conclusion beyond the recorded engineering facts
+is asserted here.

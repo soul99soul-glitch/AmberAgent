@@ -56,9 +56,9 @@ class WebMountManager(
      * Phase 2 post-review fix: top-level "experimental feature enable" flag
      * matching the iCloud / Feishu Office Enhancement pattern. When OFF
      * (default), WebMount adds zero tools to the agent catalog regardless
-     * of any per-assistant or per-station configuration. When ON, the
+     * of any per-station setting. When ON, the
      * safe `wm_*` primitives + adapter tools are immediately available
-     * to every assistant without further configuration.
+     * to Amber without further configuration.
      *
      * `wm_eval` (arbitrary JS) is gated by a separate sub-toggle
      * [evalEnabledFlow] so users can enable the main feature without

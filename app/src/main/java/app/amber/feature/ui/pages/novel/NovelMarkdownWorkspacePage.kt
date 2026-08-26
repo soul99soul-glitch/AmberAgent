@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -36,6 +38,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -74,7 +77,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.ai.core.MessageRole
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.ai.provider.ModelType
 import app.amber.feature.ui.components.ai.TopModelMenu
 import app.amber.feature.ui.context.LocalSettings
@@ -88,23 +90,23 @@ import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import kotlinx.coroutines.delay
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AiChat01
-import me.rerere.hugeicons.stroke.AiMagic
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp02
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.CancelCircle
-import me.rerere.hugeicons.stroke.Edit02
-import me.rerere.hugeicons.stroke.Flash
-import me.rerere.hugeicons.stroke.Compass
-import me.rerere.hugeicons.stroke.Database
-import me.rerere.hugeicons.stroke.MinusSign
-import me.rerere.hugeicons.stroke.Notebook
-import me.rerere.hugeicons.stroke.PlayCircle
-import me.rerere.hugeicons.stroke.Edit04
-import me.rerere.hugeicons.stroke.Tick02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.BotMessageSquare
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowUp
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.CircleX
+import com.composables.icons.lucide.SquarePen
+import com.composables.icons.lucide.Zap
+import com.composables.icons.lucide.Compass
+import com.composables.icons.lucide.Database
+import com.composables.icons.lucide.Minus
+import com.composables.icons.lucide.Notebook
+import com.composables.icons.lucide.CirclePlay
+import com.composables.icons.lucide.PenLine
+import com.composables.icons.lucide.CheckCheck
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -128,6 +130,17 @@ fun NovelMarkdownWorkspacePage(
     var showGhostwrite by remember { mutableStateOf(false) }
     // Graphite TopModelMenu：与标准 chat 同款——顶栏下方卷帘下拉（替代 ModelSelector 弹层）。
     var modelMenuOpen by remember { mutableStateOf(false) }
+
+    // Keep the durable batch and workspace projection live on either tab, even when
+    // the sheet is closed. A terminal refresh naturally stops this effect.
+    LaunchedEffect(projectId, state.ghostwriteJob?.jobId, state.ghostwriteJob?.status) {
+        if (state.ghostwriteJob?.status == "running") {
+            while (true) {
+                delay(2_500)
+                viewModel.refreshGhostwrite()
+            }
+        }
+    }
 
     Scaffold(
         containerColor = workspace.canvas,
@@ -185,28 +198,31 @@ fun NovelMarkdownWorkspacePage(
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             Icon(
-                                imageVector = HugeIcons.ArrowDown01,
+                                imageVector = Lucide.ArrowDown,
                                 contentDescription = "选择模型",
                                 tint = tokens.ink3,
                                 modifier = Modifier
                                     .size(13.dp)
                                     .rotate(chevronRotation),
                             )
-                            if (currentModelUuid != null) {
-                                Icon(
-                                    imageVector = HugeIcons.Cancel01,
-                                    contentDescription = "改回跟随全局",
-                                    tint = tokens.ink3,
-                                    modifier = Modifier
-                                        .size(12.dp)
-                                        .clickable { viewModel.setWritingModel(null) },
-                                )
-                            }
                         }
                     }
                 },
                 navigationIcon = { BackButton() },
                 actions = {
+                    if (state.writingModelId != null) {
+                        IconButton(
+                            onClick = { viewModel.setWritingModel(null) },
+                            modifier = Modifier.size(48.dp),
+                        ) {
+                            Icon(
+                                imageVector = Lucide.X,
+                                contentDescription = "改回跟随全局",
+                                tint = LocalAmberTokens.current.ink3,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                     // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
                     val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
                     Box(
@@ -306,7 +322,6 @@ fun NovelMarkdownWorkspacePage(
             // 高亮解析后的实际生效模型（项目覆盖 ?? 全局），选择任一即设为项目覆盖。
             @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
             val resolvedModelId: kotlin.uuid.Uuid? = overrideUuid
-                ?: appSettings.getCurrentAssistant().chatModelId
                 ?: appSettings.chatModelId
             TopModelMenu(
                 open = modelMenuOpen,
@@ -336,9 +351,9 @@ fun NovelMarkdownWorkspacePage(
             onStart = { viewModel.startGhostwriteBatch(it) },
             onPause = { viewModel.pauseGhostwriteBatch() },
             onResume = { viewModel.resumeGhostwriteBatch() },
+            onRetryFailed = { viewModel.retryFailedGhostwriteBatch() },
             onCancel = { viewModel.cancelGhostwriteBatch() },
             onDismissFailure = { viewModel.dismissGhostwriteFailure() },
-            onRefresh = { viewModel.refreshGhostwrite() },
             onInjectionChange = { viewModel.setInjectionFlags(it) },
             onGeneratePlan = { viewModel.generateChapterPlan() },
             readChapterPlan = { viewModel.readChapterPlan() },
@@ -379,9 +394,9 @@ private fun MarkdownGhostwriteSheet(
     onStart: (Int) -> Unit,
     onPause: () -> Unit,
     onResume: () -> Unit,
+    onRetryFailed: () -> Unit,
     onCancel: () -> Unit,
     onDismissFailure: () -> Unit,
-    onRefresh: () -> Unit,
     onInjectionChange: (app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags) -> Unit,
     onGeneratePlan: () -> Unit,
     readChapterPlan: () -> String,
@@ -401,16 +416,7 @@ private fun MarkdownGhostwriteSheet(
     val type = LocalAmberType.current
     val tokens = LocalAmberTokens.current
     val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-
-    // Keep progress live while the sheet is open over a running batch.
-    LaunchedEffect(job?.status) {
-        if (job != null && (job.status == "running" || job.status == "paused")) {
-            while (true) {
-                delay(2_500)
-                onRefresh()
-            }
-        }
-    }
+    val branchOwned = job?.status == "running" || job?.status == "paused"
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = workspace.canvas) {
         Column(
@@ -466,7 +472,7 @@ private fun MarkdownGhostwriteSheet(
                         horizontalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
                         PanelRoundIcon(
-                            icon = HugeIcons.MinusSign,
+                            icon = Lucide.Minus,
                             contentDescription = "减一章",
                             enabled = target > 1,
                             onClick = { if (target > 1) target -= 1 },
@@ -485,7 +491,7 @@ private fun MarkdownGhostwriteSheet(
                             }
                         }
                         PanelRoundIcon(
-                            icon = HugeIcons.Add01,
+                            icon = Lucide.Plus,
                             contentDescription = "加一章",
                             enabled = target < 99,
                             onClick = { if (target < 99) target += 1 },
@@ -501,7 +507,12 @@ private fun MarkdownGhostwriteSheet(
                     Text(job.reason ?: "未知原因", style = type.meta, color = workspace.red)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         PanelPill(text = "知道了", onClick = onDismissFailure)
-                        PanelPill(text = "再开一批", tone = PanelTone.Accent, enabled = !busy, onClick = { onStart(job.target) })
+                        PanelPill(
+                            text = "继续剩余",
+                            tone = PanelTone.Accent,
+                            enabled = !busy,
+                            onClick = onRetryFailed,
+                        )
                     }
                 } else {
                     val paused = job.status == "paused"
@@ -587,7 +598,7 @@ private fun MarkdownGhostwriteSheet(
                     PanelPill(
                         text = if (busy) "生成中…" else "一键生成",
                         tone = PanelTone.Accent,
-                        enabled = !busy,
+                        enabled = !busy && !branchOwned,
                         onClick = onGeneratePlan,
                     )
                 },
@@ -596,6 +607,7 @@ private fun MarkdownGhostwriteSheet(
                 PanelEditor(
                     placeholder = "例如：赵大夜探军营，与旧部相认；不可暴露身份。结尾留：密信被截。",
                     initial = remember(planAutoTick) { readChapterPlan() },
+                    enabled = !busy && !branchOwned,
                     onSave = saveChapterPlan,
                 )
             }
@@ -605,6 +617,7 @@ private fun MarkdownGhostwriteSheet(
                 PanelEditor(
                     placeholder = "例如：\n- 兵变前夜的双线布局\n- 黄龙旗来历揭晓",
                     initial = remember(planAutoTick) { readUpcomingArc() },
+                    enabled = !busy && !branchOwned,
                     onSave = saveUpcomingArc,
                 )
             }
@@ -614,6 +627,7 @@ private fun MarkdownGhostwriteSheet(
                 PanelEditor(
                     placeholder = "例如：文风冷峻克制；单章 2000-3000 字；避免说教。",
                     initial = remember { readWritingPreference() },
+                    enabled = !busy && !branchOwned,
                     onSave = saveWritingPreference,
                 )
             }
@@ -824,6 +838,7 @@ private fun PanelRoundIcon(
 private fun PanelEditor(
     placeholder: String,
     initial: String,
+    enabled: Boolean,
     onSave: (String) -> Unit,
 ) {
     val workspace = workspaceColors()
@@ -841,6 +856,7 @@ private fun PanelEditor(
         }
         BasicTextField(
             value = text,
+            enabled = enabled,
             onValueChange = {
                 text = it
                 savedTick = false
@@ -857,7 +873,7 @@ private fun PanelEditor(
         if (text.isNotEmpty()) {
             PanelPill(
                 text = "清除",
-                enabled = true,
+                enabled = enabled,
                 onClick = {
                     text = ""
                     onSave("")
@@ -868,7 +884,7 @@ private fun PanelEditor(
         PanelPill(
             text = if (savedTick) "已保存 ✓" else "保存",
             tone = if (savedTick) PanelTone.Saved else PanelTone.Accent,
-            enabled = dirty,
+            enabled = enabled && dirty,
             onClick = {
                 onSave(text)
                 savedTick = true
@@ -889,16 +905,11 @@ private fun MarkdownWorkspaceChat(
 
     Column(Modifier.fillMaxSize()) {
         // A running batch must be visible on the page itself (device-observed: the
-        // user cannot tell whether anything is happening — the FGS notification is
-        // blocked on this OEM and the sheet only polls while open).
+        // user cannot tell whether anything is happening when this OEM blocks the
+        // foreground-service notification).
         val activeJob = state.ghostwriteJob
-        if (activeJob != null && (activeJob.status == "running" || activeJob.status == "paused")) {
-            LaunchedEffect(activeJob.jobId) {
-                while (true) {
-                    kotlinx.coroutines.delay(3_000)
-                    viewModel.refreshGhostwrite()
-                }
-            }
+        val branchOwned = activeJob?.status == "running" || activeJob?.status == "paused"
+        if (activeJob != null && branchOwned) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -944,18 +955,32 @@ private fun MarkdownWorkspaceChat(
                 }
             }
         }
-        if (state.plotStale) {
-            Box(
+        // Chapters created by the current batch naturally make plot stale; resume is
+        // allowed from that durable cursor. Show the repair instruction once it releases.
+        if (state.plotStale && !branchOwned) {
+            Row(
                 Modifier
                     .fillMaxWidth()
                     .background(workspace.red.copy(alpha = 0.10f))
                     .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "⚠️ 剧情落后于正文：请先让助手更新剧情状态（plot/），再推进新正文。",
+                    "⚠️ 剧情落后于正文。同步后批准剧情修改，即可继续写作。",
                     style = type.meta,
                     color = workspace.red,
+                    modifier = Modifier.weight(1f),
                 )
+                TextButton(
+                    enabled = !state.busy,
+                    onClick = {
+                        viewModel.setComposerMode(NovelMarkdownComposerMode.Discuss)
+                        viewModel.send("根据最新正文同步 plot/current.md")
+                    },
+                ) {
+                    Text("同步剧情", color = workspace.red)
+                }
             }
         }
         state.unresolvedFromOrdinal?.let { fromOrdinal ->
@@ -1116,7 +1141,7 @@ private fun MarkdownWorkspaceChat(
             Box {
                 Box(
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(tokens.surface2)
                         .clickable(enabled = !state.busy) { modeMenu = true },
@@ -1124,9 +1149,9 @@ private fun MarkdownWorkspaceChat(
                 ) {
                     Icon(
                         imageVector = if (state.composerMode == NovelMarkdownComposerMode.WriteProse) {
-                            HugeIcons.Edit04
+                            Lucide.PenLine
                         } else {
-                            HugeIcons.AiChat01
+                            Lucide.BotMessageSquare
                         },
                         contentDescription = "模式",
                         tint = if (state.composerMode == NovelMarkdownComposerMode.WriteProse) {
@@ -1185,7 +1210,7 @@ private fun MarkdownWorkspaceChat(
             val hasDraft = draft.isNotBlank()
             Box(
                 modifier = Modifier
-                    .size(46.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(
                         if (state.busy || hasDraft) accent else tokens.surface2,
@@ -1196,14 +1221,13 @@ private fun MarkdownWorkspaceChat(
                         if (state.busy) {
                             viewModel.stopTurn()
                         } else {
-                            viewModel.send(draft)
-                            draft = ""
+                            if (viewModel.send(draft)) draft = ""
                         }
                     },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = if (state.busy) HugeIcons.Cancel01 else HugeIcons.ArrowUp02,
+                    imageVector = if (state.busy) Lucide.X else Lucide.ArrowUp,
                     contentDescription = if (state.busy) "停止" else "发送",
                     // 与 ChatInput 一致：accent 实心圆上的字形固定浅色（sage-green
                     // 这类浅 accent 的 onAccent 是近黑，箭头会一黑一白不一致）。
@@ -1220,36 +1244,41 @@ private fun MarkdownWorkspaceChat(
 private fun MarkdownChatBubble(isUser: Boolean, content: String, streaming: Boolean = false) {
     val workspace = workspaceColors()
     val type = LocalAmberType.current
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .clip(
-                if (isUser) {
-                    // Graphite user bubble: solid ink fill + inverted text, asymmetric
-                    // radius 16/16/5/16 (tail toward the sender).
-                    RoundedCornerShape(16.dp, 16.dp, 5.dp, 16.dp)
-                } else {
-                    RoundedCornerShape(14.dp)
-                },
-            )
-            .background(if (isUser) workspace.ink else workspace.paper)
-            .then(if (isUser) Modifier else Modifier.border(1.dp, workspace.hairline, RoundedCornerShape(14.dp)))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = if (isUser) Alignment.TopEnd else Alignment.TopStart,
     ) {
-        if (isUser) {
-            Text(
-                content,
-                style = type.body,
-                color = workspace.canvas,
-            )
-        } else {
-            // Assistant replies carry markdown (headings/bold/lists) — render them
-            // instead of showing raw syntax (device-observed bare ## / **).
-            app.amber.feature.ui.components.richtext.MarkdownBlock(
-                content = content,
-                style = type.body.copy(color = workspace.ink),
-                streaming = streaming,
-            )
+        Box(
+            Modifier
+                .then(if (isUser) Modifier.widthIn(max = maxWidth * 0.82f) else Modifier.fillMaxWidth())
+                .clip(
+                    if (isUser) {
+                        // Graphite user bubble: solid ink fill + inverted text, asymmetric
+                        // radius 16/16/5/16 (tail toward the sender).
+                        RoundedCornerShape(16.dp, 16.dp, 5.dp, 16.dp)
+                    } else {
+                        RoundedCornerShape(14.dp)
+                    },
+                )
+                .background(if (isUser) workspace.ink else workspace.paper)
+                .then(if (isUser) Modifier else Modifier.border(1.dp, workspace.hairline, RoundedCornerShape(14.dp)))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            if (isUser) {
+                Text(
+                    content,
+                    style = type.body,
+                    color = workspace.canvas,
+                )
+            } else {
+                // Assistant replies carry markdown (headings/bold/lists) — render them
+                // instead of showing raw syntax (device-observed bare ## / **).
+                app.amber.feature.ui.components.richtext.MarkdownBlock(
+                    content = content,
+                    style = type.body.copy(color = workspace.ink),
+                    streaming = streaming,
+                )
+            }
         }
     }
 }
@@ -1431,6 +1460,7 @@ private fun MarkdownWorkspaceManuscript(
     var openChapter by remember { mutableStateOf<NovelMarkdownChapterUi?>(null) }
     var editingChapter by remember { mutableStateOf(false) }
     var contentTick by remember { mutableStateOf(0) }
+    val branchLocked = state.ghostwriteJob?.status == "running" || state.ghostwriteJob?.status == "paused"
 
     val chapter = openChapter
     if (chapter != null) {
@@ -1439,11 +1469,12 @@ private fun MarkdownWorkspaceManuscript(
             MarkdownChapterEditor(
                 chapter = chapter,
                 initialBody = body,
-                busy = state.busy,
+                busy = state.busy || branchLocked,
                 onSave = { title, text ->
-                    viewModel.saveChapterEdit(chapter.path, title, text)
-                    contentTick++
-                    editingChapter = false
+                    viewModel.saveChapterEdit(chapter.path, title, text) {
+                        contentTick++
+                        editingChapter = false
+                    }
                 },
                 onCancel = { editingChapter = false },
             )
@@ -1466,7 +1497,7 @@ private fun MarkdownWorkspaceManuscript(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.weight(1f))
-                    TextButton(onClick = { editingChapter = true }) {
+                    TextButton(onClick = { editingChapter = true }, enabled = !branchLocked) {
                         Text("编辑", color = workspace.ink)
                     }
                 }
@@ -1502,10 +1533,14 @@ private fun MarkdownWorkspaceManuscript(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (branchLocked) {
+                Text("当前分支由代笔批次占用", color = workspace.muted, style = type.meta)
+                Spacer(Modifier.weight(1f))
+            }
             if (state.canUndo) {
                 TextButton(
                     onClick = { viewModel.undoLast() },
-                    enabled = !state.busy,
+                    enabled = !state.busy && !branchLocked,
                 ) {
                     Text("撤销最近一笔", color = workspace.muted, style = type.meta)
                 }

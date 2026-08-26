@@ -3,7 +3,7 @@ package app.amber.feature.ui.components.message
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantRegex
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.ai.transformers.replaceRegexes
 import app.amber.feature.ui.components.richtext.MarkdownParseResult
@@ -30,12 +30,12 @@ internal object MessageRenderCache {
 
     fun visualRegexText(
         text: String,
-        assistant: Assistant?,
+        regexes: List<AssistantRegex>,
         scope: AssistantAffectScope,
     ): String {
         if (text.length > MESSAGE_RENDER_TEXT_CACHE_MAX_CHARS) {
             return text.replaceRegexes(
-                assistant = assistant,
+                regexes = regexes,
                 scope = scope,
                 visual = true,
             )
@@ -43,14 +43,14 @@ internal object MessageRenderCache {
         val key = VisualTextKey(
             text = text,
             textHash = text.hashCode(),
-            assistantSignature = assistant.renderSignature(),
+            assistantSignature = regexes.renderSignature(),
             scope = scope,
         )
         synchronized(lock) {
             visualTextEntries[key]?.let { return it }
         }
         val rendered = text.replaceRegexes(
-            assistant = assistant,
+            regexes = regexes,
             scope = scope,
             visual = true,
         )
@@ -234,10 +234,9 @@ private enum class ToolJsonKind {
     Output,
 }
 
-private fun Assistant?.renderSignature(): Int {
-    if (this == null) return 0
-    var result = id.hashCode()
-    regexes.forEach { regex ->
+private fun List<AssistantRegex>.renderSignature(): Int {
+    var result = 1
+    forEach { regex ->
         result = 31 * result + regex.id.hashCode()
         result = 31 * result + regex.enabled.hashCode()
         result = 31 * result + regex.findRegex.hashCode()

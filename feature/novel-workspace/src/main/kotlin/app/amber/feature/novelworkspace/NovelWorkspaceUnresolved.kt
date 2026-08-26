@@ -70,13 +70,19 @@ object NovelWorkspaceUnresolvedStore {
         at: Instant = Instant.now(),
     ) {
         val current = load(projectDirectory)
+        val existing = current.branches[branchSlug]
+        val replacement = if (existing != null && existing.fromOrdinal <= fromOrdinal) {
+            existing
+        } else {
+            NovelWorkspaceUnresolvedEntry(
+                fromOrdinal = fromOrdinal,
+                sinceCommitId = sinceCommitId,
+                setAt = at,
+            )
+        }
         save(
             current.copy(
-                branches = current.branches + (branchSlug to NovelWorkspaceUnresolvedEntry(
-                    fromOrdinal = fromOrdinal,
-                    sinceCommitId = sinceCommitId,
-                    setAt = at,
-                )),
+                branches = current.branches + (branchSlug to replacement),
             ),
             projectDirectory,
         )

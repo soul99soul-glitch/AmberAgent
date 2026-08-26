@@ -10,7 +10,6 @@ import app.amber.document.DocxParser
 import app.amber.document.EpubParser
 import app.amber.document.PdfParser
 import app.amber.document.PptxParser
-import app.amber.document.nativebridge.OfficeNativeSwitch
 import java.io.File
 
 object DocumentAsPromptTransformer : InputMessageTransformer {
@@ -55,28 +54,11 @@ object DocumentAsPromptTransformer : InputMessageTransformer {
         return PdfParser.parserPdf(file, MAX_INLINE_TEXT_CHARS)
     }
 
-    // Phase 2 Step 1: route through OfficeNativeSwitch. Default config is
-    // disabled → parseXOrNull always returns null → JVM parser runs unchanged.
-    // When a user opts in via NativePathPrefs and the .so loaded, native runs;
-    // any failure (load, panic, NativeUnavailable) returns null and the JVM
-    // path executes via the Elvis fallback. The sampling-path JVM call
-    // happens *inside* the Switch's jvmFallback lambda, not via the Elvis,
-    // so steady-state cost stays at one parse per document.
+    private fun parseDocxAsText(file: File): String = DocxParser.parse(file)
 
-    private fun parseDocxAsText(file: File): String {
-        return OfficeNativeSwitch.parseDocxOrNull(file) { DocxParser.parse(file) }
-            ?: DocxParser.parse(file)
-    }
+    private fun parsePptxAsText(file: File): String = PptxParser.parse(file)
 
-    private fun parsePptxAsText(file: File): String {
-        return OfficeNativeSwitch.parsePptxOrNull(file) { PptxParser.parse(file) }
-            ?: PptxParser.parse(file)
-    }
-
-    private fun parseEpubAsText(file: File): String {
-        return OfficeNativeSwitch.parseEpubOrNull(file) { EpubParser.parse(file) }
-            ?: EpubParser.parse(file)
-    }
+    private fun parseEpubAsText(file: File): String = EpubParser.parse(file)
 
     private fun readDocumentContent(document: UIMessagePart.Document): String {
         val file = runCatching { document.url.toUri().toFile() }.getOrNull()

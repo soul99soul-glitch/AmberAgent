@@ -9,11 +9,8 @@ import androidx.paging.cachedIn
 import androidx.paging.insertSeparators
 import androidx.paging.map
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import app.amber.agent.R
-import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.toLocalString
 import java.time.LocalDate
@@ -21,18 +18,12 @@ import java.time.ZoneId
 
 class ChatDrawerVM(
     private val context: Application,
-    settingsStore: SettingsAggregator,
     conversationRepo: ConversationRepository,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     val conversations: Flow<PagingData<ConversationListItem>> =
-        settingsStore.settingsFlow
-            .map { it.assistantId }
-            .distinctUntilChanged()
-            .flatMapLatest { assistantId ->
-                conversationRepo.getConversationsOfAssistantPaging(assistantId)
-            }
+        conversationRepo.getConversationsPaging()
             .map { pagingData ->
                 pagingData
                     .map { ConversationListItem.Item(it) }

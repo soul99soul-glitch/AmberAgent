@@ -95,7 +95,7 @@ class RecipeToolFactory(
             // auto-approval setting can run a write recipe unattended.
             mandatoryApproval = write,
             // Nested primitive calls own their ledger effects. The outer
-            // composite effect is only PREPARED by GenerationHandler and is
+            // composite effect is only PREPARED by the run coordinator and is
             // finished by AgentToolDispatcher after the recipe returns; a
             // nested approval leaves it reusable rather than STARTED.
             ledgerManaged = false,

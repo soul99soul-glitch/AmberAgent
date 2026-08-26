@@ -1,6 +1,5 @@
 package app.amber.core.settings
 
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
 import app.amber.core.model.LocalToolOption
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -9,15 +8,12 @@ import org.junit.Test
 class AmberAgentToolDefaultsTest {
     @Test
     fun defaultAmberAgentEnablesAllLocalToolGroups() {
-        val amberAgent = DEFAULT_ASSISTANTS.first { it.id == DEFAULT_ASSISTANT_ID }
-
         assertTrue(
-            amberAgent.localTools.containsAll(
+            AMBER_AGENT_LOCAL_TOOLS.containsAll(
                 listOf(
                     LocalToolOption.JavascriptEngine,
                     LocalToolOption.TimeInfo,
                     LocalToolOption.Clipboard,
-                    LocalToolOption.Tts,
                     LocalToolOption.AskUser,
                     LocalToolOption.WorkspaceFiles,
                     LocalToolOption.Terminal,
@@ -38,18 +34,4 @@ class AmberAgentToolDefaultsTest {
         assertTrue(runtime.maxToolLoopSteps >= 256)
     }
 
-    @Test
-    fun currentAssistantPrefersSelectedAssistant() {
-        val selectedAssistantId = DEFAULT_ASSISTANTS.first { it.id != DEFAULT_ASSISTANT_ID }.id
-        val settings = Settings(assistantId = selectedAssistantId)
-
-        assertEquals(selectedAssistantId, settings.getCurrentAssistant().id)
-    }
-
-    @Test
-    fun currentAssistantFallsBackToDefaultWhenSelectionMissing() {
-        val settings = Settings(assistantId = kotlin.uuid.Uuid.random())
-
-        assertEquals(DEFAULT_ASSISTANT_ID, settings.getCurrentAssistant().id)
-    }
 }

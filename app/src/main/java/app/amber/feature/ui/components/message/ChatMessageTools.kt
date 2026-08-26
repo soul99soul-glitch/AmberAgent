@@ -37,7 +37,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,7 +49,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -61,28 +59,24 @@ import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.http.jsonObjectOrNull
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BubbleChatQuestion
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Clipboard
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Database02
-import me.rerere.hugeicons.stroke.Eraser
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.FullScreen
-import me.rerere.hugeicons.stroke.GlobalSearch
-import me.rerere.hugeicons.stroke.MagicWand01
-import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.QuillWrite01
-import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Tick01
-import me.rerere.hugeicons.stroke.Time02
-import me.rerere.hugeicons.stroke.VolumeHigh
-import me.rerere.hugeicons.stroke.Wrench01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageCircleQuestion
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Clipboard
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.DatabaseZap
+import com.composables.icons.lucide.Eraser
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Maximize
+import com.composables.icons.lucide.ScanSearch
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.Package
+import com.composables.icons.lucide.Feather
+import com.composables.icons.lucide.Check
+import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.Wrench
 import app.amber.agent.R
 import app.amber.core.ai.mcp.McpToolNamespace
-import app.amber.core.event.AppEvent
-import app.amber.core.event.AppEventBus
 import app.amber.feature.ui.components.richtext.ZoomableAsyncImage
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.FaviconRow
@@ -93,7 +87,6 @@ import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
 import app.amber.core.utils.jsonPrimitiveOrNull
-import org.koin.compose.koinInject
 
 internal object ToolNames {
     const val MEMORY = "memory_tool"
@@ -101,7 +94,6 @@ internal object ToolNames {
     const val SCRAPE_WEB = "scrape_web"
     const val GET_TIME_INFO = "get_time_info"
     const val CLIPBOARD = "clipboard_tool"
-    const val TTS = "text_to_speech"
     const val ASK_USER = "ask_user"
     const val USE_SKILL = "use_skill"
 }
@@ -139,23 +131,22 @@ private object ClipboardActions {
 
 private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
     ToolNames.MEMORY -> when (action) {
-        MemoryActions.CREATE, MemoryActions.EDIT -> HugeIcons.QuillWrite01
-        MemoryActions.DELETE -> HugeIcons.Eraser
-        else -> HugeIcons.QuillWrite01
+        MemoryActions.CREATE, MemoryActions.EDIT -> Lucide.Feather
+        MemoryActions.DELETE -> Lucide.Eraser
+        else -> Lucide.Feather
     }
 
-    ToolNames.SEARCH_WEB -> HugeIcons.GlobalSearch
-    ToolNames.SCRAPE_WEB -> HugeIcons.GlobalSearch
-    "webview_search_open" -> HugeIcons.GlobalSearch
-    "webview_open" -> HugeIcons.GlobalSearch
-    "webview_wait_for_load" -> HugeIcons.GlobalSearch
-    "webview_read" -> HugeIcons.GlobalSearch
-    in setOf("icloud_status", "icloud_list", "icloud_read", "icloud_write", "icloud_search") -> HugeIcons.Database02
-    ToolNames.GET_TIME_INFO -> HugeIcons.Time02
-    ToolNames.CLIPBOARD -> HugeIcons.Clipboard
-    ToolNames.TTS -> HugeIcons.VolumeHigh
-    ToolNames.ASK_USER -> HugeIcons.BubbleChatQuestion
-    ToolNames.USE_SKILL -> HugeIcons.MagicWand01
+    ToolNames.SEARCH_WEB -> Lucide.ScanSearch
+    ToolNames.SCRAPE_WEB -> Lucide.ScanSearch
+    "webview_search_open" -> Lucide.ScanSearch
+    "webview_open" -> Lucide.ScanSearch
+    "webview_wait_for_load" -> Lucide.ScanSearch
+    "webview_read" -> Lucide.ScanSearch
+    in setOf("icloud_status", "icloud_list", "icloud_read", "icloud_write", "icloud_search") -> Lucide.DatabaseZap
+    ToolNames.GET_TIME_INFO -> Lucide.Clock
+    ToolNames.CLIPBOARD -> Lucide.Clipboard
+    ToolNames.ASK_USER -> Lucide.MessageCircleQuestion
+    ToolNames.USE_SKILL -> Lucide.WandSparkles
     in setOf(
         "file_list",
         "file_read",
@@ -164,7 +155,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "file_search",
         "file_move",
         "share_file"
-    ) -> HugeIcons.File02
+    ) -> Lucide.FileText
 
     in setOf(
         "terminal_execute",
@@ -178,7 +169,7 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "terminal_session_exec",
         "terminal_session_read",
         "terminal_session_stop"
-    ) -> HugeIcons.Code
+    ) -> Lucide.CodeXml
 
     in setOf(
         "screen_click",
@@ -191,10 +182,10 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
         "screen_read_ui",
         "screen_screenshot",
         "vlm_task"
-    ) -> HugeIcons.FullScreen
+    ) -> Lucide.Maximize
 
     else -> when {
-        toolName.startsWith("mcp__") -> HugeIcons.Package
+        toolName.startsWith("mcp__") -> Lucide.Package
         // Phase 2 WebMount: primitives + adapter tools use the web/search
         // icon so they're visually grouped with webview_* tools.
         toolName.startsWith("wm_") ||
@@ -204,8 +195,8 @@ private fun getToolIcon(toolName: String, action: String?) = when (toolName) {
             toolName.startsWith("github_") ||
             toolName.startsWith("bilibili_") ||
             toolName.startsWith("zhihu_") ||
-            toolName.startsWith("feishu_docs_") -> HugeIcons.GlobalSearch
-        else -> HugeIcons.Wrench01
+            toolName.startsWith("feishu_docs_") -> Lucide.ScanSearch
+        else -> Lucide.Wrench
     }
 }
 
@@ -545,28 +536,28 @@ private fun V3ToolStatusBadge(
         Box(contentAlignment = Alignment.Center) {
             if (status == AgentToolStatus.SUCCEEDED) {
                 Icon(
-                    imageVector = me.rerere.hugeicons.HugeIcons.Tick01,
+                    imageVector = Lucide.Check,
                     contentDescription = null,
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
             } else if (status == AgentToolStatus.FAILED || status == AgentToolStatus.TIMED_OUT) {
                 Icon(
-                    imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
+                    imageVector = Lucide.X,
                     contentDescription = null,
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
             } else if (status == AgentToolStatus.CANCELLED) {
                 Icon(
-                    imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,
+                    imageVector = Lucide.X,
                     contentDescription = null,
                     tint = ink,
                     modifier = Modifier.size(10.dp),
                 )
             } else if (status == AgentToolStatus.WAITING_FOR_PERMISSION || status == AgentToolStatus.INTERRUPTED) {
                 Icon(
-                    imageVector = me.rerere.hugeicons.HugeIcons.Time02,
+                    imageVector = Lucide.Clock,
                     contentDescription = null,
                     tint = ink,
                     modifier = Modifier.size(10.dp),
@@ -635,11 +626,6 @@ private fun toolDisplayTitle(
         else -> stringResource(R.string.chat_message_tool_call_generic, toolName)
     }
 
-    ToolNames.TTS -> {
-        val preview = arguments.getStringContent("text")?.compactToolPreview(24) ?: ""
-        "Speaking: $preview"
-    }
-
     ToolNames.USE_SKILL -> {
         val skillName = arguments.getStringContent("name") ?: ""
         val path = arguments.getStringContent("path")
@@ -702,8 +688,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
     }
     var showResult by remember { mutableStateOf(false) }
     var showDenyDialog by remember { mutableStateOf(false) }
-    val eventBus: AppEventBus = koinInject()
-    val scope = rememberCoroutineScope()
     val isPending = tool.approvalState is ToolApprovalState.Pending
     val isDenied = tool.approvalState is ToolApprovalState.Denied
     val arguments = remember(tool.input) { MessageRenderCache.toolInputJson(tool.input) }
@@ -762,7 +746,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             size = 24.dp,
                             iconSize = 12.dp,
                             tone = WorkspaceTone.Danger,
-                            icon = HugeIcons.Cancel01,
+                            icon = Lucide.X,
                             contentDescription = stringResource(R.string.chat_message_tool_deny),
                         )
                         WorkspaceIconButton(
@@ -771,7 +755,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             size = 24.dp,
                             iconSize = 12.dp,
                             tone = WorkspaceTone.Success,
-                            icon = HugeIcons.Tick01,
+                            icon = Lucide.Check,
                             contentDescription = stringResource(R.string.chat_message_tool_approve),
                         )
                     }
@@ -847,7 +831,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Icon(
-                        imageVector = HugeIcons.File02,
+                        imageVector = Lucide.FileText,
                         contentDescription = null,
                         modifier = Modifier.size(14.dp),
                         tint = workspace.muted,
@@ -933,31 +917,6 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             style = MaterialTheme.typography.labelSmall,
                             color = workspace.faint,
                         )
-                    }
-                    if (tool.toolName == ToolNames.TTS) {
-                        val text = arguments.getStringContent("text") ?: ""
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text(
-                                text = text,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = workspace.muted,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f),
-                            )
-                            WorkspaceIconButton(
-                                onClick = { scope.launch { eventBus.emit(AppEvent.Speak(text)) } },
-                                modifier = Modifier.size(28.dp),
-                                size = 28.dp,
-                                iconSize = 14.dp,
-                                icon = HugeIcons.Refresh01,
-                                contentDescription = "Replay",
-                            )
-                        }
                     }
                     if (images.isNotEmpty()) {
                         LazyRow(

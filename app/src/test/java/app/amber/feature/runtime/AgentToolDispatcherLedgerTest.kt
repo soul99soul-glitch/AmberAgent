@@ -122,7 +122,7 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
 
     @Test
     fun userDenialRecordsApprovalDeniedAndStructuredRejection() = runBlocking {
-        // GenerationHandler prepares the effect before the approval card.
+        // The generation coordinator prepares the effect before the approval card.
         val effect = ledger.prepare(
             runId = "run_1",
             turnId = 0,

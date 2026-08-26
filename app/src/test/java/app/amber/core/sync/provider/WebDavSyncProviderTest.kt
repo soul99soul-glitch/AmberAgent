@@ -13,7 +13,6 @@ import app.amber.core.infra.AppScope
 import app.amber.core.repository.FilesRepository
 import app.amber.core.settings.WebDavConfig
 import app.amber.core.settings.prefs.AgentPrefs
-import app.amber.core.settings.prefs.AssistantPrefs
 import app.amber.core.settings.prefs.ChatPrefs
 import app.amber.core.settings.prefs.ExtensionPrefs
 import app.amber.core.settings.prefs.NativePathPrefs
@@ -123,9 +122,8 @@ class WebDavSyncProviderTest {
             searchPrefs = SearchPrefs(dataStore, appScope, secretStore),
             agentPrefs = AgentPrefs(dataStore, appScope),
             providerPrefs = ProviderPrefs(dataStore, appScope, secretStore),
-            chatPrefs = ChatPrefs(dataStore, appScope),
+            chatPrefs = ChatPrefs(dataStore, appScope, secretStore),
             extensionPrefs = ExtensionPrefs(dataStore, appScope, secretStore),
-            assistantPrefs = AssistantPrefs(dataStore, appScope, secretStore),
             scope = appScope,
             secretRedactor = secretRedactor,
         )

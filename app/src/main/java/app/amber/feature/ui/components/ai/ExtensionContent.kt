@@ -20,8 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Link01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Link
 import app.amber.agent.R
 import app.amber.core.files.SkillMetadata
 import app.amber.core.model.Lorebook
@@ -186,7 +186,7 @@ fun ExtensionEmptyState(
         )
         if (buttonText != null && onAction != null) {
             TextButton(onClick = onAction) {
-                Icon(HugeIcons.Link01, contentDescription = null)
+                Icon(Lucide.Link, contentDescription = null)
                 Text(buttonText)
             }
         }

@@ -40,11 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowLeft01
-import me.rerere.hugeicons.stroke.Eye
-import me.rerere.hugeicons.stroke.Settings03
-import me.rerere.hugeicons.stroke.Sparkles
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowLeft
+import com.composables.icons.lucide.Eye
+import com.composables.icons.lucide.Settings
+import com.composables.icons.lucide.Sparkles
 import app.amber.agent.Screen
 import app.amber.ai.provider.ModelType
 import app.amber.core.settings.findModelById
@@ -221,7 +221,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 modifier = Modifier.size(40.dp).pressable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(HugeIcons.ArrowLeft01, contentDescription = "返回", tint = t.ink, modifier = Modifier.size(22.dp))
+                Icon(Lucide.ArrowLeft, contentDescription = "返回", tint = t.ink, modifier = Modifier.size(22.dp))
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -237,7 +237,7 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 modifier = Modifier.size(40.dp).pressable(onClick = onSettings),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(HugeIcons.Settings03, contentDescription = "设置", tint = t.ink2, modifier = Modifier.size(20.dp))
+                Icon(Lucide.Settings, contentDescription = "设置", tint = t.ink2, modifier = Modifier.size(20.dp))
             }
         }
         Hairline()
@@ -273,7 +273,7 @@ private fun MasterCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    HugeIcons.Eye,
+                    Lucide.Eye,
                     contentDescription = null,
                     tint = if (live) t.accent else t.ink3,
                     modifier = Modifier.size(22.dp),
@@ -374,7 +374,7 @@ private fun ConfigCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(HugeIcons.Settings03, contentDescription = null, tint = t.ink3, modifier = Modifier.size(17.dp))
+            Icon(Lucide.Settings, contentDescription = null, tint = t.ink3, modifier = Modifier.size(17.dp))
             Text("分析模型", style = type.body.copy(fontWeight = FontWeight.Medium), color = t.ink, modifier = Modifier.weight(1f))
             ModelSelector(
                 modelId = modelId,
@@ -422,7 +422,7 @@ private fun LiveResultCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
-                    Icon(HugeIcons.Eye, contentDescription = null, tint = t.ink3, modifier = Modifier.size(13.dp))
+                    Icon(Lucide.Eye, contentDescription = null, tint = t.ink3, modifier = Modifier.size(13.dp))
                     Text(
                         text = state.currentAppLabel.ifBlank { "当前应用" },
                         style = type.tinyTag,
@@ -609,7 +609,7 @@ private fun ActionProgressCard(state: LiveModeUiState) {
         if (state.analyzing) {
             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = t.accent)
         } else {
-            Icon(HugeIcons.Sparkles, contentDescription = null, tint = t.accent, modifier = Modifier.size(18.dp))
+            Icon(Lucide.Sparkles, contentDescription = null, tint = t.accent, modifier = Modifier.size(18.dp))
         }
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(

@@ -8,7 +8,7 @@ via JNI bindings, replacing CPU-heavy JVM components.
 ```
 native/
 ├── Cargo.toml                    workspace manifest
-├── office-parsers/               docx + pptx extraction (replaces JVM XmlPullParser)
+├── office-parsers/               XLSX extraction through calamine
 ├── markdown-parser/              pulldown-cmark + packed binary AST (alternative to JetBrains markdown)
 └── highlight-parser/             tree-sitter + 14 grammars (replaces QuickJS+Prism)
 ```

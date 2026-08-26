@@ -2,7 +2,7 @@ package app.amber.core.ai.vision
 
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Modality
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
@@ -37,7 +37,7 @@ object VisionModelHealthChecker {
 
     suspend fun probe(
         settings: Settings,
-        providerManager: ProviderManager,
+        providerCatalog: ProviderCatalog,
     ): VisionModelHealth {
         val model = settings.findModelById(settings.ocrModelId)
             ?: return VisionModelHealth(VisionModelHealthKind.NOT_CONFIGURED, "未配置")
@@ -46,9 +46,9 @@ object VisionModelHealthChecker {
         }
         val providerSetting = model.findProvider(settings.providers)
             ?: return VisionModelHealth(VisionModelHealthKind.PROVIDER_MISSING, "提供商不可用")
-        val provider = providerManager.getProviderByType(providerSetting)
+        val provider = providerCatalog.text(providerSetting)
         return runCatching {
-            provider.generateText(
+            provider.complete(
                 providerSetting = providerSetting,
                 messages = listOf(
                     UIMessage.system("Reply with OK if you can receive this test image."),

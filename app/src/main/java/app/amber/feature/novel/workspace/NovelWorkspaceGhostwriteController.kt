@@ -9,10 +9,7 @@ import androidx.work.workDataOf
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
-import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
-import app.amber.feature.novelworkspace.NovelWorkspaceStore
-import java.time.Instant
-import java.util.UUID
+import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 
 /**
  * Drives workspace ghostwrite batches: create job + enqueue WorkManager, pause/resume by
@@ -31,17 +28,41 @@ class NovelWorkspaceGhostwriteController(
         targetChapterCount: Int,
     ): NovelWorkspaceGhostwriteJob {
         require(targetChapterCount > 0) { "targetChapterCount must be positive" }
+        val ledger = NovelWorkspaceLedger.load(projectDirectory)
+        check(!NovelWorkspaceLedger.isPlotStale(ledger, branchSlug)) {
+            "剧情落后于正文。请切到“讨论”，发送“根据最新正文同步 plot/current.md”，并批准剧情修改后再代笔"
+        }
+        check(NovelWorkspaceUnresolvedStore.entryFor(projectDirectory, branchSlug) == null) {
+            "存在未解决的中间章修改，请先处理（确认无碍/重写后章）再代笔"
+        }
         val job = coordinator.newJob(projectDirectory, branchSlug, targetChapterCount)
-        enqueue(projectId, job)
+        try {
+            enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+        } catch (error: Exception) {
+            NovelWorkspaceGhostwriteJobs.transition(
+                projectDirectory = projectDirectory,
+                jobId = job.id,
+                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                reason = error.message ?: "代笔任务入队失败",
+                expectedExecutionId = job.executionKey,
+            )
+            throw error
+        }
         return job
     }
 
-    private fun enqueue(projectId: String, job: NovelWorkspaceGhostwriteJob) {
+    private fun enqueue(
+        projectId: String,
+        job: NovelWorkspaceGhostwriteJob,
+        policy: ExistingWorkPolicy,
+    ) {
         val request = OneTimeWorkRequestBuilder<NovelWorkspaceGhostwriteWorker>()
             .setInputData(
                 workDataOf(
                     NovelWorkspaceGhostwriteWorker.KEY_PROJECT_ID to projectId,
                     NovelWorkspaceGhostwriteWorker.KEY_JOB_ID to job.id,
+                    NovelWorkspaceGhostwriteWorker.KEY_EXECUTION_ID to job.executionKey,
                 ),
             )
             .setConstraints(
@@ -50,47 +71,110 @@ class NovelWorkspaceGhostwriteController(
                     .build(),
             )
             .addTag(WORK_TAG)
-            .addTag("$WORK_TAG:${job.id}")
+            .addTag(jobTag(job.id))
+            .addTag(executionTag(job.id, job.executionKey))
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
-            "$WORK_TAG:${job.id}",
-            ExistingWorkPolicy.KEEP,
+            "$WORK_TAG:$projectId:${job.branchSlug}",
+            policy,
             request,
         )
     }
 
-    fun pause(projectDirectory: java.io.File, jobId: String) {
-        NovelWorkspaceGhostwriteJobs.load(projectDirectory, jobId)?.let { job ->
-            NovelWorkspaceGhostwriteJobs.save(
-                job.copy(status = NovelWorkspaceGhostwriteJob.STATUS_PAUSED, updatedAt = Instant.now()),
-                projectDirectory,
-            )
+    fun pause(projectDirectory: java.io.File, jobId: String, executionId: String) {
+        val paused = NovelWorkspaceGhostwriteJobs.transition(
+            projectDirectory = projectDirectory,
+            jobId = jobId,
+            expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+            newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+            expectedExecutionId = executionId,
+        )
+        if (paused != null) {
+            WorkManager.getInstance(context).cancelAllWorkByTag(executionTag(jobId, executionId))
         }
     }
 
     /** Resume a paused job: flip it back to running and re-enqueue the worker. */
-    fun resume(projectDirectory: java.io.File, projectId: String, jobId: String) {
-        val job = NovelWorkspaceGhostwriteJobs.load(projectDirectory, jobId) ?: return
-        if (!job.isTerminal) {
-            NovelWorkspaceGhostwriteJobs.save(
-                job.copy(status = NovelWorkspaceGhostwriteJob.STATUS_RUNNING, updatedAt = Instant.now()),
-                projectDirectory,
+    fun resume(
+        projectDirectory: java.io.File,
+        projectId: String,
+        jobId: String,
+        executionId: String,
+    ): NovelWorkspaceGhostwriteJob? {
+        val job = NovelWorkspaceGhostwriteJobs.restartPaused(
+            projectDirectory,
+            jobId,
+            expectedExecutionId = executionId,
+        ) ?: return null
+        try {
+            enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+        } catch (error: Exception) {
+            NovelWorkspaceGhostwriteJobs.transition(
+                projectDirectory = projectDirectory,
+                jobId = jobId,
+                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                expectedExecutionId = job.executionKey,
             )
-            enqueue(projectId, job)
+            throw error
         }
+        return job
     }
 
-    fun cancel(projectDirectory: java.io.File, jobId: String) {
-        NovelWorkspaceGhostwriteJobs.load(projectDirectory, jobId)?.let { job ->
-            NovelWorkspaceGhostwriteJobs.save(
-                job.copy(status = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED, updatedAt = Instant.now()),
+    /** Continue the same failed batch; its original cursor distinguishes its own stale plot. */
+    fun retryFailed(
+        projectDirectory: java.io.File,
+        projectId: String,
+        jobId: String,
+        executionId: String,
+    ): NovelWorkspaceGhostwriteJob {
+        val job = checkNotNull(
+            NovelWorkspaceGhostwriteJobs.restartFailed(
                 projectDirectory,
-            )
+                jobId,
+                expectedExecutionId = executionId,
+            ),
+        ) {
+            "该代笔批次已不可继续"
         }
-        WorkManager.getInstance(context).cancelAllWorkByTag("$WORK_TAG:$jobId")
+        try {
+            enqueue(projectId, job, ExistingWorkPolicy.REPLACE)
+        } catch (error: Exception) {
+            NovelWorkspaceGhostwriteJobs.transition(
+                projectDirectory = projectDirectory,
+                jobId = jobId,
+                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                newStatus = NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+                reason = error.message ?: "代笔任务入队失败",
+                expectedExecutionId = job.executionKey,
+            )
+            throw error
+        }
+        return job
+    }
+
+    fun cancel(projectDirectory: java.io.File, jobId: String, executionId: String) {
+        val cancelled = NovelWorkspaceGhostwriteJobs.transition(
+            projectDirectory = projectDirectory,
+            jobId = jobId,
+            expectedStatuses = setOf(
+                NovelWorkspaceGhostwriteJob.STATUS_RUNNING,
+                NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+            ),
+            newStatus = NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
+            expectedExecutionId = executionId,
+        )
+        if (cancelled != null) {
+            WorkManager.getInstance(context).cancelAllWorkByTag(jobTag(jobId))
+        }
     }
 
     companion object {
         private const val WORK_TAG = "novel_workspace_ghostwrite"
+
+        private fun jobTag(jobId: String): String = "$WORK_TAG:$jobId"
+
+        private fun executionTag(jobId: String, executionId: String): String =
+            "$WORK_TAG:$jobId:$executionId"
     }
 }

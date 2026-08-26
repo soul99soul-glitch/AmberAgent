@@ -58,7 +58,7 @@ import com.composables.icons.lucide.Share2
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import app.amber.ai.ui.UIMessagePart
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
 import app.amber.core.files.FilesManager
@@ -100,7 +100,7 @@ fun GeneratedImageCarousel(
     val scope = rememberCoroutineScope()
     val filesManager: FilesManager = koinInject()
     val settingsStore: SettingsAggregator = koinInject()
-    val providerManager: ProviderManager = koinInject()
+    val providerCatalog: ProviderCatalog = koinInject()
     val eventBus: AppEventBus = koinInject()
 
     // P6-02 capability gate — no edit entry when the provider cannot edit.
@@ -112,7 +112,7 @@ fun GeneratedImageCarousel(
     val editSupported = remember(editModel?.id, editProvider?.id) {
         val model = editModel ?: return@remember false
         val provider = editProvider ?: return@remember false
-        providerManager.getProviderByType(provider).supportsImageEdit(provider)
+        providerCatalog.image(provider).supportsImageEdit(provider)
     }
 
     var lightboxStartIndex by remember { mutableIntStateOf(-1) }
@@ -408,4 +408,3 @@ private fun resolveContentUri(context: Context, url: String): android.net.Uri {
     val authority = context.packageName + ".fileprovider"
     return FileProvider.getUriForFile(context, authority, file)
 }
-

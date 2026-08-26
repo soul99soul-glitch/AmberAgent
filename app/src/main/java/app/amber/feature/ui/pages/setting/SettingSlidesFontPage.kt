@@ -40,8 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.MoreVertical
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.EllipsisVertical
 import app.amber.core.font.FontPackCategory
 import app.amber.core.font.FontPackState
 import app.amber.core.font.SlidesFontRepository
@@ -161,7 +161,7 @@ fun SettingSlidesFontPage(
                                         modifier = Modifier.size(36.dp),
                                     ) {
                                         Icon(
-                                            HugeIcons.MoreVertical,
+                                            Lucide.EllipsisVertical,
                                             contentDescription = "更多",
                                             modifier = Modifier.size(20.dp),
                                         )

@@ -32,6 +32,7 @@ data class SearchPrefsData(
     val searchBuiltinWikipediaEnabled: Boolean = true,
     val searchBuiltinHackerNewsEnabled: Boolean = true,
     val searchGoogleWebViewFallbackEnabled: Boolean = true,
+    val retiredServiceRequiresReconfiguration: Boolean = false,
 )
 
 class SearchPrefs(
@@ -62,32 +63,47 @@ class SearchPrefs(
 
     private fun readFrom(p: Preferences): SearchPrefsData {
         val refs = redactor.readRefs(p)
+        val decodedServices = p[PreferencesKeys.SEARCH_SERVICES]
+            ?.decodeSearchServicesDroppingLegacy()
+        val storedSelected = p[PreferencesKeys.SEARCH_SELECTED] ?: 0
+        val storedEnabled = p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS]?.let {
+            it.decodeJsonOrNull<List<Uuid>>()
+        }.orEmpty()
+        val retainedEnabled = storedEnabled.filterNot {
+            it in decodedServices?.legacyServiceIds.orEmpty()
+        }
         return SearchPrefsData(
-            searchServices = p[PreferencesKeys.SEARCH_SERVICES]?.let { raw ->
-                raw.decodeJsonOrNull<List<SearchServiceOptions>>()?.let {
-                    redactor.rehydrateSearchServices(it, refs)
-                }
+            searchServices = decodedServices?.services?.let {
+                redactor.rehydrateSearchServices(it, refs)
             } ?: listOf(SearchServiceOptions.DEFAULT),
-            searchCommonOptions = p[PreferencesKeys.SEARCH_COMMON]?.let {
+            searchCommonOptions = (p[PreferencesKeys.SEARCH_COMMON]?.let {
                 it.decodeJsonOrNull<SearchCommonOptions>()
-            } ?: SearchCommonOptions(),
-            searchServiceSelected = p[PreferencesKeys.SEARCH_SELECTED] ?: 0,
-            searchEnabledServiceIds = p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS]?.let {
-                it.decodeJsonOrNull<List<Uuid>>()
-            } ?: emptyList(),
+            } ?: SearchCommonOptions()).let { options ->
+                options.copy(resultSize = options.resultSize.coerceIn(1, 30))
+            },
+            searchServiceSelected = decodedServices?.adjustedSelected(storedSelected) ?: storedSelected,
+            searchEnabledServiceIds = retainedEnabled,
             searchBuiltinDuckDuckGoEnabled = p[PreferencesKeys.SEARCH_BUILTIN_DUCKDUCKGO_ENABLED] != false,
             searchBuiltinBingEnabled = p[PreferencesKeys.SEARCH_BUILTIN_BING_ENABLED] != false,
             searchBuiltinJinaEnabled = p[PreferencesKeys.SEARCH_BUILTIN_JINA_ENABLED] != false,
             searchBuiltinWikipediaEnabled = p[PreferencesKeys.SEARCH_BUILTIN_WIKIPEDIA_ENABLED] != false,
             searchBuiltinHackerNewsEnabled = p[PreferencesKeys.SEARCH_BUILTIN_HACKERNEWS_ENABLED] != false,
             searchGoogleWebViewFallbackEnabled = p[PreferencesKeys.SEARCH_GOOGLE_WEBVIEW_FALLBACK_ENABLED] != false,
+            retiredServiceRequiresReconfiguration = decodedServices?.let { decoded ->
+                decoded.removedLegacy && (
+                    storedSelected in decoded.legacyIndices ||
+                        (storedEnabled.any { it in decoded.legacyServiceIds } && retainedEnabled.isEmpty())
+                    )
+            } == true,
         )
     }
 
     private fun writeTo(p: MutablePreferences, data: SearchPrefsData) {
         // P1-01: redaction 由 SettingsAggregator.writeSettings 统一执行
         p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(data.searchServices)
-        p[PreferencesKeys.SEARCH_COMMON] = JsonInstant.encodeToString(data.searchCommonOptions)
+        p[PreferencesKeys.SEARCH_COMMON] = JsonInstant.encodeToString(
+            data.searchCommonOptions.copy(resultSize = data.searchCommonOptions.resultSize.coerceIn(1, 30))
+        )
         p[PreferencesKeys.SEARCH_SELECTED] = data.searchServiceSelected
         p[PreferencesKeys.SEARCH_ENABLED_SERVICE_IDS] =
             JsonInstant.encodeToString(data.searchEnabledServiceIds)

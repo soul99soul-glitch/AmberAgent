@@ -28,7 +28,7 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyUIMessage
 import app.amber.agent.Screen
-import app.amber.core.model.Assistant
+import app.amber.core.model.AssistantRegex
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.richtext.buildMarkdownPreviewHtml
 import app.amber.feature.ui.components.ui.ChainOfThought
@@ -64,7 +64,7 @@ fun ChatMessage(
     /** Minor-1: 全局生成中（timeline 级）标记，用于禁用与生成写竞争的交互。 */
     timelineLoading: Boolean = false,
     model: Model? = null,
-    assistant: Assistant? = null,
+    regexes: List<AssistantRegex> = emptyList(),
     lastMessage: Boolean = false,
     onFork: () -> Unit,
     onRegenerate: () -> Unit,
@@ -110,8 +110,6 @@ fun ChatMessage(
                     ChatMessageAssistantAvatar(
                         message = message,
                         model = model,
-                        assistant = assistant,
-                        loading = loading,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -142,7 +140,7 @@ fun ChatMessage(
             }
             ProvideTextStyle(textStyle) {
                 MessagePartsBlock(
-                    assistant = assistant,
+                    regexes = regexes,
                     role = message.role,
                     parts = message.parts,
                     loading = loading,

@@ -14,7 +14,7 @@ import app.amber.feature.board.hotlist.deepread.displayHeroImageUrl
 import app.amber.feature.board.hotlist.deepread.errorOf
 import app.amber.feature.board.hotlist.deepread.statusOf
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
-import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import app.amber.core.agent.utils.markdown.CjkCompatibleGfmFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
 import org.jsoup.Jsoup
@@ -23,7 +23,7 @@ import org.jsoup.safety.Safelist
 
 object DeepReadTemplateRenderer {
     private val markdownFlavour by lazy {
-        GFMFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
+        CjkCompatibleGfmFlavourDescriptor(makeHttpsAutoLinks = true, useSafeLinks = true)
     }
     private val markdownParser by lazy { MarkdownParser(markdownFlavour) }
     private val markdownSafelist by lazy {

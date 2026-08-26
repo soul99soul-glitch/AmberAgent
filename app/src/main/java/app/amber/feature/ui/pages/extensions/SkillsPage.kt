@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,6 +17,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -29,7 +31,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.runtime.mutableStateOf
-import me.rerere.hugeicons.stroke.MoreVertical
+import com.composables.icons.lucide.EllipsisVertical
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -45,21 +47,20 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Alert01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.MagicWand01
-import me.rerere.hugeicons.stroke.Puzzle
-import me.rerere.hugeicons.stroke.Refresh01
-import app.amber.core.settings.getCurrentAssistant
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.TriangleAlert
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.WandSparkles
+import com.composables.icons.lucide.Puzzle
+import com.composables.icons.lucide.RefreshCw
 import app.amber.core.files.SkillFrontmatterParser
 import app.amber.core.files.SkillMetadata
 import app.amber.core.files.SkillScanIssue
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.nav.BackButton
-import app.amber.feature.ui.components.ui.RikkaConfirmDialog
+import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceIconButton
 import app.amber.feature.ui.components.ui.WorkspaceLeadingIcon
 import app.amber.feature.ui.components.ui.WorkspaceStatusPill
@@ -81,7 +82,7 @@ fun SkillsPage() {
     val skills by vm.skills.collectAsStateWithLifecycle()
     val skillIssues by vm.skillIssues.collectAsStateWithLifecycle()
     val settings by vm.settings.collectAsStateWithLifecycle()
-    val enabledSkillNames = settings.getCurrentAssistant().enabledSkills
+    val enabledSkillNames = settings.enabledSkills
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val toaster = LocalToaster.current
     val context = LocalContext.current
@@ -137,7 +138,7 @@ fun SkillsPage() {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Puzzle,
+                            imageVector = Lucide.Puzzle,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -166,6 +167,9 @@ fun SkillsPage() {
                             navigator = navController,
                             initText = buildOptimizeSkillPrompt(skill.name),
                         )
+                    },
+                    onToggle = {
+                        vm.setSkillEnabled(skill.name, skill.name !in enabledSkillNames)
                     },
                     onDelete = { deleteTarget = skill },
                 )
@@ -203,7 +207,7 @@ fun SkillsPage() {
         )
     }
 
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = deleteTarget != null,
         title = stringResource(R.string.skills_page_delete_title),
         confirmText = stringResource(R.string.delete),
@@ -250,7 +254,7 @@ private fun SkillLibraryStatusCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 WorkspaceLeadingIcon(
-                    icon = HugeIcons.Puzzle,
+                    icon = Lucide.Puzzle,
                     tone = WorkspaceTone.Neutral,
                     size = 34.dp,
                     iconSize = 20.dp,
@@ -260,27 +264,34 @@ private fun SkillLibraryStatusCard(
                     verticalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     Text(
-                        text = "Skill 库",
+                        text = stringResource(R.string.skills_page_library_title),
                         style = MaterialTheme.typography.titleMedium,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         // V3 settings-skills.jsx: 三 pill 中只有"已启用"用 accentSoft + accent，
                         // 不要绿色。设计稿原注释 "single accent color, no green"
-                        WorkspaceStatusPill("已安装 $installedCount")
-                        WorkspaceStatusPill("已启用 $enabledCount", tone = WorkspaceTone.Accent)
-                        WorkspaceStatusPill("未启用 $disabledCount")
+                        WorkspaceStatusPill(
+                            stringResource(R.string.skills_page_installed_count, installedCount)
+                        )
+                        WorkspaceStatusPill(
+                            stringResource(R.string.skills_page_enabled_count, enabledCount),
+                            tone = WorkspaceTone.Accent,
+                        )
+                        WorkspaceStatusPill(
+                            stringResource(R.string.skills_page_disabled_count, disabledCount)
+                        )
                     }
                 }
             }
             if (issueCount > 0) {
                 Text(
-                    text = "$issueCount 个 Skill 目录格式异常，Agent 不会加载它们。",
+                    text = stringResource(R.string.skills_page_issue_count, issueCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.red,
                 )
             } else {
                 Text(
-                    text = "Agent 会在每次运行前重新扫描已安装 Skill。",
+                    text = stringResource(R.string.skills_page_scan_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.muted,
                 )
@@ -291,26 +302,30 @@ private fun SkillLibraryStatusCard(
             ) {
                 WorkspaceIconButton(
                     onClick = onAdd,
-                    icon = HugeIcons.Add01,
+                    modifier = Modifier.minimumInteractiveComponentSize(),
+                    icon = Lucide.Plus,
                     contentDescription = stringResource(R.string.skills_page_add_title),
                     tone = WorkspaceTone.Neutral,
                 )
                 WorkspaceIconButton(
                     onClick = onImport,
-                    icon = HugeIcons.Download01,
+                    modifier = Modifier.minimumInteractiveComponentSize(),
+                    icon = Lucide.Download,
                     contentDescription = stringResource(R.string.skills_page_import_from_github),
                     tone = WorkspaceTone.Neutral,
                 )
                 WorkspaceIconButton(
                     onClick = onRefresh,
-                    icon = HugeIcons.Refresh01,
-                    contentDescription = "刷新 Skill",
+                    modifier = Modifier.minimumInteractiveComponentSize(),
+                    icon = Lucide.RefreshCw,
+                    contentDescription = stringResource(R.string.skills_page_refresh),
                     tone = WorkspaceTone.Neutral,
                 )
                 if (installedCount > 0) {
                     WorkspaceTextButton(
-                        text = "全量规整",
+                        text = stringResource(R.string.skills_page_optimize_all),
                         onClick = onOptimizeAll,
+                        modifier = Modifier.heightIn(min = 48.dp),
                         tone = WorkspaceTone.Accent,
                     )
                 }
@@ -336,7 +351,7 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Alert01,
+                icon = Lucide.TriangleAlert,
                 tone = WorkspaceTone.Danger,
                 size = 28.dp,
                 iconSize = 16.dp,
@@ -352,7 +367,7 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
                     style = MaterialTheme.typography.titleSmallEmphasized,
                 )
                 Text(
-                    text = "格式错误：${issue.reason}",
+                    text = stringResource(R.string.skills_page_format_error, issue.reason),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.red,
                 )
@@ -367,6 +382,7 @@ private fun SkillCard(
     enabled: Boolean,
     onClick: () -> Unit,
     onOptimize: () -> Unit,
+    onToggle: () -> Unit,
     onDelete: () -> Unit,
 ) {
     val colors = workspaceColors()
@@ -387,7 +403,7 @@ private fun SkillCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             WorkspaceLeadingIcon(
-                icon = HugeIcons.Puzzle,
+                icon = Lucide.Puzzle,
                 tone = WorkspaceTone.Neutral,
                 size = 34.dp,
                 iconSize = 20.dp,
@@ -405,7 +421,9 @@ private fun SkillCard(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = skill.description.ifBlank { "没有描述" },
+                    text = skill.description.ifBlank {
+                        stringResource(R.string.skills_page_no_description)
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.muted,
                     maxLines = 2,
@@ -428,7 +446,7 @@ private fun SkillCard(
                     ) {
                         if (!enabled) {
                             WorkspaceStatusPill(
-                                text = "未启用",
+                                text = stringResource(R.string.skills_page_disabled),
                                 tone = WorkspaceTone.Neutral,
                             )
                         }
@@ -444,23 +462,41 @@ private fun SkillCard(
             // V3 settings-skills.jsx: 单行右侧仅 chevron-right；操作（规整化/删除）改用 overflow 菜单
             var showMenu by remember { mutableStateOf(false) }
             Box {
-                Icon(
-                    imageVector = HugeIcons.MoreVertical,
-                    contentDescription = "更多操作",
-                    tint = chatTheme.inkSoft,
+                Box(
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(48.dp)
                         .clickable { showMenu = true },
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Lucide.EllipsisVertical,
+                        contentDescription = stringResource(R.string.skills_page_more_actions),
+                        tint = chatTheme.inkSoft,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("规整化为移动端") },
+                        text = {
+                            Text(
+                                stringResource(
+                                    if (enabled) R.string.skills_page_disable else R.string.skills_page_enable,
+                                )
+                            )
+                        },
+                        onClick = {
+                            showMenu = false
+                            onToggle()
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.skills_page_optimize)) },
                         leadingIcon = {
                             Icon(
-                                imageVector = HugeIcons.MagicWand01,
+                                imageVector = Lucide.WandSparkles,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                                 tint = chatTheme.accent,
@@ -475,7 +511,7 @@ private fun SkillCard(
                         text = { Text(stringResource(R.string.delete)) },
                         leadingIcon = {
                             Icon(
-                                imageVector = HugeIcons.Delete01,
+                                imageVector = Lucide.Trash2,
                                 contentDescription = null,
                                 modifier = Modifier.size(18.dp),
                                 tint = colors.red,

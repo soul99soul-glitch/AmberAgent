@@ -54,14 +54,14 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.streamToolIndex
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.MusicNote01
-import me.rerere.hugeicons.stroke.Video01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Music
+import com.composables.icons.lucide.Video
 import app.amber.agent.R
 import app.amber.agent.Screen
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.core.ai.generative.GenerativeUiPlanner
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.feature.ui.components.richtext.MarkdownBlock
@@ -78,7 +78,7 @@ import kotlin.time.Duration.Companion.milliseconds
 @OptIn(FlowPreview::class)
 @Composable
 internal fun MessagePartsBlock(
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     role: MessageRole,
     model: Model?,
     parts: List<UIMessagePart>,
@@ -165,7 +165,7 @@ internal fun MessagePartsBlock(
                                     ChatMessageReasoningStep(
                                         reasoning = step.reasoning,
                                         model = model,
-                                        assistant = assistant,
+                                        regexes = regexes,
                                         loading = loading,
                                         collapsedAdaptiveWidth = isReasoningOnlyBlock,
                                     )
@@ -275,7 +275,7 @@ internal fun MessagePartsBlock(
                                                 content = GenerativeUiPlanner.stripVisualRouteTagsForDisplay(
                                                     MessageRenderCache.visualRegexText(
                                                         text = part.text,
-                                                        assistant = assistant,
+                                                        regexes = regexes,
                                                         scope = AssistantAffectScope.USER,
                                                     )
                                                 ),
@@ -294,7 +294,7 @@ internal fun MessagePartsBlock(
                                     val isStreamingText = loading && blockIdx == lastBlockIdx
                                     val assistantDisplayText = MessageRenderCache.visualRegexText(
                                         text = part.text,
-                                        assistant = assistant,
+                                        regexes = regexes,
                                         scope = AssistantAffectScope.ASSISTANT,
                                     )
                                     // Streaming tail text block: single-Text markdown layer
@@ -317,7 +317,7 @@ internal fun MessagePartsBlock(
                                             {
                                                 StreamingSingleTextMarkdown(
                                                     text = part.text,
-                                                    assistant = assistant,
+                                                    regexes = regexes,
                                                     streaming = isStreamingText,
                                                     onSettled = { singleTextDrained = true },
                                                 )
@@ -408,7 +408,7 @@ internal fun MessagePartsBlock(
                             shape = RoundedCornerShape(8.dp),
                         ) {
                             Box(modifier = Modifier.size(72.dp), contentAlignment = Alignment.Center) {
-                                Icon(HugeIcons.Video01, null)
+                                Icon(Lucide.Video, null)
                             }
                         }
                     }
@@ -452,7 +452,7 @@ internal fun MessagePartsBlock(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     Icon(
-                                        imageVector = HugeIcons.MusicNote01,
+                                        imageVector = Lucide.Music,
                                         contentDescription = null,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -535,7 +535,7 @@ internal fun MessagePartsBlock(
 
                                         else -> {
                                             Icon(
-                                                imageVector = HugeIcons.File02,
+                                                imageVector = Lucide.FileText,
                                                 contentDescription = null,
                                                 modifier = Modifier.size(20.dp)
                                             )

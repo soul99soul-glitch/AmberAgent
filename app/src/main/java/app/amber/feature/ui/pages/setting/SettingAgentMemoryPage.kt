@@ -48,11 +48,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Edit01
-import me.rerere.hugeicons.stroke.Play
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.Pencil
+import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.settings.AgentRuntimeSetting
@@ -69,7 +69,7 @@ import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
-import app.amber.feature.ui.components.ui.RikkaConfirmDialog
+import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
@@ -138,12 +138,12 @@ fun SettingAgentMemoryPage(
             },
             confirmButton = {
                 TextButton(onClick = { memoryDialogState.confirm() }) {
-                    Text(stringResource(R.string.assistant_page_save))
+                    Text(stringResource(R.string.common_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { memoryDialogState.dismiss() }) {
-                    Text(stringResource(R.string.assistant_page_cancel))
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -163,7 +163,7 @@ fun SettingAgentMemoryPage(
                             onClick = { vm.triggerDreamNow() },
                         ) {
                             Icon(
-                                imageVector = HugeIcons.Play,
+                                imageVector = Lucide.Play,
                                 contentDescription = "立即运行一次 Daydream",
                             )
                         }
@@ -251,7 +251,7 @@ fun SettingAgentMemoryPage(
         }
     }
 
-    RikkaConfirmDialog(
+    ConfirmDialog(
         show = pendingDeleteMemory != null,
         title = stringResource(R.string.confirm_delete),
         confirmText = stringResource(R.string.confirm),
@@ -777,12 +777,12 @@ private fun AgentSoulCard(
                         showEditor = false
                     },
                 ) {
-                    Text(stringResource(R.string.assistant_page_save))
+                    Text(stringResource(R.string.common_save))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showEditor = false }) {
-                    Text(stringResource(R.string.assistant_page_cancel))
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -1242,7 +1242,7 @@ private fun MemoryRecordsSection(
                 onClick = onAddMemory,
                 modifier = Modifier.align(Alignment.CenterEnd),
             ) {
-                Icon(HugeIcons.Add01, contentDescription = null)
+                Icon(Lucide.Plus, contentDescription = null)
             }
         }
     }
@@ -1302,12 +1302,12 @@ private fun MemoryItem(
                 )
             }
             IconButton(onClick = { onEditMemory(memory) }) {
-                Icon(HugeIcons.Edit01, contentDescription = null, modifier = Modifier.size(20.dp))
+                Icon(Lucide.Pencil, contentDescription = null, modifier = Modifier.size(20.dp))
             }
             IconButton(onClick = { onDeleteMemory(memory) }) {
                 Icon(
-                    HugeIcons.Delete01,
-                    contentDescription = stringResource(R.string.assistant_page_delete),
+                    Lucide.Trash2,
+                    contentDescription = stringResource(R.string.delete),
                     modifier = Modifier.size(20.dp),
                 )
             }

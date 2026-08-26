@@ -5,8 +5,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import app.amber.agent.Screen
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.repository.ConversationRepository
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.modelcouncil.CouncilParticipant
 import app.amber.feature.modelcouncil.CouncilParticipantKind
@@ -35,7 +35,6 @@ fun CouncilRoomDevEntry() {
     Button(onClick = {
         scope.launch {
             val settings = settingsStore.settingsFlow.value
-            val assistant = settings.getCurrentAssistant()
             // Reuse the most recent conversation so the room has a host binding.
             val conversation = conversationRepo.getRecentConversations(limit = 1).firstOrNull()
                 ?: return@launch
@@ -66,8 +65,8 @@ fun CouncilRoomDevEntry() {
             }
             val result = manager.openRoom(
                 conversationId = conversation.id,
-                hostAssistantId = assistant.id,
-                hostName = assistant.name.ifBlank { "Host" },
+                hostAssistantId = AMBER_AGENT_ID,
+                hostName = "Amber",
                 objective = "PR3 调试:讨论 AI agent 的多模型协作架构",
                 initialGuests = guests,
             )

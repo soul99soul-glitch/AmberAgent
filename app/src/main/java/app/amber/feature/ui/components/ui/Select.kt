@@ -27,9 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowDown01
-import me.rerere.hugeicons.stroke.ArrowUp01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowDown
+import com.composables.icons.lucide.ArrowUp
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 
 @Composable
@@ -82,7 +82,7 @@ fun <T> Select(
                 )
                 trailing()
                 Icon(
-                    imageVector = if (expanded) HugeIcons.ArrowUp01 else HugeIcons.ArrowDown01,
+                    imageVector = if (expanded) Lucide.ArrowUp else Lucide.ArrowDown,
                     contentDescription = "expand",
                     modifier = Modifier.size(14.dp),
                 )

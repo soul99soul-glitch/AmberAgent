@@ -11,10 +11,8 @@ import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.Generator
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.Conversation
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
 import app.amber.core.settings.Settings
 import app.amber.feature.runtime.ToolInvocationContext
 import kotlinx.coroutines.flow.Flow
@@ -155,13 +153,7 @@ class SubAgentRunnerTest {
                     models = listOf(model),
                 )
             ),
-            assistants = listOf(
-                Assistant(
-                    id = DEFAULT_ASSISTANT_ID,
-                    name = "Parent",
-                    systemPrompt = "Parent prompt",
-                )
-            ),
+            systemPrompt = "Parent prompt",
         )
     }
 
@@ -191,7 +183,6 @@ class SubAgentRunnerTest {
             messages: List<UIMessage>,
             inputTransformers: List<InputMessageTransformer>,
             outputTransformers: List<OutputMessageTransformer>,
-            assistant: Assistant,
             memories: List<AssistantMemory>?,
             tools: List<Tool>,
             maxSteps: Int,

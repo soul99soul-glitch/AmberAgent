@@ -7,7 +7,6 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.Settings
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import org.junit.Assert.assertEquals
@@ -17,8 +16,7 @@ import kotlin.uuid.Uuid
 class StreamingTailVisualTransformTest {
     @Test
     fun tailSafeStreamingVisualTransformMatchesFullVisualTransformForTailMessage() = runBlocking {
-        val assistant = Assistant(
-            id = Uuid.random(),
+        val settings = Settings(
             regexes = listOf(
                 AssistantRegex(
                     id = Uuid.random(),
@@ -42,15 +40,13 @@ class StreamingTailVisualTransformTest {
             transformers = transformers,
             context = ContextWrapper(null),
             model = Model(modelId = "test"),
-            assistant = assistant,
-            settings = Settings(),
+            settings = settings,
         )
         val tail = messages.visualTransformsStreamingTail(
             transformers = transformers,
             context = ContextWrapper(null),
             model = Model(modelId = "test"),
-            assistant = assistant,
-            settings = Settings(),
+            settings = settings,
         )
 
         assertEquals(full, tail)

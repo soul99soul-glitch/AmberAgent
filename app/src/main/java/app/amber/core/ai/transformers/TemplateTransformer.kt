@@ -2,22 +2,16 @@ package app.amber.core.ai.transformers
 
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.toLocalDate
 import app.amber.core.utils.toLocalTime
 import java.time.Instant
 
-class TemplateTransformer(
-    private val settingsStore: SettingsAggregator,
-) : InputMessageTransformer {
+class TemplateTransformer : InputMessageTransformer {
     override suspend fun transform(
         ctx: TransformerContext,
         messages: List<UIMessage>,
     ): List<UIMessage> {
-        val template = settingsStore.settingsFlow.value.assistants
-            .find { it.id == ctx.assistant.id }
-            ?.messageTemplate
-            ?: return messages
+        val template = ctx.settings.messageTemplate
         val now = Instant.now()
         return messages.map { message ->
             message.copy(

@@ -16,7 +16,7 @@ import kotlinx.serialization.json.Json
 /**
  * P1-04 — final token budget hard fit.
  *
- * Runs once, at the provider request boundary (inside GenerationHandler's
+ * Runs once, at the provider request boundary (inside ChatRunCoordinator's
  * streamWith / generateWith, AFTER all transformers, mailbox and steer
  * merge). Covers: system prompt, memory, materials, document/OCR output,
  * tool schemas, mailbox/steer and the current-turn attachment text.

@@ -16,9 +16,9 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
-import app.amber.ai.provider.Provider
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
@@ -40,7 +40,7 @@ private const val TAG = "ConversationContextEngine"
 /**
  * Min millis between successive _summaryStreamFlow.update emissions while
  * streaming a compact summary. Mirrors STREAM_UI_FLUSH_INTERVAL_MS in
- * GenerationHandler — 33ms ≈ one frame at 30Hz; one accumulated string copy
+ * ChatRunCoordinator — 33ms ≈ one frame at 30Hz; one accumulated string copy
  * per frame is enough to feel "live" without saturating the StateFlow CAS
  * loop and ChatList recomposition.
  */
@@ -70,7 +70,7 @@ class ContextCompactionFailedException(
 ) : RuntimeException("Context compression failed [$phase]: $compactionReason")
 
 class ConversationContextEngine(
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val json: Json,
     private val contextRepository: ConversationContextRepository,
     private val appScope: AppScope,
@@ -410,7 +410,7 @@ class ConversationContextEngine(
                     ?: error("No model available for compression")
                 val provider = compressionModel.findProvider(settings.providers)
                     ?: error("Provider not found")
-                val providerHandler = providerManager.getProviderByType(provider)
+                val providerHandler = providerCatalog.text(provider)
                 val activeCompacts = contextRepository.getCompacts(conversation.id)
                 val plan = planCompactionForRequest(
                     nodes = conversation.messageNodes,
@@ -672,7 +672,7 @@ class ConversationContextEngine(
     }
 
     private suspend fun <T : ProviderSetting> streamCompactSummary(
-        providerHandler: Provider<T>,
+        providerHandler: TextModelGateway<T>,
         provider: T,
         compressionModel: Model,
         conversationKey: String,
@@ -683,7 +683,7 @@ class ConversationContextEngine(
         // large StateFlow string copy and ChatList recomposition per token.
         val accumulated = StringBuilder()
         var lastFlushAt = 0L
-        providerHandler.streamText(
+        providerHandler.stream(
             providerSetting = provider,
             messages = listOf(UIMessage.user(prompt)),
             params = TextGenerationParams(model = compressionModel),

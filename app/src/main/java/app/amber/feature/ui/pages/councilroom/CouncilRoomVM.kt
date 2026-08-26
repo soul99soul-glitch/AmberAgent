@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.transformers.DocumentAsPromptTransformer
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.settings.findModelById
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomManager
@@ -196,7 +196,6 @@ class CouncilRoomVM(
             }
             _isRestarting.value = true
             try {
-                val assistant = settings.getCurrentAssistant()
                 android.util.Log.i("CouncilRestart", "restart(): calling close(cancel=true)")
                 val closeResult = runCatching { manager.close(cid, cancel = true) }
                 android.util.Log.i("CouncilRestart", "restart(): close returned $closeResult")
@@ -208,8 +207,8 @@ class CouncilRoomVM(
                 val openResult = runCatching {
                     manager.openRoom(
                         conversationId = cid,
-                        hostAssistantId = assistant.id,
-                        hostName = assistant.name.removeSuffix(" Agent").ifBlank { "Amber" },
+                        hostAssistantId = AMBER_AGENT_ID,
+                        hostName = "Amber",
                         objective = currentRoom?.objective ?: "多模型协作讨论",
                         initialGuests = guests,
                         maxRounds = currentRoom?.maxRounds ?: settings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),

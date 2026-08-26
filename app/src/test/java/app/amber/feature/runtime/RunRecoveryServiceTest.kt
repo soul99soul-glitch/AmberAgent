@@ -5,7 +5,7 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.Conversation
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.MessageNode
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.coroutines.runBlocking
@@ -48,7 +48,7 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
     private fun conversationWithTool(conversationId: Uuid, tool: UIMessagePart.Tool): Conversation =
         Conversation(
             id = conversationId,
-            assistantId = DEFAULT_ASSISTANT_ID,
+            assistantId = AMBER_AGENT_ID,
             messageNodes = listOf(
                 MessageNode.of(UIMessage(role = MessageRole.USER, parts = listOf(UIMessagePart.Text("run a tool")))),
                 MessageNode.of(UIMessage(role = MessageRole.ASSISTANT, parts = listOf(tool))),

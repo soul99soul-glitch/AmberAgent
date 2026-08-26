@@ -715,58 +715,6 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                 }
             }
 
-            item {
-                CardGroup(
-                    modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { SectionLabel(stringResource(R.string.setting_page_tts_settings)) },
-                ) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_tts_only_read_quoted_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.ttsOnlyReadQuoted,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(ttsOnlyReadQuoted = it))
-                                }
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_auto_play_tts_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_display_page_auto_play_tts_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = displaySetting.autoPlayTTSAfterGeneration,
-                                onCheckedChange = {
-                                    updateDisplaySetting(displaySetting.copy(autoPlayTTSAfterGeneration = it))
-                                }
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_display_page_tts_default_speed_title)) },
-                        supportingContent = {
-                            // Range 0.5..2.0 with 0.1 snap → {0.5, 0.6, ..., 2.0}×.
-                            NotionSlider(
-                                value = displaySetting.ttsDefaultPlaybackSpeed,
-                                onValueChangeFinished = {
-                                    updateDisplaySetting(displaySetting.copy(ttsDefaultPlaybackSpeed = it))
-                                },
-                                valueRange = 0.5f..2.0f,
-                                snapStep = 0.1f,
-                                valueLabel = {
-                                    Text(
-                                        text = "${"%.1f".format(it)}×",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                },
-                            )
-                        },
-                    )
-                }
-            }
         }
     }
 }

@@ -32,13 +32,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Clock02
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.McpServer
-import me.rerere.hugeicons.stroke.MoreVertical
-import me.rerere.hugeicons.stroke.Package
-import me.rerere.hugeicons.stroke.Play
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.AlarmClock
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.ServerCog
+import com.composables.icons.lucide.EllipsisVertical
+import com.composables.icons.lucide.Package
+import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.cron.AgentCronManager
@@ -86,31 +86,31 @@ fun SettingAgentExtensionsPage() {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.Skills) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        leadingContent = { Icon(Lucide.Package, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_skills_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_skills)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.Extensions) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        leadingContent = { Icon(Lucide.Package, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_extensions_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingMcp) },
-                        leadingContent = { Icon(HugeIcons.McpServer, null) },
+                        leadingContent = { Icon(Lucide.ServerCog, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_mcp_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_mcp)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingCronTasks) },
-                        leadingContent = { Icon(HugeIcons.Clock02, null) },
+                        leadingContent = { Icon(Lucide.AlarmClock, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_cron_tasks_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_cron_tasks)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSlidesFonts) },
-                        leadingContent = { Icon(HugeIcons.Package, null) },
+                        leadingContent = { Icon(Lucide.Package, null) },
                         supportingContent = { Text("下载中文字体包，提高生成式幻灯片的还原度") },
                         headlineContent = { Text("Slides 字体资源") },
                     )
@@ -238,7 +238,7 @@ fun SettingAgentRuntimeTasksPage(
                 item {
                     CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                         item(
-                            leadingContent = { Icon(HugeIcons.Clock02, null) },
+                            leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_empty_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_empty_desc)) },
                         )
@@ -248,7 +248,7 @@ fun SettingAgentRuntimeTasksPage(
                 items(tasks, key = { it.taskId }) { task ->
                     CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                         item(
-                            leadingContent = { Icon(HugeIcons.Clock02, null) },
+                            leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(task.title) },
                             supportingContent = { AgentTaskSummary(task) },
                         )
@@ -360,7 +360,7 @@ fun SettingCronTasksPage(
                 item {
                     CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                         item(
-                            leadingContent = { Icon(HugeIcons.Clock02, null) },
+                            leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(stringResource(R.string.setting_cron_tasks_empty_title)) },
                             supportingContent = { Text(stringResource(R.string.setting_cron_tasks_empty_desc)) },
                         )
@@ -371,7 +371,7 @@ fun SettingCronTasksPage(
                     CardGroup(modifier = Modifier.padding(horizontal = 8.dp)) {
                         item(
                             onClick = { selectedTask = task },
-                            leadingContent = { Icon(HugeIcons.Clock02, null) },
+                            leadingContent = { Icon(Lucide.AlarmClock, null) },
                             headlineContent = { Text(task.title) },
                             supportingContent = { CronTaskSummary(task) },
                             trailingContent = {
@@ -503,7 +503,7 @@ private fun CronTaskActions(
             onCheckedChange = onToggle,
         )
         IconButton(onClick = { expanded = true }) {
-            Icon(HugeIcons.MoreVertical, contentDescription = "更多操作")
+            Icon(Lucide.EllipsisVertical, contentDescription = "更多操作")
         }
         DropdownMenu(
             expanded = expanded,
@@ -518,7 +518,7 @@ private fun CronTaskActions(
             )
             DropdownMenuItem(
                 text = { Text("立即运行") },
-                leadingIcon = { Icon(HugeIcons.Play, null) },
+                leadingIcon = { Icon(Lucide.Play, null) },
                 onClick = {
                     expanded = false
                     onRunNow()
@@ -526,7 +526,7 @@ private fun CronTaskActions(
             )
             DropdownMenuItem(
                 text = { Text("删除") },
-                leadingIcon = { Icon(HugeIcons.Delete01, null) },
+                leadingIcon = { Icon(Lucide.Trash2, null) },
                 onClick = {
                     expanded = false
                     onDelete()

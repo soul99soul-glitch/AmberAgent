@@ -23,8 +23,8 @@ import kotlin.uuid.Uuid
  * Each invocation must be bound to a concrete [conversationId] because the
  * execute lambda writes the resulting images to a per-conversation subdir on
  * disk. The tool is built per-conversation (LocalTools wires this from
- * `getTools(options, conversationId)` only when the current assistant — or
- * the global Settings — resolves to a real image-generation model).
+ * `getTools(options, conversationId)` only when global Settings resolves to
+ * a real image-generation model).
  *
  * Reads the current `Settings.getCurrentImageGenerationModel()` at execute
  * time (not bind time) so the tool always picks up the latest configured
@@ -161,7 +161,7 @@ fun createImageGenTool(
 
             val settings = settingsStore.settingsFlow.value
             val model = settings.getCurrentImageGenerationModel()
-                ?: error("No image generation model configured. Please ask the user to set one in the Assistant settings page.")
+                ?: error("No image generation model configured. Please ask the user to configure one in Settings > Models.")
 
             val files = imageGenerationRepository.generateForConversation(
                 modelId = model.id,

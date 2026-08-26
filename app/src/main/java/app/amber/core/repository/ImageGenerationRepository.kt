@@ -4,9 +4,8 @@ import android.util.Log
 import kotlinx.coroutines.flow.first
 import app.amber.ai.provider.ImageGenerationMode
 import app.amber.ai.provider.ImageGenerationParams
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
-import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.ai.ui.ImageAspectRatio
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -17,59 +16,13 @@ import app.amber.core.files.FilesManager
 import java.io.File
 import kotlin.uuid.Uuid
 
-/**
- * Shared image-generation entry point used by both [app.amber.feature.ui.pages.imggen.ImgGenVM]
- * (the standalone "create images" page) and the `generate_image` chat tool
- * (inline image generation triggered by the main chat model).
- *
- * Two destinations are supported:
- *  - [generateToGallery]: writes results to the global images dir
- *    (`filesDir/images/`) — the historic gallery used by [ImgGenVM].
- *    Caller is responsible for inserting [app.amber.agent.data.db.entity.GenMediaEntity]
- *    rows after success (kept out of this repo to preserve the existing
- *    ImgGenVM ordering: insert *after* the file write succeeds).
- *  - [generateForConversation]: writes results to a per-conversation dir
- *    (`filesDir/chat_images/{conversationId}/`) and does NOT touch the
- *    gallery DB. Chat-inline generated images live with their conversation
- *    and disappear on conversation deletion; users save to MediaStore on
- *    demand via the long-press menu in the timeline.
- */
+/** Chat-owned image generation entry point. */
 class ImageGenerationRepository(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val filesManager: FilesManager,
     private val promptConfigRepository: AgentPromptConfigRepository,
 ) {
-    /**
-     * Generate images and persist each to the **global gallery dir**.
-     * Used by ImgGenVM. Returns the saved [File]s in result order.
-     */
-    suspend fun generateToGallery(
-        modelId: Uuid,
-        prompt: String,
-        aspectRatio: ImageAspectRatio,
-        numOfImages: Int,
-        customWidth: Int? = null,
-        customHeight: Int? = null,
-    ): Result<List<GeneratedImageFile>> = runCatching {
-        val invocation = invoke(modelId, prompt, aspectRatio, numOfImages, customWidth = customWidth, customHeight = customHeight)
-        invocation.results.mapIndexed { index, item ->
-            val timestamp = System.currentTimeMillis()
-            // Match the historic filename convention from ImgGenVM so existing
-            // gallery entries and new ones look the same on disk.
-            val sanitizedModel = invocation.modelDisplayName.replace(Regex("[^A-Za-z0-9._-]"), "_")
-            val filename = "${timestamp}_${sanitizedModel}_$index.png"
-            val file = File(filesManager.getImagesDir(), filename)
-            filesManager.createImageFileFromBase64(item.data, file.absolutePath)
-            GeneratedImageFile(
-                file = file,
-                relativePath = "images/${file.name}",
-                modelDisplayName = invocation.modelDisplayName,
-                mimeType = item.mimeType,
-            )
-        }
-    }
-
     /**
      * Generate images for the chat tool. Persists to the conversation's
      * private dir; does NOT touch the gallery DB.
@@ -113,7 +66,7 @@ class ImageGenerationRepository(
         val settings = settingsStore.settingsFlow.value
         val model = settings.getCurrentImageGenerationModel() ?: return false
         val provider = model.findProvider(settings.providers) ?: return false
-        return providerManager.getProviderByType(provider).supportsImageEdit(provider)
+        return providerCatalog.image(provider).supportsImageEdit(provider)
     }
 
     private suspend fun invoke(
@@ -161,7 +114,7 @@ class ImageGenerationRepository(
         )
 
         Log.i(TAG, "generateImage model=${model.displayName} n=$numOfImages aspect=$aspectRatio mode=$mode")
-        val result = providerManager.getProviderByType(provider).generateImage(provider, params)
+        val result = providerCatalog.image(provider).generateImage(provider, params)
         return Invocation(
             results = result.items,
             modelDisplayName = model.displayName,
@@ -183,7 +136,7 @@ class ImageGenerationRepository(
         sourceImageUrl: String?,
         conversationId: Uuid,
     ): String {
-        if (!providerManager.getProviderByType(provider).supportsImageEdit(provider)) {
+        if (!providerCatalog.image(provider).supportsImageEdit(provider)) {
             error("The current image generation model does not support editing images")
         }
         require(!sourceImageUrl.isNullOrBlank()) { "mode=edit requires a source image URL" }
@@ -193,12 +146,12 @@ class ImageGenerationRepository(
         require(file.canonicalFile.path.startsWith(conversationDir.path + File.separator)) {
             "Source image is outside this conversation's images"
         }
-        require(OpenAIProvider.sourceImageMimeType(file.name) != null) {
+        require(sourceImageMimeType(file.name) != null) {
             "Unsupported source image format: ${file.name} (png/jpg/jpeg/webp only)"
         }
-        require(file.length() <= OpenAIProvider.IMAGE_EDIT_MAX_SOURCE_BYTES) {
+        require(file.length() <= IMAGE_EDIT_MAX_SOURCE_BYTES) {
             "Source image is too large " +
-                "(max ${OpenAIProvider.IMAGE_EDIT_MAX_SOURCE_BYTES / (1024 * 1024)}MB)"
+                "(max ${IMAGE_EDIT_MAX_SOURCE_BYTES / (1024 * 1024)}MB)"
         }
         return "file://${file.absolutePath}"
     }
@@ -210,6 +163,14 @@ class ImageGenerationRepository(
 
     companion object {
         private const val TAG = "ImageGenerationRepository"
+        private const val IMAGE_EDIT_MAX_SOURCE_BYTES = 5L * 1024L * 1024L
+
+        private fun sourceImageMimeType(fileName: String): String? = when (fileName.substringAfterLast('.', "").lowercase()) {
+            "png" -> "image/png"
+            "jpg", "jpeg" -> "image/jpeg"
+            "webp" -> "image/webp"
+            else -> null
+        }
     }
 }
 

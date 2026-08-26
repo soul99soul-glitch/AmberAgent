@@ -1,11 +1,11 @@
 package app.amber.feature.ui.pages.setting
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Earth
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Github
-import me.rerere.hugeicons.stroke.SmartPhone01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.Earth
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Github
+import com.composables.icons.lucide.Smartphone
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -101,7 +101,7 @@ fun SettingAboutPage() {
                     ) {
                         AsyncImage(
                             model = R.mipmap.ic_launcher,
-                            contentDescription = "Logo",
+                            contentDescription = stringResource(R.string.about_page_logo_content_description),
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .size(150.dp)
@@ -136,14 +136,14 @@ fun SettingAboutPage() {
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = LocalIndication.current,
                             ),
-                            leadingContent = { Icon(HugeIcons.Code, null) },
+                            leadingContent = { Icon(Lucide.CodeXml, null) },
                             supportingContent = {
                                 Text("${BuildConfig.VERSION_NAME} / ${BuildConfig.VERSION_CODE}")
                             },
                             headlineContent = { Text(stringResource(R.string.about_page_version)) },
                         )
                         item(
-                            leadingContent = { Icon(HugeIcons.SmartPhone01, null) },
+                            leadingContent = { Icon(Lucide.Smartphone, null) },
                             supportingContent = {
                                 Text("${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE} / SDK ${android.os.Build.VERSION.SDK_INT}")
                             },
@@ -157,20 +157,26 @@ fun SettingAboutPage() {
                         modifier = Modifier.padding(horizontal = 8.dp),
                     ) {
                         item(
-                            leadingContent = { Icon(HugeIcons.Earth, null) },
-                            supportingContent = { Text("Experimental Android Agent") },
+                            leadingContent = { Icon(Lucide.Earth, null) },
+                            supportingContent = {
+                                Text(stringResource(R.string.about_page_website_description))
+                            },
                             headlineContent = { Text(stringResource(R.string.about_page_website)) },
                         )
                         item(
-                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub") },
-                            leadingContent = { Icon(HugeIcons.Github, null) },
-                            supportingContent = { Text("Upstream source repository") },
+                            onClick = { context.openUrl("https://github.com/soul99soul-glitch/AmberAgent") },
+                            leadingContent = { Icon(Lucide.Github, null) },
+                            supportingContent = {
+                                Text(stringResource(R.string.about_page_github_description))
+                            },
                             headlineContent = { Text(stringResource(R.string.about_page_github)) },
                         )
                         item(
-                            onClick = { context.openUrl("https://github.com/rikkahub/rikkahub/blob/master/LICENSE") },
-                            leadingContent = { Icon(HugeIcons.File02, null) },
-                            supportingContent = { Text("Upstream open-source license") },
+                            onClick = { context.openUrl("https://github.com/soul99soul-glitch/AmberAgent/blob/main/LICENSE") },
+                            leadingContent = { Icon(Lucide.FileText, null) },
+                            supportingContent = {
+                                Text(stringResource(R.string.about_page_license_description))
+                            },
                             headlineContent = { Text(stringResource(R.string.about_page_license)) },
                         )
                     }

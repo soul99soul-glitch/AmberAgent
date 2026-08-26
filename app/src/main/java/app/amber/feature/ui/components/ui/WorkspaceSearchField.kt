@@ -37,8 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.X
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Search01
+import com.composables.icons.lucide.Search
 import app.amber.feature.ui.pages.chat.LocalChatTheme
 
 /**
@@ -69,7 +68,7 @@ fun WorkspaceSearchField(
 ) {
     val workspace = workspaceColors()
     // V3: 统一 drawer Amber 下方搜索栏样式 — 999 capsule + chatTheme.searchBarBg + hair border
-    // + HugeIcons.Search01 icon + chatTheme.inkSoft tint. (之前是 10dp 圆角 + workspace.row)
+    // + Lucide.Search icon + chatTheme.inkSoft tint. (之前是 10dp 圆角 + workspace.row)
     val chatTheme = LocalChatTheme.current
     val focusRequester = remember { FocusRequester() }
     val outerTapSource = remember { MutableInteractionSource() }
@@ -93,7 +92,7 @@ fun WorkspaceSearchField(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(
-                imageVector = HugeIcons.Search01,
+                imageVector = Lucide.Search,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 tint = chatTheme.inkSoft,

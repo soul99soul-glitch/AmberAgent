@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import app.amber.ai.provider.Model
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
@@ -37,12 +38,10 @@ import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.ConversationCompact
 import app.amber.core.context.ConversationContextRepository
 import app.amber.core.files.FilesManager
-import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.model.NodeFavoriteTarget
-import app.amber.core.model.withChatModelReasoningMemory
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.FavoriteRepository
 import app.amber.core.service.ChatError
@@ -259,26 +258,30 @@ class ChatVM(
     }
 
     // 设置聊天模型
-    fun setChatModel(assistant: Assistant, model: Model) {
+    fun setChatModel(model: Model) {
         viewModelScope.launch {
             settingsStore.update { settings ->
+                val currentModelId = settings.chatModelId
+                val currentModel = settings.findModelById(currentModelId)
+                val currentDefaultReasoningLevel = currentModel
+                    ?.let { settings.defaultReasoningLevelForModel(it) }
+                    ?: settings.defaultReasoningLevelForModel(model)
+                val currentReasoningLevel = settings.rememberedReasoningLevelsByModelId[
+                    currentModelId.toString()
+                ] ?: if (settings.reasoningLevel == ReasoningLevel.AUTO) {
+                    currentDefaultReasoningLevel
+                } else {
+                    settings.reasoningLevel
+                }
+                val rememberedReasoningLevels = settings.rememberedReasoningLevelsByModelId +
+                    (currentModelId.toString() to currentReasoningLevel)
+                val selectedReasoningLevel = rememberedReasoningLevels[model.id.toString()]
+                    ?: settings.defaultReasoningLevelForModel(model)
                 settings.copy(
-                    assistants = settings.assistants.map {
-                        if (it.id == assistant.id) {
-                            val currentModelId = it.chatModelId ?: settings.chatModelId
-                            val currentModel = settings.findModelById(currentModelId)
-                            it.withChatModelReasoningMemory(
-                                currentModelId = currentModelId,
-                                currentDefaultReasoningLevel = currentModel
-                                    ?.let { current -> settings.defaultReasoningLevelForModel(current) }
-                                    ?: settings.defaultReasoningLevelForModel(model),
-                                selectedModelId = model.id,
-                                selectedDefaultReasoningLevel = settings.defaultReasoningLevelForModel(model),
-                            )
-                        } else {
-                            it
-                        }
-                    })
+                    chatModelId = model.id,
+                    reasoningLevel = selectedReasoningLevel,
+                    rememberedReasoningLevelsByModelId = rememberedReasoningLevels,
+                )
             }
         }
     }
@@ -469,19 +472,6 @@ class ChatVM(
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {
             conversationRepo.togglePinStatus(conversation.id)
-        }
-    }
-
-    fun moveConversationToAssistant(conversation: Conversation, targetAssistantId: Uuid) {
-        viewModelScope.launch {
-            val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
-            val updatedConversation = conversationFull.copy(assistantId = targetAssistantId)
-            if (conversation.id == _conversationId) {
-                chatService.saveConversation(_conversationId, updatedConversation)
-                settingsStore.updateAssistant(targetAssistantId)
-            } else {
-                conversationRepo.updateConversation(updatedConversation)
-            }
         }
     }
 

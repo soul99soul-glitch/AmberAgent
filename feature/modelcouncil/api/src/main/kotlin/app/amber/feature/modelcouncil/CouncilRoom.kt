@@ -77,7 +77,7 @@ val CouncilRoomStatus.terminal: Boolean
         this == CouncilRoomStatus.CANCELLED ||
         this == CouncilRoomStatus.FAILED
 
-/** Distinguishes the host (the conversation's main Assistant) from invited guests. */
+/** Distinguishes the host (the conversation's Amber profile) from invited guests. */
 @Serializable
 enum class CouncilParticipantKind {
     @SerialName("host") HOST,
@@ -108,7 +108,7 @@ enum class CouncilParticipantStatus {
  * A Room participant.
  *
  * - Host: [id] = [COUNCIL_ROOM_HOST_ID], [modelId] = null (resolved from the
- *   conversation's Assistant at generation time), [kind] = HOST.
+ *   conversation's Amber profile at generation time), [kind] = HOST.
  * - Guest: bound to a provider model OR an external CLI runner, [kind] = GUEST.
  *
  * [avatarSeed] feeds the deterministic pixel-avatar generator (mirrors
@@ -259,7 +259,7 @@ data class CouncilRoom(
     @SerialName("output_budget_chars") val outputBudgetChars: Int = DEFAULT_COUNCIL_ROOM_OUTPUT_BUDGET_CHARS,
     @SerialName("seat_timeout_ms") val seatTimeoutMs: Long = DEFAULT_COUNCIL_ROOM_SEAT_TIMEOUT_MS,
     @SerialName("total_timeout_ms") val totalTimeoutMs: Long = DEFAULT_COUNCIL_ROOM_TOTAL_TIMEOUT_MS,
-    /** Optional override; null = use the host Assistant's configured model. */
+    /** Optional override; null = use the Amber profile's configured model. */
     @SerialName("host_model_id_override") val hostModelIdOverride: Uuid? = null,
     @SerialName("created_at_ms") val createdAtMs: Long,
     @SerialName("updated_at_ms") val updatedAtMs: Long = createdAtMs,

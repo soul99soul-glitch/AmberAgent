@@ -33,13 +33,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.Model
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.DashboardSquare01
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Globe02
-import me.rerere.hugeicons.stroke.News01
-import me.rerere.hugeicons.stroke.ServerStack01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.LayoutDashboard
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Newspaper
+import com.composables.icons.lucide.Server
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.office.FeishuOfficeAnalysisTemplate
@@ -69,56 +69,56 @@ fun SettingExperimentalPage() {
                 ) {
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalWebMount) },
-                        icon = { Icon(HugeIcons.Globe02, contentDescription = null) },
+                        icon = { Icon(Lucide.Globe, contentDescription = null) },
                         title = stringResource(R.string.setting_webmount_title),
                         description = stringResource(R.string.setting_webmount_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
-                        icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        icon = { Icon(Lucide.Server, contentDescription = null) },
                         title = stringResource(R.string.setting_icloud_title),
                         description = stringResource(R.string.setting_icloud_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalOfficePro) },
-                        icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                        icon = { Icon(Lucide.FileText, contentDescription = null) },
                         title = stringResource(R.string.setting_officepro_title),
                         description = stringResource(R.string.setting_officepro_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
-                        icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                        icon = { Icon(Lucide.FileText, contentDescription = null) },
                         title = stringResource(R.string.setting_subagent_title),
                         description = stringResource(R.string.setting_subagent_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingTodayBoard) },
-                        icon = { Icon(HugeIcons.News01, contentDescription = null) },
+                        icon = { Icon(Lucide.Newspaper, contentDescription = null) },
                         title = "今日看板",
                         description = "Agent 主动整理每日信号，生成待办与关注项",
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.MiniAppSettings) },
-                        icon = { Icon(HugeIcons.DashboardSquare01, contentDescription = null) },
+                        icon = { Icon(Lucide.LayoutDashboard, contentDescription = null) },
                         title = "小应用",
                         description = "让 Amber 生成、保存并运行轻量 HTML 工具",
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SynaraCompanion) },
-                        icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        icon = { Icon(Lucide.Server, contentDescription = null) },
                         title = "Synara",
                         description = "局域网遥控 Mac 上的 Synara 工作台",
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.ZCode) },
-                        icon = { Icon(HugeIcons.Code, contentDescription = null) },
+                        icon = { Icon(Lucide.CodeXml, contentDescription = null) },
                         title = "ZCode",
                         description = "粘贴智谱 ZCode 链接，用内置浏览器打开移动页",
                     )

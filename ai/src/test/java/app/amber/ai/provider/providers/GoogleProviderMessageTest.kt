@@ -14,13 +14,11 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.util.ImageEncodingException
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
-import java.lang.reflect.InvocationTargetException
 
 /**
  * Unit tests for GoogleProvider message building logic.
@@ -34,22 +32,15 @@ import java.lang.reflect.InvocationTargetException
  */
 class GoogleProviderMessageTest {
 
-    private lateinit var provider: GoogleProvider
+    private lateinit var adapter: GeminiGenerateContentAdapter
 
     @Before
     fun setUp() {
-        provider = GoogleProvider(OkHttpClient())
+        adapter = GeminiGenerateContentAdapter()
     }
 
-    // Helper to invoke private buildContents method via reflection
-    private fun invokeBuildContents(messages: List<UIMessage>): JsonArray {
-        val method = GoogleProvider::class.java.getDeclaredMethod(
-            "buildContents",
-            List::class.java
-        )
-        method.isAccessible = true
-        return method.invoke(provider, messages) as JsonArray
-    }
+    private fun invokeBuildContents(messages: List<UIMessage>): JsonArray =
+        adapter.encodeContents(messages)
 
     @Test
     fun `multi-round tool calls should produce functionCall followed by functionResponse`() {
@@ -122,8 +113,8 @@ class GoogleProviderMessageTest {
                 )
             )
             fail("Expected image encoding failure")
-        } catch (error: InvocationTargetException) {
-            assertTrue(error.cause is ImageEncodingException)
+        } catch (error: ImageEncodingException) {
+            // Expected: missing content URI must not be silently dropped.
         }
     }
 
@@ -358,7 +349,7 @@ class GoogleProviderMessageTest {
 
     @Test
     fun `request keeps function tools when model also enables built in tools`() {
-        val body = provider.buildCompletionRequestBody(
+        val body = adapter.encodeRequest(
             messages = listOf(UIMessage.user("hello")),
             params = TextGenerationParams(
                 model = Model(
@@ -374,7 +365,7 @@ class GoogleProviderMessageTest {
                     )
                 ),
             ),
-            isCodeAssistOAuth = false,
+            codeAssistTransport = false,
         )
 
         val tools = body["tools"]!!.jsonArray.map { it.jsonObject }
@@ -390,7 +381,7 @@ class GoogleProviderMessageTest {
             """.trimIndent()
         ).jsonObject
 
-        val image = provider.parseMessagePart(part) as UIMessagePart.Image
+        val image = adapter.decodePart(part) as UIMessagePart.Image
 
         assertEquals("data:image/webp;base64,QUJD", image.url)
     }

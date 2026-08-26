@@ -5,7 +5,7 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.feature.board.DeepReadTemplateIds
@@ -18,7 +18,7 @@ import kotlin.uuid.Uuid
 
 class DeepReadTemplateAgent(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val repository: DeepReadTemplateRepository,
     private val json: Json,
 ) {
@@ -70,12 +70,12 @@ class DeepReadTemplateAgent(
                 customHeaders = model.boardRequestHeaders(settings.providers),
                 customBody = model.boardRequestBodies(settings.providers),
             )
-            val providerInstance = providerManager.getProviderByType(provider)
+            val providerInstance = providerCatalog.text(provider)
             val systemMessage = UIMessage.system(
                 "你是移动端 Editorial UI 设计总监兼前端工程师，专门为新闻深度阅读生成静态 HTML/CSS 模板。只输出合法 JSON，不要解释。"
             )
             val raw = withTimeout(MODEL_TIMEOUT_MS) {
-                providerInstance.generateText(
+                providerInstance.complete(
                     providerSetting = provider,
                     messages = listOf(systemMessage, UIMessage.user(prompt)),
                     params = params,
@@ -84,7 +84,7 @@ class DeepReadTemplateAgent(
             val draft = runCatching { parseAndNormalizeDraft(raw, name) }
                 .recoverCatching { firstError ->
                     val repairedRaw = withTimeout(REPAIR_TIMEOUT_MS) {
-                        providerInstance.generateText(
+                        providerInstance.complete(
                             providerSetting = provider,
                             messages = listOf(
                                 systemMessage,

@@ -28,8 +28,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.AlertCircle
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CircleAlert
 import app.amber.agent.R
 
 /**
@@ -64,7 +64,7 @@ internal fun PermissionRationaleDialog(
             ) {
                 // 标题图标
                 Icon(
-                    imageVector = HugeIcons.AlertCircle,
+                    imageVector = Lucide.CircleAlert,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.primary

@@ -6,10 +6,11 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.Generator
-import app.amber.core.model.Assistant
 import app.amber.core.settings.Settings
 import app.amber.feature.novelworkspace.NovelWorkspaceCommit
 import app.amber.feature.novelworkspace.NovelWorkspaceContextAssembler
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
+import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceIoError
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
 import app.amber.feature.novelworkspace.NovelWorkspaceMarkdown
@@ -56,7 +57,6 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         val systemPrompt: String,
         val settings: Settings,
         val model: Model,
-        val assistant: Assistant,
         val maxSteps: Int = 16,
         /** Ghostwrite/unattended turns commit canon writes automatically (no approval card). */
         val autoApproveCanon: Boolean = false,
@@ -64,6 +64,10 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         val autoCommitMessage: String = NovelWorkspaceLedger.Message.COLLECTION,
         /** Which sections the constraint brief carries; null = defaults (all on). */
         val injection: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags? = null,
+        /** Durable batch owner. Null means an interactive author turn. */
+        val ownerJobId: String? = null,
+        /** Identifies this specific Worker execution across pause/resume. */
+        val ownerExecutionId: String? = null,
     )
 
     private val _pendingProposals = MutableStateFlow<List<NovelWorkspaceWriteProposal>>(emptyList())
@@ -71,6 +75,22 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
 
     fun runTurn(request: TurnRequest): Flow<TurnEvent> = flow {
         val store = NovelWorkspaceStore(request.projectDirectory)
+        val ownerAtStart = NovelWorkspaceGhostwriteJobs.activeFor(
+            request.projectDirectory,
+            request.branchSlug,
+        )
+        if (request.ownerJobId == null && ownerAtStart != null) {
+            emit(TurnEvent.Failed("当前分支仍被代笔批次占用，请先让批次完成或取消后再修改正文"))
+            return@flow
+        }
+        if (request.ownerJobId != null &&
+            (ownerAtStart?.id != request.ownerJobId ||
+                ownerAtStart.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
+                ownerAtStart.executionKey != request.ownerExecutionId)
+        ) {
+            emit(TurnEvent.Failed("代笔已暂停或取消"))
+            return@flow
+        }
         val batch = NovelWorkspaceWriteBatch()
         val session = NovelWorkspaceToolSession(
             store = store,
@@ -97,6 +117,8 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         var emittedText = ""
         var emittedReasoning = ""
         val seenTools = mutableSetOf<String>()
+        var canonLedgerPersisted = false
+        var canonRollbackHandled = false
         try {
             val messages = buildList {
                 if (systemPrompt.isNotBlank()) {
@@ -108,9 +130,11 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
                 settings = request.settings,
                 model = request.model,
                 messages = messages,
-                assistant = request.assistant,
                 tools = session.tools(),
                 maxSteps = request.maxSteps,
+                // The workspace write tool has its own strict path and author gates.
+                // Trust only this named tool; do not enable blanket auto-approval.
+                autoApprovedToolNames = setOf("novel_workspace_write"),
             ).collect { chunk ->
                 val messages = (chunk as? GenerationChunk.Messages)?.messages ?: return@collect
                 val assistantText = assistantTextOf(messages)
@@ -134,26 +158,96 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
                     }
                 }
             }
+            if (request.ownerJobId != null &&
+                NovelWorkspaceGhostwriteJobs.load(request.projectDirectory, request.ownerJobId)?.let {
+                    it.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING ||
+                        it.executionKey != request.ownerExecutionId
+                } != false
+            ) {
+                rollbackUncommittedCanon(request, batch)
+                emit(TurnEvent.Failed("代笔已暂停或取消"))
+                return@flow
+            }
             val proposal = if (batch.isEmpty()) {
                 // Free writes (setting/inbox/drafts) already hit disk; commit them so the
                 // ledger and worktree never drift apart.
                 if (batch.hasFreeWrites()) {
-                    commitTree(
-                        projectDirectory = request.projectDirectory,
-                        branchId = request.branchId,
-                        branchSlug = request.branchSlug,
-                        message = NovelWorkspaceLedger.Message.GENERIC,
-                    )
+                    val committed = if (request.ownerJobId != null) {
+                        NovelWorkspaceGhostwriteJobs.withRunningOwner(
+                            request.projectDirectory,
+                            request.ownerJobId,
+                            checkNotNull(request.ownerExecutionId),
+                        ) {
+                            commitTree(
+                                projectDirectory = request.projectDirectory,
+                                branchId = request.branchId,
+                                branchSlug = request.branchSlug,
+                                message = NovelWorkspaceLedger.Message.GENERIC,
+                            )
+                        }
+                    } else {
+                        commitTree(
+                            projectDirectory = request.projectDirectory,
+                            branchId = request.branchId,
+                            branchSlug = request.branchSlug,
+                            message = NovelWorkspaceLedger.Message.GENERIC,
+                        )
+                    }
+                    if (committed == null) {
+                        emit(TurnEvent.Failed("代笔已暂停或取消"))
+                        return@flow
+                    }
                 }
                 null
             } else if (request.autoApproveCanon) {
-                // Ghostwrite: canon writes already landed on disk during the turn —
-                // commit them now as one transaction instead of surfacing a proposal.
-                commitTree(
-                    projectDirectory = request.projectDirectory,
-                    branchId = request.branchId,
-                    branchSlug = request.branchSlug,
-                    message = request.autoCommitMessage,
+                // Apply buffered unattended writes only while this Worker still owns its
+                // execution token, then persist the write and ledger under one lock.
+                val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(request.projectDirectory)
+                val commitBufferedCanon = {
+                    val canonStore = NovelWorkspaceStore(request.projectDirectory)
+                    try {
+                        batch.snapshot().forEach { entry ->
+                            batch.rememberPrevious(entry.path, canonStore.read(entry.path))
+                            canonStore.write(entry.path, entry.content)
+                        }
+                        commitTree(
+                            projectDirectory = request.projectDirectory,
+                            branchId = request.branchId,
+                            branchSlug = request.branchSlug,
+                            message = request.autoCommitMessage,
+                            onLedgerPersisted = { canonLedgerPersisted = true },
+                        )
+                    } catch (error: Exception) {
+                        if (!canonLedgerPersisted) {
+                            rollbackUncommittedCanon(request, batch)
+                            canonRollbackHandled = true
+                        }
+                        throw error
+                    }
+                }
+                val committed = if (request.ownerJobId != null) {
+                    NovelWorkspaceGhostwriteJobs.withRunningOwner(
+                        request.projectDirectory,
+                        request.ownerJobId,
+                        checkNotNull(request.ownerExecutionId),
+                        commitBufferedCanon,
+                    )
+                } else {
+                    commitBufferedCanon()
+                }
+                if (committed == null) {
+                    rollbackUncommittedCanon(request, batch)
+                    emit(TurnEvent.Failed("代笔已暂停或取消"))
+                    return@flow
+                }
+                NovelWorkspaceUndo.save(
+                    NovelWorkspaceUndoRecord(
+                        commitId = committed.id,
+                        parentCommitId = committed.parentId,
+                        files = batch.previousSnapshot(),
+                        unresolvedBefore = unresolvedBefore,
+                    ),
+                    request.projectDirectory,
                 )
                 null
             } else {
@@ -163,18 +257,23 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         } catch (error: CancellationException) {
             // Same orphan risk as a failed turn: auto-approved canon writes may
             // already be on disk with no commit. Restore, then propagate.
-            rollbackUncommittedCanon(request, batch)
+            if (!canonLedgerPersisted && !canonRollbackHandled) rollbackUncommittedCanon(request, batch)
             throw error
         } catch (error: Exception) {
-            rollbackUncommittedCanon(request, batch)
-            emit(TurnEvent.Failed(error.message ?: "工作区生成失败"))
+            if (canonLedgerPersisted) {
+                // The chapter is already durable. Reporting a failed turn would make
+                // the batch retry the same ordinal after a checkout/undo side-effect error.
+                emit(TurnEvent.Completed(emittedText, proposal = null))
+            } else {
+                if (!canonRollbackHandled) rollbackUncommittedCanon(request, batch)
+                emit(TurnEvent.Failed(error.message ?: "工作区生成失败"))
+            }
         }
     }
 
     /**
-     * A failed/cancelled unattended turn must not leave canon files on disk that no
-     * commit owns — a later chapter commit would sweep the orphan in and trip the
-     * D-D unresolved gate. Free writes stay: they are valid whenever they land.
+     * A failed/cancelled unattended turn must not leave files on disk that no commit
+     * owns. Interactive free writes still land immediately; unattended ones are buffered.
      */
     private fun rollbackUncommittedCanon(request: TurnRequest, batch: NovelWorkspaceWriteBatch) {
         if (!request.autoApproveCanon) return
@@ -187,7 +286,9 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
     /** Author approved the gate: apply every entry, one commit, checkout refreshed. */
     fun approve(proposalId: String) {
         val proposal = _pendingProposals.value.firstOrNull { it.id == proposalId } ?: return
+        assertNoGhostwriteOwner(proposal.projectDirectory, proposal.branchSlug)
         val store = NovelWorkspaceStore(proposal.projectDirectory)
+        val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(proposal.projectDirectory)
         // Capture pre-write contents so 撤销最近一笔 can restore them.
         val previous = proposal.entries.associate { it.path to store.read(it.path) }
         for (entry in proposal.entries) {
@@ -200,7 +301,12 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
             message = commitMessageFor(proposal.entries.map { it.path }),
         )
         NovelWorkspaceUndo.save(
-            NovelWorkspaceUndoRecord(commitId = commit.id, parentCommitId = commit.parentId, files = previous),
+            NovelWorkspaceUndoRecord(
+                commitId = commit.id,
+                parentCommitId = commit.parentId,
+                files = previous,
+                unresolvedBefore = unresolvedBefore,
+            ),
             proposal.projectDirectory,
         )
         _pendingProposals.value = _pendingProposals.value.filterNot { it.id == proposalId }
@@ -219,7 +325,9 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         target: NovelWorkspaceCollectTarget,
         chapterTitle: String? = null,
     ): NovelWorkspaceCommit {
+        assertNoGhostwriteOwner(projectDirectory, branchSlug)
         val store = NovelWorkspaceStore(projectDirectory)
+        val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(projectDirectory)
         val draftRaw = store.read(draftPath)
             ?: throw NovelWorkspaceIoError("草稿不存在：$draftPath")
         val draftBody = NovelWorkspaceMarkdown.parseFile(draftRaw).body
@@ -303,7 +411,12 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
             message = NovelWorkspaceLedger.Message.COLLECTION,
         )
         NovelWorkspaceUndo.save(
-            NovelWorkspaceUndoRecord(commitId = commit.id, parentCommitId = commit.parentId, files = previous),
+            NovelWorkspaceUndoRecord(
+                commitId = commit.id,
+                parentCommitId = commit.parentId,
+                files = previous,
+                unresolvedBefore = unresolvedBefore,
+            ),
             projectDirectory,
         )
         return commit
@@ -322,35 +435,67 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         chapterOrdinal: Int,
         title: String,
         body: String,
+        ownerJobId: String? = null,
+        ownerExecutionId: String? = null,
     ): NovelWorkspaceCommit {
-        val store = NovelWorkspaceStore(projectDirectory)
-        val chaptersPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters"
-        val leafSlug = NovelWorkspaceSlug.slug(title).ifEmpty { "chapter" }
-        val path = "$chaptersPrefix/" + NovelWorkspacePaths.chapterFileName(chapterOrdinal, leafSlug)
-        val previous = mapOf(path to store.read(path))
-        store.write(
-            path,
-            NovelWorkspaceMarkdown.render(
-                fields = listOf(
-                    "id" to UUID.randomUUID().toString().uppercase(),
-                    "kind" to "chapter",
-                    "title" to title,
-                    "ordinal" to chapterOrdinal.toString(),
-                ),
-                body = body,
-            ),
-        )
-        val commit = commitTree(
-            projectDirectory = projectDirectory,
-            branchId = branchId,
-            branchSlug = branchSlug,
-            message = NovelWorkspaceLedger.Message.COLLECTION,
-        )
-        NovelWorkspaceUndo.save(
-            NovelWorkspaceUndoRecord(commitId = commit.id, parentCommitId = commit.parentId, files = previous),
+        val commitBlock = commitBlock@{
+            val store = NovelWorkspaceStore(projectDirectory)
+            val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(projectDirectory)
+            val chaptersPrefix = NovelWorkspacePaths.branchPrefix(branchSlug) + "/chapters"
+            val leafSlug = NovelWorkspaceSlug.slug(title).ifEmpty { "chapter" }
+            val path = "$chaptersPrefix/" + NovelWorkspacePaths.chapterFileName(chapterOrdinal, leafSlug)
+            val previous = mapOf(path to store.read(path))
+            var ledgerPersisted = false
+            try {
+                store.write(
+                    path,
+                    NovelWorkspaceMarkdown.render(
+                        fields = listOf(
+                            "id" to UUID.randomUUID().toString().uppercase(),
+                            "kind" to "chapter",
+                            "title" to title,
+                            "ordinal" to chapterOrdinal.toString(),
+                        ),
+                        body = body,
+                    ),
+                )
+                val commit = commitTree(
+                    projectDirectory = projectDirectory,
+                    branchId = branchId,
+                    branchSlug = branchSlug,
+                    message = NovelWorkspaceLedger.Message.COLLECTION,
+                    onLedgerPersisted = { ledgerPersisted = true },
+                )
+                NovelWorkspaceUndo.save(
+                    NovelWorkspaceUndoRecord(
+                        commitId = commit.id,
+                        parentCommitId = commit.parentId,
+                        files = previous,
+                        unresolvedBefore = unresolvedBefore,
+                    ),
+                    projectDirectory,
+                )
+                commit
+            } catch (error: Exception) {
+                if (ledgerPersisted) {
+                    NovelWorkspaceLedger.load(projectDirectory).headOf(branchId)?.let {
+                        return@commitBlock it
+                    }
+                    throw error
+                }
+                for ((changedPath, oldContent) in previous) {
+                    if (oldContent == null) store.delete(changedPath) else store.write(changedPath, oldContent)
+                }
+                throw error
+            }
+        }
+        if (ownerJobId == null) return commitBlock()
+        return NovelWorkspaceGhostwriteJobs.withRunningOwner(
             projectDirectory,
-        )
-        return commit
+            ownerJobId,
+            checkNotNull(ownerExecutionId),
+            commitBlock,
+        ) ?: throw NovelWorkspaceIoError("代笔已暂停或取消")
     }
 
     /**
@@ -366,7 +511,9 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         title: String,
         body: String,
     ): NovelWorkspaceCommit {
+        assertNoGhostwriteOwner(projectDirectory, branchSlug)
         val store = NovelWorkspaceStore(projectDirectory)
+        val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(projectDirectory)
         val previous = mapOf(chapterPath to store.read(chapterPath))
         val existing = store.read(chapterPath)
             ?: throw NovelWorkspaceIoError("章节不存在：$chapterPath")
@@ -388,7 +535,12 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
             message = NovelWorkspaceLedger.Message.MANUAL_EDIT,
         )
         NovelWorkspaceUndo.save(
-            NovelWorkspaceUndoRecord(commitId = commit.id, parentCommitId = commit.parentId, files = previous),
+            NovelWorkspaceUndoRecord(
+                commitId = commit.id,
+                parentCommitId = commit.parentId,
+                files = previous,
+                unresolvedBefore = unresolvedBefore,
+            ),
             projectDirectory,
         )
         return commit
@@ -404,6 +556,7 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         branchId: String,
         branchSlug: String,
         message: String,
+        onLedgerPersisted: () -> Unit = {},
     ): NovelWorkspaceCommit {
         val store = NovelWorkspaceStore(projectDirectory)
         val ledger = NovelWorkspaceLedger.load(projectDirectory)
@@ -424,6 +577,7 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         val mirrorsBranch = ledger.head == null || ledger.heads[branchId] == ledger.head
         val updated = if (mirrorsBranch) withCommit else withCommit.copy(head = ledger.head)
         NovelWorkspaceLedger.save(updated, projectDirectory)
+        onLedgerPersisted()
         // D-D: a middle-chapter edit invalidates everything after it — record the range.
         NovelWorkspaceLedger.firstUnresolvedOrdinalAfterEdit(
             store,
@@ -522,7 +676,10 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         .orEmpty()
 
     /** True when there is a one-level undo available for this project. */
-    fun canUndo(projectDirectory: File): Boolean = NovelWorkspaceUndo.load(projectDirectory) != null
+    fun canUndo(projectDirectory: File): Boolean {
+        val undo = NovelWorkspaceUndo.load(projectDirectory) ?: return false
+        return NovelWorkspaceLedger.load(projectDirectory).head == undo.commitId
+    }
 
     /**
      * 撤销最近一笔: restore the previous contents captured at the last commit, move the
@@ -530,6 +687,7 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
      * Only the ledger's current head commit can be undone (single level).
      */
     fun undoLast(projectDirectory: File): Boolean {
+        assertNoGhostwriteOwner(projectDirectory)
         val undo = NovelWorkspaceUndo.load(projectDirectory) ?: return false
         val store = NovelWorkspaceStore(projectDirectory)
         val ledger = NovelWorkspaceLedger.load(projectDirectory)
@@ -553,8 +711,31 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
         )
         NovelWorkspaceLedger.save(updated, projectDirectory)
         store.materializeCheckout()
+        val unresolvedBefore = undo.unresolvedBefore
+        if (unresolvedBefore != null) {
+            NovelWorkspaceUnresolvedStore.save(unresolvedBefore, projectDirectory)
+        } else {
+            // Legacy undo records predate unresolvedBefore. Only remove the gate
+            // created by the commit being undone; preserve unrelated older gates.
+            val current = NovelWorkspaceUnresolvedStore.load(projectDirectory)
+            val restored = current.copy(
+                branches = current.branches.filterValues { it.sinceCommitId != undo.commitId },
+            )
+            if (restored != current) NovelWorkspaceUnresolvedStore.save(restored, projectDirectory)
+        }
         NovelWorkspaceUndo.clear(projectDirectory)
         return true
+    }
+
+    private fun assertNoGhostwriteOwner(projectDirectory: File, branchSlug: String? = null) {
+        val owner = if (branchSlug == null) {
+            NovelWorkspaceGhostwriteJobs.listActive(projectDirectory).firstOrNull()
+        } else {
+            NovelWorkspaceGhostwriteJobs.activeFor(projectDirectory, branchSlug)
+        }
+        if (owner != null) {
+            throw NovelWorkspaceIoError("当前分支仍被代笔批次占用，请先让批次完成或取消后再修改正文")
+        }
     }
 
     companion object {

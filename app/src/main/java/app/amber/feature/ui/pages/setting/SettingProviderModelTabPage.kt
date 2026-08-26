@@ -1,10 +1,10 @@
 package app.amber.feature.ui.pages.setting
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.ArrowRight01
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Delete01
-import me.rerere.hugeicons.stroke.Cancel01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.Trash2
+import com.composables.icons.lucide.X
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -56,7 +56,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.providers.isCodexOAuthReviewModel
 import app.amber.ai.registry.ModelRegistry
@@ -100,11 +100,11 @@ private fun ModelList(
     providerSetting: ProviderSetting,
     onUpdateProvider: (ProviderSetting) -> Unit
 ) {
-    val providerManager = koinInject<ProviderManager>()
+    val providerCatalog = koinInject<ProviderCatalog>()
     val requestKey = remember(providerSetting) { providerSetting.modelListRequestKey() }
     val modelList by produceState(emptyList(), requestKey) {
         runCatching {
-            value = providerManager.getProviderByType(providerSetting)
+            value = providerCatalog.text(providerSetting)
                 .listModels(providerSetting)
                 .sortedBy { it.modelId }
                 .toList()
@@ -152,7 +152,10 @@ private fun ModelList(
             state = lazyListState
         ) {
             item("enabled_models_label") {
-                ProviderSectionLabel("已启用模型", count = providerSetting.models.size)
+                ProviderSectionLabel(
+                    stringResource(R.string.setting_provider_page_enabled_models),
+                    count = providerSetting.models.size,
+                )
             }
             if (providerSetting.models.isEmpty()) {
                 item {
@@ -221,8 +224,8 @@ private fun ModelList(
         ) {
             ProviderHairline()
             ProviderCommandButton(
-                text = "添加模型",
-                imageVector = HugeIcons.Add01,
+                text = stringResource(R.string.setting_provider_page_add_model),
+                imageVector = Lucide.Plus,
                 accent = true,
                 onClick = { showPicker = true },
                 modifier = Modifier
@@ -353,7 +356,11 @@ private fun ModelRow(
                         }
                     }
                 ) {
-                    Icon(HugeIcons.Cancel01, null, tint = t.ink3)
+                    Icon(
+                        Lucide.X,
+                        contentDescription = stringResource(R.string.cancel),
+                        tint = t.ink3,
+                    )
                 }
                 FilledIconButton(
                     onClick = {
@@ -364,7 +371,7 @@ private fun ModelRow(
                     }
                 ) {
                     Icon(
-                        HugeIcons.Delete01,
+                        Lucide.Trash2,
                         contentDescription = stringResource(R.string.chat_page_delete)
                     )
                 }
@@ -432,7 +439,7 @@ private fun ModelRow(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    imageVector = HugeIcons.ArrowRight01,
+                    imageVector = Lucide.ArrowRight,
                     contentDescription = stringResource(R.string.setting_provider_page_edit_model),
                     tint = t.ink3,
                     modifier = Modifier.size(16.dp),
@@ -510,15 +517,19 @@ private fun ModelPickerSheet(
                     )
                 }
                 ProviderGhostButton(
-                    text = if (allSelected) "✓ 已全选" else "+ 全选",
+                    text = if (allSelected) {
+                        "✓ ${stringResource(R.string.setting_provider_page_deselect_models)}"
+                    } else {
+                        "+ ${stringResource(R.string.setting_provider_page_select_all, filteredModels.size)}"
+                    },
                     onClick = {
                         val filteredIds = filteredModels.map { it.modelId }.toSet()
                         draftIds = if (allSelected) draftIds - filteredIds else draftIds + filteredIds
                     },
                 )
                 ProviderGhostButton(
-                    text = "手动创建",
-                    imageVector = HugeIcons.Add01,
+                    text = stringResource(R.string.setting_provider_page_add_new_model),
+                    imageVector = Lucide.Plus,
                     onClick = onCreateBlank,
                 )
             }
@@ -526,7 +537,7 @@ private fun ModelPickerSheet(
             ProviderTerminalFilter(
                 value = filterText,
                 onValueChange = { filterText = it },
-                placeholder = "筛选模型_",
+                placeholder = stringResource(R.string.setting_provider_page_model_filter_placeholder),
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
             )
 
@@ -538,20 +549,20 @@ private fun ModelPickerSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "模型 ID",
+                    stringResource(R.string.setting_provider_page_model_id),
                     style = type.meta.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold),
                     color = t.ink4,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "上下文",
+                    stringResource(R.string.setting_provider_page_model_context_window),
                     style = type.meta.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold),
                     color = t.ink4,
                     modifier = Modifier.size(width = 48.dp, height = 14.dp),
                     maxLines = 1,
                 )
                 Text(
-                    "操作",
+                    stringResource(R.string.setting_provider_page_actions),
                     style = type.meta.copy(fontSize = 9.5.sp, fontWeight = FontWeight.SemiBold),
                     color = t.ink4,
                     modifier = Modifier.size(width = 76.dp, height = 14.dp),
@@ -567,7 +578,7 @@ private fun ModelPickerSheet(
                 if (filteredModels.isEmpty()) {
                     item {
                         Text(
-                            text = "// 无匹配",
+                            text = stringResource(R.string.model_list_no_matches),
                             style = type.meta.copy(fontSize = 12.sp),
                             color = t.ink4,
                             modifier = Modifier
@@ -614,7 +625,11 @@ private fun ModelPickerSheet(
                                 contentAlignment = Alignment.CenterEnd,
                             ) {
                                 ProviderSquareTag(
-                                    text = if (on) "✓ 已添加" else "+ 添加",
+                                    text = if (on) {
+                                        "✓ ${stringResource(R.string.setting_provider_page_model_added)}"
+                                    } else {
+                                        "+ ${stringResource(R.string.add)}"
+                                    },
                                     selected = on,
                                     solid = true,
                                     onClick = {
@@ -629,7 +644,11 @@ private fun ModelPickerSheet(
             }
 
             Text(
-                text = "已选 $pickedCount / ${models.size}",
+                text = stringResource(
+                    R.string.setting_provider_page_selected_count,
+                    pickedCount,
+                    models.size,
+                ),
                 style = type.meta.copy(fontSize = 11.sp),
                 color = t.ink4,
                 modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),

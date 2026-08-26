@@ -7,17 +7,17 @@ import app.amber.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
 import app.amber.ai.core.SYSTEM_PROMPT_CACHE_DISABLED
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.model.Assistant
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.PromptInjection
 import app.amber.core.model.Lorebook
 import app.amber.core.model.extractContextForMatching
 import app.amber.core.model.isTriggered
+import app.amber.core.settings.Settings
 
 /**
  * 提示词注入转换器
  *
- * 根据 Assistant 关联的 ModeInjection 和 Lorebook 进行提示词注入
+ * 根据全局 Amber 设置关联的 ModeInjection 和 Lorebook 进行提示词注入
  */
 object PromptInjectionTransformer : InputMessageTransformer {
     override suspend fun transform(
@@ -26,7 +26,7 @@ object PromptInjectionTransformer : InputMessageTransformer {
     ): List<UIMessage> {
         return transformMessages(
             messages = messages,
-            assistant = ctx.assistant,
+            settings = ctx.settings,
             modeInjections = ctx.settings.modeInjections,
             lorebooks = ctx.settings.lorebooks
         )
@@ -38,14 +38,14 @@ object PromptInjectionTransformer : InputMessageTransformer {
  */
 internal fun transformMessages(
     messages: List<UIMessage>,
-    assistant: Assistant,
+    settings: Settings,
     modeInjections: List<PromptInjection.ModeInjection>,
     lorebooks: List<Lorebook>
 ): List<UIMessage> {
     // 收集所有需要注入的内容
     val injections = collectInjections(
         messages = messages,
-        assistant = assistant,
+        settings = settings,
         modeInjections = modeInjections,
         lorebooks = lorebooks
     )
@@ -68,7 +68,7 @@ internal fun transformMessages(
  */
 internal fun collectInjections(
     messages: List<UIMessage>,
-    assistant: Assistant,
+    settings: Settings,
     modeInjections: List<PromptInjection.ModeInjection>,
     lorebooks: List<Lorebook>
 ): List<PromptInjection> {
@@ -76,12 +76,12 @@ internal fun collectInjections(
 
     // 1. 获取关联的 ModeInjection
     modeInjections
-        .filter { it.enabled && assistant.modeInjectionIds.contains(it.id) }
+        .filter { it.enabled && settings.enabledModeInjectionIds.contains(it.id) }
         .forEach { injections.add(it) }
 
     // 2. 获取关联的 Lorebook 中被触发的 RegexInjection
     val enabledLorebooks = lorebooks.filter {
-        it.enabled && assistant.lorebookIds.contains(it.id)
+        it.enabled && settings.enabledLorebookIds.contains(it.id)
     }
     if (enabledLorebooks.isNotEmpty()) {
         // 提取上下文用于匹配（只取非 SYSTEM 消息）

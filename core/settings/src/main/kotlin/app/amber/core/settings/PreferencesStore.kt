@@ -8,6 +8,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
+import app.amber.ai.provider.CustomBody
+import app.amber.ai.provider.CustomHeader
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
@@ -20,6 +22,9 @@ import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_TITLE_PROMPT
 import app.amber.core.ai.prompts.LEARNING_MODE_PROMPT
 import app.amber.core.model.LocalToolOption
+import app.amber.core.model.MainAgentToolProfile
+import app.amber.core.model.AssistantRegex
+import app.amber.ai.ui.UIMessage
 import app.amber.feature.live.LiveModeSetting
 import app.amber.feature.modelcouncil.ModelCouncilRuntimeSetting
 import app.amber.feature.office.FeishuOfficeEnhancementSetting
@@ -30,14 +35,12 @@ import app.amber.core.ai.GenerationRetrySetting
 import app.amber.core.context.CompactPolicy
 import app.amber.core.memory.model.MemoryRecallSetting
 import app.amber.core.memory.model.MemoryWorkerSetting
-import app.amber.core.model.Assistant
 import app.amber.core.model.Avatar
-import app.amber.core.model.DEFAULT_ASSISTANT_ID
+import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.InjectionPosition
 import app.amber.core.model.Lorebook
 import app.amber.core.model.PromptInjection
 import app.amber.core.model.QuickMessage
-import app.amber.core.model.Tag
 import app.amber.core.sync.core.SyncSettings
 import app.amber.core.sync.s3.S3Config
 // PresetThemes lives in :app feature/ui/theme; we use only its first
@@ -47,7 +50,6 @@ import app.amber.core.sync.s3.S3Config
 import app.amber.core.agent.utils.JsonInstant
 import app.amber.search.SearchCommonOptions
 import app.amber.search.SearchServiceOptions
-import app.amber.tts.provider.TTSProviderSetting
 import kotlin.uuid.Uuid
 
 
@@ -56,6 +58,16 @@ import kotlin.uuid.Uuid
 // as a string here so PreferencesStore stays free of the Compose-flavored
 // PresetThemes registry.
 const val DEFAULT_PRESET_THEME_ID = "amberagent_clash"
+
+val DEFAULT_AMBER_SYSTEM_PROMPT = """
+        You are AmberAgent, an agent-only Android assistant.
+
+        Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
+        Prefer the authorized /workspace for file work. Use terminal and screen automation tools only when they are necessary and user-approved.
+        If you are unsure which skills are installed or enabled, call skills_list before use_skill.
+        If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
+        For webpage tasks, if WebView tools are available, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a webpage. After webview_open, call webview_wait_for_load or webview_read(wait_timeout_ms=...) before relying on the current page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
+    """.trimIndent()
 
 val Context.settingsStore by preferencesDataStore(
     name = "settings",
@@ -84,10 +96,26 @@ data class Settings(
     val compressModelId: Uuid = Uuid.random(),
     val compressPrompt: String = DEFAULT_COMPRESS_PROMPT,
     val modelGroupSessionDefaults: List<ModelGroupSessionDefault> = emptyList(),
-    val assistantId: Uuid = DEFAULT_ASSISTANT_ID,
     val providers: List<ProviderSetting> = DEFAULT_PROVIDERS,
-    val assistants: List<Assistant> = DEFAULT_ASSISTANTS,
-    val assistantTags: List<Tag> = emptyList(),
+    // The single Amber runtime configuration is persisted as direct Settings
+    // fields. LegacyAssistantProfile remains a legacy decoder only for one-time migration.
+    val systemPrompt: String = DEFAULT_AMBER_SYSTEM_PROMPT,
+    val temperature: Float? = null,
+    val topP: Float? = null,
+    val contextMessageSize: Int = 0,
+    val streamOutput: Boolean = true,
+    val messageTemplate: String = "{{ message }}",
+    val presetMessages: List<UIMessage> = emptyList(),
+    val regexes: List<AssistantRegex> = emptyList(),
+    val reasoningLevel: ReasoningLevel = ReasoningLevel.AUTO,
+    val maxTokens: Int? = null,
+    val customHeaders: List<CustomHeader> = emptyList(),
+    val customBodies: List<CustomBody> = emptyList(),
+    val rememberedReasoningLevelsByModelId: Map<String, ReasoningLevel> = emptyMap(),
+    val enabledSkills: Set<String> = AMBER_AGENT_REQUIRED_SKILLS,
+    val enabledMcpServerIds: Set<Uuid> = emptySet(),
+    val enabledModeInjectionIds: Set<Uuid> = emptySet(),
+    val enabledLorebookIds: Set<Uuid> = emptySet(),
     val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),
     val searchCommonOptions: SearchCommonOptions = SearchCommonOptions(),
     val searchServiceSelected: Int = 0,
@@ -101,8 +129,6 @@ data class Settings(
     val mcpServers: List<McpServerConfig> = emptyList(),
     val webDavConfig: WebDavConfig = WebDavConfig(),
     val s3Config: S3Config = S3Config(),
-    val ttsProviders: List<TTSProviderSetting> = DEFAULT_TTS_PROVIDERS,
-    val selectedTTSProviderId: Uuid = DEFAULT_SYSTEM_TTS_ID,
     val modeInjections: List<PromptInjection.ModeInjection> = DEFAULT_MODE_INJECTIONS,
     val lorebooks: List<Lorebook> = emptyList(),
     val quickMessages: List<QuickMessage> = emptyList(),
@@ -122,7 +148,7 @@ data class Settings(
     /**
      * Same one-shot pattern, for the visual-routing slash commands
      * (/draw / /svg / /diagram / /slide). Bumped as QuickMessages are
-     * appended to settings.quickMessages and subscribed by every assistant.
+     * appended to settings.quickMessages and subscribed by the Amber profile.
      * Persisted as [PreferencesStore.SEEDED_ROUTING_QUICK_MESSAGES_V1].
      */
     val routingQuickMessagesSeededVersion: Int = 0,
@@ -329,10 +355,6 @@ data class DisplaySetting(
     val codeBlockAutoWrap: Boolean = false,
     val codeBlockAutoCollapse: Boolean = false,
     val showLineNumbers: Boolean = false,
-    val ttsOnlyReadQuoted: Boolean = false,
-    val autoPlayTTSAfterGeneration: Boolean = false,
-    // TTS 播放条默认语速（0.5 - 2.0），每次开始朗读时的初始语速
-    val ttsDefaultPlaybackSpeed: Float = 1.0f,
     val pasteLongTextAsFile: Boolean = false,
     val pasteLongTextThreshold: Int = 1000,
     val sendOnEnter: Boolean = false,
@@ -421,33 +443,75 @@ fun Model.defaultReasoningLevel(): ReasoningLevel {
 }
 
 fun Settings.resolveSessionDefaults(
-    assistant: Assistant,
     model: Model,
 ): ResolvedSessionDefaults {
     val groupDefault = getModelGroupSessionDefault(model)
     return ResolvedSessionDefaults(
-        reasoningLevel = if (assistant.reasoningLevel == ReasoningLevel.AUTO) {
+        reasoningLevel = if (reasoningLevel == ReasoningLevel.AUTO) {
             defaultReasoningLevelForModel(model)
         } else {
-            assistant.reasoningLevel
+            reasoningLevel
         },
-        contextMessageSize = if (assistant.contextMessageSize == 0) {
-            groupDefault?.contextMessageSize ?: assistant.contextMessageSize
+        contextMessageSize = if (contextMessageSize == 0) {
+            groupDefault?.contextMessageSize ?: contextMessageSize
         } else {
-            assistant.contextMessageSize
+            contextMessageSize
         },
-        maxTokens = assistant.maxTokens ?: groupDefault?.maxTokens,
+        maxTokens = maxTokens ?: groupDefault?.maxTokens,
+    )
+}
+
+fun Settings.reasoningLevelForModel(
+    modelId: Uuid?,
+    defaultReasoningLevel: ReasoningLevel,
+): ReasoningLevel {
+    val remembered = modelId?.let { rememberedReasoningLevelsByModelId[it.toString()] }
+    return remembered ?: if (reasoningLevel == ReasoningLevel.AUTO) {
+        defaultReasoningLevel
+    } else {
+        reasoningLevel
+    }
+}
+
+fun Settings.withReasoningLevelForModel(
+    modelId: Uuid?,
+    level: ReasoningLevel,
+): Settings = copy(
+    reasoningLevel = level,
+    rememberedReasoningLevelsByModelId = if (modelId == null) {
+        rememberedReasoningLevelsByModelId
+    } else {
+        rememberedReasoningLevelsByModelId + (modelId.toString() to level)
+    },
+)
+
+fun Settings.withChatModelReasoningMemory(
+    currentModelId: Uuid?,
+    currentDefaultReasoningLevel: ReasoningLevel,
+    selectedModelId: Uuid,
+    selectedDefaultReasoningLevel: ReasoningLevel,
+): Settings {
+    val currentLevel = reasoningLevelForModel(currentModelId, currentDefaultReasoningLevel)
+    val remembered = if (currentModelId == null) {
+        rememberedReasoningLevelsByModelId
+    } else {
+        rememberedReasoningLevelsByModelId + (currentModelId.toString() to currentLevel)
+    }
+    return copy(
+        chatModelId = selectedModelId,
+        reasoningLevel = remembered[selectedModelId.toString()] ?: selectedDefaultReasoningLevel,
+        rememberedReasoningLevelsByModelId = remembered,
     )
 }
 
 fun Settings.getCurrentChatModel(): Model? {
-    return findModelById(this.getCurrentAssistant().chatModelId ?: this.chatModelId)
+    return findModelById(chatModelId)
 }
 
 /**
- * Resolve the image-generation model for the current assistant: per-assistant
- * override first, then global setting. Returns null when neither is set, in
- * which case the generate_image tool is not exposed to the main chat model.
+ * Resolve the image-generation model from its single global setting owner.
+ * Returns null when no usable image model is configured, in which case the
+ * generate_image tool is not exposed to the main chat model.
  *
  * V3 修: 全局 imageGenerationModelId 是 non-null Uuid (默认 Uuid.random()), 用户从未设置时
  * 落到一个永远查不到 model 的随机 id 上, 然后 generate_image 工具一律抛 "not configured".
@@ -456,8 +520,7 @@ fun Settings.getCurrentChatModel(): Model? {
  * 让 ImageGenTool 走兜底: 找第一个 IMAGE-type 模型, 否则才报错.
  */
 fun Settings.getCurrentImageGenerationModel(): Model? {
-    // V3 review P3 #10: assistant override 与 global 都可能存 DEFAULT_AUTO_MODEL_ID sentinel
-    // ("自动"语义) 或 stale Uuid. 优先级 = assistant 有效 id > global 有效 id > 兜底 IMAGE model.
+    // The global setting may contain DEFAULT_AUTO_MODEL_ID or a stale Uuid.
     // 关键: resolveValid 必须 `type == IMAGE` 验证 — 用户在 picker 之外 (如手加 model 默认 CHAT)
     // 选了 chat-type id 时不要返回, 让兜底找内置 IMAGE-type (如 Codex OAuth 自带的 image model).
     // 这是用户报"deepseek/gpt5.5 都调不来 gpt-image-2"的根因 — 手加的 gpt-image-2 type=CHAT,
@@ -466,8 +529,6 @@ fun Settings.getCurrentImageGenerationModel(): Model? {
         if (this == null || this == DEFAULT_AUTO_MODEL_ID) return null
         return findModelById(this)?.takeIf { it.type == ModelType.IMAGE }
     }
-    val assistantPick = this.getCurrentAssistant().imageGenerationModelId.resolveValid()
-    if (assistantPick != null) return assistantPick
     val globalPick = this.imageGenerationModelId.resolveValid()
     if (globalPick != null) return globalPick
     // 兜底: 全局任一有可用 auth 的 provider 暴露的 IMAGE 类型模型. 跟 SettingModelPage
@@ -484,22 +545,8 @@ fun Settings.resolveTaskChatModel(modelId: Uuid): Model? {
     return findModelById(modelId) ?: getCurrentChatModel()
 }
 
-fun Settings.getCurrentAssistant(): Assistant {
-    return this.assistants.find { it.id == assistantId }
-        ?: this.assistants.find { it.id == DEFAULT_ASSISTANT_ID }
-        ?: this.assistants.first()
-}
-
-fun Settings.getAssistantById(id: Uuid): Assistant? {
-    return this.assistants.find { it.id == id }
-}
-
-fun Settings.getQuickMessagesOfAssistant(assistant: Assistant) =
-    quickMessages.filter { it.id in assistant.quickMessageIds }
-
-fun Settings.getSelectedTTSProvider(): TTSProviderSetting? {
-    return ttsProviders.find { it.id == selectedTTSProviderId } ?: ttsProviders.firstOrNull()
-}
+/** Quick messages are global for the single Amber product. */
+fun Settings.getAmberQuickMessages() = quickMessages
 
 fun Model.findProvider(providers: List<ProviderSetting>, checkOverwrite: Boolean = true): ProviderSetting? {
     val provider = findModelProviderFromList(providers) ?: return null
@@ -521,11 +568,10 @@ private fun Model.findModelProviderFromList(providers: List<ProviderSetting>): P
     return null
 }
 
-val DEFAULT_ASSISTANTS = listOf(
-    Assistant(
-        id = DEFAULT_ASSISTANT_ID,
-        name = "AmberAgent",
-        systemPrompt = """
+/** Legacy-only decoder defaults; production Settings never exposes this object. */
+internal val DEFAULT_LEGACY_ASSISTANT_PROFILE = LegacyAssistantProfile(
+    id = AMBER_AGENT_ID,
+    systemPrompt = """
             You are AmberAgent, an agent-only Android assistant.
 
             Work toward the user's goal by planning briefly, using available tools, checking results, and continuing until the task is completed or you need explicit user input.
@@ -534,63 +580,35 @@ val DEFAULT_ASSISTANTS = listOf(
             If the user asks for iCloud or Obsidian files, call icloud_status first. Use icloud_list/read/search only after the experimental iCloud Drive mount reports read access; use icloud_write only after write access is enabled.
             For webpage tasks, if WebView tools are available, call webview_open early when the user asks to open, browse, view, inspect, or visually verify a page. After webview_open, call webview_wait_for_load or webview_read(wait_timeout_ms=...) before relying on the opened page title, readable text, or links. Use search_web or scrape_web when you need search results or deeper extraction. Do not try to launch Android System WebView as a standalone app.
         """.trimIndent(),
-        localTools = listOf(
-            LocalToolOption.JavascriptEngine,
-            LocalToolOption.TimeInfo,
-            LocalToolOption.Clipboard,
-            LocalToolOption.Tts,
-            LocalToolOption.AskUser,
-            LocalToolOption.WorkspaceFiles,
-            LocalToolOption.Terminal,
-            LocalToolOption.ScreenAutomation,
-            LocalToolOption.SystemAccess,
-            LocalToolOption.WebView,
-            LocalToolOption.ICloudDrive,
-        )
-    ),
-    Assistant(
-        id = Uuid.parse("3d47790c-c415-4b90-9388-751128adb0a0"),
-        name = "",
-        systemPrompt = """
-            You are a helpful assistant, called {{char}}, based on model {{model_name}}.
-
-            ## Info
-            - Time: {{cur_datetime}}
-            - Locale: {{locale}}
-            - Timezone: {{timezone}}
-            - Device Info: {{device_info}}
-            - System Version: {{system_version}}
-            - User Nickname: {{user}}
-
-            ## Hint
-            - If the user does not specify a language, reply in the user's primary language.
-            - Remember to use Markdown syntax for formatting, and use latex for mathematical expressions.
-        """.trimIndent()
-    ),
+    localTools = listOf(
+        LocalToolOption.JavascriptEngine,
+        LocalToolOption.TimeInfo,
+        LocalToolOption.Clipboard,
+        LocalToolOption.AskUser,
+        LocalToolOption.WorkspaceFiles,
+        LocalToolOption.Terminal,
+        LocalToolOption.ScreenAutomation,
+        LocalToolOption.SystemAccess,
+        LocalToolOption.WebView,
+        LocalToolOption.ICloudDrive,
+    )
 )
 
-fun List<Assistant>.withAmberAgentAssistantBranding(): List<Assistant> = map { assistant ->
-    if (assistant.id == DEFAULT_ASSISTANT_ID) {
-        assistant.copy(
-            name = if (assistant.name in setOf("", "Amberagent")) {
-                "AmberAgent"
-            } else {
-                assistant.name
-            },
-            systemPrompt = assistant.systemPrompt.replace("Amberagent", "AmberAgent"),
-            localTools = (assistant.localTools + AMBER_AGENT_REQUIRED_LOCAL_TOOLS).distinct(),
-            enabledSkills = assistant.enabledSkills + AMBER_AGENT_REQUIRED_SKILLS,
-        )
-    } else {
-        assistant
-    }
-}
+internal fun LegacyAssistantProfile.canonicalizedForAmberAgent(): LegacyAssistantProfile = copy(
+    id = AMBER_AGENT_ID,
+    systemPrompt = systemPrompt.replace("Amberagent", "AmberAgent"),
+    localTools = (
+        localTools.filterNot {
+            it == LocalToolOption.WebMount || it == LocalToolOption.WebMountEval
+        } + AMBER_AGENT_LOCAL_TOOLS
+    ).distinct(),
+    enabledSkills = enabledSkills + AMBER_AGENT_REQUIRED_SKILLS,
+)
 
-private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
+val AMBER_AGENT_LOCAL_TOOLS = listOf(
     LocalToolOption.JavascriptEngine,
     LocalToolOption.TimeInfo,
     LocalToolOption.Clipboard,
-    LocalToolOption.Tts,
     LocalToolOption.AskUser,
     LocalToolOption.WorkspaceFiles,
     LocalToolOption.Terminal,
@@ -600,20 +618,28 @@ private val AMBER_AGENT_REQUIRED_LOCAL_TOOLS = listOf(
     LocalToolOption.ICloudDrive,
 )
 
-private val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator", "会议准备", "监控文档")
+val AMBER_AGENT_REQUIRED_SKILLS = setOf("skill-creator", "会议准备", "监控文档")
 
-val DEFAULT_SYSTEM_TTS_ID = Uuid.parse("026a01a2-c3a0-4fd5-8075-80e03bdef200")
-val REMOVED_DEFAULT_TTS_PROVIDER_IDS = setOf(
-    Uuid.parse("e36b22ef-ca82-40ab-9e70-60cad861911c"), // AiHubMix TTS
-)
-val DEFAULT_TTS_PROVIDERS = listOf(
-    TTSProviderSetting.SystemTTS(
-        id = DEFAULT_SYSTEM_TTS_ID,
-        name = "",
-    ),
-)
+val AMBER_AGENT_TOOL_PROFILE = MainAgentToolProfile.FULL
 
-val DEFAULT_ASSISTANTS_IDS = DEFAULT_ASSISTANTS.map { it.id }
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+private val LEGACY_DEFAULT_ASSISTANT_ID =
+    Uuid.parse("0950e2dc-9bd5-4801-afa3-aa887aa36b4e")
+
+/**
+ * Selects one profile from the pre-2.5 assistant list without merging fields
+ * from any other entry. The selected entry wins, followed by the historical
+ * Amber id, the first legacy entry, and finally the new default profile.
+ */
+internal fun selectLegacyAssistantProfile(
+    selectedAssistantId: Uuid?,
+    legacyAssistants: List<LegacyAssistantProfile>,
+): LegacyAssistantProfile = (
+    selectedAssistantId?.let { id -> legacyAssistants.firstOrNull { it.id == id } }
+        ?: legacyAssistants.firstOrNull { it.id == LEGACY_DEFAULT_ASSISTANT_ID }
+        ?: legacyAssistants.firstOrNull()
+        ?: DEFAULT_LEGACY_ASSISTANT_PROFILE
+    ).canonicalizedForAmberAgent()
 
 val DEFAULT_MODE_INJECTIONS = listOf(
     PromptInjection.ModeInjection(

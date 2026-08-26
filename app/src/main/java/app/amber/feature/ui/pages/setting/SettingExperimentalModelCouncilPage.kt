@@ -32,8 +32,8 @@ import kotlinx.coroutines.launch
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.File02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.FileText
 import app.amber.agent.R
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_MAX_ROUNDS
 import app.amber.feature.modelcouncil.DEFAULT_MODEL_COUNCIL_OUTPUT_BUDGET_CHARS
@@ -142,7 +142,7 @@ fun SettingExperimentalModelCouncilPage(
         ) {
             item {
                 ExperimentHeroCard(
-                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                    icon = { Icon(Lucide.FileText, contentDescription = null) },
                     title = stringResource(R.string.setting_model_council_title),
                     description = stringResource(R.string.setting_model_council_desc),
                     trailing = {

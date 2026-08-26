@@ -74,8 +74,6 @@ class LocalTools(
 
     val webViewOpenLinkTool by lazy { createWebViewOpenLinkTool(webViewOperationStore) }
 
-    val ttsTool by lazy { createTtsTool(eventBus) }
-
     val askUserTool by lazy { createAskUserTool() }
 
     val deepReadOpenTool by lazy { createDeepReadOpenTool(eventBus) }
@@ -140,9 +138,6 @@ class LocalTools(
         if (options.contains(LocalToolOption.Clipboard)) {
             tools.add(clipboardTool)
         }
-        if (options.contains(LocalToolOption.Tts)) {
-            tools.add(ttsTool)
-        }
         if (options.contains(LocalToolOption.AskUser)) {
             tools.add(askUserTool)
         }
@@ -177,20 +172,12 @@ class LocalTools(
         if (options.contains(LocalToolOption.ICloudDrive)) {
             tools.addAll(iCloudDriveTools.getTools())
         }
-        // Phase 2 post-review UX fix: WebMount is now gated by a SINGLE
-        // global toggle on the WebMount Stations setting page (matches the
-        // iCloud / Feishu Office Enhancement experimental pattern). When
-        // the global toggle is ON, every assistant gets the WebMount tools
-        // automatically — no per-assistant config needed. Per-assistant
-        // `LocalToolOption.WebMount` is preserved as a manual override
-        // (someone can still opt one assistant in even when the global is
-        // off), but it's no longer the primary discovery path.
-        val webMountActive = webMountManager.globalEnabled || options.contains(LocalToolOption.WebMount)
+        // WebMount is owned by the global toggles on its settings page. The
+        // removed multi-assistant configuration must not bypass those toggles.
+        val webMountActive = webMountManager.globalEnabled
         if (webMountActive) {
             // `wm_eval` is gated by the separate global WebMountEval toggle.
-            // Per-assistant `LocalToolOption.WebMountEval` is kept as a manual
-            // override (one assistant can have eval even when the global is off).
-            val includeEval = webMountManager.evalEnabled || options.contains(LocalToolOption.WebMountEval)
+            val includeEval = webMountManager.evalEnabled
             tools.addAll(webMountPrimitiveTools.getTools(includeEval = includeEval))
             // Plan v2: adapter tools are gated by the user's site list.
             // If the user deleted a site (e.g. removed Bilibili), its adapter's
@@ -211,8 +198,8 @@ class LocalTools(
         tools.addAll(deepReadPlaybookTools.getTools())
         tools.add(deepReadOpenTool)
 
-        // generate_image auto-appears whenever the current assistant — or the
-        // global setting — resolves to a real image-gen model. The tool needs
+        // generate_image auto-appears whenever the global setting resolves to
+        // a real image-gen model. The tool needs
         // a concrete conversationId to scope its file output, so we skip it
         // for the debug catalog path (conversationId == null).
         if (conversationId != null && settingsStore.settingsFlow.value.getCurrentImageGenerationModel() != null) {

@@ -4,14 +4,14 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.widget.Toast
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Book02
-import me.rerere.hugeicons.stroke.Book04
-import me.rerere.hugeicons.stroke.Earth
-import me.rerere.hugeicons.stroke.File02
-import me.rerere.hugeicons.stroke.Image02
-import me.rerere.hugeicons.stroke.Search01
-import me.rerere.hugeicons.stroke.Wrench01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.BookOpen
+import com.composables.icons.lucide.BookMarked
+import com.composables.icons.lucide.Earth
+import com.composables.icons.lucide.FileText
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Search
+import com.composables.icons.lucide.Wrench
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -160,7 +160,7 @@ fun ChatExportSheet(
                             Text(stringResource(id = R.string.chat_page_export_markdown_desc))
                         },
                         leadingContent = {
-                            Icon(HugeIcons.File02, contentDescription = null)
+                            Icon(Lucide.FileText, contentDescription = null)
                         }
                     )
                 }
@@ -179,7 +179,7 @@ fun ChatExportSheet(
                                 Text(stringResource(id = R.string.chat_page_export_image_desc))
                             },
                             leadingContent = {
-                                Icon(HugeIcons.Image02, contentDescription = null)
+                                Icon(Lucide.Image, contentDescription = null)
                             }
                         )
 
@@ -795,14 +795,14 @@ private fun ChainOfThoughtScope.ExportedToolStep(
             Icon(
                 imageVector = when (tool.toolName) {
                     "memory_tool" -> when (memoryAction) {
-                        "create", "edit" -> HugeIcons.Book04
-                        "delete" -> HugeIcons.Book02
-                        else -> HugeIcons.Wrench01
+                        "create", "edit" -> Lucide.BookMarked
+                        "delete" -> Lucide.BookOpen
+                        else -> Lucide.Wrench
                     }
 
-                    "search_web" -> HugeIcons.Search01
-                    "scrape_web" -> HugeIcons.Earth
-                    else -> HugeIcons.Wrench01
+                    "search_web" -> Lucide.Search
+                    "scrape_web" -> Lucide.Earth
+                    else -> Lucide.Wrench
                 },
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),

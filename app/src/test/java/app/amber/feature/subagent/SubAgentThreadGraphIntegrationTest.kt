@@ -17,6 +17,7 @@ import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.RoomThreadGraphStore
 import app.amber.feature.task.AgentTaskStore
 import java.io.File
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -43,7 +44,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * P4-02 acceptance tests through the real production chain (SubAgentManager +
+ * Integration tests through the real production chain (SubAgentManager +
  * Room thread graph store + capability flags), with a scripted fake
  * [SubAgentRunner] standing in for the LLM generation:
  *
@@ -509,10 +510,10 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         awaitLive(threadId)
 
         val call = fakeRunner.calls.single()
-        // runId + onTerminal are exactly the two conditions GenerationHandler
+        // runId + onTerminal are exactly the two conditions the generation coordinator
         // requires to activate its durable path for this child run, so child
         // tool effects are recorded in the unified ledger under the child
-        // runId (plan §P4-02 "child tool effect 仍使用统一 ledger").
+        // runId.
         assertEquals(threadId, call.runId)
         assertNotNull(call.onTerminal)
 
@@ -565,7 +566,7 @@ class FakeSubAgentRunner : SubAgentRunner {
         val previousAnswer: String,
     )
 
-    val calls = mutableListOf<CapturedCall>()
+    val calls = CopyOnWriteArrayList<CapturedCall>()
     var gate: CompletableDeferred<SubAgentResult>? = null
     var nextResult: SubAgentResult =
         SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "fake done")

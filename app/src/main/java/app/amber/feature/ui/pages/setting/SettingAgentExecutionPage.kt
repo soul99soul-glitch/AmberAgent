@@ -18,13 +18,13 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.LookTop
-import me.rerere.hugeicons.stroke.Megaphone01
-import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Sparkles
-import me.rerere.hugeicons.stroke.VolumeHigh
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.SearchCheck
+import com.composables.icons.lucide.Megaphone
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Sparkles
+import com.composables.icons.lucide.Volume2
 import app.amber.agent.R
 import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
@@ -71,7 +71,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_agent_execution_display_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        leadingContent = { Icon(Lucide.SearchCheck, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_operation_preview_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_operation_preview)) },
                         trailingContent = {
@@ -104,7 +104,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Sparkles, null) },
+                        leadingContent = { Icon(Lucide.Sparkles, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generative_ui_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generative_ui)) },
                         trailingContent = {
@@ -123,7 +123,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        leadingContent = { Icon(Lucide.CodeXml, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_tool_loop_steps)) },
                         trailingContent = {
@@ -158,7 +158,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_agent_execution_live_status_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        leadingContent = { Icon(Lucide.Megaphone, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status)) },
                         trailingContent = {
@@ -177,7 +177,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.LookTop, null) },
+                        leadingContent = { Icon(Lucide.SearchCheck, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_status_privacy)) },
                         trailingContent = {
@@ -204,7 +204,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_agent_execution_live_mode_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Sparkles, null) },
+                        leadingContent = { Icon(Lucide.Sparkles, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode)) },
                         trailingContent = {
@@ -223,7 +223,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Refresh01, null) },
+                        leadingContent = { Icon(Lucide.RefreshCw, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_auto_refresh)) },
                         trailingContent = {
@@ -242,7 +242,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Refresh01, null) },
+                        leadingContent = { Icon(Lucide.RefreshCw, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_refresh_interval)) },
                         trailingContent = {
@@ -269,7 +269,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        leadingContent = { Icon(Lucide.CodeXml, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_max_nodes)) },
                         trailingContent = {
@@ -296,7 +296,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.VolumeHigh, null) },
+                        leadingContent = { Icon(Lucide.Volume2, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice)) },
                         trailingContent = {
@@ -323,7 +323,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                     title = { Text(stringResource(R.string.setting_agent_execution_stability_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        leadingContent = { Icon(Lucide.CodeXml, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry)) },
                         trailingContent = {
@@ -344,7 +344,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, null) },
+                        leadingContent = { Icon(Lucide.CodeXml, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_retry_count)) },
                         trailingContent = {
@@ -370,7 +370,7 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Megaphone01, null) },
+                        leadingContent = { Icon(Lucide.Megaphone, null) },
                         supportingContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_generation_keepalive)) },
                         trailingContent = {

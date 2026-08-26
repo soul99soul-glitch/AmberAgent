@@ -15,10 +15,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.MoneyBag02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.HandCoins
 import app.amber.core.utils.SimpleCache
 import app.amber.core.utils.toDp
 import org.koin.compose.koinInject
@@ -40,7 +40,7 @@ fun ProviderBalanceText(
         return
     }
 
-    val providerManager = koinInject<ProviderManager>()
+    val providerCatalog = koinInject<ProviderCatalog>()
 
     val value = produceState(initialValue = "~", key1 = providerSetting.id, key2 = providerSetting.balanceOption) {
         // Check cache first
@@ -50,7 +50,7 @@ fun ProviderBalanceText(
         } else {
             // Fetch balance from API
             runCatching {
-                val balance = providerManager.getProviderByType(providerSetting).getBalance(providerSetting)
+                val balance = providerCatalog.text(providerSetting).getBalance(providerSetting)
                 // Cache the result
                 cache.put("${providerSetting.id},${providerSetting.balanceOption.hashCode()}", balance)
                 value = balance
@@ -69,7 +69,7 @@ fun ProviderBalanceText(
         horizontalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Icon(
-            imageVector = HugeIcons.MoneyBag02,
+            imageVector = Lucide.HandCoins,
             contentDescription = null,
             modifier = Modifier.size(style.fontSize.toDp()),
             tint = color.takeOrElse { LocalContentColor.current }

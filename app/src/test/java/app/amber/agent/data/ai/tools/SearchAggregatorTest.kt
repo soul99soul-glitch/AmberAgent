@@ -70,6 +70,7 @@ class SearchAggregatorTest {
                                     title = "Fresh AI News",
                                     url = "https://example.com/ai",
                                     text = "AI update",
+                                    publishedAt = "2026-08-26",
                                 )
                             )
                         )
@@ -80,6 +81,10 @@ class SearchAggregatorTest {
 
         assertEquals("ok", payload["status"]!!.jsonPrimitive.content)
         assertEquals(1, payload["items"]!!.jsonArray.size)
+        assertEquals(
+            "2026-08-26",
+            payload["items"]!!.jsonArray.single().jsonObject["published_at"]!!.jsonPrimitive.content,
+        )
         val sources = payload["sources"]!!.jsonArray
         assertTrue(sources.any { it.jsonObject["status"]!!.jsonPrimitive.content == "error" })
         assertTrue(sources.any { it.jsonObject["status"]!!.jsonPrimitive.content == "ok" })

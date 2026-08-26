@@ -89,6 +89,8 @@ import app.amber.agent.data.db.entity.ThreadResultEntity
 import app.amber.agent.data.db.entity.ThemePackageEntity
 import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.core.utils.JsonInstant
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 
 @Database(
     entities = [
@@ -137,7 +139,7 @@ import app.amber.core.utils.JsonInstant
         ContinueCandidateDismissEntity::class,
         ThemePackageEntity::class,
     ],
-    version = 15
+    version = 16
 )
 @TypeConverters(TokenUsageConverter::class)
 abstract class AppDatabase : RoomDatabase() {
@@ -547,7 +549,55 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
         }
+
+        /** Fold every historical profile-owned record into the single Amber profile. */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                canonicalizeAmberOwnership(db, AMBER_AGENT_ID_SQL)
+            }
+        }
+
+        private const val AMBER_AGENT_ID_SQL = "7def1f55-3dd9-4a09-a95a-7d0c2554b346"
     }
+}
+
+internal fun canonicalizeAmberOwnership(
+    db: SupportSQLiteDatabase,
+    profileId: String,
+) {
+    val councilUpdates = mutableListOf<Pair<String, String>>()
+    db.query(
+        "SELECT id, council_state FROM conversationentity " +
+            "WHERE council_state IS NOT NULL AND council_state != ''"
+    ).use { cursor ->
+        while (cursor.moveToNext()) {
+            val conversationId = cursor.getString(0)
+            val rawState = cursor.getString(1)
+            val updatedState = runCatching {
+                val state = JsonInstant.parseToJsonElement(rawState) as? JsonObject
+                    ?: return@runCatching null
+                JsonObject(
+                    state.toMutableMap().apply {
+                        this["host_assistant_id"] = JsonPrimitive(profileId)
+                    }
+                ).toString()
+            }.getOrNull() ?: continue
+            councilUpdates += conversationId to updatedState
+        }
+    }
+
+    db.execSQL("UPDATE conversationentity SET assistant_id = ?", arrayOf(profileId))
+    councilUpdates.forEach { (conversationId, updatedState) ->
+        db.execSQL(
+            "UPDATE conversationentity SET council_state = ? WHERE id = ?",
+            arrayOf(updatedState, conversationId),
+        )
+    }
+    db.execSQL(
+        "UPDATE memoryentity SET assistant_id = ? " +
+            "WHERE assistant_id NOT IN ('__global__', '__short_term__', '__long_term__')",
+        arrayOf(profileId),
+    )
 }
 
 object TokenUsageConverter {

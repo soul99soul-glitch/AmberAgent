@@ -18,7 +18,6 @@ import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
-import okhttp3.OkHttpClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
@@ -27,11 +26,11 @@ import org.junit.Before
 import org.junit.Test
 
 class ClaudeProviderPromptCacheTest {
-    private lateinit var provider: ClaudeProvider
+    private lateinit var adapter: AnthropicMessagesAdapter
 
     @Before
     fun setUp() {
-        provider = ClaudeProvider(OkHttpClient())
+        adapter = AnthropicMessagesAdapter()
     }
 
     private fun buildRequest(
@@ -40,15 +39,7 @@ class ClaudeProviderPromptCacheTest {
         params: TextGenerationParams,
         stream: Boolean = false
     ): JsonObject {
-        val method = ClaudeProvider::class.java.getDeclaredMethod(
-            "buildMessageRequest",
-            ProviderSetting.Claude::class.java,
-            List::class.java,
-            TextGenerationParams::class.java,
-            Boolean::class.javaPrimitiveType!!
-        )
-        method.isAccessible = true
-        return method.invoke(provider, providerSetting, messages, params, stream) as JsonObject
+        return adapter.encodeRequest(providerSetting, messages, params, streaming = stream)
     }
 
     private fun dummyTool(): Tool {

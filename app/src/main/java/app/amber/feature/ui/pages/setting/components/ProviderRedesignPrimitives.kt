@@ -1,10 +1,10 @@
 package app.amber.feature.ui.pages.setting.components
 
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Copy01
-import me.rerere.hugeicons.stroke.View
-import me.rerere.hugeicons.stroke.ViewOff
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Copy
+import com.composables.icons.lucide.Eye
+import com.composables.icons.lucide.EyeOff
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -26,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +52,7 @@ import app.amber.core.utils.writeClipboardText
 import app.amber.ai.provider.GoogleAuthMode
 import app.amber.ai.provider.OpenAIAuthMode
 import app.amber.ai.provider.ProviderSetting
+import app.amber.agent.R
 import app.amber.core.settings.DEFAULT_PROVIDERS
 import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -164,11 +168,11 @@ internal fun ProviderLiveDot(
 @Composable
 internal fun ProviderIconButton(
     imageVector: ImageVector,
-    contentDescription: String?,
+    contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tint: Color = Color.Unspecified,
-    size: Dp = 36.dp,
+    size: Dp = 48.dp,
     iconSize: Dp = 19.dp,
     rotate180: Boolean = false,
 ) {
@@ -222,21 +226,28 @@ internal fun <T> ProviderPillSeg(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .height(38.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (on) t.raised else Color.Transparent)
+                    .heightIn(min = 48.dp)
                     .pressable(onClick = { onSelected(option.value) }),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = option.label,
-                    style = (if (mono) type.meta else type.secondary).copy(
-                        fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
-                    ),
-                    color = if (on) t.accent else t.ink3,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) t.raised else Color.Transparent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = option.label,
+                        style = (if (mono) type.meta else type.secondary).copy(
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Medium,
+                        ),
+                        color = if (on) t.accent else t.ink3,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
@@ -269,7 +280,7 @@ internal fun ProviderTerminalFilter(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp, bottom = 6.dp),
+                .heightIn(min = 48.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
@@ -299,8 +310,8 @@ internal fun ProviderTerminalFilter(
             )
             if (value.isNotEmpty()) {
                 ProviderSmallIconButton(
-                    imageVector = HugeIcons.Cancel01,
-                    contentDescription = null,
+                    imageVector = Lucide.X,
+                    contentDescription = stringResource(R.string.provider_filter_clear),
                     onClick = { onValueChange("") },
                 )
             }
@@ -321,6 +332,7 @@ internal fun ProviderTextField(
     modifier: Modifier = Modifier,
     placeholder: String = "",
     mono: Boolean = false,
+    isError: Boolean = false,
     readOnly: Boolean = false,
     singleLine: Boolean = true,
     minHeight: Dp = 46.dp,
@@ -338,7 +350,11 @@ internal fun ProviderTextField(
             .defaultMinSize(minHeight = minHeight)
             .clip(RoundedCornerShape(12.dp))
             .background(t.surface2)
-            .border(1.dp, t.line, RoundedCornerShape(12.dp))
+            .border(
+                1.dp,
+                if (isError) MaterialTheme.colorScheme.error else t.line,
+                RoundedCornerShape(12.dp),
+            )
             .padding(horizontal = 14.dp, vertical = 12.dp),
         readOnly = readOnly,
         singleLine = singleLine,
@@ -412,13 +428,15 @@ internal fun ProviderSecretField(
         )
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             ProviderSmallIconButton(
-                imageVector = if (visible) HugeIcons.ViewOff else HugeIcons.View,
-                contentDescription = null,
+                imageVector = if (visible) Lucide.EyeOff else Lucide.Eye,
+                contentDescription = stringResource(
+                    if (visible) R.string.provider_secret_hide else R.string.provider_secret_show,
+                ),
                 onClick = { visible = !visible },
             )
             ProviderSmallIconButton(
-                imageVector = HugeIcons.Copy01,
-                contentDescription = null,
+                imageVector = Lucide.Copy,
+                contentDescription = stringResource(R.string.copy),
                 onClick = { context.writeClipboardText(value) },
             )
         }
@@ -428,7 +446,7 @@ internal fun ProviderSecretField(
 @Composable
 internal fun ProviderSmallIconButton(
     imageVector: ImageVector,
-    contentDescription: String?,
+    contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     tint: Color = Color.Unspecified,
@@ -436,7 +454,7 @@ internal fun ProviderSmallIconButton(
     val t = LocalAmberTokens.current
     Box(
         modifier = modifier
-            .size(30.dp)
+            .size(48.dp)
             .clip(RoundedCornerShape(8.dp))
             .pressable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -459,19 +477,25 @@ internal fun ProviderToggle(
     val t = LocalAmberTokens.current
     Box(
         modifier = modifier
-            .width(44.dp)
-            .height(26.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (checked) t.accent else t.line2)
-            .pressable(onClick = { onCheckedChange(!checked) })
-            .padding(3.dp),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+            .size(48.dp)
+            .pressable(onClick = { onCheckedChange(!checked) }),
+        contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier
-                .size(20.dp)
-                .background(t.raised, CircleShape)
-        )
+            modifier = Modifier
+                .width(44.dp)
+                .height(26.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(if (checked) t.accent else t.line2)
+                .padding(3.dp),
+            contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(
+                Modifier
+                    .size(20.dp)
+                    .background(t.raised, CircleShape)
+            )
+        }
     }
 }
 
@@ -512,33 +536,40 @@ internal fun ProviderCommandButton(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Row(
+    Box(
         modifier = modifier
-            .height(44.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (accent) t.accent else t.surface2)
-            .border(1.dp, if (accent) Color.Transparent else t.line, RoundedCornerShape(10.dp))
-            .pressable(onClick = onClick)
-            .padding(horizontal = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
+            .heightIn(min = 48.dp)
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        if (imageVector != null) {
-            Icon(
-                imageVector = imageVector,
-                contentDescription = null,
-                tint = if (accent) t.accentInk else t.ink3,
-                modifier = Modifier.size(17.dp),
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (accent) t.accent else t.surface2)
+                .border(1.dp, if (accent) Color.Transparent else t.line, RoundedCornerShape(10.dp))
+                .padding(horizontal = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (imageVector != null) {
+                Icon(
+                    imageVector = imageVector,
+                    contentDescription = null,
+                    tint = if (accent) t.accentInk else t.ink3,
+                    modifier = Modifier.size(17.dp),
+                )
+                Spacer(Modifier.width(7.dp))
+            }
+            Text(
+                text = text,
+                style = type.meta.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
+                color = if (accent) t.accentInk else t.ink2,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(7.dp))
         }
-        Text(
-            text = text,
-            style = type.meta.copy(fontSize = 11.5.sp, fontWeight = FontWeight.Bold),
-            color = if (accent) t.accentInk else t.ink2,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -553,30 +584,36 @@ internal fun ProviderGhostButton(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Row(
+    Box(
         modifier = modifier
-            .height(32.dp)
-            .clip(RoundedCornerShape(3.dp))
-            .border(1.dp, if (accent) t.accent else t.line2, RoundedCornerShape(3.dp))
-            .pressable(onClick = onClick)
-            .padding(horizontal = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .heightIn(min = 48.dp)
+            .pressable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        if (imageVector != null) {
-            Icon(
-                imageVector = imageVector,
-                contentDescription = null,
-                tint = if (accent) t.accent else t.ink3,
-                modifier = Modifier.size(13.dp),
+        Row(
+            modifier = Modifier
+                .height(32.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .border(1.dp, if (accent) t.accent else t.line2, RoundedCornerShape(3.dp))
+                .padding(horizontal = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (imageVector != null) {
+                Icon(
+                    imageVector = imageVector,
+                    contentDescription = null,
+                    tint = if (accent) t.accent else t.ink3,
+                    modifier = Modifier.size(13.dp),
+                )
+            }
+            Text(
+                text = text,
+                style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                color = if (accent) t.accent else t.ink2,
+                maxLines = 1,
             )
         }
-        Text(
-            text = text,
-            style = type.meta.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
-            color = if (accent) t.accent else t.ink2,
-            maxLines = 1,
-        )
     }
 }
 

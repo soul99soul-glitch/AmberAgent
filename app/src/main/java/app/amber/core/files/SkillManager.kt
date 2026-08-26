@@ -117,13 +117,7 @@ class SkillManager(
             invalidateSkillCache()
             settingsStore.update { settings ->
                 settings.copy(
-                    assistants = settings.assistants.map { assistant ->
-                        if (assistant.enabledSkills.contains(name)) {
-                            assistant.copy(enabledSkills = assistant.enabledSkills - name)
-                        } else {
-                            assistant
-                        }
-                    }
+                    enabledSkills = settings.enabledSkills - name,
                 )
             }
         }

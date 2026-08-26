@@ -25,8 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Settings03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Settings
 import app.amber.agent.Screen
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.agent.data.db.entity.MiniAppEntity
@@ -58,7 +58,7 @@ fun MiniAppListPage(
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.MiniAppSettings) }) {
-                        Icon(HugeIcons.Settings03, contentDescription = "小应用设置")
+                        Icon(Lucide.Settings, contentDescription = "小应用设置")
                     }
                 },
             )

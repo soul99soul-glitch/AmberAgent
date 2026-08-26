@@ -50,18 +50,19 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.SecureFlagPolicy
 import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BubbleChatQuestion
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.Comment01
-import me.rerere.hugeicons.stroke.Github
-import me.rerere.hugeicons.stroke.Globe02
-import me.rerere.hugeicons.stroke.Idea
-import me.rerere.hugeicons.stroke.News01
-import me.rerere.hugeicons.stroke.Note01
-import me.rerere.hugeicons.stroke.PlayCircle02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageCircleQuestion
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.MessageSquare
+import com.composables.icons.lucide.Github
+import com.composables.icons.lucide.Globe
+import com.composables.icons.lucide.Lightbulb
+import com.composables.icons.lucide.Newspaper
+import com.composables.icons.lucide.NotebookPen
+import com.composables.icons.lucide.CirclePlay
 import app.amber.agent.R
 import app.amber.feature.webmount.core.WebMountCapability
 import app.amber.feature.webmount.core.WebMountManager
@@ -152,6 +153,10 @@ fun SettingExperimentalWebMountPage(
     val connectedTemplate = stringResource(R.string.setting_webmount_oauth_connected_toast)
     val disconnectedTemplate = stringResource(R.string.setting_webmount_oauth_disconnected_toast)
     val failedTemplate = stringResource(R.string.setting_webmount_oauth_failed_toast)
+    val slashInstalledMessage = stringResource(R.string.setting_webmount_slash_installed)
+    val slashAlreadyInstalledMessage = stringResource(R.string.setting_webmount_slash_already_installed)
+    val inferredCookieSavedTemplate = stringResource(R.string.setting_webmount_inferred_cookie_saved)
+    val cookieValidatingTemplate = stringResource(R.string.setting_webmount_cookie_validating)
 
     ExperimentalSettingsScaffold(
         title = stringResource(R.string.setting_webmount_title),
@@ -163,7 +168,7 @@ fun SettingExperimentalWebMountPage(
         ) {
             item {
                 ExperimentHeroCard(
-                    icon = { Icon(HugeIcons.Globe02, contentDescription = null) },
+                    icon = { Icon(Lucide.Globe, contentDescription = null) },
                     title = stringResource(R.string.setting_webmount_title),
                     description = stringResource(R.string.setting_webmount_desc),
                     trailing = {
@@ -230,8 +235,7 @@ fun SettingExperimentalWebMountPage(
                                 scope.launch {
                                     val installed = installWebMountSlashCommand(settingsStore)
                                     toaster.show(
-                                        if (installed) "已添加 /webmount 斜杠命令。聊天里输 / 选 webmount。"
-                                        else "你已经装过 /webmount 了。"
+                                        if (installed) slashInstalledMessage else slashAlreadyInstalledMessage
                                     )
                                 }
                             },
@@ -308,18 +312,27 @@ fun SettingExperimentalWebMountPage(
                                 } else null,
                                 onConnect = if (site.authKind == AuthKind.OAUTH) {
                                     {
-                                        scope.launch {
-                                            runCatching {
-                                                val result = oauthClient.connect(oauthProviderId)
-                                                when (result) {
-                                                    is WebMountOAuthClient.ConnectResult.Success ->
-                                                        toaster.show(connectedTemplate.format(site.displayName))
-                                                    is WebMountOAuthClient.ConnectResult.NotConfigured ->
-                                                        toaster.show(result.reason)
-                                                    is WebMountOAuthClient.ConnectResult.Failed ->
-                                                        toaster.show(failedTemplate.format(result.reason))
+                                        if (site.id !in busyStations) {
+                                            busyStations = busyStations + site.id
+                                            scope.launch {
+                                                try {
+                                                    val result = oauthClient.connect(oauthProviderId)
+                                                    when (result) {
+                                                        is WebMountOAuthClient.ConnectResult.Success ->
+                                                            toaster.show(connectedTemplate.format(site.displayName))
+                                                        is WebMountOAuthClient.ConnectResult.NotConfigured ->
+                                                            toaster.show(result.reason)
+                                                        is WebMountOAuthClient.ConnectResult.Failed ->
+                                                            toaster.show(failedTemplate.format(result.reason))
+                                                    }
+                                                } catch (error: CancellationException) {
+                                                    throw error
+                                                } catch (error: Exception) {
+                                                    toaster.show(error.message ?: error.toString())
+                                                } finally {
+                                                    busyStations = busyStations - site.id
                                                 }
-                                            }.onFailure { toaster.show(it.message ?: it.toString()) }
+                                            }
                                         }
                                     }
                                 } else null,
@@ -444,7 +457,7 @@ fun SettingExperimentalWebMountPage(
 
                 fun successMessage(): String {
                     return if (autoInferredName != null) {
-                        "已登录 $autoInferredName cookie 已识别并保存为 ${site.displayName} 的登录标记"
+                        inferredCookieSavedTemplate.format(autoInferredName, site.displayName)
                     } else {
                         signedInTemplate.format(site.displayName)
                     }
@@ -452,7 +465,7 @@ fun SettingExperimentalWebMountPage(
 
                 val stationId = target.stationId
                 if (status is WebMountLoginStatus.SignedIn && stationId != null) {
-                    toaster.show("已检测到登录 Cookie，正在验证 ${site.displayName} 可用性…")
+                    toaster.show(cookieValidatingTemplate.format(site.displayName))
                     scope.launch {
                         val state = runCatching { webMountManager.probe(stationId) }.getOrNull()
                         cookieRevision++
@@ -876,7 +889,7 @@ private fun WebMountLoginDialog(
                         }
                         IconButton(onClick = onDismiss) {
                             Icon(
-                                imageVector = HugeIcons.Cancel01,
+                                imageVector = Lucide.X,
                                 contentDescription = stringResource(R.string.update_card_close),
                                 modifier = Modifier.size(22.dp),
                             )
@@ -906,7 +919,7 @@ private fun WebMountLoginDialog(
                     )
                     webState.blockedNavigation?.let { blocked ->
                         Text(
-                            text = "已拦截打开 App 请求: ${blocked.take(80)}",
+                            text = stringResource(R.string.setting_webmount_app_open_blocked, blocked.take(80)),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 2,
@@ -923,12 +936,12 @@ private fun WebMountLoginDialog(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "登录页面已崩溃，可以重新加载。",
+                                text = stringResource(R.string.setting_webmount_login_page_crashed),
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(onClick = controller::reload) {
-                                Text("重新加载")
+                                Text(stringResource(R.string.setting_webmount_reload))
                             }
                         }
                     }
@@ -982,7 +995,10 @@ private fun WebMountLoginNavigationBar(
             modifier = Modifier.weight(1f),
         )
         TextButton(enabled = !verifying, onClick = onDone) {
-            Text(if (verifying) "验证中" else stringResource(R.string.webmount_inline_login_done))
+            Text(
+                if (verifying) stringResource(R.string.setting_webmount_verifying)
+                else stringResource(R.string.webmount_inline_login_done)
+            )
         }
     }
 }
@@ -1004,13 +1020,18 @@ private fun CookieImportFallback(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextButton(onClick = { expanded = !expanded }) {
-            Text(if (expanded) "登录遇到问题？收起 Cookie 导入" else "登录遇到问题？展开 Cookie 导入")
+            Text(
+                stringResource(
+                    if (expanded) R.string.setting_webmount_cookie_import_collapse
+                    else R.string.setting_webmount_cookie_import_expand
+                )
+            )
         }
         if (expanded) {
             OutlinedTextField(
                 value = rawCookie,
                 onValueChange = { rawCookie = it },
-                label = { Text("整行 Cookie") },
+                label = { Text(stringResource(R.string.setting_webmount_cookie_line_label)) },
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                 minLines = 1,
@@ -1054,23 +1075,35 @@ private fun CookieImportFallback(
                         }
                     },
                 ) {
-                    Text(if (importing) "导入中" else "导入")
+                    Text(
+                        stringResource(
+                            if (importing) R.string.setting_webmount_importing
+                            else R.string.setting_webmount_import
+                        )
+                    )
                 }
             }
         }
     }
 }
 
+@Composable
 private fun loginStatusLabel(
     status: WebMountLoginStatus,
     verifying: Boolean,
 ): String {
-    if (verifying) return "正在验证站点可用性…"
+    if (verifying) return stringResource(R.string.setting_webmount_status_verifying_site)
     return when (status) {
-        WebMountLoginStatus.Waiting -> "等待网页登录完成。"
-        is WebMountLoginStatus.UrlMatched -> "页面已跳转到登录后地址，正在等待 cookie 写入。"
-        is WebMountLoginStatus.SignedIn -> "已检测到登录 Cookie: ${status.cookieNames.joinToString()}"
-        is WebMountLoginStatus.MissingCookies -> "Cookie 不完整，缺少: ${status.missing.joinToString()}"
+        WebMountLoginStatus.Waiting -> stringResource(R.string.setting_webmount_status_waiting)
+        is WebMountLoginStatus.UrlMatched -> stringResource(R.string.setting_webmount_status_url_matched)
+        is WebMountLoginStatus.SignedIn -> stringResource(
+            R.string.setting_webmount_status_signed_in,
+            status.cookieNames.joinToString(),
+        )
+        is WebMountLoginStatus.MissingCookies -> stringResource(
+            R.string.setting_webmount_status_missing_cookies,
+            status.missing.joinToString(),
+        )
         is WebMountLoginStatus.Unknown -> status.reason
         is WebMountLoginStatus.Failed -> status.reason
     }
@@ -1258,28 +1291,20 @@ private fun collectKnownUrlsFor(
 ): List<String> = app.amber.feature.webmount.usersites.collectSiteUrls(site, manager, profileRegistry)
 
 private fun iconForIconKey(iconKey: String?) = when (iconKey) {
-    "hackernews" -> HugeIcons.News01
-    "reddit" -> HugeIcons.Comment01
-    "github" -> HugeIcons.Github
-    "bilibili" -> HugeIcons.PlayCircle02
-    "juejin" -> HugeIcons.Idea
-    "zhihu" -> HugeIcons.BubbleChatQuestion
-    "feishu_docs" -> HugeIcons.Note01
-    else -> HugeIcons.Globe02
+    "hackernews" -> Lucide.Newspaper
+    "reddit" -> Lucide.MessageSquare
+    "github" -> Lucide.Github
+    "bilibili" -> Lucide.CirclePlay
+    "juejin" -> Lucide.Lightbulb
+    "zhihu" -> Lucide.MessageCircleQuestion
+    "feishu_docs" -> Lucide.NotebookPen
+    else -> Lucide.Globe
 }
 
 /**
- * Install the /webmount slash command into the global QuickMessages list AND
- * subscribe every assistant to it (assistant.quickMessageIds), since the chat
- * input's slash panel filters by per-assistant subscription — a quick message
- * that exists globally but isn't in the current assistant's quickMessageIds
- * will silently not appear.
+ * Install the /webmount slash command into the global QuickMessages list.
  *
- * Idempotent: re-tapping returns false. Also back-fills the subscription if a
- * prior buggy install left an orphan QuickMessage (in global list but in no
- * assistant's id set) — in that case we keep the existing QuickMessage and
- * just patch the assistant subscriptions, and return true so the toast tells
- * the user something actually happened.
+ * Idempotent: re-tapping returns false when the command already exists.
  *
  * The template is a system-style instruction that frames whatever follows
  * (the user's actual task) so the agent uses WebMount tools by default,
@@ -1308,15 +1333,9 @@ private suspend fun installWebMountSlashCommand(
         title = "webmount",
         content = template + "\n",  // trailing newline so cursor lands on a fresh line
     )
-    val allSubscribed = current.assistants.all { quickMessage.id in it.quickMessageIds }
-    if (existing != null && allSubscribed) return false
+    if (existing != null) return false
     settingsStore.update { s ->
-        val nextMessages = if (existing == null) s.quickMessages + quickMessage else s.quickMessages
-        val nextAssistants = s.assistants.map { a ->
-            if (quickMessage.id in a.quickMessageIds) a
-            else a.copy(quickMessageIds = a.quickMessageIds + quickMessage.id)
-        }
-        s.copy(quickMessages = nextMessages, assistants = nextAssistants)
+        s.copy(quickMessages = s.quickMessages + quickMessage)
     }
     return true
 }

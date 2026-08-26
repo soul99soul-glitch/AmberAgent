@@ -60,6 +60,55 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_15_16_folds_profile_history_without_touching_memory_buckets() {
+        val oldProfile = "0950e2dc-9bd5-4801-afa3-aa887aa36b4e"
+        val customProfile = "11111111-1111-1111-1111-111111111111"
+        val amberAgentId = "7def1f55-3dd9-4a09-a95a-7d0c2554b346"
+        val version15 = helper.createDatabase(TEST_DB, 15)
+        version15.execSQL(
+            "INSERT INTO conversationentity " +
+                "(id, assistant_id, title, nodes, create_at, update_at, suggestions, is_pinned, auto_approve_tools, council_state) " +
+                "VALUES ('old-conversation', '$oldProfile', 'old', '[]', 1, 2, '[]', 0, 0, " +
+                "'{\"host_assistant_id\":\"$oldProfile\",\"objective\":\"keep\"}')"
+        )
+        version15.execSQL(
+            "INSERT INTO conversationentity " +
+                "(id, assistant_id, title, nodes, create_at, update_at, suggestions, is_pinned, auto_approve_tools, council_state) " +
+                "VALUES ('custom-conversation', '$customProfile', 'custom', '[]', 3, 4, '[]', 1, 0, NULL)"
+        )
+        listOf(customProfile, "__global__", "__short_term__", "__long_term__")
+            .forEachIndexed { index, owner ->
+                version15.execSQL(
+                    "INSERT INTO memoryentity " +
+                        "(id, assistant_id, content, scope, kind, source_conversation_id, " +
+                        "source_message_ids_json, supersedes_ids_json, expires_at, confidence, pinned, archived, " +
+                        "created_at, updated_at, last_used_at, revision, source_run_id, source_trigger) " +
+                        "VALUES (${index + 1}, '$owner', 'memory-$index', 'long_term', 'note', NULL, " +
+                        "'[]', '[]', NULL, 1.0, 0, 0, 1, 1, NULL, 1, NULL, NULL)"
+                )
+            }
+        version15.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            16,
+            true,
+            AppDatabase.MIGRATION_15_16,
+        )
+
+        assertEquals(2, db.countRows("conversationentity", "assistant_id = '$amberAgentId'"))
+        assertEquals(0, db.countRows("conversationentity", "assistant_id != '$amberAgentId'"))
+        val council = db.stringValue("conversationentity", "council_state", "id = 'old-conversation'")
+        assertTrue(council.contains(amberAgentId))
+        assertTrue(council.contains("keep"))
+        assertEquals(1, db.countRows("memoryentity", "assistant_id = '$amberAgentId'"))
+        assertEquals(1, db.countRows("memoryentity", "assistant_id = '__global__'"))
+        assertEquals(1, db.countRows("memoryentity", "assistant_id = '__short_term__'"))
+        assertEquals(1, db.countRows("memoryentity", "assistant_id = '__long_term__'"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())

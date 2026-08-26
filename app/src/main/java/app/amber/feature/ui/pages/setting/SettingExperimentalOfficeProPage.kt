@@ -42,9 +42,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.File02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.FileText
 import app.amber.agent.R
 import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.office.FeishuWorkProject
@@ -97,7 +97,7 @@ fun SettingExperimentalOfficeProPage(
         ) {
             item {
                 ExperimentHeroCard(
-                    icon = { Icon(HugeIcons.File02, contentDescription = null) },
+                    icon = { Icon(Lucide.FileText, contentDescription = null) },
                     title = stringResource(R.string.setting_officepro_title),
                     description = stringResource(R.string.setting_officepro_desc),
                     trailing = {
@@ -417,7 +417,7 @@ private fun OfficeProjectEditorDialog(
                         color = workspaceColors().ink,
                     )
                     IconButton(onClick = onDismiss) {
-                        Icon(HugeIcons.Cancel01, contentDescription = null)
+                        Icon(Lucide.X, contentDescription = null)
                     }
                 }
                 ExperimentNote(text = stringResource(R.string.setting_officepro_project_editor_desc))
@@ -609,7 +609,7 @@ private fun WatchDocDialog(
                         style = MaterialTheme.typography.titleMedium,
                     )
                     IconButton(onClick = onDismiss) {
-                        Icon(HugeIcons.Cancel01, contentDescription = null)
+                        Icon(Lucide.X, contentDescription = null)
                     }
                 }
                 OutlinedTextField(

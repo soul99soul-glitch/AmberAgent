@@ -204,6 +204,9 @@ class NovelWorkspaceToolSession(
                 "write tool: path=$path contentLen=${content.length} keys=${input.toString().take(120)}",
             )
             when {
+                isOtherBranchPath(path) -> {
+                    textResult("无法写入其他分支：$path。当前轮次只能修改 branches/$branchSlug/。")
+                }
                 NovelWorkspacePaths.isProtectedPath(path) -> {
                     if (autoApproveCanon) {
                         // Unattended canon writes are restricted to this turn's one
@@ -211,12 +214,10 @@ class NovelWorkspaceToolSession(
                         // new chapter) lands in the same commit and trips the D-D
                         // unresolved gate, killing the batch one turn later.
                         ghostwriteChapterRefusal(path)?.let { return@Tool textResult(it) }
-                        // Unattended: write straight to disk; the runtime commits at
-                        // turn end (and rolls back on failure via the remembered content).
-                        batch.rememberPrevious(path, store.read(path))
-                        store.write(path, content)
+                        // Buffer until the runtime's final owner-token check. An
+                        // obsolete Worker must never write into a resumed execution.
                         batch.add(NovelWorkspaceWriteEntry(path, content, reason))
-                        textResult("已写入 $path（代笔自动收录）。")
+                        textResult("已暂存 $path（本轮完成后自动收录）。")
                     } else {
                         batch.add(NovelWorkspaceWriteEntry(path, content, reason))
                         textResult(
@@ -226,9 +227,16 @@ class NovelWorkspaceToolSession(
                     }
                 }
                 NovelWorkspacePaths.isFreeWritePath(path) -> {
-                    store.write(path, content)
-                    batch.noteFreeWrite()
-                    textResult("已保存 $path")
+                    if (autoApproveCanon) {
+                        // The same execution-token rule applies to plan/setting/draft
+                        // writes made by an unattended provider.
+                        batch.add(NovelWorkspaceWriteEntry(path, content, reason))
+                        textResult("已暂存 $path（本轮完成后自动收录）。")
+                    } else {
+                        store.write(path, content)
+                        batch.noteFreeWrite()
+                        textResult("已保存 $path")
+                    }
                 }
                 else -> {
                     android.util.Log.i("NovelWorkspace", "write tool: REJECTED path=$path")
@@ -247,6 +255,11 @@ class NovelWorkspaceToolSession(
         val path = input.str("path")
         require(!path.isNullOrEmpty()) { "novel tool requires a non-empty path" }
         return path
+    }
+
+    private fun isOtherBranchPath(path: String): Boolean {
+        val segments = path.split('/')
+        return segments.size >= 2 && segments[0] == NovelWorkspacePaths.BRANCHES_DIR && segments[1] != branchSlug
     }
 
     /**
@@ -295,13 +308,13 @@ class NovelWorkspaceToolSession(
     }
 }
 
-/** Buffered canon writes of one turn; the author gate applies them as a single commit. */
+/** Buffered owner-gated writes of one turn; the runtime applies them as a single commit. */
 class NovelWorkspaceWriteBatch {
     private val entries = mutableListOf<NovelWorkspaceWriteEntry>()
     private var freeWrites = 0
 
     /**
-     * Pre-turn content of auto-approved canon writes (null = file did not exist).
+     * Pre-turn content of auto-approved writes (null = file did not exist).
      * A failed turn restores these: an uncommitted orphan chapter would later join
      * a fresh chapter in one commit and trip the D-D unresolved gate.
      */

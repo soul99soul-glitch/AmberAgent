@@ -29,8 +29,19 @@ class MiniAppSearchBridge(
                 put("max_results", limit)
             },
         )
+        val status = result["status"]?.jsonPrimitive?.contentOrNull ?: "error"
         val items = result["items"]?.jsonArray ?: JsonArray(emptyList())
         return buildJsonObject {
+            put("status", status)
+            result["error"]?.let { put("error", it) }
+            put("sourceErrors", buildJsonArray {
+                result["sources"]?.jsonArray.orEmpty().forEach { element ->
+                    val source = element.jsonObject
+                    if (source["status"]?.jsonPrimitive?.contentOrNull == "error") {
+                        add(source)
+                    }
+                }
+            })
             put("items", buildJsonArray {
                 items.take(limit).forEach { element ->
                     val item = element.jsonObject

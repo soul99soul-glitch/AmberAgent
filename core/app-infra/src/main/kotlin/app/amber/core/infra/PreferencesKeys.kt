@@ -41,10 +41,31 @@ object PreferencesKeys {
     // 提供商
     val PROVIDERS = stringPreferencesKey("providers")
 
-    // 助手
-    val SELECT_ASSISTANT = stringPreferencesKey("select_assistant")
-    val ASSISTANTS = stringPreferencesKey("assistants")
-    val ASSISTANT_TAGS = stringPreferencesKey("assistant_tags")
+    // Single Amber runtime settings. The legacy AMBER_PROFILE/list keys below are
+    // read-only migration inputs; new writes use these direct keys instead.
+    val AMBER_SYSTEM_PROMPT = stringPreferencesKey("amber_system_prompt")
+    val AMBER_TEMPERATURE = stringPreferencesKey("amber_temperature")
+    val AMBER_TOP_P = stringPreferencesKey("amber_top_p")
+    val AMBER_CONTEXT_MESSAGE_SIZE = intPreferencesKey("amber_context_message_size")
+    val AMBER_STREAM_OUTPUT = booleanPreferencesKey("amber_stream_output")
+    val AMBER_MESSAGE_TEMPLATE = stringPreferencesKey("amber_message_template")
+    val AMBER_PRESET_MESSAGES = stringPreferencesKey("amber_preset_messages")
+    val AMBER_REGEXES = stringPreferencesKey("amber_regexes")
+    val AMBER_REASONING_LEVEL = stringPreferencesKey("amber_reasoning_level")
+    val AMBER_MAX_TOKENS = intPreferencesKey("amber_max_tokens")
+    val AMBER_CUSTOM_HEADERS = stringPreferencesKey("amber_custom_headers")
+    val AMBER_CUSTOM_BODIES = stringPreferencesKey("amber_custom_bodies")
+    val AMBER_REMEMBERED_REASONING_LEVELS = stringPreferencesKey("amber_remembered_reasoning_levels")
+    val AMBER_ENABLED_SKILLS = stringPreferencesKey("amber_enabled_skills")
+    val AMBER_ENABLED_MCP_SERVER_IDS = stringPreferencesKey("amber_enabled_mcp_server_ids")
+    val AMBER_ENABLED_MODE_INJECTION_IDS = stringPreferencesKey("amber_enabled_mode_injection_ids")
+    val AMBER_ENABLED_LOREBOOK_IDS = stringPreferencesKey("amber_enabled_lorebook_ids")
+
+    // Legacy read-only compatibility keys. New writes never recreate these.
+    val AMBER_PROFILE = stringPreferencesKey("amber_profile")
+    val LEGACY_SELECTED_ASSISTANT = stringPreferencesKey("select_assistant")
+    val LEGACY_ASSISTANTS = stringPreferencesKey("assistants")
+    val LEGACY_ASSISTANT_TAGS = stringPreferencesKey("assistant_tags")
 
     // 搜索
     val SEARCH_SERVICES = stringPreferencesKey("search_services")
@@ -66,10 +87,6 @@ object PreferencesKeys {
 
     // S3
     val S3_CONFIG = stringPreferencesKey("s3_config")
-
-    // TTS
-    val TTS_PROVIDERS = stringPreferencesKey("tts_providers")
-    val SELECTED_TTS_PROVIDER = stringPreferencesKey("selected_tts_provider")
 
     // -----------------------------------------------------------------------
     // P1-01 SecretStore: reference + 掩码位（真实凭据只存在于 SecretStore，
@@ -104,8 +121,8 @@ object PreferencesKeys {
 
     // Same one-shot pattern for the visual-routing slash commands
     // (/draw / /diagram / /slide). Seeded into settings.quickMessages
-    // global pool and subscribed by every existing assistant on the
-    // first load that sees this version <1.
+    // global pool for the single Amber chat on the first load that sees this
+    // version <1.
     val SEEDED_ROUTING_QUICK_MESSAGES_V1 =
         booleanPreferencesKey("seeded_routing_quick_messages_v1")
 

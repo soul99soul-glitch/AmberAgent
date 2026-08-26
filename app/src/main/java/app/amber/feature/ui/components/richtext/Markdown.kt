@@ -91,8 +91,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.transform
 import kotlinx.coroutines.withContext
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Tick01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Check
 import app.amber.agent.BuildConfig
 import app.amber.feature.ui.components.message.LocalSearchImageUrls
 import app.amber.feature.ui.components.message.LocalSearchSources
@@ -103,7 +103,7 @@ import app.amber.feature.ui.theme.JetbrainsMono
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
-import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import app.amber.core.agent.utils.markdown.CjkCompatibleGfmFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
 import app.amber.feature.ui.components.richtext.tree.MdNode
@@ -130,7 +130,7 @@ private val LocalStreamingMarkdownMotionScope = compositionLocalOf<StreamingMark
 private fun Modifier.fillWidthIf(fill: Boolean): Modifier = if (fill) fillMaxWidth() else this
 
 private val flavour by lazy {
-    GFMFlavourDescriptor(
+    CjkCompatibleGfmFlavourDescriptor(
         makeHttpsAutoLinks = true, useSafeLinks = true
     )
 }
@@ -2022,7 +2022,7 @@ private fun MarkdownNode(
                 ) {
                     if (isChecked) {
                         Icon(
-                            imageVector = HugeIcons.Tick01,
+                            imageVector = Lucide.Check,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary
                         )

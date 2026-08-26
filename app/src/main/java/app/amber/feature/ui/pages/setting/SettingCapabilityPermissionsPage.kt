@@ -19,9 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.CheckmarkCircle02
-import me.rerere.hugeicons.stroke.Cancel01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CircleCheck
+import com.composables.icons.lucide.X
 import app.amber.feature.runtime.ApprovalHistoryEntry
 import app.amber.feature.tools.Capability
 import app.amber.feature.tools.CapabilityPolicy
@@ -117,7 +117,7 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                             item(
                                 leadingContent = {
                                     Icon(
-                                        if (entry.decision == "approved") HugeIcons.CheckmarkCircle02 else HugeIcons.Cancel01,
+                                        if (entry.decision == "approved") Lucide.CircleCheck else Lucide.X,
                                         null,
                                     )
                                 },

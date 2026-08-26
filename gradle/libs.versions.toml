@@ -3,7 +3,7 @@ agp = "9.2.0"
 barcodeScanning = "17.3.0"
 cameraCore = "1.6.0"
 dom4j = "2.2.0"
-jlatexmath = "1.3"
+jlatexmath = "0.2.0"
 kotlin = "2.3.21"
 coreKtx = "1.18.0"
 junit = "4.13.2"
@@ -15,14 +15,12 @@ commons-text = "1.15.0"
 lifecycleRuntimeKtx = "2.10.0"
 activityCompose = "1.13.0"
 composeBom = "2026.04.01"
-media3 = "1.10.0"
-metadataExtractor = "2.20.0"
 nav2 = "2.9.8"
 nav3Core = "1.1.1"
 material3AdaptiveNav3 = "1.3.0-alpha10"
 lifecycleViewmodelNav3 = "2.10.0"
 nav3Material = "1.0.0-SNAPSHOT"
-markdown = "66a56dffca"
+markdown = "0.7.8"
 okhttp = "5.3.2"
 coil = "3.4.0"
 quickjs = "3.2.3"
@@ -35,7 +33,6 @@ kotlinx-datetime = "0.7.1"
 ksp = "2.3.4"
 paging = "3.4.2"
 lucide-icons = "1.1.0"
-huge-icons = "1.3"
 image-viewer = "1.1.0-alpha.7"
 google-services = "4.4.4"
 firebase-bom = "34.12.0"
@@ -66,19 +63,16 @@ ktor = "3.4.3"
 sqlite-vector = "0.9.92"
 jmdns = "3.6.3"
 slf4j = "2.0.17"
-sqlite-android = "-SNAPSHOT"
+sqlite-android = "0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0"
 
 [libraries]
 androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "cameraCore" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
-androidx-media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
-androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
-androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "barcodeScanning" }
 dom4j = { module = "org.dom4j:dom4j", version.ref = "dom4j" }
-jlatexmath = { module = "com.github.rikkahub.jlatexmath-android:jlatexmath", version.ref = "jlatexmath" }
-jlatexmath-font-greek = { module = "com.github.rikkahub.jlatexmath-android:jlatexmath-font-greek", version.ref = "jlatexmath" }
-jlatexmath-font-cyrillic = { module = "com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic", version.ref = "jlatexmath" }
+jlatexmath = { module = "ru.noties:jlatexmath-android", version.ref = "jlatexmath" }
+jlatexmath-font-greek = { module = "ru.noties:jlatexmath-android-font-greek", version.ref = "jlatexmath" }
+jlatexmath-font-cyrillic = { module = "ru.noties:jlatexmath-android-font-cyrillic", version.ref = "jlatexmath" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 kotest-runner-junit5 = { group = "io.kotest", name = "kotest-runner-junit5", version.ref = "kotest" }
@@ -112,8 +106,7 @@ androidx-paging-runtime = { group = "androidx.paging", name = "paging-runtime", 
 androidx-paging-compose = { group = "androidx.paging", name = "paging-compose", version.ref = "paging" }
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "workmanager" }
-jetbrains-markdown = { module = "com.github.rikkahub:markdown", version.ref = "markdown" }
-metadata-extractor = { module = "com.drewnoakes:metadata-extractor", version.ref = "metadataExtractor" }
+jetbrains-markdown = { module = "org.jetbrains:markdown", version.ref = "markdown" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 okhttp-sse = { group = "com.squareup.okhttp3", name = "okhttp-sse", version.ref = "okhttp" }
 okhttp-logging = { group = "com.squareup.okhttp3", name = "logging-interceptor", version.ref = "okhttp" }
@@ -134,7 +127,6 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlin-coroutines-core" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
 lucide-icons = { group = "com.composables", name = "icons-lucide", version.ref = "lucide-icons" }
-huge-icons = { group = "com.github.rikkahub", name = "hugeicons-compose", version.ref = "huge-icons" }
 image-viewer = { group = "com.jvziyaoyao.scale", name = "image-viewer", version.ref = "image-viewer" }
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebase-bom" }
 firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics" }
@@ -185,7 +177,7 @@ sqlite-vector = { module = "ai.sqlite:vector", version.ref = "sqlite-vector" }
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-android = { module = "uk.uuid.slf4j:slf4j-android", version = "2.0.17-0" }
-sqlite-android = { module = "com.github.rikkahub:sqlite-android", version.ref = "sqlite-android" }
+sqlite-android = { module = "com.github.requery:sqlite-android", version.ref = "sqlite-android" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

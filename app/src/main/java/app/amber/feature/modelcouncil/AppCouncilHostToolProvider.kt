@@ -10,7 +10,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.core.Tool
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
@@ -27,10 +27,10 @@ import kotlin.uuid.Uuid
 /**
  * App-module implementation of [CouncilHostToolProvider]. Owns the host's
  * tool-augmented generation loop by reusing the project's existing primitives:
- * [ProviderManager.streamText] + [MessageStreamAccumulator] +
+ * [ProviderCatalog.streamText] + [MessageStreamAccumulator] +
  * [AgentToolDispatcher.executeBatch] + the read-only tool factories.
  *
- * Kept deliberately minimal next to [app.amber.core.ai.GenerationHandler] — no
+ * Kept deliberately minimal next to [app.amber.core.ai.ChatRunCoordinator] — no
  * speculative execution, transformers, or approval UI. It serves a single host
  * turn with a bounded number of tool round-trips, and is the ONLY place in the
  * council that exposes tools. `ask_user` is surfaced (not executed) so the room
@@ -40,7 +40,7 @@ import kotlin.uuid.Uuid
  * so all calls are auto-approved — no per-call permission gate.
  */
 class AppCouncilHostToolProvider(
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val toolDispatcher: AgentToolDispatcher,
     ) : CouncilHostToolProvider {
 
@@ -62,7 +62,7 @@ class AppCouncilHostToolProvider(
             ?: return HostToolOutcome.Done("", listOf("Host model not found: $modelId"))
         val provider = model.findProvider(settings.providers)
             ?: return HostToolOutcome.Done("", listOf("Provider not found for host model."))
-        val providerImpl = providerManager.getProviderByType(provider)
+        val providerImpl = providerCatalog.text(provider)
 
         // The "relatively strong" host tool set: web search + page scrape + time.
         // ask_user is included so the host CAN ask; it is intercepted, not run.
@@ -93,7 +93,7 @@ class AppCouncilHostToolProvider(
             val accumulator = MessageStreamAccumulator(messages, model)
             val streamed = runCatching {
                 withTimeoutOrNull(timeoutMs) {
-                    providerImpl.streamText(provider, messages, params).collect { chunk ->
+                    providerImpl.stream(provider, messages, params).collect { chunk ->
                         accumulator.append(chunk)
                         // Forward only the assistant's own cumulative text for live display.
                         val delta = chunk.choices.firstOrNull()?.delta?.parts
@@ -172,7 +172,7 @@ class AppCouncilHostToolProvider(
                 return HostToolOutcome.Done(finalText, warnings)
             }
             // Write executed outputs back into the last assistant message (mirrors
-            // GenerationHandler's in-place update), then loop so the model sees results.
+            // the coordinator's in-place update), then loop so the model sees results.
             val lastMessage = messages.last()
             val updatedParts = lastMessage.parts.map { part ->
                 if (part is UIMessagePart.Tool) {

@@ -34,12 +34,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.ai.ui.UIMessagePart
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Clock02
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Download01
-import me.rerere.hugeicons.stroke.ListView
-import me.rerere.hugeicons.stroke.MoreVertical
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.AlarmClock
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.Download
+import com.composables.icons.lucide.List
+import com.composables.icons.lucide.EllipsisVertical
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.agent.data.db.entity.MiniAppEntity
@@ -126,7 +126,7 @@ fun MiniAppChatCard(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = HugeIcons.MoreVertical,
+                        imageVector = Lucide.EllipsisVertical,
                         contentDescription = "更多操作",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -138,7 +138,7 @@ fun MiniAppChatCard(
                         if (showSourceButton) {
                             DropdownMenuItem(
                                 text = { Text("查看源码") },
-                                leadingIcon = { Icon(HugeIcons.Code, contentDescription = null) },
+                                leadingIcon = { Icon(Lucide.CodeXml, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
                                     withCurrentApp { sourceTarget = it }
@@ -147,7 +147,7 @@ fun MiniAppChatCard(
                         }
                         DropdownMenuItem(
                             text = { Text("打开列表") },
-                            leadingIcon = { Icon(HugeIcons.ListView, contentDescription = null) },
+                            leadingIcon = { Icon(Lucide.List, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
                                 onOpenList()
@@ -155,7 +155,7 @@ fun MiniAppChatCard(
                         )
                         DropdownMenuItem(
                             text = { Text("导出 HTML") },
-                            leadingIcon = { Icon(HugeIcons.Download01, contentDescription = null) },
+                            leadingIcon = { Icon(Lucide.Download, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
                                 withCurrentApp(exportMiniApp)
@@ -163,7 +163,7 @@ fun MiniAppChatCard(
                         )
                         DropdownMenuItem(
                             text = { Text("版本历史") },
-                            leadingIcon = { Icon(HugeIcons.Clock02, contentDescription = null) },
+                            leadingIcon = { Icon(Lucide.AlarmClock, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
                                 withCurrentApp { versionTarget = it }

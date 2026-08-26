@@ -101,7 +101,7 @@ val agentRuntimeModule = module {
 
     single {
         GenerationSubAgentRunner(
-            generationHandler = get(),
+            generator = get(),
         )
     }
     single<app.amber.feature.subagent.SubAgentRunner> { get<GenerationSubAgentRunner>() }
@@ -153,7 +153,7 @@ val agentRuntimeModule = module {
     }
     single<app.amber.feature.modelcouncil.CouncilHostToolProvider> {
         app.amber.feature.modelcouncil.AppCouncilHostToolProvider(
-            providerManager = get(),
+            providerCatalog = get(),
             toolDispatcher = get(),
         )
     }

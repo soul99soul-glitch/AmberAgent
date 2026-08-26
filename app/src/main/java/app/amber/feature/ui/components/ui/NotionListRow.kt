@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Compact, single-row card matching the Notion-flavoured visual language. Replaces the
- * previous list-style cards (TTS providers, search services, etc.) where each item used
+ * previous list-style cards (search services, etc.) where each item used
  * a 16dp-padded `Card` with a 40dp circular leading icon stacked above a separate
  * actions row — that produced ~80-100dp tall items dense with empty space.
  *

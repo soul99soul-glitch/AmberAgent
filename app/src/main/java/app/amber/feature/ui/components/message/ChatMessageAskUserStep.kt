@@ -49,10 +49,10 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.BubbleChatQuestion
-import me.rerere.hugeicons.stroke.Refresh01
-import me.rerere.hugeicons.stroke.Tick01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.MessageCircleQuestion
+import com.composables.icons.lucide.RefreshCw
+import com.composables.icons.lucide.Check
 import app.amber.agent.R
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.DotLoading
@@ -117,7 +117,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
             } else {
                 // §6.2 AskUser card: accent "?" indicator, flat & hairline (no glow).
                 Icon(
-                    imageVector = HugeIcons.BubbleChatQuestion,
+                    imageVector = Lucide.MessageCircleQuestion,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                     tint = LocalAmberTokens.current.accent,
@@ -313,7 +313,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Icon(
-                                    imageVector = HugeIcons.Refresh01,
+                                    imageVector = Lucide.RefreshCw,
                                     contentDescription = null,
                                     modifier = Modifier.size(12.dp),
                                     tint = actionTokens.ink3,
@@ -360,7 +360,7 @@ internal fun ChainOfThoughtScope.AskUserToolStep(
                             contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
                         ) {
                             Icon(
-                                imageVector = HugeIcons.Tick01,
+                                imageVector = Lucide.Check,
                                 contentDescription = null,
                                 modifier = Modifier.size(16.dp),
                             )
@@ -402,7 +402,7 @@ private fun AskOptionChip(
         ) {
             if (selected) {
                 Icon(
-                    imageVector = HugeIcons.Tick01,
+                    imageVector = Lucide.Check,
                     contentDescription = null,
                     modifier = Modifier.size(13.dp),
                 )

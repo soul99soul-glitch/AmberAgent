@@ -11,8 +11,9 @@ import app.amber.ai.provider.ImageGenerationMode
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
-import app.amber.ai.provider.Provider
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ImageModelGateway
+import app.amber.ai.provider.TextModelGateway
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.ImageAspectRatio
@@ -67,7 +68,7 @@ class ImageGenerationRepositoryTest {
     private lateinit var db: AppDatabase
     private lateinit var settingsStore: SettingsAggregator
     private lateinit var filesManager: FilesManager
-    private lateinit var providerManager: ProviderManager
+    private lateinit var providerCatalog: ProviderCatalog
     private lateinit var fakeProvider: FakeImageProvider
     private lateinit var repository: ImageGenerationRepository
     private lateinit var imageModel: Model
@@ -97,12 +98,18 @@ class ImageGenerationRepositoryTest {
         )
 
         fakeProvider = FakeImageProvider()
-        providerManager = ProviderManager(okhttp3.OkHttpClient(), context)
-        providerManager.registerProvider("openai", fakeProvider)
+        val httpClient = okhttp3.OkHttpClient()
+        providerCatalog = ProviderCatalog(
+            openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
+            googleProvider = app.amber.ai.provider.providers.GoogleProvider(httpClient, context),
+            claudeProvider = app.amber.ai.provider.providers.ClaudeProvider(httpClient, context),
+            openAITextGateway = fakeProvider,
+            openAIImageGateway = fakeProvider,
+        )
 
         repository = ImageGenerationRepository(
             settingsStore = settingsStore,
-            providerManager = providerManager,
+            providerCatalog = providerCatalog,
             filesManager = filesManager,
             promptConfigRepository = AgentPromptConfigRepository(context),
         )
@@ -347,25 +354,25 @@ class ImageGenerationRepositoryTest {
     /** Fake image provider recording every received params object. */
     private class FakeImageProvider(
         var editSupported: Boolean = true,
-    ) : Provider<ProviderSetting.OpenAI> {
+    ) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
         val received = mutableListOf<ImageGenerationParams>()
 
         override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> = emptyList()
 
-        override suspend fun generateText(
+        override suspend fun complete(
             providerSetting: ProviderSetting.OpenAI,
             messages: List<UIMessage>,
             params: TextGenerationParams,
         ): MessageChunk = error("not used")
 
-        override suspend fun streamText(
+        override suspend fun stream(
             providerSetting: ProviderSetting.OpenAI,
             messages: List<UIMessage>,
             params: TextGenerationParams,
         ): Flow<MessageChunk> = error("not used")
 
         override suspend fun generateImage(
-            providerSetting: ProviderSetting,
+            providerSetting: ProviderSetting.OpenAI,
             params: ImageGenerationParams,
         ): ImageGenerationResult {
             received += params

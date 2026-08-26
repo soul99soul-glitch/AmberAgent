@@ -1,20 +1,17 @@
 package app.amber.core.ai.transformers
 
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
-import kotlin.uuid.Uuid
 import app.amber.agent.data.model.nativebridge.RegexNativeSwitch
 
 fun String.replaceRegexes(
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     scope: AssistantAffectScope,
     visual: Boolean = false
 ): String {
-    if (assistant == null) return this
-    if (assistant.regexes.isEmpty()) return this
+    if (regexes.isEmpty()) return this
 
-    val program = AssistantRegexProgramCache.get(assistant, scope, visual)
+    val program = AssistantRegexProgramCache.get(regexes, scope, visual)
     if (program.isEmpty) return this
 
     // Phase 2 Step 3: route through RegexNativeSwitch when enabled AND no
@@ -50,15 +47,15 @@ private object AssistantRegexProgramCache {
     }
 
     fun get(
-        assistant: Assistant,
+        regexes: List<AssistantRegex>,
         scope: AssistantAffectScope,
         visual: Boolean,
     ): AssistantRegexProgram {
-        val key = AssistantRegexProgramKey.of(assistant, scope, visual)
+        val key = AssistantRegexProgramKey.of(regexes, scope, visual)
         synchronized(lock) {
             entries[key]?.let { return it }
         }
-        val program = buildProgram(assistant, scope, visual)
+        val program = buildProgram(regexes, scope, visual)
         synchronized(lock) {
             entries[key]?.let { return it }
             entries[key] = program
@@ -67,11 +64,11 @@ private object AssistantRegexProgramCache {
     }
 
     private fun buildProgram(
-        assistant: Assistant,
+        regexes: List<AssistantRegex>,
         scope: AssistantAffectScope,
         visual: Boolean,
     ): AssistantRegexProgram {
-        val applicable = assistant.regexes.filter { regex ->
+        val applicable = regexes.filter { regex ->
             regex.enabled && regex.visualOnly == visual && regex.affectingScope.contains(scope)
         }
         if (applicable.isEmpty()) return AssistantRegexProgram.Empty
@@ -94,19 +91,18 @@ private object AssistantRegexProgramCache {
 }
 
 private data class AssistantRegexProgramKey(
-    val assistantId: Uuid,
     val scope: AssistantAffectScope,
     val visual: Boolean,
     val signature: Int,
 ) {
     companion object {
         fun of(
-            assistant: Assistant,
+            regexes: List<AssistantRegex>,
             scope: AssistantAffectScope,
             visual: Boolean,
         ): AssistantRegexProgramKey {
             var signature = 1
-            assistant.regexes.forEach { regex ->
+            regexes.forEach { regex ->
                 signature = 31 * signature + regex.id.hashCode()
                 signature = 31 * signature + regex.enabled.hashCode()
                 signature = 31 * signature + regex.findRegex.hashCode()
@@ -115,7 +111,6 @@ private data class AssistantRegexProgramKey(
                 signature = 31 * signature + regex.visualOnly.hashCode()
             }
             return AssistantRegexProgramKey(
-                assistantId = assistant.id,
                 scope = scope,
                 visual = visual,
                 signature = signature,

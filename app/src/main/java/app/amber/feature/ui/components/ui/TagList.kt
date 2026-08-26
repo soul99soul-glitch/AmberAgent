@@ -30,9 +30,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastForEach
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
-import me.rerere.hugeicons.stroke.Cancel01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
+import com.composables.icons.lucide.X
 import app.amber.agent.R
 import app.amber.core.model.Tag
 import kotlin.uuid.Uuid
@@ -61,7 +61,7 @@ fun TagsInput(
                 Text(tag.name)
             }, selected = false, trailingIcon = {
                 Icon(
-                    imageVector = HugeIcons.Cancel01,
+                    imageVector = Lucide.X,
                     contentDescription = null,
                     modifier = Modifier
                         .size(16.dp)
@@ -83,7 +83,7 @@ fun TagsInput(
                 .clip(CircleShape)
                 .clickable { showAddDialog = true }) {
             Icon(
-                imageVector = HugeIcons.Add01,
+                imageVector = Lucide.Plus,
                 contentDescription = stringResource(R.string.add),
                 modifier = Modifier
                     .padding(6.dp)

@@ -11,11 +11,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
@@ -23,6 +23,7 @@ import app.amber.search.SearchResult.SearchResultItem
 import app.amber.search.SearchService.Companion.httpClient
 import app.amber.search.SearchService.Companion.json
 import app.amber.search.SearchService.Companion.keyRoulette
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -81,6 +82,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
+            require(serviceOptions.apiKey.isNotBlank()) { "Tavily API key is required" }
             val topic = params["topic"]?.jsonPrimitive?.contentOrNull ?: "general"
 
             // Validate topic
@@ -91,43 +93,29 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             val body = buildJsonObject {
                 put("query", query)
                 put("max_results", commonOptions.resultSize)
-                put("search_depth", serviceOptions.depth.ifEmpty { "advanced" })
+                val searchDepth = serviceOptions.depth.ifEmpty { "advanced" }
+                put("search_depth", searchDepth)
                 put("topic", topic)
-                put("include_answer", "advanced")
+                put("include_answer", if (searchDepth == "advanced") "advanced" else "basic")
+                put("include_images", true)
             }
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
 
             val request = Request.Builder()
                 .url("https://api.tavily.com/search")
-                .post(body.toString().toRequestBody())
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
                 .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
-                    json.decodeFromString<SearchResponse>(it)
+
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("response failed #${response.code}: ${response.body?.string().orEmpty()}")
                 }
 
-                val tavilyImages = response.images.distinct().take(5)
-                var imagesAttached = false
                 return@withContext Result.success(
-                    SearchResult(
-                        answer = response.answer,
-                        items = response.results.map {
-                            val imgs = if (!imagesAttached && tavilyImages.isNotEmpty()) {
-                                imagesAttached = true
-                                tavilyImages
-                            } else emptyList()
-                            SearchResultItem(
-                                title = it.title,
-                                url = it.url,
-                                text = it.content,
-                                images = imgs,
-                            )
-                        }
-                    ))
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
+                    mapTavilySearchResponse(response.body?.string().orEmpty(), commonOptions.resultSize)
+                )
             }
         }
     }
@@ -139,6 +127,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
     ): Result<ScrapedResult> = withContext(Dispatchers.IO) {
         runCatching {
             val url = params["url"]?.jsonPrimitive?.content ?: error("url is required")
+            require(serviceOptions.apiKey.isNotBlank()) { "Tavily API key is required" }
             val body = buildJsonObject {
                 put("urls", buildJsonArray {
                     add(url)
@@ -147,17 +136,21 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
             val apiKey = keyRoulette.next(serviceOptions.apiKey, serviceOptions.id.toString())
             val request = Request.Builder()
                 .url("https://api.tavily.com/extract")
-                .post(body.toString().toRequestBody())
+                .post(body.toString().toRequestBody("application/json".toMediaType()))
                 .addHeader("Authorization", "Bearer $apiKey")
+                .addHeader("Content-Type", "application/json")
                 .build()
-            val response = httpClient.newCall(request).await()
-            if (response.isSuccessful) {
-                val response = response.body.string().let {
-                    json.decodeFromString<ScrapeResponse>(it)
+            httpClient.newCall(request).await().use { response ->
+                if (!response.isSuccessful) {
+                    error("response failed #${response.code}: ${response.body?.string().orEmpty()}")
+                }
+                val responseBody = json.decodeFromString<ScrapeResponse>(response.body?.string().orEmpty())
+                if (responseBody.results.isEmpty() && responseBody.failedResults.isNotEmpty()) {
+                    error("Tavily extract failed: ${responseBody.failedResults.joinToString { it.url }}")
                 }
                 return@withContext Result.success(
                     ScrapedResult(
-                        urls = response.results.map {
+                        urls = responseBody.results.map {
                             ScrapedResultUrl(
                                 url = it.url,
                                 content = it.rawContent,
@@ -165,9 +158,31 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
                         }
                     )
                 )
-            } else {
-                error("response failed #${response.code}: ${response.body?.string()}")
             }
+        }
+    }
+
+    internal fun mapTavilySearchResponse(body: String, resultSize: Int): SearchResult {
+        val response = json.decodeFromString<SearchResponse>(body)
+        val tavilyImages = response.images.mapNotNull { it.imageUrl() }.distinct().take(5)
+        return SearchResult(
+            answer = response.answer,
+            items = response.results.take(resultSize).mapIndexed { index, item ->
+                SearchResultItem(
+                    title = item.title,
+                    url = item.url,
+                    text = item.content,
+                    images = if (index == 0) tavilyImages else emptyList(),
+                )
+            }
+        )
+    }
+
+    private fun JsonElement.imageUrl(): String? {
+        return when (this) {
+            is kotlinx.serialization.json.JsonPrimitive -> contentOrNull
+            is JsonObject -> this["url"]?.jsonPrimitive?.contentOrNull
+            else -> null
         }
     }
 
@@ -176,7 +191,7 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
         val query: String,
         val followUpQuestions: String? = null,
         val answer: String? = null,
-        val images: List<String> = emptyList(),
+        val images: List<JsonElement> = emptyList(),
         val results: List<TavilySearchService.SearchResultItem>,
     )
 
@@ -192,6 +207,8 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
     @Serializable
     data class ScrapeResponse(
         val results: List<ScrapedResultItem>,
+        @SerialName("failed_results")
+        val failedResults: List<FailedResultItem> = emptyList(),
     )
 
     @Serializable
@@ -199,5 +216,11 @@ object TavilySearchService : SearchService<SearchServiceOptions.TavilyOptions> {
         val url: String,
         @SerialName("raw_content")
         val rawContent: String,
+    )
+
+    @Serializable
+    data class FailedResultItem(
+        val url: String,
+        val error: String? = null,
     )
 }

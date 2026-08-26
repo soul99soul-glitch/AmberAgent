@@ -37,64 +37,10 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Production-chain canaries (Phase 0 of the Android/iOS capability parity plan —
- * docs/plans/2026-08-13-android-ios-capability-parity-closure-plan.md).
- *
- * These tests exercise **current production code only** — no test-only
- * substitute runtime. They freeze the baseline behavior so later phases can
- * prove they did not regress it. The Novel and Workspace chains below do not
- * touch the legacy GenerationHandler path nor the future runtime; runtime
- * canaries pin the durable runtime version (runId + `durable_tool_effects` +
- * `typed_run_terminal` flags) and live in `RuntimeChainCanaryTest`.
- *
- * Failure output convention: runtime-chain canaries (Phase 1+) report
- * runId / conversationId / effectId / capability so a failure can be located.
- * The file-based chains below assert on projectId (Novel) and workspace path
- * (Workspace) instead — there is no run yet in those chains.
- *
- * ## Implemented in Phase 1 — see RuntimeChainCanaryTest
- *
- * All four runtime chains that were TODO in Phase 0 are now implemented in
- * `app/amber/agent/canary/RuntimeChainCanaryTest.kt` (same package), calling
- * the real Phase 1 production components (GenerationHandler,
- * AgentToolDispatcher write-ahead, RoomToolEffectLedger, RoomRunTerminalStore,
- * RunRecoveryService, RunOwnershipRegistry, TokenBudgetFitter):
- *
- * - stream → tool call → approval → side effect → tool result → next turn →
- *   durable terminal. Capability: `durable_tool_effects` (P1-02) +
- *   `typed_run_terminal` (P1-03). Asserts the crash between Started and
- *   Finished never re-runs a non-idempotent tool and that failures name
- *   runId/effectId (effect binding in the approval card metadata).
- * - stream → stop → target run cancelled, other runs unaffected. Capability:
- *   `typed_run_terminal` (P1-03/P1-05). Asserts stop is scoped to
- *   (conversationId, runId) via RunOwnershipRegistry and that WAITING_USER is
- *   never reported as COMPLETED.
- * - process death → checkpoint → resume/reconcile. Capabilities:
- *   `durable_tool_effects` (P1-02) — process death is simulated by rebuilding
- *   every component instance over the same persisted store. Asserts
- *   STARTED non-idempotent → OUTCOME_UNKNOWN (never silently re-run),
- *   PREPARED → re-enters approval reusing the same effectId.
- * - prompt assembly → transformer → mailbox/steer → final token fit →
- *   provider. No dedicated capability flag (P1-04). Asserts the final
- *   provider request fits the hard budget after all injections/transformers,
- *   that ContextTooLarge requests are never sent, and that the current user
- *   message + tool results survive the trim.
- *
- * ## Implemented in Phase 0
- *
- * - Workspace create → open → delete (real classes: WorkspaceManager +
- *   WorkspaceFileVM, SAF-free mirror paths; content staged through the real
- *   AndroidX FileProvider).
- * - Workspace artifact create → open → reparse → delete (real classes:
- *   ArtifactRepository + WorkspaceManager + Room artifact tables; mirror-only
- *   storage since Robolectric has no SAF workspace). Capability:
- *   `workspace_artifacts_v2` (Phase 3, P3-01).
- * - Workspace parse → reparse (same artifact chain, covered by the reparse
- *   step above).
- *
- * The legacy novel JSON engine (NovelPackageCodec + NovelReducer import→edit→
- * export→reimport) was removed with the engine cutover; the migration read
- * shell keeps the encoder/decoder for converting old books.
+ * Production-chain canaries for workspace files and persisted artifacts.
+ * They use current production components with Robolectric providing the
+ * Android environment; durable generation and recovery invariants live in
+ * [RuntimeChainCanaryTest].
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)

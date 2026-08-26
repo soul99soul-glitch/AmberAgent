@@ -35,10 +35,10 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Code
-import me.rerere.hugeicons.stroke.Database02
-import me.rerere.hugeicons.stroke.ServerStack01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.CodeXml
+import com.composables.icons.lucide.DatabaseZap
+import com.composables.icons.lucide.Server
 import app.amber.agent.R
 import app.amber.feature.terminal.AlpineRuntimeInstaller
 import app.amber.feature.terminal.InstallStatus
@@ -132,7 +132,7 @@ fun SettingSandboxPage(
                     title = { Text(stringResource(R.string.setting_sandbox_workspace_section)) },
                 ) {
                     item(
-                        leadingContent = { Icon(HugeIcons.Database02, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.DatabaseZap, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_files_page_workspace_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -233,7 +233,7 @@ fun SettingSandboxPage(
                     )
                     CardGroup {
                         item(
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_runtime_desc)) },
                         trailingContent = {
@@ -266,7 +266,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.Server, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_jobs_desc)) },
                         trailingContent = {
@@ -288,7 +288,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_output_desc)) },
                         trailingContent = {
@@ -312,7 +312,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.Code, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.CodeXml, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_title)) },
                         supportingContent = { Text(stringResource(R.string.setting_sandbox_terminal_install_timeout_desc)) },
                         trailingContent = {
@@ -336,7 +336,7 @@ fun SettingSandboxPage(
                         },
                     )
                     item(
-                        leadingContent = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                        leadingContent = { Icon(Lucide.Server, contentDescription = null) },
                         headlineContent = { Text(stringResource(R.string.setting_sandbox_termux_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

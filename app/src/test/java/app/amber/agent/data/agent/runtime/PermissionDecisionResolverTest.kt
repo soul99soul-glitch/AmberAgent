@@ -61,6 +61,63 @@ class PermissionDecisionResolverTest {
     }
 
     @Test
+    fun askUserAlwaysNeedsHumanAnswerEvenWhenUnattendedExecutionIsEnabled() {
+        val decision = resolver.resolve(
+            toolDef = approvalTool("ask_user"),
+            tool = toolCall("ask_user"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = true,
+        )
+
+        assertEquals(PermissionDecisionAction.ASK, decision.action)
+        assertEquals("hitl", decision.source)
+    }
+
+    @Test
+    fun httpMethodPolicyDistinguishesReadsFromMutations() {
+        listOf("GET", "HEAD").forEach { method ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
+                autoApproveTools = false,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$method should be read-only", PermissionDecisionAction.ALLOW, decision.action)
+        }
+
+        listOf("POST", "PUT", "PATCH", "DELETE").forEach { method ->
+            val decision = resolver.resolve(
+                toolDef = approvalTool("http_request", allowsAutoApproval = false),
+                tool = toolCall("http_request", """{"method":"$method","url":"https://example.com"}"""),
+                autoApproveTools = true,
+                autoApproveHighRiskTools = false,
+            )
+
+            assertEquals("$method should require approval", PermissionDecisionAction.ASK, decision.action)
+        }
+    }
+
+    @Test
+    fun memoryToolPolicyDistinguishesReadsFromMutations() {
+        val read = resolver.resolve(
+            toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+            tool = toolCall("memory_tool", """{"operation":"search","query":"Q代"}"""),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+        )
+        val write = resolver.resolve(
+            toolDef = approvalTool("memory_tool", allowsAutoApproval = false),
+            tool = toolCall("memory_tool", """{"operation":"delete","id":"memory-1"}"""),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+        )
+
+        assertEquals(PermissionDecisionAction.ALLOW, read.action)
+        assertEquals(PermissionDecisionAction.ASK, write.action)
+    }
+
+    @Test
     fun writeActionToolFamiliesAskButReadOnlySiblingsAllowWithRegularAutoApproval() {
         val writeOrActionTools = listOf(
             "terminal_execute",

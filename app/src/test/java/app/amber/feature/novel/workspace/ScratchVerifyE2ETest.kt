@@ -9,7 +9,6 @@ import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.Generator
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
-import app.amber.core.model.Assistant
 import app.amber.core.settings.Settings
 import app.amber.feature.novelworkspace.NovelWorkspaceFile
 import app.amber.feature.novelworkspace.NovelWorkspaceInstaller
@@ -90,7 +89,6 @@ class ScratchVerifyE2ETest {
             messages: List<UIMessage>,
             inputTransformers: List<InputMessageTransformer>,
             outputTransformers: List<OutputMessageTransformer>,
-            assistant: Assistant,
             memories: List<app.amber.core.model.AssistantMemory>?,
             tools: List<Tool>,
             maxSteps: Int,
@@ -127,7 +125,7 @@ class ScratchVerifyE2ETest {
     }
 
     @Test
-    fun `rewrite approve leaves the unresolved gate armed at a shifted ordinal instead of clearing it`() = runTest {
+    fun `rewrite approve preserves the original unresolved boundary until author confirms`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
@@ -169,7 +167,6 @@ class ScratchVerifyE2ETest {
                 systemPrompt = "",
                 settings = Settings(),
                 model = Model(),
-                assistant = Assistant(),
             ),
         ).toList().filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>().single()
         val proposal = requireNotNull(completed.proposal)
@@ -178,16 +175,17 @@ class ScratchVerifyE2ETest {
         // Approve the rewrite: one commit rewriting ch2 and ch3.
         runtime2.approve(proposal.id)
 
-        // The gate is NOT cleared by the resolve-rewrite; it is re-armed at ordinal 3.
+        // Approval and author confirmation are separate: keep the original earliest
+        // boundary instead of shrinking the affected range to chapter 3.
         val gate = NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")
-        assertNotNull("the rewrite approve must clear the gate it was meant to resolve", gate)
+        assertNotNull(gate)
         if (gate != null) {
-            assertEquals("gate re-armed at a shifted ordinal rather than cleared", 3, gate.fromOrdinal)
+            assertEquals(2, gate.fromOrdinal)
         }
     }
 
     @Test
-    fun `a non-undoable commit makes canUndo true but undoLast fail`() = runTest {
+    fun `a non-undoable commit hides a stale undo record`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
@@ -219,13 +217,11 @@ class ScratchVerifyE2ETest {
                 systemPrompt = "",
                 settings = Settings(),
                 model = Model(),
-                assistant = Assistant(),
             ),
         ).toList()
 
-        // canUndo still reports true (undo file exists)...
-        assertTrue(runtime.canUndo(dir))
-        // ...but the head no longer matches the undo record, so undoLast bails out.
+        // A stale record must not keep an enabled button that can only fail.
+        assertFalse(runtime.canUndo(dir))
         assertFalse("undo should not be possible when head moved past the undo record", runtime.undoLast(dir))
     }
 }

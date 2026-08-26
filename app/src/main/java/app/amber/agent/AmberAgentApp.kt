@@ -119,12 +119,8 @@ class AmberAgentApp : Application() {
         // Reschedule persisted mobile cron tasks after app startup.
         rescheduleCronTasks()
 
-        // Repair provider settings if the prefs-split startup race persisted defaults.
-        rescueProviderSettingsIfNeeded()
-
-        // P1-01: 幂等迁移 —— 旧明文字段进 SecretStore，DataStore 只留掩码 + reference。
-        // 失败不删旧值，中断可安全重跑（迁移版本标记持久化在 SecretStore）。
-        migrateSecretSettingsIfNeeded()
+        // Migrate the persisted shape before cached-settings rescue can write it back.
+        migrateAndRescueSettings()
 
         // Keep Daydream background review aligned with memory settings.
         syncMemoryDreamTasks()
@@ -202,18 +198,18 @@ class AmberAgentApp : Application() {
         }
     }
 
-    private fun rescueProviderSettingsIfNeeded() {
+    private fun migrateAndRescueSettings() {
         get<AppScope>().launch(Dispatchers.IO) {
-            get<SettingsProviderRescue>().rescueIfNeeded()
-        }
-    }
-
-    private fun migrateSecretSettingsIfNeeded() {
-        get<AppScope>().launch(Dispatchers.IO) {
-            runCatching { get<SettingsSecretMigrator>().migrateIfNeeded() }
+            val migrationVersion = runCatching { get<SettingsSecretMigrator>().migrateIfNeeded() }
                 .onFailure {
                     Log.e(TAG, "Secret migration failed; legacy plaintext kept (rerunnable)", it)
                 }
+                .getOrNull()
+            if (migrationVersion == SettingsSecretMigrator.MIGRATION_FAILED) {
+                Log.w(TAG, "Secret migration deferred; checking cached provider rescue without altering legacy data")
+            }
+            runCatching { get<SettingsProviderRescue>().rescueIfNeeded() }
+                .onFailure { Log.e(TAG, "Settings rescue failed", it) }
         }
     }
 

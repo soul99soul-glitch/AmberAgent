@@ -21,7 +21,6 @@ data class MessageSearchResult(
     val nodeId: String?,
     val messageId: String?,
     val conversationId: String,
-    val assistantId: String,
     val title: String,
     val updateAt: Instant,
     val snippet: String,
@@ -254,7 +253,7 @@ class MessageFtsManager(private val database: AppDatabase) {
             db.query(
                 """
             SELECT message_fts.node_id, message_fts.message_id, message_fts.conversation_id,
-                   c.assistant_id, message_fts.title, message_fts.update_at,
+                   message_fts.title, message_fts.update_at,
                    simple_snippet(message_fts, 0, '[', ']', '...', 30) AS snippet
             FROM message_fts
             JOIN ConversationEntity c ON c.id = message_fts.conversation_id
@@ -275,10 +274,9 @@ class MessageFtsManager(private val database: AppDatabase) {
                         nodeId = it.getString(0),
                         messageId = it.getString(1),
                         conversationId = it.getString(2),
-                        assistantId = it.getString(3),
-                        title = it.getString(4),
-                        updateAt = Instant.ofEpochMilli(it.getLong(5)),
-                        snippet = it.getString(6),
+                        title = it.getString(3),
+                        updateAt = Instant.ofEpochMilli(it.getLong(4)),
+                        snippet = it.getString(5),
                         hitSource = SearchHitSource.BODY,
                     )
                 )
@@ -294,7 +292,7 @@ class MessageFtsManager(private val database: AppDatabase) {
             db.query(
                 """
             SELECT conversation_title_fts.conversation_id,
-                   c.assistant_id, conversation_title_fts.title, conversation_title_fts.update_at,
+                   conversation_title_fts.title, conversation_title_fts.update_at,
                    simple_snippet(conversation_title_fts, 0, '[', ']', '...', 30) AS snippet
             FROM conversation_title_fts
             JOIN ConversationEntity c ON c.id = conversation_title_fts.conversation_id
@@ -315,10 +313,9 @@ class MessageFtsManager(private val database: AppDatabase) {
                         nodeId = null,
                         messageId = null,
                         conversationId = it.getString(0),
-                        assistantId = it.getString(1),
-                        title = it.getString(2),
-                        updateAt = Instant.ofEpochMilli(it.getLong(3)),
-                        snippet = it.getString(4),
+                        title = it.getString(1),
+                        updateAt = Instant.ofEpochMilli(it.getLong(2)),
+                        snippet = it.getString(3),
                         hitSource = SearchHitSource.TITLE,
                     )
                 )

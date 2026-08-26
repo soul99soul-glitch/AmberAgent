@@ -254,24 +254,6 @@ class PermissionDecisionResolver {
         return decision(PermissionDecisionAction.ASK, "Tool requires approval.", "ui", policy)
     }
 
-    fun shouldPauseForApproval(
-        toolDef: Tool?,
-        tool: UIMessagePart.Tool,
-        autoApproveTools: Boolean,
-        autoApproveHighRiskTools: Boolean = false,
-        autoApprovedToolNames: Set<String> = emptySet(),
-        capabilityPermissions: CapabilityPermissionState? = null,
-        permissionContext: CapabilityPermissionContext? = null,
-    ): Boolean = resolve(
-        toolDef = toolDef,
-        tool = tool,
-        autoApproveTools = autoApproveTools,
-        autoApproveHighRiskTools = autoApproveHighRiskTools,
-        autoApprovedToolNames = autoApprovedToolNames,
-        capabilityPermissions = capabilityPermissions,
-        permissionContext = permissionContext,
-    ).action == PermissionDecisionAction.ASK
-
     /**
      * P2-01 capability gate (parity plan §P2-01 #2/#3).
      *

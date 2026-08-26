@@ -44,8 +44,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Edit03
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.FilePenLine
 import app.amber.agent.R
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Avatar
@@ -320,7 +320,7 @@ private fun UIAvatarFrame(
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = HugeIcons.Edit03,
+                    imageVector = Lucide.FilePenLine,
                     contentDescription = "Edit",
                     modifier = Modifier
                         .size(size * 0.31f)

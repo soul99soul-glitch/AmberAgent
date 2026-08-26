@@ -30,7 +30,7 @@ import androidx.compose.ui.window.Dialog
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -42,8 +42,8 @@ import app.amber.feature.ui.components.ds.pressable
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Connect
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Cable
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -52,12 +52,12 @@ fun ProviderConnectionTester(
     internalProvider: ProviderSetting,
 ) {
     var showTestDialog by remember { mutableStateOf(false) }
-    val providerManager = koinInject<ProviderManager>()
+    val providerCatalog = koinInject<ProviderCatalog>()
     val scope = rememberCoroutineScope()
 
     ProviderIconButton(
-        imageVector = HugeIcons.Connect,
-        contentDescription = null,
+        imageVector = Lucide.Cable,
+        contentDescription = stringResource(R.string.setting_provider_page_test_connection),
         tint = LocalAmberTokens.current.ink3,
         onClick = { showTestDialog = true },
     )
@@ -80,13 +80,13 @@ fun ProviderConnectionTester(
 
         fun runTests() {
             val selectedModel = model ?: return
-            val provider = providerManager.getProviderByType(internalProvider)
+            val provider = providerCatalog.text(internalProvider)
             resetStates()
             scope.launch {
                 launch {
                     runCatching {
                         nonStreamingState = UiState.Loading
-                        val chunk = provider.generateText(
+                        val chunk = provider.complete(
                             providerSetting = internalProvider,
                             messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
                             params = TextGenerationParams(
@@ -104,7 +104,7 @@ fun ProviderConnectionTester(
                 launch {
                     runCatching {
                         streamingState = UiState.Loading
-                        val flow = provider.streamText(
+                        val flow = provider.stream(
                             providerSetting = internalProvider,
                             messages = listOf(UIMessage.system("You are a helpful assistant"), UIMessage.user("hello")),
                             params = TextGenerationParams(
@@ -129,7 +129,7 @@ fun ProviderConnectionTester(
                             description = "Get the current date and time.",
                             execute = { emptyList() },
                         )
-                        val chunk = provider.generateText(
+                        val chunk = provider.complete(
                             providerSetting = internalProvider,
                             messages = listOf(
                                 UIMessage.system("You are a helpful assistant"),
@@ -232,11 +232,13 @@ private fun ProviderConnectionDialog(
                     ProviderCommandButton(
                         text = stringResource(R.string.cancel),
                         onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
                     )
                     ProviderCommandButton(
                         text = stringResource(R.string.setting_provider_page_test),
                         onClick = onTest,
                         accent = true,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }

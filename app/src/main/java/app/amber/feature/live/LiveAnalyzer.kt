@@ -4,7 +4,7 @@ import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
@@ -20,7 +20,7 @@ import kotlin.uuid.Uuid
  * 调用与卡片解析。从 LiveModeManager 拆出，Manager 只编排不碰 prompt。
  */
 class LiveAnalyzer(
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
 ) {
     data class Outcome(
         val card: LiveModeCard,
@@ -81,8 +81,8 @@ class LiveAnalyzer(
             )
         }
 
-        val providerImpl = providerManager.getProviderByType(provider)
-        val result = providerImpl.generateText(
+        val providerImpl = providerCatalog.text(provider)
+        val result = providerImpl.complete(
             providerSetting = provider,
             messages = messages,
             params = TextGenerationParams(

@@ -6,7 +6,6 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
-import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 import app.amber.agent.data.db.entity.ConversationEntity
 import app.amber.core.repository.LightConversationEntity
@@ -50,27 +49,13 @@ interface ConversationDAO {
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
     fun getAll(): Flow<List<ConversationEntity>>
 
-    @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
-    fun getAllPaging(): PagingSource<Int, ConversationEntity>
-
-    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC")
-    fun getConversationsOfAssistant(assistantId: String): Flow<List<ConversationEntity>>
-
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
         CONVERSATION_SUMMARY_EXTRA_COLUMNS +
-        " FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC")
-    fun getConversationsOfAssistantPaging(assistantId: String): PagingSource<Int, LightConversationEntity>
-
-    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
-    suspend fun getRecentConversationsOfAssistant(assistantId: String, limit: Int): List<ConversationEntity>
+        " FROM conversationentity ORDER BY is_pinned DESC, update_at DESC")
+    fun getAllPaging(): PagingSource<Int, LightConversationEntity>
 
     @Query("SELECT * FROM conversationentity ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
     suspend fun getRecentConversations(limit: Int): List<ConversationEntity>
-
-    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
-        CONVERSATION_SUMMARY_EXTRA_COLUMNS +
-        " FROM conversationentity WHERE assistant_id = :assistantId ORDER BY is_pinned DESC, update_at DESC LIMIT :limit")
-    suspend fun getRecentConversationSummariesOfAssistant(assistantId: String, limit: Int): List<LightConversationEntity>
 
     @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
         CONVERSATION_SUMMARY_EXTRA_COLUMNS +
@@ -84,14 +69,6 @@ interface ConversationDAO {
         CONVERSATION_SUMMARY_EXTRA_COLUMNS +
         " FROM conversationentity WHERE title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
     fun searchConversationsPaging(searchText: String): PagingSource<Int, LightConversationEntity>
-
-    @Query("SELECT * FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
-    fun searchConversationsOfAssistant(assistantId: String, searchText: String): Flow<List<ConversationEntity>>
-
-    @Query("SELECT id, assistant_id as assistantId, title, is_pinned as isPinned, create_at as createAt, update_at as updateAt" +
-        CONVERSATION_SUMMARY_EXTRA_COLUMNS +
-        " FROM conversationentity WHERE assistant_id = :assistantId AND title LIKE '%' || :searchText || '%' ESCAPE '\\' ORDER BY is_pinned DESC, update_at DESC")
-    fun searchConversationsOfAssistantPaging(assistantId: String, searchText: String): PagingSource<Int, LightConversationEntity>
 
     @Query("SELECT * FROM conversationentity WHERE id = :id")
     fun getConversationFlowById(id: String): Flow<ConversationEntity?>
@@ -113,8 +90,23 @@ interface ConversationDAO {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(conversation: ConversationEntity): Long
 
-    @Update
-    suspend fun update(conversation: ConversationEntity)
+    /** Update chat metadata without overwriting Council Room's separately-owned checkpoint. */
+    @Query(
+        "UPDATE conversationentity SET assistant_id = :assistantId, title = :title, nodes = :nodes, " +
+            "create_at = :createAt, update_at = :updateAt, suggestions = :chatSuggestions, " +
+            "is_pinned = :isPinned, auto_approve_tools = :autoApproveToolCalls WHERE id = :id"
+    )
+    suspend fun updatePreservingCouncilState(
+        id: String,
+        assistantId: String,
+        title: String,
+        nodes: String,
+        createAt: Long,
+        updateAt: Long,
+        chatSuggestions: String,
+        isPinned: Boolean,
+        autoApproveToolCalls: Boolean,
+    )
 
     @Query("UPDATE conversationentity SET title = :title, update_at = :updatedAt WHERE id = :id")
     suspend fun updateTitle(id: String, title: String, updatedAt: Long)

@@ -9,7 +9,6 @@ import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.Generator
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
-import app.amber.core.model.Assistant
 import app.amber.core.settings.Settings
 import app.amber.feature.novelworkspace.NovelWorkspaceFile
 import app.amber.feature.novelworkspace.NovelWorkspaceInstaller
@@ -98,8 +97,11 @@ class NovelWorkspaceRuntimeTest {
         private val failFirstNCalls: Int = 0,
         /** Throw after executing the tools but before the final answer (mid-stream cut). */
         private val failAfterTools: Boolean = false,
+        /** Test hook for a durable owner change while the provider turn is in flight. */
+        private val beforeFinal: (() -> Unit)? = null,
     ) : Generator {
         var calls = 0
+        var lastAutoApprovedToolNames: Set<String> = emptySet()
 
         override fun generateText(
             settings: Settings,
@@ -107,7 +109,6 @@ class NovelWorkspaceRuntimeTest {
             messages: List<UIMessage>,
             inputTransformers: List<InputMessageTransformer>,
             outputTransformers: List<OutputMessageTransformer>,
-            assistant: Assistant,
             memories: List<app.amber.core.model.AssistantMemory>?,
             tools: List<Tool>,
             maxSteps: Int,
@@ -123,6 +124,7 @@ class NovelWorkspaceRuntimeTest {
             responsesResume: app.amber.ai.provider.ResponsesResumeRequest?,
         ): Flow<GenerationChunk> = flow {
             calls += 1
+            lastAutoApprovedToolNames = autoApprovedToolNames
             if (calls <= failFirstNCalls) throw RuntimeException("provider 429")
             val executed = mutableListOf<UIMessagePart.Tool>()
             for ((name, input) in toolCalls) {
@@ -138,6 +140,7 @@ class NovelWorkspaceRuntimeTest {
                 )
             }
             if (failAfterTools) throw RuntimeException("stream cut mid-answer")
+            beforeFinal?.invoke()
             val assistant = UIMessage(
                 role = MessageRole.ASSISTANT,
                 parts = executed + UIMessagePart.Text(finalText),
@@ -154,7 +157,6 @@ class NovelWorkspaceRuntimeTest {
         systemPrompt = "",
         settings = Settings(),
         model = Model(),
-        assistant = Assistant(),
     )
 
     @Test
@@ -249,6 +251,9 @@ class NovelWorkspaceRuntimeTest {
         session.tools().forEach { tool ->
             assertFalse("${tool.name} must not pause the generic approval pipeline", tool.needsApproval)
         }
+        val generator = LoopingFakeGenerator(emptyList(), "完成。")
+        NovelWorkspaceRuntime(generator).runTurn(request(dir)).toList()
+        assertEquals(setOf("novel_workspace_write"), generator.lastAutoApprovedToolNames)
     }
 
     @Test
@@ -414,6 +419,10 @@ class NovelWorkspaceRuntimeTest {
         runtime.collectDraft(dir, "B-1", "主线", "drafts/d2.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
         runtime.saveChapterEdit(dir, "B-1", "主线", "branches/主线/chapters/001-山呼.md", "山呼", "再改一次。")
         assertEquals(2, NovelWorkspaceUnresolvedStore.entryFor(dir, "主线")?.fromOrdinal)
+
+        // Undoing the exact commit that opened the gate must release that gate too.
+        assertTrue(runtime.undoLast(dir))
+        assertNull(NovelWorkspaceUnresolvedStore.entryFor(dir, "主线"))
     }
 
     @Test
@@ -443,7 +452,6 @@ class NovelWorkspaceRuntimeTest {
                 systemPrompt = "",
                 settings = Settings(),
                 model = Model(),
-                assistant = Assistant(),
                 autoApproveCanon = true,
                 autoCommitMessage = "代笔收录",
             ),
@@ -461,6 +469,7 @@ class NovelWorkspaceRuntimeTest {
         val lastCommitPaths = ledger.commits.last().files.keys
         assertTrue(lastCommitPaths.any { it.endsWith("002-入汴.md") })
         assertTrue(lastCommitPaths.any { it.endsWith("plot/current.md") })
+        assertTrue(runtime.canUndo(dir))
     }
 
     @Test
@@ -473,13 +482,22 @@ class NovelWorkspaceRuntimeTest {
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 2)
         assertEquals(1, job.startOrdinal) // the book already has chapter 1
 
-        // Simulate two committed chapters (each ghostwrite turn commits).
-        store.write("drafts/d1.md", "第二章。")
-        runtime.collectDraft(dir, "B-1", "主线", "drafts/d1.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
+        // A file written before its ledger commit is not durable progress.
+        store.write("branches/主线/chapters/002-orphan.md", "未提交正文。")
+        assertEquals(0, NovelWorkspaceGhostwriteJobs.progress(job, store))
+        store.delete("branches/主线/chapters/002-orphan.md")
+
+        // Simulate two committed chapters through the running batch owner's path.
+        runtime.commitGhostwrittenChapter(
+            dir, "B-1", "主线", 2, "入汴", "第二章。",
+            ownerJobId = job.id, ownerExecutionId = job.executionKey,
+        )
         assertEquals(1, NovelWorkspaceGhostwriteJobs.progress(job, store))
 
-        store.write("drafts/d2.md", "第三章。")
-        runtime.collectDraft(dir, "B-1", "主线", "drafts/d2.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "陈桥")
+        runtime.commitGhostwrittenChapter(
+            dir, "B-1", "主线", 3, "陈桥", "第三章。",
+            ownerJobId = job.id, ownerExecutionId = job.executionKey,
+        )
         assertEquals(2, NovelWorkspaceGhostwriteJobs.progress(job, store))
 
         // Progress is ledger-derived: re-creating the job's view from disk agrees.
@@ -530,7 +548,6 @@ class NovelWorkspaceRuntimeTest {
             branchId = "B-1",
             settings = Settings(),
             model = Model(),
-            assistant = Assistant(),
             isPaused = { false },
         ) { }
 
@@ -556,7 +573,6 @@ class NovelWorkspaceRuntimeTest {
             branchId = "B-1",
             settings = Settings(),
             model = Model(),
-            assistant = Assistant(),
             isPaused = { false },
         ) { }
 
@@ -587,6 +603,14 @@ class NovelWorkspaceRuntimeTest {
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/别的/chapters/003-x.md")
                         put("content", "越界。")
+                    },
+                    "novel_workspace_write" to buildJsonObject {
+                        put("path", "branches/别的/plot/current.md")
+                        put("content", "越界剧情。")
+                    },
+                    "novel_workspace_write" to buildJsonObject {
+                        put("path", "branches/别的/plan/this-chapter.md")
+                        put("content", "越界计划。")
                     },
                     // No ordinal prefix: refused.
                     "novel_workspace_write" to buildJsonObject {
@@ -629,6 +653,8 @@ class NovelWorkspaceRuntimeTest {
         assertEquals("陈桥驿的风先到。", NovelWorkspaceMarkdown.parseFile(store.read("branches/主线/chapters/001-山呼.md")!!).body)
         assertEquals("第二章。", NovelWorkspaceMarkdown.parseFile(store.read("branches/主线/chapters/002-入汴.md")!!).body)
         assertFalse(store.exists("branches/别的/chapters/003-x.md"))
+        assertFalse(store.exists("branches/别的/plot/current.md"))
+        assertFalse(store.exists("branches/别的/plan/this-chapter.md"))
         assertFalse(store.exists("branches/主线/chapters/new-chapter.md"))
         assertFalse(store.exists("branches/主线/chapters/004-多写.md"))
         assertEquals("第三章定稿。", NovelWorkspaceMarkdown.parseFile(store.read("branches/主线/chapters/003-陈桥.md")!!).body)
@@ -688,7 +714,6 @@ class NovelWorkspaceRuntimeTest {
             branchId = "B-1",
             settings = Settings(),
             model = Model(),
-            assistant = Assistant(),
             isPaused = { false },
         ) { }
 
@@ -701,6 +726,36 @@ class NovelWorkspaceRuntimeTest {
         assertEquals("2", filed.fields["ordinal"])
         assertTrue(filed.body.startsWith("赵大摸黑进了柴房"))
         assertEquals(NovelWorkspaceLedger.Message.COLLECTION, NovelWorkspaceLedger.load(dir).commits.last().message)
+    }
+
+    @Test
+    fun `non-chapter tool commit does not suppress narrated chapter filing`() = runTest {
+        val dir = installProject()
+        val chapter = "赵大摸黑进了柴房。\n\n" + "外头风声更紧了，他数着自己的心跳等天亮。".repeat(60)
+        val generator = LoopingFakeGenerator(
+            toolCalls = listOf(
+                "novel_workspace_write" to buildJsonObject {
+                    put("path", "branches/主线/plan/this-chapter.md")
+                    put("content", "赵大潜入柴房，等候天亮。")
+                },
+            ),
+            finalText = "# 火起\n\n$chapter",
+        )
+        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
+
+        val result = coordinator.runBatch(
+            job = job,
+            projectDirectory = dir,
+            branchId = "B-1",
+            settings = Settings(),
+            model = Model(),
+            isPaused = { false },
+        ) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Completed)
+        assertTrue(NovelWorkspaceStore(dir).exists("branches/主线/plan/this-chapter.md"))
+        assertTrue(NovelWorkspaceStore(dir).list("branches/主线/chapters").any { it.endsWith("002-火起.md") })
     }
 
     @Test
@@ -719,7 +774,6 @@ class NovelWorkspaceRuntimeTest {
             branchId = "B-1",
             settings = Settings(),
             model = Model(),
-            assistant = Assistant(),
             isPaused = { false },
         ) { }
 
@@ -754,5 +808,104 @@ class NovelWorkspaceRuntimeTest {
         assertEquals(listOf("J-RUN"), NovelWorkspaceGhostwriteJobs.listActive(dir).map { it.id })
         // An empty book directory has no failures to surface.
         assertNull(NovelWorkspaceGhostwriteJobs.latestFailed(tempFolder.newFolder("empty")))
+    }
+
+    @Test
+    fun `job owner claim and conditional transitions preserve the latest user state`() {
+        val dir = installProject()
+        val coordinator = NovelWorkspaceGhostwriteCoordinator(
+            NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), "")),
+        )
+        val first = coordinator.newJob(dir, "主线", targetChapterCount = 1)
+        val duplicate = runCatching { coordinator.newJob(dir, "主线", targetChapterCount = 1) }
+        assertTrue(duplicate.isFailure)
+
+        NovelWorkspaceGhostwriteJobs.transition(
+            projectDirectory = dir,
+            jobId = first.id,
+            expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+            newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+        )
+        NovelWorkspaceGhostwriteJobs.transition(
+            projectDirectory = dir,
+            jobId = first.id,
+            expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+            newStatus = NovelWorkspaceGhostwriteJob.STATUS_COMPLETED,
+        )
+        assertEquals(
+            NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+            NovelWorkspaceGhostwriteJobs.load(dir, first.id)?.status,
+        )
+        val resumed = NovelWorkspaceGhostwriteJobs.restartPaused(dir, first.id)
+        assertNotNull(resumed)
+        val restarted = checkNotNull(resumed)
+        assertFalse(first.executionKey == restarted.executionKey)
+        assertNull(NovelWorkspaceGhostwriteJobs.restartPaused(dir, first.id))
+        assertNull(
+            NovelWorkspaceGhostwriteJobs.withRunningOwner(dir, first.id, first.executionKey) { "old" },
+        )
+        assertNull(
+            NovelWorkspaceGhostwriteJobs.transition(
+                projectDirectory = dir,
+                jobId = first.id,
+                expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                expectedExecutionId = first.executionKey,
+            ),
+        )
+        assertEquals(
+            "current",
+            NovelWorkspaceGhostwriteJobs.withRunningOwner(dir, first.id, restarted.executionKey) { "current" },
+        )
+    }
+
+    @Test
+    fun `pause during provider turn prevents the chapter commit`() = runTest {
+        val dir = installProject()
+        lateinit var job: NovelWorkspaceGhostwriteJob
+        val generator = LoopingFakeGenerator(
+            toolCalls = listOf(
+                "novel_workspace_write" to buildJsonObject {
+                    put("path", "branches/主线/plan/this-chapter.md")
+                    put("content", "旧执行不得留下的计划。")
+                },
+                "novel_workspace_write" to buildJsonObject {
+                    put("path", "branches/主线/chapters/002-暂停.md")
+                    put("content", "这段正文不得由旧执行写入。")
+                },
+            ),
+            finalText = ("这是一段本应被暂停丢弃的章节正文。".repeat(80)),
+            beforeFinal = {
+                NovelWorkspaceGhostwriteJobs.transition(
+                    projectDirectory = dir,
+                    jobId = job.id,
+                    expectedStatuses = setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+                    newStatus = NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+                )
+            },
+        )
+        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
+
+        val result = coordinator.runBatch(
+            job = job,
+            projectDirectory = dir,
+            branchId = "B-1",
+            settings = Settings(),
+            model = Model(),
+            isPaused = {
+                NovelWorkspaceGhostwriteJobs.load(dir, job.id)?.status !=
+                    NovelWorkspaceGhostwriteJob.STATUS_RUNNING
+            },
+        ) { }
+
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Stopped)
+        assertEquals(1, NovelWorkspaceLedger.load(dir).commits.size)
+        assertFalse(NovelWorkspaceStore(dir).exists("branches/主线/plan/this-chapter.md"))
+        assertFalse(NovelWorkspaceStore(dir).list("branches/主线/chapters").any { it.contains("002-") })
+        assertEquals(
+            NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+            NovelWorkspaceGhostwriteJobs.load(dir, job.id)?.status,
+        )
     }
 }

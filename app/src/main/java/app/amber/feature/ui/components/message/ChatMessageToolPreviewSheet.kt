@@ -45,8 +45,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.ui.UIMessagePart
 import app.amber.highlight.HighlightText
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Delete01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Trash2
 import app.amber.agent.R
 import app.amber.core.repository.MemoryRepository
 import app.amber.feature.ui.components.richtext.HighlightCodeBlock
@@ -312,7 +312,7 @@ private fun GenericToolPreview(
                     }
                 ) {
                     Icon(
-                        imageVector = HugeIcons.Delete01,
+                        imageVector = Lucide.Trash2,
                         contentDescription = "Delete memory"
                     )
                 }

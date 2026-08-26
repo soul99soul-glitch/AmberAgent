@@ -49,12 +49,12 @@ import kotlinx.coroutines.isActive
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessagePart
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Brain02
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Brain
 import app.amber.agent.R
 import app.amber.core.settings.resolveSessionDefaults
-import app.amber.core.model.Assistant
 import app.amber.core.model.AssistantAffectScope
+import app.amber.core.model.AssistantRegex
 import app.amber.feature.ui.components.richtext.StreamingPlainText
 import app.amber.feature.ui.components.ui.ChainOfThoughtScope
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -199,7 +199,7 @@ private fun rememberReasoningState(
 @Composable
 private fun ReasoningContent(
     reasoning: UIMessagePart.Reasoning,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     loading: Boolean,
     expandState: ReasoningCardState,
     scrollState: ScrollState,
@@ -283,7 +283,7 @@ private fun ReasoningContent(
                 StreamingPlainText(
                     text = MessageRenderCache.visualRegexText(
                         text = displayText,
-                        assistant = assistant,
+                        regexes = regexes,
                         scope = AssistantAffectScope.ASSISTANT,
                     ),
                     // Thinking text streams like answer text: display-buffer
@@ -311,7 +311,7 @@ private fun ReasoningContent(
 fun ChainOfThoughtScope.ChatMessageReasoningStep(
     reasoning: UIMessagePart.Reasoning,
     model: Model?,
-    assistant: Assistant?,
+    regexes: List<AssistantRegex>,
     loading: Boolean,
     fadeHeight: Float = 64f,
     collapsedAdaptiveWidth: Boolean = false,
@@ -324,10 +324,9 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     val showThinkingTitle = thinkingTitle != null
     val workspace = workspaceColors()
     val settings = LocalSettings.current
-    val reasoningLevel = if (assistant != null && model != null) {
-        settings.resolveSessionDefaults(assistant, model).reasoningLevel
-    } else {
-        assistant?.reasoningLevel
+    val reasoningLevel = model?.let { selectedModel ->
+        settings.rememberedReasoningLevelsByModelId[selectedModel.id.toString()]
+            ?: settings.resolveSessionDefaults(selectedModel).reasoningLevel
     }
     val budgetLabel = reasoningLevel.reasoningBudgetLabel()
 
@@ -339,7 +338,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         onExpandedChange = { state.onExpandedChange(it, reasoningLoading) },
         icon = {
             Icon(
-                imageVector = HugeIcons.Brain02,
+                imageVector = Lucide.Brain,
                 contentDescription = null,
                 tint = chatThemeForReasoning.thinkHeaderInk,
                 modifier = Modifier.size(14.dp),
@@ -398,7 +397,7 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
         content = {
             ReasoningContent(
                 reasoning = reasoning,
-                assistant = assistant,
+                regexes = regexes,
                 loading = reasoningLoading,
                 expandState = state.expandState,
                 scrollState = state.scrollState,

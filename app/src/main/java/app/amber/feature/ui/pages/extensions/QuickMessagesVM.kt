@@ -17,12 +17,14 @@ class QuickMessagesVM(
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
 
     fun addQuickMessage(title: String, content: String) {
-        updateQuickMessages(
-            settings.value.quickMessages + QuickMessage(
-                title = title,
-                content = content,
-            )
-        )
+        val quickMessage = QuickMessage(title = title, content = content)
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                settings.copy(
+                    quickMessages = settings.quickMessages + quickMessage,
+                )
+            }
+        }
     }
 
     fun updateQuickMessage(updated: QuickMessage) {
@@ -42,16 +44,10 @@ class QuickMessagesVM(
     }
 
     private fun updateQuickMessages(quickMessages: List<QuickMessage>) {
-        val validIds = quickMessages.map { it.id }.toSet()
         viewModelScope.launch {
             settingsStore.update { settings ->
                 settings.copy(
                     quickMessages = quickMessages,
-                    assistants = settings.assistants.map { assistant ->
-                        assistant.copy(
-                            quickMessageIds = assistant.quickMessageIds.filter { it in validIds }.toSet()
-                        )
-                    }
                 )
             }
         }

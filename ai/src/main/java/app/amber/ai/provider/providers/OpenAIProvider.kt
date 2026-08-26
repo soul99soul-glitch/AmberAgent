@@ -15,17 +15,16 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import app.amber.ai.provider.EmbeddingGenerationParams
-import app.amber.ai.provider.EmbeddingGenerationResult
 import app.amber.ai.provider.ImageGenerationMode
 import app.amber.ai.provider.ImageGenerationParams
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.OpenAIAuthMode
-import app.amber.ai.provider.Provider
+import app.amber.ai.provider.ImageModelGateway
+import app.amber.ai.provider.BalanceResultPath
 import app.amber.ai.provider.ProviderSetting
+import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.openai.ChatCompletionsAPI
 import app.amber.ai.provider.providers.openai.OPENAI_CODEX_BACKEND_BASE_URL
@@ -49,7 +48,6 @@ import app.amber.ai.util.json
 import app.amber.ai.util.mergeCustomBody
 import app.amber.ai.util.toHeaders
 import app.amber.common.http.await
-import app.amber.common.http.getByKey
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -58,13 +56,14 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
+import java.math.RoundingMode
 
 private const val TAG = "OpenAIProvider"
 
 class OpenAIProvider(
     private val client: OkHttpClient,
     context: Context? = null
-) : Provider<ProviderSetting.OpenAI> {
+) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val oauthClient = context?.let { OpenAICodexOAuthClient(client, OpenAICodexAuthStore(it)) }
 
@@ -148,16 +147,16 @@ class OpenAIProvider(
 
         val bodyStr = response.body.string()
         val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val value = bodyJson.getByKey(providerSetting.balanceOption.resultPath)
-        val digitalValue = value.toFloatOrNull()
-        if(digitalValue != null) {
-            "%.2f".format(digitalValue)
+        val value = BalanceResultPath.extract(bodyJson, providerSetting.balanceOption.resultPath)
+        val digitalValue = value.toBigDecimalOrNull()
+        if (digitalValue != null) {
+            digitalValue.setScale(2, RoundingMode.HALF_UP).toPlainString()
         } else {
             value
         }
     }
 
-    override suspend fun streamText(
+    override suspend fun stream(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams
@@ -177,7 +176,7 @@ class OpenAIProvider(
         }
     }
 
-    override suspend fun generateText(
+    override suspend fun complete(
         providerSetting: ProviderSetting.OpenAI,
         messages: List<UIMessage>,
         params: TextGenerationParams,
@@ -389,60 +388,6 @@ class OpenAIProvider(
         )
     }
 
-    override suspend fun generateEmbedding(
-        providerSetting: ProviderSetting.OpenAI,
-        params: EmbeddingGenerationParams
-    ): EmbeddingGenerationResult = withContext(Dispatchers.IO) {
-        require(providerSetting.authMode == OpenAIAuthMode.API_KEY) {
-            unsupportedAuthModeMessage(providerSetting.authMode, capability = "embeddings")
-        }
-        require(params.input.isNotEmpty()) { "Embedding input cannot be empty" }
-
-        val key = keyRoulette.next(providerSetting.apiKey, providerSetting.id.toString())
-        val requestBody = json.encodeToString(
-            buildJsonObject {
-                put("model", params.model.modelId)
-                if (params.input.size == 1) {
-                    put("input", params.input.first())
-                } else {
-                    putJsonArray("input") {
-                        params.input.forEach { add(JsonPrimitive(it)) }
-                    }
-                }
-                params.dimensions?.let { put("dimensions", it) }
-            }.mergeCustomBody(params.customBody)
-        )
-
-        val request = Request.Builder()
-            .url("${providerSetting.baseUrl}/embeddings")
-            .headers(params.customHeaders.toHeaders())
-            .addHeader("Authorization", "Bearer $key")
-            .addHeader("Content-Type", "application/json")
-            .post(requestBody.toRequestBody("application/json".toMediaType()))
-            .build()
-
-        val response = client.newCall(request).await()
-        if (!response.isSuccessful) {
-            error("Failed to generate embedding: ${response.code} ${response.body?.string()}")
-        }
-
-        val bodyStr = response.body?.string() ?: ""
-        val bodyJson = json.parseToJsonElement(bodyStr).jsonObject
-        val data = bodyJson["data"]?.jsonArray ?: error("No data in response")
-        val model = bodyJson["model"]?.jsonPrimitive?.contentOrNull ?: params.model.modelId
-
-        val embeddings = data.map { embeddingJson ->
-            val embeddingArray = embeddingJson.jsonObject["embedding"]?.jsonArray
-                ?: error("No embedding in response")
-            embeddingArray.map { it.jsonPrimitive.content.toFloat() }
-        }
-
-        EmbeddingGenerationResult(
-            model = model,
-            embeddings = embeddings
-        )
-    }
-
     /**
      * P6-02: `images.edit` is an API-key capability (multipart upload).
      * Codex OAuth's `image_generation` tool accepts text input only, so it
@@ -452,12 +397,9 @@ class OpenAIProvider(
         providerSetting.authMode == OpenAIAuthMode.API_KEY
 
     override suspend fun generateImage(
-        providerSetting: ProviderSetting,
+        providerSetting: ProviderSetting.OpenAI,
         params: ImageGenerationParams
     ): ImageGenerationResult = withContext(Dispatchers.IO) {
-        require(providerSetting is ProviderSetting.OpenAI) {
-            "Expected OpenAI provider setting"
-        }
         when (providerSetting.authMode) {
             OpenAIAuthMode.API_KEY -> when (params.mode) {
                 ImageGenerationMode.EDIT -> generateImageViaImagesEditEndpoint(providerSetting, params)

@@ -74,7 +74,7 @@ val boardModule = module {
     single {
         DeepReadTemplateAgent(
             settingsStore = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             repository = get(),
             json = get(),
         )
@@ -83,7 +83,7 @@ val boardModule = module {
     single {
         HotListTitleLocalizer(
             settingsStore = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             json = get(),
         )
     }
@@ -101,7 +101,7 @@ val boardModule = module {
     single {
         DeepReadAgentRunManager(
             settingsStore = get(),
-            generationHandler = get(),
+            generator = get(),
             hotListRepository = get(),
             artifactRepository = get(),
             toolSetFactory = get(),
@@ -194,7 +194,7 @@ val boardModule = module {
     single {
         BoardAgent(
             settingsStore = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             boardRepository = get(),
         )
     }
@@ -204,7 +204,7 @@ val boardModule = module {
     single {
         DailyReviewAgent(
             settingsStore = get(),
-            providerManager = get(),
+            providerCatalog = get(),
             boardRepository = get(),
             conversationRepository = get(),
             appUsageCollector = get(),

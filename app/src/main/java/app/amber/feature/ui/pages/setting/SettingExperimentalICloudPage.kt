@@ -32,9 +32,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Cancel01
-import me.rerere.hugeicons.stroke.ServerStack01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.X
+import com.composables.icons.lucide.Server
 import app.amber.agent.R
 import app.amber.feature.icloud.ICLOUD_CHINA_LOGIN_URL
 import app.amber.feature.icloud.ICLOUD_GLOBAL_LOGIN_URL
@@ -71,7 +71,7 @@ fun SettingExperimentalICloudPage(
         ) {
             item {
                 ExperimentHeroCard(
-                    icon = { Icon(HugeIcons.ServerStack01, contentDescription = null) },
+                    icon = { Icon(Lucide.Server, contentDescription = null) },
                     title = stringResource(R.string.setting_icloud_title),
                     description = stringResource(R.string.setting_icloud_desc),
                     trailing = {
@@ -249,7 +249,7 @@ private fun ICloudLoginDialog(
                         )
                         IconButton(onClick = onDismiss) {
                             Icon(
-                                imageVector = HugeIcons.Cancel01,
+                                imageVector = Lucide.X,
                                 contentDescription = stringResource(R.string.update_card_close),
                                 modifier = Modifier.size(22.dp),
                             )

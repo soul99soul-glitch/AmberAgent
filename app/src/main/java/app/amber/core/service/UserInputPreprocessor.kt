@@ -1,7 +1,6 @@
 package app.amber.core.service
 
 import app.amber.ai.ui.UIMessagePart
-import app.amber.core.settings.getCurrentAssistant
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.ai.transformers.replaceRegexes
@@ -9,7 +8,7 @@ import app.amber.core.ai.transformers.replaceRegexes
 /**
  * Pre-flight user-input transformation surface.
  *
- * Applies the current assistant's USER-scoped regex transformers to each
+ * Applies Amber's USER-scoped regex transformers to each
  * `UIMessagePart.Text` of an inbound message *before* it lands in the
  * conversation history. Non-text parts pass through unchanged.
  *
@@ -28,12 +27,12 @@ class UserInputPreprocessor(
     private val settingsStore: SettingsAggregator,
 ) {
     fun process(parts: List<UIMessagePart>): List<UIMessagePart> {
-        val assistant = settingsStore.settingsFlow.value.getCurrentAssistant()
+        val regexes = settingsStore.settingsFlow.value.regexes
         return parts.map { part ->
             when (part) {
                 is UIMessagePart.Text -> part.copy(
                     text = part.text.replaceRegexes(
-                        assistant = assistant,
+                        regexes = regexes,
                         scope = AssistantAffectScope.USER,
                         visual = false,
                     )

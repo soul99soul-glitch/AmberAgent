@@ -1,7 +1,6 @@
 package app.amber.feature.novel.workspace
 
 import app.amber.ai.provider.Model
-import app.amber.core.model.Assistant
 import app.amber.core.settings.Settings
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
@@ -39,13 +38,14 @@ class NovelWorkspaceGhostwriteCoordinator(
         branchSlug: String,
         settings: Settings,
         model: Model,
-        assistant: Assistant,
         chapterOrdinal: Int,
         maxSteps: Int = 24,
         injection: NovelWorkspaceInjectionFlags? = null,
+        ownerJobId: String? = null,
+        ownerExecutionId: String? = null,
     ): GhostwriteChapterResult {
         val store = NovelWorkspaceStore(projectDirectory)
-        val commitIdBeforeTurn = NovelWorkspaceLedger.load(projectDirectory).headCommit?.id
+        val commitIdBeforeTurn = NovelWorkspaceLedger.load(projectDirectory).headOf(branchId)?.id
         val plan = store.read(NovelWorkspacePaths.branchPrefix(branchSlug) + "/plan/this-chapter.md")
             ?.let { NovelWorkspaceMarkdown.parseFile(it).body }
         // A wedged/trickling provider could otherwise hang a chapter turn for the
@@ -62,11 +62,12 @@ class NovelWorkspaceGhostwriteCoordinator(
                 systemPrompt = NovelWorkspacePrompts.ghostwriteChapter(chapterOrdinal, plan),
                 settings = settings,
                 model = model,
-                assistant = assistant,
                 maxSteps = maxSteps,
                 autoApproveCanon = true,
-                    autoCommitMessage = "代笔收录",
-                    injection = injection,
+                autoCommitMessage = "代笔收录",
+                injection = injection,
+                ownerJobId = ownerJobId,
+                ownerExecutionId = ownerExecutionId,
                 ),
                 ).toList()
             }
@@ -77,8 +78,14 @@ class NovelWorkspaceGhostwriteCoordinator(
         val failure = events.filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Failed>().lastOrNull()
         if (failure != null) return GhostwriteChapterResult(commitId = null, error = failure.message)
         // A canon commit happened iff the ledger head advanced past where we started.
-        val commit = NovelWorkspaceLedger.load(projectDirectory).headCommit
-        if (commit != null && commit.id != commitIdBeforeTurn) {
+        val ledgerAfterTurn = NovelWorkspaceLedger.load(projectDirectory)
+        val commit = ledgerAfterTurn.headOf(branchId)
+        val targetCommitted = chapterOrdinal in NovelWorkspaceLedger.committedChapterOrdinals(
+            store,
+            ledgerAfterTurn,
+            branchSlug,
+        )
+        if (targetCommitted && commit != null && commit.id != commitIdBeforeTurn) {
             return GhostwriteChapterResult(commitId = commit.id)
         }
         // Host-write fallback (device-proven): many providers narrate the chapter
@@ -92,14 +99,22 @@ class NovelWorkspaceGhostwriteCoordinator(
             .orEmpty()
         if (finalText.length >= MIN_HOSTWRITE_CHARS) {
             val (title, body) = splitChapterTitle(finalText, chapterOrdinal)
-            val filed = runtime.commitGhostwrittenChapter(
-                projectDirectory = projectDirectory,
-                branchId = branchId,
-                branchSlug = branchSlug,
-                chapterOrdinal = chapterOrdinal,
-                title = title,
-                body = body,
-            )
+            val filed = try {
+                runtime.commitGhostwrittenChapter(
+                    projectDirectory = projectDirectory,
+                    branchId = branchId,
+                    branchSlug = branchSlug,
+                    chapterOrdinal = chapterOrdinal,
+                    title = title,
+                    body = body,
+                    ownerJobId = ownerJobId,
+                    ownerExecutionId = ownerExecutionId,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                return GhostwriteChapterResult(commitId = null, error = error.message ?: "代笔收录失败")
+            }
             return GhostwriteChapterResult(commitId = filed.id)
         }
         return GhostwriteChapterResult(commitId = null)
@@ -122,6 +137,7 @@ class NovelWorkspaceGhostwriteCoordinator(
     sealed interface BatchResult {
         data class Completed(val chaptersWritten: Int) : BatchResult
         data class Failed(val chaptersWritten: Int, val error: String) : BatchResult
+        data class Stopped(val chaptersWritten: Int) : BatchResult
     }
 
     /**
@@ -134,7 +150,6 @@ class NovelWorkspaceGhostwriteCoordinator(
         branchId: String,
         settings: Settings,
         model: Model,
-        assistant: Assistant,
         isPaused: () -> Boolean,
         injection: NovelWorkspaceInjectionFlags? = null,
         onChapter: suspend (Int) -> Unit,
@@ -144,13 +159,16 @@ class NovelWorkspaceGhostwriteCoordinator(
         var noProgressStreak = 0
         try {
             while (written < job.targetChapterCount) {
-                if (isPaused() || isCancelled(job, projectDirectory)) break
+                if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                 // D-D: never write new chapters while a middle-chapter edit is unresolved.
                 if (NovelWorkspaceUnresolvedStore.entryFor(projectDirectory, job.branchSlug) != null) {
                     return BatchResult.Failed(written, "存在未解决的中间章修改，请先处理再代笔")
                 }
-                val before =
-                    NovelWorkspaceLedger.workingChapterOrdinals(store, job.branchSlug).maxOrNull() ?: 0
+                val before = NovelWorkspaceLedger.committedChapterOrdinals(
+                    store,
+                    NovelWorkspaceLedger.load(projectDirectory),
+                    job.branchSlug,
+                ).maxOrNull() ?: 0
                 val nextOrdinal = before + 1
                 var chapter = ghostwriteOneChapter(
                     projectDirectory = projectDirectory,
@@ -158,35 +176,40 @@ class NovelWorkspaceGhostwriteCoordinator(
                     branchSlug = job.branchSlug,
                     settings = settings,
                     model = model,
-                    assistant = assistant,
                     chapterOrdinal = nextOrdinal,
                     injection = injection,
+                    ownerJobId = job.id,
+                    ownerExecutionId = job.executionKey,
                 )
                 // One retry absorbs transient provider blips (rate limit, dropped
                 // connection); a second failure ends the batch with the error surfaced.
                 if (chapter.error != null) {
-                    if (isPaused() || isCancelled(job, projectDirectory)) break
+                    if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                     delay(CHAPTER_RETRY_DELAY_MS)
                     // Re-check after the backoff: pause during the wait must not
                     // still run a full turn (device-observed review finding).
-                    if (isPaused() || isCancelled(job, projectDirectory)) break
+                    if (isPaused() || isCancelled(job, projectDirectory)) return BatchResult.Stopped(written)
                     chapter = ghostwriteOneChapter(
                         projectDirectory = projectDirectory,
                         branchId = branchId,
                         branchSlug = job.branchSlug,
                         settings = settings,
                         model = model,
-                        assistant = assistant,
                         chapterOrdinal = nextOrdinal,
                         injection = injection,
+                        ownerJobId = job.id,
+                        ownerExecutionId = job.executionKey,
                     )
                 }
                 if (chapter.error != null) {
                     return BatchResult.Failed(written, chapter.error)
                 }
                 // No-progress guard: a turn that didn't add a chapter must not spin forever.
-                val after =
-                    NovelWorkspaceLedger.workingChapterOrdinals(store, job.branchSlug).maxOrNull() ?: 0
+                val after = NovelWorkspaceLedger.committedChapterOrdinals(
+                    store,
+                    NovelWorkspaceLedger.load(projectDirectory),
+                    job.branchSlug,
+                ).maxOrNull() ?: 0
                 if (after > before) {
                     noProgressStreak = 0
                 } else {
@@ -204,25 +227,28 @@ class NovelWorkspaceGhostwriteCoordinator(
         } catch (error: CancellationException) {
             throw error
         }
-        return if (written >= job.targetChapterCount) {
-            BatchResult.Completed(written)
-        } else {
-            BatchResult.Failed(written, "已暂停或被取消")
-        }
+        return BatchResult.Completed(written)
     }
 
     private fun isCancelled(job: NovelWorkspaceGhostwriteJob, projectDirectory: File): Boolean =
         NovelWorkspaceGhostwriteJobs.load(projectDirectory, job.id)?.let {
             it.status == NovelWorkspaceGhostwriteJob.STATUS_CANCELLED ||
-                it.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED
+                it.status == NovelWorkspaceGhostwriteJob.STATUS_PAUSED ||
+                it.executionKey != job.executionKey
         } ?: true
 
     /** Create a new batch job (cursor = current manuscript state). */
     fun newJob(projectDirectory: File, branchSlug: String, targetChapterCount: Int): NovelWorkspaceGhostwriteJob {
         val store = NovelWorkspaceStore(projectDirectory)
-        val startOrdinal = NovelWorkspaceLedger.workingChapterOrdinals(store, branchSlug).maxOrNull() ?: 0
+        val startOrdinal = NovelWorkspaceLedger.committedChapterOrdinals(
+            store,
+            NovelWorkspaceLedger.load(projectDirectory),
+            branchSlug,
+        ).maxOrNull() ?: 0
+        val jobId = UUID.randomUUID().toString().uppercase()
         val job = NovelWorkspaceGhostwriteJob(
-            id = UUID.randomUUID().toString().uppercase(),
+            id = jobId,
+            executionId = jobId,
             branchSlug = branchSlug,
             targetChapterCount = targetChapterCount,
             startOrdinal = startOrdinal,
@@ -230,7 +256,9 @@ class NovelWorkspaceGhostwriteCoordinator(
             createdAt = Instant.now(),
             updatedAt = Instant.now(),
         )
-        NovelWorkspaceGhostwriteJobs.save(job, projectDirectory)
+        check(NovelWorkspaceGhostwriteJobs.saveIfNoActive(job, projectDirectory)) {
+            "已有代笔批次占用当前分支，请先继续或取消该批次"
+        }
         return job
     }
 

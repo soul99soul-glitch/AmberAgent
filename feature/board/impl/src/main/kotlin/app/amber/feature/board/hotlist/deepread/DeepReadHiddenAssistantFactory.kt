@@ -2,39 +2,25 @@ package app.amber.feature.board.hotlist.deepread
 
 import app.amber.ai.core.ReasoningLevel
 import app.amber.core.settings.Settings
-import app.amber.core.settings.getCurrentAssistant
-import app.amber.core.model.Assistant
-import kotlin.uuid.Uuid
 
 object DeepReadHiddenAssistantFactory {
-    fun create(settings: Settings): Assistant {
-        val base = settings.getCurrentAssistant()
-        return base.copy(
-            id = Uuid.random(),
-            name = "Deep Read Agent",
-            systemPrompt = systemPrompt(),
-            streamOutput = true,
-            enableMemory = false,
-            useGlobalMemory = false,
-            enableRecentChatsReference = false,
-            presetMessages = emptyList(),
-            quickMessageIds = emptySet(),
-            regexes = emptyList(),
-            customHeaders = emptyList(),
-            customBodies = emptyList(),
-            mcpServers = emptySet(),
-            localTools = emptyList(),
-            modeInjectionIds = emptySet(),
-            lorebookIds = emptySet(),
-            enabledSkills = emptySet(),
-            enableTimeReminder = false,
-            messageTemplate = "{{ message }}",
-            reasoningLevel = base.reasoningLevel.takeUnless { it == ReasoningLevel.OFF } ?: ReasoningLevel.AUTO,
-            // Keep provider/session defaults for max tokens. The section writer tools make each model
-            // response small enough that we do not need a bespoke cap here.
-            maxTokens = null,
-        )
-    }
+    fun create(settings: Settings): Settings = settings.copy(
+        systemPrompt = systemPrompt(),
+        streamOutput = true,
+        presetMessages = emptyList(),
+        regexes = emptyList(),
+        customHeaders = emptyList(),
+        customBodies = emptyList(),
+        enabledMcpServerIds = emptySet(),
+        enabledModeInjectionIds = emptySet(),
+        enabledLorebookIds = emptySet(),
+        enabledSkills = emptySet(),
+        messageTemplate = "{{ message }}",
+        reasoningLevel = settings.reasoningLevel.takeUnless { it == ReasoningLevel.OFF } ?: ReasoningLevel.AUTO,
+        // Keep provider/session defaults for max tokens. The section writer tools make each model
+        // response small enough that we do not need a bespoke cap here.
+        maxTokens = null,
+    )
 
     private fun systemPrompt(): String = """
         你是 AmberAgent 今日看板的隐藏深度阅读 Agent。你的任务不是输出一篇普通聊天回答，而是基于来源研究并通过内部 writer tools 分段写入 News 杂志风深度阅读内容。

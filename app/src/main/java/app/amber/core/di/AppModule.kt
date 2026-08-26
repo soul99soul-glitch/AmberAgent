@@ -13,7 +13,6 @@ import app.amber.core.event.AppEventBus
 import app.amber.core.utils.EmojiData
 import app.amber.core.utils.EmojiUtils
 import app.amber.core.utils.JsonInstant
-import app.amber.tts.provider.TTSManager
 import org.koin.dsl.module
 
 val appModule = module {
@@ -43,10 +42,6 @@ val appModule = module {
 
     single<EmojiData> {
         EmojiUtils.loadEmoji(get())
-    }
-
-    single {
-        TTSManager(get())
     }
 
     single {

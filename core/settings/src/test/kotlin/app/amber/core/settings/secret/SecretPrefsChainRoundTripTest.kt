@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.ai.mcp.McpCommonOptions
 import app.amber.core.ai.mcp.McpServerConfig
@@ -13,7 +14,9 @@ import app.amber.core.settings.PreferencesKeys
 import app.amber.core.settings.Settings
 import app.amber.core.settings.secret.SecretDescriptor
 import app.amber.core.settings.secret.SecretRedactor
+import app.amber.core.settings.secret.SecretReference
 import app.amber.core.settings.secret.SecretStore
+import app.amber.core.settings.secret.SettingsSecretMigrator
 import app.amber.core.settings.secret.fakeSecretStore
 import androidx.datastore.core.DataStore
 import kotlinx.coroutines.CoroutineScope
@@ -102,9 +105,8 @@ class SecretPrefsChainRoundTripTest {
         searchPrefs = SearchPrefs(dataStore, scope, secretStore),
         agentPrefs = AgentPrefs(dataStore, scope),
         providerPrefs = ProviderPrefs(dataStore, scope, secretStore),
-        chatPrefs = ChatPrefs(dataStore, scope),
+        chatPrefs = ChatPrefs(dataStore, scope, secretStore),
         extensionPrefs = ExtensionPrefs(dataStore, scope, secretStore),
-        assistantPrefs = AssistantPrefs(dataStore, scope, secretStore),
         scope = scope,
         secretRedactor = secretRedactor,
     )
@@ -155,5 +157,37 @@ class SecretPrefsChainRoundTripTest {
         // 用户清空 key → 保存 → secret 无引用 → 回收
         aggregator.update(Settings(providers = listOf(provider.copy(apiKey = ""))))
         assertNull("orphan secret must be reclaimed after ref removal", secretStore.read(descriptor))
+    }
+
+    @Test
+    fun `direct settings update preserves legacy refs and secrets while migration is pending`() = runBlocking {
+        val oldId = kotlin.uuid.Uuid.random()
+        val descriptor = SecretDescriptor("assistant", oldId.toString(), "customHeader:Authorization")
+        val reference = SecretReference(
+            scope = descriptor.scope,
+            ownerId = descriptor.ownerId,
+            fieldName = descriptor.fieldName,
+            mask = SecretRedactor.MASK_STRING,
+        )
+        secretStore.update(descriptor, "Bearer legacy-secret")
+        dataStore.edit {
+            it[PreferencesKeys.AMBER_PROFILE] = "{broken"
+            it[PreferencesKeys.LEGACY_ASSISTANTS] = "[]"
+            secretRedactor.writeRefs(it, mapOf(descriptor.key to reference))
+        }
+
+        val migrator = SettingsSecretMigrator(dataStore, secretStore, secretRedactor)
+        assertEquals(SettingsSecretMigrator.MIGRATION_FAILED, migrator.migrateIfNeeded())
+
+        val aggregator = buildAggregator()
+        aggregator.settingsFlow.awaitUntil { !it.init }
+        aggregator.update(Settings(systemPrompt = "updated while retrying"))
+
+        val persisted = dataStore.data.first()
+        assertEquals("{broken", persisted[PreferencesKeys.AMBER_PROFILE])
+        assertEquals("[]", persisted[PreferencesKeys.LEGACY_ASSISTANTS])
+        assertEquals(reference, secretRedactor.readRefs(persisted)[descriptor.key])
+        assertEquals("Bearer legacy-secret", secretStore.read(descriptor))
+        assertEquals("updated while retrying", persisted[PreferencesKeys.AMBER_SYSTEM_PROMPT])
     }
 }

@@ -1,6 +1,5 @@
 package app.amber.feature.ui.pages.chat
 
-import me.rerere.hugeicons.stroke.Search01
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut

@@ -22,8 +22,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
-import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Add01
+import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.Plus
 import app.amber.agent.R
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
@@ -55,7 +55,7 @@ fun SettingSearchPage(vm: SettingVM = koinViewModel()) {
                         }
                     ) {
                         Icon(
-                            imageVector = HugeIcons.Add01,
+                            imageVector = Lucide.Plus,
                             contentDescription = stringResource(R.string.setting_page_search_add_provider),
                         )
                     }

@@ -8,7 +8,7 @@ import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import app.amber.ai.provider.ProviderManager
+import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
@@ -32,7 +32,7 @@ import kotlin.uuid.Uuid
 
 class MemoryExtractor(
     private val settingsStore: SettingsAggregator,
-    private val providerManager: ProviderManager,
+    private val providerCatalog: ProviderCatalog,
     private val json: Json,
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
@@ -115,7 +115,7 @@ class MemoryExtractor(
                 sourceMessageIds = sourceIds,
                 locale = Locale.getDefault().displayName,
             )
-            val response = providerManager.getProviderByType(provider).generateText(
+            val response = providerCatalog.text(provider).complete(
                 providerSetting = provider,
                 messages = listOf(UIMessage.user(prompt)),
                 params = TextGenerationParams(model = model),

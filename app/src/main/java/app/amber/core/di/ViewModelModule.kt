@@ -1,7 +1,5 @@
 package app.amber.core.di
 
-import app.amber.feature.ui.pages.assistant.AssistantVM
-import app.amber.feature.ui.pages.assistant.detail.AssistantDetailVM
 import app.amber.feature.ui.pages.backup.BackupVM
 import app.amber.feature.ui.pages.chat.ChatDrawerVM
 import app.amber.feature.ui.pages.chat.ChatVM
@@ -13,7 +11,6 @@ import app.amber.feature.ui.pages.search.SearchVM
 import app.amber.feature.ui.pages.sessionhome.SessionHomeVM
 import app.amber.feature.ui.pages.history.HistoryVM
 import app.amber.feature.ui.pages.stats.StatsVM
-import app.amber.feature.ui.pages.imggen.ImgGenVM
 import app.amber.feature.ui.pages.extensions.PromptVM
 import app.amber.feature.ui.pages.extensions.QuickMessagesVM
 import app.amber.feature.ui.pages.extensions.SkillDetailVM
@@ -64,16 +61,6 @@ val viewModelModule = module {
     viewModelOf(::SettingCapabilityPermissionsVM)
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
-    viewModelOf(::AssistantVM)
-    viewModel<AssistantDetailVM> {
-        AssistantDetailVM(
-            id = it.get(),
-            settingsStore = get(),
-            memoryRepository = get(),
-            filesManager = get(),
-            skillManager = get(),
-        )
-    }
     viewModelOf(::LiveCompanionVM)
     single { SynaraConnectionStore(androidContext()) }
     viewModel { SynaraVM(store = get()) }
@@ -81,12 +68,10 @@ val viewModelModule = module {
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(
             text = it.get(),
-            settingsStore = get(),
         )
     }
     viewModelOf(::BackupVM)
     viewModelOf(::StorageVM)
-    viewModelOf(::ImgGenVM)
     viewModelOf(::DeveloperVM)
     viewModelOf(::PromptVM)
     viewModelOf(::QuickMessagesVM)

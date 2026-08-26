@@ -1,6 +1,5 @@
 package app.amber.core.sync.core
 
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -11,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.core.settings.Settings
+import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService
 
 private const val SECRET_MASK = "__MASKED_BY_AMBERAGENT_SYNC__"
 
@@ -36,13 +36,65 @@ class SyncRedactor(private val json: Json) {
     ): Settings {
         val exported = json.parseToJsonElement(settingsJson)
         val merged = if (mode == SyncMode.STANDARD) {
-            val local = json.parseToJsonElement(json.encodeToString(localSettings))
-            restoreLocalSecrets(exported, local, trustLocalSecret = true)
+            val local = json.parseToJsonElement(json.encodeToString(localSettings)).jsonObject
+            restoreLocalSecrets(
+                exported = exported,
+                local = local.legacyAssistantRestoreShape(exported),
+                trustLocalSecret = true,
+            )
         } else {
             exported
         }
-        return json.decodeFromString(merged.toString())
+        return json.decodeSettingsDroppingLegacySearchService(merged.toString())
     }
+
+    /**
+     * v1 STANDARD archives may still store the single runtime header under the
+     * removed `assistants` array. Give the generic merger a same-shaped local
+     * view before PrefsDecode removes that legacy container; otherwise a masked
+     * nested value sees no local array item and is replaced with an empty string.
+     */
+    private fun JsonObject.legacyAssistantRestoreShape(exported: JsonElement): JsonObject {
+        val exportedObject = exported as? JsonObject ?: return this
+        val exportedAssistants = exportedObject["assistants"] as? JsonArray ?: return this
+        val localHeaders = this["customHeaders"] as? JsonArray ?: return this
+        val localHeadersByName = localHeaders.mapNotNull { element ->
+            val header = element as? JsonObject ?: return@mapNotNull null
+            header.customHeaderName()?.let { it to header }
+        }.toMap()
+        val localAssistants = exportedAssistants.map { element ->
+            val profile = element as? JsonObject
+            if (profile == null) {
+                element
+            } else {
+                val exportedHeaders = profile["customHeaders"] as? JsonArray
+                if (exportedHeaders == null) {
+                    element
+                } else {
+                    val shapedHeaders = JsonArray(exportedHeaders.map { headerElement ->
+                        val header = headerElement as? JsonObject
+                        if (header == null) {
+                            headerElement
+                        } else {
+                            localHeadersByName[header.customHeaderName()] ?: header
+                        }
+                    })
+                    val shapedProfile = mutableMapOf<String, JsonElement>(
+                        "customHeaders" to shapedHeaders,
+                    )
+                    profile["id"]?.let { shapedProfile["id"] = it }
+                    JsonObject(shapedProfile)
+                }
+            }
+        }
+        return JsonObject(toMutableMap().apply {
+            this["assistants"] = JsonArray(localAssistants)
+        })
+    }
+
+    private fun JsonObject.customHeaderName(): String? =
+        this["name"]?.jsonPrimitive?.contentOrNull
+            ?: this["first"]?.jsonPrimitive?.contentOrNull
 
     private fun redact(element: JsonElement): JsonElement = when (element) {
         is JsonObject -> JsonObject(
