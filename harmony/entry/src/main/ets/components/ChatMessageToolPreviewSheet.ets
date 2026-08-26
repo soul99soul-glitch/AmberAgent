@@ -136,7 +136,7 @@ export struct ChatMessageToolPreviewSheet {
         }
         .alignItems(HorizontalAlign.Start)
       }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       .layoutWeight(1)
     }
     .width('100%')

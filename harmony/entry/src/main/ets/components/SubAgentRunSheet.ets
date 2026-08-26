@@ -49,7 +49,7 @@ export struct SubAgentRunSheet {
             .padding(16)
         }
       }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       .layoutWeight(1)
       .padding({ left: 16, right: 16, bottom: 16 })
     }

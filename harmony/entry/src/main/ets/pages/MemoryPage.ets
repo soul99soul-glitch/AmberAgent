@@ -264,7 +264,7 @@ struct MemoryPage {
             }
           }.width('100%')
         }
-        .align(Alignment.Start).layoutWeight(1).padding({ left: GUTTER, right: GUTTER, top: 0, bottom: 28 }).backgroundColor(BG)
+        .align(Alignment.TopStart).layoutWeight(1).padding({ left: GUTTER, right: GUTTER, top: 0, bottom: 28 }).backgroundColor(BG)
       }.width('100%').height('100%').backgroundColor(BG)
       if (this.draft !== null) this.draftDialog(this.draft)
     }

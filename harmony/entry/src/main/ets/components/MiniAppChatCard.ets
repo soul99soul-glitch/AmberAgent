@@ -271,7 +271,7 @@ export struct MiniAppChatCard {
           }
           .width('100%')
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .layoutWeight(1)
       }
       .width('86%').height('62%')

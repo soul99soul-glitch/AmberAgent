@@ -207,7 +207,7 @@ struct SettingPage {
         }
         .width('100%').padding({ left: 18, right: 18 })
       }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       .layoutWeight(1).backgroundColor(BG)
     }
     .width('100%').height('100%').backgroundColor(BG)

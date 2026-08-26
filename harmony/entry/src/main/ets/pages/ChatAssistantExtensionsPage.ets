@@ -216,7 +216,7 @@ struct ChatAssistantExtensionsPage {
           }
           .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 24 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
     }

@@ -142,7 +142,7 @@ struct ChatAgentExecutionPage {
           }, (opt: number): string => `${opt}`)
         }
       }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
       .width('100%').margin({ top: 10 })
     }
@@ -175,7 +175,7 @@ struct ChatAgentExecutionPage {
           }, (opt: string): string => opt)
         }
       }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
       .width('100%').margin({ top: 10 })
     }

@@ -390,7 +390,7 @@ struct ChatTaskModelsPage {
             }
             .width('100%').padding({ top: 2, bottom: 24 })
           }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)
         }
       }

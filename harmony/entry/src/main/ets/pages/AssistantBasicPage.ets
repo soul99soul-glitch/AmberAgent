@@ -199,7 +199,7 @@ struct AssistantBasicPage {
           }
           .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .layoutWeight(1)
       }
     }

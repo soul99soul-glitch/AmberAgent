@@ -125,7 +125,7 @@ export struct WorkspaceFilePreview {
     Scroll() {
       MarkdownText({ content: this.textContent, fontSize: 13, fontColor: INK2 })
     }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
     .layoutWeight(1)
     .padding({ left: 16, right: 16, bottom: 16 })
   }
@@ -140,7 +140,7 @@ export struct WorkspaceFilePreview {
         .width('100%')
         .copyOption(CopyOptions.LocalDevice)
     }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
     .layoutWeight(1)
     .padding({ left: 16, right: 16, bottom: 16 })
   }

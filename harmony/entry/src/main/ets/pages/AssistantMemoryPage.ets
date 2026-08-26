@@ -175,7 +175,7 @@ struct AssistantMemoryPage {
           }
           .width('100%')
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .layoutWeight(1)
       }
     }

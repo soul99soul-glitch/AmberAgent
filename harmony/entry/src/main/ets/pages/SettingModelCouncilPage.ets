@@ -184,7 +184,7 @@ struct SettingModelCouncilPage {
           }
           .width('100%').padding({ bottom: 20 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .layoutWeight(1)
       }
     }

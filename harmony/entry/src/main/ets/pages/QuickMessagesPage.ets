@@ -202,7 +202,7 @@ struct QuickMessagesPage {
             Column() {}.height(40)
           }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 16 })
         }
-        .align(Alignment.Start).layoutWeight(1)
+        .align(Alignment.TopStart).layoutWeight(1)
       } else if (!this.loaded) {
         Column() {
           Text('加载中…').fontSize(BODY).fontColor(INK3)

@@ -200,7 +200,7 @@ struct ChatAssistantLocalToolsPage {
           .border({ width: 1, color: LINE })
           .margin({ left: GUTTER, right: GUTTER, bottom: 24 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
     }

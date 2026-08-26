@@ -673,7 +673,7 @@ export struct MarkdownText {
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
         .width('100%')
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
       }
     }
     .width('100%')

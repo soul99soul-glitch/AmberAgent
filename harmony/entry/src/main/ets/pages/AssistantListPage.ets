@@ -282,7 +282,7 @@ struct AssistantListPage {
           }
           .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 16 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
     }

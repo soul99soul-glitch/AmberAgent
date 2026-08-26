@@ -351,7 +351,7 @@ struct PromptTemplatePage {
             }
             .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 16 })
           }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)
         }
       } else {
@@ -458,7 +458,7 @@ struct PromptTemplatePage {
           }
           .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
     }

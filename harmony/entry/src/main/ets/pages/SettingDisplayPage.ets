@@ -148,7 +148,7 @@ struct SettingDisplayPage {
           .width('100%')
           .padding({ left: GUTTER, right: GUTTER })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .layoutWeight(1)
       }
     }

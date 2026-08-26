@@ -250,7 +250,7 @@ struct AssistantPromptPage {
             }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 4, bottom: 32 })
           }.width('100%')
         }
-        .align(Alignment.Start).layoutWeight(1)
+        .align(Alignment.TopStart).layoutWeight(1)
       }
     }.width('100%').height('100%').backgroundColor(BG)
   }

@@ -150,7 +150,7 @@ struct ChatAgentPermissionsPage {
           }
           .width('100%').padding({ left: 16, right: 16, bottom: 24 })
         }
-        .align(Alignment.Start)
+        .align(Alignment.TopStart)
         .width('100%').layoutWeight(1)
       }
     }
