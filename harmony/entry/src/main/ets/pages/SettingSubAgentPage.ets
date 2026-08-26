@@ -161,6 +161,7 @@ struct SettingSubAgentPage {
           .width('100%')
           .padding({ bottom: 20 })
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
     }

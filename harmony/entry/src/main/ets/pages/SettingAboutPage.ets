@@ -72,6 +72,7 @@ struct SettingAboutPage {
         }
         .width('100%')
       }
+        .align(Alignment.Start)
       .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(BG)

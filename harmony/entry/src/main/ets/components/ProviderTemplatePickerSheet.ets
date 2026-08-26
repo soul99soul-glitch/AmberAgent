@@ -218,6 +218,7 @@ export struct ProviderTemplatePickerSheet {
             }
             .width('100%')
           }
+        .align(Alignment.Start)
           .layoutWeight(1)
           .scrollBar(BarState.Off)
 

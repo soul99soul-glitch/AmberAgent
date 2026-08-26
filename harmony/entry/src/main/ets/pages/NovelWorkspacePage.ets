@@ -515,6 +515,7 @@ const unsub: (() => void) | null = this.currentUnsub;
         .width('100%').padding({ left: 20, right: 20, bottom: 24 })
         .alignItems(HorizontalAlign.Start)
       }
+        .align(Alignment.Start)
       .layoutWeight(1)
     }
     .width('100%').height('100%')
@@ -613,6 +614,7 @@ const unsub: (() => void) | null = this.currentUnsub;
         .width('100%').padding({ left: 20, right: 20, bottom: 24 })
         .alignItems(HorizontalAlign.Start)
       }
+        .align(Alignment.Start)
       .layoutWeight(1)
     }
     .width('100%').height('100%')

@@ -436,6 +436,7 @@ struct DeepReadArticlePage {
             }
             .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
           }
+        .align(Alignment.Start)
           .layoutWeight(1)
           .backgroundColor(BG)
         }

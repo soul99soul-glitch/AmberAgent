@@ -324,6 +324,7 @@ export struct WorkspaceFileSheet {
             }
             .width('100%')
           }
+        .align(Alignment.Start)
           .layoutWeight(1)
           .padding({ left: 12, right: 12, bottom: 8 })
 

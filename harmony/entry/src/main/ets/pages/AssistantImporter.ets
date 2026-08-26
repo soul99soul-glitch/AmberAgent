@@ -214,6 +214,7 @@ struct AssistantImporter {
         }
         .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12 })
       }
+        .align(Alignment.Start)
       .layoutWeight(1)
     }
     .width('100%').height('100%').backgroundColor(BG)

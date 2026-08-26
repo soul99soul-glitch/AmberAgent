@@ -599,6 +599,7 @@ struct ChatAssistantsPage {
         }
         .width('100%').padding({ left: GUTTER, right: GUTTER, bottom: 32 })
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
     }

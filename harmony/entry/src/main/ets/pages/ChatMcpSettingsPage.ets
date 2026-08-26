@@ -415,6 +415,7 @@ struct ChatMcpSettingsPage {
       .width('100%').padding({ bottom: 16 })
       .alignItems(HorizontalAlign.Start)
     }
+        .align(Alignment.Start)
     .width('100%').layoutWeight(1)
   }
 

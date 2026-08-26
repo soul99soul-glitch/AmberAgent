@@ -4338,6 +4338,7 @@ struct ChatPage {
         }
         .width('100%').alignItems(HorizontalAlign.Start)
       }
+        .align(Alignment.Start)
       .width('100%').layoutWeight(1).margin({ top: 12 })
     }
     .width('100%').height('100%').padding(16)
@@ -4670,6 +4671,7 @@ struct ChatPage {
           }
           .padding({ left: 20, right: 20 })
         }
+        .align(Alignment.Start)
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
         .width('100%')
@@ -4707,6 +4709,7 @@ struct ChatPage {
           }
           .padding({ left: 20, right: 20 })
         }
+        .align(Alignment.Start)
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
         .width('100%')
@@ -4742,6 +4745,7 @@ struct ChatPage {
           }
           .padding({ left: 20, right: 20 })
         }
+        .align(Alignment.Start)
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
         .width('100%')

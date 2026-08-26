@@ -249,7 +249,8 @@ struct AssistantPromptPage {
                 .borderRadius(50).onClick((): void => { this.addEntry(); })
             }.width('100%').padding({ left: GUTTER, right: GUTTER, top: 4, bottom: 32 })
           }.width('100%')
-        }.layoutWeight(1)
+        }
+        .align(Alignment.Start).layoutWeight(1)
       }
     }.width('100%').height('100%').backgroundColor(BG)
   }

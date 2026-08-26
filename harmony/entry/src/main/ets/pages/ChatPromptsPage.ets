@@ -557,6 +557,7 @@ struct ChatPromptsPage {
           }
           .width('100%').alignItems(HorizontalAlign.Start)
         }
+        .align(Alignment.Start)
         .width('100%').layoutWeight(1)
         Row() {
           Blank()
@@ -643,6 +644,7 @@ struct ChatPromptsPage {
           }
           .width('100%').alignItems(HorizontalAlign.Start)
         }
+        .align(Alignment.Start)
         .width('100%').layoutWeight(1)
         Row() {
           Blank()
@@ -750,6 +752,7 @@ struct ChatPromptsPage {
           }
           .width('100%').alignItems(HorizontalAlign.Start)
         }
+        .align(Alignment.Start)
         .width('100%').layoutWeight(1)
         Row() {
           Blank()
@@ -815,6 +818,7 @@ struct ChatPromptsPage {
             }
             .width('100%').padding({ left: 18, right: 18, bottom: 16 })
           }
+        .align(Alignment.Start)
           .width('100%').layoutWeight(1)
 
           // 添加按钮(floating toolbar 适配;import 未移植)

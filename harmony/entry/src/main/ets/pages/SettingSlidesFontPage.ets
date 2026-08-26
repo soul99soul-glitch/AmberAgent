@@ -153,6 +153,7 @@ struct SettingSlidesFontPage {
           }
           .width('100%').padding({ left: 16, right: 16 })
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
     }

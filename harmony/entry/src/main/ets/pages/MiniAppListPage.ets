@@ -456,6 +456,7 @@ struct MiniAppListPage {
           }
           .width('100%')
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
       .width('86%').height('62%')

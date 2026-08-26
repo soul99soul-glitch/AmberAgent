@@ -427,6 +427,7 @@ struct ProfilePage {
         .width('100%')
         .padding({ left: 18, right: 18 })
       }
+        .align(Alignment.Start)
       .layoutWeight(1).backgroundColor(BG)
     }
     .width('100%').height('100%').backgroundColor(BG)
@@ -498,6 +499,7 @@ struct ProfilePage {
       .rowsGap(0)
       .height(89) // 7×11 + 6×2
     }
+        .align(Alignment.Start)
     .scrollable(ScrollDirection.Horizontal)
     .scrollBar(BarState.Off)
     .width('100%')

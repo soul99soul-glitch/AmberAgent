@@ -107,6 +107,7 @@ struct HotListSourceSettingsPage {
           }
           .width('100%')
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
     }

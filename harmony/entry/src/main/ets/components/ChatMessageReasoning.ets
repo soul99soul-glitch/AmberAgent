@@ -131,6 +131,7 @@ export struct ChatMessageReasoning {
           }
           .width('100%')
         }
+        .align(Alignment.Start)
         .width('100%')
         .height(100)
         .padding({ left: 14, top: 2, bottom: 2 })

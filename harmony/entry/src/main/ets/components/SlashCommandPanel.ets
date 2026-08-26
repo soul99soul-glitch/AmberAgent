@@ -80,6 +80,7 @@ export struct SlashCommandPanel {
         }
         .width('100%')
       }
+        .align(Alignment.Start)
       .height('auto')
       .constraintSize({ maxHeight: 320 })
       .scrollable(ScrollDirection.Vertical)

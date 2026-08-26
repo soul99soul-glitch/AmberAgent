@@ -736,6 +736,7 @@ struct ChatSearchSettingsPage {
           }
           .width('100%').alignItems(HorizontalAlign.Start)
         }
+        .align(Alignment.Start)
         .width('100%').layoutWeight(1)
 
         Row() {
@@ -822,6 +823,7 @@ struct ChatSearchSettingsPage {
             }
             .width('100%').padding({ left: 16, right: 16, bottom: 24 })
           }
+        .align(Alignment.Start)
           .width('100%').layoutWeight(1)
         }
       }

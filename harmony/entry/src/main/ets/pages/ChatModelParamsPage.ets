@@ -285,6 +285,7 @@ struct ChatModelParamsPage {
           }
           .width('100%').padding({ left: 16, right: 16, bottom: 32 })
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
       }
     }

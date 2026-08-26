@@ -197,6 +197,7 @@ struct CouncilRunPage {
           }
           .padding({ left: 14, right: 14, top: 2, bottom: 11 })
         }
+        .align(Alignment.Start)
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
         .width('100%').margin({ bottom: 10 })

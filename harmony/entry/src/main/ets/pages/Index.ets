@@ -239,6 +239,7 @@ struct Index {
           }
           .width('100%')
         }
+        .align(Alignment.Start)
         .layoutWeight(1)
         .backgroundColor(BG)
       }
