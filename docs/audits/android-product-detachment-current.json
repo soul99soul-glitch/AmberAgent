@@ -1,0 +1,358 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-26T22:45:50.231347+00:00",
+  "phase": "D6-post-commit-packaged",
+  "scope": "AmberAgent Android product detachment residuals",
+  "git": {
+    "head": "c44302af7f6ae31e2259fb03b769379fc712a8af",
+    "branch": "main",
+    "detached": false,
+    "dirty_entry_count": 11,
+    "android_dirty_entry_count": 3,
+    "other_platform_wip_present": true,
+    "status_sha256": "ee35a63e593ead841aa3ff41ffc6b08807eab3c6d241bd56add634584a17ffd2",
+    "android_dirty_entries": [
+      "?? docs/",
+      "?? scripts/android_product_detachment_manifest.py",
+      "?? scripts/chat_kernel_similarity.py"
+    ],
+    "other_platform_wip_entry_count": 8
+  },
+  "dependencies": {
+    "catalog_rikka_coordinates": [],
+    "resolved_rikka_coordinates": [],
+    "resolved_rikka_count": 0,
+    "resolved_report": {
+      "command": "./gradlew :app:dependencies --configuration debugRuntimeClasspath | rg 'com\\.github\\.rikkahub'",
+      "sha256": "d891221a8316ddd9bc1d10fef60f61befa5ad145204495ffbf36589e8f6ad930"
+    }
+  },
+  "hugeicons": {
+    "file_count": 0,
+    "concrete_icon_count": 0,
+    "concrete_icons": [],
+    "files": []
+  },
+  "source": {
+    "rikka_endpoint_hits": [],
+    "rikka_endpoint_file_count": 0,
+    "rikka_namespace_or_brand_hits": [],
+    "search_legacy_route": {
+      "registry_and_serial_tag": {
+        "path": "search/src/main/java/app/amber/search/SearchService.kt",
+        "matches": []
+      },
+      "endpoint_owner": {
+        "path": "search/src/main/java/app/amber/search/AmberAgentSearchService.kt",
+        "matches": []
+      },
+      "settings_editor": {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSearchServiceEditorSheet.kt",
+        "matches": []
+      },
+      "settings_persistence": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/SearchPrefs.kt",
+        "matches": [
+          {
+            "line": 25,
+            "text": "val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),"
+          },
+          {
+            "line": 66,
+            "text": "val decodedServices = p[PreferencesKeys.SEARCH_SERVICES]"
+          },
+          {
+            "line": 76,
+            "text": "searchServices = decodedServices?.services?.let {"
+          },
+          {
+            "line": 103,
+            "text": "p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(data.searchServices)"
+          }
+        ]
+      },
+      "raw_legacy_decoder": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/PrefsDecode.kt",
+        "matches": [
+          {
+            "line": 54,
+            "text": "* Decode after removing the retired `amber_agent` subtype at the raw JSON boundary."
+          },
+          {
+            "line": 65,
+            "text": "val isLegacy = (objectValue?.get(\"type\") as? JsonPrimitive)?.content == \"amber_agent\""
+          },
+          {
+            "line": 84,
+            "text": "fun Json.decodeSettingsDroppingLegacySearchService(encoded: String): Settings {"
+          },
+          {
+            "line": 133,
+            "text": "this[\"enableWebSearch\"] = JsonPrimitive(false)"
+          }
+        ]
+      },
+      "cached_backup_rescue": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/SettingsProviderRescue.kt",
+        "matches": [
+          {
+            "line": 83,
+            "text": "settings = json.decodeSettingsDroppingLegacySearchService(settingsJson),"
+          }
+        ]
+      },
+      "webdav_backup_restore": {
+        "path": "app/src/main/java/app/amber/core/sync/webdav/WebDavSync.kt",
+        "matches": [
+          {
+            "line": 12,
+            "text": "import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService"
+          },
+          {
+            "line": 259,
+            "text": "stagedSettings = json.decodeSettingsDroppingLegacySearchService(settingsJson)"
+          }
+        ]
+      },
+      "s3_backup_restore": {
+        "path": "app/src/main/java/app/amber/core/sync/S3Sync.kt",
+        "matches": [
+          {
+            "line": 12,
+            "text": "import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService"
+          },
+          {
+            "line": 228,
+            "text": "stagedSettings = json.decodeSettingsDroppingLegacySearchService(settingsJson)"
+          }
+        ]
+      },
+      "sync_archive_restore": {
+        "path": "app/src/main/java/app/amber/core/sync/core/SyncRedactor.kt",
+        "matches": [
+          {
+            "line": 13,
+            "text": "import app.amber.core.settings.prefs.decodeSettingsDroppingLegacySearchService"
+          },
+          {
+            "line": 48,
+            "text": "return json.decodeSettingsDroppingLegacySearchService(merged.toString())"
+          }
+        ]
+      },
+      "secret_redaction": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/secret/SecretRedactor.kt",
+        "matches": []
+      },
+      "secret_migration": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/secret/SettingsSecretMigrator.kt",
+        "matches": [
+          {
+            "line": 97,
+            "text": "val searchServices = searchJson"
+          },
+          {
+            "line": 101,
+            "text": "val redactedSearch = redactor.redactSearchServices(searchServices, existingRefs, out)"
+          }
+        ]
+      },
+      "settings_normalization": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/SettingsAggregator.kt",
+        "matches": [
+          {
+            "line": 102,
+            "text": "searchServices = settingsForWrite.searchServices,"
+          },
+          {
+            "line": 148,
+            "text": "p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(redacted.searchServices)"
+          },
+          {
+            "line": 155,
+            "text": "p[PreferencesKeys.SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) {"
+          },
+          {
+            "line": 158,
+            "text": "settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)"
+          },
+          {
+            "line": 161,
+            "text": "settings.searchEnabledServiceIds.filter { id ->"
+          },
+          {
+            "line": 162,
+            "text": "settings.searchServices.any { service -> service.id == id }"
+          },
+          {
+            "line": 310,
+            "text": "searchServices = search.searchServices,"
+          },
+          {
+            "line": 313,
+            "text": "searchEnabledServiceIds = search.searchEnabledServiceIds,"
+          },
+          {
+            "line": 412,
+            "text": "* - Filter searchEnabledServiceIds — only services that still exist survive"
+          },
+          {
+            "line": 422,
+            "text": "val cleanedSearchSelected = if (migratedSettings.searchServices.isEmpty()) {"
+          },
+          {
+            "line": 425,
+            "text": "migratedSettings.searchServiceSelected.coerceIn(0, migratedSettings.searchServices.lastIndex)"
+          },
+          {
+            "line": 427,
+            "text": "val cleanedSearchEnabledIds = migratedSettings.searchEnabledServiceIds"
+          },
+          {
+            "line": 428,
+            "text": ".filter { id -> migratedSettings.searchServices.any { service -> service.id == id } }"
+          },
+          {
+            "line": 430,
+            "text": "migratedSettings.searchServices.getOrNull(cleanedSearchSelected)"
+          },
+          {
+            "line": 436,
+            "text": "searchEnabledServiceIds = cleanedSearchEnabledIds,"
+          }
+        ]
+      },
+      "tool_selector_alias": {
+        "path": "app/src/main/java/app/amber/core/ai/tools/SearchAggregator.kt",
+        "matches": []
+      },
+      "tool_availability": {
+        "path": "app/src/main/java/app/amber/core/ai/tools/SearchOrchestrator.kt",
+        "matches": []
+      },
+      "deepread_priority": {
+        "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadSourcePrefetcher.kt",
+        "matches": []
+      }
+    },
+    "about_current_product_links": {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAboutPage.kt",
+      "matches": [],
+      "canonical_repository_matches": [
+        {
+          "line": 167,
+          "text": "onClick = { context.openUrl(\"https://github.com/soul99soul-glitch/AmberAgent\") },"
+        }
+      ],
+      "canonical_license_matches": [
+        {
+          "line": 175,
+          "text": "onClick = { context.openUrl(\"https://github.com/soul99soul-glitch/AmberAgent/blob/main/LICENSE\") },"
+        }
+      ]
+    },
+    "dynamic_asset_route": {
+      "matcher": [
+        {
+          "line": 54,
+          "text": "PATTERN_AMBERAGENT.containsMatchIn(lowerName) -> \"graphite_agent_mark\""
+        },
+        {
+          "line": 71,
+          "text": "private val PATTERN_AMBERAGENT = Regex(\"amberagent|auto\")"
+        }
+      ],
+      "loader": [
+        {
+          "line": 25,
+          "text": "import app.amber.core.utils.computeAIIconByName"
+        },
+        {
+          "line": 40,
+          "text": ".data(\"file:///android_asset/icons/$path\")"
+        },
+        {
+          "line": 70,
+          "text": "val path = remember(name) { computeAIIconByName(name) } ?: run {"
+        }
+      ]
+    }
+  },
+  "assets": [],
+  "artifacts": [
+    {
+      "path": "app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
+      "sha256": "1648c7a068addf22ddbff6fed987a19ca2ac5aa181ae75e927a09283117a7ca3",
+      "size_bytes": 108398814,
+      "rikka_hits": {
+        "api.rikka-ai.com": [],
+        "com.github.rikkahub": [],
+        "me.rerere.hugeicons": [],
+        "rikkahub.svg": []
+      }
+    },
+    {
+      "path": "app/build/outputs/apk/debug/app-universal-debug.apk",
+      "sha256": "1648c7a068addf22ddbff6fed987a19ca2ac5aa181ae75e927a09283117a7ca3",
+      "size_bytes": 108398814,
+      "rikka_hits": {
+        "api.rikka-ai.com": [],
+        "com.github.rikkahub": [],
+        "me.rerere.hugeicons": [],
+        "rikkahub.svg": []
+      }
+    },
+    {
+      "path": "app/build/outputs/apk/graphite/app-arm64-v8a-graphite.apk",
+      "sha256": "d0a6684f51c77035a11fa279f08378fdd279bb0f274f7b3298b4d0c3cb6821b2",
+      "size_bytes": 105994124,
+      "rikka_hits": {
+        "api.rikka-ai.com": [],
+        "com.github.rikkahub": [],
+        "me.rerere.hugeicons": [],
+        "rikkahub.svg": []
+      }
+    },
+    {
+      "path": "app/build/outputs/apk/graphite/app-universal-graphite.apk",
+      "sha256": "d0a6684f51c77035a11fa279f08378fdd279bb0f274f7b3298b4d0c3cb6821b2",
+      "size_bytes": 105994124,
+      "rikka_hits": {
+        "api.rikka-ai.com": [],
+        "com.github.rikkahub": [],
+        "me.rerere.hugeicons": [],
+        "rikkahub.svg": []
+      }
+    }
+  ],
+  "notice_sbom": {
+    "status": "present",
+    "files": [
+      {
+        "path": "NOTICE",
+        "sha256": "a79bca50775009a79650a1432c39be205b79dff709c1cfc79ef08fedead92b2a",
+        "unknown_occurrences": 0,
+        "rikka_occurrences": 6
+      },
+      {
+        "path": "docs/audits/android-product-detachment-sbom.json",
+        "sha256": "c28ab1220c05f9291ee4a0a7d6fc437f2aa603d1ff5c884d891ea15d03478569",
+        "unknown_occurrences": 0,
+        "rikka_occurrences": 5
+      }
+    ],
+    "file_count": 2,
+    "unknown_occurrences": 0,
+    "root_license": {
+      "path": "LICENSE",
+      "present": true,
+      "sha256": "0397e25cc3c3eb04eda3270d8e95fd09f49a6532cbb4c4b18e53cabe692b9c86"
+    }
+  },
+  "device_evidence": {
+    "simulator_ui": "not verified by this manifest",
+    "physical_device_ui": "not verified by this manifest",
+    "database_upgrade": "not verified by this manifest",
+    "kill_relaunch": "not verified by this manifest"
+  }
+}

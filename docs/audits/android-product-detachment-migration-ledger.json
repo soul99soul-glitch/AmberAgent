@@ -1,0 +1,328 @@
+{
+  "schema_version": 1,
+  "plan": "docs/plans/2026-08-25-android-product-detachment-residuals-plan.md",
+  "frozen_head": "bdd1f7d94e561f1ebb967c6736a261babb8ae2e9",
+  "phase_status": {
+    "D0": "completed",
+    "D1": "completed_environment_conditional",
+    "D2a": "completed_environment_conditional",
+    "D2b": "completed_environment_conditional",
+    "D2c": "engineering_completed_release_no_go",
+    "D3": "completed_environment_conditional",
+    "D4": "completed_environment_conditional",
+    "D5": "completed_environment_conditional",
+    "D6": "completed_release_no_go",
+    "post_completion_retirement_cleanup": "completed_environment_conditional"
+  },
+  "phase_reviews": {
+    "D0_initial": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "NO-GO",
+      "critical": 0,
+      "high": 4,
+      "medium": 4,
+      "low": 0,
+      "accepted_fixes": [
+        "generate baseline and current independently",
+        "make resolved dependency report mandatory and record command/hash",
+        "represent missing NOTICE/SBOM as missing with unknown unavailable",
+        "record Search registry/persistence/selector/DeepRead call chain in machine evidence",
+        "record WIP status entries/hash and explicit About/dynamic asset routes",
+        "scan production Java/XML/config and stream all APK/AAB entries without size omission"
+      ]
+    },
+    "D0_rereview": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "GO",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "D1": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "code GO; phase accepted under explicit environment-continuation rule",
+      "critical": 0,
+      "high": 0,
+      "medium": 1,
+      "low": 1,
+      "boundaries": [
+        "compile/APK scan unavailable because no Android SDK is installed",
+        "plan phase label drift fixed before D2a"
+      ]
+    },
+    "D2a_initial": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "NO-GO",
+      "critical": 0,
+      "high": 1,
+      "medium": 1,
+      "low": 0,
+      "accepted_fix": "preserve the proven CJK-adjacent emphasis rule with one official-parser compatibility descriptor shared by the app richtext and DeepRead consumers"
+    },
+    "D2a_rereview": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "GO with Android SDK verification boundary",
+      "critical": 0,
+      "high": 0,
+      "medium": 2,
+      "low": 1,
+      "boundaries": [
+        "app and Android consumer compile unavailable because Android SDK is not installed",
+        "target hunks remain isolated from the pre-existing detached-head WIP"
+      ]
+    },
+    "D2b": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "GO with Android SDK, Canvas, and device UI verification boundary",
+      "critical": 0,
+      "high": 0,
+      "medium": 3,
+      "low": 1,
+      "root_disposition": [
+        "kept compile, Canvas, theme, baseline, long-formula and device UI evidence unavailable",
+        "closed the TTF concern by parsing every Unicode cmap table with fontTools and verifying E000=Omega and E001=harpoonleftright",
+        "closed the current-manifest concern: D2b-current was regenerated at 2026-08-24T17:55Z, which is 2026-08-25T01:55 Asia/Shanghai",
+        "recorded official-source provenance, transformation, hashes, GPL-2.0 plus linking exception, and bundled font-license boundary below"
+      ]
+    },
+    "D2c": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "engineering and supply-chain GO; release NO-GO because database/device validation is unavailable",
+      "critical": 0,
+      "high": 1,
+      "medium": 2,
+      "low": 1,
+      "root_disposition": [
+        "accepted the High release boundary: no Android compile, existing-database upgrade, Room migration, WAL/FTS/vector, kill-relaunch or 16KB device evidence",
+        "closed the 32MB behavior concern: AmberAgentApp calls DatabaseUtil.setCursorWindowSize(32 MiB), which updates both platform and Requery default CursorWindow sizes before database use",
+        "recorded the fixed upstream commit, AAR/class/native comparison and ELF evidence below",
+        "kept DataSourceModule database construction untouched because its dirty hunks belong to the chat-kernel WIP"
+      ]
+    },
+    "D3_initial": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "NO-GO until persisted backup/restore, secret cleanup, and startup routing gates were closed",
+      "critical": 0,
+      "high": 1,
+      "medium": 2,
+      "low": 1
+    },
+    "D3_rereview": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "engineering GO with Android SDK, backup-runtime, and provider-smoke boundary",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 2,
+      "accepted_fixes": [
+        "sanitize legacy amber_agent before sealed Settings decode on DataStore, cached rescue, WebDAV, S3, and sync archive restore paths",
+        "remove retired JSON, selected/enabled references, secret refs and orphans without mapping the old API key to another provider",
+        "gate enableWebSearch in composeRawSettings before the asynchronous persistent migration completes"
+      ]
+    },
+    "D4_initial": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "NO-GO until two user-visible semantic icon mappings were corrected",
+      "critical": 0,
+      "high": 0,
+      "medium": 2,
+      "low": 2,
+      "accepted_fixes": [
+        "Time02 -> Clock for GET_TIME_INFO",
+        "Share04 -> Share2 for the Android system share action"
+      ]
+    },
+    "D4_rereview": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "code GO with Android SDK and device-visual boundary",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 2
+    },
+    "D5_initial": {
+      "reviewer": "gpt-5.6-luna reasoning=max plus delegated release-gate review",
+      "decision": "NO-GO until four NOTICE/SBOM Medium findings and the Greek GPL-version inconsistency were closed",
+      "critical": 0,
+      "high": 0,
+      "medium": 5,
+      "low": 0
+    },
+    "D5_targeted_rereview": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "engineering compliance GO; strict release remains NO-GO without APK/device evidence",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "D6": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "engineering gates GO; strict release NO-GO because SDK/APK/device/database/provider evidence is unavailable",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 1,
+      "low_findings": [
+        "two ChatPage comments retain the word HugeIcons but have no import, symbol, dependency or runtime effect; not expanded under the Low-only rule"
+      ]
+    },
+    "post_completion_retirement_cleanup": {
+      "reviewer": "gpt-5.6-luna reasoning=max",
+      "decision": "engineering GO; strict release remains NO-GO because the focused Android test and release evidence are unavailable without the SDK",
+      "critical": 0,
+      "high": 0,
+      "medium": 0,
+      "low": 1,
+      "accepted_cleanup": [
+        "remove the two comment-only HugeIcons references reported by D6",
+        "rename the GenerationSubAgentRunner dependency from generationHandler to generator and update its Koin named argument",
+        "merge the three unique approval-policy matrices into PermissionDecisionResolverTest and delete the redundant 13-test GenerationHandlerAutoApprovalTest",
+        "delete the zero-consumer AgentToolDispatcher and PermissionDecisionResolver shouldPauseForApproval wrappers so production uses resolveDecision -> resolve only",
+        "replace misleading phase/retired-owner source comments with current ownership statements",
+        "mark the two audit scripts as manual dated-evidence reproducers rather than runtime or standing CI gates"
+      ],
+      "accepted_low_boundary": "two GenerationHandler comment references remain only in the protected NovelWorkspaceRuntimeTest dirty WIP; they have no production symbol or runtime effect"
+    }
+  },
+  "verification": {
+    "D0": {
+      "resolved_dependency_scan": "passed: debugRuntimeClasspath contains exactly 6 com.github.rikkahub coordinates",
+      "source_manifest": "passed: 112 HugeIcons files, 153 concrete icons, 1 production endpoint file, 1 Rikka-named asset",
+      "apk_baseline": "not run: no Android SDK found in the current environment; dependency resolution succeeded with cached JBR",
+      "product_source_changed": false
+    },
+    "D1": {
+      "source_asset_scan": "passed: no Rikka matcher alias and no rikkahub.svg source asset",
+      "dynamic_asset_route": "passed: AutoAIIcon still maps amberagent/auto through the existing 24dp AmberAgentIcon path",
+      "git_diff_check": "passed",
+      "compile_and_apk_scan": "unavailable: Android SDK is not installed in the current environment"
+    },
+    "D2a": {
+      "selected_dependency": "org.jetbrains:markdown:0.7.8",
+      "resolved_dependency_scan": "passed: com.github.rikkahub:markdown=0 and org.jetbrains:markdown:0.7.8 -> markdown-jvm:0.7.8",
+      "source_comparison": "fork 66a56dffca differs from JetBrains base 70b10b0a in CJK-adjacent emphasis parsing plus build/docs only",
+      "jvm_behavior_probe": {
+        "gfm_table": "same valid table HTML",
+        "fenced_code": "same language-kotlin pre/code HTML",
+        "link": "same safe https anchor HTML",
+        "streaming_partial": "same literal unmatched ** tail",
+        "streaming_final": "same strong node after closure",
+        "cjk_adjacent_strong": "preserved by CjkCompatibleGfmFlavourDescriptor while node construction delegates to official 0.7.8"
+      },
+      "focused_jvm_test": "passed: :core:agent-utils:test",
+      "compile_and_device_ui": "unavailable: Android SDK is not installed; no simulator/device evidence"
+    },
+    "D2b": {
+      "selected_dependencies": [
+        "ru.noties:jlatexmath-android:0.2.0",
+        "ru.noties:jlatexmath-android-font-greek:0.2.0",
+        "ru.noties:jlatexmath-android-font-cyrillic:0.2.0"
+      ],
+      "resolved_dependency_scan": "passed: all three com.github.rikkahub.jlatexmath-android coordinates are absent; only HugeIcons and SQLite Rikka coordinates remain",
+      "source_comparison": "Rikka tag 1.3 differs from noties v0.2.0 in an unused getBackground getter, build metadata, and two core-font glyph repairs; Greek/Cyrillic module assets are byte-identical",
+      "published_api_check": "passed: official 0.2.0 AAR Builder exposes every builder/textSize/color/background/padding/align/build API consumed by LatexText; bounds/draw are inherited Drawable APIs",
+      "official_artifacts_sha256": {
+        "jlatexmath-android-0.2.0.aar": "b16824328d45ed86892f7f8aa74a542fc361b8a94004de8ca5ae86113b78a89f",
+        "jlatexmath-android-font-greek-0.2.0.aar": "d4216f88b65e3a6d296f886bf3c43f548d08dca845d8b64801461719d2085d89",
+        "jlatexmath-android-font-cyrillic-0.2.0.aar": "d76f042f6dc91217dd5e94e28018703747519173b3ea3df46b4379985f502b75"
+      },
+      "font_compatibility_overlay": {
+        "source": "noties/jlatexmath-android v0.2.0 commit cc2a83dcf695028b5588f91a90734d94eb5bd02b",
+        "derivation": "independent transformation of official assets: duplicate the existing U+00AD Omega and harpoonleftright glyphs to private-use U+E000/U+E001, then update the official XML symbol maps and copy the existing metrics",
+        "rikka_binary_or_runtime_used": false,
+        "unicode_cmap_verification": "passed: both Unicode cmap tables in each derived TTF map E000/E001 to the expected official glyph",
+        "files_sha256": {
+          "fonts/base/jlm_amsfonts.map.xml": "6850565d66bfaa0e3e34d583b09d074964133f88c79a6a1c866eccd2e3535a51",
+          "fonts/base/jlm_base.map.xml": "131de02ba07de996f9274abed0d33fc867a52d736d12fa73bb2af5153d229400",
+          "fonts/latin/amber_jlm_cmr10_pua.ttf": "09e56174aa7ac007f7756826489d4474df5e31c4c3432866883be0efb48ac06c",
+          "fonts/latin/jlm_cmr10.xml": "308e39d287d7fd02c747153d4c8556f6a0b992b8580482c46f423ffb73347c9b",
+          "fonts/maths/amber_jlm_msam10_pua.ttf": "039014f4665ff2ad820769823371c5088d4728077990d5a16a402a75a6ed838e",
+          "fonts/maths/jlm_msam10.xml": "e2f3c16c1b697d98fdeea4c77d43c3c08a56cefcec798ccee1857fcb4b3eead6"
+        }
+      },
+      "license_boundary": "noties POM declares GPL-2.0; upstream LICENSE includes the JLaTeXMath linking exception and enumerates OFL, public-domain, Knuth, GPL-2.0 and other bundled font licenses. Modified source assets and notices remain subject to those terms; no legal-clearance claim is made.",
+      "compile_and_device_ui": "unavailable: Android SDK is not installed; Canvas, formula baseline/size, themes, long formula and physical-device UI are unverified"
+    },
+    "D2c": {
+      "selected_dependency": "com.github.requery:sqlite-android:0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0",
+      "selection_reason": "the immutable official upstream merge-base matches the current fork's SQLite 3.50.4 code without downgrading to the older 3.49.0 tag or using a dynamic snapshot",
+      "fork_comparison": "Rikka master 80cedc8888df2fe1d22d7f9bf8d9287f621624be adds only new CursorWindow(name, 32 MiB) in AbstractWindowedCursor over upstream 0bbaa7a8; no native or other class changes",
+      "resolved_dependency_scan": "passed: com.github.rikkahub:sqlite-android is absent; only the HugeIcons Rikka coordinate remains",
+      "aar_comparison": "passed: extracted AARs differ only in io/requery/android/database/AbstractWindowedCursor.class",
+      "native_abi_comparison": {
+        "result": "passed: fork and official fixed-commit libsqlite3x.so are byte-identical for all four ABIs",
+        "arm64-v8a": "9098815a85ecaf72661a6da8a4608967aea402fbd5955e13b3291dedf81905eb",
+        "armeabi-v7a": "bd2fdda837d47d7336208bc97967754683d8ec20948d28338eca0ae154c6f102",
+        "x86": "f5406bd2b16bb968949482230be9a01180da7822db47f8ba3f38f50741bd4a5d",
+        "x86_64": "ad6a702654731fdbd3686f6af06fa1701ff2648579cea6e62ef93b791833d8c2"
+      },
+      "page_alignment": "passed static ELF check for 64-bit ABIs: every PT_LOAD p_align is 0x4000 for arm64-v8a and x86_64",
+      "production_contract": "unchanged: database amber_agent, WRITE_AHEAD_LOGGING, migrations 1..15, RequerySQLiteOpenHelperFactory and SQLiteCustomExtension(libsimple)",
+      "cursor_window_behavior": "preserved by existing AmberAgentApp -> DatabaseUtil.setCursorWindowSize(32 MiB), which sets io.requery.android.database.CursorWindow.sDefaultCursorWindowSize",
+      "license": "Apache-2.0 per official requery repository/POM",
+      "release_verification": "NO-GO: Android SDK and device are unavailable; existing database upgrade, Room migrations, Conversation/Memory read-write, WAL/FTS/sqlite-vector, kill-relaunch, APK ABI and 16KB device behavior are unverified"
+    },
+    "D3": {
+      "production_route": "passed: AmberAgentSearchService, registry/editor/Aggregator/Orchestrator/DeepRead production routes and api.rikka-ai.com are absent",
+      "legacy_persistence": "passed static review: raw amber_agent entries are removed before sealed decode; selected/enabled IDs, API-key refs and orphan secrets are removed without reassignment. Focused regression tests were added but could not execute without the Android SDK",
+      "restore_paths": "passed static wiring: DataStore, cached Settings rescue, WebDAV, S3 and sync archive restore use the same raw sanitizer",
+      "startup_gate": "passed static review and has a focused helper test source: retired selected/unique-enabled service forces in-memory enableWebSearch=false before asynchronous migration; test execution is unavailable without the Android SDK",
+      "compile_and_provider_smoke": "unavailable: Android SDK and real provider/device are unavailable"
+    },
+    "D4": {
+      "migration": "passed: 112/112 baseline files migrated; 153 mappings resolve to 137 Lucide targets present in icons-lucide 1.1.0 sources",
+      "source_gate": "passed: me.rerere.hugeicons imports and HugeIcons usages are 0",
+      "dependency_gate": "passed: HugeIcons/Rikka coordinate is absent from catalog and resolved dependency graphs",
+      "layout_boundary": "icon-expression/import changes preserve existing modifier, size, padding, spacing, alignment and touch-container code; two semantic mappings were corrected before rereview",
+      "compile_and_device_ui": "unavailable: Android SDK, emulator and physical device are unavailable; stroke/baseline/theme/narrow-screen/font-scale/touch visuals remain unverified"
+    },
+    "D5": {
+      "about": "passed: current product repository and LICENSE links point to the canonical AmberAgent repository",
+      "icon_notices": "passed: NOTICE uses canonical compose-icons source and separates Compose Icons MIT, Lucide ISC, and Feather-derived MIT with Copyright (c) 2013-present Cole Bemis; both license texts are packaged and hashed",
+      "historical_provenance": "passed: RikkaHub is runtime_component=false, out_of_scope_historical_provenance, NOASSERTION with fixed raw LICENSE source/hash and an explicit no-legal-clearance boundary",
+      "jlatex_notices": "passed: holders, core/Cyrillic linking exception, Greek GPL-2.0-only, Knuth, OFL, dsrom free-use and upstream public-domain declarations are recorded; 7 packaged license files and 6 derived assets match SBOM paths/hashes",
+      "license_refs": "passed: 3 referenced LicenseRef values equal the 3 defined values; unresolved_count=0",
+      "lucide_variants": {
+        "debug": "pkg:maven/com.composables/icons-lucide-android-debug@1.1.0?type=aar; module 66b7a06c...; artifact 3c3a3bcd...",
+        "release": "pkg:maven/com.composables/icons-lucide-android@1.1.0?type=aar; module 93c1ac6b...; artifact c8939093..."
+      },
+      "font_mapping": "passed: renamed XML references exist; Unicode cmap E000=Omega and E001=harpoonleftright in both Unicode cmap tables",
+      "packaging_and_ui": "unavailable: Android SDK is not installed; APK/AAB merged assets, About/license screen and actual JLaTeX/Lucide rendering are unverified"
+    },
+    "D6": {
+      "engineering_gate": "GO: debug/release Rikka resolved dependencies, catalog coordinates, HugeIcons imports/usages, production endpoint/namespace, source asset, current About links and NOTICE/SBOM unknown gates all passed",
+      "markdown_jvm_test": "passed: :core:agent-utils:test",
+      "dependency_insight": "passed: debugRuntimeClasspath and releaseRuntimeClasspath both report no dependency matching com.github.rikkahub",
+      "machine_evidence": "passed: JSON parse, SBOM LicenseRef/path/hash checks, JLaTeX cmap checks and git diff --check",
+      "artifacts": "unavailable_not_zero: no APK/AAB exists because Android SDK/local.properties are absent",
+      "strict_release_gate": "NO-GO: app compile/assemble, APK/AAB scan, emulator/physical UI, existing database upgrade/WAL/FTS/vector/kill-relaunch/16KB, backup restore runtime and real provider smoke are unverified"
+    },
+    "post_completion_retirement_cleanup": {
+      "production_owner_scan": "passed: non-historical, non-Novel Android Kotlin/Java source and tests contain no GenerationHandler, ProviderManager, HugeIcons or generationHandler owner references",
+      "decision_chain": "passed static call-chain review: ChatRunCoordinator and RecipeRunner call AgentToolDispatcher.resolveDecision, which delegates to PermissionDecisionResolver.resolve",
+      "test_consolidation": "passed static review: 13 legacy wrapper tests were removed; ask_user, HTTP read/mutation, and memory read/mutation boundaries were merged into the existing 25-test PermissionDecisionResolverTest",
+      "dead_wrapper_scan": "passed: rg and CodeGraph v1.39 found zero external consumers before both shouldPauseForApproval wrappers were deleted",
+      "audit_tool_lifecycle": "passed: both scripts remain manual reproducers for dated evidence and are not wired into runtime or a standing CI/release gate",
+      "python_syntax_and_json": "passed",
+      "git_diff_check": "passed",
+      "focused_android_test": "unavailable: Gradle reached Android task configuration with the cached JBR, then failed because SDK location/local.properties is absent"
+    }
+  },
+  "wip_boundaries": {
+    "detached_head": true,
+    "chat_kernel_replacement_preserved": true,
+    "other_platform_wip_present_but_not_inspected": true,
+    "dirty_targets_requiring_local_diff_before_edit": [
+      "app/src/main/java/app/amber/core/di/DataSourceModule.kt",
+      "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt"
+    ]
+  },
+  "unverified": [
+    "simulator visual review",
+    "physical-device Markdown/LaTeX/Icon UI",
+    "existing database upgrade and kill/relaunch",
+    "real search provider smoke"
+  ]
+}

@@ -1,0 +1,298 @@
+{
+  "schema_version": 1,
+  "phase_status": {
+    "phase_0": "completed",
+    "phase_1": "completed",
+    "phase_2": "completed",
+    "phase_3": "completed",
+    "phase_4": "completed",
+    "phase_5": "completed"
+  },
+  "provider_production_consumers": {
+    "chat_and_runtime": [
+      "app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt",
+      "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "app/src/main/java/app/amber/core/service/AiAuxiliaryGenerator.kt",
+      "app/src/main/java/app/amber/feature/runtime/StoredResponseGateway.kt"
+    ],
+    "context_memory_and_agents": [
+      "app/src/main/java/app/amber/core/context/ConversationContextEngine.kt",
+      "app/src/main/java/app/amber/core/memory/dream/MemoryDreamPlanner.kt",
+      "app/src/main/java/app/amber/core/memory/extraction/MemoryExtractor.kt",
+      "app/src/main/java/app/amber/feature/board/agent/BoardAgent.kt",
+      "app/src/main/java/app/amber/feature/board/agent/DailyReviewAgent.kt",
+      "app/src/main/java/app/amber/feature/board/hotlist/HotListTitleLocalizer.kt",
+      "app/src/main/java/app/amber/feature/miniapp/MiniAppV3Runtime.kt",
+      "app/src/main/java/app/amber/feature/modelcouncil/AppCouncilHostToolProvider.kt",
+      "feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/ProviderModelCouncilTextRunner.kt",
+      "feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/ModelCouncilManager.kt",
+      "feature/board/impl/src/main/kotlin/app/amber/feature/board/hotlist/deepread/template/DeepReadTemplateAgent.kt"
+    ],
+    "live_vision_image_and_ocr": [
+      "app/src/main/java/app/amber/feature/live/LiveAnalyzer.kt",
+      "app/src/main/java/app/amber/feature/live/LiveModeManager.kt",
+      "app/src/main/java/app/amber/core/ai/transformers/OcrTransformer.kt",
+      "app/src/main/java/app/amber/core/ai/vision/ImageAttachmentValidator.kt",
+      "app/src/main/java/app/amber/core/ai/vision/VisionModelHealthChecker.kt",
+      "app/src/main/java/app/amber/core/repository/ImageGenerationRepository.kt"
+    ],
+    "settings_tools_and_ui": [
+      "app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt",
+      "app/src/main/java/app/amber/feature/ui/pages/setting/SettingModelPage.kt",
+      "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+      "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelTabPage.kt",
+      "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderConnectionTester.kt",
+      "app/src/main/java/app/amber/feature/ui/components/ai/ProviderBalanceText.kt",
+      "app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt",
+      "app/src/main/java/app/amber/feature/ui/components/message/GeneratedImageCarousel.kt"
+    ],
+    "wiring": [
+      "app/src/main/java/app/amber/core/di/DataSourceModule.kt"
+    ]
+  },
+  "generator_contract_consumers": [
+    {
+      "path": "feature/subagent/src/main/kotlin/app/amber/feature/subagent/SubAgentRunner.kt",
+      "migration": "keep Generator contract; bind ChatRunCoordinator"
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceRuntime.kt",
+      "migration": "compile-only compatibility; do not edit dirty WIP"
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteWorker.kt",
+      "migration": "compile-only compatibility; do not edit dirty WIP"
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspaceViewModel.kt",
+      "migration": "compile-only compatibility; do not edit dirty WIP"
+    },
+    {
+      "path": "app/src/main/java/app/amber/core/di/DataSourceModule.kt",
+      "migration": "completed: bind ChatRunCoordinator and expose it through Generator"
+    }
+  ],
+  "legacy_generation_handler_consumers": [
+    {
+      "path": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "migration": "completed: inject Generator; ChatRunCoordinator is the Koin owner"
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/chat/impl/ChatTurnAgent.kt",
+      "migration": "completed: inject Generator; no concrete coordinator dependency"
+    },
+    {
+      "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
+      "migration": "completed: inject Generator; deep-read retry and stream behavior preserved"
+    }
+  ],
+  "provider_capability_owners": [
+    {
+      "capability": "text generation, streaming, model listing and balance",
+      "target": "TextModelGateway<T>",
+      "required_by": "chat, settings, balance, memory, context, board, miniapp, council, live and OCR"
+    },
+    {
+      "capability": "image create/edit and edit support",
+      "target": "ImageModelGateway<T>",
+      "required_by": "ImageGenerationRepository, GeneratedImageCarousel and ChatInput"
+    },
+    {
+      "capability": "OpenAI image edit MIME and source-size policy",
+      "target": "move provider-neutral file validation to ImageGenerationRepository policy; keep OpenAI wire validation inside OpenAI adapter",
+      "required_by": "ImageGenerationRepository currently reads OpenAIProvider.sourceImageMimeType and IMAGE_EDIT_MAX_SOURCE_BYTES directly"
+    },
+    {
+      "capability": "OpenAI stored response query/replay/cancel",
+      "target": "inject the concrete OpenAI stored-response API into app StoredResponseGateway",
+      "required_by": "StoredResponseGateway"
+    },
+    {
+      "capability": "Google OAuth status",
+      "target": "inject concrete Google account status source into ProviderConfigTools",
+      "required_by": "provider_config tools"
+    },
+    {
+      "capability": "Google Vertex/service-account/predict transport",
+      "target": "private responsibility of Google adapter",
+      "required_by": "Google text and image requests"
+    },
+    {
+      "capability": "embedding",
+      "target": "no new shared interface; keep out of contract until a production consumer exists",
+      "required_by": "none at current baseline"
+    }
+  ],
+  "generation_owner_map": [
+    {
+      "responsibility": "implements public Generator contract",
+      "phase_3_owner": "ChatRunCoordinator"
+    },
+    {
+      "responsibility": "context, memory, token budget and system prompt assembly",
+      "phase_3_owner": "ChatRunCoordinator using existing Amber helpers"
+    },
+    {
+      "responsibility": "input, output and visual transforms plus stream flush",
+      "phase_3_owner": "ChatRunCoordinator; one existing MessageChunk/MessageStreamAccumulator path"
+    },
+    {
+      "responsibility": "generative UI retry/fallback, vision fallback and retry classification",
+      "phase_3_owner": "ChatRunCoordinator policy methods"
+    },
+    {
+      "responsibility": "provider request and stream parsing",
+      "phase_3_owner": "TextModelGateway provider adapter"
+    },
+    {
+      "responsibility": "tool decision and execution",
+      "phase_3_owner": "existing AgentToolDispatcher"
+    },
+    {
+      "responsibility": "effect prepare/finish and unknown outcome",
+      "phase_3_owner": "existing ToolEffectLedger"
+    },
+    {
+      "responsibility": "capability permission resolution",
+      "phase_3_owner": "existing CapabilityPermissionStore and AgentToolDispatcher"
+    },
+    {
+      "responsibility": "terminal persistence and recovery",
+      "phase_3_owner": "existing RunTerminalStore and RunRecoveryService; coordinator publishes once"
+    },
+    {
+      "responsibility": "Responses resume request",
+      "phase_3_owner": "ChatService resolves durable request; coordinator forwards it to OpenAI gateway"
+    },
+    {
+      "responsibility": "speculative tool execution",
+      "phase_3_owner": "existing SpeculativeToolRunner, constructed once per run step"
+    }
+  ],
+  "candidate_code_islands": [
+    {
+      "file": "app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt",
+      "function": "generateText model/tool loop",
+      "amber_lines": "207-496",
+      "rikka_matching_blocks": [
+        "134-237",
+        "324-341"
+      ],
+      "evidence": "multiple normalized matching blocks of 16-22 lines",
+      "preserve": "effect ledger, permissions, waiting user, step limit, cancellation, steer, speculative execution and terminal semantics",
+      "decision": "completed in Phase 3; old handler deleted and exact loop blocks eliminated"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt",
+      "function": "generateInternal",
+      "amber_lines": "515-838",
+      "rikka_matching_blocks": [
+        "342-415"
+      ],
+      "evidence": "signature and request/transform blocks remain matched",
+      "preserve": "memory/context assembly, transformers, Responses resume, vision and generative UI repair",
+      "decision": "completed in Phase 3; run assembly remains Amber-owned and longest residual block is 11 normalized lines"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "function": "removeSession/addConversationReference/getConversationJobs",
+      "amber_lines": "482-687",
+      "rikka_matching_blocks": [
+        "211-286"
+      ],
+      "evidence": "13-19 line normalized matching blocks",
+      "preserve": "single ConversationSession owner, reference count, job state flow and cleanup",
+      "decision": "completed in Phase 4; session construction/removal/reference ownership and job aggregation rewritten without changing the single session owner"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "function": "handleToolApproval",
+      "amber_lines": "1321-1469",
+      "rikka_matching_blocks": [
+        "393-448"
+      ],
+      "evidence": "23 line normalized matching block plus smaller continuations",
+      "preserve": "approval targets visible call, cancels paused job, resumes only after all pending decisions",
+      "decision": "completed in Phase 4; in-app and notification paths still converge on applyToolApprovalDecision"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "function": "cancelToolByUser",
+      "amber_lines": "2376-2387",
+      "rikka_matching_blocks": [
+        "705-716"
+      ],
+      "evidence": "11 line normalized matching block",
+      "preserve": "cancel is explicit and does not execute or report success",
+      "decision": "completed in Phase 4; cancellation result construction rewritten and remains below the 12-line block gate"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "function": "checkFilesDelete",
+      "amber_lines": "2688-2700",
+      "rikka_matching_blocks": [
+        "977-989"
+      ],
+      "evidence": "12 line normalized matching block",
+      "preserve": "only unreferenced local files are removed",
+      "decision": "completed in Phase 4; retained-file set drives one explicit removal batch"
+    },
+    {
+      "file": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "function": "deleteMessage/copyLocalFileIfNeeded",
+      "amber_lines": "2978-3033",
+      "rikka_matching_blocks": [
+        "1190-1245"
+      ],
+      "evidence": "34 line and 12 line normalized matching blocks",
+      "preserve": "branch selection, context invalidation, tombstone safety and controlled local file copy",
+      "decision": "completed in Phase 4; fork, delete and local media copy paths rewritten with schema unchanged"
+    }
+  ],
+  "phase_4_similarity_review": {
+    "baseline": {
+      "ordered_token_similarity_pct": 33.8,
+      "token_shingle_shared_amber_pct": 13.2,
+      "longest_normalized_code_block": 34
+    },
+    "current": {
+      "ordered_token_similarity_pct": 30.4,
+      "token_shingle_shared_amber_pct": 7.6,
+      "longest_normalized_code_block": 10
+    },
+    "residual_blocks_at_least_8_lines": [
+      "two package/import runs",
+      "input/output transformer registration",
+      "regenerate public signature and session lookup",
+      "tool approval public signature and paused-job cancellation",
+      "approval completion/error/job-assignment tail"
+    ],
+    "classification": "all remaining blocks are imports, public API shape, transformer registration or generic coroutine tails; no residual conversation algorithm reaches the 12-line review gate"
+  },
+  "ui_review_surfaces": [
+    {
+      "surface": "chat streaming and reasoning",
+      "checks": "line stability, baseline alignment, vertical spacing, long text, narrow width and font scale"
+    },
+    {
+      "surface": "ChatInput and stop/cancel controls",
+      "checks": "visual model availability, image actions, touch target, icon size, enabled state and keyboard overlap"
+    },
+    {
+      "surface": "tool approval card and notification approval",
+      "checks": "pending/executing/result state, button alignment, spacing, long arguments and duplicate actions"
+    },
+    {
+      "surface": "provider settings, model list, connection test and balance",
+      "checks": "loading state, truncation, row alignment, error text, theme, narrow width and font scale"
+    },
+    {
+      "surface": "image generation/edit and GeneratedImageCarousel",
+      "checks": "edit visibility, aspect ratio, crop, controls, spacing and loading/error state"
+    },
+    {
+      "surface": "Model Council, DeepRead, Live and background completion",
+      "checks": "stream result state, progress, error/cancel terminal, notification/deep-link destination and layout stability"
+    }
+  ]
+}

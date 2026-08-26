@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "amber_head": "701e8c634ababe12fc1a0d03beccb36b2b55a0ca",
+    "rikka_head": "b270766f06671d7456ce3d248622dc667648b6d1",
+    "rikka_tag": "2.4.11",
+    "rikka_remote": "https://github.com/rikkahub/rikkahub"
+  },
+  "normalization": {
+    "token_shingle_size": 12,
+    "review_block_min_normalized_lines": 12,
+    "review_amber_shingle_pct": 5.0,
+    "namespace_mappings": [
+      { "from": "me.rerere.rikkahub", "to": "app.amber" },
+      { "from": "me.rerere.ai", "to": "app.amber.ai" },
+      { "from": "me.rerere", "to": "app.amber" }
+    ]
+  },
+  "pairs": [
+    {
+      "id": "provider_contract",
+      "amber": "ai/src/main/java/app/amber/ai/provider/ModelGateway.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/Provider.kt"
+    },
+    {
+      "id": "generation_requests",
+      "amber": "ai/src/main/java/app/amber/ai/provider/GenerationRequests.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/Provider.kt"
+    },
+    {
+      "id": "provider_catalog",
+      "amber": "ai/src/main/java/app/amber/ai/provider/ProviderCatalog.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/ProviderManager.kt"
+    },
+    {
+      "id": "openai_provider",
+      "amber": "ai/src/main/java/app/amber/ai/provider/providers/OpenAIProvider.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/providers/openai/OpenAIProvider.kt"
+    },
+    {
+      "id": "claude_provider",
+      "amber": "ai/src/main/java/app/amber/ai/provider/providers/ClaudeProvider.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/providers/claude/ClaudeProvider.kt"
+    },
+    {
+      "id": "anthropic_messages_adapter",
+      "amber": "ai/src/main/java/app/amber/ai/provider/providers/AnthropicMessagesAdapter.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/providers/claude/ClaudeProvider.kt"
+    },
+    {
+      "id": "google_provider",
+      "amber": "ai/src/main/java/app/amber/ai/provider/providers/GoogleProvider.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleProvider.kt"
+    },
+    {
+      "id": "gemini_generate_content_adapter",
+      "amber": "ai/src/main/java/app/amber/ai/provider/providers/GeminiGenerateContentAdapter.kt",
+      "rikka": "ai/src/main/java/me/rerere/ai/provider/providers/google/GoogleProvider.kt"
+    },
+    {
+      "id": "generation_handler",
+      "amber": "app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt",
+      "rikka": "app/src/main/java/me/rerere/rikkahub/data/ai/GenerationHandler.kt"
+    },
+    {
+      "id": "chat_service",
+      "amber": "app/src/main/java/app/amber/core/service/ChatService.kt",
+      "rikka": "app/src/main/java/me/rerere/rikkahub/service/ChatService.kt"
+    }
+  ],
+  "excluded_dirty_wip": [
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwrite.kt",
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteController.kt",
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteWorker.kt",
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspacePrompts.kt",
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceRuntime.kt",
+    "app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceTools.kt",
+    "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspacePage.kt",
+    "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspaceViewModel.kt",
+    "app/src/test/java/app/amber/feature/novel/workspace/NovelWorkspaceRuntimeTest.kt",
+    "app/src/test/java/app/amber/feature/novel/workspace/ScratchVerifyE2ETest.kt",
+    "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceGhostwriteJobs.kt",
+    "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceLedger.kt",
+    "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceUndo.kt",
+    "feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceUnresolved.kt",
+    "feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceConsistencyTest.kt",
+    "feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceLedgerTest.kt",
+    "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSandboxPage.kt",
+    "feature/terminal/src/main/kotlin/app/amber/feature/terminal/TerminalRuntime.kt",
+    "feature/tools/impl/src/main/kotlin/app/amber/feature/tools/TerminalTools.kt",
+    "feature/workspace/src/main/kotlin/app/amber/feature/workspace/WorkspaceManager.kt",
+    "app/src/test/java/app/amber/agent/data/agent/workspace/WorkspaceManagerMirrorIsolationTest.kt",
+    "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageTools.kt",
+    "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt",
+    "app/src/main/res/values/strings.xml",
+    "app/src/main/res/values-zh/strings.xml",
+    "app/src/test/java/app/amber/agent/data/agent/terminal/TerminalRuntimeModelsTest.kt",
+    "feature/terminal/api/src/main/kotlin/app/amber/feature/terminal/TerminalRuntimeModels.kt",
+    "app/src/main/java/app/amber/feature/ui/components/ui/Switch.kt",
+    "app/src/main/java/app/amber/feature/ui/components/ui/WorkspaceStyle.kt",
+    "feature/task/src/main/kotlin/app/amber/feature/task/AgentTaskStore.kt"
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-26T22:45:50Z",
+  "plan": "docs/plans/2026-08-25-android-product-detachment-residuals-plan.md",
+  "frozen_head": "c44302af7f6ae31e2259fb03b769379fc712a8af",
+  "scope": "AmberAgent Android product-detachment and runtime migration committed on main; iOS WIP preserved",
+  "task_scope_status": "completed_with_release_boundary",
+  "engineering_detachment_gate": "GO",
+  "strict_release_gate": "NO-GO",
+  "strict_release_no_go_reason": [
+    "the repository does not contain a Firebase google-services client for app.amber.agent, so the guarded Release APK/AAB build cannot complete",
+    "16KB device behavior and the full Markdown, JLaTeXMath, Lucide and About/license visual matrix remain unverified"
+  ],
+  "machine_evidence": {
+    "baseline": "docs/audits/android-product-detachment-baseline.json",
+    "current": {
+      "path": "docs/audits/android-product-detachment-current.json",
+      "sha256": "226f46d65cd3f03968f89e1da7e21860cd293cd600635dc6d3661d7251391f79"
+    },
+    "ledger": "docs/audits/android-product-detachment-migration-ledger.json",
+    "icon_mapping": {
+      "path": "docs/audits/android-hugeicons-lucide-map.json",
+      "sha256": "c5266752d2173f23d9a723f0245337621369463bfa65b1faed6bb46807ea9cf0"
+    },
+    "sbom": {
+      "path": "docs/audits/android-product-detachment-sbom.json",
+      "sha256": "c28ab1220c05f9291ee4a0a7d6fc437f2aa603d1ff5c884d891ea15d03478569"
+    },
+    "notice": {
+      "path": "NOTICE",
+      "sha256": "a79bca50775009a79650a1432c39be205b79dff709c1cfc79ef08fedead92b2a"
+    },
+    "resolved_debug_report_sha256": "d891221a8316ddd9bc1d10fef60f61befa5ad145204495ffbf36589e8f6ad930",
+    "resolved_release_report_sha256": "2286d0a8c3778eb72ecbace2fac00ab923f97203e99cea83f4e066efd565fba9",
+    "debug_apk_sha256": "1648c7a068addf22ddbff6fed987a19ca2ac5aa181ae75e927a09283117a7ca3",
+    "graphite_apk_sha256": "d0a6684f51c77035a11fa279f08378fdd279bb0f274f7b3298b4d0c3cb6821b2",
+    "office_parsers_arm64_sha256": "4a650eb246fa1d4961df2a5786ae997f7c4e0de9338bf52bf627f0d46f4803ef"
+  },
+  "final_engineering_gates": {
+    "catalog_com_github_rikkahub_count": 0,
+    "debug_runtime_com_github_rikkahub_count": 0,
+    "release_runtime_com_github_rikkahub_count": 0,
+    "me_rerere_hugeicons_import_or_usage_count": 0,
+    "production_api_rikka_ai_com_count": 0,
+    "production_rikkahub_namespace_or_brand_hit_count": 0,
+    "source_rikkahub_svg_count": 0,
+    "about_current_rikkahub_repository_link_count": 0,
+    "about_canonical_repository_link_count": 1,
+    "about_canonical_license_link_count": 1,
+    "sbom_unknown_count": 0,
+    "sbom_undefined_license_ref_count": 0,
+    "notice_unknown_count": 0,
+    "apk_aab_gate": "debug_and_graphite_apk_passed_zero; guarded release AAB unavailable because the private Firebase client is absent",
+    "git_diff_check": "passed"
+  },
+  "resolved_replacements": [
+    {
+      "removed": "com.github.rikkahub:markdown",
+      "replacement": "org.jetbrains:markdown:0.7.8"
+    },
+    {
+      "removed": "com.github.rikkahub:hugeicons-compose",
+      "replacement": "com.composables:icons-lucide:1.1.0"
+    },
+    {
+      "removed": "com.github.rikkahub.jlatexmath-android:jlatexmath",
+      "replacement": "ru.noties:jlatexmath-android:0.2.0"
+    },
+    {
+      "removed": "com.github.rikkahub.jlatexmath-android:jlatexmath-font-greek",
+      "replacement": "ru.noties:jlatexmath-android-font-greek:0.2.0"
+    },
+    {
+      "removed": "com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic",
+      "replacement": "ru.noties:jlatexmath-android-font-cyrillic:0.2.0"
+    },
+    {
+      "removed": "com.github.rikkahub:sqlite-android",
+      "replacement": "com.github.requery:sqlite-android:0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0"
+    }
+  ],
+  "verification": {
+    "debug_dependency_insight": {
+      "command": "./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency com.github.rikkahub",
+      "result": "BUILD SUCCESSFUL; no matching dependencies"
+    },
+    "release_dependency_insight": {
+      "command": "./gradlew :app:dependencyInsight --configuration releaseRuntimeClasspath --dependency com.github.rikkahub",
+      "result": "BUILD SUCCESSFUL; no matching dependencies"
+    },
+    "markdown_jvm": {
+      "command": "./gradlew :core:agent-utils:test",
+      "result": "BUILD SUCCESSFUL",
+      "covers": [
+        "official JetBrains parser compatibility",
+        "GFM table",
+        "fenced code",
+        "link",
+        "streaming partial/final Markdown",
+        "CJK-adjacent strong emphasis compatibility"
+      ]
+    },
+    "search_migration": {
+      "result": "production-chain review and focused settings migration tests passed",
+      "covered_source_paths": [
+        "DataStore SearchPrefs",
+        "SettingsProviderRescue",
+        "WebDAV restore",
+        "S3 restore",
+        "sync archive restore",
+        "SettingsSecretMigrator",
+        "composeRawSettings startup gate"
+      ]
+    },
+    "jlatexmath": {
+      "result": "official AAR/API/source comparison and derived-asset/hash checks passed",
+      "unicode_cmap": [
+        "E000=Omega in both Unicode cmap tables",
+        "E001=harpoonleftright in both Unicode cmap tables"
+      ],
+      "device_canvas": "unverified in the final visual matrix"
+    },
+    "sqlite": {
+      "result": "official fixed-commit supply-chain comparison passed",
+      "static_evidence": [
+        "fork/official AAR differs only in AbstractWindowedCursor.class",
+        "all four ABI libsqlite3x.so files are byte-identical",
+        "arm64-v8a and x86_64 PT_LOAD alignment is 0x4000",
+        "existing Amber startup retains the 32 MiB Requery default CursorWindow size"
+      ],
+      "database_device_behavior": "overlay install preserved all compared database/WAL/SHM hashes; cold launch completed without SQLite or migration errors; 16KB behavior remains unverified"
+    },
+    "icons": {
+      "result": "112/112 files migrated; 153 source mappings resolve to 137 Lucide targets",
+      "semantic_review_fixes": [
+        "GET_TIME_INFO uses Lucide.Clock",
+        "Android system share action uses Lucide.Share2"
+      ],
+      "device_visual_behavior": "unverified"
+    },
+    "build_and_package": {
+      "sdk": "/opt/homebrew/share/android-commandlinetools",
+      "jdk": "/opt/homebrew/opt/openjdk@17",
+      "compile": "settings, document, search, Novel workspace, AI and app JVM tests passed; app Graphite Kotlin compilation and assembly passed",
+      "focused_app_tests": "app debug unit tests passed with 1752 tests completed and 12 skipped; settings, document and search focused suites also passed",
+      "debug_apk": "final assembleDebug passed; universal and arm64-v8a outputs share SHA-256 1648c7a068addf22ddbff6fed987a19ca2ac5aa181ae75e927a09283117a7ca3 and scanned with zero api.rikka-ai.com, com.github.rikkahub, me.rerere.hugeicons, and rikkahub.svg hits",
+      "graphite_apk": "final assembleGraphite passed after cargo-ndk rebuilt office_parsers; both outputs share SHA-256 d0a6684f51c77035a11fa279f08378fdd279bb0f274f7b3298b4d0c3cb6821b2 and passed the same zero-hit scan",
+      "release_assets": "mergeReleaseAssets passed and its merged asset tree passed the same zero-hit scan",
+      "release_apk_aab": "blocked by the intentional google-services client guard; app.amber.agent has no release Firebase client in this checkout"
+    },
+    "notice_sbom": {
+      "result": "JSON, LicenseRef sets, packaged-license hashes, derived-asset hashes, runtime variant PURLs and metadata/artifact hashes passed",
+      "packaged_license_file_count": 7,
+      "derived_asset_count": 6,
+      "license_ref_count": 3,
+      "lucide_debug": {
+        "purl": "pkg:maven/com.composables/icons-lucide-android-debug@1.1.0?type=aar",
+        "module_sha256": "66b7a06cd6c974e00e9f6843ed2f90f5bebd246921e5b70097ee022268f469f5",
+        "artifact_sha256": "3c3a3bcd7499f9239933eb62e842d10ca1dc1359c0a0b06e9d9366db9b3344dd"
+      },
+      "lucide_release": {
+        "purl": "pkg:maven/com.composables/icons-lucide-android@1.1.0?type=aar",
+        "module_sha256": "93c1ac6bbe7aa7651b690c63bce57bf56490812bd1e6f61b5042f0fdb1ef6ad9",
+        "artifact_sha256": "c8939093d4228360f46da82a43843c57531186975d40934e219f1c18f5a1d9a1"
+      }
+    }
+  },
+  "phase_reviews": {
+    "D0": "initial NO-GO; fixes accepted; rereview GO",
+    "D1": "code GO with SDK/APK boundary",
+    "D2a": "initial NO-GO for CJK behavior; fixed; rereview GO",
+    "D2b": "engineering GO with Canvas/device boundary",
+    "D2c": "supply-chain and code GO; strict database release gate NO-GO",
+    "D3": "initial NO-GO for persistence/restore/startup chain; fixed; final engineering GO",
+    "D4": "initial NO-GO for two Medium semantic icon mappings; fixed; rereview GO",
+    "D5": "five Medium compliance/license findings fixed; targeted rereview GO with 0 Critical/High/Medium/Low",
+    "D6": "independent final review: engineering GO; 0 Critical, 0 High, 0 Medium, 1 Low comment-only wording; strict release NO-GO",
+    "post_completion_retirement_cleanup": "independent review engineering GO; 0 Critical, 0 High, 0 Medium, 1 accepted Low limited to two protected Novel dirty-WIP comments; strict release remains NO-GO",
+    "post_landing_verification": "current main checkout compile/test/package evidence passed; Debug and freshly rebuilt Graphite APK hard gates are zero; strict release remains NO-GO for the Firebase and remaining full-device-matrix boundaries",
+    "post_landing_ui_review": "independent static review found no attributable Critical/High/Medium issue; Provider filtering and list layout were additionally verified on USB device 987a53f3"
+  },
+  "post_completion_retirement_cleanup": {
+    "date": "2026-08-25",
+    "current_manifest_boundary": "the D6 current manifest was regenerated in the current main checkout after compile, tests, Debug/Graphite packaging, and stale artifact replacement",
+    "removed": [
+      "two zero-consumer shouldPauseForApproval wrapper APIs",
+      "redundant GenerationHandlerAutoApprovalTest with 13 wrapper-level cases",
+      "two D6 Low comment-only HugeIcons references",
+      "non-Novel stale GenerationHandler/generationHandler owner wording"
+    ],
+    "preserved": [
+      "three unique approval-policy matrices in PermissionDecisionResolverTest",
+      "legacy search DataStore migration and backup sanitizer",
+      "CJK Markdown compatibility descriptor",
+      "amber_agent database and backup stable identifiers",
+      "NOTICE/SBOM historical and license provenance",
+      "all Novel dirty WIP"
+    ],
+    "static_verification": {
+      "decision_chain": "ChatRunCoordinator/RecipeRunner -> AgentToolDispatcher.resolveDecision -> PermissionDecisionResolver.resolve",
+      "codegraph": "v1.39.0 Tree-sitter graph plus rg fallback; zero external shouldPauseForApproval consumers before deletion",
+      "python_script_syntax": "passed",
+      "json_parse": "passed",
+      "git_diff_check": "passed"
+    },
+    "focused_android_test": "passed as part of the 27-test focused app suite; the SubAgent test fake was made thread-safe after reproducing an ArrayList ConcurrentModificationException"
+  },
+  "ui_and_device_evidence": {
+    "static_detachment_ui_review": "GO; current detachment delta and the final Workspace breadcrumb/touch-target refinements were independently rereviewed with no attributable Critical/High/Medium finding",
+    "markdown_android_ui": "unverified",
+    "jlatexmath_canvas_theme_baseline_long_formula": "unverified",
+    "sqlite_existing_database_upgrade_and_kill_relaunch": "overlay installation preserved compared database files and cold launch completed without SQLite/migration errors; destructive upgrade and 16KB coverage remain unverified",
+    "search_settings_backup_restore_and_real_provider": "migration tests passed; real-provider network smoke remains unverified",
+    "lucide_theme_narrow_screen_font_scale_touch_target": "unverified",
+    "about_and_license_screen": "unverified",
+    "provider_page": "verified on USB device 987a53f3: filter height was approximately 48dp, Provider cards were visible, and the list was scrollable",
+    "cold_launch_lifecycle": "verified on USB device 987a53f3: no Lifecycle addObserver/removeObserver, Koin construction, SQLite, migration, or fatal exception was observed",
+    "apk_aab_merged_assets_and_embedded_strings": "Debug and freshly rebuilt Graphite APK plus Release merged-assets passed the hard-token scan; configured Release APK/AAB remains unavailable"
+  },
+  "historical_and_legal_boundary": {
+    "engineering_statement": "The detachment-scoped Android runtime dependency, endpoint, source import, source asset, and current-product About gates are clean.",
+    "provenance_statement": "Direct RikkaHub fork lineage, Git history, historical authorship, copyright, trademark, and applicable license obligations are not erased.",
+    "historical_sbom_license_concluded": "NOASSERTION",
+    "legal_clearance_claimed": false
+  },
+  "wip_protection": {
+    "detached_head": false,
+    "current_branch": "main",
+    "chat_kernel_replacement_preserved": true,
+    "android_product_wip_committed": true,
+    "other_platform_wip_preserved": true,
+    "other_platform_contents_inspected": false,
+    "commit_performed": true,
+    "push_reset_clean_rebase_stash_performed": false
+  }
+}

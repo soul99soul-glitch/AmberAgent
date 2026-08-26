@@ -1,0 +1,4565 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-24T17:24:22.797234+00:00",
+  "phase": "D0-baseline",
+  "scope": "AmberAgent Android product detachment residuals",
+  "git": {
+    "head": "bdd1f7d94e561f1ebb967c6736a261babb8ae2e9",
+    "branch": null,
+    "detached": true,
+    "dirty_entry_count": 85,
+    "android_dirty_entry_count": 83,
+    "other_platform_wip_present": true,
+    "status_sha256": "1cb027e73662f076d098d0de03c47ec0413480576d9f38ec59ba117ea6d89197",
+    "android_dirty_entries": [
+      " D ai/src/main/java/app/amber/ai/provider/Provider.kt",
+      " D ai/src/main/java/app/amber/ai/provider/ProviderManager.kt",
+      " M ai/src/main/java/app/amber/ai/provider/providers/ClaudeProvider.kt",
+      " M ai/src/main/java/app/amber/ai/provider/providers/GoogleProvider.kt",
+      " M ai/src/main/java/app/amber/ai/provider/providers/OpenAIProvider.kt",
+      " M ai/src/main/java/app/amber/ai/ui/Message.kt",
+      " M ai/src/test/java/app/amber/ai/provider/providers/ClaudeProviderMessageTest.kt",
+      " M ai/src/test/java/app/amber/ai/provider/providers/ClaudeProviderPromptCacheTest.kt",
+      " M ai/src/test/java/app/amber/ai/provider/providers/GoogleProviderMessageTest.kt",
+      " M ai/src/test/java/app/amber/ai/provider/providers/ProviderStreamTerminationTest.kt",
+      " D app/src/main/java/app/amber/core/ai/GenerationHandler.kt",
+      " M app/src/main/java/app/amber/core/ai/tools/ProviderConfigTools.kt",
+      " M app/src/main/java/app/amber/core/ai/transformers/OcrTransformer.kt",
+      " M app/src/main/java/app/amber/core/ai/vision/ImageAttachmentValidator.kt",
+      " M app/src/main/java/app/amber/core/ai/vision/VisionModelHealthChecker.kt",
+      " M app/src/main/java/app/amber/core/context/ConversationContextEngine.kt",
+      " M app/src/main/java/app/amber/core/context/TokenBudgetFitter.kt",
+      " M app/src/main/java/app/amber/core/di/AgentRuntimeModule.kt",
+      " M app/src/main/java/app/amber/core/di/BoardModule.kt",
+      " M app/src/main/java/app/amber/core/di/ChatModule.kt",
+      " M app/src/main/java/app/amber/core/di/DataSourceModule.kt",
+      " M app/src/main/java/app/amber/core/di/RepositoryModule.kt",
+      " M app/src/main/java/app/amber/core/memory/dream/MemoryDreamPlanner.kt",
+      " M app/src/main/java/app/amber/core/memory/extraction/MemoryExtractor.kt",
+      " M app/src/main/java/app/amber/core/repository/ImageGenerationRepository.kt",
+      " M app/src/main/java/app/amber/core/service/AiAuxiliaryGenerator.kt",
+      " M app/src/main/java/app/amber/core/service/ChatService.kt",
+      " M app/src/main/java/app/amber/feature/board/agent/BoardAgent.kt",
+      " M app/src/main/java/app/amber/feature/board/agent/DailyReviewAgent.kt",
+      " M app/src/main/java/app/amber/feature/board/hotlist/HotListTitleLocalizer.kt",
+      " M app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadAgentRunManager.kt",
+      " M app/src/main/java/app/amber/feature/chat/impl/ChatTurnAgent.kt",
+      " M app/src/main/java/app/amber/feature/live/LiveAnalyzer.kt",
+      " M app/src/main/java/app/amber/feature/live/LiveModeManager.kt",
+      " M app/src/main/java/app/amber/feature/miniapp/MiniAppV3Runtime.kt",
+      " M app/src/main/java/app/amber/feature/modelcouncil/AppCouncilHostToolProvider.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwrite.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteController.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceGhostwriteWorker.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspacePrompts.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceRuntime.kt",
+      " M app/src/main/java/app/amber/feature/novel/workspace/NovelWorkspaceTools.kt",
+      " M app/src/main/java/app/amber/feature/recipe/RecipeToolFactory.kt",
+      " M app/src/main/java/app/amber/feature/runtime/AgentToolDispatcher.kt",
+      " M app/src/main/java/app/amber/feature/runtime/StoredResponseGateway.kt",
+      " M app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt",
+      " M app/src/main/java/app/amber/feature/ui/components/ai/ProviderBalanceText.kt",
+      " M app/src/main/java/app/amber/feature/ui/components/message/GeneratedImageCarousel.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspacePage.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspaceViewModel.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/setting/SettingModelPage.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelTabPage.kt",
+      " M app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderConnectionTester.kt",
+      " M app/src/test/java/app/amber/agent/canary/RuntimeChainCanaryTest.kt",
+      " M app/src/test/java/app/amber/agent/di/KoinModulesVerifyTest.kt",
+      " M app/src/test/java/app/amber/core/ai/tools/ProviderConfigToolsTest.kt",
+      " M app/src/test/java/app/amber/core/repository/ImageGenerationRepositoryTest.kt",
+      " M app/src/test/java/app/amber/feature/novel/workspace/NovelWorkspaceRuntimeTest.kt",
+      " M app/src/test/java/app/amber/feature/novel/workspace/ScratchVerifyE2ETest.kt",
+      " M app/src/test/java/app/amber/feature/ui/components/ai/ComposerInteractionTest.kt",
+      " M core/ai/generation/api/src/main/kotlin/app/amber/core/ai/Generator.kt",
+      " M feature/board/impl/src/main/kotlin/app/amber/feature/board/hotlist/deepread/template/DeepReadTemplateAgent.kt",
+      " M feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/CouncilHostToolProvider.kt",
+      " M feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/ModelCouncilManager.kt",
+      " M feature/modelcouncil/src/main/kotlin/app/amber/feature/modelcouncil/ProviderModelCouncilTextRunner.kt",
+      " M feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceGhostwriteJobs.kt",
+      " M feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceLedger.kt",
+      " M feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceUndo.kt",
+      " M feature/novel-workspace/src/main/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceUnresolved.kt",
+      " M feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceConsistencyTest.kt",
+      " M feature/novel-workspace/src/test/kotlin/app/amber/feature/novelworkspace/NovelWorkspaceLedgerTest.kt",
+      " M feature/subagent/src/main/kotlin/app/amber/feature/subagent/SubAgentRunner.kt",
+      "?? ai/src/main/java/app/amber/ai/provider/GenerationRequests.kt",
+      "?? ai/src/main/java/app/amber/ai/provider/ModelGateway.kt",
+      "?? ai/src/main/java/app/amber/ai/provider/ProviderCatalog.kt",
+      "?? ai/src/main/java/app/amber/ai/provider/providers/AnthropicMessagesAdapter.kt",
+      "?? ai/src/main/java/app/amber/ai/provider/providers/GeminiGenerateContentAdapter.kt",
+      "?? ai/src/test/java/app/amber/ai/provider/providers/ProviderWireAdapterFixtureTest.kt",
+      "?? app/src/main/java/app/amber/core/ai/ChatRunCoordinator.kt",
+      "?? docs/",
+      "?? scripts/android_product_detachment_manifest.py",
+      "?? scripts/chat_kernel_similarity.py"
+    ],
+    "other_platform_wip_entry_count": 2
+  },
+  "dependencies": {
+    "catalog_rikka_coordinates": [
+      {
+        "line": 79,
+        "text": "jlatexmath = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath\", version.ref = \"jlatexmath\" }"
+      },
+      {
+        "line": 80,
+        "text": "jlatexmath-font-greek = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath-font-greek\", version.ref = \"jlatexmath\" }"
+      },
+      {
+        "line": 81,
+        "text": "jlatexmath-font-cyrillic = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic\", version.ref = \"jlatexmath\" }"
+      },
+      {
+        "line": 115,
+        "text": "jetbrains-markdown = { module = \"com.github.rikkahub:markdown\", version.ref = \"markdown\" }"
+      },
+      {
+        "line": 137,
+        "text": "huge-icons = { group = \"com.github.rikkahub\", name = \"hugeicons-compose\", version.ref = \"huge-icons\" }"
+      },
+      {
+        "line": 188,
+        "text": "sqlite-android = { module = \"com.github.rikkahub:sqlite-android\", version.ref = \"sqlite-android\" }"
+      }
+    ],
+    "resolved_rikka_coordinates": [
+      "com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic:1.3",
+      "com.github.rikkahub.jlatexmath-android:jlatexmath-font-greek:1.3",
+      "com.github.rikkahub.jlatexmath-android:jlatexmath:1.3",
+      "com.github.rikkahub:hugeicons-compose:1.3",
+      "com.github.rikkahub:markdown:66a56dffca",
+      "com.github.rikkahub:sqlite-android:-SNAPSHOT"
+    ],
+    "resolved_rikka_count": 6,
+    "resolved_report": {
+      "command": "./gradlew :app:dependencies --configuration debugRuntimeClasspath | rg 'com\\.github\\.rikkahub'",
+      "sha256": "ff507750780bf2902ac2ca60402ba7ad549eca8f0bef8638c8f44829ce5e618e"
+    }
+  },
+  "hugeicons": {
+    "file_count": 112,
+    "concrete_icon_count": 153,
+    "concrete_icons": [
+      "Add01",
+      "AiChat01",
+      "AiMagic",
+      "Alert01",
+      "AlertCircle",
+      "Archive01",
+      "ArrowDown01",
+      "ArrowExpand01",
+      "ArrowLeft01",
+      "ArrowLeft02",
+      "ArrowReloadHorizontal",
+      "ArrowRight01",
+      "ArrowRight02",
+      "ArrowUp01",
+      "ArrowUp02",
+      "Book01",
+      "Book02",
+      "Book03",
+      "Book04",
+      "BookOpen01",
+      "Brain02",
+      "BubbleChat",
+      "BubbleChatQuestion",
+      "Bug01",
+      "Camera01",
+      "Cancel01",
+      "CancelCircle",
+      "ChartBarLine",
+      "ChartColumn",
+      "ChartHistogram",
+      "CheckmarkCircle02",
+      "Clipboard",
+      "Clock01",
+      "Clock02",
+      "CloudSavingDone01",
+      "Code",
+      "Colors",
+      "Comment01",
+      "Compass",
+      "Connect",
+      "Copy01",
+      "Cpu",
+      "CursorPointer01",
+      "DashboardSquare01",
+      "Database",
+      "Database02",
+      "Delete01",
+      "Delete02",
+      "Developer",
+      "Download01",
+      "Download04",
+      "DragDropHorizontal",
+      "Earth",
+      "Edit01",
+      "Edit02",
+      "Edit03",
+      "Edit04",
+      "Eraser",
+      "Eye",
+      "Favourite",
+      "FavouriteCircle",
+      "File01",
+      "File02",
+      "FileDownload",
+      "FileImport",
+      "FileScript",
+      "FileZip",
+      "Files02",
+      "Flash",
+      "FloppyDisk",
+      "Folder01",
+      "Folder02",
+      "Forward02",
+      "FullScreen",
+      "GitFork",
+      "Github",
+      "GlobalSearch",
+      "Globe02",
+      "Icon1stBracket",
+      "Idea",
+      "Idea01",
+      "Image02",
+      "Image03",
+      "ImageUpload",
+      "Layers02",
+      "LayoutGrid",
+      "LeftToRightListBullet",
+      "Link01",
+      "ListView",
+      "LookTop",
+      "MagicWand01",
+      "McpServer",
+      "Megaphone01",
+      "Menu03",
+      "Message01",
+      "Message02",
+      "MessageAdd01",
+      "MessageMultiple01",
+      "MinusSign",
+      "MoneyBag02",
+      "MoreVertical",
+      "MusicNote01",
+      "News01",
+      "Note01",
+      "Notebook",
+      "Notebook01",
+      "Package",
+      "Package01",
+      "Pause",
+      "Pen01",
+      "Pin",
+      "PinOff",
+      "Play",
+      "PlayCircle",
+      "PlayCircle02",
+      "PowerService",
+      "Puzzle",
+      "QrCodeScan",
+      "QuillWrite01",
+      "QuoteUp",
+      "Refresh01",
+      "Refresh03",
+      "Rocket01",
+      "Search01",
+      "SendToMobile",
+      "ServerStack01",
+      "Settings03",
+      "Share01",
+      "Share03",
+      "Share04",
+      "SlidersHorizontal",
+      "SmartPhone01",
+      "SourceCode",
+      "Sparkles",
+      "StopCircle",
+      "Sun01",
+      "Text",
+      "TextSelection",
+      "Tick01",
+      "Tick02",
+      "Time02",
+      "Tools",
+      "TransactionHistory",
+      "Upload02",
+      "UserGroup",
+      "Video01",
+      "View",
+      "ViewOff",
+      "VolumeHigh",
+      "WavingHand01",
+      "WebDesign01",
+      "Wrench01",
+      "Zap"
+    ],
+    "files": [
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/AssistantPicker.kt",
+        "imports_root": true,
+        "icons": [
+          "Edit03",
+          "LookTop"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowUp01",
+          "ArrowUp02",
+          "Book03",
+          "Camera01",
+          "Cancel01",
+          "Files02",
+          "Image02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputAttachments.kt",
+        "imports_root": true,
+        "icons": [
+          "Camera01",
+          "Cancel01",
+          "File02",
+          "Files02",
+          "Image02",
+          "MusicNote01",
+          "Video01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputComposers.kt",
+        "imports_root": true,
+        "icons": [
+          "FullScreen"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputSandbox.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01",
+          "ArrowRight01",
+          "Cancel01",
+          "Code",
+          "Tick01",
+          "Time02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ExtensionContent.kt",
+        "imports_root": true,
+        "icons": [
+          "Link01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/McpPicker.kt",
+        "imports_root": true,
+        "icons": [
+          "Alert01",
+          "Icon1stBracket",
+          "McpServer"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ModelList.kt",
+        "imports_root": true,
+        "icons": [
+          "AiMagic",
+          "ArrowDown01",
+          "ArrowRight01",
+          "Brain02",
+          "Cancel01",
+          "DragDropHorizontal",
+          "Favourite",
+          "Image03",
+          "Message01",
+          "Search01",
+          "Text",
+          "Tools",
+          "Wrench01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ProviderBalanceText.kt",
+        "imports_root": true,
+        "icons": [
+          "MoneyBag02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ReasoningPicker.kt",
+        "imports_root": true,
+        "icons": [
+          "Idea",
+          "Idea01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageActions.kt",
+        "imports_root": true,
+        "icons": [
+          "Archive01",
+          "Copy01",
+          "Delete01",
+          "Edit01",
+          "FavouriteCircle",
+          "GitFork",
+          "MoreVertical",
+          "QuoteUp",
+          "Refresh03",
+          "Share04",
+          "StopCircle",
+          "TextSelection",
+          "VolumeHigh",
+          "WebDesign01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageAskUserStep.kt",
+        "imports_root": true,
+        "icons": [
+          "BubbleChatQuestion",
+          "Refresh01",
+          "Tick01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageBranch.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01",
+          "ArrowRight01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCopySheet.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Copy01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCouncilStep.kt",
+        "imports_root": true,
+        "icons": [
+          "MagicWand01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageMessagePartsBlock.kt",
+        "imports_root": true,
+        "icons": [
+          "File02",
+          "MusicNote01",
+          "Video01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageReasoning.kt",
+        "imports_root": true,
+        "icons": [
+          "Brain02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageSubAgentStep.kt",
+        "imports_root": true,
+        "icons": [
+          "MagicWand01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageToolPreviewSheet.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageTools.kt",
+        "imports_root": true,
+        "icons": [
+          "BubbleChatQuestion",
+          "Cancel01",
+          "Clipboard",
+          "Code",
+          "Database02",
+          "Eraser",
+          "File02",
+          "FullScreen",
+          "GlobalSearch",
+          "MagicWand01",
+          "Package",
+          "QuillWrite01",
+          "Refresh01",
+          "Tick01",
+          "Time02",
+          "VolumeHigh",
+          "Wrench01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowExpand01",
+          "ArrowLeft01",
+          "ArrowRight01",
+          "Cancel01",
+          "Download01",
+          "FileZip",
+          "Pause",
+          "Play"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ToolResultPreview.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft02",
+          "ArrowRight02",
+          "Tick01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/nav/BackButton.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/HighlightCodeBlock.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowUp01",
+          "Copy01",
+          "Download04",
+          "Eye"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt",
+        "imports_root": true,
+        "icons": [
+          "Tick01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownNew.kt",
+        "imports_root": true,
+        "icons": [
+          "Download01",
+          "Tick01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/Mermaid.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Download01",
+          "View"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ChainOfThought.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowRight01",
+          "ArrowUp01",
+          "Search01",
+          "Sparkles"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Emoji.kt",
+        "imports_root": true,
+        "icons": [
+          "Search01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ErrorCard.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Copy01",
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Export.kt",
+        "imports_root": true,
+        "icons": [
+          "File01",
+          "Share01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Favicon.kt",
+        "imports_root": true,
+        "icons": [
+          "Link01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ImagePreviewDialog.kt",
+        "imports_root": true,
+        "icons": [
+          "Download01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/JsonTree.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowRight01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Select.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowUp01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ShareSheet.kt",
+        "imports_root": true,
+        "icons": [
+          "Share03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TTSController.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01",
+          "ArrowRight01",
+          "Cancel01",
+          "Forward02",
+          "Pause",
+          "Play"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TagList.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Cancel01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TextArea.kt",
+        "imports_root": true,
+        "icons": [
+          "FileImport",
+          "FullScreen"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/UIAvatar.kt",
+        "imports_root": true,
+        "icons": [
+          "Edit03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/WorkspaceSearchField.kt",
+        "imports_root": true,
+        "icons": [
+          "Search01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/permission/PermissionRationaleDialog.kt",
+        "imports_root": true,
+        "icons": [
+          "AlertCircle"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceArtifactsTab.kt",
+        "imports_root": true,
+        "icons": [
+          "Archive01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceFilePreview.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Share01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceFileSheet.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01",
+          "Cancel01",
+          "File02",
+          "Folder01",
+          "Refresh01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/AssistantPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Cancel01",
+          "Copy01",
+          "Delete01",
+          "MoreVertical",
+          "Search01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantDetailPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowRight01",
+          "BookOpen01",
+          "Brain02",
+          "Code",
+          "Message02",
+          "Puzzle",
+          "Settings03",
+          "Wrench01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantMemoryPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Delete01",
+          "Edit01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantPromptPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowDown01",
+          "ArrowUp01",
+          "Cancel01",
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/PropertyEditor.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/backup/BackupPage.kt",
+        "imports_root": true,
+        "icons": [
+          "CloudSavingDone01",
+          "Database02",
+          "Delete02",
+          "Download04",
+          "FileImport",
+          "Folder02",
+          "Upload02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/board/BoardPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowRight01",
+          "Notebook01",
+          "Refresh03",
+          "Settings03",
+          "Share03",
+          "TransactionHistory"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatList.kt",
+        "imports_root": false,
+        "icons": [
+          "Search01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatListIndicators.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Package01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "Cancel01",
+          "CursorPointer01",
+          "Tick01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "Cancel01",
+          "LeftToRightListBullet",
+          "Menu03",
+          "Refresh01",
+          "Time02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatSizeChecker.kt",
+        "imports_root": true,
+        "icons": [
+          "Alert01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/Export.kt",
+        "imports_root": true,
+        "icons": [
+          "Book02",
+          "Book04",
+          "Earth",
+          "File02",
+          "Image02",
+          "Search01",
+          "Wrench01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilMembersSheet.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowReloadHorizontal"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilRoomComposer.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowUp02",
+          "Cancel01",
+          "File02",
+          "Image02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilRoomPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowReloadHorizontal",
+          "BubbleChat",
+          "Settings03",
+          "UserGroup"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/developer/DeveloperPage.kt",
+        "imports_root": true,
+        "icons": [
+          "FileScript"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/ExtensionsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Book03",
+          "Favourite",
+          "Zap"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/PromptPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowDown01",
+          "Book01",
+          "Cancel01",
+          "Delete01",
+          "Download01",
+          "Edit01",
+          "FileDownload",
+          "FileImport",
+          "MagicWand01",
+          "Share03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/QuickMessagesPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Delete01",
+          "Edit01",
+          "MoreVertical",
+          "Zap"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/SkillsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Alert01",
+          "Delete01",
+          "Download01",
+          "MagicWand01",
+          "MoreVertical",
+          "Puzzle",
+          "Refresh01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/favorite/FavoritePage.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01",
+          "Favourite"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/history/HistoryPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01",
+          "GlobalSearch",
+          "Pin",
+          "PinOff"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/imggen/ImgGenPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Colors",
+          "Copy01",
+          "Delete01",
+          "FloppyDisk",
+          "Image03",
+          "SendToMobile",
+          "SlidersHorizontal"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/live/LiveCompanionPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowLeft01",
+          "Eye",
+          "Settings03",
+          "Sparkles"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/log/LogPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppListPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Settings03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/components/MiniAppChatCard.kt",
+        "imports_root": true,
+        "icons": [
+          "Clock02",
+          "Code",
+          "Download01",
+          "ListView",
+          "MoreVertical"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/components/MiniAppGridCard.kt",
+        "imports_root": true,
+        "icons": [
+          "Clock02",
+          "Delete01",
+          "Download01",
+          "Edit01",
+          "MoreVertical",
+          "Pin",
+          "PinOff",
+          "SourceCode"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspacePage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "AiChat01",
+          "AiMagic",
+          "ArrowDown01",
+          "ArrowUp02",
+          "Cancel01",
+          "CancelCircle",
+          "Compass",
+          "Database",
+          "Edit02",
+          "Edit04",
+          "Flash",
+          "MinusSign",
+          "Notebook",
+          "PlayCircle",
+          "Tick02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelProjectsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "BookOpen01",
+          "Delete02",
+          "MoreVertical"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelUi.kt",
+        "imports_root": true,
+        "icons": [
+          "BookOpen01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/search/SearchPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Refresh01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/sessionhome/SessionHomePage.kt",
+        "imports_root": true,
+        "icons": [
+          "BookOpen01",
+          "BubbleChat",
+          "Cancel01",
+          "Clock01",
+          "Delete01",
+          "Earth",
+          "LayoutGrid",
+          "MessageAdd01",
+          "Pen01",
+          "Pin",
+          "Search01",
+          "Settings03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAboutPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Code",
+          "Earth",
+          "File02",
+          "Github",
+          "SmartPhone01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentExecutionPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Code",
+          "LookTop",
+          "Megaphone01",
+          "Refresh01",
+          "Sparkles",
+          "VolumeHigh"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentExtensionsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Clock02",
+          "Delete01",
+          "McpServer",
+          "MoreVertical",
+          "Package",
+          "Play"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentMemoryPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Delete01",
+          "Edit01",
+          "Play"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentPermissionsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Alert01",
+          "Layers02",
+          "Settings03",
+          "Zap"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingCapabilityPermissionsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "CheckmarkCircle02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalICloudPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "ServerStack01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalModelCouncilPage.kt",
+        "imports_root": true,
+        "icons": [
+          "File02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalOfficeProPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "File02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Code",
+          "DashboardSquare01",
+          "File02",
+          "Globe02",
+          "News01",
+          "ServerStack01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalSubAgentPage.kt",
+        "imports_root": true,
+        "icons": [
+          "File02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalWebMountPage.kt",
+        "imports_root": true,
+        "icons": [
+          "BubbleChatQuestion",
+          "Cancel01",
+          "Comment01",
+          "Github",
+          "Globe02",
+          "Idea",
+          "News01",
+          "Note01",
+          "PlayCircle02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingFilesPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01",
+          "Image02"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingMcpPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowDown01",
+          "ArrowUp01",
+          "Cancel01",
+          "Delete01",
+          "FileImport",
+          "Settings03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingModelPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Brain02",
+          "FileZip",
+          "MagicWand01",
+          "Message01",
+          "MessageMultiple01",
+          "Notebook01",
+          "Settings03",
+          "View"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingPage.kt",
+        "imports_root": true,
+        "icons": [
+          "AiMagic",
+          "Alert01",
+          "Brain02",
+          "ChartHistogram",
+          "Code",
+          "Database02",
+          "Developer",
+          "GlobalSearch",
+          "ImageUpload",
+          "LookTop",
+          "Megaphone01",
+          "Package",
+          "Rocket01",
+          "Settings03",
+          "Sun01",
+          "WavingHand01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Delete01",
+          "PowerService",
+          "Refresh03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelSettingsForm.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Cancel01",
+          "Delete01",
+          "Edit01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelTabPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "ArrowRight01",
+          "Cancel01",
+          "Delete01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Camera01",
+          "ChartBarLine",
+          "Image02",
+          "Share01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSandboxPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Code",
+          "Database02",
+          "ServerStack01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSearchPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSlidesFontPage.kt",
+        "imports_root": true,
+        "icons": [
+          "MoreVertical"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSystemAccessPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Alert01",
+          "File02",
+          "Settings03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingTTSPage.kt",
+        "imports_root": true,
+        "icons": [
+          "Add01",
+          "Delete01",
+          "DragDropHorizontal",
+          "Edit01",
+          "MoreVertical",
+          "StopCircle",
+          "VolumeHigh"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/BalanceOption.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowDown01",
+          "ArrowUp01",
+          "Refresh03"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderConnectionTester.kt",
+        "imports_root": true,
+        "icons": [
+          "Connect"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderRedesignPrimitives.kt",
+        "imports_root": true,
+        "icons": [
+          "Cancel01",
+          "Copy01",
+          "View",
+          "ViewOff"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderTemplatePickerSheet.kt",
+        "imports_root": true,
+        "icons": [
+          "SlidersHorizontal"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/stats/StatsPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ChartColumn",
+          "Cpu",
+          "Message01",
+          "Rocket01",
+          "Zap"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/synara/SynaraConnectPage.kt",
+        "imports_root": true,
+        "icons": [
+          "QrCodeScan"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/webview/WebViewPage.kt",
+        "imports_root": true,
+        "icons": [
+          "ArrowRight01",
+          "Bug01",
+          "Earth",
+          "MoreVertical",
+          "Refresh01"
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/zcode/ZCodePage.kt",
+        "imports_root": true,
+        "icons": [
+          "QrCodeScan"
+        ]
+      }
+    ]
+  },
+  "source": {
+    "rikka_endpoint_hits": [
+      {
+        "path": "search/src/main/java/app/amber/search/AmberAgentSearchService.kt",
+        "matches": [
+          {
+            "line": 58,
+            "text": ".url(\"https://api.rikka-ai.com/v1/search\")"
+          }
+        ]
+      }
+    ],
+    "rikka_endpoint_file_count": 1,
+    "rikka_namespace_or_brand_hits": [
+      {
+        "path": "app/build.gradle.kts",
+        "matches": [
+          {
+            "line": 718,
+            "text": "// https://github.com/rikkahub/jlatexmath-android"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/AssistantPicker.kt",
+        "matches": [
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.stroke.Edit03"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.LookTop"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInput.kt",
+        "matches": [
+          {
+            "line": 103,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 104,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 105,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 106,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp02"
+          },
+          {
+            "line": 107,
+            "text": "import me.rerere.hugeicons.stroke.Book03"
+          },
+          {
+            "line": 108,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 109,
+            "text": "import me.rerere.hugeicons.stroke.Camera01"
+          },
+          {
+            "line": 110,
+            "text": "import me.rerere.hugeicons.stroke.Files02"
+          },
+          {
+            "line": 111,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputAttachments.kt",
+        "matches": [
+          {
+            "line": 74,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 75,
+            "text": "import me.rerere.hugeicons.stroke.Camera01"
+          },
+          {
+            "line": 76,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 77,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 78,
+            "text": "import me.rerere.hugeicons.stroke.Files02"
+          },
+          {
+            "line": 79,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          },
+          {
+            "line": 80,
+            "text": "import me.rerere.hugeicons.stroke.MusicNote01"
+          },
+          {
+            "line": 81,
+            "text": "import me.rerere.hugeicons.stroke.Video01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputComposers.kt",
+        "matches": [
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.stroke.FullScreen"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ChatInputSandbox.kt",
+        "matches": [
+          {
+            "line": 62,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 63,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 66,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 67,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          },
+          {
+            "line": 68,
+            "text": "import me.rerere.hugeicons.stroke.Time02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ExtensionContent.kt",
+        "matches": [
+          {
+            "line": 23,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 24,
+            "text": "import me.rerere.hugeicons.stroke.Link01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/McpPicker.kt",
+        "matches": [
+          {
+            "line": 26,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 27,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          },
+          {
+            "line": 28,
+            "text": "import me.rerere.hugeicons.stroke.Icon1stBracket"
+          },
+          {
+            "line": 29,
+            "text": "import me.rerere.hugeicons.stroke.McpServer"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ModelList.kt",
+        "matches": [
+          {
+            "line": 89,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 90,
+            "text": "import me.rerere.hugeicons.stroke.AiMagic"
+          },
+          {
+            "line": 91,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 92,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 93,
+            "text": "import me.rerere.hugeicons.stroke.Brain02"
+          },
+          {
+            "line": 94,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.stroke.DragDropHorizontal"
+          },
+          {
+            "line": 96,
+            "text": "import me.rerere.hugeicons.stroke.Favourite"
+          },
+          {
+            "line": 97,
+            "text": "import me.rerere.hugeicons.stroke.Image03"
+          },
+          {
+            "line": 98,
+            "text": "import me.rerere.hugeicons.stroke.Message01"
+          },
+          {
+            "line": 99,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          },
+          {
+            "line": 100,
+            "text": "import me.rerere.hugeicons.stroke.Text"
+          },
+          {
+            "line": 101,
+            "text": "import me.rerere.hugeicons.stroke.Tools"
+          },
+          {
+            "line": 102,
+            "text": "import me.rerere.hugeicons.stroke.Wrench01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ProviderBalanceText.kt",
+        "matches": [
+          {
+            "line": 20,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 21,
+            "text": "import me.rerere.hugeicons.stroke.MoneyBag02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ai/ReasoningPicker.kt",
+        "matches": [
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.Idea"
+          },
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.stroke.Idea01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageActions.kt",
+        "matches": [
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.stroke.Archive01"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.FavouriteCircle"
+          },
+          {
+            "line": 54,
+            "text": "import me.rerere.hugeicons.stroke.GitFork"
+          },
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 56,
+            "text": "import me.rerere.hugeicons.stroke.Refresh03"
+          },
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.stroke.QuoteUp"
+          },
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.stroke.Share04"
+          },
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.stroke.StopCircle"
+          },
+          {
+            "line": 60,
+            "text": "import me.rerere.hugeicons.stroke.TextSelection"
+          },
+          {
+            "line": 61,
+            "text": "import me.rerere.hugeicons.stroke.VolumeHigh"
+          },
+          {
+            "line": 62,
+            "text": "import me.rerere.hugeicons.stroke.WebDesign01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageAskUserStep.kt",
+        "matches": [
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.BubbleChatQuestion"
+          },
+          {
+            "line": 54,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          },
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageBranch.kt",
+        "matches": [
+          {
+            "line": 21,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 22,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 23,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCopySheet.kt",
+        "matches": [
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageCouncilStep.kt",
+        "matches": [
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageMessagePartsBlock.kt",
+        "matches": [
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.stroke.MusicNote01"
+          },
+          {
+            "line": 60,
+            "text": "import me.rerere.hugeicons.stroke.Video01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageReasoning.kt",
+        "matches": [
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.Brain02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageSubAgentStep.kt",
+        "matches": [
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageToolPreviewSheet.kt",
+        "matches": [
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ChatMessageTools.kt",
+        "matches": [
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.BubbleChatQuestion"
+          },
+          {
+            "line": 66,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 67,
+            "text": "import me.rerere.hugeicons.stroke.Clipboard"
+          },
+          {
+            "line": 68,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 69,
+            "text": "import me.rerere.hugeicons.stroke.Database02"
+          },
+          {
+            "line": 70,
+            "text": "import me.rerere.hugeicons.stroke.Eraser"
+          },
+          {
+            "line": 71,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 72,
+            "text": "import me.rerere.hugeicons.stroke.FullScreen"
+          },
+          {
+            "line": 73,
+            "text": "import me.rerere.hugeicons.stroke.GlobalSearch"
+          },
+          {
+            "line": 74,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          },
+          {
+            "line": 75,
+            "text": "import me.rerere.hugeicons.stroke.Package"
+          },
+          {
+            "line": 76,
+            "text": "import me.rerere.hugeicons.stroke.QuillWrite01"
+          },
+          {
+            "line": 77,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          },
+          {
+            "line": 78,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          },
+          {
+            "line": 79,
+            "text": "import me.rerere.hugeicons.stroke.Time02"
+          },
+          {
+            "line": 80,
+            "text": "import me.rerere.hugeicons.stroke.VolumeHigh"
+          },
+          {
+            "line": 81,
+            "text": "import me.rerere.hugeicons.stroke.Wrench01"
+          },
+          {
+            "line": 548,
+            "text": "imageVector = me.rerere.hugeicons.HugeIcons.Tick01,"
+          },
+          {
+            "line": 555,
+            "text": "imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,"
+          },
+          {
+            "line": 562,
+            "text": "imageVector = me.rerere.hugeicons.HugeIcons.Cancel01,"
+          },
+          {
+            "line": 569,
+            "text": "imageVector = me.rerere.hugeicons.HugeIcons.Time02,"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/GenerativeWidgetCard.kt",
+        "matches": [
+          {
+            "line": 87,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 88,
+            "text": "import me.rerere.hugeicons.stroke.ArrowExpand01"
+          },
+          {
+            "line": 89,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 90,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 91,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 92,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 93,
+            "text": "import me.rerere.hugeicons.stroke.FileZip"
+          },
+          {
+            "line": 94,
+            "text": "import me.rerere.hugeicons.stroke.Pause"
+          },
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.stroke.Play"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/message/ToolResultPreview.kt",
+        "matches": [
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft02"
+          },
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight02"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/nav/BackButton.kt",
+        "matches": [
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/HighlightCodeBlock.kt",
+        "matches": [
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 66,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 67,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 68,
+            "text": "import me.rerere.hugeicons.stroke.Download04"
+          },
+          {
+            "line": 69,
+            "text": "import me.rerere.hugeicons.stroke.Eye"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/Markdown.kt",
+        "matches": [
+          {
+            "line": 94,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/MarkdownNew.kt",
+        "matches": [
+          {
+            "line": 83,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 84,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 85,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/richtext/Mermaid.kt",
+        "matches": [
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.View"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ChainOfThought.kt",
+        "matches": [
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.stroke.Sparkles"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Emoji.kt",
+        "matches": [
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ErrorCard.kt",
+        "matches": [
+          {
+            "line": 31,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Export.kt",
+        "matches": [
+          {
+            "line": 18,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 19,
+            "text": "import me.rerere.hugeicons.stroke.File01"
+          },
+          {
+            "line": 20,
+            "text": "import me.rerere.hugeicons.stroke.Share01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Favicon.kt",
+        "matches": [
+          {
+            "line": 21,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 22,
+            "text": "import me.rerere.hugeicons.stroke.Link01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ImagePreviewDialog.kt",
+        "matches": [
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/JsonTree.kt",
+        "matches": [
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/Select.kt",
+        "matches": [
+          {
+            "line": 30,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 31,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/ShareSheet.kt",
+        "matches": [
+          {
+            "line": 27,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 28,
+            "text": "import me.rerere.hugeicons.stroke.Share03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TTSController.kt",
+        "matches": [
+          {
+            "line": 30,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 31,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.Forward02"
+          },
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.stroke.Pause"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.Play"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TagList.kt",
+        "matches": [
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/TextArea.kt",
+        "matches": [
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.FileImport"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.stroke.FullScreen"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/UIAvatar.kt",
+        "matches": [
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.stroke.Edit03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/WorkspaceSearchField.kt",
+        "matches": [
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/ui/permission/PermissionRationaleDialog.kt",
+        "matches": [
+          {
+            "line": 31,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.AlertCircle"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceArtifactsTab.kt",
+        "matches": [
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.stroke.Archive01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceFilePreview.kt",
+        "matches": [
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Share01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/components/workspace/WorkspaceFileSheet.kt",
+        "matches": [
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 60,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 61,
+            "text": "import me.rerere.hugeicons.stroke.Folder01"
+          },
+          {
+            "line": 62,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/AssistantPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantDetailPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.BookOpen01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Brain02"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Message02"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.Puzzle"
+          },
+          {
+            "line": 11,
+            "text": "import me.rerere.hugeicons.stroke.Wrench01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantMemoryPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/AssistantPromptPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/assistant/detail/PropertyEditor.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/backup/BackupPage.kt",
+        "matches": [
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.CloudSavingDone01"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Database02"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.stroke.Delete02"
+          },
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.stroke.Download04"
+          },
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.stroke.FileImport"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.Folder02"
+          },
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.stroke.Upload02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/board/BoardPage.kt",
+        "matches": [
+          {
+            "line": 63,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.Notebook01"
+          },
+          {
+            "line": 66,
+            "text": "import me.rerere.hugeicons.stroke.Refresh03"
+          },
+          {
+            "line": 67,
+            "text": "import me.rerere.hugeicons.stroke.Share03"
+          },
+          {
+            "line": 68,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 69,
+            "text": "import me.rerere.hugeicons.stroke.TransactionHistory"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatList.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatListIndicators.kt",
+        "matches": [
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Package01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatListNormalSection.kt",
+        "matches": [
+          {
+            "line": 78,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 79,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 80,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 81,
+            "text": "import me.rerere.hugeicons.stroke.CursorPointer01"
+          },
+          {
+            "line": 82,
+            "text": "import me.rerere.hugeicons.stroke.Tick01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatPage.kt",
+        "matches": [
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 96,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 97,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 98,
+            "text": "import me.rerere.hugeicons.stroke.LeftToRightListBullet"
+          },
+          {
+            "line": 99,
+            "text": "import me.rerere.hugeicons.stroke.Menu03"
+          },
+          {
+            "line": 100,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          },
+          {
+            "line": 101,
+            "text": "import me.rerere.hugeicons.stroke.Time02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/ChatSizeChecker.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/chat/Export.kt",
+        "matches": [
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Book02"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Book04"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.Earth"
+          },
+          {
+            "line": 11,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 12,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          },
+          {
+            "line": 13,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          },
+          {
+            "line": 14,
+            "text": "import me.rerere.hugeicons.stroke.Wrench01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilMembersSheet.kt",
+        "matches": [
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.ArrowReloadHorizontal"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilRoomComposer.kt",
+        "matches": [
+          {
+            "line": 86,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 87,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 88,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp02"
+          },
+          {
+            "line": 89,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 90,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 91,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/councilroom/CouncilRoomPage.kt",
+        "matches": [
+          {
+            "line": 73,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 74,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 75,
+            "text": "import me.rerere.hugeicons.stroke.ArrowReloadHorizontal"
+          },
+          {
+            "line": 76,
+            "text": "import me.rerere.hugeicons.stroke.BubbleChat"
+          },
+          {
+            "line": 77,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 78,
+            "text": "import me.rerere.hugeicons.stroke.UserGroup"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/developer/DeveloperPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.FileScript"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/ExtensionsPage.kt",
+        "matches": [
+          {
+            "line": 17,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 19,
+            "text": "import me.rerere.hugeicons.stroke.Book03"
+          },
+          {
+            "line": 20,
+            "text": "import me.rerere.hugeicons.stroke.Favourite"
+          },
+          {
+            "line": 21,
+            "text": "import me.rerere.hugeicons.stroke.Zap"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/PromptPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Book01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.FileDownload"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.FileImport"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 11,
+            "text": "import me.rerere.hugeicons.stroke.Share03"
+          },
+          {
+            "line": 12,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 13,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          },
+          {
+            "line": 14,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/QuickMessagesPage.kt",
+        "matches": [
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Zap"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/extensions/SkillsPage.kt",
+        "matches": [
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          },
+          {
+            "line": 54,
+            "text": "import me.rerere.hugeicons.stroke.Puzzle"
+          },
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/favorite/FavoritePage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Favourite"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/history/HistoryPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Pin"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.PinOff"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.GlobalSearch"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/imggen/ImgGenPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Image03"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Colors"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.FloppyDisk"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.SendToMobile"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.SlidersHorizontal"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/live/LiveCompanionPage.kt",
+        "matches": [
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.ArrowLeft01"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.Eye"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Sparkles"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/log/LogPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/MiniAppListPage.kt",
+        "matches": [
+          {
+            "line": 28,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 29,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/components/MiniAppChatCard.kt",
+        "matches": [
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.stroke.Clock02"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.ListView"
+          },
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/miniapp/components/MiniAppGridCard.kt",
+        "matches": [
+          {
+            "line": 26,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 27,
+            "text": "import me.rerere.hugeicons.stroke.Clock02"
+          },
+          {
+            "line": 28,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 29,
+            "text": "import me.rerere.hugeicons.stroke.Download01"
+          },
+          {
+            "line": 30,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 31,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 32,
+            "text": "import me.rerere.hugeicons.stroke.Pin"
+          },
+          {
+            "line": 33,
+            "text": "import me.rerere.hugeicons.stroke.PinOff"
+          },
+          {
+            "line": 34,
+            "text": "import me.rerere.hugeicons.stroke.SourceCode"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelMarkdownWorkspacePage.kt",
+        "matches": [
+          {
+            "line": 91,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 92,
+            "text": "import me.rerere.hugeicons.stroke.AiChat01"
+          },
+          {
+            "line": 93,
+            "text": "import me.rerere.hugeicons.stroke.AiMagic"
+          },
+          {
+            "line": 94,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 96,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp02"
+          },
+          {
+            "line": 97,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 98,
+            "text": "import me.rerere.hugeicons.stroke.CancelCircle"
+          },
+          {
+            "line": 99,
+            "text": "import me.rerere.hugeicons.stroke.Edit02"
+          },
+          {
+            "line": 100,
+            "text": "import me.rerere.hugeicons.stroke.Flash"
+          },
+          {
+            "line": 101,
+            "text": "import me.rerere.hugeicons.stroke.Compass"
+          },
+          {
+            "line": 102,
+            "text": "import me.rerere.hugeicons.stroke.Database"
+          },
+          {
+            "line": 103,
+            "text": "import me.rerere.hugeicons.stroke.MinusSign"
+          },
+          {
+            "line": 104,
+            "text": "import me.rerere.hugeicons.stroke.Notebook"
+          },
+          {
+            "line": 105,
+            "text": "import me.rerere.hugeicons.stroke.PlayCircle"
+          },
+          {
+            "line": 106,
+            "text": "import me.rerere.hugeicons.stroke.Edit04"
+          },
+          {
+            "line": 107,
+            "text": "import me.rerere.hugeicons.stroke.Tick02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelProjectsPage.kt",
+        "matches": [
+          {
+            "line": 68,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 69,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 70,
+            "text": "import me.rerere.hugeicons.stroke.BookOpen01"
+          },
+          {
+            "line": 71,
+            "text": "import me.rerere.hugeicons.stroke.Delete02"
+          },
+          {
+            "line": 72,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/novel/NovelUi.kt",
+        "matches": [
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.BookOpen01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/search/SearchPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/sessionhome/SessionHomePage.kt",
+        "matches": [
+          {
+            "line": 86,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 87,
+            "text": "import me.rerere.hugeicons.stroke.BookOpen01"
+          },
+          {
+            "line": 88,
+            "text": "import me.rerere.hugeicons.stroke.BubbleChat"
+          },
+          {
+            "line": 89,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 90,
+            "text": "import me.rerere.hugeicons.stroke.Clock01"
+          },
+          {
+            "line": 91,
+            "text": "import me.rerere.hugeicons.stroke.MessageAdd01"
+          },
+          {
+            "line": 92,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 93,
+            "text": "import me.rerere.hugeicons.stroke.Earth"
+          },
+          {
+            "line": 94,
+            "text": "import me.rerere.hugeicons.stroke.LayoutGrid"
+          },
+          {
+            "line": 95,
+            "text": "import me.rerere.hugeicons.stroke.Pen01"
+          },
+          {
+            "line": 96,
+            "text": "import me.rerere.hugeicons.stroke.Pin"
+          },
+          {
+            "line": 97,
+            "text": "import me.rerere.hugeicons.stroke.Search01"
+          },
+          {
+            "line": 98,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAboutPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Earth"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Github"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.SmartPhone01"
+          },
+          {
+            "line": 165,
+            "text": "onClick = { context.openUrl(\"https://github.com/rikkahub/rikkahub\") },"
+          },
+          {
+            "line": 171,
+            "text": "onClick = { context.openUrl(\"https://github.com/rikkahub/rikkahub/blob/master/LICENSE\") },"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentExecutionPage.kt",
+        "matches": [
+          {
+            "line": 21,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 22,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 23,
+            "text": "import me.rerere.hugeicons.stroke.LookTop"
+          },
+          {
+            "line": 24,
+            "text": "import me.rerere.hugeicons.stroke.Megaphone01"
+          },
+          {
+            "line": 25,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          },
+          {
+            "line": 26,
+            "text": "import me.rerere.hugeicons.stroke.Sparkles"
+          },
+          {
+            "line": 27,
+            "text": "import me.rerere.hugeicons.stroke.VolumeHigh"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentExtensionsPage.kt",
+        "matches": [
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.Clock02"
+          },
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.stroke.McpServer"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.stroke.Package"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.Play"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentMemoryPage.kt",
+        "matches": [
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 54,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.stroke.Play"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAgentPermissionsPage.kt",
+        "matches": [
+          {
+            "line": 25,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 26,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          },
+          {
+            "line": 27,
+            "text": "import me.rerere.hugeicons.stroke.Layers02"
+          },
+          {
+            "line": 28,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 29,
+            "text": "import me.rerere.hugeicons.stroke.Zap"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingCapabilityPermissionsPage.kt",
+        "matches": [
+          {
+            "line": 22,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 23,
+            "text": "import me.rerere.hugeicons.stroke.CheckmarkCircle02"
+          },
+          {
+            "line": 24,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalICloudPage.kt",
+        "matches": [
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.stroke.ServerStack01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalModelCouncilPage.kt",
+        "matches": [
+          {
+            "line": 35,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalOfficeProPage.kt",
+        "matches": [
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalPage.kt",
+        "matches": [
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 37,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.stroke.DashboardSquare01"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.stroke.Globe02"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.News01"
+          },
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.stroke.ServerStack01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalSubAgentPage.kt",
+        "matches": [
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingExperimentalWebMountPage.kt",
+        "matches": [
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 56,
+            "text": "import me.rerere.hugeicons.stroke.BubbleChatQuestion"
+          },
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 58,
+            "text": "import me.rerere.hugeicons.stroke.Comment01"
+          },
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.stroke.Github"
+          },
+          {
+            "line": 60,
+            "text": "import me.rerere.hugeicons.stroke.Globe02"
+          },
+          {
+            "line": 61,
+            "text": "import me.rerere.hugeicons.stroke.Idea"
+          },
+          {
+            "line": 62,
+            "text": "import me.rerere.hugeicons.stroke.News01"
+          },
+          {
+            "line": 63,
+            "text": "import me.rerere.hugeicons.stroke.Note01"
+          },
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.stroke.PlayCircle02"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingFilesPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingMcpPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.FileImport"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingModelPage.kt",
+        "matches": [
+          {
+            "line": 59,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 60,
+            "text": "import me.rerere.hugeicons.stroke.Brain02"
+          },
+          {
+            "line": 61,
+            "text": "import me.rerere.hugeicons.stroke.FileZip"
+          },
+          {
+            "line": 62,
+            "text": "import me.rerere.hugeicons.stroke.MagicWand01"
+          },
+          {
+            "line": 63,
+            "text": "import me.rerere.hugeicons.stroke.Message01"
+          },
+          {
+            "line": 64,
+            "text": "import me.rerere.hugeicons.stroke.MessageMultiple01"
+          },
+          {
+            "line": 65,
+            "text": "import me.rerere.hugeicons.stroke.Notebook01"
+          },
+          {
+            "line": 66,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 67,
+            "text": "import me.rerere.hugeicons.stroke.View"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingPage.kt",
+        "matches": [
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.stroke.AiMagic"
+          },
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.Brain02"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.ChartHistogram"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 47,
+            "text": "import me.rerere.hugeicons.stroke.Database02"
+          },
+          {
+            "line": 48,
+            "text": "import me.rerere.hugeicons.stroke.Developer"
+          },
+          {
+            "line": 49,
+            "text": "import me.rerere.hugeicons.stroke.GlobalSearch"
+          },
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.stroke.ImageUpload"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.LookTop"
+          },
+          {
+            "line": 52,
+            "text": "import me.rerere.hugeicons.stroke.Megaphone01"
+          },
+          {
+            "line": 53,
+            "text": "import me.rerere.hugeicons.stroke.Package"
+          },
+          {
+            "line": 54,
+            "text": "import me.rerere.hugeicons.stroke.Rocket01"
+          },
+          {
+            "line": 55,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          },
+          {
+            "line": 56,
+            "text": "import me.rerere.hugeicons.stroke.Sun01"
+          },
+          {
+            "line": 57,
+            "text": "import me.rerere.hugeicons.stroke.WavingHand01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderConfigPage.kt",
+        "matches": [
+          {
+            "line": 99,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 100,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 101,
+            "text": "import me.rerere.hugeicons.stroke.PowerService"
+          },
+          {
+            "line": 102,
+            "text": "import me.rerere.hugeicons.stroke.Refresh03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelSettingsForm.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderModelTabPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingProviderPage.kt",
+        "matches": [
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Camera01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Image02"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.ChartBarLine"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Share01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSandboxPage.kt",
+        "matches": [
+          {
+            "line": 38,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 39,
+            "text": "import me.rerere.hugeicons.stroke.Code"
+          },
+          {
+            "line": 40,
+            "text": "import me.rerere.hugeicons.stroke.Database02"
+          },
+          {
+            "line": 41,
+            "text": "import me.rerere.hugeicons.stroke.ServerStack01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSearchPage.kt",
+        "matches": [
+          {
+            "line": 25,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 26,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSlidesFontPage.kt",
+        "matches": [
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSystemAccessPage.kt",
+        "matches": [
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 44,
+            "text": "import me.rerere.hugeicons.stroke.Alert01"
+          },
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.stroke.File02"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Settings03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingTTSPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.StopCircle"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.DragDropHorizontal"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Edit01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Add01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          },
+          {
+            "line": 9,
+            "text": "import me.rerere.hugeicons.stroke.Delete01"
+          },
+          {
+            "line": 10,
+            "text": "import me.rerere.hugeicons.stroke.VolumeHigh"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/BalanceOption.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ArrowDown01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.ArrowUp01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Refresh03"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderConnectionTester.kt",
+        "matches": [
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.Connect"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderRedesignPrimitives.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.Cancel01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Copy01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.View"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.ViewOff"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/components/ProviderTemplatePickerSheet.kt",
+        "matches": [
+          {
+            "line": 50,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 51,
+            "text": "import me.rerere.hugeicons.stroke.SlidersHorizontal"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/stats/StatsPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ChartColumn"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Cpu"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Message01"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Rocket01"
+          },
+          {
+            "line": 8,
+            "text": "import me.rerere.hugeicons.stroke.Zap"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/synara/SynaraConnectPage.kt",
+        "matches": [
+          {
+            "line": 45,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 46,
+            "text": "import me.rerere.hugeicons.stroke.QrCodeScan"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/webview/WebViewPage.kt",
+        "matches": [
+          {
+            "line": 3,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 4,
+            "text": "import me.rerere.hugeicons.stroke.ArrowRight01"
+          },
+          {
+            "line": 5,
+            "text": "import me.rerere.hugeicons.stroke.Bug01"
+          },
+          {
+            "line": 6,
+            "text": "import me.rerere.hugeicons.stroke.Earth"
+          },
+          {
+            "line": 7,
+            "text": "import me.rerere.hugeicons.stroke.Refresh01"
+          },
+          {
+            "line": 36,
+            "text": "import me.rerere.hugeicons.stroke.MoreVertical"
+          }
+        ]
+      },
+      {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/zcode/ZCodePage.kt",
+        "matches": [
+          {
+            "line": 42,
+            "text": "import me.rerere.hugeicons.HugeIcons"
+          },
+          {
+            "line": 43,
+            "text": "import me.rerere.hugeicons.stroke.QrCodeScan"
+          }
+        ]
+      },
+      {
+        "path": "gradle/libs.versions.toml",
+        "matches": [
+          {
+            "line": 79,
+            "text": "jlatexmath = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath\", version.ref = \"jlatexmath\" }"
+          },
+          {
+            "line": 80,
+            "text": "jlatexmath-font-greek = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath-font-greek\", version.ref = \"jlatexmath\" }"
+          },
+          {
+            "line": 81,
+            "text": "jlatexmath-font-cyrillic = { module = \"com.github.rikkahub.jlatexmath-android:jlatexmath-font-cyrillic\", version.ref = \"jlatexmath\" }"
+          },
+          {
+            "line": 115,
+            "text": "jetbrains-markdown = { module = \"com.github.rikkahub:markdown\", version.ref = \"markdown\" }"
+          },
+          {
+            "line": 137,
+            "text": "huge-icons = { group = \"com.github.rikkahub\", name = \"hugeicons-compose\", version.ref = \"huge-icons\" }"
+          },
+          {
+            "line": 188,
+            "text": "sqlite-android = { module = \"com.github.rikkahub:sqlite-android\", version.ref = \"sqlite-android\" }"
+          }
+        ]
+      }
+    ],
+    "search_legacy_route": {
+      "registry_and_serial_tag": {
+        "path": "search/src/main/java/app/amber/search/SearchService.kt",
+        "matches": [
+          {
+            "line": 63,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> AmberAgentSearchService"
+          },
+          {
+            "line": 142,
+            "text": "AmberAgentSearchOptions::class to \"AmberAgent\","
+          },
+          {
+            "line": 277,
+            "text": "@SerialName(\"amber_agent\")"
+          },
+          {
+            "line": 278,
+            "text": "data class AmberAgentSearchOptions("
+          }
+        ]
+      },
+      "endpoint_owner": {
+        "path": "search/src/main/java/app/amber/search/AmberAgentSearchService.kt",
+        "matches": [
+          {
+            "line": 22,
+            "text": "object AmberAgentSearchService : SearchService<SearchServiceOptions.AmberAgentSearchOptions> {"
+          },
+          {
+            "line": 46,
+            "text": "serviceOptions: SearchServiceOptions.AmberAgentSearchOptions"
+          },
+          {
+            "line": 58,
+            "text": ".url(\"https://api.rikka-ai.com/v1/search\")"
+          },
+          {
+            "line": 93,
+            "text": "serviceOptions: SearchServiceOptions.AmberAgentSearchOptions"
+          }
+        ]
+      },
+      "settings_editor": {
+        "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingSearchServiceEditorSheet.kt",
+        "matches": [
+          {
+            "line": 218,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> {"
+          },
+          {
+            "line": 219,
+            "text": "AmberAgentSearchOptions(options) { onUpdateOptions(it) }"
+          },
+          {
+            "line": 810,
+            "text": "private fun AmberAgentSearchOptions("
+          },
+          {
+            "line": 811,
+            "text": "options: SearchServiceOptions.AmberAgentSearchOptions,"
+          },
+          {
+            "line": 812,
+            "text": "onUpdateOptions: (SearchServiceOptions.AmberAgentSearchOptions) -> Unit"
+          }
+        ]
+      },
+      "settings_persistence": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/SearchPrefs.kt",
+        "matches": [
+          {
+            "line": 25,
+            "text": "val searchServices: List<SearchServiceOptions> = listOf(SearchServiceOptions.DEFAULT),"
+          },
+          {
+            "line": 66,
+            "text": "searchServices = p[PreferencesKeys.SEARCH_SERVICES]?.let { raw ->"
+          },
+          {
+            "line": 89,
+            "text": "p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(data.searchServices)"
+          }
+        ]
+      },
+      "secret_redaction": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/secret/SecretRedactor.kt",
+        "matches": [
+          {
+            "line": 262,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> service.copy("
+          },
+          {
+            "line": 639,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> service.copy("
+          }
+        ]
+      },
+      "secret_migration": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/secret/SettingsSecretMigrator.kt",
+        "matches": [
+          {
+            "line": 16,
+            "text": "import app.amber.search.SearchServiceOptions"
+          },
+          {
+            "line": 66,
+            "text": "val searchServices = searchJson?.decodeJsonOrNull<List<SearchServiceOptions>>() ?: emptyList()"
+          },
+          {
+            "line": 67,
+            "text": "val redactedSearch = redactor.redactSearchServices(searchServices, existingRefs, out)"
+          }
+        ]
+      },
+      "settings_normalization": {
+        "path": "core/settings/src/main/kotlin/app/amber/core/settings/prefs/SettingsAggregator.kt",
+        "matches": [
+          {
+            "line": 119,
+            "text": "searchServices = settingsForWrite.searchServices,"
+          },
+          {
+            "line": 152,
+            "text": "p[PreferencesKeys.SEARCH_SERVICES] = JsonInstant.encodeToString(redacted.searchServices)"
+          },
+          {
+            "line": 155,
+            "text": "p[PreferencesKeys.SEARCH_SELECTED] = if (settings.searchServices.isEmpty()) {"
+          },
+          {
+            "line": 158,
+            "text": "settings.searchServiceSelected.coerceIn(0, settings.searchServices.lastIndex)"
+          },
+          {
+            "line": 161,
+            "text": "settings.searchEnabledServiceIds.filter { id ->"
+          },
+          {
+            "line": 162,
+            "text": "settings.searchServices.any { service -> service.id == id }"
+          },
+          {
+            "line": 291,
+            "text": "searchServices = search.searchServices,"
+          },
+          {
+            "line": 294,
+            "text": "searchEnabledServiceIds = search.searchEnabledServiceIds,"
+          },
+          {
+            "line": 431,
+            "text": "* - Filter searchEnabledServiceIds — only services that still exist survive"
+          },
+          {
+            "line": 447,
+            "text": "val cleanedSearchSelected = if (migratedSettings.searchServices.isEmpty()) {"
+          },
+          {
+            "line": 450,
+            "text": "migratedSettings.searchServiceSelected.coerceIn(0, migratedSettings.searchServices.lastIndex)"
+          },
+          {
+            "line": 452,
+            "text": "val cleanedSearchEnabledIds = migratedSettings.searchEnabledServiceIds"
+          },
+          {
+            "line": 453,
+            "text": ".filter { id -> migratedSettings.searchServices.any { service -> service.id == id } }"
+          },
+          {
+            "line": 455,
+            "text": "migratedSettings.searchServices.getOrNull(cleanedSearchSelected)"
+          },
+          {
+            "line": 461,
+            "text": "searchEnabledServiceIds = cleanedSearchEnabledIds,"
+          }
+        ]
+      },
+      "tool_selector_alias": {
+        "path": "app/src/main/java/app/amber/core/ai/tools/SearchAggregator.kt",
+        "matches": [
+          {
+            "line": 316,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> listOf(\"amber_agent\", \"amberagent\")"
+          }
+        ]
+      },
+      "tool_availability": {
+        "path": "app/src/main/java/app/amber/core/ai/tools/SearchOrchestrator.kt",
+        "matches": [
+          {
+            "line": 867,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> options.apiKey.isNotBlank()"
+          }
+        ]
+      },
+      "deepread_priority": {
+        "path": "app/src/main/java/app/amber/feature/board/hotlist/deepread/DeepReadSourcePrefetcher.kt",
+        "matches": [
+          {
+            "line": 819,
+            "text": "is SearchServiceOptions.AmberAgentSearchOptions -> if (apiKey.isNotBlank()) 66 else 0"
+          }
+        ]
+      }
+    },
+    "about_current_product_links": {
+      "path": "app/src/main/java/app/amber/feature/ui/pages/setting/SettingAboutPage.kt",
+      "matches": [
+        {
+          "line": 165,
+          "text": "onClick = { context.openUrl(\"https://github.com/rikkahub/rikkahub\") },"
+        },
+        {
+          "line": 171,
+          "text": "onClick = { context.openUrl(\"https://github.com/rikkahub/rikkahub/blob/master/LICENSE\") },"
+        }
+      ]
+    },
+    "dynamic_asset_route": {
+      "matcher": [
+        {
+          "line": 54,
+          "text": "PATTERN_AMBERAGENT.containsMatchIn(lowerName) -> \"amberagent.svg\""
+        },
+        {
+          "line": 71,
+          "text": "private val PATTERN_AMBERAGENT = Regex(\"amberagent|rikka|auto\")"
+        }
+      ],
+      "loader": [
+        {
+          "line": 25,
+          "text": "import app.amber.core.utils.computeAIIconByName"
+        },
+        {
+          "line": 40,
+          "text": ".data(\"file:///android_asset/icons/$path\")"
+        },
+        {
+          "line": 70,
+          "text": "val path = remember(name) { computeAIIconByName(name) } ?: run {"
+        }
+      ]
+    }
+  },
+  "assets": [
+    {
+      "path": "app/src/main/assets/icons/rikkahub.svg",
+      "sha256": "bdacf8171091d3880df6eeb2058324b3b9fc01f5fb2ede10daf2d7fea87b3889",
+      "name_hit": true,
+      "payload_hit": false
+    }
+  ],
+  "artifacts": [],
+  "notice_sbom": {
+    "status": "missing",
+    "files": [],
+    "file_count": 0,
+    "unknown_occurrences": null,
+    "root_license": {
+      "path": "LICENSE",
+      "present": true,
+      "sha256": "0397e25cc3c3eb04eda3270d8e95fd09f49a6532cbb4c4b18e53cabe692b9c86"
+    }
+  },
+  "device_evidence": {
+    "simulator_ui": "not verified by this manifest",
+    "physical_device_ui": "not verified by this manifest",
+    "database_upgrade": "not verified by this manifest",
+    "kill_relaunch": "not verified by this manifest"
+  }
+}

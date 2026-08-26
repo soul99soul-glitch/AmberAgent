@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "amber_head": "701e8c634ababe12fc1a0d03beccb36b2b55a0ca",
+  "rikka_head": "b270766f06671d7456ce3d248622dc667648b6d1",
+  "scope": "Android production chat and provider kernel defined by the execution plan",
+  "legacy_owner_production_references": {
+    "Provider": 0,
+    "ProviderManager": 0,
+    "GenerationHandler": 0
+  },
+  "similarity": [
+    { "id": "provider_contract", "ordered_pct": 33.1, "amber_shingle_pct": 18.8, "longest_block": 3, "classification": "small public gateway interface signatures; no control flow" },
+    { "id": "generation_requests", "ordered_pct": 50.8, "amber_shingle_pct": 45.2, "longest_block": 10, "classification": "plain request DTO fields and defaults; no protocol parser or run control flow" },
+    { "id": "provider_catalog", "ordered_pct": 43.9, "amber_shingle_pct": 2.2, "longest_block": 0, "classification": "independent registry; below both review gates" },
+    { "id": "openai_provider", "ordered_pct": 34.4, "amber_shingle_pct": 15.2, "longest_block": 25, "classification": "existing Amber OpenAI implementation; longest block is the optional balance HTTP request, not generation/run ownership" },
+    { "id": "claude_provider", "ordered_pct": 30.5, "amber_shingle_pct": 39.9, "longest_block": 15, "classification": "official Anthropic HTTP request transport; request/response mapping lives only in the new adapter" },
+    { "id": "anthropic_messages_adapter", "ordered_pct": 20.7, "amber_shingle_pct": 11.0, "longest_block": 6, "classification": "independent wire adapter; no long code island" },
+    { "id": "google_provider", "ordered_pct": 31.6, "amber_shingle_pct": 35.5, "longest_block": 21, "classification": "Google authentication and image predict HTTP transport; text mapping lives only in the new adapter" },
+    { "id": "gemini_generate_content_adapter", "ordered_pct": 29.5, "amber_shingle_pct": 13.5, "longest_block": 7, "classification": "independent wire adapter; no long code island" },
+    { "id": "generation_handler", "ordered_pct": 32.4, "amber_shingle_pct": 7.4, "longest_block": 11, "classification": "ChatRunCoordinator owns the run; residual blocks are common API wiring and below the 12-line gate" },
+    { "id": "chat_service", "ordered_pct": 30.4, "amber_shingle_pct": 7.6, "longest_block": 10, "classification": "residual blocks are imports, transformer registration, public signatures and generic coroutine tails" }
+  ],
+  "verification": {
+    "ai_test_debug_unit_test": "passed",
+    "app_focused_unit_tests": "passed",
+    "app_compile_debug_kotlin": "passed",
+    "app_assemble_debug": "passed",
+    "git_diff_check": "passed",
+    "connected_android_devices": 0,
+    "real_provider_smoke": "not run: no test credential was used",
+    "background_kill_relaunch": "not run: no connected device or emulator"
+  },
+  "artifacts": [
+    {
+      "path": "app/build/outputs/apk/debug/app-universal-debug.apk",
+      "sha256": "0fb710df683020082bdc5474cfe7ccbdf0b0f952d307a5dfded780429c40299c"
+    },
+    {
+      "path": "app/build/outputs/apk/debug/app-arm64-v8a-debug.apk",
+      "sha256": "0fb710df683020082bdc5474cfe7ccbdf0b0f952d307a5dfded780429c40299c"
+    }
+  ],
+  "final_subagent_review": {
+    "decision": "GO for the scoped Android production chat/provider kernel",
+    "critical": 0,
+    "high": 0,
+    "medium": 0,
+    "low": 2,
+    "low_boundaries": [
+      "TextModelGateway retains the existing getBalance TODO default for non-OpenAI providers; this is not a generation fallback and remains a separate provider-capability cleanup item",
+      "historical test names/comments and the disabled useKernelPath branch are not production legacy owners"
+    ]
+  },
+  "ui_review": {
+    "layout_diff_in_in_scope_surfaces": false,
+    "static_result": "no in-scope alignment, spacing, size, crop or touch-target regression found",
+    "device_visual_result": "not run: no connected device or emulator",
+    "excluded_external_wip": "ChatPage, ChatMessageTools, Switch, WorkspaceStyle and other paths tracked by the current manifest"
+  },
+  "product_wide_residuals_outside_this_plan": {
+    "resolved_rikka_maven_coordinates": 6,
+    "source_files_importing_me_rerere_hugeicons": 112,
+    "rikka_search_endpoint": "https://api.rikka-ai.com/v1/search",
+    "about_links_to_rikkahub": 2,
+    "packaged_rikkahub_asset": "assets/icons/rikkahub.svg",
+    "conclusion": "chat-kernel replacement is complete; product-wide provenance, dependency, endpoint, branding and legal detachment is not achieved by this scoped plan"
+  }
+}

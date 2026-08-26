@@ -1,0 +1,262 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-08-24T18:51:31Z",
+  "scope": "Detachment-affected components resolved on app:debugRuntimeClasspath and app:releaseRuntimeClasspath, their two Lucide Android variants, and AmberAgent-derived JLaTeXMath assets; not an exhaustive whole-application SBOM",
+  "unknown_count": 0,
+  "historical_noassertion_count": 1,
+  "license_ref_validation": {
+    "referenced": [
+      "LicenseRef-JLaTeXMath-Font-Licenses",
+      "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception",
+      "LicenseRef-Knuth-Font-License"
+    ],
+    "defined": [
+      "LicenseRef-JLaTeXMath-Font-Licenses",
+      "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception",
+      "LicenseRef-Knuth-Font-License"
+    ],
+    "unresolved_count": 0
+  },
+  "license_refs": [
+    {
+      "id": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception",
+      "definition": "GNU GPL version 2 or later plus the JLaTeXMath linking exception reproduced in the upstream v0.2.0 LICENSE",
+      "source": "https://github.com/noties/jlatexmath-android/blob/v0.2.0/LICENSE",
+      "packaged_path": "app/src/main/assets/licenses/jlatexmath/LICENSE",
+      "sha256": "55a1524c2889cd2e2cdc9c345090973798782923e0dc022cb7e55e0dc2ba6e2a"
+    },
+    {
+      "id": "LicenseRef-JLaTeXMath-Font-Licenses",
+      "definition": "Upstream v0.2.0 font bundle summary: AMS fonts under OFL-1.1, Computer Modern and Cyrillic fonts under Knuth terms, Greek fonts under GPL-2.0-only, dsrom under its stated free-use terms, and stmary/rsfs identified by upstream as public domain",
+      "summary_source": "https://github.com/noties/jlatexmath-android/blob/v0.2.0/LICENSE",
+      "summary_packaged_path": "app/src/main/assets/licenses/jlatexmath/LICENSE",
+      "summary_sha256": "55a1524c2889cd2e2cdc9c345090973798782923e0dc022cb7e55e0dc2ba6e2a",
+      "full_text_paths": [
+        "app/src/main/assets/licenses/jlatexmath/COPYING",
+        "app/src/main/assets/licenses/jlatexmath/fonts/Knuth_License.txt",
+        "app/src/main/assets/licenses/jlatexmath/fonts/License_for_dsrom.txt",
+        "app/src/main/assets/licenses/jlatexmath/fonts/OFL.txt"
+      ]
+    },
+    {
+      "id": "LicenseRef-Knuth-Font-License",
+      "definition": "Knuth font terms distributed by JLaTeXMath; modified fonts must carry a different name",
+      "source": "https://github.com/noties/jlatexmath-android/blob/v0.2.0/jlatexmath/src/main/resources/org/scilab/forge/jlatexmath/fonts/licences/Knuth_License.txt",
+      "packaged_path": "app/src/main/assets/licenses/jlatexmath/fonts/Knuth_License.txt",
+      "sha256": "8dfa2050f50d341636748e7ab0ed175dde130e33d722678cfa99351c6aded331"
+    }
+  ],
+  "components": [
+    {
+      "purl": "pkg:maven/org.jetbrains/markdown@0.7.8",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "license_concluded": "Apache-2.0",
+      "source": "https://github.com/JetBrains/markdown",
+      "artifact_sha256": "9c59543bacabd5da25a89cb686931ce7ef635cabb27bd6c0a34f8dcaa06c110a"
+    },
+    {
+      "purl": "pkg:maven/com.composables/icons-lucide@1.1.0",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": false,
+      "role": "requested Gradle metadata coordinate; Android runtime artifacts are the two available-at variants below",
+      "license_concluded": "MIT AND ISC",
+      "source": "https://github.com/composablehorizons/compose-icons",
+      "content_source": "https://github.com/lucide-icons/lucide",
+      "source_license_sha256": "9e0f7f25e430a2e3608394e8c8648aa100bdc8e4721169fc27517c90ff4821d9",
+      "content_license_sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+      "gradle_module_metadata_sha256": "578871722d305ed8446b467c54cdf52f7e7566eb1abf5c7ee80a26e9ba396411",
+      "sources_sha256": "796dc281b54b64a44648dc876342cedc1473488c3c94a256c32ee6b8e5691c08"
+    },
+    {
+      "purl": "pkg:maven/com.composables/icons-lucide-android-debug@1.1.0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "selected_variant": "debugRuntimeElements-published",
+      "license_concluded": "MIT AND ISC",
+      "source": "https://github.com/composablehorizons/compose-icons",
+      "content_source": "https://github.com/lucide-icons/lucide",
+      "artifact_sha256": "3c3a3bcd7499f9239933eb62e842d10ca1dc1359c0a0b06e9d9366db9b3344dd",
+      "gradle_module_metadata_sha256": "66b7a06cd6c974e00e9f6843ed2f90f5bebd246921e5b70097ee022268f469f5"
+    },
+    {
+      "purl": "pkg:maven/com.composables/icons-lucide-android@1.1.0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "selected_variant": "releaseRuntimeElements-published",
+      "license_concluded": "MIT AND ISC",
+      "source": "https://github.com/composablehorizons/compose-icons",
+      "content_source": "https://github.com/lucide-icons/lucide",
+      "artifact_source": "https://repo1.maven.org/maven2/com/composables/icons-lucide-android/1.1.0/icons-lucide-android-1.1.0.aar",
+      "artifact_sha256": "c8939093d4228360f46da82a43843c57531186975d40934e219f1c18f5a1d9a1",
+      "gradle_module_metadata_sha256": "93c1ac6bbe7aa7651b690c63bce57bf56490812bd1e6f61b5042f0fdb1ef6ad9"
+    },
+    {
+      "purl": "pkg:maven/ru.noties/jlatexmath-android@0.2.0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception AND LicenseRef-JLaTeXMath-Font-Licenses",
+      "source": "https://github.com/noties/jlatexmath-android/tree/v0.2.0",
+      "artifact_sha256": "b16824328d45ed86892f7f8aa74a542fc361b8a94004de8ca5ae86113b78a89f"
+    },
+    {
+      "purl": "pkg:maven/ru.noties/jlatexmath-android-font-greek@0.2.0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "license_concluded": "GPL-2.0-only",
+      "license_evidence": [
+        {
+          "kind": "published Maven POM",
+          "path": "Gradle cache ru.noties:jlatexmath-android-font-greek:0.2.0 POM",
+          "sha256": "235f62b1cccaa9bd1280cd3e77a187fde820edf345f9051404721ba001cc343c",
+          "statement": "GNU General Public License, version 2"
+        },
+        {
+          "kind": "packaged upstream font-license summary",
+          "path": "app/src/main/assets/licenses/jlatexmath/LICENSE",
+          "sha256": "55a1524c2889cd2e2cdc9c345090973798782923e0dc022cb7e55e0dc2ba6e2a",
+          "statement": "Greek fonts are under GNU GPL version 2"
+        },
+        {
+          "kind": "packaged full license text",
+          "path": "app/src/main/assets/licenses/jlatexmath/COPYING",
+          "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f"
+        }
+      ],
+      "source": "https://github.com/noties/jlatexmath-android/tree/v0.2.0/jlatexmath-font-greek",
+      "artifact_sha256": "d4216f88b65e3a6d296f886bf3c43f548d08dca845d8b64801461719d2085d89"
+    },
+    {
+      "purl": "pkg:maven/ru.noties/jlatexmath-android-font-cyrillic@0.2.0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception AND LicenseRef-Knuth-Font-License",
+      "source": "https://github.com/noties/jlatexmath-android/tree/v0.2.0/jlatexmath-font-cyrillic",
+      "artifact_sha256": "d76f042f6dc91217dd5e94e28018703747519173b3ea3df46b4379985f502b75"
+    },
+    {
+      "purl": "pkg:maven/com.github.requery/sqlite-android@0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0?type=aar",
+      "resolved": true,
+      "resolved_on": [
+        "app:debugRuntimeClasspath",
+        "app:releaseRuntimeClasspath"
+      ],
+      "runtime_component": true,
+      "license_concluded": "Apache-2.0",
+      "source": "https://github.com/requery/sqlite-android/tree/0bbaa7a8b4c485c0d4b385425113fe33ead6c3c0",
+      "artifact_sha256": "8fadf3d6152832c18d2e907a826cb797d419e9cb2ade172f29674dee4fdd66e7"
+    }
+  ],
+  "packaged_license_files": [
+    {
+      "path": "app/src/main/assets/licenses/compose-icons/LICENSE",
+      "sha256": "2477a8b645bceb59fcb5198ceb3e54e50e8fbcdd29bb0352afb0c257d475465c",
+      "covers": "Compose Icons MIT"
+    },
+    {
+      "path": "app/src/main/assets/licenses/lucide/LICENSE",
+      "sha256": "b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57",
+      "covers": "Lucide ISC and Feather-derived icon MIT attribution, Copyright (c) 2013-present Cole Bemis"
+    },
+    {
+      "path": "app/src/main/assets/licenses/jlatexmath/LICENSE",
+      "sha256": "55a1524c2889cd2e2cdc9c345090973798782923e0dc022cb7e55e0dc2ba6e2a",
+      "covers": "JLaTeXMath copyright holders, GPL-2.0-or-later linking exception, and font-license summary"
+    },
+    {
+      "path": "app/src/main/assets/licenses/jlatexmath/COPYING",
+      "sha256": "df84246204e3c54cd24aebbc23714235f5fc41d754d53b65444a2afbf070130f",
+      "covers": "GNU GPL version 2 full text"
+    },
+    {
+      "path": "app/src/main/assets/licenses/jlatexmath/fonts/Knuth_License.txt",
+      "sha256": "8dfa2050f50d341636748e7ab0ed175dde130e33d722678cfa99351c6aded331",
+      "covers": "Computer Modern and Cyrillic font naming terms"
+    },
+    {
+      "path": "app/src/main/assets/licenses/jlatexmath/fonts/License_for_dsrom.txt",
+      "sha256": "6c4321c24c91ce63ce7f77286207eddf59066b1daa9e393f3e697d578ce4789e",
+      "covers": "dsrom font free-use terms"
+    },
+    {
+      "path": "app/src/main/assets/licenses/jlatexmath/fonts/OFL.txt",
+      "sha256": "c5f826ca32b56a30e0f22467be9f51068b747a6e461314b7650238c3b90ee819",
+      "covers": "AMS font copyright, OFL-1.1 full text, and Reserved Font Names"
+    }
+  ],
+  "derived_assets": [
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/base/jlm_amsfonts.map.xml",
+      "sha256": "6850565d66bfaa0e3e34d583b09d074964133f88c79a6a1c866eccd2e3535a51",
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception"
+    },
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/base/jlm_base.map.xml",
+      "sha256": "131de02ba07de996f9274abed0d33fc867a52d736d12fa73bb2af5153d229400",
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception"
+    },
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/latin/amber_jlm_cmr10_pua.ttf",
+      "sha256": "09e56174aa7ac007f7756826489d4474df5e31c4c3432866883be0efb48ac06c",
+      "license_concluded": "LicenseRef-Knuth-Font-License",
+      "modification": "renamed modified font; duplicated the existing Omega glyph at U+E000"
+    },
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/latin/jlm_cmr10.xml",
+      "sha256": "308e39d287d7fd02c747153d4c8556f6a0b992b8580482c46f423ffb73347c9b",
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception"
+    },
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/maths/amber_jlm_msam10_pua.ttf",
+      "sha256": "039014f4665ff2ad820769823371c5088d4728077990d5a16a402a75a6ed838e",
+      "license_concluded": "OFL-1.1",
+      "modification": "renamed modified font; duplicated the existing rightleftharpoons glyph at U+E001"
+    },
+    {
+      "path": "app/src/main/assets/org/scilab/forge/jlatexmath/fonts/maths/jlm_msam10.xml",
+      "sha256": "e2f3c16c1b697d98fdeea4c77d43c3c08a56cefcec798ccee1857fcb4b3eead6",
+      "license_concluded": "LicenseRef-JLaTeXMath-GPL-2.0-or-later-with-linking-exception"
+    }
+  ],
+  "historical_provenance": {
+    "project": "RikkaHub",
+    "reference": "https://github.com/rikkahub/rikkahub/tree/b270766f06671d7456ce3d248622dc667648b6d1",
+    "runtime_component": false,
+    "sbom_scope": "out_of_scope_historical_provenance",
+    "license_concluded": "NOASSERTION",
+    "license_evidence_source": "https://raw.githubusercontent.com/rikkahub/rikkahub/b270766f06671d7456ce3d248622dc667648b6d1/LICENSE",
+    "license_evidence_sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+    "reason": "Recorded only to preserve fork provenance. License obligations for inherited files require file/history-specific analysis and are not concluded by this detachment SBOM; no legal clearance is asserted.",
+    "notice_required": true
+  },
+  "unverified_evidence": [
+    "APK/AAB packaging and merged-asset inspection unavailable because Android SDK is not installed",
+    "About/license screen and Lucide/JLaTeXMath rendering remain unverified on emulator or physical device"
+  ]
+}
