@@ -845,6 +845,7 @@ struct ChatPage {
   private pendingQueue: PendingUserMessage[] = [];
   private pendingDrainActive: boolean = false;
   private appendActive: boolean = false;
+  private initialImagePickerConsumed: boolean = false;
   private pickerToken: number = 0;
   @State materializingImages: boolean = false;
   // D-050:重试状态文案(strings.xml:386;null = 清除)
@@ -1098,6 +1099,11 @@ struct ChatPage {
   onPageShow(): void {
     this.pageVisible = true;
     this.themeTick = Date.now();
+    if (this.cursorTimer === -1) {
+      this.cursorTimer = setInterval((): void => {
+        if (this.pageAlive && this.pageVisible) this.cursorOn = !this.cursorOn;
+      }, 525);
+    }
     this.attachKeyboardListener();
     // D-070 补:从搜索设置页返回后重载偏好,否则继续用旧工具组/旧开关
     this.refreshSearchSettings();
@@ -1135,6 +1141,10 @@ struct ChatPage {
 
   onPageHide(): void {
     this.pageVisible = false;
+    if (this.cursorTimer !== -1) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = -1;
+    }
     this.detachKeyboardListener();
     this.imeKeyboardHeightVp = 0;
   }
@@ -1435,9 +1445,21 @@ struct ChatPage {
         this.applyInitialScroll(-1);
         // 消费首页传入的 initialText(首页输入框发送);无则显示空状态 hero(不自动发送)
         const initialText: string = params ? (params['initialText'] ?? '') : '';
+        const sendMode: string = params ? (params['sendMode'] ?? 'send') : 'send';
+        const openImagePicker: boolean = params ? params['openImagePicker'] === 'true' : false;
         if (initialText.length > 0) {
           this.inputText = initialText;
-          this.send();
+          if (sendMode === 'append') {
+            this.sendWithoutAnswer();
+          } else {
+            this.send();
+          }
+        }
+        if (openImagePicker && !this.initialImagePickerConsumed && this.pageAlive) {
+          this.initialImagePickerConsumed = true;
+          setTimeout((): void => {
+            if (this.pageAlive && this.pageVisible) this.pickImages();
+          }, 0);
         }
       });
     }

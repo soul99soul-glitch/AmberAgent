@@ -1,28 +1,25 @@
-// Index — 首页(对齐 Amber Redesign HomeScreen)
+// Index — 首页(对齐 Android 首屏基准)
 //
-// 设计来源: aa-chat.jsx HomeScreen
-// 结构: ChatHeader(无 meter) + 居中 hero(amber wordmark + 问候 + 副标题 + 建议芯片) + InputBar
-// 当有历史会话时: ChatHeader + 会话列表(SessionRow) + InputBar
-//
-// 导航:
-//   左上 history icon → ChatListPage(完整会话列表)
-//   右上 edit icon → 新对话
-//   芯片点击 → 填入输入框
-//   输入框回车 → ChatPage
+// 首页只负责新会话入口和最近会话列表。模型选择与图片物化仍由既有页面承接,
+// 以保持首页与 ChatPage 的发送/附件行为一致。
 
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { ConversationSummary } from '@amber/chat-domain';
-import { getChatRepository } from '../di/AppContainer.ets';
-import { SearchField } from '../components/ui/SearchField.ets';
-import { SectionHeader, PageSpacer, SessionRowItem } from '../components/PageTemplate.ets';
+import { getChatRepository, describeChatModel } from '../di/AppContainer.ets';
 import {
-  INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
-  ACCENT, ACCENT_INK, ACCENT_LIGHT,
-  TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
+  INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
 
-// 问候语(根据时间)
+// Index-specific values: keep new hierarchy values together until they become shared tokens.
+const HEADER_HEIGHT: number = 56;
+const TOUCH_SIZE: number = 46;
+const COMPOSER_GAP: number = 9;
+const COMPOSER_MIN_HEIGHT: number = 46;
+const COMPOSER_MAX_HEIGHT: number = 111;
+const COMPOSER_VERTICAL_PADDING: number = 18;
+const CHIP_LINE_HEIGHT: number = 18;
+
 const greetingMessage = (): string => {
   const hour: number = new Date().getHours();
   if (hour < 6) return '夜深了，光';
@@ -31,7 +28,6 @@ const greetingMessage = (): string => {
   return '晚上好，光';
 };
 
-// 建议芯片
 const SUGGESTIONS: string[] = [
   '陪我把今天捋一捋',
   '解释一个概念',
@@ -39,53 +35,232 @@ const SUGGESTIONS: string[] = [
   '随便聊聊',
 ];
 
+// ArkUI accepts rgba strings; the accent is a user-selectable #RRGGBB token.
+const accentWithAlpha = (hex: string, alpha: number): string => {
+  const value: string = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const r: number = parseInt(value.substring(0, 2), 16);
+  const g: number = parseInt(value.substring(2, 4), 16);
+  const b: number = parseInt(value.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+@Component
+struct IndexSuggestionChip {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  @Prop label: string = '';
+  @State pressedScale: number = 1;
+  onSelect: () => void = (): void => {};
+
+  private setPressed(event: TouchEvent): void {
+    const pressed: boolean = event.type === TouchType.Down;
+    animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+      this.pressedScale = pressed ? 0.975 : 1;
+    });
+  }
+
+  build(): void {
+    Text(this.label)
+      .fontSize(12)
+      .fontWeight(FontWeight.Normal)
+      .lineHeight(CHIP_LINE_HEIGHT)
+      .fontColor(this.accentColorStore)
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+      .backgroundColor(SURFACE)
+      .borderRadius(50)
+      .border({ width: 1, color: accentWithAlpha(this.accentColorStore, 0.14) })
+      .scale({ x: this.pressedScale, y: this.pressedScale })
+      .onTouch((event: TouchEvent): void => { this.setPressed(event); })
+      .onClick((): void => { this.onSelect(); });
+  }
+}
+
+@Component
+struct IndexRecentRow {
+  @Prop title: string = '';
+  @Prop timeText: string = '';
+  onSelect: () => void = (): void => {};
+  build(): void {
+    Row() {
+      Text(this.title.length > 0 ? this.title : '未命名对话')
+        .fontSize(14)
+        .fontWeight(FontWeight.Normal)
+        .lineHeight(21)
+        .fontColor(INK)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+      Text(this.timeText)
+        .fontSize(12)
+        .fontWeight(FontWeight.Normal)
+        .lineHeight(16)
+        .fontColor(INK3)
+        .fontFamily('JetBrainsMono')
+        .textAlign(TextAlign.End)
+        .maxLines(1)
+        .margin({ left: 12 })
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 46 })
+    .padding(10)
+    .backgroundColor(Color.Transparent)
+    .onClick((): void => { this.onSelect(); });
+  }
+}
+
 @Entry
 @Component
 struct Index {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
+  @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State inputText: string = '';
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;
-  @State cursorVisible: boolean = true;
+  @State modelLabel: string = '';
+  @State cursorOpacity: number = 1;
+  @State inputFocused: boolean = false;
+  @State inputHeight: number = COMPOSER_MIN_HEIGHT;
+  @State inputFlashAlpha: number = 0;
+  @State attachScale: number = 1;
+  @State sendScale: number = 1;
   private cursorTimer: number = -1;
+  private pageAlive: boolean = false;
+  private pageVisible: boolean = false;
+  private keyboardHeightVp: number = 0;
+  private imeListenerAttached: boolean = false;
+  private imeWindow: window.Window | null = null;
 
   aboutToAppear(): void {
-    this.loadRecent();
+    this.pageAlive = true;
+    this.pageVisible = true;
     this.startCursorBlink();
+    this.loadRecent();
+    this.loadModelLabel();
+    this.attachKeyboardListener();
+  }
+
+  onPageShow(): void {
+    this.pageVisible = true;
+    this.startCursorBlink();
+    this.loadModelLabel();
+    this.attachKeyboardListener();
+  }
+
+  onPageHide(): void {
+    this.pageVisible = false;
+    this.stopCursorBlink();
+    this.detachKeyboardListener();
+    this.keyboardHeightVp = 0;
   }
 
   aboutToDisappear(): void {
-    if (this.cursorTimer >= 0) {
-      clearInterval(this.cursorTimer);
-      this.cursorTimer = -1;
-    }
+    this.pageAlive = false;
+    this.pageVisible = false;
+    this.stopCursorBlink();
+    this.detachKeyboardListener();
   }
 
   private startCursorBlink(): void {
+    this.stopCursorBlink();
+    this.cursorOpacity = 1;
     this.cursorTimer = setInterval((): void => {
-      this.cursorVisible = !this.cursorVisible;
+      if (this.pageAlive && this.pageVisible) {
+        this.cursorOpacity = this.cursorOpacity === 1 ? 0 : 1;
+      }
     }, 525);
   }
 
+  private stopCursorBlink(): void {
+    if (this.cursorTimer !== -1) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = -1;
+    }
+    this.cursorOpacity = 0;
+  }
+
+  private loadModelLabel(): void {
+    describeChatModel().then((label: string): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.modelLabel = label;
+    }).catch((): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.modelLabel = '';
+    });
+  }
+
   private loadRecent(): void {
-    const repo = getChatRepository();
-    repo.list().then((list: ConversationSummary[]): void => {
-      // 取最近 5 条非置顶
+    getChatRepository().list().then((list: ConversationSummary[]): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
       this.recentItems = list.slice(0, 5);
+      this.loaded = true;
+    }).catch((): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.recentItems = [];
       this.loaded = true;
     });
   }
 
-  private send(): void {
-    if (this.inputText.trim().length === 0) return;
+  private updateInputHeight(value: string): void {
+    const parts: string[] = value.split('\n');
+    let visualLines: number = 0;
+    for (const part of parts) {
+      visualLines += Math.max(1, Math.ceil(part.length / 24));
+    }
+    const lines: number = Math.min(4, Math.max(1, visualLines));
+    const target: number = Math.max(COMPOSER_MIN_HEIGHT,
+      Math.min(COMPOSER_MAX_HEIGHT, COMPOSER_MIN_HEIGHT + (lines - 1) * 21));
+    if (target === this.inputHeight) return;
+    animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.inputHeight = target;
+    });
+  }
+
+  private chooseSuggestion(value: string): void {
+    this.inputText = value;
+    this.updateInputHeight(value);
+    this.flashInputBorder();
+  }
+
+  private flashInputBorder(): void {
+    this.inputFlashAlpha = 1;
+    animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+      this.inputFlashAlpha = 0;
+    });
+  }
+
+  private inputBorderColor(): string {
+    if (this.inputFlashAlpha > 0) return accentWithAlpha(this.accentColorStore, this.inputFlashAlpha);
+    if (this.inputFocused) return accentWithAlpha(this.accentColorStore, 0.42);
+    return LINE;
+  }
+
+  private pressButton(which: boolean, event: TouchEvent): void {
+    const pressed: boolean = event.type === TouchType.Down;
+    animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+      if (which) this.attachScale = pressed ? 0.975 : 1;
+      else this.sendScale = pressed ? 0.975 : 1;
+    });
+  }
+
+  private send(sendMode: string = 'send'): void {
+    const text: string = this.inputText.trim();
+    if (text.length === 0) return;
     const params: Record<string, string> = {};
-    params['initialText'] = this.inputText.trim();
+    params['initialText'] = text;
+    params['sendMode'] = sendMode;
     router.replaceUrl({ url: 'pages/ChatPage', params: params });
   }
 
   private newConversation(): void {
     router.replaceUrl({ url: 'pages/ChatPage' });
+  }
+
+  private openImagePickerConversation(): void {
+    router.replaceUrl({ url: 'pages/ChatPage', params: { openImagePicker: 'true' } });
   }
 
   private openConversation(id: string): void {
@@ -102,9 +277,8 @@ struct Index {
 
   build(): void {
     Column() {
-      // ── ChatHeader(两行: 标题 + 模型行) ──
+      // Header content is 56vp; the system status inset is kept outside that height.
       Row() {
-        // 左: history icon(44 热区)
         Row() {
           Icon({ name: 'menu', iconSize: 22, color: INK2 })
         }
@@ -114,25 +288,31 @@ struct Index {
         .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
         .accessibilityText('打开会话列表')
 
-        // 中: 标题 + 模型(信息展示, 不可点击)
         Column() {
-            Text('新会话')
+          Text('新会话')
             .fontSize(TEXT_STYLES.sessionTitle.size)
             .fontWeight(TEXT_STYLES.sessionTitle.weight)
             .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
             .fontColor(INK)
-          Text('deepseek-v4-flash')
-            .fontSize(TEXT_STYLES.meta.size)
-            .fontWeight(TEXT_STYLES.meta.weight)
-            .lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontColor(INK3)
-            .fontFamily('JetBrainsMono')
-            .margin({ top: 1 })
+            .maxLines(1)
+          Row() {
+            Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
+              .fontSize(TINY)
+              .fontWeight(FontWeight.Normal)
+              .lineHeight(16)
+              .fontColor(this.modelLabel.length > 0 ? INK3 : INK4)
+              .fontFamily('JetBrainsMono')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Icon({ name: 'chevron_right', iconSize: 13, color: INK3 }).margin({ left: 4 })
+          }
+          .margin({ top: 1 })
+          // Simplified decision: reuse the existing full model picker route; TopModelMenu needs ChatPage session state.
+          .onClick((): void => { router.pushUrl({ url: 'pages/ChatModelPickerPage' }); })
         }
-        .alignItems(HorizontalAlign.Center)
         .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
 
-        // 右: edit icon(44 热区)
         Row() {
           Icon({ name: 'edit', iconSize: 20, color: INK2 })
         }
@@ -143,145 +323,200 @@ struct Index {
         .accessibilityText('新建会话')
       }
       .width('100%')
+      .height(HEADER_HEIGHT)
+      .padding({ left: 20, right: 20 })
       .alignItems(VerticalAlign.Center)
-      .padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
-      if (this.recentItems.length === 0 && this.loaded) {
-        // ── 空状态: 居中 hero ──
+      if (!this.loaded) {
         Column() {
-          // amber wordmark(等宽 + 闪烁光标)
+          LoadingProgress()
+            .width(28).height(28)
+            .color(this.accentColorStore)
+        }
+        .layoutWeight(1)
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else if (this.recentItems.length === 0) {
+        // Empty hero contains only the wordmark and greeting.
+        Column() {
           Row() {
             Text('amber')
-              .fontSize(30)
+              .fontSize(24)
               .fontWeight(FontWeight.Bold)
+              .lineHeight(18)
+              .letterSpacing(0)
               .fontColor(INK)
               .fontFamily('JetBrainsMono')
             Text('')
-              .width(8)
-              .height(24)
+              .width(9).height(20)
               .backgroundColor(this.accentColorStore)
               .borderRadius(1)
               .margin({ left: 2 })
-              .opacity(this.cursorVisible ? 1 : 0)
+              .opacity(this.cursorOpacity)
           }
-
-          // 问候语
+          .alignItems(VerticalAlign.Bottom)
           Text(greetingMessage())
-            .fontSize(21)
+            .fontSize(26)
             .fontWeight(FontWeight.Medium)
+            .lineHeight(36)
+            .letterSpacing(0.2)
             .fontColor(INK)
-            .margin({ top: 18 })
-
-          // 副标题
-          Text('今天想聊点什么？或者从下面挑一个开始。')
-            .fontSize(BODY2)
-            .fontColor(INK3)
             .textAlign(TextAlign.Center)
-            .margin({ top: 6 })
-            .maxLines(2)
-
-          // 建议芯片
-          Flex({ wrap: FlexWrap.Wrap, justifyContent: FlexAlign.Center }) {
-            ForEach(SUGGESTIONS, (s: string, idx: number): void => {
-              Text(s)
-                .fontSize(BODY2)
-                .fontColor(INK2)
-                .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-                .backgroundColor(SURFACE)
-                .borderRadius(999)
-                .border({ width: 1, color: LINE2 })
-                // 左右各 4.5:换行居中时行末不留额外右空隙,列间距仍为 9
-                .margin({ left: 4.5, right: 4.5, top: 9 })
-                .onClick((): void => {
-                  this.inputText = s;
-                })
-            }, (s: string, idx: number): string => `chip-${idx}`)
-          }
-          .width('100%')
-          .margin({ top: 6 })
+            .margin({ top: 18 })
         }
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
         .alignItems(HorizontalAlign.Center)
-        .padding({ left: 30, right: 30 })
       } else {
-        // ── 有会话: 最近列表 ──
         Scroll() {
           Column() {
-            SectionHeader({ label: '最近' })
             ForEach(this.recentItems, (item: ConversationSummary): void => {
-              SessionRowItem({
-                title: item.title.length > 0 ? item.title : '未命名对话',
-                snippet: '',
-                modelId: '',
+              IndexRecentRow({
+                title: item.title,
                 timeText: this.formatTime(item.updateAt),
-                pinned: item.isPinned,
-                onRowClick: (): void => { this.openConversation(item.id); },
+                onSelect: (): void => { this.openConversation(item.id); },
               })
             }, (item: ConversationSummary): string => `home-${item.id}`)
-
-            // 查看全部
-            Row() {
-              Text('查看全部对话')
-                .fontSize(BODY2)
-                .fontColor(this.accentColorStore)
-            }
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-            .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
-
-            PageSpacer()
           }
           .width('100%')
         }
-        .align(Alignment.TopStart)
         .layoutWeight(1)
+        .width('100%')
+        .align(Alignment.TopStart)
         .backgroundColor(BG)
       }
 
-      // ── InputBar(沉浸式底部) ──
-      Row() {
-        // 输入药丸
-        TextInput({ text: this.inputText, placeholder: '输入消息…' })
-          .fontSize(BODY)
-          .fontColor(INK)
-          .placeholderColor(INK4)
-          .backgroundColor(SURFACE2)
-          .borderRadius(26)
-          .constraintSize({ minHeight: 48 })
-          .border({ width: 1, color: LINE })
-          .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-          .layoutWeight(1)
-          .onChange((v: string): void => { this.inputText = v; })
-          .onSubmit((): void => { this.send(); })
-
-        // 发送按钮(有文本时 accent, 无文本时灰)
-        Row() {
-          Icon({ name: 'arrow_up', iconSize: 20,
-            color: this.inputText.trim().length > 0 ? ACCENT_INK : INK4 })
+      // Suggestions stay fixed above the dock instead of occupying the hero.
+      if (this.loaded && this.recentItems.length === 0) {
+        Scroll() {
+          Row() {
+            ForEach(SUGGESTIONS, (suggestion: string, index: number): void => {
+              IndexSuggestionChip({
+                label: suggestion,
+                onSelect: (): void => { this.chooseSuggestion(suggestion); },
+              })
+                .margin({ right: index < SUGGESTIONS.length - 1 ? 8 : 0 })
+            }, (suggestion: string, index: number): string => `home-chip-${index}-${suggestion}`)
+          }
+          .padding({ left: 16, right: 16 })
         }
-        .width(48)
-        .height(48)
-        .borderRadius(999)
+        .width('100%')
+        .scrollable(ScrollDirection.Horizontal)
+        .scrollBar(BarState.Off)
+        .margin({ bottom: 12 })
+      }
+
+      // Three-part input dock: attach, expanding text pill, send.
+      Row() {
+        Row() {
+          Icon({ name: 'plus', iconSize: 21, color: INK2 })
+        }
+        .width(TOUCH_SIZE).height(TOUCH_SIZE)
+        .borderRadius(TOUCH_SIZE / 2)
+        .backgroundColor(SURFACE)
+        .border({ width: 1, color: LINE })
         .justifyContent(FlexAlign.Center)
-        .backgroundColor(this.inputText.trim().length > 0 ? this.accentColorStore : SURFACE2)
-        .border({ width: 1, color: this.inputText.trim().length > 0 ? this.accentColorStore : LINE })
-        .margin({ left: 9 })
-        .onClick((): void => { this.send(); })
+        .alignItems(VerticalAlign.Center)
+        .scale({ x: this.attachScale, y: this.attachScale })
+        .onTouch((event: TouchEvent): void => { this.pressButton(true, event); })
+        // Simplified decision: ChatPage owns PhotoViewPicker and image materialization.
+        .onClick((): void => { this.openImagePickerConversation(); })
+        .accessibilityText('添加图片')
+
+        Row() {
+          TextArea({ text: this.inputText, placeholder: '输入消息' })
+            .height(Math.max(28, this.inputHeight - COMPOSER_VERTICAL_PADDING))
+            .layoutWeight(1)
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(TEXT_STYLES.body.weight)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontColor(INK)
+            .placeholderColor(INK4)
+            .backgroundColor(Color.Transparent)
+            .maxLines(4)
+            .onFocus((): void => { this.inputFocused = true; })
+            .onBlur((): void => { this.inputFocused = false; })
+            .onChange((value: string): void => {
+              this.inputText = value;
+              this.updateInputHeight(value);
+            })
+            .enterKeyType(EnterKeyType.Send)
+            .onSubmit((): void => { this.send(); })
+        }
+        .layoutWeight(1)
+        .height(this.inputHeight)
+        .constraintSize({ minHeight: COMPOSER_MIN_HEIGHT, maxHeight: COMPOSER_MAX_HEIGHT })
+        .padding({ left: 18, right: 16, top: 9, bottom: 9 })
+        .borderRadius(26)
+        .backgroundColor(SURFACE)
+        .border({ width: 1, color: this.inputBorderColor() })
+        .animation({ duration: 220, curve: Curve.EaseOut })
+        .margin({ left: COMPOSER_GAP, right: COMPOSER_GAP })
+
+        Row() {
+          Icon({
+            name: 'arrow_up',
+            iconSize: 20,
+            color: this.inputText.trim().length > 0 ? ACCENT_INK : INK4,
+          })
+        }
+        .width(TOUCH_SIZE).height(TOUCH_SIZE)
+        .borderRadius(TOUCH_SIZE / 2)
+        .backgroundColor(this.inputText.trim().length > 0 ? this.accentColorStore : SURFACE)
+        .border({
+          width: 1,
+          color: this.inputText.trim().length > 0 ? this.accentColorStore : LINE,
+        })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .scale({ x: this.sendScale, y: this.sendScale })
+        .onTouch((event: TouchEvent): void => { this.pressButton(false, event); })
+        .gesture(
+          GestureGroup(
+            GestureMode.Exclusive,
+            LongPressGesture().onAction((): void => { this.send('append'); }),
+            TapGesture().onAction((): void => { this.send('send'); }),
+          ),
+        )
+        .accessibilityText('发送消息')
       }
       .width('100%')
-      .padding({ left: 14, right: 14, top: 10, bottom: 14 })
+      .alignItems(VerticalAlign.Bottom)
+      .padding({ left: 12, right: 10, top: 12, bottom: this.keyboardHeightVp + this.navBarHeight + 6 })
       .backgroundColor(SURFACE)
-      .border({ width: { top: 1 }, color: { top: LINE } })
     }
     .width('100%')
     .height('100%')
+    .padding({ top: this.statusBarHeight })
     .backgroundColor(BG)
-    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
+  }
+
+  private attachKeyboardListener(): void {
+    if (this.imeListenerAttached) return;
+    const ctx: Context | undefined = this.getUIContext().getHostContext();
+    if (ctx === undefined) return;
+    window.getLastWindow(ctx).then((win: window.Window): void => {
+      if (!this.pageAlive || !this.pageVisible) return;
+      this.imeWindow = win;
+      win.on('keyboardHeightChange', (heightPx: number): void => {
+        if (!this.pageAlive || !this.pageVisible) return;
+        this.keyboardHeightVp = heightPx > 0 ? this.getUIContext().px2vp(heightPx) : 0;
+      });
+      this.imeListenerAttached = true;
+    }).catch((): void => {});
+  }
+
+  private detachKeyboardListener(): void {
+    if (!this.imeListenerAttached || this.imeWindow === null) return;
+    try {
+      this.imeWindow.off('keyboardHeightChange');
+    } catch (_e) {
+    }
+    this.imeWindow = null;
+    this.imeListenerAttached = false;
   }
 }
