@@ -6,10 +6,6 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: apps/android
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -53,7 +49,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-android-gradle-${{ hashFiles('apps/android/**/*.gradle*', 'apps/android/**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-android-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
       - name: Cargo cache
         uses: actions/cache@v4
@@ -61,8 +57,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apps/android/native/target
-          key: ${{ runner.os }}-android-cargo-${{ hashFiles('apps/android/native/**/Cargo.lock', 'apps/android/native/**/Cargo.toml') }}
+            native/target
+          key: ${{ runner.os }}-android-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
 
       - name: Prepare signed build files
         run: |
@@ -87,6 +83,10 @@ jobs:
             "lib/arm64-v8a/libmarkdown_parser.so"
             "lib/arm64-v8a/libhighlight_parser.so"
             "lib/arm64-v8a/libregex_transformer.so"
+            "lib/arm64-v8a/libreader_extractor.so"
+            "lib/arm64-v8a/libsync_crypto.so"
+            "lib/arm64-v8a/libmarkdown_preprocess.so"
+            "lib/arm64-v8a/libhtml_diff_normalizer.so"
           )
           missing=()
           for so in "${expected[@]}"; do
@@ -104,4 +104,4 @@ jobs:
         if: success()
         with:
           name: android-release-apk
-          path: apps/android/app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/*.apk

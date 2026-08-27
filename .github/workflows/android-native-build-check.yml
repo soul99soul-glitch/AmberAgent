@@ -4,19 +4,15 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'apps/android/native/**'
-      - 'apps/android/app/**/Cargo.toml'
-      - 'apps/android/document/build.gradle.kts'
-      - 'apps/android/highlight/build.gradle.kts'
-      - 'apps/android/app/build.gradle.kts'
+      - 'native/**'
+      - 'app/**/Cargo.toml'
+      - 'document/build.gradle.kts'
+      - 'highlight/build.gradle.kts'
+      - 'app/build.gradle.kts'
       - '.github/workflows/android-native-build-check.yml'
 
 permissions:
   contents: read
-
-defaults:
-  run:
-    working-directory: apps/android
 
 jobs:
   build-check:
@@ -59,7 +55,7 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-android-gradle-${{ hashFiles('apps/android/**/*.gradle*', 'apps/android/**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-android-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
       - name: Cargo cache
         uses: actions/cache@v4
@@ -67,11 +63,11 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            apps/android/native/target
-          key: ${{ runner.os }}-android-cargo-${{ hashFiles('apps/android/native/**/Cargo.lock', 'apps/android/native/**/Cargo.toml') }}
+            native/target
+          key: ${{ runner.os }}-android-cargo-${{ hashFiles('native/**/Cargo.lock', 'native/**/Cargo.toml') }}
 
       - name: Cargo tests
-        working-directory: apps/android/native
+        working-directory: native
         run: cargo test --workspace --locked
 
       - name: Gradle debug build
@@ -91,6 +87,10 @@ jobs:
             "lib/arm64-v8a/libmarkdown_parser.so"
             "lib/arm64-v8a/libhighlight_parser.so"
             "lib/arm64-v8a/libregex_transformer.so"
+            "lib/arm64-v8a/libreader_extractor.so"
+            "lib/arm64-v8a/libsync_crypto.so"
+            "lib/arm64-v8a/libmarkdown_preprocess.so"
+            "lib/arm64-v8a/libhtml_diff_normalizer.so"
           )
           missing=()
           for so in "${expected[@]}"; do
