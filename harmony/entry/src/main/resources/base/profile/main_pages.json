@@ -53,6 +53,7 @@
     "pages/SettingAgentExtensionsPageFull",
     "pages/SettingAgentMemoryPageFull",
     "pages/SettingAgentPermissionsPageFull",
+    "pages/SettingAppearancePage",
     "pages/SettingCronTasksPage",
     "pages/SettingDeepReadPage",
     "pages/SettingDisplayPage",

@@ -5,17 +5,13 @@
 
 import { router } from '@kit.ArkUI';
 import { bundleManager } from '@kit.AbilityKit';
-import {
-  BG, SURFACE, SURFACE2, RAISED, INK, INK3, LINE,
-  ACCENT, ACCENT_INK, BODY2, LABEL, applyTheme, setAccentColor,
-} from '../design/tokens.ets';
+import { BG, SURFACE, LINE, BODY2, LABEL, ACCENT, INK3 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { loadDisplaySetting, saveDisplaySetting } from '@amber/chat-domain';
-import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 
-// 主题选择持久化键(全局调色板应用登记 P1:tokens 为静态常量)
+// 主题选择持久化键(外观页写入;根页只读回显 value)
 const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
 
 @Entry
@@ -25,8 +21,7 @@ struct SettingPage {
   @StorageProp('darkMode') darkMode: boolean = false;
   @StorageProp('systemDarkMode') systemDarkMode: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
-  @State themeMode: string = 'system';
-  @State accentColor: string = ACCENT;
+  @State appearanceValue: string = '跟随系统';
   // 真实值装配:默认模型标签 + 版本号(不写死占位)
   @State modelLabel: string = '';
   @State versionLabel: string = '';
@@ -39,39 +34,11 @@ struct SettingPage {
     } catch (e) {
       this.versionLabel = '';
     }
-    // 真实持久化回读:强调色(DisplaySetting)+ 主题(ui_color_mode)
-    loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
-      if (s.accentColor.length > 0) {
-        this.accentColor = s.accentColor;
-        setAccentColor(s.accentColor);
-        AppStorage.setOrCreate<string>('accentColor', s.accentColor);
-      }
-    });
+    // 外观行 value 只读回显(写入在 AppearancePage)
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
-      if (raw === 'dark' || raw === 'light' || raw === 'system') this.themeMode = raw;
-    });
-  }
-
-  private setTheme(mode: string): void {
-    this.themeMode = mode;
-    getChatKvStore().put(UI_COLOR_MODE_KEY, mode);
-    const resolvedDark: boolean = mode === 'dark' || (mode === 'system' && this.systemDarkMode);
-    applyTheme(resolvedDark);
-    applyWindowTheme(resolvedDark);
-    AppStorage.setOrCreate<string>('uiColorMode', mode);
-    AppStorage.setOrCreate<boolean>('darkMode', resolvedDark);
-    // tokens 于 build 读取 → 重建当前页即时生效(栈内他页回栈时重建)
-    // @StorageProp('darkMode') 驱动各根页重建读新令牌
-  }
-
-  private setAccent(color: string): void {
-    this.accentColor = color;
-    setAccentColor(color);
-    AppStorage.setOrCreate<string>('accentColor', color);
-    loadDisplaySetting(getChatKvStore()).then((s: DisplaySetting): void => {
-      const next: DisplaySetting = s;
-      next.accentColor = color;
-      saveDisplaySetting(getChatKvStore(), next);
+      if (raw === 'light') this.appearanceValue = '浅色';
+      else if (raw === 'dark') this.appearanceValue = '深色';
+      else this.appearanceValue = '跟随系统';
     });
   }
 
@@ -85,104 +52,83 @@ struct SettingPage {
 
       Scroll() {
         Column() {
-          // ── 外观 ──
+          // ── 通用设置(iOS generalEntries)──
           SectionHeader({ label: '通用设置' })
-
-          Row() {
-            Row() {
-              Text('浅色')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'light' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'light' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'light' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('light'); })
-
-            Row() {
-              Text('深色')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'dark' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'dark' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'dark' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('dark'); })
-
-            Row() {
-              Text('跟随系统')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'system' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'system' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'system' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('system'); })
-          }
-          .width('100%').padding(4)
-          .backgroundColor(SURFACE2).borderRadius(13)
-          .margin({ top: 4 })
-
-          Row() {
-            ForEach(['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'], (color: string, idx: number): void => {
-              Text(this.accentColor === color ? '✓' : '')
-                .fontSize(18).fontColor(ACCENT_INK)
-                .width(38).height(38).borderRadius(11)
-                .backgroundColor(color)
-                .border({ width: this.accentColor === color ? 2 : 0, color: INK })
-                .textAlign(TextAlign.Center)
-                .margin({ right: idx < 4 ? 12 : 0 })
-                .onClick((): void => { this.setAccent(color); })
-            }, (color: string, idx: number): string => `swatch-${idx}`)
-          }
-          .width('100%')
-          .padding({ left: 6, top: 10, bottom: 4 })
-
           Column() {
-            NavRow({ label: '显示设置', isLast: true, onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
+            NavRow({ label: '外观', valueText: this.appearanceValue, iconName: 'palette',
+              onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
+            NavRow({ label: '显示与字体', iconName: 'eye', isLast: true,
+              onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
-          // ── 模型与服务 ──
-          SectionHeader({ label: '模型与服务' })
-          Column() {
-            NavRow({ label: '默认模型', valueText: this.modelLabel, onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
-            NavRow({ label: '任务模型', onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
-            NavRow({ label: '服务商与密钥', onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
-            NavRow({ label: '联网搜索', onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
-            NavRow({ label: 'TTS', onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
-            NavRow({ label: '深度阅读设置', isLast: true, onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
-
-          // ── Agent Runtime ──
+          // ── Agent 设置(iOS agentEntries)──
           SectionHeader({ label: 'AGENT 设置' })
           Column() {
-            NavRow({ label: '技能', onRowClick: (): void => { this.go('pages/SkillsPage'); } })
-            NavRow({ label: '核心记忆', onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
-            NavRow({ label: '提示词', onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
-            NavRow({ label: 'MCP 服务器', onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
-            NavRow({ label: '执行参数', onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
-            NavRow({ label: '权限与批准', onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
-            NavRow({ label: '沙盒设置', onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
-            NavRow({ label: '定时任务', onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
-            NavRow({ label: '实验功能', isLast: true, onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
+            NavRow({ label: '灵魂与记忆', iconName: 'brain',
+              onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
+            NavRow({ label: '运行环境', iconName: 'clock',
+              onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
+            NavRow({ label: '技能', iconName: 'puzzle',
+              onRowClick: (): void => { this.go('pages/SkillsPage'); } })
+            NavRow({ label: '权限与批准', iconName: 'shield',
+              onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
+            NavRow({ label: 'MCP 服务器', iconName: 'plug', isLast: true,
+              onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
-          // ── 数据 ──
+          // ── 模型与服务(iOS modelServiceEntries)──
+          SectionHeader({ label: '模型与服务' })
+          Column() {
+            NavRow({ label: '服务商', iconName: 'key',
+              onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
+            NavRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'cpu',
+              onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
+            NavRow({ label: '任务模型', iconName: 'spark',
+              onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
+            NavRow({ label: '提示词', iconName: 'doc',
+              onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
+            NavRow({ label: '搜索服务', iconName: 'search',
+              onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
+            NavRow({ label: '语音服务', iconName: 'speaker', isLast: true,
+              onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
+          }
+          .width('100%').backgroundColor(SURFACE)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+
+          // ── 高级功能(iOS advancedFeatureEntries,自实验性功能上提)──
+          SectionHeader({ label: '高级功能' })
+          Column() {
+            NavRow({ label: 'WebMount', valueText: 'Alpha', iconName: 'globe',
+              onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
+            NavRow({ label: '子代理', valueText: 'Beta', iconName: 'person',
+              onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
+            NavRow({ label: '模型议会', valueText: 'Beta', iconName: 'spark',
+              onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
+            NavRow({ label: '小应用', valueText: 'Beta', iconName: 'box',
+              onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
+            NavRow({ label: '小说创作', iconName: 'doc',
+              onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
+            NavRow({ label: '深度阅读', iconName: 'book', isLast: true,
+              onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
+          }
+          .width('100%').backgroundColor(SURFACE)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+
+          // ── 数据设置(iOS dataEntries)──
           SectionHeader({ label: '数据设置' })
           Column() {
-            NavRow({ label: '历史记录', onRowClick: (): void => { this.go('pages/HistoryPage'); } })
-            NavRow({ label: '收藏', onRowClick: (): void => { this.go('pages/FavoritePage'); } })
-            NavRow({ label: '今日看板', onRowClick: (): void => { this.go('pages/BoardPage'); } })
-            NavRow({ label: '文件管理', isLast: true, onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
+            NavRow({ label: '文件管理', iconName: 'folder',
+              onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
+            NavRow({ label: '历史记录', iconName: 'history',
+              onRowClick: (): void => { this.go('pages/HistoryPage'); } })
+            NavRow({ label: '收藏', iconName: 'star',
+              onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+            NavRow({ label: '定时任务', iconName: 'clock', isLast: true,
+              onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(18).clip(true)

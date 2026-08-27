@@ -113,11 +113,24 @@ export struct NavRow {
   @Prop isLast: boolean = false;
   // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
   @Prop showChevron: boolean = true;
+  // iOS AmberFormRow 方案 B:统一 accent 浅底图标板(28×28 r8)+ accent 图标
+  @Prop iconName: string = '';
   onRowClick: () => void = (): void => {};
   @State private pressed: boolean = false;
 
   build(): void {
     Row() {
+      if (this.iconName.length > 0) {
+        Row() {
+          Icon({ name: this.iconName, iconSize: 18, color: ACCENT })
+        }
+        .width(28).height(28)
+        .borderRadius(8)
+        .backgroundColor(ACCENT_LIGHT)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ right: 12 })
+      }
       Text(this.label)
         .fontSize(TEXT_STYLES.body.size)
         .fontWeight(TEXT_STYLES.body.weight)

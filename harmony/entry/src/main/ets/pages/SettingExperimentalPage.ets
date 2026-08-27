@@ -17,12 +17,7 @@ struct SettingExperimentalPage {
 
       Scroll() {
         Column() {
-          SectionHeader({ label: '智能体' })
-          NavRow({ label: '子代理', valueText: 'Beta', onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
-          NavRow({ label: '模型议会', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
-
           SectionHeader({ label: '内容' })
-          NavRow({ label: '网页挂载', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
           NavRow({ label: 'Office Pro', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalOfficeProPage'); } })
           NavRow({ label: 'DeepRead 模板', isLast: true, onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
 
@@ -30,7 +25,6 @@ struct SettingExperimentalPage {
           NavRow({ label: '定时任务', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
 
           SectionHeader({ label: '其他' })
-          NavRow({ label: '小应用', valueText: 'Beta', onRowClick: (): void => { this.go('pages/MiniAppListPage'); } })
           NavRow({ label: '字体设置', onRowClick: (): void => { this.go('pages/SettingSlidesFontPage'); } })
           NavRow({ label: '系统权限', isLast: true, onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
 
