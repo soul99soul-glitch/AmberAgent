@@ -13,6 +13,7 @@ import {
 import {
   FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_BOLD,
 } from '../design/fonts.ets';
+import { SectionHeader } from '../components/PageTemplate.ets';
 
 // Index-specific values: keep new hierarchy values together until they become shared tokens.
 const HEADER_HEIGHT: number = 56;
@@ -22,6 +23,11 @@ const COMPOSER_MIN_HEIGHT: number = 46;
 const COMPOSER_MAX_HEIGHT: number = 111;
 const COMPOSER_VERTICAL_PADDING: number = 18;
 const CHIP_LINE_HEIGHT: number = 18;
+// header 两侧触控方块(Android TopBar 同款 36dp)
+const HEADER_TOUCH_SIZE: number = 36;
+// Android TopBar: model-id 行为 lerp(ink3, ink2, 0.5) 的暖中灰
+const MODEL_LABEL_LIGHT: string = '#737066';
+const MODEL_LABEL_DARK: string = '#8E887E';
 
 const greetingMessage = (): string => {
   const hour: number = new Date().getHours();
@@ -91,16 +97,16 @@ struct IndexRecentRow {
       Text(this.title.length > 0 ? this.title : '未命名对话')
         .fontSize(14)
         .fontWeight(FontWeight.Normal)
-        .lineHeight(21)
+        .lineHeight(20)
         .fontFamily(FONT_SANS)
         .fontColor(INK)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
       Text(this.timeText)
-        .fontSize(12)
+        .fontSize(11)
         .fontWeight(FontWeight.Normal)
-        .lineHeight(16)
+        .lineHeight(14)
         .fontColor(INK3)
         .fontFamily(FONT_MONO)
         .textAlign(TextAlign.End)
@@ -108,8 +114,8 @@ struct IndexRecentRow {
         .margin({ left: 12 })
     }
     .width('100%')
-    .constraintSize({ minHeight: 46 })
-    .padding(10)
+    .constraintSize({ minHeight: 40 })
+    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
     .backgroundColor(Color.Transparent)
     .onClick((): void => { this.onSelect(); });
   }
@@ -200,7 +206,7 @@ struct Index {
   private loadRecent(): void {
     getChatRepository().list().then((list: ConversationSummary[]): void => {
       if (!this.pageAlive || !this.pageVisible) return;
-      this.recentItems = list.slice(0, 5);
+      this.recentItems = list.slice(0, 9);
       this.loaded = true;
     }).catch((): void => {
       if (!this.pageAlive || !this.pageVisible) return;
@@ -285,9 +291,9 @@ struct Index {
       // Header content is 56vp; the system status inset is kept outside that height.
       Row() {
         Row() {
-          Icon({ name: 'menu', iconSize: 22, color: INK2 })
+          Icon({ name: 'menu', iconSize: 20, color: INK2 })
         }
-        .width(44).height(44)
+        .width(HEADER_TOUCH_SIZE).height(HEADER_TOUCH_SIZE)
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .onClick((): void => { router.pushUrl({ url: 'pages/ChatListPage' }); })
@@ -304,9 +310,10 @@ struct Index {
           Row() {
             Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
               .fontSize(TINY)
-              .fontWeight(FontWeight.Normal)
-              .lineHeight(16)
-              .fontColor(this.modelLabel.length > 0 ? INK3 : INK4)
+              .fontWeight(FontWeight.Medium)
+              .lineHeight(14)
+              .fontColor(this.modelLabel.length > 0
+                ? (this.darkMode ? MODEL_LABEL_DARK : MODEL_LABEL_LIGHT) : INK4)
               .fontFamily(FONT_MONO)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -320,9 +327,9 @@ struct Index {
         .alignItems(HorizontalAlign.Start)
 
         Row() {
-          Icon({ name: 'edit', iconSize: 20, color: INK2 })
+          Icon({ name: 'edit', iconSize: 18, color: INK2 })
         }
-        .width(44).height(44)
+        .width(HEADER_TOUCH_SIZE).height(HEADER_TOUCH_SIZE)
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .onClick((): void => { this.newConversation(); })
@@ -353,7 +360,7 @@ struct Index {
               .fontSize(24)
               .fontWeight(FontWeight.Bold)
               .lineHeight(18)
-              .letterSpacing(0)
+              .letterSpacing(-0.5)
               .fontColor(INK)
               .fontFamily(FONT_MONO_BOLD)
             Text('')
@@ -372,7 +379,7 @@ struct Index {
             .fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK)
             .textAlign(TextAlign.Center)
-            .margin({ top: 18 })
+            .margin({ top: 14 })
         }
         .width('100%')
         .layoutWeight(1)
@@ -381,6 +388,7 @@ struct Index {
       } else {
         Scroll() {
           Column() {
+            SectionHeader({ label: '最近' })
             ForEach(this.recentItems, (item: ConversationSummary): void => {
               IndexRecentRow({
                 title: item.title,
@@ -414,13 +422,14 @@ struct Index {
         .width('100%')
         .scrollable(ScrollDirection.Horizontal)
         .scrollBar(BarState.Off)
-        .margin({ bottom: 12 })
+        .padding({ top: 8, bottom: 8 })
+        .margin({ bottom: 4 })
       }
 
       // Three-part input dock: attach, expanding text pill, send.
       Row() {
         Row() {
-          Icon({ name: 'plus', iconSize: 21, color: INK2 })
+          Icon({ name: 'plus', iconSize: 24, color: INK2 })
         }
         .width(TOUCH_SIZE).height(TOUCH_SIZE)
         .borderRadius(TOUCH_SIZE / 2)
@@ -468,7 +477,7 @@ struct Index {
         Row() {
           Icon({
             name: 'arrow_up',
-            iconSize: 20,
+            iconSize: 22,
             color: this.inputText.trim().length > 0 ? ACCENT_INK : INK4,
           })
         }
@@ -494,7 +503,7 @@ struct Index {
       }
       .width('100%')
       .alignItems(VerticalAlign.Bottom)
-      .padding({ left: 12, right: 10, top: 12, bottom: this.keyboardHeightVp + this.navBarHeight + 6 })
+      .padding({ left: 12, right: 12, top: 10, bottom: this.keyboardHeightVp + this.navBarHeight + 6 })
       .backgroundColor(SURFACE)
     }
     .width('100%')
