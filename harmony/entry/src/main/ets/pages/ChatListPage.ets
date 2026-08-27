@@ -444,7 +444,6 @@ struct ChatListPage {
             .layoutWeight(1)
             .margin({ left: 14 })
 
-
           Row() {
             Icon({ name: 'gear', iconSize: 22, color: INK2 })
           }
@@ -503,15 +502,15 @@ struct ChatListPage {
         .alignItems(VerticalAlign.Center)
 
         Row() {
-          Column() { this.FeatureItem('reader', '深度阅读', 'book') }.height('100%').layoutWeight(1)
+          Column() { this.FeatureItem('reader', '深度阅读', 'hi_book_open') }.height('100%').layoutWeight(1)
           this.FeatureDivider()
-          Column() { this.FeatureItem('apps', '小应用', 'box') }.height('100%').layoutWeight(1)
+          Column() { this.FeatureItem('apps', '小应用', 'hi_app_archive') }.height('100%').layoutWeight(1)
           this.FeatureDivider()
-          Column() { this.FeatureItem('novel', '小说创作', 'edit') }.height('100%').layoutWeight(1)
+          Column() { this.FeatureItem('novel', '小说创作', 'hi_pencil') }.height('100%').layoutWeight(1)
           this.FeatureDivider()
-          Column() { this.FeatureItem('webmount', '站点', 'globe') }.height('100%').layoutWeight(1)
+          Column() { this.FeatureItem('webmount', '站点', 'hi_global') }.height('100%').layoutWeight(1)
           this.FeatureDivider()
-          Column() { this.FeatureItem('council', '模型议会', 'brain') }.height('100%').layoutWeight(1)
+          Column() { this.FeatureItem('council', '模型议会', 'hi_message') }.height('100%').layoutWeight(1)
         }
         .width('100%')
         .height(92)
