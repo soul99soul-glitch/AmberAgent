@@ -4,13 +4,14 @@
 // 对照设计 §6.5
 
 import { UIAbility, AbilityConstant, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
-import { window, display, font } from '@kit.ArkUI';
+import { window, display } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '../di/AppContainer.ets';
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
+import { registerAmberFonts } from '../design/fonts.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -59,13 +60,8 @@ export default class EntryAbility extends UIAbility {
 
   onCreate(want: Want, _launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, 'onCreate');
-    // 注册 JetBrains Mono(设计系统等宽字体), 供 fontFamily('JetBrainsMono') 使用
-    try {
-      font.registerFont({ familyName: 'JetBrainsMono', familySrc: $rawfile('fonts/JetBrainsMono-Regular.ttf') });
-      font.registerFont({ familyName: 'JetBrainsMonoBold', familySrc: $rawfile('fonts/JetBrainsMono-Bold.ttf') });
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, 'registerFont failed: %{public}s', String(e));
-    }
+    // 注册 Amber 品牌字体族(AmberSans 四权重/JetBrainsMono/NotoSerifSC),见 design/fonts.ets
+    registerAmberFonts();
     AppStorage.setOrCreate<boolean>('appBackgrounded', false);
     this.systemDarkMode = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     AppStorage.setOrCreate<boolean>('systemDarkMode', this.systemDarkMode);

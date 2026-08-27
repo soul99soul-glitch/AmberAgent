@@ -18,6 +18,7 @@ import type {
 } from '@amber/deepread-domain';
 import { displayHeroImageUrl, firstFailureMessage, isComplete, STAGE_ORDER } from '@amber/deepread-domain';
 import { MarkdownText } from '../components/MarkdownText.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
 import { getDeepReadScheduler, getRepository } from '../di/AppContainer.ets';
 import {
@@ -306,7 +307,7 @@ struct DeepReadArticlePage {
           Icon({ name: 'back', iconSize: 20, color: INK3 })
             .onClick(() => { router.back(); })
           Text('深度阅读').fontSize(18).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily('serif').margin({ left: 12 }).layoutWeight(1)
+            .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
 
           // G5-S1:字号缩放按钮(zoom out / zoom in)
           Row() {
@@ -360,7 +361,7 @@ struct DeepReadArticlePage {
             Column() {
               Text(this.title)
                 .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
-                .fontFamily('serif')
+                .fontFamily(FONT_SERIF)
                 .lineHeight(34).maxLines(3)
               if (this.heroImageUrl() !== null) {
                 Image(this.heroImageUrl() as string)

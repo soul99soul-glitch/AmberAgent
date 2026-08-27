@@ -13,6 +13,7 @@ import {
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
   PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER,
 } from '../design/tokens.ets';
+import { FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 
 // ===== Page Header (对齐 PageHeader / SettingsHeader) =====
@@ -42,6 +43,7 @@ export struct PageTitleBar {
         .fontSize(TEXT_STYLES.screenTitle.size)
         .fontWeight(TEXT_STYLES.screenTitle.weight)
         .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+        .fontFamily(TEXT_STYLES.screenTitle.family)
         .fontColor(INK)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -53,6 +55,7 @@ export struct PageTitleBar {
             .fontSize(TEXT_STYLES.secondary.size)
             .fontWeight(TEXT_STYLES.secondary.weight)
             .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
             .fontColor(this.accentColorStore)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -84,11 +87,13 @@ export struct SectionHeader {
         .fontWeight(TEXT_STYLES.eyebrow.weight)
         .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
         .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
+        .fontFamily(TEXT_STYLES.eyebrow.family)
       Text(` ${this.label.toUpperCase()}`)
         .fontSize(TEXT_STYLES.eyebrow.size)
         .fontWeight(TEXT_STYLES.eyebrow.weight)
         .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
         .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
+        .fontFamily(TEXT_STYLES.eyebrow.family)
         .fontColor(INK3)
     }
     .width('100%')
@@ -116,6 +121,7 @@ export struct NavRow {
         .fontSize(TEXT_STYLES.body.size)
         .fontWeight(TEXT_STYLES.body.weight)
         .lineHeight(TEXT_STYLES.body.lineHeight)
+        .fontFamily(TEXT_STYLES.body.family)
         .fontColor(this.danger ? ERROR : INK)
         .layoutWeight(1)
       if (this.valueText.length > 0) {
@@ -123,8 +129,8 @@ export struct NavRow {
           .fontSize(TEXT_STYLES.secondary.size)
           .fontWeight(TEXT_STYLES.secondary.weight)
           .lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(FONT_MONO)
           .fontColor(this.danger ? ERROR : INK3)
-          .fontFamily('JetBrainsMono')
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .textAlign(TextAlign.End)
@@ -160,10 +166,14 @@ export struct ToggleRow {
         Text(this.label)
           .fontSize(BODY)
           .fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_MEDIUM)
           .fontColor(INK)
         if (this.desc.length > 0) {
           Text(this.desc)
             .fontSize(BODY2)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
             .fontColor(INK3)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -195,12 +205,15 @@ export struct SelectRow {
       Text(this.label)
         .fontSize(BODY)
         .fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.body.lineHeight)
+        .fontFamily(FONT_SANS_MEDIUM)
         .fontColor(INK)
         .layoutWeight(1)
       Text(this.valueText)
         .fontSize(BODY2)
+        .lineHeight(TEXT_STYLES.secondary.lineHeight)
+        .fontFamily(FONT_MONO)
         .fontColor(INK3)
-        .fontFamily('JetBrainsMono')
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .textAlign(TextAlign.End)
@@ -234,6 +247,8 @@ export struct SessionRowItem {
           Text(this.title.length > 0 ? this.title : '未命名对话')
             .fontSize(BODY)
             .fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -244,6 +259,8 @@ export struct SessionRowItem {
         if (this.snippet.length > 0) {
           Text(this.snippet)
             .fontSize(BODY2)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
             .fontColor(INK3)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -254,8 +271,9 @@ export struct SessionRowItem {
         if (this.modelId.length > 0) {
           Text(this.modelId)
             .fontSize(TINY)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO)
             .fontColor(INK4)
-            .fontFamily('JetBrainsMono')
             .margin({ top: 6 })
         }
       }
@@ -264,8 +282,9 @@ export struct SessionRowItem {
 
       Text(this.timeText)
         .fontSize(LABEL)
+        .lineHeight(TEXT_STYLES.meta.lineHeight)
+        .fontFamily(FONT_MONO)
         .fontColor(INK4)
-        .fontFamily('JetBrainsMono')
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .margin({ left: 11, top: 2 })

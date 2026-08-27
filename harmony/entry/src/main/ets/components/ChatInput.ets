@@ -16,7 +16,8 @@
 //   ❌ +→× 形变动画(后续迭代)
 //   ❌ 用量面板(后续迭代)
 
-import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, SURFACE, SURFACE2, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_SANS, FONT_MONO } from '../design/fonts.ets';
 import { SlashCommandPanel, SlashCommand, QuickMessage, buildSlashCommands } from './SlashCommandPanel.ets';
 import { Icon } from './ui/Icon.ets';
 
@@ -105,9 +106,9 @@ export struct ChatInput {
       // 编辑取消条
       if (this.editing) {
         Row() {
-          Text('取消编辑').fontSize(META).fontColor(INK3)
+          Text('取消编辑').fontSize(META).fontFamily(FONT_SANS).fontColor(INK3)
           Blank()
-          Text('编辑中').fontSize(LABEL).fontColor(INK4)
+          Text('编辑中').fontSize(LABEL).fontFamily(FONT_MONO).fontColor(INK4)
         }
         .width('100%')
         .padding({ left: 20, right: 20, top: 4, bottom: 4 })
@@ -141,6 +142,7 @@ export struct ChatInput {
             placeholder: this.editing ? '编辑消息,发送将重发…' : '输入消息…' })
             .layoutWeight(1)
             .fontSize(BODY).fontColor(INK)
+            .fontFamily(FONT_SANS)
             .placeholderColor(INK4)
             .placeholderFont({ size: BODY })
             .backgroundColor(Color.Transparent)
@@ -148,7 +150,7 @@ export struct ChatInput {
             .padding({ top: 13, bottom: 14 })
             .maxLines(4)
             .constraintSize({ minHeight: 48, maxHeight: 111 })
-            .lineHeight(21)
+            .lineHeight(lineHeightForSize(BODY))
             .onChange((v: string): void => { this.onTextChange(v); })
         }
         .layoutWeight(1)

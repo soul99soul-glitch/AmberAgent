@@ -7,6 +7,8 @@
 //   (session-home.html :root 与 [data-theme="dark"] 逐值复制)。
 //   组件在 build() 时读取 → 页面重建即生效;切换当前页经 replaceUrl 重建。
 
+import { FONT_SANS, FONT_SANS_SEMIBOLD, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_SEMIBOLD } from './fonts.ets';
+
 // ── 基础色(Light base, Graphite) ──
 export let BG: string = '#F4F2EC';         // 页面背景(暖奶油)
 export let SURFACE: string = '#FAF9F5';    // 卡片/托盘(浅奶油)
@@ -111,31 +113,56 @@ export const LABEL: number = 11;             // 标签/eyebrow(11/600)
 export const TINY: number = 10.5;            // 极小字(10.5/400-600)
 
 // ── TypeScale contract (Android AmberType.kt seven levels) ──
+// family 与 weight 绑定下发(AmberSans 系列由合并字体承载字重),消费点应同时
+// 设置 fontSize/fontWeight/lineHeight/fontFamily 四件套,禁止混搭旧常数。
+
 export class TextStyleToken {
   size: number;
   weight: FontWeight;
   lineHeight: number;
   letterSpacing: number;
+  family: string;
 
-  constructor(size: number, weight: FontWeight, lineHeight: number, letterSpacing: number = 0) {
+  constructor(size: number, weight: FontWeight, lineHeight: number,
+    letterSpacing: number = 0, family: string = FONT_SANS) {
     this.size = size;
     this.weight = weight;
     this.lineHeight = lineHeight;
     this.letterSpacing = letterSpacing;
+    this.family = family;
   }
 }
 
 export class TextStyles {
-  screenTitle: TextStyleToken = new TextStyleToken(19, FontWeight.Bold, 25);
-  sessionTitle: TextStyleToken = new TextStyleToken(16, FontWeight.Bold, 21);
+  screenTitle: TextStyleToken = new TextStyleToken(19, FontWeight.Bold, 25, 0, FONT_SANS_BOLD);
+  sessionTitle: TextStyleToken = new TextStyleToken(16, FontWeight.Bold, 21, 0, FONT_SANS_BOLD);
   body: TextStyleToken = new TextStyleToken(15, FontWeight.Normal, 22);
   secondary: TextStyleToken = new TextStyleToken(13, FontWeight.Normal, 18);
-  meta: TextStyleToken = new TextStyleToken(12, FontWeight.Normal, 16);
-  eyebrow: TextStyleToken = new TextStyleToken(11, 600, 14, 1.3);
-  tinyTag: TextStyleToken = new TextStyleToken(10.5, 600, 13);
+  meta: TextStyleToken = new TextStyleToken(12, FontWeight.Normal, 16, 0, FONT_MONO);
+  eyebrow: TextStyleToken = new TextStyleToken(11, 600, 14, 1.3, FONT_MONO_SEMIBOLD);
+  tinyTag: TextStyleToken = new TextStyleToken(10.5, 600, 13, 0, FONT_SANS_SEMIBOLD);
 }
 
 export const TEXT_STYLES: TextStyles = new TextStyles();
+
+// ── 行高契约(AmberType 七级逐对 size→lineHeight;契约外字号取「最接近档」,
+//    等距时归较小档,避免小标题被套大档行高) ──
+const LH_BREAKPOINTS: number[] = [19, 16, 15, 13, 12, 11, 10.5];
+const LH_VALUES: number[] = [25, 21, 22, 18, 16, 14, 13];
+
+export const lineHeightForSize = (size: number): number => {
+  let best = 0;
+  let bestDist = Math.abs(size - LH_BREAKPOINTS[0]);
+  for (let i = 1; i < LH_BREAKPOINTS.length; i++) {
+    const dist = Math.abs(size - LH_BREAKPOINTS[i]);
+    // 等距取较小档(后遍历到的为较小字号档,仅在严格更小时替换)
+    if (dist < bestDist || (Math.abs(dist - bestDist) < 0.005 && LH_BREAKPOINTS[i] < LH_BREAKPOINTS[best])) {
+      best = i;
+      bestDist = dist;
+    }
+  }
+  return LH_VALUES[best];
+};
 
 // ── 间距/圆角 ──
 export const PAD_CARD: number = 16;

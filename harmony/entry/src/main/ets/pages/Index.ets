@@ -10,6 +10,9 @@ import { getChatRepository, describeChatModel } from '../di/AppContainer.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_INK, TINY, TEXT_STYLES,
 } from '../design/tokens.ets';
+import {
+  FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_BOLD,
+} from '../design/fonts.ets';
 
 // Index-specific values: keep new hierarchy values together until they become shared tokens.
 const HEADER_HEIGHT: number = 56;
@@ -64,6 +67,7 @@ struct IndexSuggestionChip {
       .fontSize(12)
       .fontWeight(FontWeight.Normal)
       .lineHeight(CHIP_LINE_HEIGHT)
+      .fontFamily(FONT_SANS)
       .fontColor(this.accentColorStore)
       .maxLines(1)
       .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -88,6 +92,7 @@ struct IndexRecentRow {
         .fontSize(14)
         .fontWeight(FontWeight.Normal)
         .lineHeight(21)
+        .fontFamily(FONT_SANS)
         .fontColor(INK)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -97,7 +102,7 @@ struct IndexRecentRow {
         .fontWeight(FontWeight.Normal)
         .lineHeight(16)
         .fontColor(INK3)
-        .fontFamily('JetBrainsMono')
+        .fontFamily(FONT_MONO)
         .textAlign(TextAlign.End)
         .maxLines(1)
         .margin({ left: 12 })
@@ -293,6 +298,7 @@ struct Index {
             .fontSize(TEXT_STYLES.sessionTitle.size)
             .fontWeight(TEXT_STYLES.sessionTitle.weight)
             .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
+            .fontFamily(TEXT_STYLES.sessionTitle.family)
             .fontColor(INK)
             .maxLines(1)
           Row() {
@@ -301,7 +307,7 @@ struct Index {
               .fontWeight(FontWeight.Normal)
               .lineHeight(16)
               .fontColor(this.modelLabel.length > 0 ? INK3 : INK4)
-              .fontFamily('JetBrainsMono')
+              .fontFamily(FONT_MONO)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
             Icon({ name: 'chevron_right', iconSize: 13, color: INK3 }).margin({ left: 4 })
@@ -349,7 +355,7 @@ struct Index {
               .lineHeight(18)
               .letterSpacing(0)
               .fontColor(INK)
-              .fontFamily('JetBrainsMono')
+              .fontFamily(FONT_MONO_BOLD)
             Text('')
               .width(9).height(20)
               .backgroundColor(this.accentColorStore)
@@ -363,6 +369,7 @@ struct Index {
             .fontWeight(FontWeight.Medium)
             .lineHeight(36)
             .letterSpacing(0.2)
+            .fontFamily(FONT_SANS_MEDIUM)
             .fontColor(INK)
             .textAlign(TextAlign.Center)
             .margin({ top: 18 })
@@ -434,6 +441,7 @@ struct Index {
             .fontSize(TEXT_STYLES.body.size)
             .fontWeight(TEXT_STYLES.body.weight)
             .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family)
             .fontColor(INK)
             .placeholderColor(INK4)
             .backgroundColor(Color.Transparent)

@@ -1,5 +1,6 @@
 // CouncilPage — 模型议会配置页:议题 / 模式 / 轮数 / 视角席 → 发起运行
 import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2,TITLE } from '../design/tokens.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -141,7 +142,7 @@ struct CouncilPage {
       Row() {
         Icon({ name: 'back', iconSize: 20, color: INK3 }).onClick(() => { router.back(); })
         Text('模型议会').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-          .fontFamily('serif').margin({ left: 12 })
+          .fontFamily(FONT_SERIF).margin({ left: 12 })
       }
       .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
       .backgroundColor(BG)

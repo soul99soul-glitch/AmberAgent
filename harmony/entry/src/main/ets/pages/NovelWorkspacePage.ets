@@ -1,6 +1,7 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
@@ -505,7 +506,7 @@ const unsub: (() => void) | null = this.currentUnsub;
           if (this.project !== null) {
             ForEach(this.project.chapters.filter(c => c.id === this.selectedChapterId), (c: NovelChapter) => {
               Text(c.title).fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-                .fontFamily('serif').margin({ bottom: 6 })
+                .fontFamily(FONT_SERIF).margin({ bottom: 6 })
               Text(`${this.charCount(c.content)} 字`).fontSize(12).fontColor(INK3).margin({ bottom: 16 })
               Text(c.content.length > 0 ? c.content : '这一章还没有正文。')
                 .fontSize(15).fontColor(INK).lineHeight(28)
@@ -635,7 +636,7 @@ const unsub: (() => void) | null = this.currentUnsub;
           Icon({ name: 'back', iconSize: 22, color: INK3 }).onClick(() => { router.back(); })
           Text(this.project !== null ? this.project.name : '小说创作')
             .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily('serif').margin({ left: 12 }).layoutWeight(1)
+            .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
         }

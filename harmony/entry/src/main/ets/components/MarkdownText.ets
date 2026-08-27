@@ -28,7 +28,8 @@ import type {
   HighlightToken,
   MarkdownCacheResult,
 } from '@amber/chat-domain';
-import { ACCENT, BODY, INK, INK3, LINE, META, MONO_SMALL, SURFACE2 } from '../design/tokens.ets';
+import { ACCENT, BODY, INK, INK3, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -278,9 +279,11 @@ export struct MarkdownText {
         if (this.displayBlocks.length === 0) {
           // 安全兜底:解析未产出块(理论不会,parseMarkdown 有异常回退)→ 纯文本段落
           Text(this.displayText)
+            .width(this.fillWidth ? '100%' : 'auto')
             .fontSize(this.fontSize)
             .fontColor(this.fontColor)
-            .lineHeight(this.fontSize * 1.6)
+            .lineHeight(lineHeightForSize(this.fontSize))
+            .fontFamily(FONT_SANS)
         } else {
           ForEach(
             this.displayBlocks,
@@ -308,7 +311,8 @@ export struct MarkdownText {
               .width(this.fillWidth ? '100%' : 'auto')
               .fontSize(this.fontSize)
               .fontColor(this.fontColor)
-              .lineHeight(this.fontSize * 1.6)
+              .lineHeight(lineHeightForSize(this.fontSize))
+              .fontFamily(FONT_SANS)
               .margin({ bottom: 4 })
           }
         }
@@ -503,8 +507,10 @@ export struct MarkdownText {
     }
     .width('100%')
     .fontSize(this.headingSize(block.kind === 'heading' ? block.level : 1))
-.fontColor(this.fontColor)
-        .margin({ top: block.kind === 'heading' && block.level <= 2 ? 12 : 8, bottom: 4 })
+    .fontColor(this.fontColor)
+    .lineHeight(lineHeightForSize(this.headingSize(block.kind === 'heading' ? block.level : 1)))
+    .fontFamily(FONT_SANS_BOLD)
+    .margin({ top: block.kind === 'heading' && block.level <= 2 ? 12 : 8, bottom: 4 })
   }
 
   @Builder
@@ -523,7 +529,8 @@ export struct MarkdownText {
     .width(this.fillWidth ? '100%' : 'auto')
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
-    .lineHeight(this.fontSize * 1.6)
+    .lineHeight(lineHeightForSize(this.fontSize))
+    .fontFamily(FONT_SANS)
     .margin({ top: 2, bottom: 4 })
   }
 
@@ -544,7 +551,8 @@ export struct MarkdownText {
     .width('100%')
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
-    .lineHeight(this.fontSize * 1.5)
+    .lineHeight(lineHeightForSize(this.fontSize))
+    .fontFamily(FONT_SANS)
     .border({ width: { left: 3 }, color: LINE })
     .padding({ left: 10 })
     .margin({ top: 4, bottom: 4 })
@@ -578,6 +586,7 @@ export struct MarkdownText {
               Text(block.ordered ? this.orderedLabel(block, idx) : '•')
                 .fontSize(this.fontSize)
                 .fontColor(this.fontColor)
+                .fontFamily(FONT_SANS)
                 .width(block.ordered ? 32 : 16)
                 .margin({ top: 2 })
               Text() {
@@ -591,7 +600,8 @@ export struct MarkdownText {
               }
               .fontSize(this.fontSize)
               .fontColor(this.fontColor)
-              .lineHeight(this.fontSize * 1.5)
+              .lineHeight(lineHeightForSize(this.fontSize))
+              .fontFamily(FONT_SANS)
               .layoutWeight(1)
             }
             .width('100%')
@@ -614,10 +624,12 @@ export struct MarkdownText {
           Text(block.lang.length > 0 ? block.lang : 'code')
             .fontSize(MONO_SMALL)
             .fontColor('#9AA3B2')
-            .fontFamily('JetBrainsMono')
+            .fontFamily(FONT_MONO)
             .layoutWeight(1)
           Text('复制')
             .fontSize(META)
+            .lineHeight(lineHeightForSize(META))
+            .fontFamily(FONT_SANS)
             .fontColor(CODE_TEXT)
             .width(48)
             .height(44)
@@ -639,7 +651,7 @@ export struct MarkdownText {
                 this.getCodeLines(block),
                 (lineTokens: HighlightToken[], idx: number): void => {
                   if (lineTokens.length === 0) {
-                    Text(' ').fontSize(12).fontFamily('JetBrainsMono').lineHeight(18)
+                    Text(' ').fontSize(12).fontFamily(FONT_MONO).lineHeight(18)
                   } else {
                     Text() {
                       ForEach(
@@ -647,14 +659,14 @@ export struct MarkdownText {
                         (tok: HighlightToken, ti: number): void => {
                           Span(tok.text)
                             .fontSize(12)
-                            .fontFamily('JetBrainsMono')
+                            .fontFamily(FONT_MONO)
                             .fontColor(this.tokenColor(tok.type))
                         },
                         (tok: HighlightToken, ti: number): string => `tok-${idx}-${ti}`,
                       )
                     }
                     .fontSize(12)
-                    .fontFamily('JetBrainsMono')
+                    .fontFamily(FONT_MONO)
                     .lineHeight(18)
                   }
                 },
@@ -664,7 +676,7 @@ export struct MarkdownText {
               Text(block.code)
                 .fontSize(12)
                 .fontColor(CODE_TEXT)
-                .fontFamily('JetBrainsMono')
+                .fontFamily(FONT_MONO)
                 .lineHeight(18)
             }
           }
@@ -703,6 +715,8 @@ export struct MarkdownText {
               }
               .fontSize(META)
               .fontColor(this.fontColor)
+              .lineHeight(lineHeightForSize(META))
+              .fontFamily(FONT_SANS_MEDIUM)
               .textAlign(this.tableTextAlign(block, ci))
               .layoutWeight(1)
               .padding({ left: 6, right: 6, top: 4, bottom: 4 })
@@ -732,6 +746,8 @@ export struct MarkdownText {
                   }
                   .fontSize(META)
                   .fontColor(this.fontColor)
+                  .lineHeight(lineHeightForSize(META))
+                  .fontFamily(FONT_SANS)
                   .textAlign(this.tableTextAlign(block, ci))
                   .layoutWeight(1)
                   .padding({ left: 6, right: 6, top: 4, bottom: 4 })
@@ -754,6 +770,13 @@ export struct MarkdownText {
 
   // ===== 行内 token 渲染 =====
 
+  // 权重→家族名(字重由注册的静态档承载;仅设 fontWeight 会落到合成加粗)
+  private spanFamily(weight: FontWeight): string {
+    if (weight === FontWeight.Bold) return FONT_SANS_BOLD;
+    if (weight === FontWeight.Medium) return FONT_SANS_MEDIUM;
+    return FONT_SANS;
+  }
+
   @Builder
   RenderInlineToken(tok: InlineToken, size: number, color: string, weight: FontWeight): void {
     if (tok.type === 'text') {
@@ -761,21 +784,25 @@ export struct MarkdownText {
         .fontSize(size)
         .fontColor(color)
         .fontWeight(weight)
+        .fontFamily(this.spanFamily(weight))
     } else if (tok.type === 'bold') {
       Span(tok.text)
         .fontSize(size)
         .fontColor(color)
         .fontWeight(FontWeight.Bold)
+        .fontFamily(FONT_SANS_BOLD)
     } else if (tok.type === 'italic') {
       Span(tok.text)
         .fontSize(size)
         .fontColor(color)
+        .fontWeight(weight)
         .fontStyle(FontStyle.Italic)
+        .fontFamily(this.spanFamily(weight))
     } else if (tok.type === 'code') {
       Span(tok.text)
         .fontSize(size - 1)
         .fontColor(this.fontColor === INK ? INLINE_CODE_FG : color)
-        .fontFamily('JetBrainsMono')
+        .fontFamily(FONT_MONO)
     } else if (tok.type === 'link') {
       Span(tok.text)
         .fontSize(size)

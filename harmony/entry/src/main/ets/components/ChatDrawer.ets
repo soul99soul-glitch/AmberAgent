@@ -1,6 +1,7 @@
 // ChatDrawer — chat navigation drawer aligned with Android ChatDrawer.
 // Harmony uses a root Stack overlay instead of ModalNavigationDrawer.
 import { INK, INK2, INK3, SURFACE, BG, LINE, ACCENT, BODY, OVERLAY } from '../design/tokens.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { WorkspaceSearchField } from './ui/WorkspaceSearchField.ets';
 import { UIAvatar } from './UIAvatar.ets';
 import { Icon } from './ui/Icon.ets';
@@ -29,7 +30,7 @@ export struct ChatDrawer {
             .fontSize(30)
             .fontWeight(FontWeight.Medium)
             .fontColor(INK)
-            .fontFamily('serif')
+            .fontFamily(FONT_SERIF)
             .width('100%')
             .padding({ left: 16, right: 16, top: this.statusBarHeight + 12, bottom: 8 })
 

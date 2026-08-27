@@ -1,5 +1,6 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
+import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
@@ -99,7 +100,7 @@ struct NovelProjectsPage {
         Row() {
           Icon({ name: 'back', iconSize: 20, color: INK }).onClick(() => { router.back(); })
           Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily('serif').margin({ left: 12 }).maxLines(1)
+            .fontFamily(FONT_SERIF).margin({ left: 12 }).maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Blank()
           Text('新建').fontSize(13).fontColor(ACCENT)
@@ -134,7 +135,7 @@ struct NovelProjectsPage {
                 Row() {
                   Column() {
                     Text(p.name).fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
-                      .fontFamily('serif').maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .fontFamily(FONT_SERIF).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(`${p.chapters.length} 章 · ${p.materials.length} 条资料 · ${p.messages.length} 条对话`)
                       .fontSize(12).fontColor(INK3).margin({ top: 6 })
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
