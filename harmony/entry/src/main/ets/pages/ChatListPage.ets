@@ -9,6 +9,7 @@ import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.et
 import { Icon } from '../components/ui/Icon.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
 import { ACCENT, ACCENT_INK, BG, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE2 } from '../design/tokens.ets';
+import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
 
 interface ActionMenuResult {
   index: number;
@@ -278,17 +279,21 @@ struct ChatListPage {
         Text(item.title.length > 0 ? item.title : '未命名对话')
           .fontSize(17)
           .fontWeight(FontWeight.Bold)
+          .lineHeight(23)
+          .fontFamily(FONT_SANS_BOLD)
           .fontColor(INK)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .layoutWeight(1)
         if (item.isPinned) {
-          Icon({ name: 'pin', iconSize: 17, color: this.accentColorStore })
+          Icon({ name: 'pin', iconSize: 15, color: this.accentColorStore })
             .margin({ left: 10, right: 8 })
         }
         Text(this.formatConversationDate(item.updateAt))
           .fontSize(13)
-          .fontColor(INK4)
+          .lineHeight(18)
+          .fontFamily(FONT_MONO)
+          .fontColor(INK3)
           .maxLines(1)
       }
       .width('100%')
@@ -296,7 +301,8 @@ struct ChatListPage {
 
       Row() {
         Text(this.previewOf(item.id))
-          .fontSize(15)
+          .fontSize(14)
+          .lineHeight(19)
           .fontColor(INK3)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -304,25 +310,26 @@ struct ChatListPage {
           .margin({ right: 14 })
         if (this.messageCount(item.id) > 0) {
           Text(`${this.messageCount(item.id)}`)
-            .fontSize(16)
+            .fontSize(13)
+            .fontFamily(FONT_MONO)
             .fontColor(this.accentColorStore)
-            .width(42)
-            .height(42)
-            .lineHeight(42)
+            .width(28)
+            .height(28)
+            .lineHeight(26)
             .textAlign(TextAlign.Center)
             .maxLines(1)
             .minFontSize(11)
             .border({ width: 1, color: this.accentColorStore })
-            .borderRadius(21)
+            .borderRadius(14)
         }
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-      .margin({ top: 9 })
+      .margin({ top: 5 })
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 17, bottom: 14 })
+    .padding({ left: 20, right: 20, top: 11, bottom: 11 })
     .backgroundColor(BG)
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .onClick((): void => { this.openConversation(item.id); })
@@ -381,14 +388,16 @@ struct ChatListPage {
   @Builder
   FeatureItem(id: string, label: string, icon: string): void {
     Column() {
-      Icon({ name: icon, iconSize: 36, color: this.accentColorStore })
+      Icon({ name: icon, iconSize: 26, color: this.accentColorStore })
       Text(label)
-        .fontSize(15)
+        .fontSize(13)
         .fontWeight(FontWeight.Medium)
+        .lineHeight(18)
+        .fontFamily(FONT_SANS_MEDIUM)
         .fontColor(INK2)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 10 })
+        .margin({ top: 7 })
     }
     .width('100%')
     .height('100%')
@@ -401,7 +410,7 @@ struct ChatListPage {
   FeatureDivider(): void {
     Column()
       .width(1)
-      .height(58)
+      .height(44)
       .backgroundColor(LINE)
   }
 
@@ -411,31 +420,36 @@ struct ChatListPage {
         Row() {
           Row() {
             Text('Amber')
-              .fontSize(32)
-              .fontWeight(FontWeight.Medium)
+              .fontSize(30)
+              .fontWeight(FontWeight.Bold)
+              .lineHeight(36)
+              .letterSpacing(-0.5)
+              .fontFamily(FONT_SANS_BOLD)
               .fontColor(INK)
             Column()
-              .width(4)
-              .height(28)
+              .width(9)
+              .height(30)
               .backgroundColor(this.accentColorStore)
-              .margin({ left: 9 })
+              .margin({ left: 8 })
           }
           .alignItems(VerticalAlign.Center)
 
           Text(this.todayLabel())
             .fontSize(14)
+            .lineHeight(19)
+            .fontFamily(FONT_SANS)
             .fontColor(INK3)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .layoutWeight(1)
-            .margin({ left: 16 })
+            .margin({ left: 14 })
 
 
           Row() {
             Icon({ name: 'gear', iconSize: 22, color: INK2 })
           }
-          .width(44)
-          .height(44)
+          .width(40)
+          .height(40)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
@@ -443,45 +457,47 @@ struct ChatListPage {
           Row() {
             UIAvatar({
               name: this.userNickname,
-              avatarSize: 40,
+              avatarSize: 36,
               accentColor: this.accentColorStore,
             })
           }
-          .width(44)
-          .height(44)
+          .width(40)
+          .height(40)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
-          .margin({ left: 8 })
+          .margin({ left: 6 })
           .onClick((): void => { router.pushUrl({ url: 'pages/ProfilePage' }); })
         }
         .width('100%')
         .alignItems(VerticalAlign.Center)
-        .padding({ left: 20, right: 20, top: this.statusBarHeight + 16, bottom: 21 })
+        .padding({ left: 20, right: 20, top: this.statusBarHeight + 10, bottom: 10 })
 
         Row() {
-          Icon({ name: 'search', iconSize: 28, color: INK3 })
+          Icon({ name: 'search', iconSize: 20, color: INK3 })
           TextInput({ text: this.searchText, placeholder: '搜索会话' })
-            .fontSize(21)
+            .fontSize(16)
             .fontColor(INK)
             .placeholderColor(INK4)
+            .placeholderFont({ size: 16 })
+            .fontFamily(FONT_SANS)
             .backgroundColor(Color.Transparent)
             .layoutWeight(1)
-            .margin({ left: 16 })
+            .margin({ left: 12 })
             .onClick((): void => { this.openSearch(); })
             .onChange((value: string): void => { this.searchText = value; this.refresh(); })
           if (this.searchText.length > 0) {
             Row() {
               Icon({ name: 'close', iconSize: 18, color: INK3 })
             }
-            .width(44)
-            .height(44)
+            .width(40)
+            .height(40)
             .justifyContent(FlexAlign.Center)
             .alignItems(VerticalAlign.Center)
             .onClick((): void => { this.searchText = ''; this.refresh(); })
           }
         }
         .width('100%')
-        .height(72)
+        .height(52)
         .padding({ left: 20, right: 20 })
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
         .alignItems(VerticalAlign.Center)
@@ -498,7 +514,7 @@ struct ChatListPage {
           Column() { this.FeatureItem('council', '模型议会', 'brain') }.height('100%').layoutWeight(1)
         }
         .width('100%')
-        .height(112)
+        .height(92)
         .padding({ left: 20, right: 20 })
         .alignItems(VerticalAlign.Center)
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
@@ -516,17 +532,21 @@ struct ChatListPage {
               ListItem() {
                 Column() {
                   Text(this.searchText.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
-                    .fontSize(17)
+                    .fontSize(16)
                     .fontWeight(FontWeight.Medium)
+                    .lineHeight(22)
+                    .fontFamily(FONT_SANS_MEDIUM)
                     .fontColor(INK2)
                   Text(this.searchText.trim().length > 0 ? '换一个关键词再试试。' : '点击右下角按钮开始新的对话。')
-                    .fontSize(15)
+                    .fontSize(14)
+                    .lineHeight(19)
+                    .fontFamily(FONT_SANS)
                     .fontColor(INK3)
-                    .margin({ top: 8 })
+                    .margin({ top: 6 })
                 }
                 .width('100%')
                 .alignItems(HorizontalAlign.Center)
-                .padding({ top: 64, bottom: 64 })
+                .padding({ top: 48, bottom: 48 })
               }
             } else {
               ForEach(this.items, (item: ConversationSummary): void => {
@@ -547,11 +567,11 @@ struct ChatListPage {
           .divider({ strokeWidth: 0, color: Color.Transparent })
 
           Column() {
-            Icon({ name: 'edit', iconSize: 27, color: ACCENT_INK })
+            Icon({ name: 'edit', iconSize: 24, color: ACCENT_INK })
           }
-          .width(62)
-          .height(62)
-          .borderRadius(31)
+          .width(56)
+          .height(56)
+          .borderRadius(28)
           .backgroundColor(this.accentColorStore)
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
@@ -562,7 +582,7 @@ struct ChatListPage {
               this.fabScale = down ? 0.96 : 1;
             });
           })
-          .margin({ right: 24, bottom: this.snackVisible ? 84 : 28 })
+          .margin({ right: 24, bottom: this.snackVisible ? 80 : 26 })
           .onClick((): void => { this.newConversation(); })
         }
         .layoutWeight(1)
