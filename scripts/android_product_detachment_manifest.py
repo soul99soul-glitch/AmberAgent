@@ -285,9 +285,6 @@ def main() -> None:
     matcher_path = ROOT / "app/src/main/java/app/amber/core/utils/AIIconMatcher.kt"
     icon_loader_path = ROOT / "app/src/main/java/app/amber/feature/ui/components/ui/AIIcon.kt"
 
-    other_platform_wip_present = any(
-        "apps/ios/" in line or line[3:].startswith("../ios/") for line in status_lines
-    )
     document = {
         "schema_version": 1,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -298,18 +295,11 @@ def main() -> None:
             "branch": git("branch", "--show-current") or None,
             "detached": not bool(git("branch", "--show-current")),
             "dirty_entry_count": len(status_lines),
-            "android_dirty_entry_count": len(status_lines) - sum(
-                "apps/ios/" in line or line[3:].startswith("../ios/") for line in status_lines
-            ),
-            "other_platform_wip_present": other_platform_wip_present,
+            "android_dirty_entry_count": len(status_lines),
+            "other_platform_wip_present": False,
             "status_sha256": hashlib.sha256("\n".join(status_lines).encode()).hexdigest(),
-            "android_dirty_entries": [
-                line for line in status_lines
-                if "apps/ios/" not in line and not line[3:].startswith("../ios/")
-            ],
-            "other_platform_wip_entry_count": sum(
-                "apps/ios/" in line or line[3:].startswith("../ios/") for line in status_lines
-            ),
+            "android_dirty_entries": status_lines,
+            "other_platform_wip_entry_count": 0,
         },
         "dependencies": {
             "catalog_rikka_coordinates": coordinate_hits,

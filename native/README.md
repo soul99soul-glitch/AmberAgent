@@ -1,58 +1,37 @@
-# Rust Native Components (amber-agent spike)
+# Rust Native Components
 
-Cargo workspace housing 3 Rust crates that compile to Android `.so` libraries
-via JNI bindings, replacing CPU-heavy JVM components.
+本目录是 Android 端的 Rust workspace。十个 crate 中，`jni-common` 提供共享 JNI 边界，`tokenizer` 只参与 Native 单测；其余八个 crate 构建为 arm64 Android `.so`：
 
-## Layout
-
+```text
+office-parsers
+markdown-parser
+highlight-parser
+regex-transformer
+reader-extractor
+sync-crypto
+markdown-preprocess
+html-diff-normalizer
 ```
-native/
-├── Cargo.toml                    workspace manifest
-├── office-parsers/               XLSX extraction through calamine
-├── markdown-parser/              pulldown-cmark + packed binary AST (alternative to JetBrains markdown)
-└── highlight-parser/             tree-sitter + 14 grammars (replaces QuickJS+Prism)
-```
 
-See `docs/RUST_NATIVE_SPIKE_PLAN.md` at repo root for full spike plan,
-acceptance criteria, JNI boundary spec, and packed binary formats.
-
-## Local development
+## Native 单测
 
 ```bash
-# Native-only sanity build (no Android linking)
-cargo build --release
-
-# Run native unit tests
-cargo test --workspace
-
-# Lint
-cargo clippy --workspace --all-targets -- -D warnings
-
-# Format check
-cargo fmt --check
+cargo test --workspace --locked
 ```
 
-## Android cross-build
+## Android 交叉编译
 
-Driven by Gradle via the [mozilla/rust-android-gradle](https://github.com/mozilla/rust-android-gradle)
-plugin. The plugin runs `cargo-ndk` for each Android ABI and stages the
-resulting `.so` files into the consumer module's `jniLibs/` directory.
+需要 Rust、`aarch64-linux-android` target、`cargo-ndk` 3.5.4 和 Android NDK `27.0.12077973`。Gradle 在 `app`、`document` 和 `highlight` 模块内分别调用 `cargo ndk`，再把八个库合并进 APK。
 
 ```bash
-# From repo root — assumes Rust toolchain + Android NDK + targets installed
-./gradlew :document:cargoBuild           # Component #1
-./gradlew :app:cargoBuild                # Component #2
-./gradlew :highlight:cargoBuild          # Component #3
+ANDROID_NDK_HOME=/path/to/android-sdk/ndk/27.0.12077973 \
+  ./gradlew :app:assembleDebug
 ```
 
-See `docs/RUST_NATIVE_SPIKE_PLAN.md` §2.1/§2.3 for one-time setup.
+如果 `cargo-ndk` 不在 `PATH`，debug 构建会明确记录跳过并保留 JVM fallback；这种 APK 不能作为 Native 完整性证据。`release`、`graphite` 和 `baseline` 构建会在缺少任一 required `.so` 时失败。CI 也会逐项检查 APK 内的八个 `lib/arm64-v8a/*.so`。
 
-## Hard constraints
+## JNI 边界
 
-- **No std/heap-only blowups**: Every JNI call must work with O(input size) memory.
-- **Panic-catch at FFI boundary**: Never unwind across JNI; catch in `lib.rs` entry.
-- **JVM fallback preserved**: The Kotlin adapter falls back to existing JVM
-  implementation if native load fails or returns error. This is non-negotiable
-  during spike — see SPIKE_PLAN.md §6.
-- **Output equivalence**: Each component must produce output indistinguishable
-  from its JVM counterpart for the corpus in `native/<component>/tests/corpus/`.
+- JNI 入口不得让 Rust panic 跨越 FFI 边界。
+- 失败必须返回现有 Kotlin adapter 能识别的错误，由当前生产调用链决定是否使用 JVM fallback。
+- 修改 wire/binary 格式时，先更新直接消费方和对应 corpus 测试。
