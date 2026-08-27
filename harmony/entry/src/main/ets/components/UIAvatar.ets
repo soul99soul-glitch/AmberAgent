@@ -15,7 +15,7 @@ export struct UIAvatar {
   @Prop accentColor: string = '';
   build(): void {
     if (this.imageUrl.length > 0) {
-      Image(this.imageUrl)
+      Image(this.imageSrc())
         .width(this.avatarSize).height(this.avatarSize)
         .borderRadius(this.circular ? this.avatarSize / 2 : 8)
         .objectFit(ImageFit.Cover)
@@ -33,6 +33,16 @@ export struct UIAvatar {
       .borderRadius(this.circular ? this.avatarSize / 2 : 8)
       .backgroundColor(this.avatarColor())
     }
+  }
+
+  // 沙箱绝对路径补 file:// 前缀(Image 组件要求);网络/data:/file:/rawfile 原样
+  private imageSrc(): string {
+    const u: string = this.imageUrl;
+    if (u.startsWith('http') || u.startsWith('data:') || u.startsWith('file://')
+      || u.startsWith('resource:') || u.startsWith('$rawfile')) {
+      return u;
+    }
+    return 'file://' + u;
   }
 
   private initial(): string {

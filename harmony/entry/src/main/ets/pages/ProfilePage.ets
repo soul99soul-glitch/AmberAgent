@@ -7,11 +7,17 @@
 // 数据: DisplaySetting(KV) + ChatRepository(RDB 遍历聚合,不造假)
 import { router } from '@kit.ArkUI';
 import { bundleManager } from '@kit.AbilityKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import { fileIo } from '@kit.CoreFileKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import { loadDisplaySetting, saveDisplaySetting, makeDisplaySetting } from '@amber/chat-domain';
+import type { common } from '@kit.AbilityKit';
 import type { DisplaySetting, ConversationSummary, Conversation, UIMessage } from '@amber/chat-domain';
 import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
-import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
+import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
+import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BG,
   BODY, BODY2, META, LABEL, ACCENT, RADIUS,
@@ -216,10 +222,6 @@ struct ProfilePage {
     });
   }
 
-  private go(page: string): void {
-    router.pushUrl({ url: page });
-  }
-
   private openNicknameEditor(): void {
     this.dialogController = new CustomDialogController({
       builder: NicknameEditDialog({
@@ -272,6 +274,108 @@ struct ProfilePage {
     saveDisplaySetting(getChatKvStore(), this.setting);
   }
 
+  // 头像选择(PhotoViewPicker 单选)→ 物化到 filesDir(KV 只存路径)
+  private picking: boolean = false;
+
+  private pickAvatar(): void {
+    if (this.picking) return;
+    this.picking = true;
+    const options: photoAccessHelper.PhotoSelectOptions = new photoAccessHelper.PhotoSelectOptions();
+    options.MIMEType = photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE;
+    options.maxSelectNumber = 1;
+    const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+    picker.select(options).then((result: photoAccessHelper.PhotoSelectResult): Promise<void> => {
+      return this.materializeAvatar(result.photoUris);
+    }).catch((_e: Error): void => {
+      // 用户取消选择等系统侧取消不视为错误
+      this.picking = false;
+    });
+  }
+
+  private async materializeAvatar(uris: string[]): Promise<void> {
+    try {
+      if (uris.length === 0) return;
+      let value: string = '';
+      try {
+        // 首选发图管线(D-079b):JPEG q85 ≤2048 EXIF 归一 → data: URL
+        value = await compressImageAsDataUrl(uris[0]);
+      } catch (de) {
+        // 部分图源(HEIC/权限窗外的媒体项)PixelMap 解码失败 → 降级为字节级拷贝进沙箱
+        const derr: Error = de as Error;
+        hilog.warn(0x0001, 'ProfilePage', `头像解码降级拷贝: ${derr.message}`);
+        value = this.copyAvatarToSandbox(uris[0]);
+      }
+      if (value.length === 0) return;
+      this.saveAvatar(value);
+    } catch (e) {
+      const err: Error = e as Error;
+      hilog.warn(0x0001, 'ProfilePage', `头像设置失败: ${err.message}`);
+    } finally {
+      this.picking = false;
+    }
+  }
+
+  private copyAvatarToSandbox(uri: string): string {
+    const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+    const destPath: string = `${ctx.filesDir}/avatar_${Date.now()}.jpg`;
+    const src: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      const st: fileIo.Stat = fileIo.statSync(src.fd);
+      const buf: ArrayBuffer = new ArrayBuffer(st.size);
+      fileIo.readSync(src.fd, buf, { offset: 0, length: st.size });
+      const dst: fileIo.File = fileIo.openSync(destPath,
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      try {
+        fileIo.writeSync(dst.fd, buf);
+      } finally {
+        fileIo.closeSync(dst);
+      }
+      return destPath;
+    } finally {
+      fileIo.closeSync(src);
+    }
+  }
+
+  private saveAvatar(path: string): void {
+    this.setting = makeDisplaySetting({
+      showAssistantBubble: this.setting.showAssistantBubble,
+      showModelIcon: this.setting.showModelIcon,
+      showModelName: this.setting.showModelName,
+      showDateBelowName: this.setting.showDateBelowName,
+      showThinkingContent: this.setting.showThinkingContent,
+      autoCloseThinking: this.setting.autoCloseThinking,
+      showUpdates: this.setting.showUpdates,
+      showMessageJumper: this.setting.showMessageJumper,
+      messageJumperOnLeft: this.setting.messageJumperOnLeft,
+      fontSizeRatio: this.setting.fontSizeRatio,
+      enableMessageGenerationHapticEffect: this.setting.enableMessageGenerationHapticEffect,
+      skipCropImage: this.setting.skipCropImage,
+      enableNotificationOnMessageGeneration: this.setting.enableNotificationOnMessageGeneration,
+      enableLiveUpdateNotification: this.setting.enableLiveUpdateNotification,
+      codeBlockAutoWrap: this.setting.codeBlockAutoWrap,
+      codeBlockAutoCollapse: this.setting.codeBlockAutoCollapse,
+      showLineNumbers: this.setting.showLineNumbers,
+      ttsOnlyReadQuoted: this.setting.ttsOnlyReadQuoted,
+      autoPlayTTSAfterGeneration: this.setting.autoPlayTTSAfterGeneration,
+      pasteLongTextAsFile: this.setting.pasteLongTextAsFile,
+      pasteLongTextThreshold: this.setting.pasteLongTextThreshold,
+      sendOnEnter: this.setting.sendOnEnter,
+      enableAutoScroll: this.setting.enableAutoScroll,
+      showBottomFollowAnimation: this.setting.showBottomFollowAnimation,
+      enableLatexRendering: this.setting.enableLatexRendering,
+      enableBlurEffect: this.setting.enableBlurEffect,
+      chatFontFamily: this.setting.chatFontFamily,
+      enableVolumeKeyScroll: this.setting.enableVolumeKeyScroll,
+      volumeKeyScrollRatio: this.setting.volumeKeyScrollRatio,
+      chatThemeChoice: this.setting.chatThemeChoice,
+      amberBaseFamily: this.setting.amberBaseFamily,
+      accentColor: this.setting.accentColor,
+      userNickname: this.setting.userNickname,
+      userAvatar: path,
+    });
+    saveDisplaySetting(getChatKvStore(), this.setting);
+  }
+
   @Builder
   statCard(label: string, value: string) {
     Column() {
@@ -301,14 +405,28 @@ struct ProfilePage {
         Column() {
           // ── 头部:大头像 + 昵称 + 摘要 ──
           Column() {
-            UIAvatar({
-              name: this.setting.userNickname,
-              emoji: '',
-              imageUrl: this.setting.userAvatar,
-              avatarSize: 72,
-              circular: true,
-              accentColor: this.accentColorStore,
-            })
+            Stack({ alignContent: Alignment.BottomEnd }) {
+              UIAvatar({
+                name: this.setting.userNickname,
+                emoji: '',
+                imageUrl: this.setting.userAvatar,
+                avatarSize: 72,
+                circular: true,
+                accentColor: this.accentColorStore,
+              })
+              Row() {
+                Icon({ name: 'image', iconSize: 13, color: INK2 })
+              }
+              .width(26)
+              .height(26)
+              .borderRadius(13)
+              .backgroundColor('#FFFFFF')
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .border({ width: 1, color: LINE })
+            }
+            .onClick((): void => { this.pickAvatar(); })
+            .accessibilityText('更换头像')
             Row() {
               Text(this.setting.userNickname.length > 0 ? this.setting.userNickname : '未设置昵称')
                 .fontSize(20)
@@ -391,28 +509,6 @@ struct ProfilePage {
             .padding({ top: 40, bottom: 40 })
             .alignItems(HorizontalAlign.Center)
           }
-
-          // ── 快捷入口 ──
-          SectionHeader({ label: 'PROFILE' })
-          Column() {
-            NavRow({
-              label: '昵称',
-              valueText: this.setting.userNickname.length > 0 ? this.setting.userNickname : '未设置',
-              isLast: true,
-              onRowClick: (): void => { this.openNicknameEditor(); },
-            })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
-
-          SectionHeader({ label: 'SHORTCUTS' })
-          Column() {
-            NavRow({ label: '显示设置', onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
-            NavRow({ label: '设置', onRowClick: (): void => { this.go('pages/SettingPage'); } })
-            NavRow({ label: '关于', isLast: true, onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
 
           // 版本信息
           Row() {

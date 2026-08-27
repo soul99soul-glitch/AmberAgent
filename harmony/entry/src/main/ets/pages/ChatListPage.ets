@@ -34,6 +34,7 @@ struct ChatListPage {
   @State pressedId: string = '';
   @State pressedFeature: string = '';
   @State userNickname: string = '';
+  @State userAvatar: string = '';
   @State previews: Record<string, string> = {};
   @State msgCounts: Record<string, number> = {};
   private pendingDeleted: Conversation | null = null;
@@ -46,7 +47,9 @@ struct ChatListPage {
     this.themeTick = Date.now();
     this.refresh();
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
-      if (this.pageAlive) this.userNickname = setting.userNickname;
+      if (!this.pageAlive) return;
+      this.userNickname = setting.userNickname;
+      this.userAvatar = setting.userAvatar;
     }).catch((): void => {});
     // 应用已在前台时,第二条通知不会再触发 aboutToAppear — show 时也要消费深链
     this.consumeDeepLink();
@@ -56,7 +59,9 @@ struct ChatListPage {
     this.pageAlive = true;
     this.refresh();
     loadDisplaySetting(getChatKvStore()).then((setting: DisplaySetting): void => {
-      if (this.pageAlive) this.userNickname = setting.userNickname;
+      if (!this.pageAlive) return;
+      this.userNickname = setting.userNickname;
+      this.userAvatar = setting.userAvatar;
     }).catch((): void => {});
 
     // EntryAbility 写入的通知/分享深链在根页消费，避免改变返回栈语义。
@@ -466,6 +471,7 @@ struct ChatListPage {
           Row() {
             UIAvatar({
               name: this.userNickname,
+              imageUrl: this.userAvatar,
               avatarSize: 36,
               accentColor: this.accentColorStore,
             })
