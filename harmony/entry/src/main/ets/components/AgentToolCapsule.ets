@@ -2,6 +2,14 @@
 // wrap-content pill: 图标 + 标题文本 + 状态徽章 / 审批按钮
 import { INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT, SIGNAL, ERROR, META, STATUS_AMBER } from '../design/tokens.ets';
 import { DotLoading } from './ui/DotLoading.ets';
+const accentAlpha = (hex: string, alpha: number): string => {
+  const value: string = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const r: number = parseInt(value.substring(0, 2), 16);
+  const g: number = parseInt(value.substring(2, 4), 16);
+  const b: number = parseInt(value.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 // 工具状态
 export enum ToolStatus {
@@ -96,6 +104,7 @@ export const toolStatusIcon = (status: ToolStatus): string => {
 
 @Component
 export struct AgentToolCallCapsule {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop toolName: string = '';
   @Prop title: string = '';
   @Prop status: ToolStatus = ToolStatus.Running;
@@ -113,7 +122,7 @@ export struct AgentToolCallCapsule {
 
         Text(this.title)
           .fontSize(META)
-          .fontColor(INK2)
+          .fontColor(this.showApproval ? INK2 : ACCENT)
           .fontWeight(FontWeight.Medium)
           .fontFamily('JetBrainsMono')
           .maxLines(1)
@@ -135,11 +144,11 @@ export struct AgentToolCallCapsule {
           }
         }
       }
-      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-      .constraintSize({ minHeight: 44 })
-      .backgroundColor(SURFACE2)
+      .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+      .constraintSize({ minHeight: 32 })
+      .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
       .borderRadius(50)
-      .border({ width: 1, color: LINE })
+      .border({ width: this.showApproval ? 1 : 0, color: LINE })
       .alignItems(VerticalAlign.Center)
       .onClick((): void => { this.onCapsuleClick(); })
       .accessibilityText(`查看工具 ${this.title}`)

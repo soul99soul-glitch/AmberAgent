@@ -86,7 +86,7 @@ struct SettingPage {
       Scroll() {
         Column() {
           // ── 外观 ──
-          SectionHeader({ label: 'APPEARANCE' })
+          SectionHeader({ label: '通用设置' })
 
           Row() {
             Row() {
@@ -145,10 +145,10 @@ struct SettingPage {
             NavRow({ label: '显示设置', isLast: true, onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
           // ── 模型与服务 ──
-          SectionHeader({ label: 'MODELS & SERVICES' })
+          SectionHeader({ label: '模型与服务' })
           Column() {
             NavRow({ label: '默认模型', valueText: this.modelLabel, onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
             NavRow({ label: '任务模型', onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
@@ -158,10 +158,10 @@ struct SettingPage {
             NavRow({ label: '深度阅读设置', isLast: true, onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
           // ── Agent Runtime ──
-          SectionHeader({ label: 'AGENT RUNTIME' })
+          SectionHeader({ label: 'AGENT 设置' })
           Column() {
             NavRow({ label: '技能', onRowClick: (): void => { this.go('pages/SkillsPage'); } })
             NavRow({ label: '核心记忆', onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
@@ -174,10 +174,10 @@ struct SettingPage {
             NavRow({ label: '实验功能', isLast: true, onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
           // ── 数据 ──
-          SectionHeader({ label: 'DATA' })
+          SectionHeader({ label: '数据设置' })
           Column() {
             NavRow({ label: '历史记录', onRowClick: (): void => { this.go('pages/HistoryPage'); } })
             NavRow({ label: '收藏', onRowClick: (): void => { this.go('pages/FavoritePage'); } })
@@ -185,16 +185,16 @@ struct SettingPage {
             NavRow({ label: '文件管理', isLast: true, onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
           // ── 关于 ──
-          SectionHeader({ label: 'ABOUT' })
+          SectionHeader({ label: '关于' })
           Column() {
             NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
             NavRow({ label: '关于', isLast: true, onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
+          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
 
           // 1:1 原型版本行:$ 提示符陶土色
           Row() {

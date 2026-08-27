@@ -116,23 +116,23 @@ export struct ChatInput {
       }
 
       // Composer 沉浸式(原型验收规格):无底盘底色、无顶部分隔线,
-      //   + / 胶囊 / 发送键严格等高 48,容器 alignItems:center,胶囊固定 height 48。
+      //   + / 胶囊 / 发送键严格等高 44(amber-zhenji 规格),胶囊 bg surface、圆角随输入增高 999↔24。
       Stack() {
         Row() {
-        // Attach capsule:48x48, radius 999, bg SURFACE2, border 1px LINE, plus 22/INK2
+        // Attach capsule:44x44, radius 999, bg SURFACE, border 1px LINE, plus 20/INK2
         Row() {
-          Icon({ name: 'plus', iconSize: 22, color: INK2 })
+          Icon({ name: 'plus', iconSize: 20, color: INK2 })
         }
-        .width(48).height(48)
+        .width(44).height(44)
         .borderRadius(999)
-        .backgroundColor(SURFACE2)
+        .backgroundColor(SURFACE)
         .border({ width: 1, color: LINE })
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .opacity(this.sending ? 0.4 : 1)
         .scale({ x: this.attachScale, y: this.attachScale })
         .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
-        .margin({ right: 9 })
+        .margin({ right: 8 })
         .onClick((): void => { if (!this.sending) this.onPickImage(); })
         .accessibilityText('添加图片')
 
@@ -146,28 +146,28 @@ export struct ChatInput {
             .placeholderColor(INK4)
             .placeholderFont({ size: BODY })
             .backgroundColor(Color.Transparent)
-            .borderRadius(26)
-            .padding({ top: 13, bottom: 14 })
+            .borderRadius(this.text.length > 0 ? 24 : 999)
+            .padding({ top: 11, bottom: 12 })
             .maxLines(4)
-            .constraintSize({ minHeight: 48, maxHeight: 111 })
+            .constraintSize({ minHeight: 44, maxHeight: 111 })
             .lineHeight(lineHeightForSize(BODY))
             .onChange((v: string): void => { this.onTextChange(v); })
         }
         .layoutWeight(1)
-        .constraintSize({ minHeight: 48, maxHeight: 111 })
-        .borderRadius(26)
-        .backgroundColor(SURFACE2)
+        .constraintSize({ minHeight: 44, maxHeight: 111 })
+        .borderRadius(this.text.length > 0 ? 24 : 999)
+        .backgroundColor(SURFACE)
         .border({ width: 1, color: LINE })
         .padding({ left: 18, right: 18 })
         .alignItems(VerticalAlign.Center)
-        .margin({ right: 9 })
+        .margin({ right: 8 })
 
         // Send/Stop button:48x48, radius 999(stop 用纯白方块 glyph,1:1 原型)
         if (this.sending) {
           Row() {
-            Column().width(14).height(14).backgroundColor(SURFACE).borderRadius(3)
+            Column().width(12).height(12).backgroundColor(SURFACE).borderRadius(3)
           }
-          .width(48).height(48)
+          .width(44).height(44)
           .borderRadius(999)
           .backgroundColor(INK)
           .justifyContent(FlexAlign.Center)
@@ -178,9 +178,9 @@ export struct ChatInput {
           .accessibilityText('停止生成')
         } else {
           Row() {
-            Icon({ name: 'arrow_up', iconSize: 21, color: this.canSend() ? ACCENT_INK : INK2 })
+            Icon({ name: 'arrow_up', iconSize: 20, color: this.canSend() ? ACCENT_INK : INK2 })
           }
-          .width(48).height(48)
+          .width(44).height(44)
           .borderRadius(999)
           .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE2)
           .border({ width: 1, color: this.canSend() ? this.accentColorStore : LINE })

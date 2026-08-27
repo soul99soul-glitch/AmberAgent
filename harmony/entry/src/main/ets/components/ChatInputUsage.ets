@@ -112,6 +112,55 @@ export struct ContextUsageIndicator {
   }
 }
 
+// ContextBarsIndicator — 上下文四段竖条 + 百分比(amber-zhenji.html .ctx-bars 规格)
+@Component
+export struct ContextBarsIndicator {
+  @Prop usedTokens: number = 0;
+  @Prop contextWindow: number = 0;
+  @Prop compactActive: boolean = false;
+
+  private ratio(): number {
+    if (this.contextWindow <= 0) return 0;
+    return Math.min(this.usedTokens / this.contextWindow, 1);
+  }
+
+  private filledCount(): number {
+    if (this.compactActive) return 4;
+    const pct: number = this.ratio() * 100;
+    if (pct <= 0) return 0;
+    if (pct < 25) return 1;
+    if (pct < 50) return 2;
+    if (pct < 75) return 3;
+    return 4;
+  }
+
+  private percentText(): string {
+    if (this.compactActive) return '压缩中';
+    return `${Math.round(this.ratio() * 100)}%`;
+  }
+
+  build(): void {
+    Row({ space: 6 }) {
+      Row({ space: 2 }) {
+        ForEach([0, 1, 2, 3], (i: number): void => {
+          Column()
+            .width(3)
+            .height(10)
+            .borderRadius(1)
+            .backgroundColor(i < this.filledCount() ? ACCENT : LINE)
+        }, (i: number): string => `bar-${i}`)
+      }
+      .alignItems(VerticalAlign.Center)
+
+      Text(this.percentText())
+        .fontSize(11)
+        .fontFamily('JetBrainsMono')
+        .fontColor(INK4)
+    }
+    .alignItems(VerticalAlign.Center)
+  }
+}
+
 // ReasoningLevelChip — reasoning 等级选择 chip
 @Component
 export struct ReasoningLevelChip {

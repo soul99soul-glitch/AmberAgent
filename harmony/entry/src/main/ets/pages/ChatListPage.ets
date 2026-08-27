@@ -8,8 +8,8 @@ import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
-import { ACCENT, ACCENT_INK, BG, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE2 } from '../design/tokens.ets';
-import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
+import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_MONO_BOLD } from '../design/fonts.ets';
 import { BlinkingCursor } from '../design/components.ets';
 
 interface ActionMenuResult {
@@ -17,6 +17,16 @@ interface ActionMenuResult {
 }
 
 const SNACK_BG: string = '#32302B';
+
+// accent 透明度混色(iOS rgba 语法;ArkUI 直接收 '#AARRGGBB' 也受支持但令牌是 #RRGGBB)
+const accentAlpha = (hex: string, alpha: number): string => {
+  const value: string = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const r: number = parseInt(value.substring(0, 2), 16);
+  const g: number = parseInt(value.substring(2, 4), 16);
+  const b: number = parseInt(value.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 const SNACK_DURATION_MS: number = 4000;
 
 @Entry
@@ -28,7 +38,6 @@ struct ChatListPage {
   @State themeTick: number = 0;
   @State items: ConversationSummary[] = [];
   @State loaded: boolean = false;
-  @State searchText: string = '';
   @State snackVisible: boolean = false;
   @State fabScale: number = 1;
   @State pressedId: string = '';
@@ -89,10 +98,8 @@ struct ChatListPage {
 
   private refresh(): void {
     const repo = getChatRepository();
-    const query: string = this.searchText.trim();
     const seq: number = ++this.refreshSeq;
-    const future: Promise<ConversationSummary[]> =
-      query.length > 0 ? repo.search(query) : repo.list();
+    const future: Promise<ConversationSummary[]> = repo.list();
     future.then((list: ConversationSummary[]): void => {
       if (seq !== this.refreshSeq || !this.pageAlive) return;
       const pendingId: string = this.pendingDeleted !== null ? this.pendingDeleted.id : '';
@@ -141,10 +148,7 @@ struct ChatListPage {
   }
 
   private openSearch(): void {
-    const params: Record<string, string> = {};
-    const query: string = this.searchText.trim();
-    if (query.length > 0) params['query'] = query;
-    router.pushUrl({ url: 'pages/SearchPage', params: params });
+    router.pushUrl({ url: 'pages/SearchPage' });
   }
 
   private newConversation(): void {
@@ -298,10 +302,10 @@ struct ChatListPage {
             .margin({ left: 10, right: 8 })
         }
         Text(this.formatConversationDate(item.updateAt))
-          .fontSize(13)
-          .lineHeight(18)
+          .fontSize(11)
+          .lineHeight(14)
           .fontFamily(FONT_MONO)
-          .fontColor(INK3)
+          .fontColor(INK4)
           .maxLines(1)
       }
       .width('100%')
@@ -309,8 +313,8 @@ struct ChatListPage {
 
       Row() {
         Text(this.previewOf(item.id))
-          .fontSize(14)
-          .lineHeight(19)
+          .fontSize(13)
+          .lineHeight(18)
           .fontColor(INK3)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -318,17 +322,16 @@ struct ChatListPage {
           .margin({ right: 14 })
         if (this.messageCount(item.id) > 0) {
           Text(`${this.messageCount(item.id)}`)
-            .fontSize(13)
+            .fontSize(10)
             .fontFamily(FONT_MONO)
             .fontColor(this.accentColorStore)
-            .width(28)
-            .height(28)
-            .lineHeight(26)
+            .constraintSize({ minWidth: 18 })
+            .height(18)
+            .padding({ left: 5, right: 5 })
             .textAlign(TextAlign.Center)
             .maxLines(1)
-            .minFontSize(11)
-            .border({ width: 1, color: this.accentColorStore })
-            .borderRadius(14)
+            .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.45) })
+            .borderRadius(99)
         }
       }
       .width('100%')
@@ -337,7 +340,7 @@ struct ChatListPage {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 11, bottom: 11 })
+    .padding({ left: 20, right: 20, top: 12, bottom: 12 })
     .backgroundColor(this.pressedId === item.id ? SURFACE2 : BG)
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .onTouch((event: TouchEvent): void => {
@@ -400,11 +403,12 @@ struct ChatListPage {
   @Builder
   FeatureItem(id: string, label: string, icon: string): void {
     Column() {
-      Icon({ name: icon, iconSize: 26, color: this.accentColorStore })
+      Icon({ name: icon, iconSize: 24, color: this.accentColorStore })
       Text(label)
-        .fontSize(13)
+        .fontSize(12.5)
         .fontWeight(FontWeight.Medium)
-        .lineHeight(18)
+        .lineHeight(17)
+        .letterSpacing(0.2)
         .fontFamily(FONT_SANS_MEDIUM)
         .fontColor(INK2)
         .maxLines(1)
@@ -428,7 +432,7 @@ struct ChatListPage {
   FeatureDivider(): void {
     Column()
       .width(1)
-      .height(44)
+      .height(26)
       .backgroundColor(LINE)
   }
 
@@ -438,21 +442,21 @@ struct ChatListPage {
         Row() {
           Row() {
             Text('Amber')
-              .fontSize(30)
+              .fontSize(23)
               .fontWeight(FontWeight.Bold)
-              .lineHeight(36)
+              .lineHeight(28)
               .letterSpacing(-0.5)
-              .fontFamily(FONT_SANS_BOLD)
+              .fontFamily(FONT_MONO_BOLD)
               .fontColor(INK)
-            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 9, cursorHeight: 30 })
-              .margin({ left: 8 })
+            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 12, cursorHeight: 23 })
+              .margin({ left: 3 })
           }
           .alignItems(VerticalAlign.Center)
 
           Text(this.todayLabel())
-            .fontSize(14)
-            .lineHeight(19)
-            .fontFamily(FONT_SANS)
+            .fontSize(11.5)
+            .fontFamily(FONT_MONO)
+            .letterSpacing(0.2)
             .fontColor(INK3)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -460,10 +464,10 @@ struct ChatListPage {
             .margin({ left: 14 })
 
           Row() {
-            Icon({ name: 'gear', iconSize: 22, color: INK2 })
+            Icon({ name: 'gear', iconSize: 20, color: INK2 })
           }
-          .width(40)
-          .height(40)
+          .width(48)
+          .height(48)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .onClick((): void => { router.pushUrl({ url: 'pages/SettingPage' }); })
@@ -472,12 +476,12 @@ struct ChatListPage {
             UIAvatar({
               name: this.userNickname,
               imageUrl: this.userAvatar,
-              avatarSize: 36,
+              avatarSize: 34,
               accentColor: this.accentColorStore,
             })
           }
-          .width(40)
-          .height(40)
+          .width(48)
+          .height(48)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .margin({ left: 6 })
@@ -488,34 +492,19 @@ struct ChatListPage {
         .padding({ left: 20, right: 20, top: this.statusBarHeight + 10, bottom: 10 })
 
         Row() {
-          Icon({ name: 'search', iconSize: 20, color: INK3 })
-          TextInput({ text: this.searchText, placeholder: '搜索会话' })
-            .fontSize(16)
-            .fontColor(INK)
-            .placeholderColor(INK4)
-            .placeholderFont({ size: 16 })
+          Icon({ name: 'search', iconSize: 17, color: INK3 })
+          Text('搜索会话')
+            .fontSize(14.5)
             .fontFamily(FONT_SANS)
-            .backgroundColor(Color.Transparent)
-            .layoutWeight(1)
-            .margin({ left: 12 })
-            .onClick((): void => { this.openSearch(); })
-            .onChange((value: string): void => { this.searchText = value; this.refresh(); })
-          if (this.searchText.length > 0) {
-            Row() {
-              Icon({ name: 'close', iconSize: 18, color: INK3 })
-            }
-            .width(40)
-            .height(40)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .onClick((): void => { this.searchText = ''; this.refresh(); })
-          }
+            .fontColor(INK4)
+            .margin({ left: 9 })
+          Blank()
         }
         .width('100%')
-        .height(52)
-        .padding({ left: 20, right: 20 })
+        .padding({ top: 9, bottom: 10, left: 20, right: 20 })
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
         .alignItems(VerticalAlign.Center)
+        .onClick((): void => { this.openSearch(); })
 
         Row() {
           Column() { this.FeatureItem('reader', '深度阅读', 'hi_book_open') }.height('100%').layoutWeight(1)
@@ -529,8 +518,8 @@ struct ChatListPage {
           Column() { this.FeatureItem('council', '模型议会', 'hi_message') }.height('100%').layoutWeight(1)
         }
         .width('100%')
-        .height(92)
-        .padding({ left: 20, right: 20 })
+        .height(84)
+        .padding({ left: 20, right: 20, top: 6 })
         .alignItems(VerticalAlign.Center)
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
@@ -546,13 +535,13 @@ struct ChatListPage {
             } else if (this.items.length === 0) {
               ListItem() {
                 Column() {
-                  Text(this.searchText.trim().length > 0 ? '没有匹配的会话' : '还没有会话')
+                  Text('还没有会话')
                     .fontSize(16)
                     .fontWeight(FontWeight.Medium)
                     .lineHeight(22)
                     .fontFamily(FONT_SANS_MEDIUM)
                     .fontColor(INK2)
-                  Text(this.searchText.trim().length > 0 ? '换一个关键词再试试。' : '点击右下角按钮开始新的对话。')
+                  Text('点击右下角按钮开始新的对话。')
                     .fontSize(14)
                     .lineHeight(19)
                     .fontFamily(FONT_SANS)
@@ -581,8 +570,17 @@ struct ChatListPage {
           .backgroundColor(BG)
           .divider({ strokeWidth: 0, color: Color.Transparent })
 
+          Column()
+            .width('100%')
+            .height(52)
+            .linearGradient({
+              direction: GradientDirection.Bottom,
+              colors: [[BG_FADE_START, 0], [BG_FADE_END, 1]],
+            })
+            .hitTestBehavior(HitTestMode.None)
+
           Column() {
-            Icon({ name: 'edit', iconSize: 24, color: ACCENT_INK })
+            Icon({ name: 'hi_message', iconSize: 24, color: ACCENT_INK })
           }
           .width(56)
           .height(56)

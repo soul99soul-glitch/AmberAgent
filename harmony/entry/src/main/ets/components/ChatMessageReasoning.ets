@@ -91,9 +91,9 @@ export struct ChatMessageReasoning {
     Column() {
       // 头部: 图标 + 标题文本 + 展开箭头
       Row() {
-        Icon({ name: 'brain', iconSize: 14, color: ACCENT })
+        Icon({ name: 'brain', iconSize: 16, color: ACCENT })
         Text(this.headerText())
-          .fontSize(META)
+          .fontSize(13)
           .fontColor(ACCENT)
           .fontWeight(FontWeight.Medium)
           .fontFamily('JetBrainsMono')

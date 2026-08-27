@@ -10,6 +10,7 @@ import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERR
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { router, promptAction, window } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { FONT_MONO } from '../design/fonts.ets';
 import { inputMethod } from '@kit.IMEKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -134,7 +135,7 @@ import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import type { QuickMessage } from '../components/SlashCommandPanel.ets';
-import { ContextUsageIndicator } from '../components/ChatInputUsage.ets';
+import { ContextBarsIndicator } from '../components/ChatInputUsage.ets';
 import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
 import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
 import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
@@ -167,6 +168,16 @@ import { MiniAppChatCard } from '../components/MiniAppChatCard.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
+
+// accent rgba 混色(建议 chips 描边等;与 tokens 令牌 #RRGGBB 配合)
+const accentAlpha = (hex: string, alpha: number): string => {
+  const value: string = hex.replace('#', '');
+  if (value.length !== 6) return hex;
+  const r: number = parseInt(value.substring(0, 2), 16);
+  const g: number = parseInt(value.substring(2, 4), 16);
+  const b: number = parseInt(value.substring(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 // 1:1 原型空态 hero 轮换句(3.2s 淡入淡出)
 const GREETINGS: string[] = [
@@ -4510,24 +4521,16 @@ struct ChatPage {
 
       // 悬浮头部(1:1 原型 padding 2px 20px 11px;透明 → 毛玻璃 blur14)
       Row() {
-        // Android ChatHeader:菜单三线触发器；保留返回按钮供显式返回。
+        // amber-zhenji:chat-head 左侧为返回(抽屉入口收归首页)。
         Row() {
-          Stack() {
-            Column() {
-              Text('').width(22).height(1.5).backgroundColor(INK).borderRadius(1)
-              Text('').width(14).height(1.5).backgroundColor(INK).borderRadius(1)
-                .margin({ top: 5 })
-              Text('').width(19).height(1.5).backgroundColor(INK).borderRadius(1)
-                .margin({ top: 5 })
-            }
-            .alignItems(HorizontalAlign.Start)
-          }
-          .width(36).height(36)
-          .alignContent(Alignment.Center)
-          .onClick((): void => { this.openDrawer(); })
-          .accessibilityText('打开会话抽屉')
-
+          Icon({ name: 'back', iconSize: 24, color: INK })
         }
+        .width(48).height(48)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .margin({ left: -10 })
+        .onClick((): void => { router.back(); })
+        .accessibilityText('返回')
 
         // Center:标题 + 模型行(flex 1, margin-left 2)
         Column() {
@@ -4547,24 +4550,24 @@ struct ChatPage {
               .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
               .fontFamily(TEXT_STYLES.sessionTitle.family)
               .fontColor(INK)
+              .textAlign(TextAlign.Center)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
           }
-          // 模型行(1:1):厂商前缀模型名 mono + ⌄ 紧跟其后,整体左对齐
+          // 模型行(amber-zhenji):mono 11.5 ink3 居中 + ⌄12
           Row() {
             Text(this.modelLabel.length > 0 ? this.modelLabel : '未配置模型')
-              .fontSize(META).fontFamily('JetBrainsMono')
+              .fontSize(11.5).fontFamily(FONT_MONO)
               .fontColor(this.modelLabel.length > 0 ? INK3 : this.accentColorStore)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Icon({ name: 'chevron_down', iconSize: 11, color: INK4 })
+            Icon({ name: 'chevron_down', iconSize: 12, color: INK3 })
               .rotate({ angle: this.modelMenuOpen ? 180 : 0 })
-              .margin({ left: 6 })
+              .margin({ left: 2 })
           }
           .margin({ top: 1 })
         }
         .layoutWeight(1)
-        .alignItems(HorizontalAlign.Start)
-        .margin({ left: 10 })
+        .alignItems(HorizontalAlign.Center)
         .onClick((): void => {
           if (!this.editingTitle) {
             this.toggleModelMenu();
@@ -4587,11 +4590,10 @@ struct ChatPage {
             //   contextFilledBars/contextRingColor 计算;点击弹紧凑详情 sheet)—
             //   置 header 右侧,+ 图标左侧,不遮挡模型行
             Row() {
-              ContextUsageIndicator({
+              ContextBarsIndicator({
                 usedTokens: this.estimatedContextTokens(),
                 contextWindow: this.contextWindowTokens ?? 0,
                 compactActive: this.compactActiveCount > 0,
-                lineColor: LINE,
               })
             }
             .alignItems(VerticalAlign.Center)
@@ -4614,7 +4616,8 @@ struct ChatPage {
         }
       }
       .width('100%')
-      .padding({ left: 20, right: 20, top: this.statusBarHeight + 2, bottom: 11 })
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 20, right: 20, top: this.statusBarHeight + 2, bottom: 8 })
       .border({ width: { bottom: 1 }, color: { bottom: this.headerSolid ? LINE : Color.Transparent }, style: { bottom: BorderStyle.Dotted } })
       .backgroundColor(this.headerSolid ? BG_GLASS : Color.Transparent)
       .backdropBlur(this.headerSolid ? 14 : 0)
@@ -4667,12 +4670,14 @@ struct ChatPage {
           Row() {
             ForEach(this.suggestions, (s: string): void => {
               Text(s)
-                .fontSize(12).fontColor(INK2)
+                .fontSize(13).fontColor(this.accentColorStore)
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .padding({ left: 10, right: 10, top: 6, bottom: 6 })
-                .backgroundColor(SURFACE)
-                .borderRadius(12)
+                .constraintSize({ maxWidth: '58%' })
+                .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                .backgroundColor(Color.Transparent)
+                .borderRadius(999)
+                .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.35) })
                 .margin({ right: 8 })
                 // Android ChatPage.kt:812-830:点击 = 填入输入框;
                 //   长按 = 直接发送(D-042);生成中 → FOLLOWUP 入队(D-048);

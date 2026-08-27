@@ -31,9 +31,9 @@ export struct PageTitleBar {
     Row() {
       if (this.showBack) {
         Row() {
-          Icon({ name: 'back', iconSize: 22, color: INK })
+          Icon({ name: 'back', iconSize: 24, color: INK })
         }
-        .width(44).height(44)
+        .width(48).height(48)
         .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .accessibilityText('返回')
@@ -67,8 +67,9 @@ export struct PageTitleBar {
       }
     }
     .width('100%')
-    // 无返回键时标题对齐页边距 GUTTER(=卡片左缘);有返回键时返回钮贴左,标题随钮
-    .padding({ left: this.showBack ? 14 : GUTTER, right: GUTTER, top: this.statusBarHeight + 2, bottom: 11 })
+    // amber-zhenji topbar:高 64,返回钮 48 热区、贴边 4px
+    .constraintSize({ minHeight: 64 })
+    .padding({ left: this.showBack ? 4 : GUTTER, right: GUTTER, top: this.statusBarHeight, bottom: 8 })
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .backgroundColor(BG)
   }
@@ -183,9 +184,19 @@ export struct ToggleRow {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      Toggle({ type: ToggleType.Switch, isOn: this.checked })
-        .selectedColor(this.checked ? this.accentColorStore : LINE2)
-        .onChange((_v: boolean): void => { this.onToggle(); })
+      Stack({ alignContent: Alignment.Start }) {
+        Column()
+          .width(42).height(24).borderRadius(99)
+          .backgroundColor(this.checked ? this.accentColorStore : LINE2)
+        Column()
+          .width(20).height(20).borderRadius(10)
+          .backgroundColor('#FFFFFF')
+          .margin({ left: this.checked ? 22 : 2 })
+          .animation({ duration: 150, curve: Curve.EaseOut })
+      }
+      .clip(true)
+      .onClick((): void => { this.onToggle(); })
+      .accessibilityText(this.checked ? '已开启' : '已关闭')
     }
     .width('100%')
     .padding({ left: 16, right: 16, top: 14, bottom: 14 })
