@@ -122,21 +122,22 @@ export struct ChatInput {
       //   + / 胶囊 / 发送键严格等高 44(amber-zhenji 规格),胶囊 bg surface、圆角随输入增高 999↔24。
       Stack() {
         Row() {
-        // Attach capsule:rest 44 圆;展开 拍照/图片/文件(amber-zhenji InlineAttachmentActions)
-        Row({ space: 2 }) {
+        // Attach capsule:rest 44 纯圆;展开时动作组以宽度+透明度推入(220ms),
+        //   组件常驻(不做 if 增删),避免宽度跳变无动效、收起无动画。
+        Row() {
           Row() {
             Icon({ name: 'plus', iconSize: 20, color: INK2 })
               .rotate({ angle: this.attachExpanded ? 45 : 0 })
               .animation({ duration: 220, curve: Curve.EaseOut })
           }
-          .width(44).height(44)
+          .width(40).height(40)
           .borderRadius(999)
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .onClick((): void => { this.attachExpanded = !this.attachExpanded; })
           .accessibilityText('添加附件')
 
-          if (this.attachExpanded && !this.sending) {
+          Row({ space: 2 }) {
             Row() {
               Icon({ name: 'hi_camera', iconSize: 23, color: INK2 })
             }
@@ -144,6 +145,7 @@ export struct ChatInput {
             .justifyContent(FlexAlign.Center)
             .onClick((): void => { this.attachExpanded = false; this.onTakePhoto(); })
             .accessibilityText('拍照')
+
             Row() {
               Icon({ name: 'hi_photos', iconSize: 23, color: INK2 })
             }
@@ -151,6 +153,7 @@ export struct ChatInput {
             .justifyContent(FlexAlign.Center)
             .onClick((): void => { this.attachExpanded = false; this.onPickImage(); })
             .accessibilityText('选择图片')
+
             Row() {
               Icon({ name: 'hi_files', iconSize: 23, color: INK2 })
             }
@@ -159,7 +162,13 @@ export struct ChatInput {
             .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
             .accessibilityText('选择文件')
           }
+          .width(this.attachExpanded ? 124 : 0)
+          .opacity(this.attachExpanded ? 1 : 0)
+          .clip(true)
+          .alignItems(VerticalAlign.Center)
+          .animation({ duration: 220, curve: Curve.EaseOut })
         }
+        .height(44)
         .padding({ left: 2, right: 2 })
         .borderRadius(999)
         .backgroundColor(SURFACE)
@@ -169,7 +178,6 @@ export struct ChatInput {
         .scale({ x: this.attachScale, y: this.attachScale })
         .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
         .margin({ right: 8 })
-        .animation({ duration: 220, curve: Curve.EaseOut })
 
         // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
         Row() {
@@ -183,13 +191,13 @@ export struct ChatInput {
             .backgroundColor(Color.Transparent)
             .borderRadius(this.text.length > 0 ? 24 : 999)
             .padding({ top: 11, bottom: 12 })
-            .maxLines(4)
-            .constraintSize({ minHeight: 44, maxHeight: 111 })
+            .maxLines(this.attachExpanded ? 1 : 4)
+            .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
             .lineHeight(lineHeightForSize(BODY))
             .onChange((v: string): void => { this.onTextChange(v); })
         }
         .layoutWeight(1)
-        .constraintSize({ minHeight: 44, maxHeight: 111 })
+        .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
         .borderRadius(this.text.length > 0 ? 24 : 999)
         .backgroundColor(SURFACE)
         .border({ width: 1, color: LINE })
