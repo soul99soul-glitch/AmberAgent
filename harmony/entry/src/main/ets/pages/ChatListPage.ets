@@ -10,6 +10,7 @@ import { Icon } from '../components/ui/Icon.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
 import { ACCENT, ACCENT_INK, BG, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE2 } from '../design/tokens.ets';
 import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
+import { BlinkingCursor } from '../design/components.ets';
 
 interface ActionMenuResult {
   index: number;
@@ -30,6 +31,8 @@ struct ChatListPage {
   @State searchText: string = '';
   @State snackVisible: boolean = false;
   @State fabScale: number = 1;
+  @State pressedId: string = '';
+  @State pressedFeature: string = '';
   @State userNickname: string = '';
   @State previews: Record<string, string> = {};
   @State msgCounts: Record<string, number> = {};
@@ -330,8 +333,12 @@ struct ChatListPage {
     .width('100%')
     .alignItems(HorizontalAlign.Start)
     .padding({ left: 20, right: 20, top: 11, bottom: 11 })
-    .backgroundColor(BG)
+    .backgroundColor(this.pressedId === item.id ? SURFACE2 : BG)
     .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.pressedId = item.id;
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedId = '';
+    })
     .onClick((): void => { this.openConversation(item.id); })
     .gesture(
       LongPressGesture()
@@ -403,6 +410,12 @@ struct ChatListPage {
     .height('100%')
     .justifyContent(FlexAlign.Center)
     .alignItems(HorizontalAlign.Center)
+    .scale({ x: this.pressedFeature === id ? 0.94 : 1, y: this.pressedFeature === id ? 0.94 : 1 })
+    .animation({ duration: 140, curve: Curve.EaseOut })
+    .onTouch((event: TouchEvent): void => {
+      if (event.type === TouchType.Down) this.pressedFeature = id;
+      else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressedFeature = '';
+    })
     .onClick((): void => { this.onFeature(id); })
   }
 
@@ -426,10 +439,7 @@ struct ChatListPage {
               .letterSpacing(-0.5)
               .fontFamily(FONT_SANS_BOLD)
               .fontColor(INK)
-            Column()
-              .width(9)
-              .height(30)
-              .backgroundColor(this.accentColorStore)
+            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 9, cursorHeight: 30 })
               .margin({ left: 8 })
           }
           .alignItems(VerticalAlign.Center)

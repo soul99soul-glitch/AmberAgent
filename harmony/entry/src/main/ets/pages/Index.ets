@@ -14,6 +14,7 @@ import {
   FONT_SANS, FONT_SANS_MEDIUM, FONT_SANS_BOLD, FONT_MONO, FONT_MONO_BOLD,
 } from '../design/fonts.ets';
 import { SectionHeader } from '../components/PageTemplate.ets';
+import { BlinkingCursor } from '../design/components.ets';
 
 // Index-specific values: keep new hierarchy values together until they become shared tokens.
 const HEADER_HEIGHT: number = 56;
@@ -132,13 +133,11 @@ struct Index {
   @State recentItems: ConversationSummary[] = [];
   @State loaded: boolean = false;
   @State modelLabel: string = '';
-  @State cursorOpacity: number = 1;
   @State inputFocused: boolean = false;
   @State inputHeight: number = COMPOSER_MIN_HEIGHT;
   @State inputFlashAlpha: number = 0;
   @State attachScale: number = 1;
   @State sendScale: number = 1;
-  private cursorTimer: number = -1;
   private pageAlive: boolean = false;
   private pageVisible: boolean = false;
   private keyboardHeightVp: number = 0;
@@ -148,7 +147,6 @@ struct Index {
   aboutToAppear(): void {
     this.pageAlive = true;
     this.pageVisible = true;
-    this.startCursorBlink();
     this.loadRecent();
     this.loadModelLabel();
     this.attachKeyboardListener();
@@ -156,14 +154,12 @@ struct Index {
 
   onPageShow(): void {
     this.pageVisible = true;
-    this.startCursorBlink();
     this.loadModelLabel();
     this.attachKeyboardListener();
   }
 
   onPageHide(): void {
     this.pageVisible = false;
-    this.stopCursorBlink();
     this.detachKeyboardListener();
     this.keyboardHeightVp = 0;
   }
@@ -171,27 +167,9 @@ struct Index {
   aboutToDisappear(): void {
     this.pageAlive = false;
     this.pageVisible = false;
-    this.stopCursorBlink();
     this.detachKeyboardListener();
   }
 
-  private startCursorBlink(): void {
-    this.stopCursorBlink();
-    this.cursorOpacity = 1;
-    this.cursorTimer = setInterval((): void => {
-      if (this.pageAlive && this.pageVisible) {
-        this.cursorOpacity = this.cursorOpacity === 1 ? 0 : 1;
-      }
-    }, 525);
-  }
-
-  private stopCursorBlink(): void {
-    if (this.cursorTimer !== -1) {
-      clearInterval(this.cursorTimer);
-      this.cursorTimer = -1;
-    }
-    this.cursorOpacity = 0;
-  }
 
   private loadModelLabel(): void {
     describeChatModel().then((label: string): void => {
@@ -363,12 +341,8 @@ struct Index {
               .letterSpacing(-0.5)
               .fontColor(INK)
               .fontFamily(FONT_MONO_BOLD)
-            Text('')
-              .width(9).height(20)
-              .backgroundColor(this.accentColorStore)
-              .borderRadius(1)
+            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 9, cursorHeight: 20 })
               .margin({ left: 2 })
-              .opacity(this.cursorOpacity)
           }
           .alignItems(VerticalAlign.Bottom)
           Text(greetingMessage())

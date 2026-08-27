@@ -97,14 +97,44 @@ export struct LiveDot {
 //   故重命名为 cursorWidth / cursorHeight。
 @Component
 export struct BlinkingCursor {
-  color: string = ACCENT;
-  cursorWidth: number = 2;
-  cursorHeight: number = 16;
+  @Prop color: string = ACCENT;
+  @Prop cursorWidth: number = 2;
+  @Prop cursorHeight: number = 16;
+  @State private visible: boolean = true;
+  private timer: number = -1;
+  private alive: boolean = false;
+
+  aboutToAppear(): void {
+    this.alive = true;
+    this.start();
+  }
+
+  aboutToDisappear(): void {
+    this.alive = false;
+    this.stop();
+  }
+
+  private start(): void {
+    this.stop();
+    this.visible = true;
+    this.timer = setInterval((): void => {
+      if (this.alive) this.visible = !this.visible;
+    }, 530);
+  }
+
+  private stop(): void {
+    if (this.timer !== -1) {
+      clearInterval(this.timer);
+      this.timer = -1;
+    }
+  }
+
   build(): void {
     Column()
       .width(this.cursorWidth)
       .height(this.cursorHeight)
       .backgroundColor(this.color)
+      .opacity(this.visible ? 1 : 0)
   }
 }
 
