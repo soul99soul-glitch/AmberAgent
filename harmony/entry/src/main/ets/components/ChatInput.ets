@@ -39,6 +39,9 @@ export struct ChatInput {
   onStop: () => void = (): void => {};
   onSendWithoutAnswer: () => void = (): void => {};
   onPickImage: () => void = (): void => {};
+  onTakePhoto: () => void = (): void => {};
+  onPickFile: () => void = (): void => {};
+  @State attachExpanded: boolean = false;
   onCancelEdit: () => void = (): void => {};
   onClearInput: () => void = (): void => {};
   onCompactContext: () => void = (): void => {};
@@ -119,22 +122,54 @@ export struct ChatInput {
       //   + / 胶囊 / 发送键严格等高 44(amber-zhenji 规格),胶囊 bg surface、圆角随输入增高 999↔24。
       Stack() {
         Row() {
-        // Attach capsule:44x44, radius 999, bg SURFACE, border 1px LINE, plus 20/INK2
-        Row() {
-          Icon({ name: 'plus', iconSize: 20, color: INK2 })
+        // Attach capsule:rest 44 圆;展开 拍照/图片/文件(amber-zhenji InlineAttachmentActions)
+        Row({ space: 2 }) {
+          Row() {
+            Icon({ name: 'plus', iconSize: 20, color: INK2 })
+              .rotate({ angle: this.attachExpanded ? 45 : 0 })
+              .animation({ duration: 220, curve: Curve.EaseOut })
+          }
+          .width(44).height(44)
+          .borderRadius(999)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.attachExpanded = !this.attachExpanded; })
+          .accessibilityText('添加附件')
+
+          if (this.attachExpanded && !this.sending) {
+            Row() {
+              Icon({ name: 'hi_camera', iconSize: 23, color: INK2 })
+            }
+            .width(40).height(40).borderRadius(999)
+            .justifyContent(FlexAlign.Center)
+            .onClick((): void => { this.attachExpanded = false; this.onTakePhoto(); })
+            .accessibilityText('拍照')
+            Row() {
+              Icon({ name: 'hi_photos', iconSize: 23, color: INK2 })
+            }
+            .width(40).height(40).borderRadius(999)
+            .justifyContent(FlexAlign.Center)
+            .onClick((): void => { this.attachExpanded = false; this.onPickImage(); })
+            .accessibilityText('选择图片')
+            Row() {
+              Icon({ name: 'hi_files', iconSize: 23, color: INK2 })
+            }
+            .width(40).height(40).borderRadius(999)
+            .justifyContent(FlexAlign.Center)
+            .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
+            .accessibilityText('选择文件')
+          }
         }
-        .width(44).height(44)
+        .padding({ left: 2, right: 2 })
         .borderRadius(999)
         .backgroundColor(SURFACE)
         .border({ width: 1, color: LINE })
-        .justifyContent(FlexAlign.Center)
         .alignItems(VerticalAlign.Center)
         .opacity(this.sending ? 0.4 : 1)
         .scale({ x: this.attachScale, y: this.attachScale })
         .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
         .margin({ right: 8 })
-        .onClick((): void => { if (!this.sending) this.onPickImage(); })
-        .accessibilityText('添加图片')
+        .animation({ duration: 220, curve: Curve.EaseOut })
 
         // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
         Row() {

@@ -118,44 +118,46 @@ export struct ContextBarsIndicator {
   @Prop usedTokens: number = 0;
   @Prop contextWindow: number = 0;
   @Prop compactActive: boolean = false;
+  // 填充色(Android contextRingColor:空/低/中/高阈值色)
+  @Prop fillColor: string = ACCENT;
+  @Prop trackColor: string = LINE;
 
   private ratio(): number {
     if (this.contextWindow <= 0) return 0;
     return Math.min(this.usedTokens / this.contextWindow, 1);
   }
 
+  // Android contextMeterFilledBars:四舍五入到最近的 1/5
   private filledCount(): number {
-    if (this.compactActive) return 4;
-    const pct: number = this.ratio() * 100;
-    if (pct <= 0) return 0;
-    if (pct < 25) return 1;
-    if (pct < 50) return 2;
-    if (pct < 75) return 3;
-    return 4;
+    if (this.compactActive) return 5;
+    const v: number = this.ratio();
+    if (v <= 0.001) return 0;
+    return Math.max(0, Math.min(5, Math.round(v * 5)));
   }
 
   private percentText(): string {
     if (this.compactActive) return '压缩中';
-    return `${Math.round(this.ratio() * 100)}%`;
+    return `${Math.floor(this.ratio() * 100)}%`;
   }
 
   build(): void {
-    Row({ space: 6 }) {
+    Row({ space: 3 }) {
       Row({ space: 2 }) {
-        ForEach([0, 1, 2, 3], (i: number): void => {
+        ForEach([0, 1, 2, 3, 4], (i: number): void => {
           Column()
             .width(3)
-            .height(10)
+            .height(8)
             .borderRadius(1)
-            .backgroundColor(i < this.filledCount() ? ACCENT : LINE)
+            .backgroundColor(i < this.filledCount() ? this.fillColor : this.trackColor)
         }, (i: number): string => `bar-${i}`)
       }
       .alignItems(VerticalAlign.Center)
 
       Text(this.percentText())
-        .fontSize(11)
+        .fontSize(10)
+        .lineHeight(12)
         .fontFamily('JetBrainsMono')
-        .fontColor(INK4)
+        .fontColor(INK3)
     }
     .alignItems(VerticalAlign.Center)
   }

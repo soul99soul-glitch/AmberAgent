@@ -9,6 +9,10 @@
 import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, TEXT_STYLES, USER_BG, USER_INK } from '../design/tokens.ets';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { router, promptAction, window } from '@kit.ArkUI';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { camera, cameraPicker } from '@kit.CameraKit';
+import { util } from '@kit.ArkTS';
+import type { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { FONT_MONO } from '../design/fonts.ets';
 import { inputMethod } from '@kit.IMEKit';
@@ -123,6 +127,7 @@ import {
   createArtifactHttpPort, createArtifactImagePort, createDeflateRawPort,
 } from '../platform_impl/ArtifactPorts.ets';
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
+import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -177,6 +182,38 @@ const accentAlpha = (hex: string, alpha: number): string => {
   const g: number = parseInt(value.substring(2, 4), 16);
   const b: number = parseInt(value.substring(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+// 待发文件附件(选取时一次性读入并转 data: URL)
+interface PendingDoc {
+  url: string;
+  fileName: string;
+  mime: string;
+}
+
+const MIME_BY_EXT: Record<string, string> = {};
+MIME_BY_EXT.pdf = 'application/pdf';
+MIME_BY_EXT.txt = 'text/plain';
+MIME_BY_EXT.md = 'text/markdown';
+MIME_BY_EXT.csv = 'text/csv';
+MIME_BY_EXT.json = 'application/json';
+MIME_BY_EXT.doc = 'application/msword';
+MIME_BY_EXT.png = 'image/png';
+MIME_BY_EXT.jpg = 'image/jpeg';
+MIME_BY_EXT.jpeg = 'image/jpeg';
+MIME_BY_EXT.gif = 'image/gif';
+MIME_BY_EXT.webp = 'image/webp';
+MIME_BY_EXT.zip = 'application/zip';
+MIME_BY_EXT.docx = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+MIME_BY_EXT.xlsx = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+MIME_BY_EXT.pptx = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+const mimeByName = (name: string): string => {
+  const dot: number = name.lastIndexOf('.');
+  if (dot < 0) return 'application/octet-stream';
+  const ext: string = name.substring(dot + 1).toLowerCase();
+  const mime: string | undefined = MIME_BY_EXT[ext];
+  return mime !== undefined ? mime : 'application/octet-stream';
 };
 
 // 1:1 原型空态 hero 轮换句(3.2s 淡入淡出)
@@ -823,6 +860,7 @@ struct ChatPage {
   @State titleInput: string = '';
   // D-038:待发图片(data: URL 物化,发送后清空)
   @State pendingImages: string[] = [];
+  @State pendingDocs: PendingDoc[] = [];
   // D-041:regenerate 流式预览(目标节点行下渲染;完成后清空)
   @State regenTail: UIMessage | null = null;
   @State regenNodeId: string = '';
@@ -2434,7 +2472,10 @@ struct ChatPage {
   private invalidatePicker(clearImages: boolean = false): void {
     this.pickerToken++;
     this.materializingImages = false;
-    if (clearImages) this.pendingImages = [];
+    if (clearImages) {
+      this.pendingImages = [];
+      this.pendingDocs = [];
+    }
   }
 
   private removePendingImage(index: number): void {
@@ -2442,6 +2483,194 @@ struct ChatPage {
     next.splice(index, 1);
     this.pendingImages = next;
   }
+
+  private removePendingDoc(index: number): void {
+    const next: PendingDoc[] = [...this.pendingDocs];
+    next.splice(index, 1);
+    this.pendingDocs = next;
+  }
+
+  private async takePhoto(): Promise<void> {
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      const profile: cameraPicker.PickerProfile = {
+        cameraPosition: camera.CameraPosition.CAMERA_POSITION_BACK,
+      };
+      const result: cameraPicker.PickerResult = await cameraPicker.pick(
+        ctx, [cameraPicker.PickerMediaType.PHOTO], profile);
+      if (result.resultCode === 0 && result.resultUri.length > 0) {
+        const dataUrl: string = await compressImageAsDataUrl(result.resultUri);
+        this.pendingImages = [...this.pendingImages, dataUrl];
+      }
+    } catch (_e) {
+      // 用户取消拍摄
+    }
+  }
+
+  private async pickFiles(): Promise<void> {
+    try {
+      const docPicker = new picker.DocumentViewPicker();
+      const options: picker.DocumentSelectOptions =
+        new picker.DocumentSelectOptions();
+      options.maxSelectNumber = 3;
+      const uris: string[] = await docPicker.select(options);
+      for (const uri of uris) {
+        const raw: string = uri.substring(uri.lastIndexOf('/') + 1);
+        const fileName: string = decodeURIComponent(raw.split('?')[0]) || 'file';
+        const bytes: Uint8Array = this.readUriBytes(uri);
+        const b64: string = new util.Base64Helper().encodeToStringSync(bytes);
+        const mime: string = mimeByName(fileName);
+        this.pendingDocs = [...this.pendingDocs,
+          { url: `data:${mime};base64,${b64}`, fileName: fileName, mime: mime } as PendingDoc];
+      }
+    } catch (_e) {
+      // 用户取消选择
+    }
+  }
+
+  private readUriBytes(uri: string): Uint8Array {
+    const MAX: number = 10 * 1024 * 1024;
+    const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      const st: fileIo.Stat = fileIo.statSync(file.fd);
+      if (st.size > MAX) {
+        throw new Error(`文件超过 10MB: ${st.size} bytes`);
+      }
+      const buf: ArrayBuffer = new ArrayBuffer(st.size);
+      fileIo.readSync(file.fd, buf, { offset: 0, length: st.size });
+      return new Uint8Array(buf);
+    } finally {
+      fileIo.closeSync(file);
+    }
+  }
+
+  // 末条 assistant 消息的真实 usage(Android ContextRing V3 数据源)
+  private lastTurnUsage(): TokenUsage | null {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return null;
+    const nodes = conv.messageNodes;
+    for (let i: number = nodes.length - 1; i >= 0; i--) {
+      const msgs = nodes[i].messages;
+      if (msgs.length === 0) continue;
+      const idx: number = nodes[i].selectIndex >= 0 && nodes[i].selectIndex < msgs.length
+        ? nodes[i].selectIndex : 0;
+      const msg: UIMessage = msgs[idx];
+      if (msg.role !== 'assistant' || msg.usage === null) continue;
+      return msg.usage;
+    }
+    return null;
+  }
+
+  private lastTurnElapsedMs(): number | null {
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return null;
+    const nodes = conv.messageNodes;
+    for (let i: number = nodes.length - 1; i >= 0; i--) {
+      const msgs = nodes[i].messages;
+      if (msgs.length === 0) continue;
+      const idx: number = nodes[i].selectIndex >= 0 && nodes[i].selectIndex < msgs.length
+        ? nodes[i].selectIndex : 0;
+      const msg: UIMessage = msgs[idx];
+      if (msg.role !== 'assistant') continue;
+      if (msg.finishedAt === null) return null;
+      const a: number = new Date(msg.createdAt).getTime();
+      const b: number = new Date(msg.finishedAt).getTime();
+      if (isNaN(a) || isNaN(b)) return null;
+      return b - a > 0 ? b - a : null;
+    }
+    return null;
+  }
+
+  private formatGrouped(n: number): string {
+    return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  private lastTurnTotalText(): string {
+    const u: TokenUsage | null = this.lastTurnUsage();
+    return u !== null ? `${this.formatGrouped(u.totalTokens)} tok` : '—';
+  }
+
+  private lastTurnCacheText(): string {
+    const u: TokenUsage | null = this.lastTurnUsage();
+    if (u === null || u.promptTokens <= 0 || u.cachedTokens <= 0) return '—';
+    const pct: number = Math.min(100, u.cachedTokens * 100.0 / u.promptTokens);
+    return `${Math.floor(pct)}%`;
+  }
+
+  private lastTurnSpeedText(): string {
+    const u: TokenUsage | null = this.lastTurnUsage();
+    const ms: number | null = this.lastTurnElapsedMs();
+    if (u === null || ms === null || u.completionTokens <= 0) return '—';
+    return `${Math.floor(u.completionTokens / (ms / 1000.0))} tok/s`;
+  }
+
+  @Builder
+  metaStat(label: string, value: string) {
+    Column() {
+      Text(label).fontSize(10.5).fontColor(INK4).letterSpacing(0.3)
+      Text(value).fontSize(12).fontColor(INK).fontWeight(FontWeight.Medium)
+        .letterSpacing(0.2).margin({ top: 2 })
+    }
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  // 用量与上下文卡(Android ContextUsagePanel:260dp,ctx 指示器下方右锚定)
+  @Builder
+  contextUsagePanel() {
+    Column() {
+      Text('用量与上下文')
+        .fontSize(13).fontColor(INK2).letterSpacing(0.3)
+        .width('100%')
+        .margin({ bottom: 10 })
+
+      Row() {
+        Text('Context')
+          .fontSize(13).fontColor(INK).fontWeight(FontWeight.Medium).letterSpacing(0.2)
+        Blank()
+        Text(`${this.estimatedContextTokens() > 0
+          ? formatContextTokens(this.estimatedContextTokens()) : '0'} / ${this.contextWindowTokens !== null
+          ? formatContextTokens(this.contextWindowTokens) : '--'}`)
+          .fontSize(11.5).fontColor(INK4).letterSpacing(0.3)
+      }
+      .width('100%')
+
+      Stack({ alignContent: Alignment.Start }) {
+        Column()
+          .width('100%').height(5).borderRadius(999)
+          .backgroundColor('#141B1A17')
+        Column()
+          .height(5).borderRadius(999)
+          .backgroundColor(this.contextRingColor())
+          .width(`${Math.max(0, Math.min(1, this.contextUsageRatio())) * 100}%`)
+      }
+      .width('100%')
+      .margin({ top: 6 })
+
+      Column()
+        .width('100%').height(1)
+        .backgroundColor(LINE)
+        .margin({ top: 14 })
+
+      Row() {
+        this.metaStat('本次', this.lastTurnTotalText())
+        Blank()
+        this.metaStat('缓存命中', this.lastTurnCacheText())
+        Blank()
+        this.metaStat('速度', this.lastTurnSpeedText())
+      }
+      .width('100%')
+      .margin({ top: 12 })
+      .alignItems(VerticalAlign.Top)
+    }
+    .width(260)
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .backgroundColor(SURFACE)
+    .borderRadius(18)
+    .border({ width: 1, color: LINE })
+    .shadow({ radius: 36, color: '#33404238', offsetY: 6 })
+    .alignItems(HorizontalAlign.Start)
+  }
+
 
   // 编辑并重发:editMessage(新分支)→ 持久化 → runRegenerateAt(user 节点截断续跑)
   private sendEdit(text: string): void {
@@ -3733,13 +3962,17 @@ struct ChatPage {
     if (this.materializingImages) return;
     const text: string = this.inputText.trim();
     const hasImages: boolean = this.pendingImages.length > 0;
-    if ((text.length === 0 && !hasImages) || this.conversation === null) return;
+    const hasDocs: boolean = this.pendingDocs.length > 0;
+    if ((text.length === 0 && !hasImages && !hasDocs) || this.conversation === null) return;
     const inputParts: UIMessagePart[] = [];
     if (text.length > 0) {
       inputParts.push({ type: 'text', text, metadata: null });
     }
     for (const url of this.pendingImages) {
       inputParts.push({ type: 'image', url, metadata: null });
+    }
+    for (const doc of this.pendingDocs) {
+      inputParts.push({ type: 'document', url: doc.url, fileName: doc.fileName, mime: doc.mime, metadata: null });
     }
     // D-064:斜杠命令拦截(编辑态除外 — Android 编辑走 handleMessageEdit 不经 orchestrator)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
@@ -3866,8 +4099,9 @@ struct ChatPage {
     if (this.materializingImages) return;
     const text: string = this.inputText.trim();
     const hasImages: boolean = this.pendingImages.length > 0;
+    const hasDocs: boolean = this.pendingDocs.length > 0;
     // D-038:文本可空但图片不可空;两者皆空才拦截(isEmptyInput 对齐 Android)
-    if ((text.length === 0 && !hasImages) || this.conversation === null) return;
+    if ((text.length === 0 && !hasImages && !hasDocs) || this.conversation === null) return;
     // 组装输入 parts:文本 + 图片(data: URL)
     const inputParts: UIMessagePart[] = [];
     if (text.length > 0) {
@@ -3875,6 +4109,9 @@ struct ChatPage {
     }
     for (const url of this.pendingImages) {
       inputParts.push({ type: 'image', url, metadata: null });
+    }
+    for (const doc of this.pendingDocs) {
+      inputParts.push({ type: 'document', url: doc.url, fileName: doc.fileName, mime: doc.mime, metadata: null });
     }
     // D-064:斜杠命令拦截(orchestrator 在排队/发送前解析;编辑态除外)
     if (this.editingNodeId.length === 0 && this.tryRouteDeepReadSlash(inputParts)) return;
@@ -4550,7 +4787,6 @@ struct ChatPage {
               .lineHeight(TEXT_STYLES.sessionTitle.lineHeight)
               .fontFamily(TEXT_STYLES.sessionTitle.family)
               .fontColor(INK)
-              .textAlign(TextAlign.Center)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
           }
@@ -4567,7 +4803,7 @@ struct ChatPage {
           .margin({ top: 1 })
         }
         .layoutWeight(1)
-        .alignItems(HorizontalAlign.Center)
+        .alignItems(HorizontalAlign.Start)
         .onClick((): void => {
           if (!this.editingTitle) {
             this.toggleModelMenu();
@@ -4594,6 +4830,8 @@ struct ChatPage {
                 usedTokens: this.estimatedContextTokens(),
                 contextWindow: this.contextWindowTokens ?? 0,
                 compactActive: this.compactActiveCount > 0,
+                fillColor: this.contextRingColor(),
+                trackColor: LINE,
               })
             }
             .alignItems(VerticalAlign.Center)
@@ -4634,6 +4872,18 @@ struct ChatPage {
         .alignContent(Alignment.Center)
         .onClick((): void => { this.jumpToBottom(); })
         .accessibilityText('回到消息底部')
+      }
+
+      // ContextUsagePanel(Android ContextRing.kt ContextUsagePopup):指示器下方右锚定
+      if (this.contextMeterOpen) {
+        Column()
+          .width('100%').height('100%')
+          .hitTestBehavior(HitTestMode.Block)
+          .onClick((): void => { this.contextMeterOpen = false; })
+        Column() {
+          this.contextUsagePanel()
+        }
+        .position({ top: this.statusBarHeight + 72, right: 8 })
       }
       }
       .layoutWeight(1)
@@ -4815,6 +5065,8 @@ struct ChatPage {
           },
           onSendWithoutAnswer: (): void => { this.sendWithoutAnswer(); },
           onPickImage: (): void => { this.pickImages(); },
+          onTakePhoto: (): void => { this.takePhoto(); },
+          onPickFile: (): void => { this.pickFiles(); },
           onCancelEdit: (): void => { this.cancelEdit(); },
           onClearInput: (): void => { this.inputText = ''; },
           onCompactContext: (): void => { this.compactCurrentConversation(); },
@@ -4965,11 +5217,6 @@ struct ChatPage {
     .bindSheet(this.toolPreviewSheetOpen, this.toolPreviewSheetBuilder(), {
       height: SheetSize.LARGE,
       onDisappear: (): void => { this.closeToolPreview(); },
-    })
-    // P4:Context 用量详情 sheet(5 段柱点击打开)
-    .bindSheet(this.contextMeterOpen, this.contextMeterSheet(), {
-      height: SheetSize.MEDIUM,
-      onDisappear: (): void => { this.contextMeterOpen = false; },
     })
   }
 }
