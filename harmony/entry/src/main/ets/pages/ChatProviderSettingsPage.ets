@@ -67,12 +67,17 @@ struct ChatProviderSettingsPage {
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
       if (seq !== this.loadSeq) return;
       if (list === null) {
-        // 首装播种:Android DEFAULT_PROVIDERS 1:1(9 家预置)
+        // 首装播种:await 落库完成才放行交互,避免与详情新增写入竞态互相覆盖
         this.all = DEFAULT_PROVIDERS;
-        saveProviders(getChatKvStore(), this.all).catch((): void => {});
-      } else {
-        this.all = list;
+        this.rebuildRows();
+        saveProviders(getChatKvStore(), this.all).then((): void => {
+          if (seq === this.loadSeq) this.loaded = true;
+        }).catch((): void => {
+          if (seq === this.loadSeq) this.loaded = true;
+        });
+        return;
       }
+      this.all = list;
       this.rebuildRows();
       this.loaded = true;
     }).catch((): void => {
@@ -96,15 +101,6 @@ struct ChatProviderSettingsPage {
     if (q.length === 0) return this.rows;
     return this.rows.filter((r: ProviderRow): boolean =>
       r.name.toLowerCase().indexOf(q) >= 0 || r.slug.toLowerCase().indexOf(q) >= 0);
-  }
-
-  // 预置添加:暂存对象进入详情页,填写 API Key 后保存落库
-  private addPreset(p: ProviderSetting): void {
-    if (this.all.find((x: ProviderSetting): boolean => x.id === p.id) !== undefined) return;
-    setPendingProvider(p);
-    const params: Record<string, string> = {};
-    params['isNew'] = '1';
-    router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
   }
 
   private totalModelCount(): number {
@@ -256,7 +252,7 @@ struct ChatProviderSettingsPage {
             // 终端风筛选(▸ + mono 输入 + line2 底线)
             Column() {
               Row() {
-                Text('▸').fontSize(12).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                Text('▸').fontSize(12).lineHeight(16).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
                 TextInput({ text: this.filterQuery, placeholder: '筛选提供商' })
                   .fontSize(12).fontColor(INK)
                   .fontFamily('JetBrainsMono')
@@ -275,6 +271,7 @@ struct ChatProviderSettingsPage {
               }
               .width('100%')
               .alignItems(VerticalAlign.Center)
+              .constraintSize({ minHeight: 48 })
               Column().width('100%').height(1).backgroundColor(LINE2)
             }
             .width('100%')

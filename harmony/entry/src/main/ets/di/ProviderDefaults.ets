@@ -121,7 +121,9 @@ export const DEFAULT_PROVIDERS: ProviderSetting[] = [
     baseUrl: 'https://api.x.ai/v1',
     apiKey: '',
     enabled: false,
-    brand: 'openai',
+    brand: 'generic',
+    // Android 同款默认走 Responses API;鸿蒙打开详情会提示迁移到 Chat Completions
+    useResponseApi: true,
   }),
 ];
 

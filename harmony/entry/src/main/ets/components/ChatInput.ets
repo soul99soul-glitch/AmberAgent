@@ -190,7 +190,7 @@ export struct ChatInput {
             .placeholderFont({ size: BODY })
             .backgroundColor(Color.Transparent)
             .borderRadius(this.text.length > 0 ? 24 : 999)
-            .padding({ top: 11, bottom: 12 })
+            .padding({ top: 11, bottom: 11 })
             .maxLines(this.attachExpanded ? 1 : 4)
             .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
             .lineHeight(lineHeightForSize(BODY))

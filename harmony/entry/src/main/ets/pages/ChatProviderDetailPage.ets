@@ -71,6 +71,22 @@ struct ChatProviderDetailPage {
       if (target !== null) {
         this.applyProvider(target);
       }
+      setPendingProvider(null);
+    }).catch((): void => {
+      setPendingProvider(null);
+    });
+  }
+
+  // 返回自模型参数页等场景:仅刷新 provider 引用(携带最新 models 参数),
+  // 不重置用户正在编辑的表单草稿
+  onPageShow(): void {
+    const raw: ProviderSetting | null = this.provider;
+    if (raw === null) return;
+    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
+      const hit = (list ?? []).find((p: ProviderSetting): boolean => p.id === raw.id);
+      if (hit !== undefined && this.provider !== null && this.provider.id === hit.id) {
+        this.provider = hit;
+      }
     }).catch((): void => {});
   }
 
@@ -122,9 +138,12 @@ struct ChatProviderDetailPage {
       });
   }
 
+  private ioBusy: boolean = false;
+
   private save(): void {
     const raw: ProviderSetting | null = this.provider;
-    if (raw === null) return;
+    if (raw === null || this.ioBusy) return;
+    this.ioBusy = true;
     if (this.unsupportedAuthMsg.length > 0 && this.apiKey.trim().length === 0) {
       this.savedMsg = '请先填写 API Key';
       setTimeout((): void => { this.savedMsg = ''; }, 2000);
@@ -179,7 +198,7 @@ struct ChatProviderDetailPage {
         balanceOption: o.balanceOption,
       });
     }
-    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
+    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): Promise<void> => {
       const all: ProviderSetting[] = list ?? [];
       const idx: number = all.findIndex((p: ProviderSetting): boolean => p.id === updated.id);
       if (idx >= 0) {
@@ -187,22 +206,23 @@ struct ChatProviderDetailPage {
       } else {
         all.unshift(updated);
       }
-      saveProviders(getChatKvStore(), all).then((): void => {
+      return saveProviders(getChatKvStore(), all).then((): void => {
         this.provider = updated;
         this.unsupportedAuthMsg = '';
         this.savedMsg = '已保存';
         setTimeout((): void => { this.savedMsg = ''; }, 1500);
-      }).catch((e: Error): void => {
-        this.savedMsg = `保存失败：${e.message}`;
       });
     }).catch((e: Error): void => {
       this.savedMsg = `保存失败：${e.message}`;
+    }).finally((): void => {
+      this.ioBusy = false;
     });
   }
 
   private removeSelf(): void {
     const raw: ProviderSetting | null = this.provider;
-    if (raw === null) return;
+    if (raw === null || this.ioBusy) return;
+    this.ioBusy = true;
     AlertDialog.show({
       title: '删除 Provider',
       message: `删除「${this.name}」?其 API Key 与模型配置将从本机移除。`,
@@ -218,6 +238,7 @@ struct ChatProviderDetailPage {
           }).then((): void => {
             router.back();
           }).catch((e: Error): void => {
+            this.ioBusy = false;
             this.savedMsg = `删除失败：${e.message}`;
           });
         },
@@ -280,7 +301,7 @@ struct ChatProviderDetailPage {
         Column()
           .width('100%').height(2).borderRadius(1)
           .backgroundColor(this.tab === 0 ? this.accentColorStore : Color.Transparent)
-          .margin({ top: 6 })
+          .margin({ top: 6, left: 12, right: 12 })
       }
       .layoutWeight(1)
       .onClick((): void => { this.tab = 0; })
@@ -294,7 +315,7 @@ struct ChatProviderDetailPage {
         Column()
           .width('100%').height(2).borderRadius(1)
           .backgroundColor(this.tab === 1 ? this.accentColorStore : Color.Transparent)
-          .margin({ top: 6 })
+          .margin({ top: 6, left: 12, right: 12 })
       }
       .layoutWeight(1)
       .onClick((): void => { this.tab = 1; })

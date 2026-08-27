@@ -8,8 +8,6 @@ import { bundleManager } from '@kit.AbilityKit';
 import { BG, SURFACE, LINE, BODY2, LABEL, ACCENT, INK3 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
-import type { DisplaySetting } from '@amber/chat-domain';
-import { loadDisplaySetting, saveDisplaySetting } from '@amber/chat-domain';
 
 // 主题选择持久化键(外观页写入;根页只读回显 value)
 const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
@@ -39,7 +37,17 @@ struct SettingPage {
       if (raw === 'light') this.appearanceValue = '浅色';
       else if (raw === 'dark') this.appearanceValue = '深色';
       else this.appearanceValue = '跟随系统';
-    });
+    }).catch((): void => {});
+  }
+
+  // 从外观页返回时回栈不重跑 aboutToAppear — onPageShow 重读回显值,
+  // 并借 darkMode 读取触发根页按新主题令牌重建
+  onPageShow(): void {
+    getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
+      if (raw === 'light') this.appearanceValue = '浅色';
+      else if (raw === 'dark') this.appearanceValue = '深色';
+      else this.appearanceValue = '跟随系统';
+    }).catch((): void => {});
   }
 
   private go(page: string): void {
@@ -74,6 +82,8 @@ struct SettingPage {
               onRowClick: (): void => { this.go('pages/SkillsPage'); } })
             NavRow({ label: '权限与批准', iconName: 'shield',
               onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
+            NavRow({ label: '沙盒设置', iconName: 'box',
+              onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
             NavRow({ label: 'MCP 服务器', iconName: 'plug', isLast: true,
               onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
           }
@@ -112,8 +122,10 @@ struct SettingPage {
               onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
             NavRow({ label: '小说创作', iconName: 'doc',
               onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-            NavRow({ label: '深度阅读', iconName: 'book', isLast: true,
+            NavRow({ label: '深度阅读', iconName: 'book',
               onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
+            NavRow({ label: '实验功能', iconName: 'info', isLast: true,
+              onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
           }
           .width('100%').backgroundColor(SURFACE)
           .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
@@ -127,6 +139,8 @@ struct SettingPage {
               onRowClick: (): void => { this.go('pages/HistoryPage'); } })
             NavRow({ label: '收藏', iconName: 'star',
               onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+            NavRow({ label: '今日看板', iconName: 'bell',
+              onRowClick: (): void => { this.go('pages/BoardPage'); } })
             NavRow({ label: '定时任务', iconName: 'clock', isLast: true,
               onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
           }
@@ -158,6 +172,6 @@ struct SettingPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
+    .opacity((this.accentColorStore.length >= 0 && (this.darkMode || !this.darkMode)) ? 1 : 1)
   }
 }

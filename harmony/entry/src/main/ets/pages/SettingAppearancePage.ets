@@ -1,7 +1,6 @@
 // SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位)
 // 颜色模式(浅色/深色/跟随系统)+ 强调色五选一。自设置主页迁入,
 // 主页一行「外观 value=当前模式」进入。
-import { bundleManager } from '@kit.AbilityKit';
 import {
   BG, SURFACE, SURFACE2, RAISED, INK, INK3, LINE,
   ACCENT, ACCENT_INK, BODY2, applyTheme, setAccentColor,
@@ -30,10 +29,10 @@ struct SettingAppearancePage {
         setAccentColor(s.accentColor);
         AppStorage.setOrCreate<string>('accentColor', s.accentColor);
       }
-    });
+    }).catch((): void => {});
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
       if (raw === 'dark' || raw === 'light' || raw === 'system') this.themeMode = raw;
-    });
+    }).catch((): void => {});
   }
 
   private setTheme(mode: string): void {
@@ -54,7 +53,7 @@ struct SettingAppearancePage {
       const next: DisplaySetting = s;
       next.accentColor = color;
       saveDisplaySetting(getChatKvStore(), next);
-    });
+    }).catch((): void => {});
   }
 
   build() {
@@ -111,7 +110,7 @@ struct SettingAppearancePage {
               (color: string, idx: number): void => {
                 Text(this.accentColor === color ? '✓' : '')
                   .fontSize(18).fontColor(ACCENT_INK)
-                  .width(38).height(38).borderRadius(11)
+                  .width(36).height(36).borderRadius(18)
                   .backgroundColor(color)
                   .border({ width: this.accentColor === color ? 2 : 0, color: INK })
                   .textAlign(TextAlign.Center)
@@ -133,6 +132,6 @@ struct SettingAppearancePage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
-    .opacity(this.accentColorStore.length >= 0 ? 1 : 1)
+    .opacity((this.accentColorStore.length >= 0 && (this.darkMode || !this.darkMode)) ? 1 : 1)
   }
 }
