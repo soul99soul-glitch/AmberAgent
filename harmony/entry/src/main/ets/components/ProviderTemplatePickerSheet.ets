@@ -1,243 +1,176 @@
-// ProviderTemplatePickerSheet — 模板选择底部 sheet(G6-S2)
-// Android 基准: ProviderTemplatePickerSheet.kt(290 行)
-// 必要:Provider 模板列表(OpenAI / Claude / Google / DeepSeek / Zhipu / Azure / Ollama / Custom)
-//   每项:名称 + 描述 + 默认 baseUrl + 图标;点击 → onPick(template) 填充配置
-//   顶部搜索栏(按名称/描述过滤)
-//
-// Props:@Prop show / onPick(template) / onDismiss
-// ArkUI 规则:无 as unknown / 无对象展开 / 无 any/unknown;@Prop 避开 size/enabled/Select/onClick;
-//   ForEach 内不出现 const/let(UI 树优先);过滤逻辑放 private 方法
-import { ACCENT, BG, BODY, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
-import { Icon } from './ui/Icon.ets';
+// ProviderTemplatePickerSheet — 添加提供商(amber-zhenji / Android ProviderTemplatePickerSheet 同构)
+// 结构:// OAUTH 区(Codex/Gemini OAuth,鸿蒙暂不支持 → 回调提示)+
+//   // 预置 区(DEFAULT_PROVIDERS 减去已存在的 id),行 = monogram34 + 名称 +
+//   subtitle(slug)+ auth 徽标。选择 → onPickPreset(整份 ProviderSetting)。
+import {
+  ACCENT, BG, INK, INK2, INK3, INK4, LABEL, LINE, META, OVERLAY, SURFACE2,
+} from '../design/tokens.ets';
+import type { ProviderSetting } from '@amber/chat-domain';
+import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug } from '../di/ProviderDefaults.ets';
 
-// Provider 模板接口(供 onPick 回调传递)
-export interface ProviderTemplate {
+interface OAuthRow {
+  monogram: string;
   name: string;
-  description: string;
-  baseUrl: string;
-  apiKeyPlaceholder: string;
-  type: string;
+  subtitle: string;
 }
 
-// 内置模板(对齐 Android DEFAULT_PROVIDERS + 模板 sheet)
-const TEMPLATES: ProviderTemplate[] = [
-  {
-    name: 'OpenAI',
-    description: 'GPT-4o / o1 系列',
-    baseUrl: 'https://api.openai.com/v1',
-    apiKeyPlaceholder: 'sk-...',
-    type: 'openai',
-  },
-  {
-    name: 'Claude',
-    description: 'Claude 3.5 / Opus 系列',
-    baseUrl: 'https://api.anthropic.com',
-    apiKeyPlaceholder: 'sk-ant-...',
-    type: 'claude',
-  },
-  {
-    name: 'Google',
-    description: 'Gemini 2.0 系列',
-    baseUrl: 'https://generativelanguage.googleapis.com',
-    apiKeyPlaceholder: 'AIza...',
-    type: 'google',
-  },
-  {
-    name: 'DeepSeek',
-    description: 'DeepSeek V3 / R1 系列',
-    baseUrl: 'https://api.deepseek.com',
-    apiKeyPlaceholder: 'sk-...',
-    type: 'deepseek',
-  },
-  {
-    name: 'Zhipu',
-    description: '智谱 GLM-4 系列',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    apiKeyPlaceholder: 'xxx.xxx',
-    type: 'zhipu',
-  },
-  {
-    name: 'Azure',
-    description: 'Azure OpenAI 服务',
-    baseUrl: 'https://{resource}.openai.azure.com',
-    apiKeyPlaceholder: 'azure-key',
-    type: 'azure',
-  },
-  {
-    name: 'Ollama',
-    description: '本地 Ollama 服务',
-    baseUrl: 'http://localhost:11434',
-    apiKeyPlaceholder: '无需密钥',
-    type: 'ollama',
-  },
-  {
-    name: 'Custom',
-    description: '自定义 OpenAI 兼容接口',
-    baseUrl: 'https://api.example.com/v1',
-    apiKeyPlaceholder: 'sk-...',
-    type: 'custom',
-  },
+const OAUTH_ROWS: OAuthRow[] = [
+  { monogram: 'OC', name: 'OpenAI Codex OAuth', subtitle: 'openai · chatgpt.com 后端' },
+  { monogram: 'GO', name: 'Gemini OAuth', subtitle: 'google-gemini · cloudcode-pa' },
 ];
 
 @Component
 export struct ProviderTemplatePickerSheet {
   @Prop show: boolean = false;
-  @State searchText: string = '';
-  onPick: (template: ProviderTemplate) => void = (_t: ProviderTemplate): void => {};
+  @Prop existingIds: string = ''; // JSON 数组字符串(ArkTS @Prop 传数组受限,序列化传递)
+  onPickPreset: (p: ProviderSetting) => void = (_p: ProviderSetting): void => {};
+  onOauthPick: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
 
-  // 类型 → 图标(Unicode emoji,对齐 ChatExportSheet 图标策略)
-  private templateIcon(providerType: string): string {
-    const t: string = providerType.toLowerCase();
-    if (t === 'openai') return '🟢';
-    if (t === 'claude') return '🟠';
-    if (t === 'google') return '🔵';
-    if (t === 'deepseek') return '🟣';
-    if (t === 'zhipu') return '🧪';
-    if (t === 'azure') return '☁️';
-    if (t === 'ollama') return '🦙';
-    return '⚙️';
+  private bundled(): ProviderSetting[] {
+    const exist: string = this.existingIds;
+    return DEFAULT_PROVIDERS.filter((p: ProviderSetting): boolean => exist.indexOf(`"${p.id}"`) < 0);
   }
 
-  // 按搜索词过滤模板(名称 + 描述匹配)
-  private filteredTemplates(): ProviderTemplate[] {
-    const q: string = this.searchText.trim().toLowerCase();
-    if (q.length === 0) return TEMPLATES;
-    const result: ProviderTemplate[] = [];
-    for (let i = 0; i < TEMPLATES.length; i++) {
-      const t: ProviderTemplate = TEMPLATES[i];
-      if (t.name.toLowerCase().indexOf(q) >= 0 ||
-        t.description.toLowerCase().indexOf(q) >= 0) {
-        result.push(t);
-      }
+  @Builder
+  sectionLabel(text: string) {
+    Row() {
+      Text('//').fontSize(11).fontWeight(FontWeight.Medium).fontColor(ACCENT)
+        .fontFamily('JetBrainsMono')
+      Text(` ${text.toUpperCase()}`).fontSize(11).fontWeight(FontWeight.Medium)
+        .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
+      Blank()
     }
-    return result;
+    .width('100%')
+    .padding({ top: 18, bottom: 10 })
+  }
+
+  @Builder
+  tagBadge(text: string) {
+    Text(text)
+      .fontSize(10)
+      .fontWeight(FontWeight.Medium)
+      .fontFamily('JetBrainsMono')
+      .fontColor(text === '—' ? INK4 : INK3)
+      .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+      .backgroundColor(SURFACE2)
+      .borderRadius(3)
+      .border({ width: 1, color: LINE })
   }
 
   build(): void {
     if (this.show) {
       Stack({ alignContent: Alignment.Bottom }) {
-        // 遮罩层(点击关闭)
         Column()
           .width('100%')
           .height('100%')
           .backgroundColor(OVERLAY)
           .onClick((): void => { this.onDismiss(); })
 
-        // sheet 主体
         Column() {
-          // 顶部 grabber
           Text('')
-            .width(42)
-            .height(4)
-            .borderRadius(2)
+            .width(42).height(4).borderRadius(2)
             .backgroundColor(LINE)
-            .margin({ top: 10, bottom: 8 })
+            .margin({ top: 10, bottom: 6 })
 
-          // 标题
-          Text('添加 Provider')
-            .fontSize(BODY)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(INK)
-            .width('100%')
-            .margin({ bottom: 12 })
-
-          // 搜索栏
-          Row() {
-            Icon({ name: 'search', iconSize: BODY, color: INK3 }).margin({ right: 10 })
-            TextInput({ text: this.searchText, placeholder: '搜索模板...' })
-              .fontSize(BODY)
-              .fontColor(INK)
-              .backgroundColor('transparent')
-              .layoutWeight(1)
-              .padding({ top: 0, bottom: 0, left: 0, right: 0 })
-              .onChange((v: string): void => { this.searchText = v; })
-            if (this.searchText.length > 0) {
-              Text('✕')
-                .fontSize(LABEL)
-                .fontColor(INK3)
-                .width(20)
-                .height(20)
-                .textAlign(TextAlign.Center)
-                .borderRadius(6)
-                .onClick((): void => { this.searchText = ''; })
-            }
-          }
-          .width('100%')
-          .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-          .backgroundColor(SURFACE2)
-          .borderRadius(999)
-          .border({ width: 1, color: LINE })
-          .margin({ bottom: 12 })
-
-          // 模板列表(可滚动)
           Scroll() {
             Column() {
-              ForEach(this.filteredTemplates(), (item: ProviderTemplate): void => {
-                Row() {
-                  Text(this.templateIcon(item.type))
-                    .fontSize(20)
-                    .margin({ right: 12 })
+              Text('添加提供商')
+                .fontSize(22)
+                .fontWeight(FontWeight.Bold)
+                .fontColor(INK)
+                .width('100%')
+                .margin({ top: 6, bottom: 4 })
 
+              this.sectionLabel('OAUTH')
+              ForEach(OAUTH_ROWS, (row: OAuthRow): void => {
+                Row() {
+                  Text(row.monogram)
+                    .fontSize(11).fontWeight(FontWeight.Bold)
+                    .fontFamily('JetBrainsMono')
+                    .fontColor(INK2)
+                    .width(34).height(34)
+                    .borderRadius(9)
+                    .backgroundColor(SURFACE2)
+                    .border({ width: 1, color: LINE })
+                    .textAlign(TextAlign.Center)
                   Column() {
-                    Text(item.name)
-                      .fontSize(BODY)
-                      .fontColor(INK)
-                      .fontWeight(FontWeight.Medium)
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(item.description)
-                      .fontSize(LABEL)
-                      .fontColor(INK3)
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(row.name)
+                      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(row.subtitle)
+                      .fontSize(12).fontColor(INK4)
+                      .fontFamily('JetBrainsMono')
                       .margin({ top: 2 })
-                    Text(item.baseUrl)
-                      .fontSize(LABEL)
-                      .fontColor(INK4)
-                      .maxLines(1)
-                      .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      .margin({ top: 2 })
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   }
                   .alignItems(HorizontalAlign.Start)
                   .layoutWeight(1)
+                  .margin({ left: 12 })
 
-                  Text('›')
-                    .fontSize(18)
-                    .fontColor(INK4)
+                  this.tagBadge('oauth')
                 }
                 .width('100%')
-                .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-                .backgroundColor(SURFACE)
-                .borderRadius(12)
-                .border({ width: 1, color: LINE })
-                .margin({ bottom: 8 })
-                .alignItems(VerticalAlign.Center)
-                .onClick((): void => { this.onPick(item); })
-              }, (item: ProviderTemplate): string => item.name)
+                .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+                .onClick((): void => { this.onOauthPick(); })
+              }, (row: OAuthRow): string => `oa-${row.monogram}`)
+
+              this.sectionLabel('预置')
+              ForEach(this.bundled(), (p: ProviderSetting): void => {
+                Row() {
+                  Text(toProviderMonogram(p.name))
+                    .fontSize(11).fontWeight(FontWeight.Bold)
+                    .fontFamily('JetBrainsMono')
+                    .fontColor(INK2)
+                    .width(34).height(34)
+                    .borderRadius(9)
+                    .backgroundColor(SURFACE2)
+                    .border({ width: 1, color: LINE })
+                    .textAlign(TextAlign.Center)
+                  Column() {
+                    Text(p.name)
+                      .fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(providerSlug(p))
+                      .fontSize(12).fontColor(INK4)
+                      .fontFamily('JetBrainsMono')
+                      .margin({ top: 2 })
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
+                  .margin({ left: 12 })
+
+                  this.tagBadge('key')
+                }
+                .width('100%')
+                .padding({ left: 4, right: 4, top: 10, bottom: 10 })
+                .onClick((): void => { this.onPickPreset(p); })
+              }, (p: ProviderSetting): string => `pre-${p.id}`)
+
+              Text('列表里没有的?选一个相近的预置,进详情改 Base URL 即可。')
+                .fontSize(12).fontColor(INK3)
+                .width('100%')
+                .margin({ top: 8, bottom: 16 })
             }
             .width('100%')
+            .padding({ left: 18, right: 18, bottom: 12 })
           }
-        .align(Alignment.TopStart)
+          .align(Alignment.TopStart)
           .layoutWeight(1)
           .scrollBar(BarState.Off)
 
-          // 关闭按钮
           Text('关闭')
-            .fontSize(BODY)
-            .fontColor(INK3)
+            .fontSize(14).fontColor(INK3)
             .width('100%')
             .textAlign(TextAlign.Center)
-            .padding({ top: 12, bottom: 12 })
-            .margin({ top: 8 })
+            .padding({ top: 12, bottom: 14 })
             .onClick((): void => { this.onDismiss(); })
         }
         .width('100%')
-        .height('85%')
+        .height('88%')
         .backgroundColor(BG)
         .borderRadius({ topLeft: 16, topRight: 16 })
-        .padding({ left: 18, right: 18, top: 0, bottom: 12 })
-        // 消费点击事件,避免穿透到遮罩层(关闭 sheet)
         .onClick((): void => {})
       }
       .width('100%')

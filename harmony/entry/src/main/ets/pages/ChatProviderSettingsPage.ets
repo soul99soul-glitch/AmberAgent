@@ -10,10 +10,10 @@
 //   - brand 编辑及 openai account 区(余额等)= P1
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, BODY, BODY2, META, LABEL, ERROR, RADIUS,
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BODY, BODY2, META, LABEL, ERROR, RADIUS,
 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
 import type {
   ProviderSetting, ProviderSettingOpenAIVariant, ProviderSettingGoogle,
   ProviderSettingClaude, ProviderModel,
@@ -23,6 +23,8 @@ import {
   makeProviderSettingGoogle, makeProviderSettingClaude, makeProviderModel,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { DEFAULT_PROVIDERS, toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
+import { ProviderTemplatePickerSheet } from '../components/ProviderTemplatePickerSheet.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 
 
@@ -31,6 +33,10 @@ interface ProviderRow {
   name: string;
   ptype: string;
   enabled: boolean;
+  mono: string;
+  slug: string;
+  auth: string;
+  modelsCount: number;
 }
 
 @Entry
@@ -38,6 +44,8 @@ interface ProviderRow {
 struct ChatProviderSettingsPage {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
+  @State filterQuery: string = '';
+  @State sheetShow: boolean = false;
   @State rows: ProviderRow[] = [];
   @State selectedId: string = '';
   @State selectedType: string = ''; // '' 未选中 | openai | google | claude
@@ -73,6 +81,13 @@ struct ChatProviderSettingsPage {
   // 子页(模型参数页)保存返回后重读,避免陈旧 models 合并覆盖新参数
   onPageShow(): void {
     this.load();
+    // 进入页面不弹键盘、不自动滚到编辑区:延迟清掉首帧抢到的焦点
+    setTimeout((): void => {
+      try {
+        this.getUIContext().getFocusController().clearFocus();
+      } catch (_e) {
+      }
+    }, 250);
   }
 
   // 加载序号:aboutToAppear + onPageShow 双触发时,迟到的旧加载不得覆盖新数据/选中态
@@ -82,7 +97,13 @@ struct ChatProviderSettingsPage {
     const seq: number = ++this.loadSeq;
     loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
       if (seq !== this.loadSeq) return;
-      this.all = list ?? [];
+      if (list === null) {
+        // 首装播种:Android DEFAULT_PROVIDERS 1:1(9 家预置)
+        this.all = DEFAULT_PROVIDERS;
+        saveProviders(getChatKvStore(), this.all).catch((): void => {});
+      } else {
+        this.all = list;
+      }
       this.rebuildRows();
       // 兼容旧行为(D-020):默认选中首个 openai,否则首个 provider
       const firstOpenai = this.all.find((p: ProviderSetting): boolean => p.type === 'openai');
@@ -100,7 +121,31 @@ struct ChatProviderSettingsPage {
   private rebuildRows(): void {
     this.rows = this.all.map((p: ProviderSetting): ProviderRow => ({
       id: p.id, name: p.name, ptype: p.type, enabled: p.enabled,
+      mono: toProviderMonogram(p.name),
+      slug: providerSlug(p),
+      auth: providerAuthLabel(p),
+      modelsCount: p.models.length,
     }));
+  }
+
+  private filteredRows(): ProviderRow[] {
+    const q: string = this.filterQuery.trim().toLowerCase();
+    if (q.length === 0) return this.rows;
+    return this.rows.filter((r: ProviderRow): boolean =>
+      r.name.toLowerCase().indexOf(q) >= 0 || r.slug.toLowerCase().indexOf(q) >= 0);
+  }
+
+  // 预置添加(Android AddButton:模板原 id 直接入列并置顶)
+  private addPreset(p: ProviderSetting): void {
+    if (this.all.find((x: ProviderSetting): boolean => x.id === p.id) !== undefined) return;
+    const next: ProviderSetting[] = [p, ...this.all];
+    saveProviders(getChatKvStore(), next).then((): void => {
+      this.all = next;
+      this.rebuildRows();
+      this.selectProvider(p);
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `添加失败：${e.message}`, duration: 1800 });
+    });
   }
 
   private selectProvider(p: ProviderSetting): void {
@@ -358,7 +403,103 @@ struct ChatProviderSettingsPage {
     .onClick((): void => this.addProvider(ptype))
   }
 
+  private totalModelCount(): number {
+    let n: number = 0;
+    for (const p of this.all) n += p.models.length;
+    return n;
+  }
+
+  private onlineCount(): number {
+    let n: number = 0;
+    for (const p of this.all) {
+      if (p.enabled) n++;
+    }
+    return n;
+  }
+
+  @Builder
+  registryStat(value: number, label: string, accent: boolean) {
+    Row() {
+      Text(`${value}`).fontSize(12).fontWeight(FontWeight.Bold)
+        .fontFamily('JetBrainsMono')
+        .fontColor(accent ? this.accentColorStore : INK)
+      Text(` ${label}`).fontSize(11.5).fontColor(INK3)
+    }
+    .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  registrySep() {
+    Column()
+      .width(1).height(11)
+      .backgroundColor(LINE2)
+      .margin({ left: 13, right: 13 })
+  }
+
+  @Builder
+  providerRegistryRow(row: ProviderRow) {
+    Column() {
+      Row() {
+        Text(row.mono)
+          .fontSize(10.5).fontWeight(FontWeight.Bold)
+          .fontFamily('JetBrainsMono')
+          .fontColor(row.enabled ? INK2 : INK4)
+          .width(32).height(32)
+          .borderRadius(9)
+          .backgroundColor(SURFACE2)
+          .border({ width: 1, color: LINE })
+          .textAlign(TextAlign.Center)
+        Column() {
+          Row() {
+            Text(row.name)
+              .fontSize(15).fontWeight(FontWeight.Medium)
+              .fontColor(row.enabled ? INK : INK3)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            if (row.enabled) {
+              Column().width(6).height(6).borderRadius(3)
+                .backgroundColor(this.accentColorStore).margin({ left: 7 })
+            }
+          }
+          .alignItems(VerticalAlign.Center)
+          Text(row.slug)
+            .fontSize(11).fontFamily('JetBrainsMono').fontColor(INK4)
+            .margin({ top: 3 })
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .margin({ left: 12 })
+
+        Column() {
+          Text(row.auth)
+            .fontSize(10).fontWeight(FontWeight.Medium)
+            .fontFamily('JetBrainsMono')
+            .fontColor(row.auth === '—' ? INK4 : INK3)
+            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+            .backgroundColor(SURFACE2)
+            .borderRadius(3)
+            .border({ width: 1, color: LINE })
+          Text(`${row.modelsCount} 个模型`)
+            .fontSize(11)
+            .fontColor(row.modelsCount > 0 ? INK2 : INK4)
+            .margin({ top: 4 })
+        }
+        .alignItems(HorizontalAlign.End)
+      }
+      .width('100%')
+      .padding({ left: 4, right: 4, top: 11, bottom: 11 })
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
+    .onClick((): void => {
+      const target = this.all.find((p: ProviderSetting): boolean => p.id === row.id);
+      if (target !== undefined) this.selectProvider(target);
+    })
+  }
+
   build() {
+    Stack() {
     Column() {
       PageTitleBar({
         title: '服务商与密钥',
@@ -377,69 +518,115 @@ struct ChatProviderSettingsPage {
       } else {
         Scroll() {
           Column() {
-            // ── Provider 列表 ──
-            SectionHeader({ label: 'PROVIDERS' })
+            // ── Provider 注册表(amber-zhenji / Android SettingProviderPage 1:1)──
+            Row() {
+              Row({ space: 1 }) {
+                Column().width(3).height(5).borderRadius(1).backgroundColor(this.accentColorStore)
+                Column().width(3).height(9).borderRadius(1).backgroundColor(this.accentColorStore)
+                Column().width(3).height(13).borderRadius(1).backgroundColor(this.accentColorStore)
+              }
+              .alignItems(VerticalAlign.Bottom)
+              .margin({ right: 9 })
+              this.registryStat(this.all.length, '提供商', false)
+              this.registrySep()
+              this.registryStat(this.totalModelCount(), '模型', false)
+              this.registrySep()
+              this.registryStat(this.onlineCount(), '在线', true)
+              Blank()
+              // + 添加(ghost,accent 描边)
+              Row() {
+                Text('+').fontSize(13).fontColor(this.accentColorStore).margin({ right: 6 })
+                Text('添加').fontSize(11).fontWeight(FontWeight.Bold)
+                  .fontFamily('JetBrainsMono').fontColor(this.accentColorStore)
+              }
+              .height(32)
+              .padding({ left: 11, right: 11 })
+              .borderRadius(3)
+              .border({ width: 1, color: this.accentColorStore })
+              .alignItems(VerticalAlign.Center)
+              .onClick((): void => { this.sheetShow = true; })
+            }
+            .width('100%')
+            .alignItems(VerticalAlign.Center)
+            .margin({ top: 12, bottom: 2 })
 
-            if (this.rows.length === 0) {
-              // 空状态:直接列出模板选择器,顶部不留白
-              Column({ space: 8 }) {
-                this.providerTemplateCard('OpenAI', 'GPT-4o / o1 / 兼容接口', 'openai')
-                this.providerTemplateCard('Google', 'Gemini / Vertex AI', 'google')
-                this.providerTemplateCard('Claude', 'Anthropic Claude', 'claude')
+            // 终端风筛选(▸ + mono 输入 + line2 底线)
+            Column() {
+              Row() {
+                Text('▸').fontSize(12).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                TextInput({ text: this.filterQuery, placeholder: '筛选提供商' })
+                  .fontSize(12).fontColor(INK)
+                  .fontFamily('JetBrainsMono')
+                  .placeholderColor(INK4)
+                  .placeholderFont({ size: 12 })
+                  .backgroundColor(Color.Transparent)
+                  .padding({ top: 0, bottom: 0, left: 7, right: 0 })
+                  .constraintSize({ minHeight: 40 })
+                  .layoutWeight(1)
+                  .onChange((v: string): void => { this.filterQuery = v; })
+                if (this.filterQuery.length > 0) {
+                  Text('✕').fontSize(12).fontColor(INK3)
+                    .width(24).height(24).textAlign(TextAlign.Center)
+                    .onClick((): void => { this.filterQuery = ''; })
+                }
               }
               .width('100%')
-            } else {
-              Column() {
-                ForEach(this.rows, (row: ProviderRow, idx: number): void => {
-                  Row() {
-                    Column() {
-                      Text(row.name)
-                        .fontSize(BODY)
-                        .fontWeight(FontWeight.Medium)
-                        .fontColor(INK)
-                        .maxLines(1)
-                        .textOverflow({ overflow: TextOverflow.Ellipsis })
-                      Text(row.ptype)
-                        .fontSize(LABEL)
-                        .fontColor(INK4)
-                        .margin({ top: 2 })
-                    }
-                    .alignItems(HorizontalAlign.Start)
-                    .layoutWeight(1)
+              .alignItems(VerticalAlign.Center)
+              Column().width('100%').height(1).backgroundColor(LINE2)
+            }
+            .width('100%')
+            .margin({ top: 8, bottom: 2 })
 
-                    if (!row.enabled) {
-                      Text('停用')
-                        .fontSize(LABEL).fontColor(INK4)
-                        .padding({ left: 8, right: 8, top: 3, bottom: 3 })
-                        .backgroundColor(SURFACE2).borderRadius(RADIUS)
-                        .margin({ right: 8 })
-                    }
-                    if (row.id === this.selectedId) {
-                      Text('编辑中')
-                        .fontSize(LABEL).fontColor(this.accentColorStore)
-                    }
+            Row() {
+              Text('//').fontSize(11).fontWeight(FontWeight.Medium)
+                .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
+              Text(` 在线`).fontSize(11).fontWeight(FontWeight.Medium)
+                .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
+              Text(`· ${this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length}`)
+                .fontSize(11).fontColor(INK4).margin({ left: 6 })
+              Blank()
+              Column().width(1).height(1)
+            }
+            .width('100%')
+            .padding({ top: 18, bottom: 11, left: 4, right: 4 })
+            .alignItems(VerticalAlign.Center)
+
+            ForEach(this.filteredRows().filter((r: ProviderRow): boolean => r.enabled),
+              (row: ProviderRow): void => {
+                this.providerRegistryRow(row)
+              }, (row: ProviderRow): string => `on-${row.id}`)
+
+            ForEach(this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled),
+              (row: ProviderRow, idx: number): void => {
+                if (idx === 0) {
+                  Row() {
+                    Text('//').fontSize(11).fontWeight(FontWeight.Medium)
+                      .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
+                    Text(` 未启用`).fontSize(11).fontWeight(FontWeight.Medium)
+                      .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
+                    Text(`· ${this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length}`)
+                      .fontSize(11).fontColor(INK4).margin({ left: 6 })
+                    Blank()
                   }
                   .width('100%')
-                  .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-                  .backgroundColor(row.id === this.selectedId ? SURFACE2 : SURFACE)
-                  .border(idx === this.rows.length - 1 ? { width: 0 } : { width: { bottom: 0.5 }, color: { bottom: LINE } })
-                  .onClick((): void => this.selectById(row.id))
-                }, (row: ProviderRow): string => row.id)
-              }
-              .width('100%').backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+                  .padding({ top: 22, bottom: 11, left: 4, right: 4 })
+                  .alignItems(VerticalAlign.Center)
+                }
+                Column() {
+                  this.providerRegistryRow(row)
+                }
+                .opacity(0.62)
+              }, (row: ProviderRow): string => `off-${row.id}`)
 
-              // 有数据时:紧凑横排添加按钮
-              Row() {
-                this.addProviderButton('+ OpenAI', 'openai')
-                Blank()
-                this.addProviderButton('+ Google', 'google')
-                Blank()
-                this.addProviderButton('+ Claude', 'claude')
-              }
-              .width('100%')
-              .margin({ top: 10 })
+            if (this.filteredRows().length === 0) {
+              Text('没有匹配的提供商')
+                .fontSize(13).fontColor(INK3)
+                .width('100%')
+                .padding({ top: 28, bottom: 28 })
+                .textAlign(TextAlign.Center)
             }
+
+            Column().height(18)
 
             // ── 编辑区 ──
             if (this.selectedType.length > 0) {
@@ -611,5 +798,19 @@ struct ChatProviderSettingsPage {
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    ProviderTemplatePickerSheet({
+            show: this.sheetShow,
+            existingIds: JSON.stringify(this.all.map((p: ProviderSetting): string => p.id)),
+            onPickPreset: (p: ProviderSetting): void => {
+              this.sheetShow = false;
+              this.addPreset(p);
+            },
+            onOauthPick: (): void => {
+              this.sheetShow = false;
+              promptAction.showToast({ message: '鸿蒙版暂不支持 OAuth 登录，请使用 API Key 预置', duration: 2200 });
+            },
+            onDismiss: (): void => { this.sheetShow = false; },
+          })
+    }
   }
 }
