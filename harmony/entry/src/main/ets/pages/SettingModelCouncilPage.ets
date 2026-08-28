@@ -325,7 +325,10 @@ struct SettingModelCouncilPage {
 
   // M3.3:删除席位(核心席不可删)
   private deleteSeat(seatId: string): void {
-    if (isCoreRole(seatId)) return;
+    const seat: ModelCouncilSeat | undefined = this.seats.find(
+      (s: ModelCouncilSeat): boolean => s.seatId === seatId);
+    if (seat === undefined) return;
+    if (isCoreRole(seat.role)) return;
     this.seats = this.seats.filter((s: ModelCouncilSeat): boolean => s.seatId !== seatId);
     this.saveSetting();
   }

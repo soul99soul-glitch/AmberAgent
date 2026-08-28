@@ -16,8 +16,11 @@
 //     持久化结果等价;显示态 raw 保留
 //   - 高级设置 tab 的 ProviderOverwriteSettings(:251-257)/内置工具 tab
 //     (:275-283)未移植(P1 已登),本页仅 customHeaders/customBodies 两节
-import { ACCENT,BG,ERROR,INK,INK2,INK3,INK4,LINE,SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  BG, ERROR, INK, INK3, LINE, RAISED, TEXT_STYLES,
+} from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, BtnGhost } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import type {
   CustomBody, CustomHeader, JsonValue, ProviderModel, ProviderSetting,
@@ -182,23 +185,23 @@ struct ChatModelParamsPage {
   }
 
   @Builder
-  sectionLabel(text: string, count: number) {
-    // ModelAdvancedSectionLabel(:289-312):'//' + 大写节标 + '· N'
-    Row() {
-      Text('//').fontSize(12).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-      Text(` ${text}`).fontSize(12).fontColor(INK3)
-      Text(`· ${count}`).fontSize(11).fontColor(INK4).margin({ left: 6 })
+  textField(label: string, value: string, placeholder: string, onChange: (v: string) => void) {
+    Column() {
+      Text(label).fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+        .fontColor(INK3).margin({ bottom: 4 })
+      TextInput({ text: value, placeholder: placeholder })
+        .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK).height(40)
+        .backgroundColor(RAISED).borderRadius(8).border({ width: 1, color: LINE })
+        .onChange(onChange)
     }
-    .width('100%').margin({ bottom: 10, top: 8 })
+    .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
   }
 
   build() {
     Column() {
-      PageTitleBar({
-        title: `模型参数 · ${this.modelLabel}`,
-        actionText: '确定',
-        onAction: (): void => { this.confirm(); },
-      })
+      PageTitleBar({ title: `模型参数 · ${this.modelLabel}` })
 
       if (!this.loaded) {
         Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
@@ -208,87 +211,91 @@ struct ChatModelParamsPage {
         Scroll() {
           Column() {
             // ── 自定义 Headers(:315-395) ──
-            this.sectionLabel('自定义 Headers', this.headerNames.length)
+            SectionHeader({ label: `自定义 Headers · ${this.headerNames.length}` })
             ForEach(this.headerNames, (_n: string, i: number) => {
               Column() {
                 Row() {
-                  Text(`HEADER ${i + 1}`)
-                    .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
+                  Text(`HEADER ${i + 1}`).fontSize(TEXT_STYLES.meta.size).fontWeight(600)
+                    .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                    .fontColor(INK3)
                   Blank()
-                  Text('删除')
-                    .fontSize(12).fontColor(ERROR)
-                    .padding({ left: 10, right: 4, top: 4, bottom: 4 })
-                    .onClick((): void => { this.removeHeader(i); })
+                  BtnGhost({ label: '删除', onTap: (): void => { this.removeHeader(i); } })
                 }
                 .width('100%').margin({ bottom: 8 })
-                TextInput({ text: this.headerNames[i] ?? '', placeholder: 'Header 名称' })
-                  .fontSize(13).height(38)
-                  .backgroundColor(SURFACE).borderRadius(8)
-                  .margin({ bottom: 8 })
-                  .onChange((v: string): void => { this.setHeaderName(i, v); })
-                TextInput({ text: this.headerValues[i] ?? '', placeholder: 'Header 值' })
-                  .fontSize(13).height(38)
-                  .backgroundColor(SURFACE).borderRadius(8)
-                  .onChange((v: string): void => { this.setHeaderValue(i, v); })
+                this.textField('Header 名称', this.headerNames[i] ?? '', 'Header 名称',
+                  (v: string): void => { this.setHeaderName(i, v); })
+                this.textField('Header 值', this.headerValues[i] ?? '', 'Header 值',
+                  (v: string): void => { this.setHeaderValue(i, v); })
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding(12).backgroundColor(BG).borderRadius(12)
-              .border({ width: 1, color: LINE })
-              .margin({ bottom: 10 })
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              if (i < this.headerNames.length - 1) {
+                PaperSeparator()
+              }
             }, (_n: string, i: number): string => `h-${i}`)
-            Text('添加 Header')
-              .fontSize(13).fontColor(ACCENT)
-              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              .margin({ bottom: 16 })
-              .onClick((): void => { this.addHeader(); })
+            Row() {
+              BtnGhost({ label: '添加 Header', onTap: (): void => { this.addHeader(); } })
+            }
+            .padding({ left: 16, right: 16, top: 8, bottom: 8 })
 
             // ── 自定义 Body(:397-499) ──
-            this.sectionLabel('自定义 Body', this.bodyKeys.length)
+            SectionHeader({ label: `自定义 Body · ${this.bodyKeys.length}` })
             ForEach(this.bodyKeys, (_k: string, i: number) => {
               Column() {
                 Row() {
-                  Text(`BODY ${i + 1}`)
-                    .fontSize(11).fontColor(INK3).fontWeight(FontWeight.Medium)
+                  Text(`BODY ${i + 1}`).fontSize(TEXT_STYLES.meta.size).fontWeight(600)
+                    .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                    .fontColor(INK3)
                   Blank()
-                  Text('删除')
-                    .fontSize(12).fontColor(ERROR)
-                    .padding({ left: 10, right: 4, top: 4, bottom: 4 })
-                    .onClick((): void => { this.removeBody(i); })
+                  BtnGhost({ label: '删除', onTap: (): void => { this.removeBody(i); } })
                 }
                 .width('100%').margin({ bottom: 8 })
-                TextInput({ text: this.bodyKeys[i] ?? '', placeholder: 'Body Key' })
-                  .fontSize(13).height(38)
-                  .backgroundColor(SURFACE).borderRadius(8)
-                  .margin({ bottom: 8 })
-                  .onChange((v: string): void => { this.setBodyKey(i, v); })
-                TextArea({ text: this.bodyTexts[i] ?? '', placeholder: 'Body 值 (JSON)' })
-                  .fontSize(12)
-                  .backgroundColor(SURFACE).borderRadius(8)
-                  .height(98)
-                  .onChange((v: string): void => { this.setBodyText(i, v); })
-                if ((this.bodyErrors[i] ?? '').length > 0) {
-                  Text(this.bodyErrors[i])
-                    .fontSize(11).fontColor(ACCENT)
-                    .width('100%').margin({ top: 6 })
+                this.textField('Body Key', this.bodyKeys[i] ?? '', 'Body Key',
+                  (v: string): void => { this.setBodyKey(i, v); })
+                Column() {
+                  Text('Body 值 (JSON)').fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Medium)
+                    .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                    .fontColor(INK3).margin({ bottom: 4 })
+                  TextArea({ text: this.bodyTexts[i] ?? '', placeholder: 'Body 值 (JSON)' })
+                    .fontSize(TEXT_STYLES.meta.size).lineHeight(TEXT_STYLES.meta.lineHeight)
+                    .fontFamily(FONT_MONO).fontColor(INK).backgroundColor(RAISED)
+                    .borderRadius(8).border({ width: 1, color: LINE }).height(98)
+                    .onChange((v: string): void => { this.setBodyText(i, v); })
+                  if ((this.bodyErrors[i] ?? '').length > 0) {
+                    Text(this.bodyErrors[i]).fontSize(TEXT_STYLES.meta.size)
+                      .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
+                      .fontColor(ERROR).width('100%').margin({ top: 6 })
+                  }
                 }
+                .width('100%').alignItems(HorizontalAlign.Start).margin({ bottom: 10 })
               }
               .width('100%').alignItems(HorizontalAlign.Start)
-              .padding(12).backgroundColor(BG).borderRadius(12)
-              .border({ width: 1, color: LINE })
-              .margin({ bottom: 10 })
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+              if (i < this.bodyKeys.length - 1) {
+                PaperSeparator()
+              }
             }, (_k: string, i: number): string => `b-${i}`)
-            Text('添加 Body')
-              .fontSize(13).fontColor(ACCENT)
-              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              .margin({ bottom: 24 })
-              .onClick((): void => { this.addBody(); })
+            Row() {
+              BtnGhost({ label: '添加 Body', onTap: (): void => { this.addBody(); } })
+            }
+            .padding({ left: 16, right: 16, top: 8, bottom: 24 })
           }
           .width('100%').padding({ left: 16, right: 16, bottom: 32 })
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)
+
+        Row() {
+          Blank()
+          BtnGhost({ label: '取消', onTap: (): void => { router.back(); } })
+          Row() {
+            BtnFill({ label: '确定', onTap: (): void => { this.confirm(); } })
+          }
+          .margin({ left: 8 })
+        }
+        .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 16 })
       }
     }
-    .width('100%').height('100%').backgroundColor(SURFACE)
+    .width('100%').height('100%').backgroundColor(BG)
   }
 }

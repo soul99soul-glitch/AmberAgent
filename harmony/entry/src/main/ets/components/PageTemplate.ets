@@ -147,13 +147,14 @@ export struct IconSeat {
 export struct Chip {
   @Prop text: string = '';
   @Prop withChevron: boolean = false;
+  @Prop danger: boolean = false;
   build(): void {
     Row() {
       Text(this.text)
         .fontSize(TINY)
         .lineHeight(TEXT_STYLES.tinyTag.lineHeight)
         .fontFamily(FONT_MONO_MEDIUM)
-        .fontColor(INK3)
+        .fontColor(this.danger ? ERROR : INK3)
         .maxLines(1)
       if (this.withChevron) {
         Icon({ name: 'chevron_down', iconSize: 12, color: INK3 }).margin({ left: 4 })
@@ -164,7 +165,7 @@ export struct Chip {
     .padding({ left: 8, right: this.withChevron ? 6 : 8, top: 3, bottom: 3 })
     .borderRadius(6)
     .backgroundColor(SURFACE)
-    .border({ width: 1, color: LINE2 })
+    .border({ width: 1, color: this.danger ? ERROR : LINE2 })
   }
 }
 

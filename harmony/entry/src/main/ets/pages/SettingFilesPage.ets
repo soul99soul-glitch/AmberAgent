@@ -17,7 +17,7 @@ import {
   BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { PageTitleBar, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
+import { PageTitleBar, PageSpacer, PaperSeparator, IconSeat } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface FileRow {
@@ -38,12 +38,12 @@ struct FilePaperRow {
   build(): void {
     Column() {
       Row() {
-        Icon({ name: 'doc', iconSize: 18, color: INK3 })
+        IconSeat({ iconName: this.mimeType.toLowerCase().indexOf('image') >= 0 ? 'image' : 'doc' })
         Column() {
           Text(this.displayName)
-            .fontSize(TEXT_STYLES.secondary.size)
+            .fontSize(15)
             .fontWeight(600)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
             .fontFamily(FONT_SANS_SEMIBOLD)
             .fontColor(INK)
             .maxLines(2)
@@ -70,7 +70,7 @@ struct FilePaperRow {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        .margin({ left: 10 })
+        .margin({ left: 12 })
         Row() {
           Icon({ name: 'trash', iconSize: 15, color: ERROR })
         }

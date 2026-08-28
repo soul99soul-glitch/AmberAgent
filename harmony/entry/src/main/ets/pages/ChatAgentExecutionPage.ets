@@ -9,6 +9,7 @@ import type {
   AgentOperationPreviewMode, AgentRuntimeSnapshot,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 
 const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
 const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
@@ -22,6 +23,7 @@ const coerceIn = (v: number, lo: number, hi: number): number =>
 @Component
 struct ChatAgentExecutionPage {
   @State loaded: boolean = false;
+  @State loadError: boolean = false;
   @State maxToolLoopSteps: number = 256;
   @State retryEnabled: boolean = true;
   @State retryMaxRetries: number = 5;
@@ -31,13 +33,18 @@ struct ChatAgentExecutionPage {
     this.refresh();
   }
 
-  private async refresh(): Promise<void> {
-    const snap: AgentRuntimeSnapshot = await loadAgentRuntimeSnapshot(getChatKvStore());
-    this.maxToolLoopSteps = snap.maxToolLoopSteps;
-    this.retryEnabled = snap.generationRetry.enabled;
-    this.retryMaxRetries = snap.generationRetry.maxRetries;
-    this.operationPreviewMode = snap.operationPreviewMode;
-    this.loaded = true;
+  private refresh(): void {
+    loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
+      this.maxToolLoopSteps = snap.maxToolLoopSteps;
+      this.retryEnabled = snap.generationRetry.enabled;
+      this.retryMaxRetries = snap.generationRetry.maxRetries;
+      this.operationPreviewMode = snap.operationPreviewMode;
+      this.loadError = false;
+      this.loaded = true;
+    }).catch((): void => {
+      this.loadError = true;
+      this.loaded = true;
+    });
   }
 
   private setToolLoopSteps(steps: number): void {
@@ -105,7 +112,7 @@ struct ChatAgentExecutionPage {
           onSelect: (idx: number): void => { onSelect(options[idx]); },
         })
       }
-      .margin({ top: 10 })
+      .margin({ top: 12 })
       if (!isLast) {
         PaperSeparator()
       }
@@ -142,7 +149,7 @@ struct ChatAgentExecutionPage {
           onSelect: (idx: number): void => { onSelect(options[idx]); },
         })
       }
-      .margin({ top: 10 })
+      .margin({ top: 12 })
       if (!isLast) {
         PaperSeparator()
       }
@@ -165,6 +172,16 @@ struct ChatAgentExecutionPage {
       } else {
         Scroll() {
           Column() {
+            if (this.loadError) {
+              Text('// 运行时配置加载失败，以下内容未读取真实配置')
+                .fontSize(TEXT_STYLES.meta.size)
+                .fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO)
+                .fontColor(INK3)
+                .width('100%')
+                .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+            }
             SectionHeader({ label: '运行' })
             this.selectTextPaper('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
               PREVIEW_MODE_OPTIONS, PREVIEW_MODE_LABELS, this.operationPreviewMode,

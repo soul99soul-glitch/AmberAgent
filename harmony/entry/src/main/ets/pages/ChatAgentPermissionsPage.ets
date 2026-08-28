@@ -7,11 +7,13 @@ import {
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 
 @Entry
 @Component
 struct ChatAgentPermissionsPage {
   @State loaded: boolean = false;
+  @State loadError: boolean = false;
   @State autoApproveAll: boolean = false;
   @State autoApproveHighRisk: boolean = false;
   @State speculativeEnabled: boolean = false;
@@ -20,12 +22,17 @@ struct ChatAgentPermissionsPage {
     this.refresh();
   }
 
-  private async refresh(): Promise<void> {
-    const snap: AgentRuntimeSnapshot = await loadAgentRuntimeSnapshot(getChatKvStore());
-    this.autoApproveAll = snap.autoApproveAllToolCalls;
-    this.autoApproveHighRisk = snap.autoApproveHighRiskToolCalls;
-    this.speculativeEnabled = snap.speculativeToolExecution.enabled;
-    this.loaded = true;
+  private refresh(): void {
+    loadAgentRuntimeSnapshot(getChatKvStore()).then((snap: AgentRuntimeSnapshot): void => {
+      this.autoApproveAll = snap.autoApproveAllToolCalls;
+      this.autoApproveHighRisk = snap.autoApproveHighRiskToolCalls;
+      this.speculativeEnabled = snap.speculativeToolExecution.enabled;
+      this.loadError = false;
+      this.loaded = true;
+    }).catch((): void => {
+      this.loadError = true;
+      this.loaded = true;
+    });
   }
 
   private setAutoApproveAll(checked: boolean): void {
@@ -86,6 +93,16 @@ struct ChatAgentPermissionsPage {
       } else {
         Scroll() {
           Column() {
+            if (this.loadError) {
+              Text('// 运行时配置加载失败，以下内容未读取真实配置')
+                .fontSize(TEXT_STYLES.meta.size)
+                .fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO)
+                .fontColor(INK3)
+                .width('100%')
+                .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+            }
             SectionHeader({ label: '批准策略' })
             ToggleRow({
               label: '全局自动批准',

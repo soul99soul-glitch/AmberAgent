@@ -19,16 +19,33 @@ struct SettingAgentMemoryPageFull {
   @State editingId: number = -1;
   @State editDraft: string = '';
   private ops: MemoryLibraryOps = getMemoryLibraryOps();
+  private reloadInFlight: boolean = false;
+  private reloadRequested: boolean = false;
 
   aboutToAppear(): void {
     this.reload();
   }
 
+  onPageShow(): void {
+    this.reload();
+  }
+
   private reload(): void {
+    if (this.reloadInFlight) {
+      this.reloadRequested = true;
+      return;
+    }
+    this.reloadInFlight = true;
     this.ops.listBucket(MEMORY_BUCKET_GLOBAL).then((list: AssistantMemory[]): void => {
       this.memories = list;
       this.loaded = true;
-    }).catch((): void => { this.loaded = true; });
+    }).catch((): void => { this.loaded = true; }).finally((): void => {
+      this.reloadInFlight = false;
+      if (this.reloadRequested) {
+        this.reloadRequested = false;
+        this.reload();
+      }
+    });
   }
 
   private add(): void {

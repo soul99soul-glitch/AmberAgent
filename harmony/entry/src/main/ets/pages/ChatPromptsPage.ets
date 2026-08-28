@@ -21,10 +21,10 @@
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
 import { promptAction } from '@kit.ArkUI';
 import {
-  ACCENT, BG, INK, INK3, INK4, LINE, OVERLAY, SURFACE, ERROR, META, BODY, BODY2, TEXT_STYLES,
+  ACCENT, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, SURFACE, ERROR, META, BODY, BODY2, TEXT_STYLES,
   lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill } from '../components/PageTemplate.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, Chip } from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
 import type {
   InjectionPosition, InjectionRole, Lorebook, PromptInjection, RegexInjection,
@@ -63,6 +63,7 @@ const parseIntOrNull = (v: string): number | null => {
 @Entry
 @Component
 struct ChatPromptsPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State tab: number = 0; // 0 = 模式注入;1 = 世界书
   @State modeInjections: PromptInjection[] = [];
@@ -297,22 +298,15 @@ struct ChatPromptsPage {
 
   @Builder
   tagText(text: string, warn: boolean) {
-    Text(text)
-      .fontSize(10.5).fontWeight(600).lineHeight(TEXT_STYLES.tinyTag.lineHeight)
-      .fontFamily(TEXT_STYLES.tinyTag.family)
-      .fontColor(warn ? ERROR : INK3)
-      .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-      .border({ width: 1, color: warn ? ERROR : LINE })
-      .borderRadius(6)
-      .margin({ right: 4 })
+    Chip({ text: text, danger: warn }).margin({ right: 4 })
   }
 
   @Builder
   formField(label: string, value: string, onChange: (v: string) => void) {
     Column() {
-      Text(label).fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+      Text(label).fontSize(12).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(12)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ bottom: 4 })
       TextInput({ text: value })
-        .width('100%').fontSize(13).fontColor(INK)
+        .width('100%').fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13)).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
         .backgroundColor(BG).borderRadius(8)
         .onChange(onChange)
     }
@@ -323,15 +317,25 @@ struct ChatPromptsPage {
   switchRow(label: string, desc: string, value: boolean, onChange: (v: boolean) => void) {
     Row() {
       Column() {
-        Text(label).fontSize(13).fontColor(INK)
+        Text(label).fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13)).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
         if (desc.length > 0) {
-          Text(desc).fontSize(11).fontColor(INK3).margin({ top: 2 })
+          Text(desc).fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 2 })
         }
       }
       .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: value })
-        .selectedColor(ACCENT)
-        .onChange(onChange)
+      Stack({ alignContent: Alignment.Start }) {
+        Column()
+          .width(42).height(24).borderRadius(99)
+          .backgroundColor(value ? this.accentColorStore : LINE2)
+        Column()
+          .width(20).height(20).borderRadius(10)
+          .backgroundColor('#FFFFFF')
+          .margin({ left: value ? 22 : 2 })
+          .animation({ duration: 150, curve: Curve.EaseOut })
+      }
+      .clip(true)
+      .onClick((): void => { onChange(!value); })
+      .accessibilityText(value ? '已开启' : '已关闭')
     }
     .width('100%').margin({ bottom: 12 })
   }
@@ -341,11 +345,13 @@ struct ChatPromptsPage {
   positionSelector(current: InjectionPosition, menuOpen: boolean,
     onToggleMenu: () => void, onSelect: (v: InjectionPosition) => void) {
     Column() {
-      Text('注入位置').fontSize(13).fontColor(INK).margin({ bottom: 4 })
+      Text('注入位置').fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13)).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).margin({ bottom: 4 })
       Row() {
         Text(positionLabel(current))
-          .fontSize(13).fontColor(INK).layoutWeight(1)
-        Text(menuOpen ? '▲' : '▼').fontSize(11).fontColor(INK3)
+          .fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13))
+          .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).layoutWeight(1)
+        Text(menuOpen ? '▲' : '▼').fontSize(11).fontWeight(FontWeight.Normal)
+          .lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3)
       }
       .width('100%').padding(10).backgroundColor(BG).borderRadius(8)
       .onClick(onToggleMenu)
@@ -376,11 +382,13 @@ struct ChatPromptsPage {
   roleSelector(current: InjectionRole, menuOpen: boolean,
     onToggleMenu: () => void, onSelect: (v: InjectionRole) => void) {
     Column() {
-      Text('注入角色').fontSize(13).fontColor(INK).margin({ bottom: 4 })
+      Text('注入角色').fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13)).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).margin({ bottom: 4 })
       Row() {
         Text(roleLabel(current))
-          .fontSize(13).fontColor(INK).layoutWeight(1)
-        Text(menuOpen ? '▲' : '▼').fontSize(11).fontColor(INK3)
+          .fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13))
+          .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).layoutWeight(1)
+        Text(menuOpen ? '▲' : '▼').fontSize(11).fontWeight(FontWeight.Normal)
+          .lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3)
       }
       .width('100%').padding(10).backgroundColor(BG).borderRadius(8)
       .onClick(onToggleMenu)
@@ -476,7 +484,7 @@ struct ChatPromptsPage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (lb.description.length > 0) {
             Text(lb.description)
-              .fontSize(11).fontColor(INK3).margin({ top: 2 })
+              .fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 2 })
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           Row() {
@@ -527,7 +535,7 @@ struct ChatPromptsPage {
       Blank().onClick((): void => { this.miVisible = false; })
       Column() {
         Text('编辑模式注入')
-          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16)).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
           .margin({ bottom: 12 })
         Scroll() {
           Column() {
@@ -554,7 +562,7 @@ struct ChatPromptsPage {
                 this.miRoleMenuOpen = false;
               })
             Column() {
-              Text('注入内容').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+              Text('注入内容').fontSize(12).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(12)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ bottom: 4 })
               TextArea({ text: this.miContent })
                 .width('100%').height(160).fontSize(13).fontColor(INK)
                 .backgroundColor(BG).borderRadius(8)
@@ -570,14 +578,18 @@ struct ChatPromptsPage {
           Blank()
           Text('取消')
             .fontSize(14).fontColor(INK3)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => { this.miVisible = false; })
           Text('确定')
             .fontSize(14).fontColor(ACCENT)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => { this.confirmModeInjection(); })
         }
-        .width('100%').margin({ top: 8 })
+        .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
       }
       .width('100%').height('90%').padding(16)
       .backgroundColor(SURFACE)
@@ -594,7 +606,7 @@ struct ChatPromptsPage {
       Blank().onClick((): void => { this.lbVisible = false; })
       Column() {
         Text('编辑世界书')
-          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16)).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
           .margin({ bottom: 12 })
         Scroll() {
           Column() {
@@ -620,10 +632,11 @@ struct ChatPromptsPage {
                 Row() {
                   Column() {
                     Text(e.name.length > 0 ? e.name : '未命名条目')
-                      .fontSize(13).fontColor(INK)
+                      .fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13))
+                      .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
                     if (e.keywords.length > 0) {
                       Text(`关键词：${e.keywords.join(', ')}`)
-                        .fontSize(11).fontColor(INK3).margin({ top: 2 })
+                        .fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 2 })
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     }
                     if (!e.enabled) {
@@ -657,14 +670,18 @@ struct ChatPromptsPage {
           Blank()
           Text('取消')
             .fontSize(14).fontColor(INK3)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => { this.lbVisible = false; })
           Text('确定')
             .fontSize(14).fontColor(ACCENT)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => { this.confirmLorebook(); })
         }
-        .width('100%').margin({ top: 8 })
+        .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
       }
       .width('100%').height('95%').padding(16)
       .backgroundColor(SURFACE)
@@ -681,7 +698,7 @@ struct ChatPromptsPage {
       Blank().onClick((): void => { this.enVisible = false; })
       Column() {
         Text('编辑条目')
-          .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+          .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16)).fontFamily(TEXT_STYLES.body.family).fontColor(INK)
           .margin({ bottom: 12 })
         Scroll() {
           Column() {
@@ -702,13 +719,13 @@ struct ChatPromptsPage {
                 (v: string): void => { this.enInjectDepthText = v; })
             }
 
-            Text('关键词').fontSize(13).fontColor(INK)
+            Text('关键词').fontSize(13).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(13)).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
             if (this.enKeywords.length > 0) {
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(this.enKeywords, (kw: string) => {
                   Row() {
-                    Text(kw).fontSize(11).fontColor(INK)
-                    Text('✕').fontSize(10).fontColor(INK3).margin({ left: 6 })
+                    Text(kw).fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK)
+                    Text('✕').fontSize(10).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(10)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ left: 6 })
                   }
                   .padding({ left: 8, right: 8, top: 4, bottom: 4 })
                   .backgroundColor(BG).borderRadius(6)
@@ -749,7 +766,7 @@ struct ChatPromptsPage {
                 this.enRoleMenuOpen = false;
               })
             Column() {
-              Text('注入内容').fontSize(12).fontColor(INK3).margin({ bottom: 4 })
+              Text('注入内容').fontSize(12).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(12)).fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ bottom: 4 })
               TextArea({ text: this.enContent })
                 .width('100%').height(130).fontSize(13).fontColor(INK)
                 .backgroundColor(BG).borderRadius(8)
@@ -765,18 +782,22 @@ struct ChatPromptsPage {
           Blank()
           Text('取消')
             .fontSize(14).fontColor(INK3)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => { this.enVisible = false; })
           Text('确定')
             .fontSize(14)
             .fontColor(this.enKeywords.length > 0 || this.enConstantActive ? ACCENT : LINE)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+            .constraintSize({ minHeight: 44 })
+            .textAlign(TextAlign.Center)
+            .padding({ left: 20, right: 20 })
             .onClick((): void => {
               // canSave(:1161)= keywords 非空 || constantActive
               if (this.enKeywords.length > 0 || this.enConstantActive) this.confirmEntry();
             })
         }
-        .width('100%').margin({ top: 8 })
+        .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
       }
       .width('100%').height('92%').padding(16)
       .backgroundColor(SURFACE)

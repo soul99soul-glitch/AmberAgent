@@ -254,7 +254,8 @@ struct SettingDeepReadPage {
                 Text(m.model + '  ·  ' + m.baseUrl)
                   .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
                   .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
-                  .margin({ top: 3 })
+                  .margin({ top: 3 }).maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
               }
               .alignItems(HorizontalAlign.Start).layoutWeight(1)
               BtnGhost({ label: '删除', onTap: (): void => { this.deleteModel(m.id); } })

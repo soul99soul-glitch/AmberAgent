@@ -233,7 +233,7 @@ struct SettingSubAgentPage {
       }
       .width('100%')
       .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .onClick((): void => {
         // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)
         if (this.expandedRoleId === def.id) {

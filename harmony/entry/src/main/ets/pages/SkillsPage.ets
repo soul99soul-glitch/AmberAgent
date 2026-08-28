@@ -10,7 +10,7 @@ import type { Assistant, SkillMetadata } from '@amber/chat-domain';
 import { saveAssistants, patchAssistant } from '@amber/chat-domain';
 import { getSkillManager, getChatAssistants, getChatKvStore } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE2, INK, INK3, INK4, LINE, ACCENT, ERROR,
+  BG, SURFACE2, INK, INK3, INK4, LINE, LINE2, ACCENT, ERROR,
   BODY, BODY2, META, MONO_SMALL, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
@@ -20,6 +20,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct SkillsPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State skills: SkillMetadata[] = [];
   @State enabledNames: string[] = [];
   @State loaded: boolean = false;
@@ -81,9 +82,20 @@ struct SkillsPage {
               .layoutWeight(1)
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
-            Toggle({ type: ToggleType.Switch, isOn: this.isEnabled(s.name) })
-              .selectedColor(ACCENT)
-              .onChange((on: boolean): void => { this.toggle(s.name, on); })
+            Stack({ alignContent: Alignment.Start }) {
+              Column()
+                .width(42).height(24).borderRadius(99)
+                .backgroundColor(this.isEnabled(s.name) ? this.accentColorStore : LINE2)
+              Column()
+                .width(20).height(20).borderRadius(10)
+                .backgroundColor('#FFFFFF')
+                .margin({ left: this.isEnabled(s.name) ? 22 : 2 })
+                .animation({ duration: 150, curve: Curve.EaseOut })
+            }
+            .clip(true)
+            .margin({ left: 12 })
+            .onClick((): void => { this.toggle(s.name, !this.isEnabled(s.name)); })
+            .accessibilityText(this.isEnabled(s.name) ? '已开启' : '已关闭')
           }
           .width('100%')
 

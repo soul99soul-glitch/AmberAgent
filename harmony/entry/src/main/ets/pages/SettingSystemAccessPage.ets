@@ -71,8 +71,9 @@ struct SettingSystemAccessPage {
             .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
             .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
           Text(p.desc)
-            .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_SANS).fontColor(INK3).margin({ top: 4 })
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 4 })
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)

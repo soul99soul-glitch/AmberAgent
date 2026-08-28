@@ -3,10 +3,10 @@
 // 点选持久化到 Preferences(chat_selected_provider_id/model_id),
 // resolveChatRuntime 优先消费。
 import {
-  ACCENT, BG, INK, INK2, INK3, LINE, META, BODY, TEXT_STYLES,
+  ACCENT, BG, INK, INK2, INK3, LINE, META, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, PaperSeparator } from '../components/PageTemplate.ets';
-import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM, FONT_MONO_SEMIBOLD } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth } from '@amber/chat-domain';
 import {
@@ -117,12 +117,12 @@ struct ChatModelPickerPage {
                 Row() {
                   Column() {
                     Text(row.modelId)
-                      .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
-                      .fontFamily(FONT_MONO_MEDIUM).fontColor(row.selected ? ACCENT : INK)
+                      .fontSize(13).fontWeight(600).lineHeight(lineHeightForSize(13))
+                      .fontFamily(FONT_MONO_SEMIBOLD).fontColor(row.selected ? ACCENT : INK)
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                     Text(`${row.providerName} · ${row.providerType}`)
-                      .fontSize(BODY).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.body.lineHeight)
-                      .fontFamily(TEXT_STYLES.body.family).fontColor(INK3).margin({ top: 4 })
+                      .fontSize(12).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(12))
+                      .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 4 })
                       .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                   }
                   .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -141,6 +141,7 @@ struct ChatModelPickerPage {
               }
               .width('100%')
             }, (row: ModelRow): string => `${row.providerId}/${row.modelId}`)
+            PageSpacer()
           }
           .width('100%')
         }

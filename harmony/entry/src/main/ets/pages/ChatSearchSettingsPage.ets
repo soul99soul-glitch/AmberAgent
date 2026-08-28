@@ -14,8 +14,15 @@
 //   - ModalBottomSheet → 全屏 overlay(同 ChatTaskModelsPage overlay 先例)
 //   - StepperNumberField 直输 → 仅 −/＋ 按钮(clamp 1..50 语义保留)
 //   - 每 provider Description() composable 未移植(P1 既有登记)
-import { ACCENT, BG, INK, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  ACCENT, ACCENT_INK, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, RAISED, SURFACE, SURFACE2,
+  TEXT_STYLES,
+} from '../design/tokens.ets';
+import {
+  PageTitleBar, SectionHeader, ToggleRow, PaperSeparator, BtnFill, BtnGhost,
+} from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
 import {
   defaultSearchPrefs, loadSearchPrefs, updateSearchPrefs,
@@ -26,9 +33,6 @@ import type {
   SearchSettings, SearchServiceOptions, SearchServiceOptionsType,
 } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-
-const DANGER: string = '#B5473A';
-
 
 // TYPES LinkedHashMap 插入序(SEARCH_SERVICE_TYPES 声明序逐字)
 const SEARCH_TYPE_ORDER: SearchServiceOptionsType[] = [
@@ -85,6 +89,7 @@ const capitalize = (s: string): string =>
 @Entry
 @Component
 struct ChatSearchSettingsPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State loaded: boolean = false;
   @State s: SearchSettings = defaultSearchPrefs();
   // ===== 编辑器 overlay(editIndex < 0 = 新增,Android target.index == null) =====
@@ -416,72 +421,45 @@ struct ChatSearchSettingsPage {
   // ===== UI =====
 
   @Builder
-  heroCard() {
+  heroRow() {
+    ToggleRow({
+      label: 'Agent 网络搜索', desc: '允许聊天调用 search_web 和 scrape_web，使用已启用服务。',
+      checked: this.s.enableWebSearch, isLast: true,
+      onToggle: (): void => { this.setMaster(!this.s.enableWebSearch); },
+    })
     Column() {
       Row() {
-        Column() {
-          Text('Agent 网络搜索')
-            .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
-          Text('允许聊天调用 search_web 和 scrape_web，使用已启用服务。')
-            .fontSize(12).fontColor(INK3).margin({ top: 4 })
-        }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Toggle({ type: ToggleType.Switch, isOn: this.s.enableWebSearch })
-          .selectedColor(ACCENT)
-          .onChange((v: boolean): void => { this.setMaster(v); })
-      }
-      .width('100%').padding(18)
-
-      Row()
-        .width('100%').height(1).backgroundColor(LINE)
-
-      Row() {
-        Row()
-          .width(7).height(7).borderRadius(4).backgroundColor(ACCENT)
+        Column().width(7).height(7).borderRadius(4).backgroundColor(this.accentColorStore)
           .margin({ right: 8 })
         Text(`${this.enabledCount()} / ${this.s.searchServices.length + 6} 个服务已启用 · 多源召回`)
-          .fontSize(12).fontColor(INK3)
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
-      .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 14 })
-    }
-    .width('100%').backgroundColor(SURFACE).borderRadius(14)
-    .border({ width: 1, color: LINE })
-  }
-
-  @Builder
-  subGroupLabel(text: string, trailing: string) {
-    Row() {
-      Text(text)
-        .fontSize(11).fontWeight(FontWeight.Medium).fontColor(INK3)
-        .layoutWeight(1)
-      if (trailing.length > 0) {
-        Text(trailing).fontSize(11).fontColor(INK3)
-      }
-    }
-    .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 6 })
-  }
-
-  @Builder
-  builtinRow(title: string, desc: string, field: string, showDivider: boolean) {
-    Column() {
-      Row() {
-        Column() {
-          Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-          Text(desc).fontSize(11).fontColor(INK3).margin({ top: 2 })
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 10 })
-        Toggle({ type: ToggleType.Switch, isOn: this.builtinValue(field) })
-          .selectedColor(ACCENT)
-          .onChange((v: boolean): void => { this.setBuiltin(field, v); })
-      }
-      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-
-      if (showDivider) {
-        Row().height(1).backgroundColor(LINE).margin({ left: 16, right: 16 })
-      }
+      .width('100%').constraintSize({ minHeight: 48 }).padding({ left: 16, right: 16 })
+      PaperSeparator()
     }
     .width('100%')
+  }
+
+  @Builder
+  inlineToggle(checked: boolean, onToggle: () => void) {
+    Stack({ alignContent: Alignment.Start }) {
+      Column().width(42).height(24).borderRadius(99)
+        .backgroundColor(checked ? this.accentColorStore : LINE2)
+      Column().width(20).height(20).borderRadius(10).backgroundColor(RAISED)
+        .margin({ left: checked ? 22 : 2 })
+        .animation({ duration: 150, curve: Curve.EaseOut })
+    }
+    .clip(true).margin({ left: 12 }).onClick(onToggle)
+    .accessibilityText(checked ? '已开启' : '已关闭')
+  }
+
+  @Builder
+  builtinRow(title: string, desc: string, field: string, isLast: boolean) {
+    ToggleRow({
+      label: title, desc: desc, checked: this.builtinValue(field), isLast: isLast,
+      onToggle: (): void => { this.setBuiltin(field, !this.builtinValue(field)); },
+    })
   }
 
   @Builder
@@ -489,92 +467,108 @@ struct ChatSearchSettingsPage {
     Column() {
       Row() {
         Text(`${index + 1}`)
-          .fontSize(11).fontColor(INK3)
-          .width(20).textAlign(TextAlign.Center)
-        Text(SEARCH_SERVICE_TYPES[svc.type])
-          .fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-          .layoutWeight(1).margin({ left: 8 })
-          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text('上移')
-          .fontSize(12).fontColor(index > 0 ? ACCENT : LINE)
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .onClick((): void => {
-            if (index > 0) this.moveService(index, index - 1);
-          })
-        Text('下移')
-          .fontSize(12)
-          .fontColor(index < this.s.searchServices.length - 1 ? ACCENT : LINE)
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .width(24).textAlign(TextAlign.Center)
+        Column() {
+          Text(SEARCH_SERVICE_TYPES[svc.type])
+            .fontSize(TEXT_STYLES.body.size).fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(svc.id).fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO).fontColor(INK3)
+            .margin({ top: 3 }).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 8 })
+        Text('上移').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(index > 0 ? this.accentColorStore : INK4).padding({ left: 6, right: 6 })
+          .onClick((): void => { if (index > 0) this.moveService(index, index - 1); })
+        Text('下移').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(index < this.s.searchServices.length - 1 ? this.accentColorStore : INK4)
+          .padding({ left: 6, right: 6 })
           .onClick((): void => {
             if (index < this.s.searchServices.length - 1) this.moveService(index, index + 1);
           })
-        Toggle({
-          type: ToggleType.Switch,
-          isOn: this.s.searchEnabledServiceIds.indexOf(svc.id) >= 0,
-        })
-          .selectedColor(ACCENT)
-          .onChange((v: boolean): void => { this.toggleService(svc, v); })
-        Text('›').fontSize(16).fontColor(INK3).margin({ left: 8 })
+        this.inlineToggle(this.s.searchEnabledServiceIds.indexOf(svc.id) >= 0,
+          (): void => {
+            this.toggleService(svc, this.s.searchEnabledServiceIds.indexOf(svc.id) < 0);
+          })
+        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 }).margin({ left: 8 })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+      .width('100%').constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .onClick((): void => { this.openEdit(svc, index); })
-
       if (index < this.s.searchServices.length - 1) {
-        Row().height(1).backgroundColor(LINE).margin({ left: 16, right: 16 })
+        PaperSeparator()
       }
     }
     .width('100%')
   }
 
   @Builder
-  commonOptionsCard() {
+  commonOptionsRow() {
     Column() {
-      this.subGroupLabel('通用选项', '')
       Row() {
         Column() {
-          Text('结果数量').fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-          Text('每次搜索最多返回的结果条数').fontSize(11).fontColor(INK3).margin({ top: 2 })
-            .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text('结果数量').fontSize(TEXT_STYLES.body.size).fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          Text('每次搜索最多返回的结果条数').fontSize(TEXT_STYLES.secondary.size)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 4 }).maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Row() {
-          Text('−')
-            .fontSize(16).fontColor(this.s.searchCommonOptions.resultSize > 1 ? INK : LINE)
-            .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+          Text('−').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.s.searchCommonOptions.resultSize > 1 ? INK : INK4)
+            .width(32).height(32).textAlign(TextAlign.Center)
             .onClick((): void => {
               if (this.s.searchCommonOptions.resultSize > 1) {
                 this.setResultSize(this.s.searchCommonOptions.resultSize - 1);
               }
             })
           Text(`${this.s.searchCommonOptions.resultSize}`)
-            .fontSize(14).fontColor(INK).width(36).textAlign(TextAlign.Center)
-          Text('＋')
-            .fontSize(16).fontColor(this.s.searchCommonOptions.resultSize < 50 ? INK : LINE)
-            .padding({ left: 12, right: 12, top: 4, bottom: 4 })
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK).width(36).textAlign(TextAlign.Center)
+          Text('＋').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.s.searchCommonOptions.resultSize < 50 ? INK : INK4)
+            .width(32).height(32).textAlign(TextAlign.Center)
             .onClick((): void => {
               if (this.s.searchCommonOptions.resultSize < 50) {
                 this.setResultSize(this.s.searchCommonOptions.resultSize + 1);
               }
             })
         }
-        .backgroundColor(BG).borderRadius(10).border({ width: 1, color: LINE })
+        .backgroundColor(SURFACE2).borderRadius(8).border({ width: 1, color: LINE })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 18 })
+      .width('100%').constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      PaperSeparator()
     }
-    .width('100%').backgroundColor(SURFACE).borderRadius(14)
-    .border({ width: 1, color: LINE })
+    .width('100%')
   }
 
   @Builder
-  recommendRow(title: string, detail: string) {
+  recommendRow(title: string, detail: string, isLast: boolean) {
     Row() {
-      Text(title).fontSize(13).fontWeight(FontWeight.Medium).fontColor(ACCENT)
-      Text(detail).fontSize(12).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.End)
+      Text(title).fontSize(TEXT_STYLES.body.size).fontWeight(600)
+        .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(this.accentColorStore)
+      Text(detail).fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+        .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.End)
         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
     }
-    .width('100%').padding({ left: 14, right: 14, top: 10, bottom: 10 })
-    .border({ width: 1, color: LINE }).borderRadius(12)
-    .margin({ bottom: 8 })
+    .width('100%').constraintSize({ minHeight: 56 })
+    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
+    if (!isLast) {
+      PaperSeparator()
+    }
   }
 
   @Builder
@@ -634,6 +628,7 @@ struct ChatSearchSettingsPage {
                 }
                 .width('100%')
                 }
+                .align(Alignment.TopStart)
                 .height(220).margin({ top: 4 })
                 .backgroundColor(BG).borderRadius(8)
               }
@@ -668,7 +663,7 @@ struct ChatSearchSettingsPage {
                   ForEach(this.depthOptions(), (d: string) => {
                     Text(capitalize(d))
                       .fontSize(13)
-                      .fontColor(d === this.dDepth ? Color.White : INK)
+                      .fontColor(d === this.dDepth ? ACCENT_INK : INK)
                       .textAlign(TextAlign.Center)
                       .padding({ top: 6, bottom: 6 })
                       .layoutWeight(1)
@@ -713,9 +708,7 @@ struct ChatSearchSettingsPage {
                     .margin({ top: 2 })
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: this.dSummary })
-                  .selectedColor(ACCENT)
-                  .onChange((v: boolean): void => { this.dSummary = v; })
+                this.inlineToggle(this.dSummary, (): void => { this.dSummary = !this.dSummary; })
               }
               .width('100%').margin({ bottom: 12 })
             }
@@ -741,23 +734,17 @@ struct ChatSearchSettingsPage {
 
         Row() {
           if (this.editIndex >= 0 && this.s.searchServices.length > 1) {
-            Text('删除提供商')
-              .fontSize(14).fontColor(DANGER)
-              .padding({ left: 12, right: 12, top: 8, bottom: 8 })
-              .onClick((): void => { this.confirmDelete(); })
+            BtnGhost({ label: '删除提供商', onTap: (): void => { this.confirmDelete(); } })
           }
           Blank()
-          Text('取消')
-            .fontSize(14).fontColor(INK3)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-            .onClick((): void => { this.editorVisible = false; })
-          Text(this.editIndex < 0 ? '添加提供商' : '保存')
-            .fontSize(14).fontColor(ACCENT)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-            .onClick((): void => {
+          BtnGhost({ label: '取消', onTap: (): void => { this.editorVisible = false; } })
+          BtnFill({
+            label: this.editIndex < 0 ? '添加提供商' : '保存',
+            onTap: (): void => {
               if (this.editIndex < 0) this.confirmAdd();
               else this.confirmEdit();
-            })
+            },
+          })
         }
         .width('100%').margin({ top: 8 })
       }
@@ -778,50 +765,36 @@ struct ChatSearchSettingsPage {
         } else {
           Scroll() {
             Column() {
-              this.heroCard()
+              this.heroRow()
 
-              Column() {
-                this.subGroupLabel('内置免费源', '')
-                this.builtinRow('Jina Search / Reader',
-                  '可无 Key 使用，尽量以 Markdown 搜索和读取网页。', 'jina', true)
-                this.builtinRow('DuckDuckGo Lite',
-                  '无需 API Key 的免费公共召回源。', 'duckduckgo', true)
-                this.builtinRow('Bing HTML',
-                  '免费公共兜底，遇到验证页会明确报错。', 'bing', true)
-                this.builtinRow('Wikipedia',
-                  '实体和背景知识源，适合百科类问题。', 'wikipedia', true)
-                this.builtinRow('Hacker News',
-                  '技术、开源和 AI 工具生态讨论源。', 'hackernews', true)
-                this.builtinRow('Google WebView 兜底',
-                  '普通搜索弱或深度搜索时，打开可见搜索页兜底。', 'webview', false)
+              SectionHeader({ label: '内置免费源' })
+              this.builtinRow('Jina Search / Reader',
+                '可无 Key 使用，尽量以 Markdown 搜索和读取网页。', 'jina', false)
+              this.builtinRow('DuckDuckGo Lite',
+                '无需 API Key 的免费公共召回源。', 'duckduckgo', false)
+              this.builtinRow('Bing HTML',
+                '免费公共兜底，遇到验证页会明确报错。', 'bing', false)
+              this.builtinRow('Wikipedia',
+                '实体和背景知识源，适合百科类问题。', 'wikipedia', false)
+              this.builtinRow('Hacker News',
+                '技术、开源和 AI 工具生态讨论源。', 'hackernews', false)
+              this.builtinRow('Google WebView 兜底',
+                '普通搜索弱或深度搜索时，打开可见搜索页兜底。', 'webview', true)
 
-                this.subGroupLabel('已配置', '调整优先级')
-                ForEach(this.s.searchServices, (svc: SearchServiceOptions, index: number) => {
-                  this.serviceRow(svc, index)
-                }, (svc: SearchServiceOptions): string => svc.id)
-              }
-              .width('100%').backgroundColor(SURFACE).borderRadius(14)
-              .border({ width: 1, color: LINE })
-              .margin({ top: 22 })
+              SectionHeader({ label: '已配置' })
+              ForEach(this.s.searchServices, (svc: SearchServiceOptions, index: number) => {
+                this.serviceRow(svc, index)
+              }, (svc: SearchServiceOptions): string => svc.id)
 
-              Column() {
-                this.commonOptionsCard()
-              }
-              .width('100%').margin({ top: 22 })
+              SectionHeader({ label: '通用选项' })
+              this.commonOptionsRow()
 
-              Column() {
-                Row() {
-                  Text('推荐组合')
-                    .fontSize(11).fontWeight(FontWeight.Medium).fontColor(INK3)
-                }
-                .width('100%').padding({ top: 14, bottom: 6 })
-                this.recommendRow('零成本', 'Jina + DuckDuckGo + Bing')
-                this.recommendRow('Google 结果', 'Serper / SerpAPI')
-                this.recommendRow('高质量多源', 'Tavily 或 Brave')
-              }
-              .width('100%').margin({ top: 8 })
+              SectionHeader({ label: '推荐组合' })
+              this.recommendRow('零成本', 'Jina + DuckDuckGo + Bing', false)
+              this.recommendRow('Google 结果', 'Serper / SerpAPI', false)
+              this.recommendRow('高质量多源', 'Tavily 或 Brave', true)
             }
-            .width('100%').padding({ left: 16, right: 16, bottom: 24 })
+            .width('100%').padding({ bottom: 24 })
           }
         .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)

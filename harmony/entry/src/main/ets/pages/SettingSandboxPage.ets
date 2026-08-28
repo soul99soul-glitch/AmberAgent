@@ -2,7 +2,7 @@
 // 工作区根 = filesDir(真值)；终端运行时 = builtin(鸿蒙无 shell 运行时)。
 import type { AgentRuntimeSnapshot } from '../platform_impl/AgentRuntimePrefs.ets';
 import {
-  loadAgentRuntimeSnapshot, updateSpeculativeToolExecution, defaultAgentRuntimeSnapshot,
+  loadAgentRuntimeSnapshot, updateSpeculativeToolExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import {
@@ -10,7 +10,7 @@ import {
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import {
-  PageTitleBar, SectionHeader, NavRow, ToggleRow,
+  PageTitleBar, SectionHeader, NavRow, ToggleRow, BtnGhost,
   PageSpacer,
 } from '../components/PageTemplate.ets';
 
@@ -18,14 +18,23 @@ import {
 @Component
 struct SettingSandboxPage {
   @State snap: AgentRuntimeSnapshot | null = null;
+  @State loadError: boolean = false;
   @State workspaceRoot: string = '';
 
   aboutToAppear(): void {
     const ctx = AppStorage.get<Context>('abilityContext') as Context;
     this.workspaceRoot = ctx.filesDir;
+    this.loadSnapshot();
+  }
+
+  private loadSnapshot(): void {
+    this.loadError = false;
     loadAgentRuntimeSnapshot(getChatKvStore()).then((s: AgentRuntimeSnapshot): void => {
       this.snap = s;
-    }).catch((): void => { this.snap = defaultAgentRuntimeSnapshot(); });
+    }).catch((): void => {
+      this.snap = null;
+      this.loadError = true;
+    });
   }
 
   @Builder
@@ -158,7 +167,20 @@ struct SettingSandboxPage {
             showChevron: false,
           })
           SectionHeader({ label: '并发工具' })
-          if (this.snap !== null) {
+          if (this.loadError) {
+            Text('// 运行时配置加载失败，未应用默认值以避免覆盖真实配置')
+              .fontSize(TEXT_STYLES.meta.size)
+              .fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO)
+              .fontColor(INK3)
+              .width('100%')
+              .padding({ left: 16, right: 16, top: 14, bottom: 4 })
+            Row() {
+              BtnGhost({ label: '重试', onTap: (): void => { this.loadSnapshot(); } })
+            }
+            .width('100%').padding({ left: 16, right: 16, bottom: 8 })
+          } else if (this.snap !== null) {
             this.concurrencyBlock(this.snap)
           }
           Text('// 输出上限随工具类型内置，无独立设置面')

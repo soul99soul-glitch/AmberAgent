@@ -5,7 +5,10 @@
 //   worker → updateMemoryWorkerModels{modelId = it.id, followCompressModel = false}(:631-641)
 //   daydream → 同构 {daydreamModelId, daydreamFollowCompressModel = false}(:684-697)
 // 与 ChatModelPickerPage 区别:任务模型按模型 uuid(m.id)存储,非 (providerId, modelId) 对。
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE,TITLE } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, RAISED, TEXT_STYLES } from '../design/tokens.ets';
+import { PageTitleBar, PaperSeparator, Chip } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { FONT_MONO, FONT_MONO_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID } from '@amber/chat-domain';
 import type { ProviderModel } from '@amber/chat-domain';
@@ -40,7 +43,6 @@ const TASK_TITLES: Record<string, string> = {
 @Entry
 @Component
 struct ChatTaskModelPickerPage {
-  @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State rows: TaskModelRow[] = [];
   @State loaded: boolean = false;
   @State task: string = 'title';
@@ -128,50 +130,63 @@ struct ChatTaskModelPickerPage {
 
   build() {
     Column() {
-      Row() {
-        Text(TASK_TITLES[this.task] ?? '选择模型')
-          .fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 12 })
+      PageTitleBar({ title: TASK_TITLES[this.task] ?? '选择模型' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Text('加载中…').fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+          .fontColor(INK3).margin({ top: 32 })
       } else if (this.rows.length === 0) {
         Column() {
-          Text('没有可用的 Provider/模型').fontSize(15).fontColor(INK2)
+          Text('没有可用的 Provider/模型').fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family).fontColor(INK2)
           Text('先在 Provider 设置页填写 baseUrl、API Key 和模型')
-            .fontSize(12).fontColor(INK3).margin({ top: 8 })
-          Text('去设置')
-            .fontSize(14).fontColor(ACCENT).margin({ top: 16 })
+            .fontSize(TEXT_STYLES.secondary.size).lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3).margin({ top: 8 })
+          Text('去设置').fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(ACCENT).margin({ top: 16 })
             .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
-        }.margin({ top: 64 })
+        }.margin({ top: 64 }).alignItems(HorizontalAlign.Center)
       } else {
-        List() {
-          ForEach(this.rows, (row: TaskModelRow): void => {
-            ListItem() {
-              Row() {
-                Column() {
-                  Text(row.displayName.length > 0 ? row.displayName : row.modelId)
-                    .fontSize(15).fontColor(INK)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(`${row.modelId} · ${row.providerName} · ${row.providerType}`)
-                    .fontSize(11).fontColor(INK3).margin({ top: 4 })
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Scroll() {
+          Column() {
+            ForEach(this.rows, (row: TaskModelRow, index: number): void => {
+              Column() {
+                Row() {
+                  Column() {
+                    Text(row.modelId)
+                      .fontSize(TEXT_STYLES.secondary.size).fontWeight(600)
+                      .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(FONT_MONO_SEMIBOLD)
+                      .fontColor(row.selected ? ACCENT : INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${row.providerName} · ${row.providerType}`)
+                      .fontSize(TEXT_STYLES.meta.size).fontWeight(FontWeight.Medium)
+                      .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
+                      .fontColor(INK3).margin({ top: 4 })
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  if (row.selected) {
+                    Chip({ text: '当前' })
+                  }
+                  Icon({ name: 'chevron_right', iconSize: 16, color: INK4 }).margin({ left: 8 })
                 }
-                .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                if (row.selected) {
-                  Text('当前').fontSize(12).fontColor(ACCENT)
+                .width('100%').constraintSize({ minHeight: 64 })
+                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                .backgroundColor(row.selected ? RAISED : Color.Transparent)
+                .onClick((): void => this.pick(row))
+                if (index < this.rows.length - 1) {
+                  PaperSeparator()
                 }
               }
               .width('100%')
-              .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
-              .onClick((): void => this.pick(row))
-            }
-          }, (row: TaskModelRow): string => row.modelUuid)
+            }, (row: TaskModelRow): string => row.modelUuid)
+          }
+          .width('100%')
         }
-        .width('100%').layoutWeight(1)
-        .divider({ strokeWidth: 1, color: LINE })
+        .align(Alignment.TopStart).width('100%').layoutWeight(1)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

@@ -41,6 +41,9 @@ struct SettingPage {
   // 并借 darkMode 读取触发根页按新主题令牌重建
   onPageShow(): void {
     this.refreshAppearanceValue();
+    describeChatModel().then((label: string): void => {
+      this.modelLabel = label;
+    }).catch((): void => {});
   }
 
   private refreshAppearanceValue(): void {

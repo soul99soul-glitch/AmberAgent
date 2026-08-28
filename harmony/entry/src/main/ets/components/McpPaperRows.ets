@@ -81,8 +81,8 @@ export struct McpToolPaperRow {
         Column() {
           if (this.description.length > 0) {
             Text(this.description)
-              .fontSize(TEXT_STYLES.meta.size).fontWeight(400)
-              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(TEXT_STYLES.meta.family)
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
               .fontColor(INK3).width('100%')
           }
           if (this.params.length > 0) {

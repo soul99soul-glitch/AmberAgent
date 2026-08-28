@@ -16,7 +16,7 @@ import { getChatKvStore } from '../di/AppContainer.ets';
 import { toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import {
   ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS,
-  TEXT_STYLES,
+  TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { Icon } from '../components/ui/Icon.ets';
@@ -149,6 +149,7 @@ struct ChatProviderDetailPage {
     if (this.unsupportedAuthMsg.length > 0 && this.apiKey.trim().length === 0) {
       this.savedMsg = '请先填写 API Key';
       setTimeout((): void => { this.savedMsg = ''; }, 2000);
+      this.ioBusy = false;
       return;
     }
     const models: ProviderModel[] = this.parseModels(raw.models);
@@ -228,7 +229,7 @@ struct ChatProviderDetailPage {
     AlertDialog.show({
       title: '删除 Provider',
       message: `删除「${this.name}」?其 API Key 与模型配置将从本机移除。`,
-      primaryButton: { value: '取消', action: (): void => {} },
+      primaryButton: { value: '取消', action: (): void => { this.ioBusy = false; } },
       secondaryButton: {
         value: '删除',
         fontColor: ERROR,
@@ -238,6 +239,7 @@ struct ChatProviderDetailPage {
               (p: ProviderSetting): boolean => p.id !== raw.id);
             return saveProviders(getChatKvStore(), next);
           }).then((): void => {
+            this.ioBusy = false;
             router.back();
           }).catch((e: Error): void => {
             this.ioBusy = false;
@@ -328,16 +330,16 @@ struct ChatProviderDetailPage {
 
         Column() {
           Row() {
-            Text('//').fontSize(11).fontWeight(FontWeight.Medium)
-              .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
-            Text(' 提供商').fontSize(11).fontWeight(FontWeight.Medium)
-              .fontColor(INK3).fontFamily(FONT_MONO_MEDIUM).letterSpacing(1.3)
+            Text('//').fontSize(11).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(11))
+              .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
+            Text(' 提供商').fontSize(11).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(11))
+              .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).letterSpacing(1.3)
           }
           .alignItems(VerticalAlign.Center)
           Row({ space: 7 }) {
             Text(this.provider !== null ? providerSlug(this.provider) : '--')
-              .fontSize(16).fontWeight(FontWeight.Bold).fontColor(INK)
-              .fontFamily(FONT_MONO)
+              .fontSize(16).fontWeight(FontWeight.Bold).lineHeight(lineHeightForSize(16)).fontFamily(FONT_MONO)
+              .fontColor(INK)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             if (this.provider !== null && this.provider.enabled) {
               Column().width(6).height(6).borderRadius(3)
@@ -347,7 +349,7 @@ struct ChatProviderDetailPage {
           .alignItems(VerticalAlign.Center)
           Row({ space: 6 }) {
             Text(`${this.name} · ${(this.provider !== null ? providerAuthLabel(this.provider) : '—')} · ${this.provider !== null ? this.provider.models.length : 0} 个模型`)
-              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(MONO_SMALL))
               .fontFamily(FONT_MONO).fontColor(INK3)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
@@ -387,7 +389,8 @@ struct ChatProviderDetailPage {
             if (this.unsupportedAuthMsg.length > 0) {
               Column() {
                 Text(this.unsupportedAuthMsg)
-                  .fontSize(LABEL).fontColor(ERROR).lineHeight(18)
+                  .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(LABEL))
+                    .fontFamily(TEXT_STYLES.eyebrow.family).fontColor(ERROR)
               }
               .width('100%')
               .padding({ left: 16, right: 16, top: 12, bottom: 12 })
@@ -439,7 +442,7 @@ struct ChatProviderDetailPage {
             // 删除置底
             Row() {
               Text('删除此 Provider')
-                .fontSize(BODY2).fontColor(ERROR)
+                .fontSize(BODY2).fontColor(ERROR).lineHeight(lineHeightForSize(BODY2)).fontFamily(TEXT_STYLES.secondary.family)
                 .padding({ top: 12, bottom: 12 })
                 .onClick((): void => this.removeSelf())
               Blank()

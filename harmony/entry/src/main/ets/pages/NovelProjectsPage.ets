@@ -152,8 +152,8 @@ struct NovelProjectsPage {
               .fontColor(INK3)
               .margin({ top: 12 })
           }
-          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .padding({ top: 48 })
+          .width('100%').padding({ top: 64, left: 18, right: 18 })
+          .alignItems(HorizontalAlign.Start)
         } else if (this.projects.length === 0) {
           Column() {
             Text('开始你的第一部小说')
@@ -174,8 +174,8 @@ struct NovelProjectsPage {
             }
             .margin({ top: 24 })
           }
-          .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .padding({ top: 48, left: 18, right: 18 })
+          .width('100%').padding({ top: 64, left: 18, right: 18 })
+          .alignItems(HorizontalAlign.Start)
         } else {
           Scroll() {
             Column() {

@@ -2,7 +2,7 @@
 // 字体族选择(PillSelect) + 字号滑块(NotionSlider) + 预览文本
 import { router } from '@kit.ArkUI';
 import {
-  INK, INK2, INK3, BG, BODY, META, LABEL, TEXT_STYLES, lineHeightForSize,
+  INK, INK2, INK3, BG, BODY, META, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
@@ -66,8 +66,9 @@ struct SettingSlidesFontPage {
             .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
             .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
           Text(desc)
-            .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-            .fontFamily(FONT_SANS).fontColor(INK3).margin({ top: 4 })
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 4 })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         PillSelect({
@@ -94,8 +95,9 @@ struct SettingSlidesFontPage {
           .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
           .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
         Text(desc)
-          .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_SANS).fontColor(INK3).margin({ top: 4 })
+          .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(INK3).margin({ top: 4 })
       }
       .width('100%').alignItems(HorizontalAlign.Start)
       NotionSlider({

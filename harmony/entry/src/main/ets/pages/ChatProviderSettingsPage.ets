@@ -290,7 +290,7 @@ struct ChatProviderSettingsPage {
               Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
             }
             .width('100%')
-            .padding({ top: 18, bottom: 11, left: 4, right: 4 })
+            .padding({ top: 18, bottom: 11, left: 16, right: 16 })
             .alignItems(VerticalAlign.Center)
 
             ForEach(this.filteredRows().filter((r: ProviderRow): boolean => r.enabled),
@@ -311,7 +311,7 @@ struct ChatProviderSettingsPage {
                     Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
                   }
                   .width('100%')
-                  .padding({ top: 22, bottom: 11, left: 4, right: 4 })
+                  .padding({ top: 22, bottom: 11, left: 16, right: 16 })
                   .alignItems(VerticalAlign.Center)
                 }
                 Column() {

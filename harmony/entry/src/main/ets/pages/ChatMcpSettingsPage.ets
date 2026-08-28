@@ -4,7 +4,7 @@ import {
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import {
-  PageTitleBar, Chip, Seg, ToggleRow, BtnFill, BtnGhost, PaperSeparator, IconSeat,
+  PageTitleBar, Chip, Seg, ToggleRow, BtnFill, BtnGhost, PaperSeparator, IconSeat, PageSpacer,
 } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { McpToolPaperRow } from '../components/McpPaperRows.ets';
@@ -317,7 +317,7 @@ struct ChatMcpSettingsPage {
           options: ['Streamable HTTP', 'SSE'],
           selected: draft.kind === 'sse' ? 1 : 0,
           onSelect: (index: number): void => { this.switchTransport(index); },
-        })
+        }).margin({ top: 12 })
         PaperSeparator()
 
         // URL(:608-646 — 按类型 desc/placeholder)
@@ -546,8 +546,13 @@ struct ChatMcpSettingsPage {
     Column() {
       // 顶栏(:126-147)— 返回 + MCP 设置 + 导入/添加(双 trailing → 保留 inline,对齐 PageTitleBar 样式)
       Row() {
-        Icon({ name: 'back', iconSize: 20, color: INK })
-          .onClick((): void => { router.back(); })
+        Row() {
+          Icon({ name: 'back', iconSize: 24, color: INK })
+        }
+        .width(48).height(48)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick((): void => { router.back(); })
         Text('MCP 设置')
           .fontSize(TITLE)
           .fontWeight(700)
@@ -576,7 +581,7 @@ struct ChatMcpSettingsPage {
         .alignItems(VerticalAlign.Center)
         .onClick((): void => { this.openCreate(); })
       }
-      .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
+      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 2, bottom: 11 })
       .border({ width: { bottom: 1 }, color: { bottom: LINE } })
       .backgroundColor(BG)
 
@@ -589,6 +594,9 @@ struct ChatMcpSettingsPage {
             }
             .swipeAction({ end: this.deleteAction(config) })
           }, (config: McpServerConfig): string => config.id)
+          ListItem() {
+            PageSpacer()
+          }
         }
         .width('100%').height('100%')
         .padding({ top: 10 })

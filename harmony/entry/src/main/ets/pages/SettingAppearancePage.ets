@@ -73,7 +73,7 @@ struct SettingAppearancePage {
             onSelect: (idx: number): void => {
               this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system');
             },
-          })
+          }).margin({ top: 12 })
           SectionHeader({ label: '强调色' })
           Row() {
             ForEach(ACCENT_OPTIONS, (color: string, idx: number): void => {

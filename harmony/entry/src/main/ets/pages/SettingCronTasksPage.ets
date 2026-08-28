@@ -10,7 +10,7 @@ import {
   getAgentCronManager, isAgentCronExecutionAvailable,
 } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE2, INK, INK3, INK4, ACCENT, ERROR,
+  BG, SURFACE2, INK, INK3, INK4, LINE2, ACCENT, ERROR,
   BODY, BODY2, META, MONO_SMALL, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
@@ -20,6 +20,7 @@ import { Icon } from '../components/ui/Icon.ets';
 @Entry
 @Component
 struct SettingCronTasksPage {
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @State tasks: AgentCronTask[] = [];
   @State loaded: boolean = false;
   private readonly executionAvailable: boolean = isAgentCronExecutionAvailable();
@@ -63,22 +64,30 @@ struct SettingCronTasksPage {
               .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
               .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
               .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-            Toggle({
-              type: ToggleType.Switch,
-              isOn: this.executionAvailable && t.enabled,
+            Stack({ alignContent: Alignment.Start }) {
+              Column()
+                .width(42).height(24).borderRadius(99)
+                .backgroundColor(this.executionAvailable && t.enabled ? this.accentColorStore : LINE2)
+              Column()
+                .width(20).height(20).borderRadius(10)
+                .backgroundColor('#FFFFFF')
+                .margin({ left: this.executionAvailable && t.enabled ? 22 : 2 })
+                .animation({ duration: 150, curve: Curve.EaseOut })
+            }
+            .clip(true)
+            .margin({ left: 12 })
+            .opacity(this.executionAvailable ? 1 : 0.5)
+            .onClick((): void => {
+              if (!this.executionAvailable) return;
+              const m: AgentCronManager | null = this.manager;
+              if (m === null) return;
+              m.updateTask(t.id, { enabled: !t.enabled })
+                .then((): void => { this.reload(); })
+                .catch((e: Error): void => {
+                  promptAction.showToast({ message: e.message, duration: 1800 });
+                });
             })
-              .selectedColor(ACCENT)
-              .enabled(this.executionAvailable)
-              .onChange((on: boolean): void => {
-                if (!this.executionAvailable) return;
-                const m: AgentCronManager | null = this.manager;
-                if (m === null) return;
-                m.updateTask(t.id, { enabled: on })
-                  .then((): void => { this.reload(); })
-                  .catch((e: Error): void => {
-                    promptAction.showToast({ message: e.message, duration: 1800 });
-                  });
-              })
+            .accessibilityText(this.executionAvailable && t.enabled ? '已开启' : '已关闭')
           }
           .width('100%')
 

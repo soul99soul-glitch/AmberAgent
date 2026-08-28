@@ -9,9 +9,9 @@
 //     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
 //     onSelect → id + follow=false
 import {
-  ACCENT, BG, INK, INK2, INK3, OVERLAY, SURFACE, META, BODY, TEXT_STYLES,
+  ACCENT, BG, INK, INK2, INK3, OVERLAY, SURFACE, META, BODY, TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PaperSeparator } from '../components/PageTemplate.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, BtnGhost, BtnFill } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
@@ -232,7 +232,7 @@ struct ChatTaskModelsPage {
           Text(desc)
             .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Normal)
             .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 3 })
+            .fontColor(INK3).margin({ top: 4 })
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
@@ -297,7 +297,8 @@ struct ChatTaskModelsPage {
           Text(this.editingPrompt === 'title' ? '标题总结模型'
             : this.editingPrompt === 'suggestion' ? '聊天建议模型'
               : this.editingPrompt === 'compress' ? '压缩模型' : '视觉识别模型')
-            .fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
+            .fontSize(16).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(16))
+            .fontFamily(TEXT_STYLES.body.family).fontColor(INK)
           Blank()
           Text('重置为默认')
             .fontSize(13).fontColor(INK3)
@@ -310,7 +311,8 @@ struct ChatTaskModelsPage {
           : this.editingPrompt === 'ocr'
             ? '变量：图片数据：{images}'
             : '变量: 对话内容: {content}, 语言: {locale}')
-          .fontSize(11).fontColor(INK3).margin({ top: 8 })
+          .fontSize(11).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(11))
+          .fontFamily(TEXT_STYLES.meta.family).fontColor(INK3).margin({ top: 8 })
 
         TextArea({ text: this.promptDraft })
           .width('100%').height(220).margin({ top: 10 })
@@ -319,15 +321,9 @@ struct ChatTaskModelsPage {
           .onChange((value: string): void => { this.promptDraft = value; })
 
         Row() {
-          Text('取消')
-            .fontSize(14).fontColor(INK3)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-            .onClick((): void => { this.editingPrompt = ''; })
+          BtnGhost({ label: '取消', onTap: (): void => { this.editingPrompt = ''; } })
           Blank()
-          Text('保存')
-            .fontSize(14).fontColor(ACCENT)
-            .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-            .onClick((): void => { this.savePrompt(); })
+          BtnFill({ label: '保存', onTap: (): void => { this.savePrompt(); } })
         }
         .width('100%').margin({ top: 12 })
       }
@@ -415,7 +411,7 @@ struct ChatTaskModelsPage {
                 '',
                 false, '', 'ocr', true, false, true)
             }
-            .width('100%').padding({ top: 2, bottom: 24 })
+            .width('100%').padding({ top: 2, bottom: 32 })
           }
         .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)

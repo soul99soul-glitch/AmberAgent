@@ -114,6 +114,7 @@ struct BoardHotItemRow {
 struct BoardPage {
   @State sections: SourceSection[] = [];
   @State loading: boolean = false;
+  @State hotlistError: string = '';
   @State todayConvs: number = 0;
   @State pinnedConvs: number = 0;
   @State totalMsgs: number = 0;
@@ -151,7 +152,7 @@ struct BoardPage {
         getChatRepository().getById(s.id).then((c: Conversation | null): void => {
           if (c !== null) {
             for (const n of c.messageNodes) {
-              if (n.messages.length > 0) msgs++;
+              msgs += n.messages.length;
             }
           }
           done++;
@@ -169,23 +170,36 @@ struct BoardPage {
     this.loading = true;
     createNewsNowProvider(getAppContainer().httpClient)
       .fetchAllSources()
-      .then((all: SourceSection[]): void => {
+      .then((all: SourceSection[]): Promise<void> => {
         // 消费深度阅读设置的热榜开关(source_<id>),关掉的源不上看板
         const storage = getAppContainer().storage;
         const acc: SourceSection[] = [];
-        const step = (i: number): void => {
+        let storageFailed: boolean = false;
+        const step = (i: number): Promise<void> => {
           if (i >= all.length) {
-            this.sections = acc;
-            this.loading = false;
-            return;
+            if (!storageFailed) this.sections = acc;
+            return Promise.resolve();
           }
           const sec: SourceSection = all[i];
-          storage.get<string>(`source_${sec.sourceId}`, 'true').then((v: string): void => {
-            if (v === 'true') acc.push(sec);
-            step(i + 1);
-          });
+          return storage.get<string>(`source_${sec.sourceId}`, 'true')
+            .then((v: string): Promise<void> => {
+              if (v === 'true') acc.push(sec);
+              return step(i + 1);
+            })
+            .catch((): Promise<void> => {
+              storageFailed = true;
+              this.hotlistError = '热榜设置读取失败，已保留上次结果';
+              return step(i + 1);
+            });
         };
-        step(0);
+        this.hotlistError = '';
+        return step(0);
+      })
+      .catch((e: Error): void => {
+        this.hotlistError = `热榜加载失败：${e.message}`;
+      })
+      .finally((): void => {
+        this.loading = false;
       });
   }
 
@@ -216,6 +230,17 @@ struct BoardPage {
         .onClick((): void => { this.loadHotlist(); })
       }
       .width('100%').padding({ left: 16, right: 16, top: 20, bottom: 8 })
+
+      if (this.hotlistError.length > 0 && !this.loading) {
+        Text(this.hotlistError)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3)
+          .width('100%')
+          .padding({ left: 16, right: 16, top: 8, bottom: 4 })
+      }
 
       if (this.loading) {
         Text('抓取热榜中…')
