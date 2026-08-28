@@ -1,12 +1,14 @@
-// SettingPage — 设置入口(G8 对齐 SettingsScreen 设计稿)
+// SettingPage — 设置入口(youhua 纸面列表优化版)
 //
-// 结构梳理(对齐 Android 层次):外观 / 模型与服务 / Agent Runtime / 数据 / 关于。
-//   无 profile 卡、无订阅占位、无死占位行(退出登录/通知)。
+// 结构(amber-youhua.html 四组制):通用设置 / AGENT 设置 / 模型与服务 / 数据设置 / 关于。
+//   纸面列表:无卡片分组,行间内缩发丝线,圆形图标座 + 标题/描述两段行。
+//   原「高级功能」组收编进实验功能页;MCP/定时任务收编进技能与扩展页。
 
 import { router } from '@kit.ArkUI';
 import { bundleManager } from '@kit.AbilityKit';
-import { BG, SURFACE, LINE, BODY2, LABEL, ACCENT, INK3 } from '../design/tokens.ets';
+import { BG, ACCENT, INK3, LABEL, TEXT_STYLES } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO } from '../design/fonts.ets';
 import { describeChatModel, getChatKvStore } from '../di/AppContainer.ets';
 
 // 主题选择持久化键(外观页写入;根页只读回显 value)
@@ -32,17 +34,16 @@ struct SettingPage {
     } catch (e) {
       this.versionLabel = '';
     }
-    // 外观行 value 只读回显(写入在 AppearancePage)
-    getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
-      if (raw === 'light') this.appearanceValue = '浅色';
-      else if (raw === 'dark') this.appearanceValue = '深色';
-      else this.appearanceValue = '跟随系统';
-    }).catch((): void => {});
+    this.refreshAppearanceValue();
   }
 
   // 从外观页返回时回栈不重跑 aboutToAppear — onPageShow 重读回显值,
   // 并借 darkMode 读取触发根页按新主题令牌重建
   onPageShow(): void {
+    this.refreshAppearanceValue();
+  }
+
+  private refreshAppearanceValue(): void {
     getChatKvStore().get(UI_COLOR_MODE_KEY).then((raw: string | null): void => {
       if (raw === 'light') this.appearanceValue = '浅色';
       else if (raw === 'dark') this.appearanceValue = '深色';
@@ -60,112 +61,75 @@ struct SettingPage {
 
       Scroll() {
         Column() {
-          // ── 通用设置(iOS generalEntries)──
+          // ── 通用设置(youhua 通用设置)──
           SectionHeader({ label: '通用设置' })
-          Column() {
-            NavRow({ label: '外观', valueText: this.appearanceValue, iconName: 'palette',
-              onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
-            NavRow({ label: '显示与字体', iconName: 'eye', isLast: true,
-              onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+          NavRow({ label: '颜色模式', desc: this.appearanceValue, chipText: this.appearanceValue, iconName: 'palette',
+            onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
+          NavRow({ label: '显示设置', desc: '管理显示设置', iconName: 'gear', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })
 
-          // ── Agent 设置(iOS agentEntries)──
+          // ── AGENT 设置(youhua AGENT 设置)──
           SectionHeader({ label: 'AGENT 设置' })
-          Column() {
-            NavRow({ label: '灵魂与记忆', iconName: 'brain',
-              onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
-            NavRow({ label: '运行环境', iconName: 'clock',
-              onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
-            NavRow({ label: '技能', iconName: 'puzzle',
-              onRowClick: (): void => { this.go('pages/SkillsPage'); } })
-            NavRow({ label: '权限与批准', iconName: 'shield',
-              onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
-            NavRow({ label: '沙盒设置', iconName: 'box',
-              onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
-            NavRow({ label: 'MCP 服务器', iconName: 'plug', isLast: true,
-              onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+          NavRow({ label: '核心记忆', desc: '跨会话保留的 AmberAgent 持久知识', iconName: 'brain',
+            onRowClick: (): void => { this.go('pages/SettingAgentMemoryPageFull'); } })
+          NavRow({ label: '技能与扩展', desc: 'Skill、提示词和外部工具服务', iconName: 'puzzle',
+            onRowClick: (): void => { this.go('pages/SkillsPage'); } })
+          NavRow({ label: '运行与显示', desc: '工具循环、操作预览和实时状态', iconName: 'eye',
+            onRowClick: (): void => { this.go('pages/ChatAgentExecutionPage'); } })
+          NavRow({ label: '权限与批准', desc: '系统权限和工具批准策略', iconName: 'shield',
+            onRowClick: (): void => { this.go('pages/ChatAgentPermissionsPage'); } })
+          NavRow({ label: 'Agent 运行环境', desc: 'Workspace、Alpine/proot 和命令运行状态', iconName: 'box',
+            onRowClick: (): void => { this.go('pages/SettingSandboxPage'); } })
+          NavRow({ label: '实验性功能', desc: '管理仍需真机验证的 AmberAgent 预览能力', iconName: 'spark', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
 
-          // ── 模型与服务(iOS modelServiceEntries)──
+          // ── 模型与服务(youhua 模型与服务)──
           SectionHeader({ label: '模型与服务' })
-          Column() {
-            NavRow({ label: '服务商', iconName: 'key',
-              onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
-            NavRow({ label: '模型与提示词', valueText: this.modelLabel, iconName: 'cpu',
-              onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
-            NavRow({ label: '任务模型', iconName: 'spark',
-              onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
-            NavRow({ label: '提示词', iconName: 'doc',
-              onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
-            NavRow({ label: '搜索服务', iconName: 'search',
-              onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
-            NavRow({ label: '语音服务', iconName: 'speaker', isLast: true,
-              onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+          NavRow({ label: '提供商', desc: '配置 AI 提供商', iconName: 'key',
+            onRowClick: (): void => { this.go('pages/ChatProviderSettingsPage'); } })
+          NavRow({ label: '模型与提示词', valueText: this.modelLabel, desc: '默认模型、辅助任务模型和提示词', iconName: 'cpu',
+            onRowClick: (): void => { this.go('pages/ChatModelPickerPage'); } })
+          NavRow({ label: '任务模型', desc: '标题、生图、视觉与压缩等辅助模型', iconName: 'spark',
+            onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
+          NavRow({ label: '提示词', desc: '快捷消息与提示词模板', iconName: 'doc',
+            onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
+          NavRow({ label: '搜索服务', desc: '设置搜索服务', iconName: 'search',
+            onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
+          NavRow({ label: '语音服务', desc: 'TTS 语音合成服务', iconName: 'speaker', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
 
-          // ── 高级功能(iOS advancedFeatureEntries,自实验性功能上提)──
-          SectionHeader({ label: '高级功能' })
-          Column() {
-            NavRow({ label: 'WebMount', valueText: 'Alpha', iconName: 'globe',
-              onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
-            NavRow({ label: '子代理', valueText: 'Beta', iconName: 'person',
-              onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
-            NavRow({ label: '模型议会', valueText: 'Beta', iconName: 'spark',
-              onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
-            NavRow({ label: '小应用', valueText: 'Beta', iconName: 'box',
-              onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
-            NavRow({ label: '小说创作', iconName: 'doc',
-              onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
-            NavRow({ label: '深度阅读', iconName: 'book',
-              onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
-            NavRow({ label: '实验功能', iconName: 'info', isLast: true,
-              onRowClick: (): void => { this.go('pages/SettingExperimentalPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
-
-          // ── 数据设置(iOS dataEntries)──
+          // ── 数据设置(youhua 数据设置)──
           SectionHeader({ label: '数据设置' })
-          Column() {
-            NavRow({ label: '文件管理', iconName: 'folder',
-              onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
-            NavRow({ label: '历史记录', iconName: 'history',
-              onRowClick: (): void => { this.go('pages/HistoryPage'); } })
-            NavRow({ label: '收藏', iconName: 'star',
-              onRowClick: (): void => { this.go('pages/FavoritePage'); } })
-            NavRow({ label: '今日看板', iconName: 'bell',
-              onRowClick: (): void => { this.go('pages/BoardPage'); } })
-            NavRow({ label: '定时任务', iconName: 'clock', isLast: true,
-              onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+          NavRow({ label: '文件管理', desc: '聊天文件与附件存储', iconName: 'folder',
+            onRowClick: (): void => { this.go('pages/SettingFilesPage'); } })
+          NavRow({ label: '历史记录', desc: '浏览全部会话历史', iconName: 'history',
+            onRowClick: (): void => { this.go('pages/HistoryPage'); } })
+          NavRow({ label: '收藏', desc: '收藏的消息与内容', iconName: 'star',
+            onRowClick: (): void => { this.go('pages/FavoritePage'); } })
+          NavRow({ label: '今日看板', desc: 'Agent 整理的每日信号与待办', iconName: 'bell', isLast: true,
+            onRowClick: (): void => { this.go('pages/BoardPage'); } })
 
           // ── 关于 ──
           SectionHeader({ label: '关于' })
-          Column() {
-            NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
-            NavRow({ label: '关于', isLast: true, onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
-          }
-          .width('100%').backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(18).clip(true)
+          NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
+          NavRow({ label: '关于', isLast: true, onRowClick: (): void => { this.go('pages/SettingAboutPage'); } })
 
-          // 1:1 原型版本行:$ 提示符陶土色
+          // youhua 版本行:$ 提示符 accent 色
           Row() {
-            Text('$').fontColor(ACCENT).fontSize(LABEL).fontFamily('JetBrainsMono')
-            Text(` amber v${this.versionLabel}`).fontColor(INK3).fontSize(LABEL).fontFamily('JetBrainsMono')
+            Text('$')
+              .fontSize(LABEL).fontWeight(FontWeight.Medium)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
+              .fontColor(this.accentColorStore)
+            Text(` amber v${this.versionLabel}`)
+              .fontSize(LABEL).fontWeight(FontWeight.Medium)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO)
+              .fontColor(INK3)
           }
           .width('100%').justifyContent(FlexAlign.Center).margin({ top: 22 })
 
           PageSpacer()
         }
-        .width('100%').padding({ left: 18, right: 18 })
+        .width('100%')
       }
         .align(Alignment.TopStart)
       .layoutWeight(1).backgroundColor(BG)

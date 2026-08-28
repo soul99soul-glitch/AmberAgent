@@ -1,9 +1,10 @@
-// PageTemplate — 全站共享页面骨架(G7 对齐 Amber Redesign)
+// PageTemplate — 全站共享页面骨架(G7 对齐 Amber Redesign + youhua 纸面列表优化版)
 //
-// 设计来源: oc-amber.css + aa-pages.jsx + aa-settings.jsx
+// 设计来源: oc-amber.css + aa-pages.jsx + amber-youhua.html(设置收成纸面列表)
 // 关键规则:
 //   - mono = 机器信息(模型名/时间/eyebrow), sans = 人类文字
-//   - flat & hairline first, shadow 仅用于 overlay
+//   - flat & hairline first, shadow 仅用于 overlay;设置域 = 纸面列表:
+//     无卡片分组、行间发丝线(内缩)、40 圆形图标座、行标题 15/600 + 描述 13
 //   - 触摸目标 ≥ 44px
 
 import { router } from '@kit.ArkUI';
@@ -11,9 +12,9 @@ import {
   INK, INK2, INK3, INK4, SURFACE, SURFACE2, RAISED, LINE, LINE2, BG,
   ACCENT, ACCENT_INK, ACCENT_LIGHT, SIGNAL, ERROR, CODE_BG,
   TITLE, HEADER, BODY, BODY2, META, MONO_SMALL, LABEL, TINY, TEXT_STYLES,
-  PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER,
+  PAD_CARD, PAD_ITEM, RADIUS, RADIUS_PILL, GUTTER, lineHeightForSize,
 } from '../design/tokens.ets';
-import { FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
+import { FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 
 // ===== Page Header (对齐 PageHeader / SettingsHeader) =====
@@ -75,7 +76,7 @@ export struct PageTitleBar {
   }
 }
 
-// ===== Section Label (对齐 SectionLabel) =====
+// ===== Section Label (youhua .sec-label:`//` + 标签 + 右侧发丝线) =====
 @Component
 export struct SectionHeader {
   @Prop label: string = '';
@@ -83,170 +84,389 @@ export struct SectionHeader {
   build(): void {
     Row() {
       Text('//')
-        .fontSize(TEXT_STYLES.eyebrow.size)
+        .fontSize(META)
         .fontColor(this.accentColorStore)
-        .fontWeight(TEXT_STYLES.eyebrow.weight)
-        .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-        .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
-        .fontFamily(TEXT_STYLES.eyebrow.family)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.meta.lineHeight)
+        .fontFamily(FONT_MONO_MEDIUM)
       Text(` ${this.label.toUpperCase()}`)
-        .fontSize(TEXT_STYLES.eyebrow.size)
-        .fontWeight(TEXT_STYLES.eyebrow.weight)
-        .lineHeight(TEXT_STYLES.eyebrow.lineHeight)
-        .letterSpacing(TEXT_STYLES.eyebrow.letterSpacing)
-        .fontFamily(TEXT_STYLES.eyebrow.family)
-        .fontColor(INK3)
+        .fontSize(META)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(TEXT_STYLES.meta.lineHeight)
+        .fontFamily(FONT_MONO_MEDIUM)
+        .fontColor(INK2)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      // 标签右侧延伸到行尾的发丝线(youhua .sec-label::after)
+      Row()
+        .layoutWeight(1)
+        .height(1)
+        .backgroundColor(LINE)
+        .margin({ left: 8 })
     }
     .width('100%')
+    .alignItems(VerticalAlign.Center)
     // 对齐行内文字(行 padding 左 16):包边页 18+16=34,全出血页 16,两族一致成立
-    .padding({ left: 16, top: 20, bottom: 4 })
+    .padding({ left: 16, right: 16, top: 20, bottom: 8 })
   }
 }
 
-// ===== Flat Rows =====
+// ===== Paper Rows(youhua .set-row:透明底 + 内缩发丝线 + minH64) =====
 
+// 纸面行通用:内容行 + 非末行时追加左右内缩 16 的 1px 分隔线
+@Component
+export struct PaperSeparator {
+  build(): void {
+    Row()
+      .width('100%')
+      .height(1)
+      .backgroundColor(LINE)
+      .margin({ left: 16, right: 16 })
+  }
+}
+
+// youhua .set-ico:40 圆形图标座(LINE 描边 + SURFACE 底 + INK2 图标)
+@Component
+export struct IconSeat {
+  @Prop iconName: string = '';
+  build(): void {
+    Row() {
+      Icon({ name: this.iconName, iconSize: 18, color: INK2 })
+    }
+    .width(40).height(40)
+    .borderRadius(20)
+    .border({ width: 1, color: LINE })
+    .backgroundColor(SURFACE)
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+  }
+}
+
+// youhua .chip:mono 10.5 药丸(SURFACE 底 + LINE2 描边),可带下拉箭头
+@Component
+export struct Chip {
+  @Prop text: string = '';
+  @Prop withChevron: boolean = false;
+  build(): void {
+    Row() {
+      Text(this.text)
+        .fontSize(TINY)
+        .lineHeight(TEXT_STYLES.tinyTag.lineHeight)
+        .fontFamily(FONT_MONO_MEDIUM)
+        .fontColor(INK3)
+        .maxLines(1)
+      if (this.withChevron) {
+        Icon({ name: 'chevron_down', iconSize: 12, color: INK3 }).margin({ left: 4 })
+      }
+    }
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 22 })
+    .padding({ left: 8, right: this.withChevron ? 6 : 8, top: 3, bottom: 3 })
+    .borderRadius(6)
+    .backgroundColor(SURFACE)
+    .border({ width: 1, color: LINE2 })
+  }
+}
+
+// youhua .btn-fill:accent 实底主按钮(minH44 r8)
+@Component
+export struct BtnFill {
+  @Prop label: string = '';
+  @StorageProp('accentColor') accentColorStore: string = ACCENT;
+  onTap: () => void = (): void => {};
+  build(): void {
+    Row() {
+      Text(this.label)
+        .fontSize(14)
+        .fontWeight(600)
+        .lineHeight(lineHeightForSize(14))
+        .fontFamily(FONT_SANS_SEMIBOLD)
+        .fontColor(ACCENT_INK)
+    }
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 44 })
+    .padding({ left: 16, right: 16 })
+    .borderRadius(8)
+    .backgroundColor(this.accentColorStore)
+    .onClick((): void => { this.onTap(); })
+  }
+}
+
+// youhua .btn-ghost:LINE 描边次按钮(minH44 r8)
+@Component
+export struct BtnGhost {
+  @Prop label: string = '';
+  onTap: () => void = (): void => {};
+  @State private pressed: boolean = false;
+  build(): void {
+    Row() {
+      Text(this.label)
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .lineHeight(lineHeightForSize(14))
+        .fontFamily(FONT_SANS_MEDIUM)
+        .fontColor(INK)
+    }
+    .justifyContent(FlexAlign.Center)
+    .alignItems(VerticalAlign.Center)
+    .constraintSize({ minHeight: 44 })
+    .padding({ left: 16, right: 16 })
+    .borderRadius(8)
+    .border({ width: 1, color: LINE })
+    .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+    .onTouch((e: TouchEvent): void => {
+      if (e.type === TouchType.Down) this.pressed = true;
+      else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+    })
+    .onClick((): void => { this.onTap(); })
+  }
+}
+
+// youhua .seg:LINE 描边一体式分段控件(r8,段 minH44,激活 SURFACE2 底 + INK)
+@Component
+export struct Seg {
+  @Prop options: string[] = [];
+  @Prop selected: number = 0;
+  onSelect: (idx: number) => void = (_idx: number): void => {};
+  build(): void {
+    Row() {
+      ForEach(this.options, (opt: string, idx: number): void => {
+        Text(opt)
+          .fontSize(13)
+          .fontWeight(this.selected === idx ? 600 : FontWeight.Medium)
+          .lineHeight(lineHeightForSize(13))
+          .fontFamily(this.selected === idx ? FONT_SANS_SEMIBOLD : FONT_SANS_MEDIUM)
+          .fontColor(this.selected === idx ? INK : INK2)
+          .textAlign(TextAlign.Center)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+          .constraintSize({ minHeight: 44 })
+          .padding({ top: 10, bottom: 10, left: 8, right: 8 })
+          .backgroundColor(this.selected === idx ? SURFACE2 : Color.Transparent)
+          .onClick((): void => { this.onSelect(idx); })
+      }, (opt: string, idx: number): string => `seg-${idx}-${opt}`)
+    }
+    .width('100%')
+    .border({ width: 1, color: LINE })
+    .borderRadius(8)
+    .clip(true)
+  }
+}
+
+// youhua .set-row 导航行:图标座 + 标题/描述 + 值(chip/文本/链接动作)+ 箭头
 @Component
 export struct NavRow {
   @Prop label: string = '';
+  @Prop desc: string = '';
   @Prop valueText: string = '';
+  // chip 形态值(颜色模式等):含下拉箭头,显示时抑制行尾箭头
+  @Prop chipText: string = '';
+  // 链接动作(导出/应用等 link-act):显示时抑制行尾箭头
+  @Prop linkText: string = '';
   @Prop danger: boolean = false;
   @Prop isLast: boolean = false;
   // 纯展示行(版本等)不绘箭头,避免"看似可点"的死控件感
   @Prop showChevron: boolean = true;
-  // iOS AmberFormRow 方案 B:统一 accent 浅底图标板(28×28 r8)+ accent 图标
   @Prop iconName: string = '';
   onRowClick: () => void = (): void => {};
   @State private pressed: boolean = false;
 
   build(): void {
-    Row() {
-      if (this.iconName.length > 0) {
-        Row() {
-          Icon({ name: this.iconName, iconSize: 18, color: ACCENT })
+    Column() {
+      Row() {
+        if (this.iconName.length > 0) {
+          IconSeat({ iconName: this.iconName }).margin({ right: 12 })
         }
-        .width(28).height(28)
-        .borderRadius(8)
-        .backgroundColor(ACCENT_LIGHT)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .margin({ right: 12 })
-      }
-      Text(this.label)
-        .fontSize(TEXT_STYLES.body.size)
-        .fontWeight(TEXT_STYLES.body.weight)
-        .lineHeight(TEXT_STYLES.body.lineHeight)
-        .fontFamily(TEXT_STYLES.body.family)
-        .fontColor(this.danger ? ERROR : INK)
+        Column() {
+          Text(this.label)
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .letterSpacing(-0.2)
+            .fontColor(this.danger ? ERROR : INK)
+          if (this.desc.length > 0) {
+            Text(this.desc)
+              .fontSize(TEXT_STYLES.secondary.size)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 4 })
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-      if (this.valueText.length > 0) {
-        Text(this.valueText)
-          .fontSize(TEXT_STYLES.secondary.size)
-          .fontWeight(TEXT_STYLES.secondary.weight)
-          .lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontFamily(FONT_MONO)
-          .fontColor(this.danger ? ERROR : INK3)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .textAlign(TextAlign.End)
-          .margin({ right: 8 })
+        if (this.chipText.length > 0) {
+          Chip({ text: this.chipText, withChevron: true }).margin({ right: 8, left: 8 })
+        } else if (this.valueText.length > 0) {
+          Text(this.valueText)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(this.danger ? ERROR : INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .textAlign(TextAlign.End)
+            .margin({ right: 8, left: 8 })
+        } else if (this.linkText.length > 0) {
+          Text(this.linkText)
+            .fontSize(META)
+            .fontWeight(FontWeight.Medium)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(1)
+            .margin({ left: 12 })
+        }
+        if (this.showChevron && this.chipText.length === 0 && this.linkText.length === 0) {
+          Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+        }
       }
-      if (this.showChevron) {
-        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        if (e.type === TouchType.Down) this.pressed = true;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      })
+      .onClick((): void => { this.onRowClick(); })
+      if (!this.isLast) {
+        PaperSeparator()
       }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(this.pressed ? SURFACE2 : SURFACE)
-    .border(this.isLast ? { width: 0 } : { width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onTouch((e: TouchEvent): void => {
-      if (e.type === TouchType.Down) this.pressed = true;
-      else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
-    })
-    .onClick((): void => { this.onRowClick(); })
   }
 }
 
+// youhua .set-row 开关行:标题/描述 + 42×24 自绘药丸开关(150ms)
 @Component
 export struct ToggleRow {
   @Prop label: string = '';
   @Prop desc: string = '';
   @Prop checked: boolean = false;
+  @Prop isLast: boolean = false;
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onToggle: () => void = (): void => {};
 
   build(): void {
-    Row() {
-      Column() {
-        Text(this.label)
-          .fontSize(BODY)
-          .fontWeight(FontWeight.Medium)
-          .lineHeight(TEXT_STYLES.body.lineHeight)
-          .fontFamily(FONT_SANS_MEDIUM)
-          .fontColor(INK)
-        if (this.desc.length > 0) {
-          Text(this.desc)
-            .fontSize(BODY2)
-            .lineHeight(TEXT_STYLES.secondary.lineHeight)
-            .fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .margin({ top: 2 })
+    Column() {
+      Row() {
+        Column() {
+          Text(this.label)
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .letterSpacing(-0.2)
+            .fontColor(INK)
+          if (this.desc.length > 0) {
+            Text(this.desc)
+              .fontSize(TEXT_STYLES.secondary.size)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 4 })
+          }
         }
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
 
-      Stack({ alignContent: Alignment.Start }) {
-        Column()
-          .width(42).height(24).borderRadius(99)
-          .backgroundColor(this.checked ? this.accentColorStore : LINE2)
-        Column()
-          .width(20).height(20).borderRadius(10)
-          .backgroundColor('#FFFFFF')
-          .margin({ left: this.checked ? 22 : 2 })
-          .animation({ duration: 150, curve: Curve.EaseOut })
+        Stack({ alignContent: Alignment.Start }) {
+          Column()
+            .width(42).height(24).borderRadius(99)
+            .backgroundColor(this.checked ? this.accentColorStore : LINE2)
+          Column()
+            .width(20).height(20).borderRadius(10)
+            .backgroundColor('#FFFFFF') // 开关滑块固定纯白:暗色 off 轨(LINE2)上仍需对比
+            .margin({ left: this.checked ? 22 : 2 })
+            .animation({ duration: 150, curve: Curve.EaseOut })
+        }
+        .clip(true)
+        .margin({ left: 12 })
+        .onClick((): void => { this.onToggle(); })
+        .accessibilityText(this.checked ? '已开启' : '已关闭')
       }
-      .clip(true)
-      .onClick((): void => { this.onToggle(); })
-      .accessibilityText(this.checked ? '已开启' : '已关闭')
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
 }
 
+// youhua .set-row 选择行:标题 + 等宽值
 @Component
 export struct SelectRow {
   @Prop label: string = '';
+  @Prop desc: string = '';
   @Prop valueText: string = '';
+  @Prop isLast: boolean = false;
   onRowClick: () => void = (): void => {};
+  @State private pressed: boolean = false;
 
   build(): void {
-    Row() {
-      Text(this.label)
-        .fontSize(BODY)
-        .fontWeight(FontWeight.Medium)
-        .lineHeight(TEXT_STYLES.body.lineHeight)
-        .fontFamily(FONT_SANS_MEDIUM)
-        .fontColor(INK)
+    Column() {
+      Row() {
+        Column() {
+          Text(this.label)
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .letterSpacing(-0.2)
+            .fontColor(INK)
+          if (this.desc.length > 0) {
+            Text(this.desc)
+              .fontSize(TEXT_STYLES.secondary.size)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .margin({ top: 4 })
+          }
+        }
+        .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-      Text(this.valueText)
-        .fontSize(BODY2)
-        .lineHeight(TEXT_STYLES.secondary.lineHeight)
-        .fontFamily(FONT_MONO)
-        .fontColor(INK3)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .textAlign(TextAlign.End)
+        Text(this.valueText)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(FontWeight.Medium)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .textAlign(TextAlign.End)
+          .margin({ left: 12 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        if (e.type === TouchType.Down) this.pressed = true;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      })
+      .onClick((): void => { this.onRowClick(); })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onClick((): void => { this.onRowClick(); })
   }
 }
 

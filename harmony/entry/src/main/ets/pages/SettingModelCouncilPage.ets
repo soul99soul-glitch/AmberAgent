@@ -17,7 +17,9 @@ import type { ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelCouncilRolePres
 import {
   LENS_PRESETS, findRolePreset, isCoreRole, makeSeat,
 } from '@amber/deepread-domain';
-import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, ERROR, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK3, ACCENT, SURFACE2, BG, ERROR, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, PaperSeparator, PageSpacer, BtnGhost } from '../components/PageTemplate.ets';
 
 @Entry
 @Component
@@ -89,98 +91,107 @@ struct SettingModelCouncilPage {
 
   build(): void {
     Column() {
-      Row() {
-        Text('Model Council 设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 8 })
+      PageTitleBar({ title: 'Model Council 设置' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3)
+        Text('加载中…')
+          .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK3)
           .width('100%').textAlign(TextAlign.Center).padding({ top: 40 })
       } else {
         Scroll() {
           Column() {
+            SectionHeader({ label: '运行参数' })
             this.toggleRow('启用 Model Council', '多模型合议:对关键决策获取多视角对比', this.councilEnabled, ((): void => {
               this.councilEnabled = !this.councilEnabled;
               this.saveSetting();
-            }))
+            }), false)
 
             this.sliderRow('最大席位数', `${this.maxSeats}`, 2, 8, this.maxSeats, (v: number): void => {
               this.maxSeats = Math.round(v);
               this.saveSetting();
-            })
+            }, false)
 
             this.sliderRow('默认轮次', `${this.defaultRounds}`, 1, 5, this.defaultRounds, (v: number): void => {
               this.defaultRounds = Math.round(v);
               this.saveSetting();
-            })
+            }, false)
 
             this.sliderRow('最大轮次', `${this.maxRounds}`, 1, 10, this.maxRounds, (v: number): void => {
               this.maxRounds = Math.round(v);
               this.saveSetting();
-            })
+            }, false)
 
             this.selectRow('席位超时', this.timeoutLabel(this.seatTimeoutMs), ((): void => {
               const opts: number[] = [60000, 120000, 180000, 300000];
               const idx: number = opts.indexOf(this.seatTimeoutMs);
               this.seatTimeoutMs = opts[(idx + 1) % opts.length];
               this.saveSetting();
-            }))
+            }), false)
 
             this.selectRow('总超时', this.timeoutLabel(this.totalTimeoutMs), ((): void => {
               const opts: number[] = [180000, 300000, 600000, 900000];
               const idx: number = opts.indexOf(this.totalTimeoutMs);
               this.totalTimeoutMs = opts[(idx + 1) % opts.length];
               this.saveSetting();
-            }))
+            }), false)
 
             this.toggleRow('显示席位输出', '在结果中展示各席位的独立输出', this.showSeatOutputs, ((): void => {
               this.showSeatOutputs = !this.showSeatOutputs;
               this.saveSetting();
-            }))
+            }), true)
 
             // M3.3:席位编辑
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 席位编辑').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
+            SectionHeader({ label: '席位编辑' })
 
-            ForEach(this.seats, (seat: ModelCouncilSeat): void => {
-              this.seatEditorRow(seat)
+            ForEach(this.seats, (seat: ModelCouncilSeat, idx: number): void => {
+              this.seatEditorRow(seat, idx === this.seats.length - 1)
             }, (seat: ModelCouncilSeat): string => seat.seatId)
 
             // 添加席位
             if (this.seats.length < this.maxSeats) {
               Row() {
-                Text('+ 添加视角席').fontSize(BODY).fontColor(ACCENT).layoutWeight(1)
-                Text(this.showAddSeatMenu ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+                Text('+ 添加视角席')
+                  .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+                  .fontFamily(FONT_SANS_SEMIBOLD).fontColor(ACCENT).layoutWeight(1)
+                Text(this.showAddSeatMenu ? '▾' : '▸')
+                  .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                  .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
               }
-              .width('100%')
-              .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
+              .width('100%').constraintSize({ minHeight: 64 })
+              .padding({ left: 16, right: 16, top: 12, bottom: 12 })
               .onClick((): void => { this.showAddSeatMenu = !this.showAddSeatMenu; })
 
               if (this.showAddSeatMenu) {
+                PaperSeparator()
                 Column() {
-                  ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset): void => {
+                  ForEach(LENS_PRESETS, (preset: ModelCouncilRolePreset, idx: number): void => {
                     Row() {
-                      Text(preset.name).fontSize(BODY).fontColor(INK).layoutWeight(1)
-                      Text('添加').fontSize(META).fontColor(ACCENT)
+                      Text(preset.name)
+                        .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+                        .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+                        .fontColor(INK).layoutWeight(1)
+                      Text('添加')
+                        .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                        .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
                     }
-                    .width('100%')
-                    .padding({ left: 24, right: 16, top: 10, bottom: 10 })
-                    .backgroundColor(SURFACE2)
-                    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+                    .width('100%').constraintSize({ minHeight: 64 })
+                    .padding({ left: 32, right: 16, top: 10, bottom: 10 })
                     .onClick((): void => { this.addLensSeat(preset.id); })
+                    if (idx < LENS_PRESETS.length - 1) {
+                      PaperSeparator()
+                    }
                   }, (preset: ModelCouncilRolePreset): string => preset.id)
                 }
                 .width('100%').backgroundColor(SURFACE2)
               }
             } else {
-              Text(`已达最大席位数 ${this.maxSeats}`).fontSize(LABEL).fontColor(INK3)
+              Text(`已达最大席位数 ${this.maxSeats}`)
+                .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
                 .padding({ left: 16, top: 8, bottom: 8 })
             }
+            PageSpacer()
           }
           .width('100%').padding({ bottom: 20 })
         }
@@ -191,69 +202,60 @@ struct SettingModelCouncilPage {
     .width('100%').height('100%').backgroundColor(BG)
   }
 
-  @Builder toggleRow(label: string, desc: string, checked: boolean, onToggle: () => void): void {
-    Row() {
-      Column() {
-        Text(label).fontSize(BODY).fontColor(INK)
-        Text(desc).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-      }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
-        .onChange((_v: boolean): void => { onToggle(); })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+  @Builder toggleRow(label: string, desc: string, checked: boolean, onToggle: () => void, isLast: boolean): void {
+    ToggleRow({ label: label, desc: desc, checked: checked, isLast: isLast, onToggle: onToggle })
   }
 
-  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number, onChange: (v: number) => void): void {
+  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number,
+    onChange: (v: number) => void, isLast: boolean): void {
     Column() {
       Row() {
-        Text(label).fontSize(BODY).fontColor(INK).layoutWeight(1)
-        Text(valueText).fontSize(META).fontColor(ACCENT)
+        Text(label)
+          .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK).layoutWeight(1)
+        Text(valueText)
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
       .width('100%')
       Slider({ value: value, min: min, max: max, step: 1 })
         .width('100%').margin({ top: 4 })
         .onChange((v: number): void => { onChange(v); })
     }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+    .width('100%').constraintSize({ minHeight: 64 })
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    if (!isLast) {
+      PaperSeparator()
+    }
   }
 
-  @Builder selectRow(label: string, valueText: string, onClick: () => void): void {
-    Row() {
-      Text(label).fontSize(BODY).fontColor(INK).layoutWeight(1)
-      Text(valueText).fontSize(META).fontColor(ACCENT)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onClick((): void => { onClick(); })
+  @Builder selectRow(label: string, valueText: string, onClick: () => void, isLast: boolean): void {
+    SelectRow({ label: label, valueText: valueText, isLast: isLast, onRowClick: onClick })
   }
 
   // M3.3:单个席位编辑行(展开 → name + systemPrompt + 删除)
-  @Builder seatEditorRow(seat: ModelCouncilSeat): void {
+  @Builder seatEditorRow(seat: ModelCouncilSeat, isLast: boolean): void {
     Column() {
       Row() {
         Column() {
           Text(seat.name.length > 0 ? seat.name : '(未命名席位)')
-            .fontSize(BODY).fontColor(INK)
+            .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(isCoreRole(seat.role) ? '核心席' : `视角席 · ${seat.role}`)
-            .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3).margin({ top: 2 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text(this.expandedSeatId === seat.seatId ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+        Text(this.expandedSeatId === seat.seatId ? '▾' : '▸')
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-      .backgroundColor(SURFACE)
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .onClick((): void => {
         if (this.expandedSeatId === seat.seatId) {
           this.saveSetting();
@@ -265,31 +267,42 @@ struct SettingModelCouncilPage {
 
       if (this.expandedSeatId === seat.seatId) {
         Column() {
-          Text('席位名称').fontSize(LABEL).fontColor(INK3).width('100%').margin({ bottom: 4 })
+          Text('席位名称')
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3).width('100%').margin({ bottom: 4 })
           TextInput({ text: seat.name, placeholder: '席位名称' })
-            .width('100%').fontSize(BODY).fontColor(INK)
+            .width('100%').fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
             .backgroundColor(SURFACE2).borderRadius(8)
             .onChange((v: string): void => { this.updateSeatName(seat.seatId, v); })
 
-          Text('系统提示词').fontSize(LABEL).fontColor(INK3)
-            .width('100%').margin({ top: 10, bottom: 4 })
+          Text('系统提示词')
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3).width('100%').margin({ top: 10, bottom: 4 })
           TextArea({ text: seat.systemPrompt, placeholder: '系统提示词' })
-            .width('100%').height(100).fontSize(BODY).fontColor(INK)
+            .width('100%').height(100).fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
             .backgroundColor(SURFACE2).borderRadius(8)
             .onChange((v: string): void => { this.updateSeatPrompt(seat.seatId, v); })
 
           if (!isCoreRole(seat.role)) {
-            Text('删除席位').fontSize(META).fontColor(ERROR).margin({ top: 10 })
+            Text('删除席位')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+              .fontColor(ERROR).margin({ top: 10 })
               .onClick((): void => { this.deleteSeat(seat.seatId); })
           }
         }
         .width('100%')
         .padding({ left: 16, right: 16, bottom: 12 })
-        .backgroundColor(SURFACE)
+      }
+      if (!isLast) {
+        PaperSeparator()
       }
     }
     .width('100%')
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
 
   // M3.3:更新席位 name

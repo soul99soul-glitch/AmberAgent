@@ -1,7 +1,7 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
-import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
-import { FONT_SERIF } from '../design/fonts.ets';
-import { Icon } from '../components/ui/Icon.ets';
+import { ACCENT, BG, INK, INK2, INK3, INK4, ERROR, OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SERIF, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, BtnFill, BtnGhost, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
@@ -93,66 +93,103 @@ struct NovelProjectsPage {
     router.pushUrl({ url: 'pages/NovelWorkspacePage', params: params });
   }
 
+  @Builder
+  projectRow(project: NovelProject, isLast: boolean): void {
+    Column() {
+      Row() {
+        IconSeat({ iconName: 'book' })
+        Column() {
+          Text(project.name)
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SERIF)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(`${project.chapters.length} 章 · ${project.materials.length} 条资料 · ${project.messages.length} 条对话`)
+            .fontSize(TEXT_STYLES.secondary.size)
+            .fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3)
+            .margin({ top: 4 })
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Row() {
+          BtnGhost({ label: '重命名', onTap: (): void => { this.openRename(project); } })
+          Blank().width(8)
+          BtnGhost({ label: '删除', onTap: (): void => { this.confirmDeleteId = project.id; } })
+        }
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .onClick((): void => { this.openWorkspace(project.id); })
+      if (!isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+
   build(): void {
     Stack() {
       Column() {
-        // 顶栏
-        Row() {
-          Icon({ name: 'back', iconSize: 20, color: INK }).onClick(() => { router.back(); })
-          Text('小说创作').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-            .fontFamily(FONT_SERIF).margin({ left: 12 }).maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Blank()
-          Text('新建').fontSize(13).fontColor(ACCENT)
-            .onClick(() => { this.openNew(); })
-        }
-        .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
-        .backgroundColor(BG)
+        PageTitleBar({ title: '小说创作', actionText: '新建', onAction: (): void => { this.openNew(); } })
 
         if (this.loading) {
           Column() {
             LoadingProgress().width(36).height(36).color(ACCENT)
-            Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 12 })
+            Text('加载中…')
+              .fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .margin({ top: 12 })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
           .padding({ top: 48 })
         } else if (this.projects.length === 0) {
           Column() {
-            Text('开始你的第一部小说').fontSize(18).fontWeight(FontWeight.Medium).fontColor(INK2)
+            Text('开始你的第一部小说')
+              .fontSize(TITLE)
+              .fontWeight(600)
+              .lineHeight(TEXT_STYLES.screenTitle.lineHeight)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(INK2)
             Text('建好项目后，在聊天区告诉 Amber 你想写什么。')
-              .fontSize(13).fontColor(INK3).margin({ top: 8 })
-            Text('新建项目').fontSize(14).fontColor('#FFFFFF')
-              .padding({ left: 24, right: 24, top: 10, bottom: 10 }).borderRadius(20)
-              .backgroundColor(ACCENT).margin({ top: 24 })
-              .onClick(() => { this.openNew(); })
+              .fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3)
+              .margin({ top: 8 })
+            Row() {
+              BtnFill({ label: '新建项目', onTap: (): void => { this.openNew(); } })
+            }
+            .margin({ top: 24 })
           }
           .width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
-          .padding({ top: 48 })
+          .padding({ top: 48, left: 18, right: 18 })
         } else {
-          List({ space: 0 }) {
-            ForEach(this.projects, (p: NovelProject) => {
-              ListItem() {
-                Row() {
-                  Column() {
-                    Text(p.name).fontSize(16).fontWeight(FontWeight.Medium).fontColor(INK)
-                      .fontFamily(FONT_SERIF).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text(`${p.chapters.length} 章 · ${p.materials.length} 条资料 · ${p.messages.length} 条对话`)
-                      .fontSize(12).fontColor(INK3).margin({ top: 6 })
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  }
-                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                  Text('重命名').fontSize(12).fontColor(INK3).margin({ right: 16 })
-                    .onClick(() => { this.openRename(p); })
-                  Text('删除').fontSize(12).fontColor('#E53935')
-                    .onClick(() => { this.confirmDeleteId = p.id; })
-                }
-                .width('100%').padding({ left: 18, right: 18, top: 14, bottom: 14 }).backgroundColor(SURFACE).borderRadius(14)
-                .border({ width: 1, color: LINE }).margin({ bottom: 14 })
-                .onClick(() => { this.openWorkspace(p.id); })
-              }
-            }, (p: NovelProject) => p.id)
+          Scroll() {
+            Column() {
+              SectionHeader({ label: '项目' })
+              ForEach(this.projects, (p: NovelProject, idx: number): void => {
+                this.projectRow(p, idx === this.projects.length - 1)
+              }, (p: NovelProject): string => p.id)
+              PageSpacer()
+            }
+            .width('100%')
+            .alignItems(HorizontalAlign.Start)
           }
-          .width('100%').layoutWeight(1).padding({ left: 20, right: 20, top: 8 })
+          .layoutWeight(1)
+          .align(Alignment.TopStart)
         }
       }
       .width('100%').height('100%').backgroundColor(BG)
@@ -163,18 +200,27 @@ struct NovelProjectsPage {
         Column() {
           Column() {
             Text(this.editingId.length === 0 ? '新建小说' : '重命名')
-              .fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 16 })
+              .fontSize(TEXT_STYLES.screenTitle.size).fontWeight(TEXT_STYLES.screenTitle.weight)
+              .lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(TEXT_STYLES.screenTitle.family)
+              .fontColor(INK).margin({ bottom: 16 })
             TextInput({ text: this.nameInput, placeholder: '例如：长夜来信' })
-              .height(46).fontSize(15).fontColor(INK).placeholderColor(INK4)
+              .height(46).fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+              .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family)
+              .fontColor(INK).placeholderColor(INK4)
               .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
               .onChange((v: string) => { this.nameInput = v; })
             if (this.errorMsg.length > 0) {
-              Text(this.errorMsg).fontSize(12).fontColor('#E53935').margin({ top: 10 })
+              Text(this.errorMsg).fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(TEXT_STYLES.meta.family).fontColor(ERROR).margin({ top: 10 })
             }
             Row() {
-              Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+              Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
-              Text('确定').fontSize(14).fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
+              Text('确定').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => { this.submitName(); })
             }
             .width('100%').margin({ top: 20 })
@@ -190,12 +236,18 @@ struct NovelProjectsPage {
       if (this.confirmDeleteId.length > 0) {
         Column() {
           Column() {
-            Text('删除项目？').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK).margin({ bottom: 12 })
-            Text('此操作不可撤销。').fontSize(13).fontColor(INK3)
+            Text('删除项目？').fontSize(TEXT_STYLES.screenTitle.size).fontWeight(TEXT_STYLES.screenTitle.weight)
+              .lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(TEXT_STYLES.screenTitle.family)
+              .fontColor(INK).margin({ bottom: 12 })
+            Text('此操作不可撤销.').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
             Row() {
-              Text('取消').fontSize(14).fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
+              Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+                .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => { this.confirmDeleteId = ''; })
-              Text('删除').fontSize(14).fontColor('#E53935').layoutWeight(1).textAlign(TextAlign.Center)
+              Text('删除').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+                .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(ERROR).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => { this.confirmDelete(); })
             }
             .width('100%').margin({ top: 20 })

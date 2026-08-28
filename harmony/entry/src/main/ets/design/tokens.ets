@@ -30,6 +30,7 @@ export let ACCENT_INK: string = '#FFFFFF'; // accent 填充上的文字(亮 acce
 export let ACCENT_LIGHT: string = '#FFF5F0'; // accent 淡背景
 export let SIGNAL: string = '#5E9C6E';   // 活跃/在线指示(Android 2026-06-10 起别名 accent)
 export let ERROR: string = '#C2553F';    // 危险红(深浅主题分档)
+export const ACCENT_OPTIONS: string[] = ['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'];
 
 // Android AmberTokens.accentInkFor:亮色 accent(如 Sage)上用深字,否则白
 const accentInkFor = (accent: string): string => {

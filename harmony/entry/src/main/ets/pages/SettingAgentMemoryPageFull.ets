@@ -1,17 +1,13 @@
 // SettingAgentMemoryPageFull — 核心记忆(接 MemoryStore 真实后端)
-//
-// Android 基准: SettingAgentMemoryPage.kt(MemoryRepository 增删改)。
-//   鸿蒙接 entry MemoryStore.ets getMemoryLibraryOps():
-//   核心记忆 = MEMORY_BUCKET_GLOBAL 桶;支持 列表/新增/删除/编辑。
-
+// 核心记忆 = MEMORY_BUCKET_GLOBAL 桶；支持列表/新增/删除/编辑。
 import type { AssistantMemory } from '@amber/chat-domain';
 import { MEMORY_BUCKET_GLOBAL } from '@amber/chat-domain';
 import { getMemoryLibraryOps, MemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
 import {
-  BG, SURFACE, SURFACE2, INK, INK3, INK4, LINE, ACCENT, ERROR,
-  BODY, BODY2, META, MONO_SMALL,
+  BG, INK, INK3, INK4, LINE, ACCENT, ERROR, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer, BtnGhost, Chip } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 @Entry
@@ -45,79 +41,119 @@ struct SettingAgentMemoryPageFull {
   build(): void {
     Column() {
       PageTitleBar({ title: '核心记忆' })
-
-      // 新增条(真实写入 MemoryStore)
+      SectionHeader({ label: '新增记忆' })
       Row() {
         TextInput({ text: this.draft, placeholder: '记一条核心记忆…' })
-          .fontSize(BODY2).fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(Color.Transparent).layoutWeight(1)
+          .fontSize(TEXT_STYLES.secondary.size)
+          .fontWeight(TEXT_STYLES.secondary.weight)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(INK)
+          .placeholderColor(INK4)
+          .backgroundColor(Color.Transparent)
+          .layoutWeight(1)
           .onChange((v: string): void => { this.draft = v; })
-        Text('添加').fontSize(BODY2).fontColor(ACCENT)
-          .padding({ left: 10, right: 4 })
-          .onClick((): void => { this.add(); })
+        Column() {
+          BtnGhost({ label: '添加', onTap: (): void => { this.add(); } })
+        }
+        .margin({ left: 10 })
       }
-      .height(44)
-      .backgroundColor(SURFACE2).borderRadius(12)
-      .padding({ left: 14, right: 10 })
-      .margin({ left: 18, right: 18, top: 10 })
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(Color.Transparent)
+      .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
+      SectionHeader({ label: '记忆列表' })
       if (this.loaded && this.memories.length === 0) {
         Column() {
-          Text('// 暂无核心记忆').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+          Text('// 暂无核心记忆')
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
           Text('Agent 会在对话中自动沉淀，也可手动添加')
-            .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
+            .fontSize(TEXT_STYLES.secondary.size)
+            .fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK4)
+            .margin({ top: 8 })
         }
-        .width('100%').padding({ top: 60 }).alignItems(HorizontalAlign.Center)
+        .width('100%')
+        .padding({ top: 44, bottom: 24 })
+        .alignItems(HorizontalAlign.Center)
       } else {
         List() {
-          ForEach(this.memories, (m: AssistantMemory): void => {
+          ForEach(this.memories, (m: AssistantMemory, idx: number): void => {
             ListItem() {
               Column() {
-                if (this.editingId === m.id) {
+                Column() {
+                  if (this.editingId === m.id) {
+                    Row() {
+                      TextInput({ text: this.editDraft })
+                        .fontSize(TEXT_STYLES.secondary.size)
+                        .fontWeight(TEXT_STYLES.secondary.weight)
+                        .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                        .fontFamily(TEXT_STYLES.secondary.family)
+                        .fontColor(INK)
+                        .backgroundColor(Color.Transparent)
+                        .layoutWeight(1)
+                        .onChange((v: string): void => { this.editDraft = v; })
+                      Column() {
+                        BtnGhost({ label: '保存', onTap: (): void => {
+                          this.ops.updateContent(m.id, this.editDraft.trim())
+                            .then((): void => { this.editingId = -1; this.reload(); });
+                        } })
+                      }
+                      .margin({ left: 8 })
+                      Column() {
+                        BtnGhost({ label: '取消', onTap: (): void => { this.editingId = -1; } })
+                      }
+                      .margin({ left: 8 })
+                    }
+                    .width('100%')
+                  } else {
+                    Text(m.content)
+                      .fontSize(TEXT_STYLES.secondary.size)
+                      .fontWeight(TEXT_STYLES.secondary.weight)
+                      .lineHeight(TEXT_STYLES.secondary.lineHeight)
+                      .fontFamily(TEXT_STYLES.secondary.family)
+                      .fontColor(INK)
+                      .width('100%')
+                      .onClick((): void => { this.editingId = m.id; this.editDraft = m.content; })
+                  }
                   Row() {
-                    TextInput({ text: this.editDraft })
-                      .fontSize(BODY2).fontColor(INK).backgroundColor(Color.Transparent)
-                      .layoutWeight(1)
-                      .onChange((v: string): void => { this.editDraft = v; })
-                    Text('保存').fontSize(MONO_SMALL).fontColor(ACCENT)
+                    Chip({ text: `${m.kind}${m.pinned ? ' · pinned' : ''}` })
+                    Blank()
+                    Icon({ name: 'trash', iconSize: 15, color: ERROR })
                       .onClick((): void => {
-                        this.ops.updateContent(m.id, this.editDraft.trim())
-                          .then((): void => { this.editingId = -1; this.reload(); });
+                        AlertDialog.show({
+                          title: '删除记忆', message: '删除这条核心记忆？',
+                          primaryButton: { value: '取消', action: (): void => {} },
+                          secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
+                            this.ops.deleteMemory(m.id).then((): void => { this.reload(); });
+                          } },
+                        });
                       })
-                    Text('取消').fontSize(MONO_SMALL).fontColor(INK3).margin({ left: 10 })
-                      .onClick((): void => { this.editingId = -1; })
                   }
                   .width('100%')
-                } else {
-                  Text(m.content).fontSize(BODY2).fontColor(INK)
-                    .width('100%')
-                    .onClick((): void => { this.editingId = m.id; this.editDraft = m.content; })
+                  .margin({ top: 8 })
                 }
-                Row() {
-                  Text(`${m.kind}${m.pinned ? ' · pinned' : ''}`)
-                    .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                  Blank()
-                  Icon({ name: 'trash', iconSize: 15, color: ERROR })
-                    .onClick((): void => {
-                      AlertDialog.show({
-                        title: '删除记忆', message: '删除这条核心记忆？',
-                        primaryButton: { value: '取消', action: (): void => {} },
-                        secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                          this.ops.deleteMemory(m.id).then((): void => { this.reload(); });
-                        } },
-                      });
-                    })
+                .width('100%')
+                .constraintSize({ minHeight: 64 })
+                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                if (idx < this.memories.length - 1) {
+                  PaperSeparator()
                 }
-                .width('100%').margin({ top: 6 })
               }
-              .padding(14)
-              .backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(14)
-              .margin({ left: 18, right: 18, bottom: 10 })
+              .width('100%')
             }
           }, (m: AssistantMemory): string => `${m.id}`)
         }
-        .width('100%').layoutWeight(1).padding({ top: 10 })
+        .width('100%')
+        .layoutWeight(1)
         .divider({ strokeWidth: 0, color: Color.Transparent })
       }
       PageSpacer()

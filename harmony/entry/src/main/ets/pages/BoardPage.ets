@@ -9,11 +9,105 @@ import type { SourceSection, HotItem } from '../platform_impl/NewsNowProvider.et
 import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
 import { getAppContainer, getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE, INK, INK2, INK3, INK4, LINE, ACCENT,
-  BODY, BODY2, META, MONO_SMALL, LABEL,
+  BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT,
+  BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
+
+@Component
+struct BoardMetricRow {
+  @Prop label: string = '';
+  @Prop valueText: string = '';
+  @Prop isLast: boolean = false;
+  @State private pressed: boolean = false;
+
+  build(): void {
+    Column() {
+      Row() {
+        Text(this.label)
+          .fontSize(BODY2)
+          .fontWeight(600)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(FONT_SANS_SEMIBOLD)
+          .fontColor(INK)
+          .layoutWeight(1)
+        Text(this.valueText)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(500)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK3)
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((event: TouchEvent): void => {
+        if (event.type === TouchType.Down) this.pressed = true;
+        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
+      })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+}
+
+@Component
+struct BoardHotItemRow {
+  @Prop rankText: string = '';
+  @Prop title: string = '';
+  @Prop heat: string = '';
+  @Prop isLast: boolean = false;
+  @State private pressed: boolean = false;
+
+  build(): void {
+    Column() {
+      Row() {
+        Text(this.rankText)
+          .fontSize(TEXT_STYLES.meta.size)
+          .fontWeight(500)
+          .lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(INK4)
+          .width(28)
+        Text(this.title)
+          .fontSize(BODY2)
+          .fontWeight(400)
+          .lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(TEXT_STYLES.secondary.family)
+          .fontColor(INK2)
+          .layoutWeight(1)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        if (this.heat.length > 0) {
+          Text(this.heat)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(500)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK4)
+            .margin({ left: 8 })
+        }
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((event: TouchEvent): void => {
+        if (event.type === TouchType.Down) this.pressed = true;
+        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
+      })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+}
 
 @Entry
 @Component
@@ -99,68 +193,60 @@ struct BoardPage {
     Column() {
       PageTitleBar({ title: '今日看板' })
 
-      // 本地真实统计
-      Row() {
-        Column() {
-          Text(`${this.todayConvs}`).fontSize(22).fontWeight(FontWeight.Bold)
-            .fontColor(INK).fontFamily('JetBrainsMono')
-          Text('今日会话').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-        }.layoutWeight(1)
-        Column() {
-          Text(`${this.totalMsgs}`).fontSize(22).fontWeight(FontWeight.Bold)
-            .fontColor(INK).fontFamily('JetBrainsMono')
-          Text('消息条数').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-        }.layoutWeight(1)
-        Column() {
-          Text(`${this.pinnedConvs}`).fontSize(22).fontWeight(FontWeight.Bold)
-            .fontColor(INK).fontFamily('JetBrainsMono')
-          Text('已置顶').fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-        }.layoutWeight(1)
+      SectionHeader({ label: '今日概览' })
+      Column() {
+        BoardMetricRow({ label: '今日会话', valueText: `${this.todayConvs}` })
+        BoardMetricRow({ label: '消息条数', valueText: `${this.totalMsgs}` })
+        BoardMetricRow({ label: '已置顶', valueText: `${this.pinnedConvs}`, isLast: true })
       }
-      .padding({ top: 14, bottom: 14 })
-      .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(14)
-      .margin({ left: 18, right: 18, top: 10 })
+      .width('100%')
 
       Row() {
-        Text('// HOTLIST').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
-          .layoutWeight(1).margin({ left: 18 })
-        Icon({ name: 'retry', iconSize: 15, color: INK3 }).margin({ right: 18 })
-          .onClick((): void => { this.loadHotlist(); })
+        Text('//')
+          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
+        Text(' HOTLIST')
+          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+          .layoutWeight(1)
+        Row() {
+          Icon({ name: 'retry', iconSize: 15, color: INK3 })
+        }
+        .width(44).height(44).justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+        .onClick((): void => { this.loadHotlist(); })
       }
-      .width('100%').margin({ top: 14 })
+      .width('100%').padding({ left: 16, right: 16, top: 20, bottom: 8 })
 
       if (this.loading) {
-        Text('抓取热榜中…').fontSize(BODY2).fontColor(INK3)
+        Text('抓取热榜中…')
+          .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
           .width('100%').textAlign(TextAlign.Center).margin({ top: 40 })
       } else {
         List() {
           ForEach(this.sections, (sec: SourceSection): void => {
             ListItem() {
               Column() {
-                Text(sec.sourceName).fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(ACCENT)
+                SectionHeader({ label: sec.sourceName })
                 if (sec.error !== null || sec.items.length === 0) {
-                  Text(sec.error !== null ? `抓取失败:${sec.error}` : '无条目')
-                    .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                    .margin({ top: 6 })
+                  BoardHotItemRow({
+                    rankText: '',
+                    title: sec.error !== null ? `抓取失败:${sec.error}` : '无条目',
+                    heat: '',
+                    isLast: true,
+                  })
                 } else {
-                  ForEach(sec.items.slice(0, 5), (item: HotItem): void => {
-                    Row() {
-                      Text(`${item.rank}`).fontSize(MONO_SMALL).fontColor(INK4)
-                        .fontFamily('JetBrainsMono').width(20)
-                      Text(item.title).fontSize(BODY2).fontColor(INK2)
-                        .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                      if (item.heat.length > 0) {
-                        Text(item.heat).fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                      }
-                    }
-                    .width('100%').margin({ top: 6 })
+                  ForEach(sec.items.slice(0, 5), (item: HotItem, index: number): void => {
+                    BoardHotItemRow({
+                      rankText: `${item.rank}`,
+                      title: item.title,
+                      heat: item.heat,
+                      isLast: index === Math.min(sec.items.length, 5) - 1,
+                    })
                   }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
                 }
               }
-              .padding(14)
-              .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(14)
-              .margin({ left: 18, right: 18, bottom: 10 })
-              .alignItems(HorizontalAlign.Start)
+              .width('100%')
             }
           }, (sec: SourceSection): string => sec.sourceId)
         }

@@ -22,7 +22,9 @@ import {
   DEFAULT_SUB_AGENT_MAX_CONCURRENT_RUNS, DEFAULT_SUB_AGENT_OUTPUT_BUDGET_CHARS,
   SUB_AGENT_BUILT_INS,
 } from '@amber/chat-domain';
-import { INK, INK3, ACCENT, SURFACE, SURFACE2, LINE, BG, TITLE, BODY, META, LABEL } from '../design/tokens.ets';
+import { INK, INK3, SURFACE2, BG, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, Seg, PaperSeparator, PageSpacer, BtnGhost } from '../components/PageTemplate.ets';
 
 @Entry
 @Component
@@ -90,73 +92,61 @@ struct SettingSubAgentPage {
 
   build(): void {
     Column() {
-      // 标题
-      Row() {
-        Text('子代理设置').fontSize(TITLE).fontWeight(FontWeight.Bold).fontColor(INK)
-      }
-      .width('100%').padding({ left: 16, right: 16, top: this.statusBarHeight + 16, bottom: 8 })
+      PageTitleBar({ title: '子代理设置' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(BODY).fontColor(INK3)
+        Text('加载中…')
+          .fontSize(TEXT_STYLES.body.size).fontWeight(TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight).fontFamily(TEXT_STYLES.body.family).fontColor(INK3)
           .width('100%').textAlign(TextAlign.Center).padding({ top: 40 })
       } else {
         Scroll() {
           Column() {
-            // enabled 开关
+            SectionHeader({ label: '运行参数' })
             this.settingRow('启用子代理', '允许主 Agent 委派子任务给隔离的子代理', (): void => {
               this.subAgentEnabled = !this.subAgentEnabled;
               this.saveSetting();
-            }, this.subAgentEnabled)
+            }, this.subAgentEnabled, false)
 
-            // mode 选择
-            this.modeRow()
+            this.modeRow(false)
 
-            // allowDynamic(smart_dynamic 模式下恒 true 且不可改)
             if (this.mode !== 'smart_dynamic') {
               this.settingRow('允许动态子代理', '允许创建临时自定义子代理角色', (): void => {
                 this.allowDynamic = !this.allowDynamic;
                 this.saveSetting();
-              }, this.allowDynamic)
+              }, this.allowDynamic, false)
             }
 
-            // maxConcurrentRuns 滑块
             this.sliderRow('最大并发数', `${this.maxConcurrentRuns}`, 1, 5, this.maxConcurrentRuns, (v: number): void => {
               this.maxConcurrentRuns = Math.round(v);
               this.saveSetting();
-            })
+            }, false)
 
-            // maxTurns 滑块
             this.sliderRow('最大轮次', `${this.maxTurns}`, 2, 8, this.maxTurns, (v: number): void => {
               this.maxTurns = Math.round(v);
               this.saveSetting();
-            })
+            }, false)
 
-            // timeout 选择
             this.selectRow('超时时间', this.timeoutLabel(), ((): void => {
               const options: number[] = [60000, 180000, 300000, 600000];
               const idx: number = options.indexOf(this.timeoutMs);
               this.timeoutMs = options[(idx + 1) % options.length];
               this.saveSetting();
-            }))
+            }), false)
 
-            // outputBudget 选择
             this.selectRow('输出预算', this.outputBudgetLabel(), ((): void => {
               const options: number[] = [8000, 12000, 24000, 48000];
               const idx: number = options.indexOf(this.outputBudgetChars);
               this.outputBudgetChars = options[(idx + 1) % options.length];
               this.saveSetting();
-            }))
+            }), true)
 
-            // M3.2:per-role override 编辑(6 内置角色)
-            Row() {
-              Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 角色提示词覆盖').fontSize(META).fontWeight(FontWeight.Medium).fontColor(INK3)
-            }
-            .width('100%').padding({ left: 16, top: 20, bottom: 8 })
+            SectionHeader({ label: '角色提示词覆盖' })
 
-            ForEach(SUB_AGENT_BUILT_INS, (def: SubAgentDefinition): void => {
-              this.roleOverrideRow(def)
+            ForEach(SUB_AGENT_BUILT_INS, (def: SubAgentDefinition, idx: number): void => {
+              this.roleOverrideRow(def, idx === SUB_AGENT_BUILT_INS.length - 1)
             }, (def: SubAgentDefinition): string => def.id)
+            PageSpacer()
           }
           .width('100%')
           .padding({ bottom: 20 })
@@ -168,89 +158,82 @@ struct SettingSubAgentPage {
     .width('100%').height('100%').backgroundColor(BG)
   }
 
-  @Builder settingRow(label: string, desc: string, onToggle: () => void, checked: boolean): void {
-    Row() {
-      Column() {
-        Text(label).fontSize(BODY).fontColor(INK)
-        Text(desc).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: checked })
-        .onChange((_v: boolean): void => { onToggle(); })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+  @Builder settingRow(label: string, desc: string, onToggle: () => void, checked: boolean, isLast: boolean): void {
+    ToggleRow({ label: label, desc: desc, checked: checked, isLast: isLast, onToggle: onToggle })
   }
 
-  @Builder modeRow(): void {
-    Row() {
-      Column() {
-        Text('模式').fontSize(BODY).fontColor(INK)
-        Text(this.mode === 'smart_dynamic' ? '智能动态:隐藏内置角色,按需创建临时子代理' : '名册:使用预设的内置子代理角色')
-          .fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
-          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-      }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1)
-      Text(this.mode === 'smart_dynamic' ? '智能动态' : '名册').fontSize(META).fontColor(ACCENT)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onClick((): void => {
-      this.mode = this.mode === 'roster' ? 'smart_dynamic' : 'roster';
-      this.saveSetting();
-    })
-  }
-
-  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number, onChange: (v: number) => void): void {
-    Column() {
-      Row() {
-        Text(label).fontSize(BODY).fontColor(INK).layoutWeight(1)
-        Text(valueText).fontSize(META).fontColor(ACCENT)
-      }
-      .width('100%')
-      Slider({ value: value, min: min, max: max, step: 1 })
-        .width('100%')
-        .margin({ top: 4 })
-        .onChange((v: number): void => { onChange(v); })
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-  }
-
-  @Builder selectRow(label: string, valueText: string, onClick: () => void): void {
-    Row() {
-      Text(label).fontSize(BODY).fontColor(INK).layoutWeight(1)
-      Text(valueText).fontSize(META).fontColor(ACCENT)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-    .onClick((): void => { onClick(); })
-  }
-
-  // M3.2:单个内置角色的 override 编辑行(展开 → systemPrompt textarea + 重置)
-  @Builder roleOverrideRow(def: SubAgentDefinition): void {
+  @Builder modeRow(isLast: boolean): void {
     Column() {
       Row() {
         Column() {
-          Text(def.name).fontSize(BODY).fontColor(INK)
-          Text(def.description).fontSize(LABEL).fontColor(INK3).margin({ top: 2 })
+          Text('模式').fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          Text(this.mode === 'smart_dynamic' ? '智能动态:隐藏内置角色,按需创建临时子代理' : '名册:使用预设的内置子代理角色')
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 4 }).maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1)
+        Seg({ options: ['名册', '智能动态'], selected: this.mode === 'smart_dynamic' ? 1 : 0,
+          onSelect: (idx: number): void => {
+            this.mode = idx === 1 ? 'smart_dynamic' : 'roster';
+            this.saveSetting();
+          } })
+      }
+      .width('100%').constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      if (!isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder sliderRow(label: string, valueText: string, min: number, max: number, value: number,
+    onChange: (v: number) => void, isLast: boolean): void {
+    Column() {
+      Row() {
+        Text(label).fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK).layoutWeight(1)
+        Text(valueText).fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+      }
+      .width('100%')
+      Slider({ value: value, min: min, max: max, step: 1 }).width('100%').margin({ top: 4 })
+        .onChange((v: number): void => { onChange(v); })
+    }
+    .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    if (!isLast) {
+      PaperSeparator()
+    }
+  }
+
+  @Builder selectRow(label: string, valueText: string, onClick: () => void, isLast: boolean): void {
+    SelectRow({ label: label, valueText: valueText, isLast: isLast, onRowClick: onClick })
+  }
+
+  // M3.2:单个内置角色的 override 编辑行(展开 → systemPrompt textarea + 重置)
+  @Builder roleOverrideRow(def: SubAgentDefinition, isLast: boolean): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(def.name)
+            .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+          Text(def.description)
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 4 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
-        Text(this.expandedRoleId === def.id ? '▾' : '▸').fontSize(LABEL).fontColor(INK3)
+        Text(this.expandedRoleId === def.id ? '▾' : '▸')
+          .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+          .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
       }
       .width('100%')
+      .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-      .backgroundColor(SURFACE)
       .onClick((): void => {
         // M3.2:折叠时保存(展开 → 折叠 = 提交编辑)
         if (this.expandedRoleId === def.id) {
@@ -263,28 +246,32 @@ struct SettingSubAgentPage {
 
       if (this.expandedRoleId === def.id) {
         Column() {
-          Text('自定义提示词(留空 = 继承默认)').fontSize(LABEL).fontColor(INK3)
-            .width('100%').margin({ bottom: 4 })
+          Text('自定义提示词(留空 = 继承默认)')
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3).width('100%').margin({ bottom: 4 })
           TextArea({
             text: this.getOverride(def.id).systemPrompt ?? '',
             placeholder: def.systemPrompt,
           })
-            .width('100%').height(120).fontSize(BODY).fontColor(INK)
+            .width('100%').height(120).fontSize(TEXT_STYLES.body.size)
+            .fontWeight(TEXT_STYLES.body.weight).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family).fontColor(INK)
             .backgroundColor(SURFACE2).borderRadius(8)
             .onChange((v: string): void => { this.updateRolePrompt(def.id, v); })
           Row() {
-            Text('恢复默认').fontSize(META).fontColor(ACCENT)
-              .onClick((): void => { this.resetRole(def.id); })
+            BtnGhost({ label: '恢复默认', onTap: (): void => { this.resetRole(def.id); } })
           }
           .width('100%').margin({ top: 8 })
         }
         .width('100%')
         .padding({ left: 16, right: 16, bottom: 12 })
-        .backgroundColor(SURFACE)
+      }
+      if (!isLast) {
+        PaperSeparator()
       }
     }
     .width('100%')
-    .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
   }
 
   // M3.2:构建 overrides Map(Record → Map;空 override 不写)

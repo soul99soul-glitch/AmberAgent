@@ -5,14 +5,16 @@
 //   filesDir/skills 根 + 内置 rawfile 资产);启停 = 当前 assistant.enabledSkills
 //   经 patchAssistant/saveAssistants 持久化(对齐 SkillManager.kt setSkillEnabled)。
 
+import { router } from '@kit.ArkUI';
 import type { Assistant, SkillMetadata } from '@amber/chat-domain';
 import { saveAssistants, patchAssistant } from '@amber/chat-domain';
 import { getSkillManager, getChatAssistants, getChatKvStore } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE, INK, INK3, INK4, LINE, ACCENT, ERROR,
-  BODY, BODY2, META, MONO_SMALL,
+  BG, SURFACE2, INK, INK3, INK4, LINE, ACCENT, ERROR,
+  BODY, BODY2, META, MONO_SMALL, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, NavRow, IconSeat, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 @Entry
@@ -21,6 +23,7 @@ struct SkillsPage {
   @State skills: SkillMetadata[] = [];
   @State enabledNames: string[] = [];
   @State loaded: boolean = false;
+  @State pressedSkill: string = '';
   private assistant: Assistant | null = null;
 
   aboutToAppear(): void {
@@ -38,6 +41,10 @@ struct SkillsPage {
 
   private isEnabled(name: string): boolean {
     return this.enabledNames.indexOf(name) >= 0;
+  }
+
+  private go(page: string): void {
+    router.pushUrl({ url: page });
   }
 
   private toggle(name: string, on: boolean): void {
@@ -59,65 +66,122 @@ struct SkillsPage {
     });
   }
 
+  @Builder skillRow(s: SkillMetadata, isLast: boolean): void {
+    Column() {
+      Row() {
+        IconSeat({ iconName: 'puzzle' }).margin({ right: 12 })
+        Column() {
+          Row() {
+            Text(s.name)
+              .fontSize(BODY)
+              .fontWeight(600)
+              .lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(FONT_SANS_SEMIBOLD)
+              .fontColor(INK)
+              .layoutWeight(1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Toggle({ type: ToggleType.Switch, isOn: this.isEnabled(s.name) })
+              .selectedColor(ACCENT)
+              .onChange((on: boolean): void => { this.toggle(s.name, on); })
+          }
+          .width('100%')
+
+          Text(s.description.length > 0 ? s.description : '（无描述）')
+            .fontSize(BODY2)
+            .fontWeight(FontWeight.Normal)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(FONT_SANS)
+            .fontColor(INK3)
+            .margin({ top: 4 })
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+
+          Row() {
+            Text(this.isEnabled(s.name) ? '已启用' : '已禁用')
+              .fontSize(MONO_SMALL)
+              .fontWeight(FontWeight.Normal)
+              .lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO)
+              .fontColor(INK4)
+            Blank()
+            Row() {
+              Icon({ name: 'trash', iconSize: 15, color: ERROR })
+            }
+            .width(44)
+            .height(44)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .accessibilityText('删除技能')
+            .onClick((): void => {
+              AlertDialog.show({
+                title: '删除技能', message: `删除技能「${s.name}」？`,
+                primaryButton: { value: '取消', action: (): void => {} },
+                secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
+                  getSkillManager().deleteSkill(s.name);
+                  this.reload();
+                } },
+              });
+            })
+          }
+          .width('100%')
+          .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressedSkill === s.name ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        if (e.type === TouchType.Down) this.pressedSkill = s.name;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressedSkill = '';
+      })
+      if (!isLast) {
+        Row().height(1).width('100%').margin({ left: 16, right: 16 }).backgroundColor(LINE)
+      }
+    }
+    .width('100%')
+  }
+
   build(): void {
     Column() {
       PageTitleBar({ title: '技能' })
 
-      if (this.loaded && this.skills.length === 0) {
+      Scroll() {
         Column() {
-          Text('// 暂无技能').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
-          Text('内置技能会随首次启动安装；也可在对话中让 Agent 创建')
-            .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
-        }
-        .width('100%').padding({ top: 80 }).alignItems(HorizontalAlign.Center)
-      } else {
-        List() {
-          ForEach(this.skills, (s: SkillMetadata): void => {
-            ListItem() {
-              Column() {
-                Row() {
-                  Text(s.name).fontSize(BODY).fontWeight(FontWeight.Medium)
-                    .fontColor(INK).fontFamily('JetBrainsMono')
-                    .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Toggle({ type: ToggleType.Switch, isOn: this.isEnabled(s.name) })
-                    .selectedColor(ACCENT)
-                    .onChange((on: boolean): void => { this.toggle(s.name, on); })
-                }
-                .width('100%')
+          SectionHeader({ label: '服务与任务' })
+          NavRow({ label: 'MCP 服务器', desc: '管理外部 MCP 工具', iconName: 'plug',
+            onRowClick: (): void => { this.go('pages/ChatMcpSettingsPage'); } })
+          NavRow({ label: '定时任务', valueText: 'Beta', desc: '查看 Agent 的定时任务和计划运行状态', iconName: 'clock',
+            onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
+          NavRow({ label: 'Slides 字体资源', desc: '下载中文字体包，提高生成式幻灯片的还原度', iconName: 'doc', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingSlidesFontPage'); } })
 
-                Text(s.description.length > 0 ? s.description : '（无描述）')
-                  .fontSize(BODY2).fontColor(INK3).margin({ top: 4 })
-                  .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                Row() {
-                  Text(`${this.isEnabled(s.name) ? '已启用' : '已禁用'}`)
-                    .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                  Blank()
-                  Icon({ name: 'trash', iconSize: 15, color: ERROR })
-                    .onClick((): void => {
-                      AlertDialog.show({
-                        title: '删除技能', message: `删除技能「${s.name}」？`,
-                        primaryButton: { value: '取消', action: (): void => {} },
-                        secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                          getSkillManager().deleteSkill(s.name);
-                          this.reload();
-                        } },
-                      });
-                    })
-                }
-                .width('100%').margin({ top: 6 })
-              }
-              .padding(14)
-              .backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(14)
-              .margin({ left: 18, right: 18, bottom: 10 })
+          SectionHeader({ label: '技能' })
+          if (this.loaded && this.skills.length === 0) {
+            Column() {
+              Text('// 暂无技能')
+                .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontColor(INK3).fontFamily(FONT_MONO_MEDIUM)
+              Text('内置技能会随首次启动安装；也可在对话中让 Agent 创建')
+                .fontSize(BODY2).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(FONT_SANS).fontColor(INK4).margin({ top: 8 })
             }
-          }, (s: SkillMetadata): string => s.name)
+            .width('100%').padding({ top: 80 }).alignItems(HorizontalAlign.Center)
+          } else {
+            ForEach(this.skills, (s: SkillMetadata, idx: number): void => {
+              this.skillRow(s, idx === this.skills.length - 1);
+            }, (s: SkillMetadata): string => s.name)
+          }
+          PageSpacer()
         }
-        .width('100%').layoutWeight(1).padding({ top: 10 })
-        .divider({ strokeWidth: 0, color: Color.Transparent })
+        .width('100%')
       }
-      PageSpacer()
+      .layoutWeight(1)
+      .align(Alignment.TopStart)
     }
     .width('100%').height('100%').backgroundColor(BG)
   }

@@ -8,10 +8,11 @@ import { router } from '@kit.ArkUI';
 import type { ConversationSummary } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, SURFACE, INK, INK3, INK4, LINE,
-  BODY, META, MONO_SMALL,
+  BG, INK, INK3, INK4,
+  META, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, PageSpacer, SectionHeader, NavRow } from '../components/PageTemplate.ets';
 
 interface HistoryGroup {
   date: string;
@@ -70,34 +71,32 @@ struct HistoryPage {
 
       if (this.loaded && this.groups.length === 0) {
         Column() {
-          Text('// 暂无历史').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+          Text('// 暂无历史')
+            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
         }
         .width('100%').padding({ top: 80 }).alignItems(HorizontalAlign.Center)
       } else {
         List() {
           ForEach(this.groups, (g: HistoryGroup): void => {
             ListItem() {
-              Text(g.date).fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                .margin({ left: 20, top: 14, bottom: 6 })
-            }
-            ForEach(g.items, (s: ConversationSummary): void => {
-              ListItem() {
-                Row() {
-                  Text(s.title.length > 0 ? s.title : '未命名对话')
-                    .fontSize(BODY).fontColor(INK).layoutWeight(1)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(this.timeOf(s)).fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                }
-                .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 12 })
-                .backgroundColor(SURFACE)
-                .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                .onClick((): void => {
-                  const params: Record<string, string> = {};
-                  params['conversationId'] = s.id;
-                  router.pushUrl({ url: 'pages/ChatPage', params: params });
-                })
+              Column() {
+                SectionHeader({ label: g.date })
+                ForEach(g.items, (s: ConversationSummary, index: number): void => {
+                  NavRow({
+                    label: s.title.length > 0 ? s.title : '未命名对话',
+                    valueText: this.timeOf(s),
+                    isLast: index === g.items.length - 1,
+                    onRowClick: (): void => {
+                      const params: Record<string, string> = {};
+                      params['conversationId'] = s.id;
+                      router.pushUrl({ url: 'pages/ChatPage', params: params });
+                    },
+                  })
+                }, (s: ConversationSummary): string => s.id)
               }
-            }, (s: ConversationSummary): string => s.id)
+              .width('100%')
+            }
           }, (g: HistoryGroup): string => g.date)
         }
         .width('100%').layoutWeight(1)

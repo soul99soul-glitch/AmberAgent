@@ -8,10 +8,11 @@
 import { promptAction } from '@kit.ArkUI';
 import { speakText } from '../platform_impl/TtsEngine.ets';
 import {
-  BG, SURFACE, INK, INK3, INK4, LINE,
-  BODY, BODY2, META, MONO_SMALL,
+  BG, INK, INK2, INK3, INK4, LINE,
+  BODY, BODY2, META, MONO_SMALL, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { PageTitleBar, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
 @Entry
 @Component
@@ -21,37 +22,52 @@ struct SettingTTSProviderPage {
       PageTitleBar({ title: 'TTS' })
 
       Column() {
-        Text('系统语音引擎').fontSize(BODY).fontColor(INK)
-        Text('unavailable · SDK 无 CoreSpeechKit')
-          .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono').margin({ top: 3 })
-        Text('升级 SDK 后在 platform_impl/TtsEngine.ets 单点接入')
-          .fontSize(BODY2).fontColor(INK3).margin({ top: 8 })
-      }
-      .padding(16)
-      .backgroundColor(SURFACE).border({ width: 1, color: LINE }).borderRadius(14)
-      .margin({ left: 18, right: 18, top: 12 })
-      .alignItems(HorizontalAlign.Start)
-
-      Row() {
-        Text('探测合成能力')
-          .fontSize(BODY2).fontColor(INK3)
-          .padding({ left: 14, right: 14, top: 12, bottom: 12 })
-          .backgroundColor(SURFACE).borderRadius(999)
-          .border({ width: 1, color: LINE })
-          .onClick((): void => {
-            speakText('probe').then((ok: boolean): void => {
-              promptAction.showToast({
-                message: ok ? '合成可用' : '合成不可用：SDK 无语音 API',
-                duration: 2000,
-              });
+        Row() {
+          Column() {
+            Text('系统语音引擎')
+              .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            Text('unavailable · SDK 无 CoreSpeechKit')
+              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK4).margin({ top: 3 })
+            Text('升级 SDK 后在 platform_impl/TtsEngine.ets 单点接入')
+              .fontSize(BODY2).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3).margin({ top: 8 })
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('离线')
+            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK4)
+        }
+        .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        PaperSeparator()
+        Row() {
+          Text('探测合成能力')
+            .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+            .layoutWeight(1)
+          Text('运行')
+            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK2)
+        }
+        .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+        .onClick((): void => {
+          speakText('probe').then((ok: boolean): void => {
+            promptAction.showToast({
+              message: ok ? '合成可用' : '合成不可用：SDK 无语音 API',
+              duration: 2000,
             });
-          })
+          });
+        })
+        PaperSeparator()
+        Text('// Android 多 provider(azure/openai)依赖网络服务,后续按需移植')
+          .fontSize(META).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO).fontColor(INK4)
+          .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       }
-      .margin({ left: 18, right: 18, top: 12 })
-
-      Text('// Android 多 provider(azure/openai)依赖网络服务,后续按需移植')
-        .fontSize(META).fontColor(INK4).fontFamily('JetBrainsMono')
-        .margin({ left: 18, right: 18, top: 14 })
+      .width('100%')
 
       PageSpacer()
     }

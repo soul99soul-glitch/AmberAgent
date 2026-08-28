@@ -2,8 +2,11 @@
 // 列出 hasUsableAuth 且非空 models 的 provider(openai/google/claude)及其模型;
 // 点选持久化到 Preferences(chat_selected_provider_id/model_id),
 // resolveChatRuntime 优先消费。
-import { ACCENT,BG,INK,INK2,INK3,LINE,SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  ACCENT, BG, INK, INK2, INK3, LINE, META, BODY, TEXT_STYLES,
+} from '../design/tokens.ets';
+import { PageTitleBar, PaperSeparator } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import { loadProviders, hasUsableAuth } from '@amber/chat-domain';
 import {
@@ -75,43 +78,73 @@ struct ChatModelPickerPage {
       PageTitleBar({ title: '选择模型' })
 
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Text('加载中…')
+          .fontSize(TEXT_STYLES.body.size)
+          .fontWeight(TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(TEXT_STYLES.body.family)
+          .fontColor(INK3)
+          .margin({ top: 32 })
       } else if (this.rows.length === 0) {
         Column() {
-          Text('没有可用的 Provider/模型').fontSize(15).fontColor(INK2)
+          Text('没有可用的 Provider/模型')
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(TEXT_STYLES.body.weight)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family)
+            .fontColor(INK2)
           Text('先在 Provider 设置页填写 baseUrl、API Key 和模型')
-            .fontSize(12).fontColor(INK3).margin({ top: 8 })
+            .fontSize(TEXT_STYLES.secondary.size)
+            .fontWeight(TEXT_STYLES.secondary.weight)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3)
+            .margin({ top: 8 })
           Text('去设置')
-            .fontSize(14).fontColor(ACCENT).margin({ top: 16 })
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family)
+            .fontColor(ACCENT)
+            .margin({ top: 16 })
             .onClick((): void => { router.pushUrl({ url: 'pages/ChatProviderSettingsPage' }); })
         }.margin({ top: 64 })
       } else {
-        List() {
-          ForEach(this.rows, (row: ModelRow): void => {
-            ListItem() {
-              Row() {
-                Column() {
-                  Text(row.modelId)
-                    .fontSize(15).fontColor(INK)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(`${row.providerName} · ${row.providerType}`)
-                    .fontSize(11).fontColor(INK3).margin({ top: 4 })
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Scroll() {
+          Column() {
+            ForEach(this.rows, (row: ModelRow, idx: number): void => {
+              Column() {
+                Row() {
+                  Column() {
+                    Text(row.modelId)
+                      .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
+                      .fontFamily(FONT_MONO_MEDIUM).fontColor(row.selected ? ACCENT : INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text(`${row.providerName} · ${row.providerType}`)
+                      .fontSize(BODY).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.body.lineHeight)
+                      .fontFamily(TEXT_STYLES.body.family).fontColor(INK3).margin({ top: 4 })
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                  if (row.selected) {
+                    Text('当前')
+                      .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
+                      .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
+                  }
                 }
-                .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                if (row.selected) {
-                  Text('当前').fontSize(12).fontColor(ACCENT)
+                .width('100%').constraintSize({ minHeight: 64 })
+                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                .onClick((): void => this.pick(row))
+                if (idx < this.rows.length - 1) {
+                  PaperSeparator()
                 }
               }
               .width('100%')
-              .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
-              .onClick((): void => this.pick(row))
-            }
-          }, (row: ModelRow): string => `${row.providerId}/${row.modelId}`)
+            }, (row: ModelRow): string => `${row.providerId}/${row.modelId}`)
+          }
+          .width('100%')
         }
-        .width('100%').layoutWeight(1)
-        .divider({ strokeWidth: 1, color: LINE })
+        .width('100%').layoutWeight(1).align(Alignment.TopStart)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

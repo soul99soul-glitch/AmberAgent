@@ -9,8 +9,8 @@ import { router } from '@kit.ArkUI';
 import { promptAction } from '@kit.ArkUI';
 import type { MiniAppSetting } from '@amber/chat-domain';
 import { makeMiniAppSetting } from '@amber/chat-domain';
-import { ACCENT, BG, BODY, BODY2, INK, INK3, LINE, META, SURFACE } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { ACCENT, BG } from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, NavRow, ToggleRow, PageSpacer } from '../components/PageTemplate.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 
@@ -180,74 +180,39 @@ struct MiniAppSettingsPage {
 
   @Builder
   groupRow(kind: MiniAppGroupKind): void {
-    Row() {
-      Column() {
-        Text(groupTitle(kind))
-          .fontSize(BODY)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(INK)
-        Text(groupDescription(kind))
-          .fontSize(BODY2)
-          .fontColor(INK3)
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      Text('›').fontSize(BODY).fontColor(INK3)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: 1, color: LINE })
-    .borderRadius(14)
-    .onClick((): void => {
-      router.pushUrl({ url: 'pages/MiniAppSettingsPage', params: { group: kind } });
+    NavRow({
+      label: groupTitle(kind),
+      desc: groupDescription(kind),
+      isLast: kind === 'advanced',
+      onRowClick: (): void => {
+        router.pushUrl({ url: 'pages/MiniAppSettingsPage', params: { group: kind } });
+      },
     })
   }
 
   @Builder
-  switchRow(row: SwitchRowData, enabled: boolean): void {
-    Row() {
-      Column() {
-        Text(row.title)
-          .fontSize(BODY)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(enabled ? INK : INK3)
-        Text(row.description)
-          .fontSize(BODY2)
-          .fontColor(INK3)
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .margin({ top: 3 })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-
-      Toggle({ type: ToggleType.Switch, isOn: this.valueForKey(this.setting, row.key) })
-        .selectedColor(this.accentColorStore)
-        .enabled(enabled)
-        .onChange((_v: boolean): void => { this.toggle(row.key); })
+  switchRow(row: SwitchRowData, enabled: boolean, isLast: boolean): void {
+    Column() {
+      ToggleRow({
+        label: row.title,
+        desc: row.description,
+        checked: this.valueForKey(this.setting, row.key),
+        isLast: isLast,
+        onToggle: (): void => { if (enabled) this.toggle(row.key); },
+      })
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .border({ width: { bottom: 0.5 }, color: LINE })
+    .opacity(enabled ? 1 : 0.5)
   }
 
   @Builder
   groupContent(rows: SwitchRowData[]): void {
     Column() {
-      ForEach(rows, (row: SwitchRowData): void => {
-        this.switchRow(row, this.setting.enabled)
+      ForEach(rows, (row: SwitchRowData, idx: number): void => {
+        this.switchRow(row, this.setting.enabled, idx === rows.length - 1)
       }, (row: SwitchRowData): string => row.key)
     }
     .width('100%')
-    .backgroundColor(SURFACE)
-    .border({ width: 1, color: LINE })
-    .borderRadius(14)
-    .clip(true)
   }
 
   build(): void {
@@ -258,30 +223,13 @@ struct MiniAppSettingsPage {
         Column() {
           if (this.group === null) {
             SectionHeader({ label: '启用' })
-            Row() {
-              Column() {
-                Text('启用小应用')
-                  .fontSize(BODY)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor(INK)
-                Text('允许 Amber 生成、保存并运行轻量 HTML 工具')
-                  .fontSize(BODY2)
-                  .fontColor(INK3)
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-                  .margin({ top: 3 })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .layoutWeight(1)
-              Toggle({ type: ToggleType.Switch, isOn: this.setting.enabled })
-                .selectedColor(this.accentColorStore)
-                .onChange((_v: boolean): void => { this.toggle('enabled'); })
-            }
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: 1, color: LINE })
-            .borderRadius(14)
+            ToggleRow({
+              label: '启用小应用',
+              desc: '允许 Amber 生成、保存并运行轻量 HTML 工具',
+              checked: this.setting.enabled,
+              isLast: true,
+              onToggle: (): void => { this.toggle('enabled'); },
+            })
 
             SectionHeader({ label: '分组' })
             this.groupRow('common')
@@ -301,10 +249,10 @@ struct MiniAppSettingsPage {
           PageSpacer()
         }
         .width('100%')
-        .padding({ left: 18, right: 18 })
+        .padding({ left: 0, right: 0 })
       }
       .layoutWeight(1)
-      .align(Alignment.Top)
+      .align(Alignment.TopStart)
       .backgroundColor(BG)
     }
     .width('100%').height('100%')

@@ -1,23 +1,7 @@
 // ChatAgentExecutionPage — 运行与显示设置面(D-115)
-// Android 锚点:
-//   SettingAgentExecutionPage.kt(全文 395 行)— 本切片移植两卡三行:
-//     '运行' CardGroup(:77-153):工具循环上限 Select
-//       (options 64/128/256/384/512,:46;selectedOption coerceIn(16,512),:132-135;
-//       optionToString '%1$d 步';写入 :136-143)
-//     '生成稳定性' CardGroup(:320-392 前两行):自动重试生成 Switch(:325-345)
-//       + 重试上限 Select(options 1/2/3/5,:47;coerceIn(1,5),:353;
-//       optionToString '%1$d 次';写入 :354-364)
-//   PreferencesStore.kt:163,181(maxToolLoopSteps 默认 256;
-//     generationRetry 默认 GenerationRetrySetting(){enabled=true,maxRetries=5})
-//   PreferencesStore.kt:268-270(界 MIN 16 / DEFAULT 256 / MAX 512)
-//   values-zh/strings.xml:643-644,646-651,993-995(标题/组名/文案逐字)
-// 未移植行(P1 登记,对应未落地子系统,不做静默无操作开关):
-//   显示卡 generativeUi 行(:80-124 部分;operationPreviewMode 已落地 D-122);
-//   实时状态卡 enableLiveStatusNotification/hideSensitiveLiveStatus(:155-199);
-//   Live 伴随卡 liveMode 五行(:201-318);
-//   后台保活 keepGenerationAliveInBackground(:372-390)
-import { ACCENT,ACCENT_INK,BG,INK,INK3,LINE,SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+// Android 锚点：工具循环上限、操作预览、自动重试生成、重试上限。
+import { BG, INK, INK3, TEXT_STYLES } from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, ToggleRow, Seg, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import {
   loadAgentRuntimeSnapshot, updateAgentRuntimeExecution,
 } from '../platform_impl/AgentRuntimePrefs.ets';
@@ -26,15 +10,11 @@ import type {
 } from '../platform_impl/AgentRuntimePrefs.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 
-
-// :46/:47 选项逐字
 const TOOL_LOOP_STEP_OPTIONS: number[] = [64, 128, 256, 384, 512];
 const RETRY_COUNT_OPTIONS: number[] = [1, 2, 3, 5];
-// D-122::48 AgentOperationPreviewMode.entries 序 + values-zh:986-990 文案逐字
 const PREVIEW_MODE_OPTIONS: AgentOperationPreviewMode[] = ['always', 'auto', 'hidden'];
 const PREVIEW_MODE_LABELS: string[] = ['常驻', '自动', '隐藏'];
 
-// :132-135 / :353 — 显示选中值 coerceIn(与 Android 同:持久化原样持有,显示钳制)
 const coerceIn = (v: number, lo: number, hi: number): number =>
   Math.min(Math.max(v, lo), hi);
 
@@ -60,7 +40,6 @@ struct ChatAgentExecutionPage {
     this.loaded = true;
   }
 
-  // :136-143 — vm.updateSettings { copy(agentRuntime = copy(maxToolLoopSteps = steps)) }
   private setToolLoopSteps(steps: number): void {
     updateAgentRuntimeExecution(getChatKvStore(), { maxToolLoopSteps: steps })
       .then((snap: AgentRuntimeSnapshot): void => {
@@ -68,7 +47,6 @@ struct ChatAgentExecutionPage {
       });
   }
 
-  // D-122::81-90 — agentRuntime.copy(operationPreviewMode = mode)
   private setPreviewMode(mode: AgentOperationPreviewMode): void {
     updateAgentRuntimeExecution(getChatKvStore(), { operationPreviewMode: mode })
       .then((snap: AgentRuntimeSnapshot): void => {
@@ -76,7 +54,6 @@ struct ChatAgentExecutionPage {
       });
   }
 
-  // :331-344 — generationRetry.copy(enabled = checked)
   private setRetryEnabled(checked: boolean): void {
     updateAgentRuntimeExecution(getChatKvStore(), { retryEnabled: checked })
       .then((snap: AgentRuntimeSnapshot): void => {
@@ -84,7 +61,6 @@ struct ChatAgentExecutionPage {
       });
   }
 
-  // :354-364 — generationRetry.copy(maxRetries = maxRetries)
   private setRetryMaxRetries(maxRetries: number): void {
     updateAgentRuntimeExecution(getChatKvStore(), { retryMaxRetries: maxRetries })
       .then((snap: AgentRuntimeSnapshot): void => {
@@ -92,133 +68,125 @@ struct ChatAgentExecutionPage {
       });
   }
 
-  @Builder
-  groupLabel(text: string) {
-    Row() {
-      Text(text)
-        .fontSize(11).fontWeight(FontWeight.Medium).fontColor(INK3)
-    }
-    .width('100%').padding({ left: 8, right: 8, top: 16, bottom: 6 })
+  private numericLabels(options: number[], suffix: string): string[] {
+    return options.map((opt: number): string => `${opt} ${suffix}`);
+  }
+
+  private optionIndex(options: number[], selected: number): number {
+    const idx: number = options.indexOf(selected);
+    return idx >= 0 ? idx : 0;
   }
 
   @Builder
-  switchCard(title: string, desc: string, value: boolean, onChange: (v: boolean) => void) {
-    Row() {
+  selectPaper(title: string, desc: string, options: number[], selected: number,
+    valueSuffix: string, onSelect: (v: number) => void, isLast: boolean): void {
+    Column() {
+      Text(title)
+        .fontSize(TEXT_STYLES.body.size)
+        .fontWeight(600)
+        .lineHeight(TEXT_STYLES.body.lineHeight)
+        .fontFamily(TEXT_STYLES.body.family)
+        .fontColor(INK)
+        .width('100%')
+      Text(desc)
+        .fontSize(TEXT_STYLES.secondary.size)
+        .fontWeight(TEXT_STYLES.secondary.weight)
+        .lineHeight(TEXT_STYLES.secondary.lineHeight)
+        .fontFamily(TEXT_STYLES.secondary.family)
+        .fontColor(INK3)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 4 })
+        .width('100%')
       Column() {
-        Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-        Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 })
-          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+        Seg({
+          options: this.numericLabels(options, valueSuffix),
+          selected: this.optionIndex(options, selected),
+          onSelect: (idx: number): void => { onSelect(options[idx]); },
+        })
       }
-      .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
-      Toggle({ type: ToggleType.Switch, isOn: value })
-        .selectedColor(ACCENT)
-        .onChange(onChange)
+      .margin({ top: 10 })
+      if (!isLast) {
+        PaperSeparator()
+      }
     }
-    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
   }
 
-  // Select + ValueChip(:129-151) → 纵向卡:标题/描述在上,芯片行横向可滚(超宽不裁切)
   @Builder
-  selectCard(title: string, desc: string, options: number[], selected: number,
-    valueSuffix: string, onSelect: (v: number) => void) {
+  selectTextPaper(title: string, desc: string, options: AgentOperationPreviewMode[], labels: string[],
+    selected: AgentOperationPreviewMode, onSelect: (v: AgentOperationPreviewMode) => void, isLast: boolean): void {
     Column() {
-      Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
+      Text(title)
+        .fontSize(TEXT_STYLES.body.size)
+        .fontWeight(600)
+        .lineHeight(TEXT_STYLES.body.lineHeight)
+        .fontFamily(TEXT_STYLES.body.family)
+        .fontColor(INK)
         .width('100%')
-      Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 }).width('100%')
-      Scroll() {
-        Row() {
-          ForEach(options, (opt: number) => {
-            Text(`${opt} ${valueSuffix}`)
-              .fontSize(12)
-              .fontColor(opt === selected ? ACCENT_INK : INK)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(opt === selected ? ACCENT : SURFACE)
-              .border({ width: 1, color: opt === selected ? ACCENT : LINE })
-              .borderRadius(10)
-              .margin({ right: 6 })
-              .onClick((): void => { onSelect(opt); })
-          }, (opt: number): string => `${opt}`)
-        }
+      Text(desc)
+        .fontSize(TEXT_STYLES.secondary.size)
+        .fontWeight(TEXT_STYLES.secondary.weight)
+        .lineHeight(TEXT_STYLES.secondary.lineHeight)
+        .fontFamily(TEXT_STYLES.secondary.family)
+        .fontColor(INK3)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 4 })
+        .width('100%')
+      Column() {
+        Seg({
+          options: labels,
+          selected: options.indexOf(selected),
+          onSelect: (idx: number): void => { onSelect(options[idx]); },
+        })
       }
-        .align(Alignment.TopStart)
-      .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
-      .width('100%').margin({ top: 10 })
+      .margin({ top: 10 })
+      if (!isLast) {
+        PaperSeparator()
+      }
     }
-    .alignItems(HorizontalAlign.Start)
-    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
   }
 
-  // D-122:字符串选项变体(:79-100 Select + optionToString)
-  @Builder
-  selectTextCard(title: string, desc: string, options: string[], labels: string[],
-    selected: string, onSelect: (v: string) => void) {
-    Column() {
-      Text(title).fontSize(14).fontWeight(FontWeight.Medium).fontColor(INK)
-        .width('100%')
-      Text(desc).fontSize(11).fontColor(INK3).margin({ top: 4 }).width('100%')
-      Scroll() {
-        Row() {
-          ForEach(options, (opt: string, index: number) => {
-            Text(labels[index])
-              .fontSize(12)
-              .fontColor(opt === selected ? ACCENT_INK : INK)
-              .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-              .backgroundColor(opt === selected ? ACCENT : SURFACE)
-              .border({ width: 1, color: opt === selected ? ACCENT : LINE })
-              .borderRadius(10)
-              .margin({ right: 6 })
-              .onClick((): void => { onSelect(opt); })
-          }, (opt: string): string => opt)
-        }
-      }
-        .align(Alignment.TopStart)
-      .scrollable(ScrollDirection.Horizontal).scrollBar(BarState.Off)
-      .width('100%').margin({ top: 10 })
-    }
-    .alignItems(HorizontalAlign.Start)
-    .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
-  }
-
-  build() {
+  build(): void {
     Column() {
       PageTitleBar({ title: '执行参数' })
-
       if (!this.loaded) {
-        Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+        Text('加载中…')
+          .fontSize(TEXT_STYLES.body.size)
+          .fontWeight(TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(TEXT_STYLES.body.family)
+          .fontColor(INK3)
+          .margin({ top: 32 })
       } else {
         Scroll() {
           Column() {
-            // :644 组名逐字
-            this.groupLabel('运行')
-            // D-122::75-100 操作预览行(组内首项;values-zh:986-990 逐字)
-            this.selectTextCard('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
+            SectionHeader({ label: '运行' })
+            this.selectTextPaper('操作预览', '控制输入框上方的 Agent 实时操作预览显示方式。',
               PREVIEW_MODE_OPTIONS, PREVIEW_MODE_LABELS, this.operationPreviewMode,
-              (v: string): void => { this.setPreviewMode(v as AgentOperationPreviewMode); })
-            // :993-995 文案逐字;:132-135 selectedOption coerceIn(16,512)
-            this.selectCard('工具循环上限', '单次回复最多调用多少轮工具。',
+              (v: AgentOperationPreviewMode): void => { this.setPreviewMode(v); }, false)
+            this.selectPaper('工具循环上限', '单次回复最多调用多少轮工具。',
               TOOL_LOOP_STEP_OPTIONS, coerceIn(this.maxToolLoopSteps, 16, 512), '步',
-              (v: number): void => { this.setToolLoopSteps(v); })
+              (v: number): void => { this.setToolLoopSteps(v); }, true)
 
-            // :646 组名逐字
-            this.groupLabel('生成稳定性')
-            // :647-648 文案逐字
-            this.switchCard('自动重试生成', '网络或服务临时中断时自动重试。',
-              this.retryEnabled,
-              (v: boolean): void => { this.setRetryEnabled(v); })
-            // :649-651 文案逐字;:353 selectedOption coerceIn(1,5)
-            this.selectCard('重试上限', '单次模型调用最多重试次数。',
+            SectionHeader({ label: '生成稳定性' })
+            ToggleRow({
+              label: '自动重试生成', desc: '网络或服务临时中断时自动重试。',
+              checked: this.retryEnabled,
+              onToggle: (): void => { this.setRetryEnabled(!this.retryEnabled); },
+            })
+            this.selectPaper('重试上限', '单次模型调用最多重试次数。',
               RETRY_COUNT_OPTIONS, coerceIn(this.retryMaxRetries, 1, 5), '次',
-              (v: number): void => { this.setRetryMaxRetries(v); })
+              (v: number): void => { this.setRetryMaxRetries(v); }, true)
+            PageSpacer()
           }
-          .width('100%').padding({ left: 18, right: 18, bottom: 24 })
+          .width('100%')
         }
-        .width('100%').layoutWeight(1).align(Alignment.Top)
+        .width('100%').layoutWeight(1).align(Alignment.TopStart)
       }
     }
     .width('100%').height('100%').backgroundColor(BG)

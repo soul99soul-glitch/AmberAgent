@@ -20,8 +20,11 @@
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
 import { promptAction } from '@kit.ArkUI';
-import { ACCENT, BG, INK, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  ACCENT, BG, INK, INK3, INK4, LINE, OVERLAY, SURFACE, ERROR, META, BODY, BODY2, TEXT_STYLES,
+  lineHeightForSize,
+} from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill } from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
 import type {
   InjectionPosition, InjectionRole, Lorebook, PromptInjection, RegexInjection,
@@ -29,9 +32,6 @@ import type {
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { loadLorebooks, loadModeInjections, updateLorebooks, updateModeInjections }
   from '../platform_impl/ExtensionPrefs.ets';
-
-const DANGER: string = '#B5473A';
-
 
 const POSITIONS: InjectionPosition[] = [
   'before_system_prompt', 'after_system_prompt', 'top_of_chat',
@@ -298,10 +298,11 @@ struct ChatPromptsPage {
   @Builder
   tagText(text: string, warn: boolean) {
     Text(text)
-      .fontSize(10)
-      .fontColor(warn ? DANGER : INK3)
+      .fontSize(10.5).fontWeight(600).lineHeight(TEXT_STYLES.tinyTag.lineHeight)
+      .fontFamily(TEXT_STYLES.tinyTag.family)
+      .fontColor(warn ? ERROR : INK3)
       .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-      .border({ width: 1, color: warn ? DANGER : LINE })
+      .border({ width: 1, color: warn ? ERROR : LINE })
       .borderRadius(6)
       .margin({ right: 4 })
   }
@@ -452,14 +453,17 @@ struct ChatPromptsPage {
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.openModeInjectionEditor(mi); })
         Text('删除')
-          .fontSize(12).fontColor(DANGER)
+          .fontSize(12).fontColor(ERROR)
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.deleteModeInjection(mi); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+      .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     }
-    .width('100%').backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
+    .width('100%')
+    if (index < this.modeInjections.length - 1) {
+      PaperSeparator()
+    }
   }
 
   @Builder
@@ -502,14 +506,17 @@ struct ChatPromptsPage {
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.openLorebookEditor(lb); })
         Text('删除')
-          .fontSize(12).fontColor(DANGER)
+          .fontSize(12).fontColor(ERROR)
           .padding({ left: 6, right: 6, top: 4, bottom: 4 })
           .onClick((): void => { this.deleteLorebook(lb); })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 14 })
+      .width('100%').constraintSize({ minHeight: 64 })
+        .padding({ left: 16, right: 16, top: 12, bottom: 12 })
     }
-    .width('100%').backgroundColor(SURFACE).borderRadius(12)
-    .border({ width: 1, color: LINE }).margin({ bottom: 8 })
+    .width('100%')
+    if (index < this.lorebooks.length - 1) {
+      PaperSeparator()
+    }
   }
 
   // ===== overlay:模式注入编辑(:408-505) =====
@@ -632,7 +639,7 @@ struct ChatPromptsPage {
                     .padding({ left: 6, right: 6, top: 4, bottom: 4 })
                     .onClick((): void => { this.openEntryEditor(e); })
                   Text('删除')
-                    .fontSize(12).fontColor(DANGER)
+                    .fontSize(12).fontColor(ERROR)
                     .padding({ left: 6, right: 6, top: 4, bottom: 4 })
                     .onClick((): void => { this.deleteEntry(e); })
                 }
@@ -788,6 +795,7 @@ struct ChatPromptsPage {
         } else {
           Scroll() {
             Column() {
+              SectionHeader({ label: this.tab === 0 ? '模式注入' : '世界书' })
               if (this.tab === 0) {
                 if (this.modeInjections.length === 0) {
                   Column() {
@@ -816,22 +824,20 @@ struct ChatPromptsPage {
                 }
               }
             }
-            .width('100%').padding({ left: 18, right: 18, bottom: 16 })
+            .width('100%').padding({ bottom: 16 })
           }
         .align(Alignment.TopStart)
           .width('100%').layoutWeight(1)
 
           // 添加按钮(floating toolbar 适配;import 未移植)
           Row() {
-            Text(this.tab === 0 ? '＋ 添加模式注入' : '＋ 添加世界书')
-              .fontSize(14).fontColor(Color.White)
-              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-              .padding({ left: 24, right: 24, top: 10, bottom: 10 })
-              .backgroundColor(ACCENT).borderRadius(20)
-              .onClick((): void => {
+            BtnFill({
+              label: this.tab === 0 ? '＋ 添加模式注入' : '＋ 添加世界书',
+              onTap: (): void => {
                 if (this.tab === 0) this.openModeInjectionEditor(null);
                 else this.openLorebookEditor(null);
-              })
+              },
+            })
           }
           .width('100%').justifyContent(FlexAlign.Center)
           .padding({ top: 8, bottom: 8 })

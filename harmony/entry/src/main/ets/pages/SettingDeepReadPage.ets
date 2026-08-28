@@ -1,8 +1,8 @@
 // SettingDeepReadPage — 深度阅读设置(AI 配置 + 热榜源开关 + 搜索源配置面板)
 //   原误置于 HistoryPage,归位独立页(首页功能区/设置入口可达)。
-import { ACCENT,BG,INK,INK2,INK3,INK4,LINE,SURFACE,SURFACE2 } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
-import { router } from '@kit.ArkUI';
+import { ACCENT, BG, INK, INK2, INK3, INK4, SURFACE2, ERROR, SIGNAL, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, BtnFill, BtnGhost, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
@@ -204,255 +204,177 @@ struct SettingDeepReadPage {
 
   build(): void {
     Column() {
-      // ── 顶栏 ──
       PageTitleBar({ title: '深度阅读设置' })
-
-      List({ space: 0 }) {
-        // ── AI 配置分组 ──
-        ListItem() {
+      Scroll() {
+        Column() {
+          SectionHeader({ label: 'AI 配置' })
           Column() {
-            Row() {
-              Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' AI 配置').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
-            }
-            .width('100%').margin({ bottom: 16 })
-            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 100, curve: Curve.EaseIn }))
-
-            Text('API Base URL').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+            Text('API Base URL')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
             TextInput({ text: this.aiBaseUrl })
-              .height(44).fontSize(14).fontColor(INK)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.aiBaseUrl = v; })
-              .margin({ bottom: 20 })
-
-            Text('API Key').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              .height(44).fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .backgroundColor(SURFACE2).borderRadius(8).padding({ left: 14, right: 14 })
+              .onChange((v: string): void => { this.aiBaseUrl = v; })
+            Text('API Key')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+              .margin({ top: 16 })
             TextInput({ text: this.aiKey, placeholder: 'sk-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.aiKey = v; })
-              .margin({ bottom: 20 })
-
-            Text('模型名称').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
+              .height(44).fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .placeholderColor(INK4).backgroundColor(SURFACE2).borderRadius(8)
+              .padding({ left: 14, right: 14 }).onChange((v: string): void => { this.aiKey = v; })
+            Text('模型名称')
+              .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+              .margin({ top: 16 })
             TextInput({ text: this.model, placeholder: 'deepseek-chat' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.model = v; })
+              .height(44).fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .placeholderColor(INK4).backgroundColor(SURFACE2).borderRadius(8)
+              .padding({ left: 14, right: 14 }).onChange((v: string): void => { this.model = v; })
           }
-          .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
-          .border({ width: 1, color: LINE })
-          .margin({ bottom: 24 })
-        }
+          .width('100%').padding({ left: 16, right: 16, bottom: 16 })
 
-        // ── 模型库分组(多模型,供议会/小说选择) ──
-        ListItem() {
-          Column() {
-            Row() {
-              Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 模型库').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
-              Blank()
-              Text('议会 / 小说使用').fontSize(11).fontColor(INK4)
-            }
-            .width('100%').margin({ bottom: 16 })
-
-            if (this.models.length === 0) {
-              Text('暂无模型,请在下方添加。议会的每个席位需指定一个模型。')
-                .fontSize(12).fontColor(INK3).margin({ bottom: 12 })
-            }
-
-            ForEach(this.models, (m: ModelConfig) => {
-              Row() {
-                Column() {
-                  Text(m.label.length > 0 ? m.label : m.model)
-                    .fontSize(14).fontColor(INK)
-                  Text(m.model + '  ·  ' + m.baseUrl)
-                    .fontSize(11).fontColor(INK3).margin({ top: 2 })
-                }
-                .alignItems(HorizontalAlign.Start).layoutWeight(1)
-                Text('✕').fontSize(15).fontColor(INK4)
-                  .padding({ left: 12, top: 4, bottom: 4 })
-                  .onClick(() => { this.deleteModel(m.id); })
-              }
-              .width('100%').padding({ top: 14, bottom: 14 })
-              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-            }, (m: ModelConfig) => m.id)
-
-            // 添加表单
-            Text('名称(可选)').fontSize(12).fontColor(INK3).margin({ top: 16, bottom: 6 })
-            TextInput({ text: this.newLabel, placeholder: '如:GPT-4o / 备用 DeepSeek' })
-              .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.newLabel = v; })
-
-            Text('API Base URL').fontSize(12).fontColor(INK3).margin({ top: 12, bottom: 6 })
-            TextInput({ text: this.newBaseUrl })
-              .height(44).fontSize(14).fontColor(INK)
-              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.newBaseUrl = v; })
-
-            Text('API Key').fontSize(12).fontColor(INK3).margin({ top: 12, bottom: 6 })
-            TextInput({ text: this.newApiKey, placeholder: 'sk-...' })
-              .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.newApiKey = v; })
-
-            Text('模型名称').fontSize(12).fontColor(INK3).margin({ top: 12, bottom: 6 })
-            TextInput({ text: this.newModel, placeholder: 'deepseek-chat' })
-              .height(44).fontSize(14).fontColor(INK).placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10).padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.newModel = v; })
-
-            Row() {
-              Text('添加模型').fontSize(13).fontColor(ACCENT)
-                .onClick(() => { this.addModel(); })
-              Blank()
-              Text(this.modelSaved).fontSize(12).fontColor(INK3)
-            }
-            .width('100%').margin({ top: 12 })
+          SectionHeader({ label: '模型库' })
+          if (this.models.length === 0) {
+            Text('暂无模型,请在下方添加。议会的每个席位需指定一个模型。')
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3).padding({ left: 16, right: 16, bottom: 12 })
           }
-          .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
-          .border({ width: 1, color: LINE })
-          .margin({ bottom: 24 })
-        }
-
-        // ── 热榜源分组 ──
-        ListItem() {
-          Column() {
+          ForEach(this.models, (m: ModelConfig, idx: number): void => {
             Row() {
-              Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 热榜源').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
-              Blank()
-              Text('NewsNow').fontSize(11).fontColor(INK4)
-            }
-            .width('100%').margin({ bottom: 16 })
-            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 200, curve: Curve.EaseIn }))
-
-            ForEach(this.hotlistToggles, (t: SourceToggle) => {
-              Row() {
-                Text(t.displayName).fontSize(14).fontColor(INK2).layoutWeight(1)
-                Toggle({ type: ToggleType.Switch, isOn: t.enabled })
-                  .selectedColor(ACCENT)
-                  .onChange(() => { this.toggleHotlist(t.id); })
-              }
-              .width('100%').padding({ top: 14, bottom: 14 })
-              .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-            })
-          }
-          .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
-          .border({ width: 1, color: LINE })
-          .margin({ bottom: 24 })
-        }
-
-        // ── 搜索源配置分组 ──
-        ListItem() {
-          Column() {
-            Row() {
-              Text('//').fontSize(13).fontColor(ACCENT).fontWeight(FontWeight.Bold)
-              Text(' 搜索源').fontSize(14).fontWeight(FontWeight.Bold).fontColor(INK2)
-              Blank()
-              Text('Deep Read 搜索').fontSize(11).fontColor(INK4)
-            }
-            .width('100%').margin({ bottom: 16 })
-            .transition(TransitionEffect.OPACITY.animation({ duration: 300, delay: 300, curve: Curve.EaseIn }))
-
-            // 源选择器(自定义下拉菜单)
-            Text('选择搜索源').fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-
-            Row() {
-              Text(KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择')
-                .fontSize(14).fontColor(INK).layoutWeight(1)
-              Text('▼').fontSize(12).fontColor(INK3)
-            }
-            .width('100%').height(44).padding({ left: 14, right: 14 })
-            .backgroundColor(SURFACE2).borderRadius(10)
-            .onClick(() => { this.showSourcePicker = !this.showSourcePicker; })
-
-            if (this.showSourcePicker) {
               Column() {
-                ForEach(KEYED_SOURCES, (s: SearchSourceDef) => {
-                  Row() {
-                    Text(s.displayName).fontSize(14).fontColor(s.id === this.selectedSource ? ACCENT : INK2)
-                  }
-                  .width('100%').padding({ top: 14, bottom: 14, left: 14, right: 14 })
-                  .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-                  .onClick(() => {
-                    this.selectSource(s.id);
-                    this.showSourcePicker = false;
-                  })
-                })
+                Text(m.label.length > 0 ? m.label : m.model)
+                  .fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+                  .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+                Text(m.model + '  ·  ' + m.baseUrl)
+                  .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                  .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+                  .margin({ top: 3 })
               }
-              .width('100%').backgroundColor(SURFACE).borderRadius(10)
-              .border({ width: 1, color: LINE })
-              .transition(TransitionEffect.OPACITY.animation({ duration: 200, curve: Curve.EaseIn }))
-              .transition(TransitionEffect.translate({ y: -10 }).animation({ duration: 200, curve: Curve.EaseOut }))
-              .margin({ top: 4 })
+              .alignItems(HorizontalAlign.Start).layoutWeight(1)
+              BtnGhost({ label: '删除', onTap: (): void => { this.deleteModel(m.id); } })
             }
-
-            // 当前源的 key 输入
-            Text('API Key').fontSize(12).fontColor(INK3).margin({ top: 16, bottom: 6 })
-            TextInput({ text: this.currentKey, placeholder: KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.keyPlaceholder ?? 'api-key-...' })
-              .height(44).fontSize(14).fontColor(INK)
-              .placeholderColor(INK4)
-              .backgroundColor(SURFACE2).borderRadius(10)
-              .padding({ left: 14, right: 14 })
-              .onChange((v: string) => { this.currentKey = v; })
-
-            // 测试按钮
+            .width('100%').constraintSize({ minHeight: 64 })
+            .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+            if (idx < this.models.length - 1) {
+              PaperSeparator()
+            }
+          }, (m: ModelConfig): string => m.id)
+          Column() {
+            Text('名称(可选)').fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+            TextInput({ text: this.newLabel, placeholder: '如:GPT-4o / 备用 DeepSeek' })
+              .height(44).fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .placeholderColor(INK4).backgroundColor(SURFACE2).borderRadius(8)
+              .padding({ left: 14, right: 14 }).onChange((v: string): void => { this.newLabel = v; })
+            Text('API Base URL').fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 12 })
+            TextInput({ text: this.newBaseUrl }).height(44).fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight).lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).backgroundColor(SURFACE2).borderRadius(8)
+              .padding({ left: 14, right: 14 }).onChange((v: string): void => { this.newBaseUrl = v; })
+            Text('API Key').fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 12 })
+            TextInput({ text: this.newApiKey, placeholder: 'sk-...' }).height(44).fontSize(TEXT_STYLES.secondary.size)
+              .fontWeight(TEXT_STYLES.secondary.weight).lineHeight(TEXT_STYLES.secondary.lineHeight)
+              .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK).placeholderColor(INK4)
+              .backgroundColor(SURFACE2).borderRadius(8).padding({ left: 14, right: 14 })
+              .onChange((v: string): void => { this.newApiKey = v; })
+            Text('模型名称').fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ top: 12 })
+            TextInput({ text: this.newModel, placeholder: 'deepseek-chat' }).height(44)
+              .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .placeholderColor(INK4).backgroundColor(SURFACE2).borderRadius(8).padding({ left: 14, right: 14 })
+              .onChange((v: string): void => { this.newModel = v; })
             Row() {
-              Text('测试连通').fontSize(13).fontColor(ACCENT)
-                .onClick(() => { this.testSource(); })
-              Blank()
-              if (this.testStatus === 'testing') {
-                Text('测试中...').fontSize(12).fontColor(INK3)
-              } else if (this.testStatus === 'ok') {
-                Text('✓ ' + this.testResult).fontSize(12).fontColor('#43A047')
-              } else if (this.testStatus === 'error') {
-                Text('✗ ' + this.testResult).fontSize(12).fontColor('#E53935')
+              BtnFill({ label: '添加模型', onTap: (): void => { this.addModel(); } })
+              Text(this.modelSaved).fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).margin({ left: 12 })
+            }
+            .width('100%').margin({ top: 12 })
+          }
+          .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 })
+
+          SectionHeader({ label: '热榜源' })
+          ForEach(this.hotlistToggles, (t: SourceToggle, idx: number): void => {
+            ToggleRow({ label: t.displayName, checked: t.enabled, isLast: idx === this.hotlistToggles.length - 1,
+              onToggle: (): void => { this.toggleHotlist(t.id); } })
+          }, (t: SourceToggle): string => t.id)
+
+          SectionHeader({ label: '搜索源' })
+          SelectRow({ label: '选择搜索源', valueText: KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.displayName ?? '选择',
+            isLast: false, onRowClick: (): void => { this.showSourcePicker = !this.showSourcePicker; } })
+          if (this.showSourcePicker) {
+            Column() {
+              ForEach(KEYED_SOURCES, (s: SearchSourceDef, idx: number): void => {
+                Row() {
+                  Text(s.displayName).fontSize(TEXT_STYLES.body.size).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+                    .fontFamily(FONT_SANS_SEMIBOLD).fontColor(s.id === this.selectedSource ? ACCENT : INK2)
+                }
+                .width('100%').constraintSize({ minHeight: 64 })
+                .padding({ left: 32, right: 16, top: 12, bottom: 12 })
+                .onClick((): void => {
+                  this.selectSource(s.id);
+                  this.showSourcePicker = false;
+                })
+                if (idx < KEYED_SOURCES.length - 1) {
+                  PaperSeparator()
+                }
+              }, (s: SearchSourceDef): string => s.id)
+            }
+            .width('100%')
+          }
+          Column() {
+            Text('API Key').fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+              .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+            TextInput({ text: this.currentKey, placeholder: KEYED_SOURCES.find((s) => s.id === this.selectedSource)?.keyPlaceholder ?? 'api-key-...' })
+              .height(44).fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(INK)
+              .placeholderColor(INK4).backgroundColor(SURFACE2).borderRadius(8).padding({ left: 14, right: 14 })
+              .onChange((v: string): void => { this.currentKey = v; })
+            Row() {
+              BtnGhost({ label: '测试连通', onTap: (): void => { this.testSource(); } })
+              if (this.testStatus.length > 0) {
+                Text(this.testStatus === 'testing' ? '测试中...' : this.testResult)
+                  .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+                  .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+                  .fontColor(this.testStatus === 'error' ? ERROR : (this.testStatus === 'ok' ? SIGNAL : INK3))
+                  .margin({ left: 12 })
               }
             }
             .width('100%').margin({ top: 12 })
-
-            // 保存按钮
-            Text('保存此源配置').fontSize(13).fontColor(ACCENT)
-              .margin({ top: 12 })
-              .onClick(() => { this.saveSourceConfig(); })
-          }
-          .width('100%').padding(18).backgroundColor(SURFACE).borderRadius(14)
-          .border({ width: 1, color: LINE })
-          .margin({ bottom: 24 })
-        }
-
-        // ── 说明 ──
-        ListItem() {
-          Text('NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。')
-            .fontSize(11).fontColor(INK4).margin({ bottom: 24 })
-        }
-
-        // ── 保存按钮 ──
-        ListItem() {
-          Column() {
-            Column() {
-              Text('保存全部').fontSize(15).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
+            Row() {
+              BtnFill({ label: '保存此源配置', onTap: (): void => { this.saveSourceConfig(); } })
             }
-            .width('70%').height(48).borderRadius(12)
-            .backgroundColor(ACCENT)
-            .justifyContent(FlexAlign.Center)
-            .onClick(() => { this.save(); })
+            .width('100%').margin({ top: 8 })
           }
-          .width('100%').justifyContent(FlexAlign.Center)
-        }
+          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
 
-        // ── 保存状态 ──
-        ListItem() {
-          Text(this.saved.length > 0 ? this.saved : '').fontSize(13).fontColor(ACCENT).margin({ top: 10 })
+          Text('NewsNow/DuckDuckGo/HackerNews/Jina 始终可用,无需 key。')
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(INK4)
+            .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+          Row() {
+            BtnFill({ label: '保存全部', onTap: (): void => { this.save(); } })
+          }
+          .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
+          Text(this.saved.length > 0 ? this.saved : '')
+            .fontSize(TEXT_STYLES.meta.size).fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight).fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
+            .padding({ left: 16, top: 8, bottom: 24 })
+          PageSpacer()
         }
+        .width('100%').alignItems(HorizontalAlign.Start)
       }
-      .layoutWeight(1)
-      .padding({ left: 18, right: 18 })
+      .layoutWeight(1).align(Alignment.TopStart).backgroundColor(BG)
+      .align(Alignment.TopStart)
     }
     .width('100%').height('100%').backgroundColor(BG)
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])

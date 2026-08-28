@@ -7,11 +7,79 @@ import type { FavoriteEntry } from '../platform_impl/FavoriteStore.ets';
 import { promptAction } from '@kit.ArkUI';
 import { listFavorites, removeFavorite } from '../platform_impl/FavoriteStore.ets';
 import {
-  BG, SURFACE, INK, INK3, INK4, LINE, ERROR,
-  BODY, BODY2, META, MONO_SMALL,
+  BG, SURFACE2, INK, INK3, INK4, ERROR,
+  BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { PageTitleBar, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
+
+@Component
+struct FavoritePaperRow {
+  @Prop title: string = '';
+  @Prop content: string = '';
+  @Prop dateText: string = '';
+  @Prop isLast: boolean = false;
+  onDelete: () => void = (): void => {};
+  @State private pressed: boolean = false;
+
+  build(): void {
+    Column() {
+      Row() {
+        Column() {
+          Text(this.title)
+            .fontSize(15)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(INK)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text(this.content)
+            .fontSize(BODY2)
+            .fontWeight(400)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3)
+            .maxLines(3)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 4 })
+            .width('100%')
+          Text(this.dateText)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(500)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK4)
+            .margin({ top: 6 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Row() {
+          Icon({ name: 'trash', iconSize: 15, color: ERROR })
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick((): void => { this.onDelete(); })
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        if (e.type === TouchType.Down) this.pressed = true;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+}
 
 @Entry
 @Component
@@ -42,48 +110,36 @@ struct FavoritePage {
 
       if (this.loaded && this.items.length === 0) {
         Column() {
-          Text('// 暂无收藏').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+          Text('// 暂无收藏')
+            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
           Text('在消息动作行点 star 收藏一段回答')
-            .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
+            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK4).margin({ top: 8 })
         }
         .width('100%').padding({ top: 80 }).alignItems(HorizontalAlign.Center)
       } else {
         List() {
-          ForEach(this.items, (f: FavoriteEntry): void => {
+          ForEach(this.items, (f: FavoriteEntry, index: number): void => {
             ListItem() {
-              Column() {
-                Row() {
-                  Text(f.title.length > 0 ? f.title : '（无标题）')
-                    .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK)
-                    .layoutWeight(1).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Icon({ name: 'trash', iconSize: 15, color: ERROR })
-                    .onClick((): void => {
-                      AlertDialog.show({
-                        title: '取消收藏', message: '删除这条收藏？',
-                        primaryButton: { value: '取消', action: (): void => {} },
-                        secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
-                          removeFavorite(f.id).then((): void => { this.reload(); })
-                            .catch((e: Error): void => {
-                              promptAction.showToast({ message: `删除失败:${e.message}`, duration: 1800 });
-                            });
-                        } },
-                      });
-                    })
-                }
-                .width('100%')
-
-                Text(f.content).fontSize(BODY2).fontColor(INK3).margin({ top: 4 })
-                  .maxLines(3).textOverflow({ overflow: TextOverflow.Ellipsis })
-
-                Text(this.fmtDate(f.createdAt))
-                  .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono')
-                  .margin({ top: 6 })
-              }
-              .padding(14)
-              .backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(14)
-              .margin({ left: 18, right: 18, bottom: 10 })
-              .alignItems(HorizontalAlign.Start)
+              FavoritePaperRow({
+                title: f.title.length > 0 ? f.title : '（无标题）',
+                content: f.content,
+                dateText: this.fmtDate(f.createdAt),
+                isLast: index === this.items.length - 1,
+                onDelete: (): void => {
+                  AlertDialog.show({
+                    title: '取消收藏', message: '删除这条收藏？',
+                    primaryButton: { value: '取消', action: (): void => {} },
+                    secondaryButton: { value: '删除', fontColor: ERROR, action: (): void => {
+                      removeFavorite(f.id).then((): void => { this.reload(); })
+                        .catch((e: Error): void => {
+                          promptAction.showToast({ message: `删除失败:${e.message}`, duration: 1800 });
+                        });
+                    } },
+                  });
+                },
+              })
             }
           }, (f: FavoriteEntry): string => f.id)
         }

@@ -2,8 +2,9 @@
 // Android 基准: SettingAboutPage.kt — 版本/构建/开源说明。
 //   版本号经 bundleManager 取真值(不写死);开源仓库无外链目标 → 纯说明行(无箭头)。
 import { bundleManager } from '@kit.AbilityKit';
-import { INK, INK2, INK3, SURFACE, LINE, BG, BODY, META, LABEL } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import { INK, INK3, BG, BODY, TITLE, LABEL, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
+import { FONT_MONO, FONT_SANS_MEDIUM, FONT_SANS_BOLD } from '../design/fonts.ets';
+import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 
 @Entry
 @Component
@@ -27,48 +28,28 @@ struct SettingAboutPage {
         Column() {
           // 应用信息
           Column() {
-            Text('AmberAgent').fontSize(22).fontWeight(FontWeight.Bold).fontColor(INK)
-            Text('鸿蒙原生版').fontSize(BODY).fontColor(INK3).margin({ top: 4 })
+            Text('AmberAgent')
+              .fontSize(TITLE).fontWeight(FontWeight.Bold).lineHeight(TEXT_STYLES.screenTitle.lineHeight).fontFamily(FONT_SANS_BOLD).fontColor(INK)
+            Text('鸿蒙原生版')
+              .fontSize(BODY).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(FONT_SANS_MEDIUM).fontColor(INK3).margin({ top: 4 })
           }
           .width('100%')
           .padding({ top: 40, bottom: 24 })
           .alignItems(HorizontalAlign.Center)
 
-          Column() {
-            Row() {
-              Text('版本').fontSize(BODY).fontColor(INK2).layoutWeight(1)
-              Text(this.versionLabel).fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.End)
-            }
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-
-            Row() {
-              Text('构建').fontSize(BODY).fontColor(INK2).layoutWeight(1)
-              Text('HarmonyOS NEXT / ArkTS').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
-                .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis }).textAlign(TextAlign.End)
-            }
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .border({ width: { top: 0.5 }, color: { top: LINE } })
-
-            Row() {
-              Text('开源社区项目 · 不收集任何用户数据').fontSize(LABEL).fontColor(INK3)
-            }
-            .width('100%')
-            .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-            .border({ width: { top: 0.5 }, color: { top: LINE } })
-          }
-          .backgroundColor(SURFACE)
-          .border({ width: 1, color: LINE }).borderRadius(14).clip(true)
-          .margin({ left: 18, right: 18 })
+          SectionHeader({ label: '应用信息' })
+          NavRow({ label: '版本', valueText: this.versionLabel, showChevron: false })
+          NavRow({ label: '构建', valueText: 'HarmonyOS NEXT / ArkTS', showChevron: false })
+          NavRow({ label: '开源社区项目', desc: '不收集任何用户数据', isLast: true, showChevron: false })
 
           Text('Powered by multiple AI providers.')
-            .fontSize(LABEL).fontColor(INK3).fontFamily('JetBrainsMono')
+            .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 24 })
             .textAlign(TextAlign.Center).width('100%')
 
-          Column() {}.height(40)
+          PageSpacer()
         }
         .width('100%')
       }

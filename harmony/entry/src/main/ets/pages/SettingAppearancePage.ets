@@ -1,17 +1,16 @@
 // SettingAppearancePage — 外观(iOS AppearanceSettingsView 对位)
-// 颜色模式(浅色/深色/跟随系统)+ 强调色五选一。自设置主页迁入,
-// 主页一行「外观 value=当前模式」进入。
+// 颜色模式(浅色/深色/跟随系统)+ 强调色五选一。自设置主页迁入。
 import {
-  BG, SURFACE, SURFACE2, RAISED, INK, INK3, LINE,
-  ACCENT, ACCENT_INK, BODY2, applyTheme, setAccentColor,
+  BG, INK, ACCENT, ACCENT_OPTIONS, setAccentColor, applyTheme,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { PageTitleBar, SectionHeader, PageSpacer, Seg } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { applyWindowTheme } from '../entryability/EntryAbility.ets';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { loadDisplaySetting, saveDisplaySetting } from '@amber/chat-domain';
 
 const UI_COLOR_MODE_KEY: string = 'ui_color_mode';
+const THEME_MODE_OPTIONS: string[] = ['浅色', '深色', '跟随系统'];
 
 @Entry
 @Component
@@ -56,71 +55,49 @@ struct SettingAppearancePage {
     }).catch((): void => {});
   }
 
-  build() {
+  private themeModeIndex(): number {
+    if (this.themeMode === 'light') return 0;
+    if (this.themeMode === 'dark') return 1;
+    return 2;
+  }
+
+  build(): void {
     Column() {
       PageTitleBar({ title: '外观' })
-
       Scroll() {
         Column() {
-          // ── 颜色模式 ──
           SectionHeader({ label: '颜色模式' })
-
-          Row() {
-            Row() {
-              Text('浅色')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'light' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'light' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'light' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('light'); })
-
-            Row() {
-              Text('深色')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'dark' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'dark' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'dark' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('dark'); })
-
-            Row() {
-              Text('跟随系统')
-                .fontSize(BODY2)
-                .fontWeight(this.themeMode === 'system' ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.themeMode === 'system' ? INK : INK3)
-            }
-            .layoutWeight(1).justifyContent(FlexAlign.Center)
-            .padding({ top: 9, bottom: 9 }).borderRadius(10)
-            .backgroundColor(this.themeMode === 'system' ? RAISED : 'transparent')
-            .onClick((): void => { this.setTheme('system'); })
-          }
-          .width('100%').padding(4)
-          .backgroundColor(SURFACE2).borderRadius(13)
-          .margin({ top: 4 })
-
-          // ── 强调色 ──
+          Seg({
+            options: THEME_MODE_OPTIONS,
+            selected: this.themeModeIndex(),
+            onSelect: (idx: number): void => {
+              this.setTheme(idx === 0 ? 'light' : idx === 1 ? 'dark' : 'system');
+            },
+          })
           SectionHeader({ label: '强调色' })
           Row() {
-            ForEach(['#B8623A', '#5E9C6E', '#4F86D6', '#9277C4', '#C2607A'],
-              (color: string, idx: number): void => {
-                Text(this.accentColor === color ? '✓' : '')
-                  .fontSize(18).fontColor(ACCENT_INK)
-                  .width(36).height(36).borderRadius(18)
-                  .backgroundColor(color)
+            ForEach(ACCENT_OPTIONS, (color: string, idx: number): void => {
+              Stack({ alignContent: Alignment.Center }) {
+                Column()
+                  .width(this.accentColor === color ? 44 : 36)
+                  .height(this.accentColor === color ? 44 : 36)
+                  .borderRadius(this.accentColor === color ? 22 : 18)
+                  .backgroundColor(this.accentColor === color ? BG : color)
                   .border({ width: this.accentColor === color ? 2 : 0, color: INK })
-                  .textAlign(TextAlign.Center)
-                  .margin({ right: idx < 4 ? 12 : 0 })
-                  .onClick((): void => { this.setAccent(color); })
-              }, (color: string, idx: number): string => `swatch-${idx}`)
+                if (this.accentColor === color) {
+                  Column()
+                    .width(36).height(36).borderRadius(18)
+                    .backgroundColor(color)
+                    .border({ width: 3, color: BG })
+                }
+              }
+              .width(44).height(44)
+              .margin({ right: idx < ACCENT_OPTIONS.length - 1 ? 12 : 0 })
+              .onClick((): void => { this.setAccent(color); })
+            }, (color: string, idx: number): string => `swatch-${idx}-${color}`)
           }
           .width('100%')
-          .padding({ left: 6, top: 10, bottom: 4 })
-
+          .padding({ left: 0, top: 10, bottom: 4 })
           PageSpacer()
         }
         .width('100%')

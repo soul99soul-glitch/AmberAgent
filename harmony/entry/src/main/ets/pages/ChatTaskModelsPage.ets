@@ -8,8 +8,12 @@
 //     follows = followCompressModel && findModelById(modelId) == null →
 //     '跟随压缩模型' + '当前跟随压缩模型：X';onClear → AUTO + follow=true;
 //     onSelect → id + follow=false
-import { ACCENT, BG, INK, INK2, INK3, LINE, OVERLAY, SURFACE } from '../design/tokens.ets';
-import { PageTitleBar } from '../components/PageTemplate.ets';
+import {
+  ACCENT, BG, INK, INK2, INK3, OVERLAY, SURFACE, META, BODY, TEXT_STYLES,
+} from '../design/tokens.ets';
+import { PageTitleBar, SectionHeader, PaperSeparator } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { router } from '@kit.ArkUI';
 import {
   loadProviders, hasUsableAuth, DEFAULT_AUTO_MODEL_ID,
@@ -217,19 +221,25 @@ struct ChatTaskModelsPage {
   @Builder
   taskCard(title: string, desc: string, currentLine: string, followLine: string,
     showClear: boolean, clearText: string, task: string, hasPrompt: boolean,
-    isWorkerRow: boolean) {
+    isWorkerRow: boolean, isLast: boolean) {
     Column() {
       Row() {
         Column() {
-          Text(title).fontSize(15).fontWeight(FontWeight.Medium).fontColor(INK)
+          Text(title)
+            .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(desc).fontSize(12).fontColor(INK3).margin({ top: 3 })
+          Text(desc)
+            .fontSize(TEXT_STYLES.secondary.size).fontWeight(FontWeight.Normal)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(INK3).margin({ top: 3 })
             .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         if (hasPrompt) {
           Text('提示词')
-            .fontSize(13).fontColor(ACCENT)
+            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
             .onClick((): void => { this.openPromptEditor(task); })
         }
       }
@@ -237,20 +247,29 @@ struct ChatTaskModelsPage {
 
       Row() {
         Column() {
-          Text(currentLine).fontSize(13).fontColor(INK2)
-            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row() {
+            Text(currentLine)
+              .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK2)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Icon({ name: 'chevron_down', iconSize: 12, color: INK3 }).margin({ left: 4 })
+          }
           if (followLine.length > 0) {
-            Text(followLine).fontSize(11).fontColor(INK3).margin({ top: 3 })
+            Text(followLine)
+              .fontSize(META).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK3).margin({ top: 3 })
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
         }
         .alignItems(HorizontalAlign.Start).layoutWeight(1)
         Text('选择')
-          .fontSize(13).fontColor(ACCENT).margin({ right: 16 })
+          .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT).margin({ right: 16 })
           .onClick((): void => { this.openPicker(task); })
         if (showClear) {
           Text(clearText)
-            .fontSize(13).fontColor(INK3)
+            .fontSize(META).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO).fontColor(INK3)
             .onClick((): void => {
               if (isWorkerRow) {
                 this.clearWorkerModel(task === 'daydream');
@@ -262,10 +281,11 @@ struct ChatTaskModelsPage {
       }
       .width('100%').margin({ top: 10 })
     }
-    .padding({ left: 18, right: 18, top: 14, bottom: 14 })
-    .backgroundColor(SURFACE)
-    .borderRadius(12)
-    .margin({ left: 18, right: 18, top: 12 })
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+    if (!isLast) {
+      PaperSeparator()
+    }
   }
 
   @Builder
@@ -327,18 +347,25 @@ struct ChatTaskModelsPage {
         PageTitleBar({ title: '任务模型' })
 
         if (!this.loaded) {
-          Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })
+          Text('加载中…')
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(TEXT_STYLES.body.weight)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family)
+            .fontColor(INK3)
+            .margin({ top: 32 })
         } else {
           Scroll() {
             Column() {
               // 标题总结模型(:433-470)
+              SectionHeader({ label: '辅助任务' })
               this.taskCard('标题总结模型',
                 '用于总结对话标题的模型, 推荐使用快速且便宜的模型',
                 this.followsChat(this.titleUuid) ? '跟随当前聊天模型' : this.selectedName(this.titleUuid),
                 this.followsChat(this.titleUuid)
                   ? (this.titleFallback.length > 0 ? `当前使用：${this.titleFallback}` : '暂无可用聊天模型')
                   : '',
-                !this.followsChat(this.titleUuid), '恢复为跟随当前聊天模型', 'title', true, false)
+                !this.followsChat(this.titleUuid), '恢复为跟随当前聊天模型', 'title', true, false, false)
 
               // 聊天建议模型(:472-509)
               this.taskCard('聊天建议模型',
@@ -347,7 +374,7 @@ struct ChatTaskModelsPage {
                 this.followsChat(this.suggestionUuid)
                   ? (this.suggestionFallback.length > 0 ? `当前使用：${this.suggestionFallback}` : '暂无可用聊天模型')
                   : '',
-                !this.followsChat(this.suggestionUuid), '恢复为跟随当前聊天模型', 'suggestion', true, false)
+                !this.followsChat(this.suggestionUuid), '恢复为跟随当前聊天模型', 'suggestion', true, false, false)
 
               // 压缩模型(:556-592)
               this.taskCard('压缩模型',
@@ -356,7 +383,7 @@ struct ChatTaskModelsPage {
                 this.followsChat(this.compressUuid)
                   ? (this.compressFallback.length > 0 ? `当前使用：${this.compressFallback}` : '暂无可用聊天模型')
                   : '',
-                !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false)
+                !this.followsChat(this.compressUuid), '恢复为跟随当前聊天模型', 'compress', true, false, false)
 
               // 记忆提取模型(:594-645)— follows = followCompressModel && findById==null(:600)
               this.taskCard('记忆提取模型',
@@ -367,7 +394,7 @@ struct ChatTaskModelsPage {
                   ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
                   : '',
                 !(this.workerFollow && this.followsChat(this.workerUuid)), '恢复跟随压缩模型',
-                'worker', false, true)
+                'worker', false, true, false)
 
               // Daydream 模型(:647-700)
               this.taskCard('Daydream 模型',
@@ -378,7 +405,7 @@ struct ChatTaskModelsPage {
                   ? `当前跟随压缩模型：${this.compressFallback.length > 0 ? this.compressFallback : '不可用'}`
                   : '',
                 !(this.daydreamFollow && this.followsChat(this.daydreamUuid)), '恢复跟随压缩模型',
-                'daydream', false, true)
+                'daydream', false, true, false)
 
               // 视觉识别模型(:511-553;D-098)— 无 allowClear;IMAGE 模态过滤在 picker;
               //   D-111:desc 健康后缀 "${desc} · ${health.label}"(:529 逐字)
@@ -386,7 +413,7 @@ struct ChatTaskModelsPage {
                 `当前聊天模型不能直接读取图片时，用它理解图片内容 · ${this.ocrHealthLabel}`,
                 this.selectedName(this.ocrUuid).length > 0 ? this.selectedName(this.ocrUuid) : '未配置',
                 '',
-                false, '', 'ocr', true, false)
+                false, '', 'ocr', true, false, true)
             }
             .width('100%').padding({ top: 2, bottom: 24 })
           }

@@ -13,15 +13,87 @@ import {
 } from '@amber/chat-domain';
 import { getFilesRepository, getDeleteChatFilesDeps } from '../platform_impl/ManagedFileStore.ets';
 import {
-  BG, SURFACE, INK, INK3, INK4, LINE, ACCENT, ERROR,
-  BODY, BODY2, META, MONO_SMALL,
+  BG, SURFACE2, INK, INK3, INK4, ACCENT, ERROR,
+  BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
-import { PageTitleBar, PageSpacer } from '../components/PageTemplate.ets';
+import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
+import { PageTitleBar, PageSpacer, PaperSeparator } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 
 interface FileRow {
   folder: string;
   file: ManagedFileEntity;
+}
+
+@Component
+struct FilePaperRow {
+  @Prop displayName: string = '';
+  @Prop folderText: string = '';
+  @Prop sizeText: string = '';
+  @Prop mimeType: string = '';
+  @Prop isLast: boolean = false;
+  @State private pressed: boolean = false;
+  onDelete: () => void = (): void => {};
+
+  build(): void {
+    Column() {
+      Row() {
+        Icon({ name: 'doc', iconSize: 18, color: INK3 })
+        Column() {
+          Text(this.displayName)
+            .fontSize(TEXT_STYLES.secondary.size)
+            .fontWeight(600)
+            .lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(FONT_SANS_SEMIBOLD)
+            .fontColor(INK)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+          Text(`${this.folderText} · ${this.sizeText}`)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(500)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 4 })
+          Text(this.mimeType)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(500)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM)
+            .fontColor(INK3)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .margin({ top: 2 })
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        .margin({ left: 10 })
+        Row() {
+          Icon({ name: 'trash', iconSize: 15, color: ERROR })
+        }
+        .width(44)
+        .height(44)
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .onClick((): void => { this.onDelete(); })
+      }
+      .width('100%')
+      .constraintSize({ minHeight: 64 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .onTouch((event: TouchEvent): void => {
+        if (event.type === TouchType.Down) this.pressed = true;
+        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
+      })
+      if (!this.isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
 }
 
 @Entry
@@ -128,41 +200,37 @@ struct SettingFilesPage {
 
       Row() {
         Text(`${this.rows.length} 个托管文件`)
-          .fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono').layoutWeight(1)
+          .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3).layoutWeight(1)
         Text(this.cleaning ? '清理中…' : '清理孤立文件')
-          .fontSize(BODY2).fontColor(ACCENT)
+          .fontSize(BODY2).fontWeight(500).lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .fontFamily(TEXT_STYLES.secondary.family).fontColor(ACCENT)
           .onClick((): void => { this.cleanOrphans(); })
       }
-      .width('100%').padding({ left: 18, right: 18, top: 10, bottom: 4 })
+      .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 4 })
 
       if (this.loaded && this.rows.length === 0) {
         Column() {
-          Text('// 暂无托管文件').fontSize(META).fontColor(INK3).fontFamily('JetBrainsMono')
+          Text('// 暂无托管文件')
+            .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
           Text('对话中的图片/附件会登记在这里')
-            .fontSize(BODY2).fontColor(INK4).margin({ top: 8 })
+            .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK4).margin({ top: 8 })
         }
         .width('100%').padding({ top: 60 }).alignItems(HorizontalAlign.Center)
       } else {
         List() {
-          ForEach(this.rows, (row: FileRow): void => {
+          ForEach(this.rows, (row: FileRow, index: number): void => {
             ListItem() {
-              Row() {
-                Icon({ name: 'doc', iconSize: 18, color: INK3 })
-                Column() {
-                  Text(row.file.displayName).fontSize(BODY2).fontColor(INK)
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                  Text(`${row.folder} · ${this.fmtSize(row.file.sizeBytes)}`)
-                    .fontSize(MONO_SMALL).fontColor(INK4).fontFamily('JetBrainsMono').margin({ top: 2 })
-                    .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                }
-                .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 10 })
-                Icon({ name: 'trash', iconSize: 15, color: ERROR })
-                  .onClick((): void => { this.deleteRow(row); })
-              }
-              .padding({ left: 14, right: 14, top: 14, bottom: 14 })
-              .backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(12)
-              .margin({ left: 18, right: 18, bottom: 8 })
+              FilePaperRow({
+                displayName: row.file.displayName,
+                folderText: row.folder,
+                sizeText: this.fmtSize(row.file.sizeBytes),
+                mimeType: row.file.mimeType,
+                isLast: index === this.rows.length - 1,
+                onDelete: (): void => { this.deleteRow(row); },
+              })
             }
           }, (row: FileRow): string => row.file.relativePath)
         }

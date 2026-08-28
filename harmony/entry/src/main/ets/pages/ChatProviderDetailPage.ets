@@ -15,11 +15,13 @@ import {
 import { getChatKvStore } from '../di/AppContainer.ets';
 import { toProviderMonogram, providerSlug, providerAuthLabel } from '../di/ProviderDefaults.ets';
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, LINE2, BODY, BODY2, META, LABEL, ERROR, RADIUS,
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, BODY, BODY2, META, MONO_SMALL, LABEL, ERROR, RADIUS,
+  TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FlatTextField } from '../components/ui/FlatTextField.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { FONT_MONO } from '../design/fonts.ets';
+import { BtnFill, BtnGhost, Chip, PaperSeparator, ToggleRow, SectionHeader } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 
 // 模板新增流:列表页 → 本页 的对象暂存(单线程 UI,模块级安全)
 export let PENDING_PROVIDER: ProviderSetting | null = null;
@@ -250,7 +252,13 @@ struct ChatProviderDetailPage {
   field(label: string, placeholder: string, value: string, onChange: (v: string) => void,
     obscure: boolean, mono: boolean = false) {
     Column() {
-      Text(label).fontSize(META).fontColor(INK3).margin({ left: 2, bottom: 6 })
+      Text(label)
+        .fontSize(TEXT_STYLES.meta.size)
+        .fontWeight(TEXT_STYLES.meta.weight)
+        .lineHeight(TEXT_STYLES.meta.lineHeight)
+        .fontFamily(TEXT_STYLES.meta.family)
+        .fontColor(INK3)
+        .margin({ left: 2, bottom: 6 })
       FlatTextField({
         value: value,
         placeholder: placeholder,
@@ -265,37 +273,14 @@ struct ChatProviderDetailPage {
   }
 
   @Builder
-  toggleRow(label: string, isOn: boolean, onChange: (v: boolean) => void) {
-    Row() {
-      Text(label).fontSize(BODY).fontColor(INK).layoutWeight(1)
-      Toggle({ type: ToggleType.Switch, isOn: isOn })
-        .selectedColor(isOn ? this.accentColorStore : LINE)
-        .onChange(onChange)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
-  }
-
-  @Builder
-  sectionLabel(text: string) {
-    Row() {
-      Text('//').fontSize(11).fontWeight(FontWeight.Medium)
-        .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
-      Text(` ${text.toUpperCase()}`).fontSize(11).fontWeight(FontWeight.Medium)
-        .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
-      Blank()
-    }
-    .width('100%')
-    .padding({ top: 18, bottom: 10 })
-  }
-
-  @Builder
   tabHeader() {
     Row() {
       Column() {
         Text('配置')
-          .fontSize(11).fontWeight(FontWeight.Medium)
-          .fontFamily('JetBrainsMono')
+          .fontSize(TEXT_STYLES.body.size)
+          .fontWeight(this.tab === 0 ? 600 : TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(TEXT_STYLES.body.family)
           .letterSpacing(1.3)
           .fontColor(this.tab === 0 ? INK : INK3)
         Column()
@@ -308,8 +293,10 @@ struct ChatProviderDetailPage {
 
       Column() {
         Text('模型')
-          .fontSize(11).fontWeight(FontWeight.Medium)
-          .fontFamily('JetBrainsMono')
+          .fontSize(TEXT_STYLES.body.size)
+          .fontWeight(this.tab === 1 ? 600 : TEXT_STYLES.body.weight)
+          .lineHeight(TEXT_STYLES.body.lineHeight)
+          .fontFamily(TEXT_STYLES.body.family)
           .letterSpacing(1.3)
           .fontColor(this.tab === 1 ? INK : INK3)
         Column()
@@ -342,9 +329,9 @@ struct ChatProviderDetailPage {
         Column() {
           Row() {
             Text('//').fontSize(11).fontWeight(FontWeight.Medium)
-              .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
+              .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
             Text(' 提供商').fontSize(11).fontWeight(FontWeight.Medium)
-              .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
+              .fontColor(INK3).fontFamily(FONT_MONO_MEDIUM).letterSpacing(1.3)
           }
           .alignItems(VerticalAlign.Center)
           Row({ space: 7 }) {
@@ -360,7 +347,8 @@ struct ChatProviderDetailPage {
           .alignItems(VerticalAlign.Center)
           Row({ space: 6 }) {
             Text(`${this.name} · ${(this.provider !== null ? providerAuthLabel(this.provider) : '—')} · ${this.provider !== null ? this.provider.models.length : 0} 个模型`)
-              .fontSize(10.5).fontColor(INK3)
+              .fontSize(MONO_SMALL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
+              .fontFamily(FONT_MONO).fontColor(INK3)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           }
           .alignItems(VerticalAlign.Center)
@@ -370,16 +358,12 @@ struct ChatProviderDetailPage {
         .margin({ left: 8 })
 
         // 导出/分享为 Android 侧能力,鸿蒙暂无 ShareSheet — 占位保持布局对称
-        Text('导出')
-          .fontSize(11).fontWeight(FontWeight.Bold)
-          .fontFamily('JetBrainsMono').fontColor(this.accentColorStore)
-          .height(32)
-          .padding({ left: 11, right: 11 })
-          .borderRadius(3)
-          .border({ width: 1, color: this.accentColorStore })
-          .onClick((): void => {
+        BtnGhost({
+          label: '导出',
+          onTap: (): void => {
             promptAction.showToast({ message: '鸿蒙版暂不支持导出分享', duration: 1800 });
-          })
+          },
+        })
       }
       .width('100%')
       .constraintSize({ minHeight: 64 })
@@ -391,14 +375,11 @@ struct ChatProviderDetailPage {
       Scroll() {
         Column() {
           if (this.tab === 0) {
-            this.sectionLabel('认证与端点')
-            Column() {
-              this.toggleRow('启用', this.providerEnabled,
-                (v: boolean): void => { this.providerEnabled = v; })
-            }
-            .width('100%').backgroundColor(SURFACE)
-            .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
-            .margin({ bottom: 12 })
+            SectionHeader({ label: '认证与端点' })
+            ToggleRow({
+              label: '启用', checked: this.providerEnabled, isLast: false,
+              onToggle: (): void => { this.providerEnabled = !this.providerEnabled; },
+            })
 
             this.field('名称', 'Provider 名称', this.name,
               (v: string): void => { this.name = v; }, false, false)
@@ -425,13 +406,10 @@ struct ChatProviderDetailPage {
               this.field('API Path', '/chat/completions', this.chatPath,
                 (v: string): void => { this.chatPath = v; }, false, true)
             } else if (this.provider !== null && this.provider.type === 'google') {
-              Column() {
-                this.toggleRow('Vertex AI', this.vertexAI,
-                  (v: boolean): void => { this.vertexAI = v; })
-              }
-              .width('100%').backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
-              .margin({ bottom: 12 })
+              ToggleRow({
+                label: 'Vertex AI', checked: this.vertexAI, isLast: this.vertexAI,
+                onToggle: (): void => { this.vertexAI = !this.vertexAI; },
+              })
               if (!this.vertexAI) {
                 this.field('Base URL', 'https://generativelanguage.googleapis.com/v1beta',
                   this.baseUrl, (v: string): void => { this.baseUrl = v; }, false, true)
@@ -439,27 +417,20 @@ struct ChatProviderDetailPage {
             } else if (this.provider !== null && this.provider.type === 'claude') {
               this.field('Base URL', 'https://api.anthropic.com/v1', this.baseUrl,
                 (v: string): void => { this.baseUrl = v; }, false, true)
-              Column() {
-                this.toggleRow('Prompt Caching', this.promptCaching,
-                  (v: boolean): void => { this.promptCaching = v; })
-              }
-              .width('100%').backgroundColor(SURFACE)
-              .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
-              .margin({ bottom: 12 })
+              ToggleRow({
+                label: 'Prompt Caching', checked: this.promptCaching, isLast: true,
+                onToggle: (): void => { this.promptCaching = !this.promptCaching; },
+              })
             }
 
             // 保存(Android ProviderSplitBar 语义:显式提交)
             Row() {
               Text(this.savedMsg.length > 0 ? this.savedMsg : ' ')
-                .fontSize(BODY2)
+                .fontSize(BODY2).lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(TEXT_STYLES.secondary.family)
                 .fontColor(this.savedMsg.startsWith('保存失败') ? ERROR : this.accentColorStore)
-              Blank()
-              Text('保存')
-                .fontSize(14).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
-                .padding({ left: 22, right: 22, top: 10, bottom: 10 })
-                .backgroundColor(this.accentColorStore)
-                .borderRadius(999)
-                .onClick((): void => { this.save(); })
+                .layoutWeight(1)
+              BtnFill({ label: '保存', onTap: (): void => { this.save(); } })
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
@@ -475,72 +446,76 @@ struct ChatProviderDetailPage {
             }
             .width('100%')
           } else {
-            this.sectionLabel('模型列表')
+            SectionHeader({ label: '模型列表' })
             Column() {
               ForEach(this.provider !== null ? this.provider.models : [],
                 (m: ProviderModel, mIdx: number): void => {
-                  Row() {
-                    Text(m.displayName.length > 0 ? m.displayName : m.modelId)
-                      .fontSize(BODY2).fontColor(INK)
-                      .layoutWeight(1)
-                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-                    if (m.type === 'image') {
-                      Text('生图').fontSize(10).fontColor(this.accentColorStore)
-                        .fontFamily('JetBrainsMono').margin({ right: 10 })
+                  Column() {
+                    Row() {
+                      Column() {
+                        Text(m.displayName.length > 0 ? m.displayName : m.modelId)
+                          .fontSize(BODY).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+                          .fontFamily(FONT_SANS_SEMIBOLD).fontColor(INK)
+                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                        Text(m.modelId)
+                          .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                          .fontFamily(FONT_MONO).fontColor(INK3)
+                          .margin({ top: 3 })
+                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      }
+                      .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                      if (m.type === 'image') {
+                        Chip({ text: '生图' }).margin({ right: 8 })
+                      }
+                      Text('参数')
+                        .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                        .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
                     }
-                    Text('参数')
-                      .fontSize(BODY2).fontColor(this.accentColorStore)
+                    .width('100%').alignItems(VerticalAlign.Center)
+                    .constraintSize({ minHeight: 64 })
+                    .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                    .onClick((): void => {
+                      const params: Record<string, string> = {};
+                      params['providerId'] = this.provider !== null ? this.provider.id : '';
+                      params['modelId'] = m.id;
+                      router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
+                    })
+                    if (mIdx < (this.provider !== null ? this.provider.models.length : 0) - 1) {
+                      PaperSeparator()
+                    }
                   }
                   .width('100%')
-                  .padding({ left: 16, right: 16, top: 13, bottom: 13 })
-                  .border(mIdx === (this.provider !== null ? this.provider.models.length : 0) - 1
-                    ? { width: 0 }
-                    : { width: { bottom: 0.5 }, color: { bottom: LINE } })
-                  .onClick((): void => {
-                    const params: Record<string, string> = {};
-                    params['providerId'] = this.provider !== null ? this.provider.id : '';
-                    params['modelId'] = m.id;
-                    router.pushUrl({ url: 'pages/ChatModelParamsPage', params: params });
-                  })
                 }, (m: ProviderModel): string => m.id)
               if (this.provider !== null && this.provider.models.length === 0) {
                 Text('暂无模型 — 在下方以逗号分隔添加 modelId')
-                  .fontSize(LABEL).fontColor(INK4)
-                  .width('100%')
-                  .textAlign(TextAlign.Center)
+                  .fontSize(LABEL).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+                  .fontFamily(TEXT_STYLES.eyebrow.family).fontColor(INK4)
+                  .width('100%').textAlign(TextAlign.Center)
                   .padding({ top: 16, bottom: 16 })
               }
             }
-            .width('100%').backgroundColor(SURFACE)
-            .border({ width: 1, color: LINE }).borderRadius(RADIUS).clip(true)
+            .width('100%')
 
             Column() {
               Text('添加模型(逗号分隔 modelId,保存后生效)')
-                .fontSize(META).fontColor(INK3)
-                .margin({ left: 2, bottom: 8 })
+                .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+                .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+                .margin({ left: 16, bottom: 8 })
               TextArea({ text: this.modelsText, placeholder: 'gpt-4o, gpt-4o-mini' })
-                .fontSize(BODY).fontColor(INK)
-                .backgroundColor(SURFACE)
-                .borderRadius(12)
+                .fontSize(BODY2).lineHeight(TEXT_STYLES.secondary.lineHeight)
+                .fontFamily(FONT_MONO).fontColor(INK)
+                .backgroundColor(SURFACE2).borderRadius(8)
                 .border({ width: 1, color: LINE })
                 .padding({ left: 14, right: 14, top: 12, bottom: 12 })
                 .height(80)
                 .onChange((v: string): void => { this.modelsText = v; })
               Row() {
                 Blank()
-                Text('保存模型')
-                  .fontSize(14).fontWeight(FontWeight.Medium).fontColor('#FFFFFF')
-                  .padding({ left: 22, right: 22, top: 10, bottom: 10 })
-                  .backgroundColor(this.accentColorStore)
-                  .borderRadius(999)
-                  .margin({ top: 10 })
-                  .onClick((): void => { this.save(); })
+                BtnFill({ label: '保存模型', onTap: (): void => { this.save(); } })
               }
-              .width('100%')
+              .width('100%').padding({ left: 16, right: 16 }).margin({ top: 10 })
             }
-            .width('100%')
-            .alignItems(HorizontalAlign.Start)
-            .margin({ top: 12 })
+            .width('100%').alignItems(HorizontalAlign.Start).margin({ top: 12 })
           }
         }
         .width('100%')

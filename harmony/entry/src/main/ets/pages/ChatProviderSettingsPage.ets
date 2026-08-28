@@ -10,9 +10,11 @@
 //   - brand 编辑及 openai account 区(余额等)= P1
 //   - 编辑中切换选中会丢弃未保存修改(MVP 草稿语义)
 import {
-  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE2, LINE, LINE2, BODY2,
+  ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, LINE, LINE2, BODY2, META, TINY, LABEL,
+  TEXT_STYLES, lineHeightForSize,
 } from '../design/tokens.ets';
-import { PageTitleBar, SectionHeader, PageSpacer } from '../components/PageTemplate.ets';
+import { PageTitleBar, PageSpacer, Chip, BtnGhost, PaperSeparator } from '../components/PageTemplate.ets';
+import { FONT_MONO, FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import type { ProviderSetting } from '@amber/chat-domain';
 import { setPendingProvider } from './ChatProviderDetailPage.ets';
@@ -120,10 +122,12 @@ struct ChatProviderSettingsPage {
   @Builder
   registryStat(value: number, label: string, accent: boolean) {
     Row() {
-      Text(`${value}`).fontSize(12).fontWeight(FontWeight.Bold)
-        .fontFamily('JetBrainsMono')
-        .fontColor(accent ? this.accentColorStore : INK)
-      Text(` ${label}`).fontSize(11.5).fontColor(INK3)
+      Text(`${value}`)
+        .fontSize(META).fontWeight(600).lineHeight(TEXT_STYLES.meta.lineHeight)
+        .fontFamily(FONT_MONO_MEDIUM).fontColor(accent ? this.accentColorStore : INK)
+      Text(` ${label}`)
+        .fontSize(TINY).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(TINY))
+        .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
     }
     .alignItems(VerticalAlign.Center)
   }
@@ -137,22 +141,23 @@ struct ChatProviderSettingsPage {
   }
 
   @Builder
-  providerRegistryRow(row: ProviderRow) {
+  providerRegistryRow(row: ProviderRow, isLast: boolean) {
     Column() {
       Row() {
         Text(row.mono)
-          .fontSize(10.5).fontWeight(FontWeight.Bold)
-          .fontFamily('JetBrainsMono')
+          .fontSize(TINY).fontWeight(600).lineHeight(TEXT_STYLES.tinyTag.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
           .fontColor(row.enabled ? INK2 : INK4)
-          .width(32).height(32)
-          .borderRadius(9)
-          .backgroundColor(SURFACE2)
+          .width(40).height(40)
+          .borderRadius(20)
+          .backgroundColor(SURFACE)
           .border({ width: 1, color: LINE })
           .textAlign(TextAlign.Center)
         Column() {
           Row() {
             Text(row.name)
-              .fontSize(15).fontWeight(FontWeight.Medium)
+              .fontSize(15).fontWeight(600).lineHeight(TEXT_STYLES.body.lineHeight)
+              .fontFamily(FONT_SANS_SEMIBOLD)
               .fontColor(row.enabled ? INK : INK3)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
             if (row.enabled) {
@@ -162,7 +167,8 @@ struct ChatProviderSettingsPage {
           }
           .alignItems(VerticalAlign.Center)
           Text(row.slug)
-            .fontSize(11).fontFamily('JetBrainsMono').fontColor(INK4)
+            .fontSize(META).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(FONT_MONO).fontColor(INK3)
             .margin({ top: 3 })
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
         }
@@ -171,32 +177,32 @@ struct ChatProviderSettingsPage {
         .margin({ left: 12 })
 
         Column() {
-          Text(row.auth)
-            .fontSize(10).fontWeight(FontWeight.Medium)
-            .fontFamily('JetBrainsMono')
-            .fontColor(row.auth === '—' ? INK4 : INK3)
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .backgroundColor(SURFACE2)
-            .borderRadius(3)
-            .border({ width: 1, color: LINE })
-          Text(`${row.modelsCount} 个模型`)
-            .fontSize(11)
-            .fontColor(row.modelsCount > 0 ? INK2 : INK4)
-            .margin({ top: 4 })
+          Chip({ text: row.auth })
+          Row() {
+            Text(`${row.modelsCount}`)
+              .fontSize(TINY).fontWeight(FontWeight.Medium).lineHeight(lineHeightForSize(TINY))
+              .fontFamily(FONT_MONO_MEDIUM).fontColor(row.modelsCount > 0 ? INK2 : INK4)
+            Text(' 个模型')
+              .fontSize(TINY).fontWeight(FontWeight.Normal).lineHeight(lineHeightForSize(TINY))
+              .fontFamily(TEXT_STYLES.secondary.family).fontColor(row.modelsCount > 0 ? INK2 : INK4)
+          }
+          .margin({ top: 4 })
         }
         .alignItems(HorizontalAlign.End)
       }
       .width('100%')
-      .padding({ left: 4, right: 4, top: 11, bottom: 11 })
+      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .border({ width: { bottom: 1 }, color: { bottom: LINE } })
     .onClick((): void => {
       const params: Record<string, string> = {};
       params['providerId'] = row.id;
       router.pushUrl({ url: 'pages/ChatProviderDetailPage', params: params });
     })
+    if (!isLast) {
+      PaperSeparator()
+    }
   }
 
   build() {
@@ -208,7 +214,12 @@ struct ChatProviderSettingsPage {
 
       if (!this.loaded) {
         Column() {
-          Text('加载中…').fontSize(BODY2).fontColor(INK3)
+          Text('加载中…')
+            .fontSize(TEXT_STYLES.body.size)
+            .fontWeight(TEXT_STYLES.body.weight)
+            .lineHeight(TEXT_STYLES.body.lineHeight)
+            .fontFamily(TEXT_STYLES.body.family)
+            .fontColor(INK3)
         }
         .width('100%').height('100%')
         .justifyContent(FlexAlign.Center)
@@ -233,17 +244,7 @@ struct ChatProviderSettingsPage {
               this.registryStat(this.onlineCount(), '在线', true)
               Blank()
               // + 添加(ghost,accent 描边)
-              Row() {
-                Text('+').fontSize(13).fontColor(this.accentColorStore).margin({ right: 6 })
-                Text('添加').fontSize(11).fontWeight(FontWeight.Bold)
-                  .fontFamily('JetBrainsMono').fontColor(this.accentColorStore)
-              }
-              .height(32)
-              .padding({ left: 11, right: 11 })
-              .borderRadius(3)
-              .border({ width: 1, color: this.accentColorStore })
-              .alignItems(VerticalAlign.Center)
-              .onClick((): void => { this.sheetShow = true; })
+              BtnGhost({ label: '＋ 添加', onTap: (): void => { this.sheetShow = true; } })
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
@@ -252,10 +253,12 @@ struct ChatProviderSettingsPage {
             // 终端风筛选(▸ + mono 输入 + line2 底线)
             Column() {
               Row() {
-                Text('▸').fontSize(12).lineHeight(16).fontWeight(FontWeight.Medium).fontColor(this.accentColorStore)
+                Text('▸').fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
+                  .fontFamily(FONT_MONO_MEDIUM).fontColor(this.accentColorStore)
                 TextInput({ text: this.filterQuery, placeholder: '筛选提供商' })
-                  .fontSize(12).fontColor(INK)
-                  .fontFamily('JetBrainsMono')
+                  .fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
+                  .fontColor(INK)
+                  .fontFamily(FONT_MONO_MEDIUM)
                   .placeholderColor(INK4)
                   .placeholderFont({ size: 12 })
                   .backgroundColor(Color.Transparent)
@@ -264,7 +267,8 @@ struct ChatProviderSettingsPage {
                   .layoutWeight(1)
                   .onChange((v: string): void => { this.filterQuery = v; })
                 if (this.filterQuery.length > 0) {
-                  Text('✕').fontSize(12).fontColor(INK3)
+                  Text('✕').fontSize(META).lineHeight(TEXT_STYLES.meta.lineHeight).fontWeight(FontWeight.Medium)
+                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
                     .width(24).height(24).textAlign(TextAlign.Center)
                     .onClick((): void => { this.filterQuery = ''; })
                 }
@@ -278,49 +282,52 @@ struct ChatProviderSettingsPage {
             .margin({ top: 8, bottom: 2 })
 
             Row() {
-              Text('//').fontSize(11).fontWeight(FontWeight.Medium)
-                .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
-              Text(` 在线`).fontSize(11).fontWeight(FontWeight.Medium)
-                .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
-              Text(`· ${this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length}`)
-                .fontSize(11).fontColor(INK4).margin({ left: 6 })
-              Blank()
-              Column().width(1).height(1)
+              Text('//').fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+                .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
+              Text(` 在线 · ${this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length}`)
+                .fontSize(LABEL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+                .fontColor(INK2).fontFamily(FONT_MONO_MEDIUM)
+              Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
             }
             .width('100%')
             .padding({ top: 18, bottom: 11, left: 4, right: 4 })
             .alignItems(VerticalAlign.Center)
 
             ForEach(this.filteredRows().filter((r: ProviderRow): boolean => r.enabled),
-              (row: ProviderRow): void => {
-                this.providerRegistryRow(row)
+              (row: ProviderRow, idx: number): void => {
+                this.providerRegistryRow(row,
+                  idx === this.filteredRows().filter((r: ProviderRow): boolean => r.enabled).length - 1)
               }, (row: ProviderRow): string => `on-${row.id}`)
 
             ForEach(this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled),
               (row: ProviderRow, idx: number): void => {
                 if (idx === 0) {
                   Row() {
-                    Text('//').fontSize(11).fontWeight(FontWeight.Medium)
-                      .fontColor(this.accentColorStore).fontFamily('JetBrainsMono')
-                    Text(` 未启用`).fontSize(11).fontWeight(FontWeight.Medium)
-                      .fontColor(INK3).fontFamily('JetBrainsMono').letterSpacing(1.3)
-                    Text(`· ${this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length}`)
-                      .fontSize(11).fontColor(INK4).margin({ left: 6 })
-                    Blank()
+                    Text('//').fontSize(LABEL).fontWeight(600).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+                      .fontColor(this.accentColorStore).fontFamily(FONT_MONO_MEDIUM)
+                    Text(` 未启用 · ${this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length}`)
+                      .fontSize(LABEL).fontWeight(FontWeight.Medium).lineHeight(TEXT_STYLES.eyebrow.lineHeight)
+                      .fontColor(INK2).fontFamily(FONT_MONO_MEDIUM)
+                    Blank().layoutWeight(1).height(1).backgroundColor(LINE).margin({ left: 10 })
                   }
                   .width('100%')
                   .padding({ top: 22, bottom: 11, left: 4, right: 4 })
                   .alignItems(VerticalAlign.Center)
                 }
                 Column() {
-                  this.providerRegistryRow(row)
+                  this.providerRegistryRow(row,
+                    idx === this.filteredRows().filter((r: ProviderRow): boolean => !r.enabled).length - 1)
                 }
-                .opacity(0.62)
+                .opacity(0.42)
               }, (row: ProviderRow): string => `off-${row.id}`)
 
             if (this.filteredRows().length === 0) {
               Text('没有匹配的提供商')
-                .fontSize(13).fontColor(INK3)
+                .fontSize(TEXT_STYLES.body.size)
+                .fontWeight(TEXT_STYLES.body.weight)
+                .lineHeight(TEXT_STYLES.body.lineHeight)
+                .fontFamily(TEXT_STYLES.body.family)
+                .fontColor(INK3)
                 .width('100%')
                 .padding({ top: 28, bottom: 28 })
                 .textAlign(TextAlign.Center)
@@ -331,7 +338,6 @@ struct ChatProviderSettingsPage {
             PageSpacer()
           }
           .width('100%')
-          .padding({ left: 18, right: 18 })
         }
         .align(Alignment.TopStart)
         .layoutWeight(1)

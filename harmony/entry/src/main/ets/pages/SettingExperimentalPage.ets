@@ -1,7 +1,7 @@
 // SettingExperimentalPage — 实验性功能入口页(G7 重构)
 // 对齐 Android: SettingExperimental → 子代理/Council/WebMount/OfficePro/TodayBoard
 import { router } from '@kit.ArkUI';
-import { BG, GUTTER } from '../design/tokens.ets';
+import { BG } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
 
 @Entry
@@ -13,28 +13,40 @@ struct SettingExperimentalPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '实验功能' })
+      PageTitleBar({ title: '实验性功能' })
 
       Scroll() {
         Column() {
-          SectionHeader({ label: '内容' })
-          NavRow({ label: 'Office Pro', valueText: 'Alpha', onRowClick: (): void => { this.go('pages/SettingExperimentalOfficeProPage'); } })
-          NavRow({ label: 'DeepRead 模板', isLast: true, onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
+          SectionHeader({ label: '预览功能' })
+          NavRow({ label: 'WebMount', valueText: 'Alpha', iconName: 'globe',
+            onRowClick: (): void => { this.go('pages/SettingExperimentalWebMountPage'); } })
+          NavRow({ label: '子代理', valueText: 'Beta', iconName: 'person',
+            onRowClick: (): void => { this.go('pages/SettingSubAgentPage'); } })
+          NavRow({ label: '模型议会', valueText: 'Beta', iconName: 'spark',
+            onRowClick: (): void => { this.go('pages/SettingModelCouncilPage'); } })
+          NavRow({ label: '小应用', valueText: 'Beta', iconName: 'box',
+            onRowClick: (): void => { this.go('pages/MiniAppSettingsPage'); } })
+          NavRow({ label: '小说创作', iconName: 'doc',
+            onRowClick: (): void => { this.go('pages/NovelProjectsPage'); } })
+          NavRow({ label: '深度阅读', iconName: 'book', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
 
-          SectionHeader({ label: '自动化' })
-          NavRow({ label: '定时任务', valueText: 'Beta', isLast: true, onRowClick: (): void => { this.go('pages/SettingCronTasksPage'); } })
+          SectionHeader({ label: '内容' })
+          NavRow({ label: 'Office Pro', valueText: 'Alpha', iconName: 'doc',
+            onRowClick: (): void => { this.go('pages/SettingExperimentalOfficeProPage'); } })
+          NavRow({ label: 'DeepRead 模板', iconName: 'book', isLast: true,
+            onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
 
           SectionHeader({ label: '其他' })
-          NavRow({ label: '字体设置', onRowClick: (): void => { this.go('pages/SettingSlidesFontPage'); } })
-          NavRow({ label: '系统权限', isLast: true, onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
+          NavRow({ label: '系统权限', iconName: 'shield', isLast: true,
+            onRowClick: (): void => { this.go('pages/SettingSystemAccessPage'); } })
 
           PageSpacer()
         }
         .width('100%')
-        .padding({ left: GUTTER, right: GUTTER })
       }
       .layoutWeight(1)
-      .align(Alignment.Top)
+      .align(Alignment.TopStart)
       .backgroundColor(BG)
     }
     .width('100%').height('100%').backgroundColor(BG)
