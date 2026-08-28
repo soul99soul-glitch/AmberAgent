@@ -39,10 +39,20 @@
 - **common**: Common utilities and extensions
 - **document**: Document parsing module for handling PDF, DOCX, and PPTX files
 - **highlight**: Code syntax highlighting implementation
+- **harmony**: HarmonyOS (ArkTS) port of the app (`entry` UI + `chat`/`deepread` shared TS logic); rules and toolchain live in the `harmony-arkts` skill — load it before touching any `.ets`/`.ts` file under `harmony/`
 - **search**: Search functionality SDK (Exa, Tavily, Zhipu)
 - **tts**: Text-to-speech implementation for different providers
 - **web**: Embedded web server module that provides Ktor server startup function and hosts static frontend build files (
   built from web-ui/ React project)
+
+## HarmonyOS (harmony/)
+
+ArkTS 语料稀缺，通用模型凭记忆写鸿蒙代码错误率极高，必须走「skill 铁律 + 官方文档 + 回喂」流程：
+
+- **harmony-arkts skill（必载）**：凡修改 `harmony/` 下 `.ets`/`.ts`、接入新的 `@ohos`/`@kit` API、或执行构建/签名/lint/模拟器验证，先加载 `harmony-arkts` skill。核心铁律：API 基线是 12（`build-profile.json5`），高版本 API 一律 `canIUse()` 包裹；禁 `export let` 做全局状态/主题（用 AppStorage + @StorageProp）；状态装饰器全 V1，禁与 V2 混用；新 API 禁止凭记忆写。
+- **官方文档优先**：接入仓库内无先例的 API，先 `harmony/scripts/devecocli.sh docs search <关键词>` 查本地离线官方文档（随 `@deveco/deveco-cli` 内置），命中后 `docs read <id>`；本地没有再 WebFetch developer.huawei.com。
+- **deveco-mcp（workspace MCP，`.zcode/config.json` 自动连接）**：`check` 工具提供 ArkTS/C++ LSP 级诊断——在 DevEco Studio 升级到 26 前本机不可用（调用报 "Project initialization failed" 属预期，不要反复重试）；升级后可在 hvigorw 之前作快速单文件诊断。
+- **验证回路（改完必走）**：`harmony/scripts/lint-arkts.sh <改动文件>`（error 级退出非 0，基线 0 error/126 warn）→ `node scripts/harmony-inventory/build-harmony-app.mjs` → `harmony/scripts/sign-hap.sh` → 模拟器安装截图目测（`hdc -t 127.0.0.1:5555 ...`，命令见 skill）。改 UI/主题/生命周期逻辑必须截图目测，暗色主题 bug 即只在模拟器上现形。
 
 ## Concepts
 
