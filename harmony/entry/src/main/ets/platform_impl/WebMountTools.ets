@@ -10,6 +10,11 @@ import type { AbortSignalLike } from '@amber/deepread-domain';
 import type { AgentTool, JsonValue, JsonObject, UIMessagePart, InputSchemaObj } from '@amber/chat-domain';
 import { makeAgentTool, makeInputSchemaObj } from '@amber/chat-domain';
 import type { WebMountSession } from './WebMountSession.ets';
+import {
+  loadWebMountSites, saveWebMountSites, makeUserSite, siteAllowsUrl, sitesDeniedMessage,
+} from './WebMountSites.ets';
+import type { UserSiteEntry } from './WebMountSites.ets';
+import { getChatKvStore } from '../di/AppContainer.ets';
 
 const SESSION_ID: string = 'main';
 
@@ -74,6 +79,11 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const url: string = strOf(input, 'url', '');
       if (url.length === 0) throw new Error('url is required');
+      // 授权边界:仅允许 WebMount Stations 已注册站点(域/子域匹配)
+      const sites: UserSiteEntry[] = await loadWebMountSites(getChatKvStore());
+      if (!siteAllowsUrl(sites, url)) {
+        return [{ type: 'text', text: sitesDeniedMessage(sites, url), metadata: null }];
+      }
       await session.open(url);
       return evalToPart(session, EXTRACT_JS);
     },
@@ -109,6 +119,7 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     parameters: (): InputSchemaObj | null => makeInputSchemaObj({
       'target': { type: 'string', description: 'Element ref from wm_extract (e.g. wm-3) or CSS selector.' },
     } as JsonObject, ['target']),
+    needsApproval: true,
     execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
       const target: string = strOf(input, 'target', '');
       if (target.length === 0) throw new Error('target is required');
@@ -195,7 +206,64 @@ export const createWebMountTools = (session: WebMountSession, includeEval: boole
     },
   });
 
+  // 站点管理三件(WebMountSiteTools.kt 对齐;add/remove 需审批 — 变更授权边界)
+  const stationsTool: AgentTool = makeAgentTool({
+    name: 'wm_stations',
+    description: 'List every website in the user\'s WebMount Stations list — the sites the '
+      + 'agent is allowed to open and operate via wm_open/wm_click/wm_type.',
+    execute: async (_input: JsonValue): Promise<UIMessagePart[]> => {
+      const sites: UserSiteEntry[] = await loadWebMountSites(getChatKvStore());
+      return textPart({
+        stations: sites.map((s: UserSiteEntry): JsonObject =>
+          ({ id: s.id, name: s.name, url: s.url } as JsonObject)),
+      });
+    },
+  });
+
+  const siteAddTool: AgentTool = makeAgentTool({
+    name: 'wm_site_add',
+    description: 'Add a website to the user\'s WebMount Stations list so wm_open can operate '
+      + 'it. Requires approval; the user manages the same list on the WebMount settings page.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'name': { type: 'string', description: 'Display name of the site.' },
+      'url': { type: 'string', description: 'Homepage URL of the site (host used for matching).' },
+    } as JsonObject, ['name', 'url']),
+    needsApproval: true,
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const name: string = strOf(input, 'name', '');
+      const url: string = strOf(input, 'url', '');
+      if (name.length === 0 || url.length === 0) throw new Error('name and url are required');
+      const kv = getChatKvStore();
+      const sites: UserSiteEntry[] = await loadWebMountSites(kv);
+      const entry: UserSiteEntry = makeUserSite(name, url);
+      await saveWebMountSites(kv, [...sites, entry]);
+      return textPart({ added: true, id: entry.id, name: entry.name, url: entry.url });
+    },
+  });
+
+  const siteRemoveTool: AgentTool = makeAgentTool({
+    name: 'wm_site_remove',
+    description: 'Remove a website from the user\'s WebMount Stations list (by id from '
+      + 'wm_stations). Requires approval.',
+    parameters: (): InputSchemaObj | null => makeInputSchemaObj({
+      'id': { type: 'string', description: 'Site id from wm_stations.' },
+    } as JsonObject, ['id']),
+    needsApproval: true,
+    execute: async (input: JsonValue): Promise<UIMessagePart[]> => {
+      const id: string = strOf(input, 'id', '');
+      if (id.length === 0) throw new Error('id is required');
+      const kv = getChatKvStore();
+      const sites: UserSiteEntry[] = await loadWebMountSites(kv);
+      const next: UserSiteEntry[] = sites.filter((s: UserSiteEntry): boolean => s.id !== id);
+      if (next.length === sites.length) return textPart({ removed: false, error: 'site not found' });
+      await saveWebMountSites(kv, next);
+      return textPart({ removed: true, id: id });
+    },
+  });
+
   return includeEval
-    ? [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool, evalTool]
-    : [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool];
+    ? [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool,
+      stationsTool, siteAddTool, siteRemoveTool, evalTool]
+    : [openTool, stateTool, extractTool, clickTool, typeTool, scrollTool, screenshotTool,
+      stationsTool, siteAddTool, siteRemoveTool];
 };
