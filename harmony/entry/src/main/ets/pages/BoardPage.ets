@@ -11,13 +11,15 @@ import type { HotTopic } from '../platform_impl/HotListAggregator.ets';
 import { getAppContainer } from '../di/AppContainer.ets';
 
 import {
-  BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT,
+  BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT, ERROR, OVERLAY, SURFACE, LINE, LABEL,
   BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
+import type { common } from '@kit.AbilityKit';
 
 @Component
 struct BoardHotItemRow {
@@ -83,6 +85,9 @@ struct BoardPage {
   @State lastUpdatedAt: number = 0;
   @State loading: boolean = false;
   @State hotlistError: string = '';
+  // 条目操作 sheet(Android HotListActionSheet:深度阅读/重新生成/原文/分享)
+  @State sheetItem: HotItem | null = null;
+  @State sheetForce: boolean = false;
   aboutToAppear(): void {
     this.loadHotlist();
   }
@@ -147,7 +152,7 @@ struct BoardPage {
           url: tp.sources.length > 0 ? tp.sources[0].url : '',
           heat: tp.sources.length > 0 ? tp.sources[0].heat : '',
         };
-        this.openArticle(first);
+        this.sheetItem = first;
       })
       if (!isLast) {
         PaperSeparator()
@@ -156,12 +161,41 @@ struct BoardPage {
     .width('100%')
   }
 
-  private openArticle(item: HotItem): void {
+  private openArticle(item: HotItem, force: boolean = false): void {
     const params: Record<string, string> = {};
     params['topicId'] = item.url;
     params['title'] = item.title;
     params['sourceUrl'] = item.url;
+    if (force) params['force'] = 'true';
     router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
+  }
+
+  private openOriginal(url: string): void {
+    if (url.trim().length === 0) return;
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      ctx.startAbility({
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: url,
+      }).catch((): void => {
+        promptAction.showToast({ message: '无法打开浏览器，已复制链接', duration: 1400 });
+      });
+    } catch (_e) {
+      promptAction.showToast({ message: '无法打开浏览器，已复制链接', duration: 1400 });
+    }
+  }
+
+  private shareTopic(item: HotItem): void {
+    let text: string = item.title;
+    if (item.url.length > 0) text += `\n${item.url}`;
+    try {
+      const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
+      board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));
+      promptAction.showToast({ message: '已复制，可粘贴分享', duration: 1400 });
+    } catch (_e) {
+      promptAction.showToast({ message: '分享准备失败', duration: 1400 });
+    }
   }
 
   private loadHotlist(): void {
@@ -207,7 +241,8 @@ struct BoardPage {
   }
 
   build(): void {
-    Column() {
+    Stack() {
+      Column() {
       PageTitleBar({
         title: '深度阅读',
         actionText: '历史',
@@ -312,7 +347,7 @@ struct BoardPage {
                       title: item.title,
                       heat: item.heat,
                       isLast: index === Math.min(sec.items.length, 12) - 1,
-                      onRowClick: (): void => { this.openArticle(item); },
+                      onRowClick: (): void => { this.sheetItem = item; },
                     })
                   }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
                 }
@@ -325,7 +360,63 @@ struct BoardPage {
         .divider({ strokeWidth: 0, color: Color.Transparent })
       }
       PageSpacer()
+      }
+      .width('100%').height('100%').backgroundColor(BG)
+      // 条目操作 sheet(半模态 overlay)
+      if (this.sheetItem !== null) {
+        Column() {
+          Blank()
+            .onClick((): void => { this.sheetItem = null; })
+          Column() {
+            Text(this.sheetItem.title)
+              .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
+              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%').padding({ left: 20, right: 20, top: 18, bottom: 10 })
+            this.SheetAction('深度阅读', 'book', 'read')
+            this.SheetDivider()
+            this.SheetAction('重新生成', 'retry', 'regenerate')
+            this.SheetDivider()
+            this.SheetAction('打开原文', 'link', 'original')
+            this.SheetDivider()
+            this.SheetAction('分享', 'share', 'share')
+          }
+          .width('100%')
+          .padding({ bottom: 12 })
+          .backgroundColor(SURFACE)
+          .borderRadius({ topLeft: 20, topRight: 20 })
+        }
+        .width('100%').height('100%')
+        .backgroundColor(OVERLAY)
+        .justifyContent(FlexAlign.End)
+      }
     }
-    .width('100%').height('100%').backgroundColor(BG)
+    .width('100%').height('100%')
+  }
+
+  @Builder
+  SheetDivider(): void {
+    Row().width('100%').height(0.5).backgroundColor(LINE)
+  }
+
+  // action: 'read' | 'regenerate' | 'original' | 'share'
+  @Builder
+  SheetAction(label: string, icon: string, action: string): void {
+    Row() {
+      Icon({ name: icon, iconSize: 18, color: INK2 }).margin({ right: 14 })
+      Text(label).fontSize(BODY2).fontColor(INK)
+      Blank()
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 48 })
+    .padding({ left: 20, right: 20 })
+    .onClick((): void => {
+      const it: HotItem | null = this.sheetItem;
+      this.sheetItem = null;
+      if (it === null) return;
+      if (action === 'read') this.openArticle(it, false);
+      else if (action === 'regenerate') this.openArticle(it, true);
+      else if (action === 'original') this.openOriginal(it.url);
+      else this.shareTopic(it);
+    })
   }
 }

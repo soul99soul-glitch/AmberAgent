@@ -40,6 +40,7 @@ interface ArticleParams {
   topicId: string;
   title: string;
   sourceUrl?: string;
+  force?: string;
 }
 
 @Entry
@@ -79,13 +80,14 @@ struct DeepReadArticlePage {
     this.topicId = params.topicId ?? '';
     this.title = params.title ?? '';
     this.sourceUrl = params.sourceUrl ?? '';
+    const wantsForce: boolean = params.force === 'true';
     if (this.topicId.length === 0 || this.title.length === 0) {
       this.errorMsg = '文章参数缺失';
       this.running = false;
       return;
     }
     hilog.info(DOMAIN, TAG, 'aboutToAppear: topicId=%{public}s title=%{public}s', this.topicId, this.title);
-    this.loadArticle(token, false).catch((e: Error): void => {
+    this.loadArticle(token, wantsForce).catch((e: Error): void => {
       if (this.pageAlive && token === this.pageToken) {
         this.errorMsg = this.cancelled ? '生成已取消' : e.message;
         this.running = false;
