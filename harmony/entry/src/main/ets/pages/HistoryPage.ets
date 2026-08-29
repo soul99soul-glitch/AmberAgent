@@ -1,15 +1,18 @@
-// HistoryPage — 历史记录(真实会话归档,按日分组)
+// HistoryPage — 历史记录(真实会话归档,按日分组;多选导出 Markdown/JSON)
 //
 // 原页误置为 DeepRead 配置(与 DeepReadArticlePage 内联设置重复,且热榜源
 //   配置已归位 SettingDeepReadPage),本页归位 Android 历史语义:
-//   全量会话按 updateAt 降序 + 日期分组,点击进对话。
+//   全量会话按 updateAt 降序 + 日期分组,点击进对话;多选后导出文件。
 
 import { router } from '@kit.ArkUI';
-import type { ConversationSummary } from '@amber/chat-domain';
+import { promptAction } from '@kit.ArkUI';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import type { ConversationSummary, Conversation, UIMessage } from '@amber/chat-domain';
+import { currentMessages, toText } from '@amber/chat-domain';
 import { getChatRepository } from '../di/AppContainer.ets';
 import {
-  BG, INK, INK3, INK4,
-  META, TEXT_STYLES,
+  BG, INK, INK3, INK4, SURFACE, LINE, ACCENT,
+  BODY, BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { PageTitleBar, PageSpacer, SectionHeader, NavRow } from '../components/PageTemplate.ets';
@@ -19,11 +22,22 @@ interface HistoryGroup {
   items: ConversationSummary[];
 }
 
+// JSON 导出条目形态(arkts-no-untyped-obj-literals)
+interface ExportEntry {
+  id: string;
+  title: string;
+  updatedAt: string;
+  messages: UIMessage[];
+}
+
 @Entry
 @Component
 struct HistoryPage {
   @State groups: HistoryGroup[] = [];
   @State loaded: boolean = false;
+  // 多选导出
+  @State selecting: boolean = false;
+  @State selectedIds: string[] = [];
 
   aboutToAppear(): void {
     getChatRepository().list().then((list: ConversationSummary[]): void => {
@@ -65,9 +79,87 @@ struct HistoryPage {
     return `${p(dt.getHours())}:${p(dt.getMinutes())}`;
   }
 
+  private toggleSelect(id: string): void {
+    const i: number = this.selectedIds.indexOf(id);
+    if (i >= 0) {
+      const next: string[] = this.selectedIds.slice();
+      next.splice(i, 1);
+      this.selectedIds = next;
+    } else {
+      this.selectedIds = [...this.selectedIds, id];
+    }
+  }
+
+  private exitSelecting(): void {
+    this.selecting = false;
+    this.selectedIds = [];
+  }
+
+  // ===== 导出(DocumentSavePicker;多会话单文件拼接) =====
+
+  private static exportFileName(ext: string): string {
+    const d: Date = new Date();
+    const p = (n: number): string => n < 10 ? `0${n}` : `${n}`;
+    return `amber-export-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}.${ext}`;
+  }
+
+  private async buildExportText(asMarkdown: boolean): Promise<string> {
+    const parts: string[] = [];
+    for (const id of this.selectedIds) {
+      const conv: Conversation | null = await getChatRepository().getById(id);
+      if (conv === null) continue;
+      if (asMarkdown) {
+        const title: string = conv.title.length > 0 ? conv.title : '未命名对话';
+        parts.push(`# ${title}\n\n_${conv.updateAt}_\n\n`);
+        const msgs: UIMessage[] = currentMessages(conv);
+        for (const m of msgs) {
+          const text: string = toText(m).trim();
+          if (text.length === 0) continue;
+          parts.push(`**${m.role}**:\n\n${text}\n\n`);
+        }
+        parts.push('---\n\n');
+      } else {
+        const msgs: UIMessage[] = currentMessages(conv);
+        const entry: ExportEntry = {
+          id: conv.id,
+          title: conv.title,
+          updatedAt: conv.updateAt,
+          messages: msgs,
+        };
+        parts.push(JSON.stringify(entry, null, 2));
+      }
+    }
+    return asMarkdown ? parts.join('') : `[\n${parts.join(',\n')}\n]`;
+  }
+
+  private exportSelected(asMarkdown: boolean): void {
+    if (this.selectedIds.length === 0) return;
+    this.buildExportText(asMarkdown).then((content: string): void => {
+      const opts: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+      opts.newFileNames = [HistoryPage.exportFileName(asMarkdown ? 'md' : 'json')];
+      const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker();
+      docPicker.save(opts).then((uris: string[]): void => {
+        if (uris.length === 0) return;
+        const file = fileIo.openSync(uris[0], fileIo.OpenMode.WRITE_ONLY);
+        fileIo.writeSync(file.fd, content);
+        fileIo.closeSync(file);
+        promptAction.showToast({ message: `已导出 ${this.selectedIds.length} 个会话`, duration: 1600 });
+        this.exitSelecting();
+      }).catch((): void => {
+        promptAction.showToast({ message: '导出取消/失败', duration: 1400 });
+      });
+    }).catch((e: Error): void => {
+      promptAction.showToast({ message: `导出失败:${e.message}`, duration: 1600 });
+    });
+  }
+
   build(): void {
     Column() {
-      PageTitleBar({ title: '历史记录' })
+      PageTitleBar({
+        title: '历史记录',
+        actionText: this.selecting ? '取消' : '选择',
+        onAction: (): void => { this.exitSelecting(); },
+      })
 
       if (this.loaded && this.groups.length === 0) {
         Column() {
@@ -84,10 +176,14 @@ struct HistoryPage {
                 SectionHeader({ label: g.date })
                 ForEach(g.items, (s: ConversationSummary, index: number): void => {
                   NavRow({
-                    label: s.title.length > 0 ? s.title : '未命名对话',
+                    label: `${this.selecting && this.selectedIds.indexOf(s.id) >= 0 ? '✓ ' : ''}${s.title.length > 0 ? s.title : '未命名对话'}`,
                     valueText: this.timeOf(s),
                     isLast: index === g.items.length - 1,
                     onRowClick: (): void => {
+                      if (this.selecting) {
+                        this.toggleSelect(s.id);
+                        return;
+                      }
                       const params: Record<string, string> = {};
                       params['conversationId'] = s.id;
                       router.pushUrl({ url: 'pages/ChatPage', params: params });
@@ -101,6 +197,24 @@ struct HistoryPage {
         }
         .width('100%').layoutWeight(1)
         .divider({ strokeWidth: 0, color: Color.Transparent })
+      }
+
+      // 多选导出操作条
+      if (this.selecting) {
+        Row() {
+          Text(`已选 ${this.selectedIds.length}`).fontSize(BODY2).fontColor(INK3)
+          Blank()
+          Text('导出 MD').fontSize(BODY2).fontColor(ACCENT)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .onClick((): void => { this.exportSelected(true); })
+          Text('导出 JSON').fontSize(BODY2).fontColor(ACCENT)
+            .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+            .onClick((): void => { this.exportSelected(false); })
+        }
+        .width('100%')
+        .padding({ left: 16, right: 16, top: 8, bottom: 8 })
+        .border({ width: { top: 0.5 }, color: { top: LINE } })
+        .backgroundColor(SURFACE)
       }
       PageSpacer()
     }

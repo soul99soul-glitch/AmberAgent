@@ -1,14 +1,14 @@
 // AssistantMemoryPage — 助手记忆配置
-// 真实写回:enableMemory。
-// 占位字段(领域暂无对应,P1 登记):记忆策略(strategy)、最大条数
-//   (maxMemories)、当前记忆列表(memories)。列表为本地占位态。
+// 真实写回:enableMemory;当前记忆 = MemoryStore 真数据(该助手记忆桶,可删)。
+// (原「策略/上限」两节为域无对应字段的假 UI,已移除;策略语义由核心记忆页与
+//   dream 管线承载)
 import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import { loadAssistants, saveAssistants, patchAssistant } from '@amber/chat-domain';
-import type { Assistant } from '@amber/chat-domain';
+import type { Assistant, MemoryRecord } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
-import { PillSelect } from '../components/ui/Select.ets';
+import { getMemoryLibraryOps } from '../platform_impl/MemoryStore.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, LABEL, TITLE, GUTTER } from '../design/tokens.ets';
 import { AmberSwitch, SwitchSize } from '../components/ui/Switch.ets';
 
 interface RouterParams {
@@ -26,12 +26,9 @@ struct AssistantMemoryPage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State loaded: boolean = false;
   @State editEnable: boolean = false;
-  @State editStrategyIndex: number = 0;
-  @State editMaxMemories: string = '50';
   @State memories: MemoryItem[] = [];
   @State saving: boolean = false;
   private assistantId: string = '';
-  private strategies: string[] = ['回忆 (recall)', '写入 (write)', '梦境 (dream)'];
 
   aboutToAppear(): void {
     const params = router.getParams() as RouterParams;
@@ -41,21 +38,24 @@ struct AssistantMemoryPage {
 
   private async refresh(): Promise<void> {
     const list: Assistant[] | null = await loadAssistants(getChatKvStore());
-    if (list === null) { this.loaded = true; return; }
-    const found: Assistant | null = list.find((a: Assistant): boolean => a.id === this.assistantId) ?? null;
-    if (found !== null) {
-      this.editEnable = found.enableMemory;
+    if (list !== null) {
+      const found: Assistant | null = list.find((a: Assistant): boolean => a.id === this.assistantId) ?? null;
+      if (found !== null) {
+        this.editEnable = found.enableMemory;
+      }
     }
-    // 占位记忆(子系统未移植,P1 登记)
-    this.memories = [
-      { id: 'm1', text: '用户偏好简洁回复,避免冗长寒暄。' },
-      { id: 'm2', text: '当前项目使用 TypeScript + ArkTS 双端架构。' },
-    ];
+    // 该助手记忆桶真数据
+    const records: MemoryRecord[] = await getMemoryLibraryOps().listBucketRecords(this.assistantId);
+    this.memories = records.map((r: MemoryRecord): MemoryItem => ({ id: `${r.id}`, text: r.content }));
     this.loaded = true;
   }
 
   private removeMemory(id: string): void {
-    this.memories = this.memories.filter((m: MemoryItem): boolean => m.id !== id);
+    const numeric: number = parseInt(id, 10);
+    if (Number.isNaN(numeric)) return;
+    getMemoryLibraryOps().deleteMemory(numeric).then((): void => {
+      this.memories = this.memories.filter((m: MemoryItem): boolean => m.id !== id);
+    }).catch((_e: Error): void => {});
   }
 
   private async save(): Promise<void> {
@@ -116,37 +116,6 @@ struct AssistantMemoryPage {
               })
             }
             .width('100%').padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
-            .backgroundColor(SURFACE)
-            .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
-
-            this.sectionHeader('策略')
-            Row() {
-              Text('记忆策略').fontSize(BODY).fontColor(INK).layoutWeight(1).maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-              PillSelect({
-                options: this.strategies, selectedIndex: this.editStrategyIndex,
-                onSelect: (i: number): void => { this.editStrategyIndex = i; },
-              })
-            }
-            .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-            .backgroundColor(SURFACE).borderRadius(RADIUS).border({ width: 1, color: LINE })
-            .margin({ left: 16, right: 16 })
-
-            this.sectionHeader('上限')
-            Column() {
-              Row() {
-                Text('最大记忆条数').fontSize(BODY).fontColor(INK)
-                Blank()
-                TextInput({ text: this.editMaxMemories, placeholder: '如 50' })
-                  .fontSize(BODY).width(90).height(40)
-                  .backgroundColor(SURFACE2).borderRadius(8)
-                  .textAlign(TextAlign.End)
-                  .type(InputType.Number)
-                  .onChange((v: string): void => { this.editMaxMemories = v; })
-              }
-              .width('100%')
-            }
-            .width('100%').padding({ left: GUTTER, right: GUTTER, top: 12, bottom: 12 })
             .backgroundColor(SURFACE)
             .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
 

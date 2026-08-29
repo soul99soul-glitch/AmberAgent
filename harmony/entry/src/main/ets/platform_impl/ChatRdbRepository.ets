@@ -10,16 +10,23 @@ import { relationalStore } from '@kit.ArkData';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   Conversation, ConversationRepository, ConversationSummary,
-  ConversationRow, MessageNodeRow, MessageNode, ConversationWindow,
+  ConversationRow, MessageNodeRow, MessageNode, ConversationWindow, MessageSearchHit,
 } from '@amber/chat-domain';
 import {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
   messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
+  messageNodeRowPlainText, snippetAround,
 } from '@amber/chat-domain';
 import { enqueueConversationFileMutation } from './ManagedFileStore.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.ChatRdbRepository';
+// 消息搜索粗筛中间态(每会话最新命中行)
+interface RawMessageHit {
+  messages: string;
+  nodeIndex: number;
+}
+
 const DB_NAME: string = 'amber_chat.db';
 
 // 列序常量(查询投影顺序固定,避免逐列 getColumnIndex)
@@ -421,6 +428,54 @@ class ChatRdbRepository implements ConversationRepository {
     return rows
       .filter((r: ConversationRow): boolean => r.title.toLowerCase().includes(needle))
       .map((r: ConversationRow): ConversationSummary => ChatRdbRepository.summaryOf(r));
+  }
+
+  async searchMessages(searchText: string, limit: number): Promise<MessageSearchHit[]> {
+    const store = await this.ensureStore();
+    if (store === null) return this.memory.searchMessages(searchText, limit);
+    // LIKE 粗筛(JSON blob 明文子串;关键词含引号/换行时可能因 JSON 转义假阴性,
+    // 个人级消息量可接受)→ 每会话取 node_index 最大命中 → 纯文本精滤 + 片段化
+    const predicates = new relationalStore.RdbPredicates('message_node');
+    predicates.like('messages', `%${searchText}%`);
+    const needle: string = searchText.toLowerCase();
+    // convId → 最新命中(粗筛行可能不含精筛词,保留 messages 待精滤)
+    const latestByConv = new Map<string, RawMessageHit>();
+    const rs = await store.query(predicates, ['conversation_id', 'messages', 'node_index']);
+    try {
+      while (rs.goToNextRow()) {
+        const convId: string = rs.getString(0);
+        const nodeIndex: number = rs.getLong(2);
+        const prev: RawMessageHit | undefined = latestByConv.get(convId);
+        if (prev === undefined || nodeIndex > prev.nodeIndex) {
+          latestByConv.set(convId, { messages: rs.getString(1), nodeIndex: nodeIndex });
+        }
+      }
+    } finally {
+      rs.close();
+    }
+    if (latestByConv.size === 0) return [];
+    const convIds: string[] = [];
+    latestByConv.forEach((_v: RawMessageHit, k: string): void => { convIds.push(k); });
+    // 会话元数据批量查(in 子句)
+    const convPredicates = new relationalStore.RdbPredicates('conversation');
+    convPredicates.in('id', convIds);
+    convPredicates.orderByDesc('update_at');
+    const convRows: ConversationRow[] = await this.queryConversationRows(store, convPredicates);
+    const hits: MessageSearchHit[] = [];
+    for (const conv of convRows) {
+      const raw: RawMessageHit | undefined = latestByConv.get(conv.id);
+      if (raw === undefined) continue;
+      const plain: string = messageNodeRowPlainText(raw.messages);
+      if (plain.toLowerCase().indexOf(needle) < 0) continue; // JSON 转义/字段名造成的假阳性精滤
+      hits.push({
+        conversationId: conv.id,
+        conversationTitle: conv.title,
+        snippet: snippetAround(plain, needle),
+        updateAt: ChatRdbRepository.summaryOf(conv).updateAt,
+      });
+      if (hits.length >= Math.max(0, limit)) break;
+    }
+    return hits;
   }
 
   async delete(id: string): Promise<void> {

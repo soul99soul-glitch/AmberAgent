@@ -293,10 +293,11 @@ export {
 export {
   CHAT_SCHEMA_SQL, conversationToRow, rowToConversation,
   messageNodeToRow, rowToMessageNode, createMemoryConversationRepository,
+  messageNodeRowPlainText, snippetAround, searchMessageHitsIn,
 } from './chat/persistence.ts';
 export type {
   ConversationRow, MessageNodeRow, ConversationSummary, ConversationRepository,
-  ConversationWindow,
+  ConversationWindow, MessageSearchHit,
 } from './chat/persistence.ts';
 
 export {

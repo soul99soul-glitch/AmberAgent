@@ -14,6 +14,7 @@
 
 import type { Conversation, MessageNode } from './conversation.ts';
 import { serializeMessageList, parseMessageList } from './serialize.ts';
+import { toText } from './message.ts';
 import { nowIso } from './ids.ts';
 
 // ===== RDB schema(SQLite 子集,Harmony RDB 兼容) =====
@@ -170,11 +171,76 @@ export interface ConversationRepository {
   list(assistantId?: string): Promise<ConversationSummary[]>;
   listRecent(limit: number, assistantId?: string): Promise<ConversationSummary[]>;
   search(searchText: string, assistantId?: string): Promise<ConversationSummary[]>;
+  // 消息全文搜索(按会话去重取最新命中,updateAt 倒序;Android MessageSearch+FTS 的
+  // 无 FTS 等价实现:LIKE 粗筛 + 解析后纯文本精滤)
+  searchMessages(searchText: string, limit: number): Promise<MessageSearchHit[]>;
   delete(id: string): Promise<void>;                          // 级联 nodes
   // Phase 5:分页窗口(尾窗 + 历史页;getById 恒全量不变)
   getConversationTailWindow(id: string, limit: number): Promise<ConversationWindow>;
   getConversationNodePage(id: string, offset: number, limit: number): Promise<ConversationWindow>;
 }
+
+// 消息全文搜索命中
+export interface MessageSearchHit {
+  conversationId: string;
+  conversationTitle: string;
+  snippet: string;
+  updateAt: string;
+}
+
+// node 行 messages JSON → 纯文本(UIMessage text part 拼接;解析失败返回空串)
+export const messageNodeRowPlainText = (messagesJson: string): string => {
+  try {
+    const msgs = parseMessageList(messagesJson);
+    let out = '';
+    for (const m of msgs) {
+      const text = toText(m);
+      if (text.length > 0) out += text + '\n';
+    }
+    return out;
+  } catch {
+    return '';
+  }
+};
+
+// 命中片段:大小写不敏感定位,但切原文保大小写;越界省略号
+export const snippetAround = (text: string, needle: string): string => {
+  const i: number = text.toLowerCase().indexOf(needle.toLowerCase());
+  if (i < 0) return text.slice(0, 40);
+  const start = Math.max(0, i - 12);
+  const head = start > 0 ? '…' : '';
+  const rest = text.slice(start, i + needle.length + 28).trim();
+  return `${head}${rest}…`;
+};
+
+// 命中列表构造:每会话取 node_index 最大的命中行(最新消息),按会话 updateAt 倒序
+export const searchMessageHitsIn = (
+  convs: ConversationSummary[],
+  nodeRowsOf: (convId: string) => MessageNodeRow[],
+  searchText: string,
+  limit: number,
+): MessageSearchHit[] => {
+  const needle = asciiLower(searchText.trim());
+  if (needle.length === 0) return [];
+  const hits: MessageSearchHit[] = [];
+  for (const conv of convs) {
+    const rows = nodeRowsOf(conv.id);
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const plain = messageNodeRowPlainText(rows[i].messages);
+      if (asciiLower(plain).indexOf(needle) < 0) continue;
+      hits.push({
+        conversationId: conv.id,
+        conversationTitle: conv.title,
+        snippet: snippetAround(plain, needle),
+        updateAt: conv.updateAt,
+      });
+      break;
+    }
+  }
+  hits.sort((a: MessageSearchHit, b: MessageSearchHit): number =>
+    b.updateAt.localeCompare(a.updateAt));
+  return hits.slice(0, Math.max(0, limit));
+};
 
 // SQLite LIKE:ASCII 大小写不敏感(非 ASCII 严格) — 用 ASCII-only 折叠对齐
 const asciiLower = (s: string): string =>
@@ -264,6 +330,13 @@ export const createMemoryConversationRepository = (
           .filter((r: ConversationRow): boolean => asciiLower(r.title).includes(needle))
           .map(summaryOf),
       );
+    },
+
+    searchMessages(searchText: string, limit: number): Promise<MessageSearchHit[]> {
+      return Promise.resolve(searchMessageHitsIn(
+        filtered(undefined).map(summaryOf),
+        (convId: string): MessageNodeRow[] => nodeRowsByConv.get(convId) ?? [],
+        searchText, limit));
     },
 
     delete(id: string): Promise<void> {

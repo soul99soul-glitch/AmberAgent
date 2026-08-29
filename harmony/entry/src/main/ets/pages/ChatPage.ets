@@ -6,7 +6,7 @@
 // D-038:图片输入 — PhotoViewPicker 选图 → data: URL → UIMessagePart[] 发送
 //   (文本可空,图片不可空);渲染 Image(p.url)
 // D-079b:物化即压缩(ImageCompress.compressImageAsDataUrl),对齐 FileEncoder 载荷
-import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, TEXT_STYLES, USER_BG, USER_INK } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BG_GLASS, BODY, BODY2, ERROR, HEADER, INK, INK2, INK3, INK4, LABEL, LINE, LINE2, META, MONO_SMALL, OVERLAY, RADIUS, SIGNAL, STATUS_AMBER, STATUS_BLUE, SURFACE, SURFACE2, TEXT_STYLES, USER_BG, USER_INK } from '../design/tokens.ets';
 import type { AbortSignalLike } from '@amber/deepread-domain';
 import { router, promptAction, window } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
@@ -23,7 +23,7 @@ import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
   Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
   PendingUserMessage, PendingUserMessageMode, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
-  CompactPolicy, CompactResult, PreparedContext, DisplaySetting,
+  CompactPolicy, CompactResult, PreparedContext, DisplaySetting, MessageSearchHit,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
@@ -886,6 +886,7 @@ struct ChatPage {
   // Phase 6:会话抽屉
   @State drawerOpen: boolean = false;
   @State drawerConversations: ConversationSummary[] = [];
+  @State drawerMessageHits: MessageSearchHit[] = [];
   // Tool preview sheet
   @State toolPreviewSheetOpen: boolean = false;
   private toolPreviewPart: UIMessagePartTool | null = null;
@@ -3079,6 +3080,18 @@ struct ChatPage {
     }).catch((e: Error): void => {
       this.errorMsg = e.message;
     });
+    // 消息全文搜索(仅在有词时;与标题搜索并列,命中展示在会话列表下)
+    if (query.length > 0) {
+      getChatRepository().searchMessages(query, 8).then((hits: MessageSearchHit[]): void => {
+        if (this.pageAlive && this.drawerSearchText.trim() === query) {
+          this.drawerMessageHits = hits;
+        }
+      }).catch((_e: Error): void => {
+        this.drawerMessageHits = [];
+      });
+    } else {
+      this.drawerMessageHits = [];
+    }
   }
 
   private openDrawer(): void {
@@ -4510,6 +4523,31 @@ struct ChatPage {
         this.regenerateDrawerTitle(item);
       },
     })
+    // 消息全文命中(有搜索词时展示;点击进入对应会话)
+    if (this.drawerMessageHits.length > 0) {
+      Column() {
+        Text(`消息命中 · ${this.drawerMessageHits.length}`)
+          .fontSize(LABEL).fontColor(INK3)
+          .width('100%').margin({ top: 14, bottom: 6 })
+        ForEach(this.drawerMessageHits, (hit: MessageSearchHit): void => {
+          Column() {
+            Text(hit.conversationTitle.length > 0 ? hit.conversationTitle : '未命名会话')
+              .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(hit.snippet)
+              .fontSize(META).fontColor(INK3).margin({ top: 3 })
+              .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start).width('100%')
+          .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+          .borderRadius(RADIUS)
+          .backgroundColor(SURFACE)
+          .margin({ bottom: 6 })
+          .onClick((): void => { this.openDrawerConversation(hit.conversationId); })
+        }, (hit: MessageSearchHit): string => hit.conversationId)
+      }
+      .width('100%')
+    }
   }
 
   // Tool preview sheet builder
