@@ -2202,7 +2202,11 @@ class ChatService(
             for (part in message.parts) {
                 if (part !is UIMessagePart.Tool || !part.isExecuted) continue
                 runCatching {
-                    ledger.getByToolCallId(part.toolCallId)?.let { effect ->
+                    // A callId can have several ledger rows (retries, older
+                    // attempts); sweep them all — markResultPersisted only
+                    // touches FINISHED/FAILED rows with a payload, so this
+                    // can never corrupt a live PREPARED/STARTED effect.
+                    ledger.listByToolCallId(part.toolCallId).forEach { effect ->
                         ledger.markResultPersisted(effect.effectId)
                     }
                 }.onFailure { error ->

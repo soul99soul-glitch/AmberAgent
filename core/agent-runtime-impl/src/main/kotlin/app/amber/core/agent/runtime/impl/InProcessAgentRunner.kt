@@ -160,26 +160,14 @@ class InProcessAgentRunner(
                 interruptedReason = null,
             )
             try {
-                eventStore.appendRun(record)
-            } catch (e: Exception) {
-                runCatching { Log.w(TAG, "Failed to persist run record", e) }
-            }
-            // Resume: a paused run (approval / resumable) re-enters RUNNING
-            // under the same runId so the post-handler terminal CAS (expected
-            // CREATED/RUNNING) can land. Fresh runs are already RUNNING (the
-            // CAS is rejected as a no-op); terminal rows stay write-once.
-            // Under the same per-runId terminal mutex: a stale activation's
-            // resume CAS needs no epoch check — it can only apply from a
-            // pause state or be rejected as a no-op, so it is harmless — but
-            // it must not interleave with another activation's terminal
-            // critical section.
-            runCatching {
-                terminalLocks.getOrPut(runId) { Mutex() }.withLock {
-                    eventStore.transitionRun(runId, RunStatus.PAUSE_STATES, RunStatus.RUNNING)
-                }
-            }
+                // ---- Launch gate: the durable row, not the in-memory
+                // snapshot, decides whether this activation may execute the
+                // handler (see [gateHandler]). The optimistic RUNNING reset
+                // above is corrected by the gate whenever the persisted truth
+                // disagrees — observers may transiently see RUNNING before
+                // the in-coroutine verdict lands, never after.
+                if (!gateHandler(record, runId, snapshot)) return@launch
 
-            try {
                 @Suppress("UNCHECKED_CAST")
                 val agent = registered.factory() as app.amber.core.agent.runtime.Agent<I, *>
                 val runScope = runScopeFactory(runId, input)
@@ -232,7 +220,13 @@ class InProcessAgentRunner(
                     // for process-death recovery.
                     val result = transitionTerminal(runId, RunStatus.CANCELLED)
                     if (activationEpochs[runId]?.get() != mine) return@withLock
-                    if (result is RunTransitionResult.Applied) {
+                    // A row-less run (the gate's INSERT never landed) has
+                    // nothing durable to settle — this activation was
+                    // cancelled regardless: publish CANCELLED instead of
+                    // failing the snapshot.
+                    if (result is RunTransitionResult.Applied ||
+                        result is RunTransitionResult.UnknownRun
+                    ) {
                         snapshot.value = snapshot.value.copy(
                             status = RunStatus.CANCELLED,
                             finishedAt = System.currentTimeMillis(),
@@ -343,23 +337,110 @@ class InProcessAgentRunner(
      * persisted run rejected it (handler parked the run at a pause, or a
      * winner already settled it), republish the snapshot with the persisted
      * truth so observers never see COMPLETED for a run that is in fact
-     * parked at WAITING_USER.
+     * parked at WAITING_USER. [RunTransitionResult.UnknownRun] means no
+     * durable row backs the run at all: the in-memory RUNNING is a fake —
+     * fail it so it cannot linger in [listUnfinishedRuns] forever.
      */
     private fun app.amber.core.agent.runtime.RunTransitionResult?.syncSnapshotOnRejection(
         snapshot: MutableStateFlow<AgentRunSnapshot>,
     ) {
-        val rejected = this as? app.amber.core.agent.runtime.RunTransitionResult.Rejected
-            ?: return
-        val winner = rejected.current ?: return
-        if (snapshot.value.status == winner) return
-        snapshot.value = snapshot.value.copy(
-            status = winner,
-            finishedAt = if (winner.isTerminal) {
-                snapshot.value.finishedAt ?: System.currentTimeMillis()
-            } else {
+        when (this) {
+            is app.amber.core.agent.runtime.RunTransitionResult.Rejected -> {
+                val winner = current ?: return
+                if (snapshot.value.status == winner) return
+                snapshot.value = snapshot.value.copy(
+                    status = winner,
+                    finishedAt = if (winner.isTerminal) {
+                        snapshot.value.finishedAt ?: System.currentTimeMillis()
+                    } else {
+                        null
+                    },
+                )
+            }
+            is app.amber.core.agent.runtime.RunTransitionResult.UnknownRun -> {
+                snapshot.value = snapshot.value.copy(
+                    status = RunStatus.FAILED,
+                    finishedAt = snapshot.value.finishedAt ?: System.currentTimeMillis(),
+                )
+            }
+            else -> Unit
+        }
+    }
+
+    /**
+     * The durable launch gate: decides whether this activation may execute
+     * the handler. Runs inside the launch coroutine (launch() itself is
+     * non-suspending), so the persisted store — not the in-memory snapshot —
+     * is the authority:
+     *
+     *  - Fresh run: the handler runs only after the run row is durably
+     *    INSERTed (create-only). An insert failure fails the snapshot — a
+     *    launch never executes against a run the store does not have.
+     *  - Existing row (the insert reported a conflict, so the fresh/resume
+     *    distinction is atomic by construction): the run must re-enter
+     *    RUNNING through the pause→RUNNING CAS, under the per-runId terminal
+     *    mutex (a stale activation's resume CAS needs no epoch check — it can
+     *    only apply from a pause state or be rejected as a no-op — but it
+     *    must not interleave with another activation's terminal critical
+     *    section). Applied → the resume wins the handler. Rejected → the row
+     *    is terminal (write-once, the handler never re-runs) or already
+     *    RUNNING (a live activation owns this run; the second activation
+     *    stands down) — the snapshot is synced to the persisted truth.
+     *    UnknownRun → the row vanished between conflict and CAS (no
+     *    production delete path): re-assert the fresh INSERT once; a second
+     *    conflict means another activation created the row in between and
+     *    owns the run.
+     *
+     * Cancellation propagates so the caller's catch(CancellationException)
+     * settles the observable state.
+     */
+    private suspend fun gateHandler(
+        record: AgentRunRecord,
+        runId: AgentRunId,
+        snapshot: MutableStateFlow<AgentRunSnapshot>,
+    ): Boolean {
+        val created = try {
+            eventStore.appendRun(record)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // Fail-closed: without a durable run row the handler never runs.
+            snapshot.value = snapshot.value.copy(
+                status = RunStatus.FAILED,
+                finishedAt = System.currentTimeMillis(),
+                error = e,
+            )
+            runCatching { Log.w(TAG, "Run $runId not started: failed to persist run record", e) }
+            return false
+        }
+        if (created) return true
+
+        val resume = terminalLocks.getOrPut(runId) { Mutex() }.withLock {
+            try {
+                eventStore.transitionRun(runId, RunStatus.PAUSE_STATES, RunStatus.RUNNING)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Fail-closed: an unresolved resume never runs the handler.
+                runCatching { Log.w(TAG, "Run $runId resume CAS failed; standing down", e) }
                 null
-            },
-        )
+            }
+        }
+        return when (resume) {
+            is RunTransitionResult.Applied -> true
+            is RunTransitionResult.Rejected -> {
+                resume.syncSnapshotOnRejection(snapshot)
+                false
+            }
+            is RunTransitionResult.UnknownRun -> try {
+                eventStore.appendRun(record)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                false
+            }
+            null -> false
+        }
     }
 
     private fun trimCompletedSnapshots() {

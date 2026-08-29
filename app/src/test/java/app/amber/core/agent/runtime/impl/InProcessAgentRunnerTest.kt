@@ -59,9 +59,8 @@ class InProcessAgentRunnerTest {
         val events = mutableListOf<AgentEventRecord>()
         val interruptions = mutableListOf<Pair<AgentRunId, String>>()
 
-        override suspend fun appendRun(run: AgentRunRecord) {
-            runs.putIfAbsent(run.runId, run)
-        }
+        override suspend fun appendRun(run: AgentRunRecord): Boolean =
+            runs.putIfAbsent(run.runId, run) == null
 
         override suspend fun appendEvent(event: AgentEventRecord) {
             if (events.none { it.runId == event.runId && it.seq == event.seq }) {
@@ -279,31 +278,43 @@ class InProcessAgentRunnerTest {
     @Test
     fun `relaunch under the same runId reuses the snapshot flow and resets to running`() = runBlocking {
         val store = RecordingEventStore()
-        var gate = CompletableDeferred<Unit>()
-        val runner = registeredRunner(store) { gate.await() }
         val runId = AgentRunId("resume-run")
+        val invocations = AtomicInteger(0)
+        val gates = listOf(CompletableDeferred<Unit>(), CompletableDeferred<Unit>())
+        // First activation parks the run (the approval-resume shape); the
+        // relaunch resumes it through the pause→RUNNING resume CAS. A
+        // completed row would be gated off instead (pinned by the launch-gate
+        // tests in :core:agent-runtime-impl).
+        val runner = registeredRunner(store) {
+            when (invocations.incrementAndGet()) {
+                1 -> {
+                    store.transitionRun(runId, RunStatus.LIVE_STATES, RunStatus.WAITING_USER)
+                    gates[0].await()
+                }
+                else -> gates[1].await()
+            }
+        }
 
         runner.launch(AgentDescriptorId("fake"), FakeInput("a"), requestedRunId = runId).getOrThrow()
         val flow = runner.observe(runId)
         assertEquals(RunStatus.RUNNING, flow.value.status)
-        gate.complete(Unit)
+        gates[0].complete(Unit)
         repeat(40) {
-            if (flow.value.status == RunStatus.COMPLETED) return@repeat
+            if (flow.value.status == RunStatus.WAITING_USER) return@repeat
             delay(50)
         }
-        assertEquals(RunStatus.COMPLETED, flow.value.status)
+        assertEquals(RunStatus.WAITING_USER, flow.value.status)
 
         // Resume under the SAME runId (paused-run resume shape): the StateFlow
         // instance must be reused — flatMapLatest observers keep their
         // subscription — and reset to RUNNING for the new attempt.
-        gate = CompletableDeferred()
         runner.launch(AgentDescriptorId("fake"), FakeInput("b"), requestedRunId = runId).getOrThrow()
 
         assertSame(flow, runner.observe(runId))
         assertEquals(RunStatus.RUNNING, flow.value.status)
         assertNull(flow.value.finishedAt)
 
-        gate.complete(Unit)
+        gates[1].complete(Unit)
         repeat(40) {
             if (flow.value.status == RunStatus.COMPLETED) return@repeat
             delay(50)

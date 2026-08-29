@@ -54,7 +54,7 @@ internal object ExecutionPolicyGate {
     private val OFFICEPRO_WORKSPACE_PATHS =
         listOf(PathArg("workspace_paths", optional = true, array = true))
 
-    private data class PathArg(
+    internal data class PathArg(
         val key: String,
         /**
          * true = the tool schema marks the argument optional; an absent
@@ -77,8 +77,17 @@ internal object ExecutionPolicyGate {
      * arguments are workspace-relative and are canonicalized against
      * [WORKSPACE_ROOT] via [ExecutionPaths]; `external_file_*` paths are
      * absolute and get java.io.File.canonicalPath.
+     *
+     * WARNING — coverage is opt-in: a path-bearing tool whose name is absent
+     * from this table is NOT constrained by the
+     * [ExecutionPolicy.allowedPathRoots] dimension at all (the gate never
+     * sees it). Registering a new tool here, or in the fail-closed
+     * [UNMODELED_ROOT_PATH_TOOLS] list, is the hard prerequisite for any
+     * narrowed path policy to reach it. See the known-bypasses and boundaries
+     * list in ExecutionPolicy.kt. Internal (not private) so
+     * ExecutionPolicyCoveragePinTest can pin the key set against silent edits.
      */
-    private val FILE_PATH_ARGS: Map<String, List<PathArg>> = mapOf(
+    internal val FILE_PATH_ARGS: Map<String, List<PathArg>> = mapOf(
         "file_list" to listOf(PathArg("path", optional = true, defaultRoot = WORKSPACE_ROOT)),
         "file_read" to listOf(PathArg("path")),
         "file_write" to listOf(PathArg("path")),
@@ -159,9 +168,10 @@ internal object ExecutionPolicyGate {
      * path policy does not model (each verified against its tool source). The
      * path dimension can only reason about /workspace-anchored and absolute
      * roots, so while it is active these tools are denied outright
-     * (fail-closed) instead of being waved through ungated.
+     * (fail-closed) instead of being waved through ungated. Internal (not
+     * private) so ExecutionPolicyCoveragePinTest can pin the exemption set.
      */
-    private val UNMODELED_ROOT_PATH_TOOLS: Map<String, String> = mapOf(
+    internal val UNMODELED_ROOT_PATH_TOOLS: Map<String, String> = mapOf(
         // ICloudDriveTools.kt — Vault-relative paths under the configured
         // iCloud Drive Vault root, not /workspace.
         "icloud_list" to "the iCloud Drive Vault",
@@ -180,7 +190,7 @@ internal object ExecutionPolicyGate {
     )
 
     /** URL-bearing network tools → which argument carries the outbound URL. */
-    private data class UrlArg(
+    internal data class UrlArg(
         val key: String,
         /**
          * false = the schema marks the URL optional: an absent argument does
@@ -191,8 +201,20 @@ internal object ExecutionPolicyGate {
         val required: Boolean,
     )
 
-    /** Network-family tools whose args carry the outbound URL to check. */
-    private val NETWORK_URL_ARGS: Map<String, UrlArg> = mapOf(
+    /**
+     * Network-family tools whose args carry the outbound URL to check.
+     *
+     * WARNING — coverage is opt-in: an outbound-URL tool whose name is absent
+     * from this table is never checked by the
+     * [ExecutionPolicy.allowedDomains] dimension (the gate skips the tool
+     * entirely). Registering a new tool here is the hard prerequisite for a
+     * narrowed domain policy to reach it. See the known-bypasses and
+     * boundaries list in ExecutionPolicy.kt (e.g. `wm_eval`'s session-scoped
+     * fetches stay invisible to this dimension even for mapped tools).
+     * Internal (not private) so ExecutionPolicyCoveragePinTest can pin the
+     * key set against silent edits.
+     */
+    internal val NETWORK_URL_ARGS: Map<String, UrlArg> = mapOf(
         "http_request" to UrlArg("url", required = true),
         "download_file" to UrlArg("url", required = true),
         "scrape_web" to UrlArg("url", required = true),

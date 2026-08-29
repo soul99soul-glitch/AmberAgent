@@ -906,6 +906,9 @@ class RecipeRuntimeTest {
         override suspend fun getByToolCallId(toolCallId: String): ToolEffect? =
             prepared.lastOrNull { it.toolCallId == toolCallId }
 
+        override suspend fun listByToolCallId(toolCallId: String): List<ToolEffect> =
+            prepared.filter { it.toolCallId == toolCallId }
+
         override suspend fun listByRun(runId: String): List<ToolEffect> = prepared.filter { it.runId == runId }
 
         override suspend fun listByConversation(conversationId: String): List<ToolEffect> = emptyList()

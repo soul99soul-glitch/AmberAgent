@@ -28,7 +28,10 @@ import kotlinx.serialization.Serializable
  *   redirect following. The inconsistency is a known v1 limitation.
  * - `webview_open_link` resolves a link `index` to its URL inside the tool
  *   body, outside the gate, so under an active [allowedDomains] dimension an
- *   index-only call is always denied (fail-closed v1 boundary).
+ *   index-only call is always denied (fail-closed v1 boundary). This is a
+ *   DENIAL, not a bypass: the tool body never runs for an index-only call
+ *   under an active domain dimension — only a call carrying the explicit
+ *   `url` argument is checkable and can pass.
  *
  * Persistence boundary: a v1 [ExecutionPolicy] is process-local and produced
  * only in memory; production always runs [permissive]. If a real narrowing

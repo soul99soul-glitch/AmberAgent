@@ -27,9 +27,8 @@ class InMemoryAgentEventStore : AgentEventStore {
     val runs = ConcurrentHashMap<String, AgentRunRecord>()
     val interruptions = mutableListOf<Pair<AgentRunId, String>>()
 
-    override suspend fun appendRun(run: AgentRunRecord) {
-        runs.putIfAbsent(run.runId, run)
-    }
+    override suspend fun appendRun(run: AgentRunRecord): Boolean =
+        runs.putIfAbsent(run.runId, run) == null
 
     override suspend fun appendEvent(event: AgentEventRecord) {
         synchronized(eventLock) {

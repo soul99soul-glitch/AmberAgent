@@ -28,7 +28,9 @@ import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.CapabilityPermissionContext
 import app.amber.feature.runtime.CapabilityPermissionStore
 import app.amber.feature.runtime.SpeculativeToolRunner
+import app.amber.feature.runtime.ToolEffect
 import app.amber.feature.runtime.ToolEffectLedger
+import app.amber.feature.runtime.ToolEffectStatus
 import app.amber.feature.runtime.ToolLedgerContext
 import app.amber.feature.runtime.argsDigest
 import app.amber.feature.tools.ToolEffectClass
@@ -38,6 +40,7 @@ import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.agent.BuildConfig
+import kotlinx.serialization.decodeFromString
 import java.util.Locale
 import kotlin.time.Clock
 
@@ -129,11 +132,24 @@ class DefaultRunKernel(
 
         // Duplicate-tool-call guard memory (aligned with the iOS ToolLoopGuard):
         // signature (toolName + argsDigest) → number of counted executions
-        // this run, plus the toolCallIds already counted — an approval-resume
-        // re-execution of the same toolCallId is the same emission re-run, so
-        // it must never count twice.
+        // this run, plus the toolCallIds already counted. On the durable path
+        // the same runId can re-enter run() many times (approval round, crash
+        // resume), so the tables are seeded from the write-ahead ledger —
+        // FINISHED, non-failure effects of THIS runId are executions that
+        // already happened, by the same standard the in-run counting below
+        // applies.
         val executedSignatures = mutableMapOf<Pair<String, String>, Int>()
         val countedToolCallIds = mutableSetOf<String>()
+        if (durablePath) {
+            toolEffectLedger!!.listByRun(runId!!).forEach { effect ->
+                if (effect.status != ToolEffectStatus.FINISHED) return@forEach
+                if (effect.toolCallId in countedToolCallIds) return@forEach
+                val output = ledgerEffectOutput(effect)
+                if (output.isEmpty() || toolOutputIsFailure(output)) return@forEach
+                countedToolCallIds += effect.toolCallId
+                executedSignatures.merge(effect.toolName to effect.argsDigest, 1, Int::plus)
+            }
+        }
 
         for (stepIndex in 0 until maxSteps) {
             Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
@@ -174,7 +190,16 @@ class DefaultRunKernel(
                     }
                 )
             }
-            val speculativeRunner = if (settings.agentRuntime.speculativeToolExecution.enabled && settings.streamOutput) {
+            // Speculative execution is disabled on the durable path: a
+            // speculative run bypasses the write-ahead ledger (no prepare —
+            // the transaction protocol requires execution to happen after
+            // prepare) and starts before the truncation guard can judge the
+            // reply (the guard requires execution to happen after its
+            // verdict, so half-emitted truncated calls stay unexecuted).
+            val speculativeRunner = if (!durablePath &&
+                settings.agentRuntime.speculativeToolExecution.enabled &&
+                settings.streamOutput
+            ) {
                 SpeculativeToolRunner(
                     scope = this,
                     dispatcher = toolDispatcher,
@@ -410,7 +435,7 @@ class DefaultRunKernel(
             // table BEFORE anything executes — 1st occurrence runs, 2nd is
             // skipped with a structured reminder the model sees through the
             // tool result, 3rd stops the loop entirely.
-            val classification = classifyDuplicates(toolsToProcess, executedSignatures, countedToolCallIds)
+            val classification = classifyDuplicates(toolsToProcess, executedSignatures)
             val stoppingTool = classification.stopping
             if (stoppingTool != null) {
                 val currentAssistant = messages.last()
@@ -545,6 +570,15 @@ class DefaultRunKernel(
      * ([Duplicates.skipped]), and a signature counted twice makes the call
      * [Duplicates.stopping] and ends the scan — the loop breaks right after,
      * so later calls of the same step stay untouched.
+     *
+     * There is deliberately NO per-toolCallId exemption anymore: a counted
+     * callId re-entering the guard is routed through the signature table like
+     * any other call. Approval/crash resume never needs an exemption — those
+     * flows re-enter run() with PREPARED/RECONCILED effects, which are never
+     * counted (only FINISHED, non-failure executions count), so a resumed
+     * emission reaches the table with a null count and executes. A FINISHED
+     * callId re-emitted by the model is a genuine repeat and must not
+     * unconditionally re-execute.
      */
     private class Duplicates(
         val toExecute: List<UIMessagePart.Tool>,
@@ -555,7 +589,6 @@ class DefaultRunKernel(
     private fun classifyDuplicates(
         tools: List<UIMessagePart.Tool>,
         executedSignatures: Map<Pair<String, String>, Int>,
-        countedToolCallIds: Set<String>,
     ): Duplicates {
         val toExecute = mutableListOf<UIMessagePart.Tool>()
         val skipped = mutableListOf<UIMessagePart.Tool>()
@@ -570,10 +603,6 @@ class DefaultRunKernel(
         for (tool in tools) {
             val signature = tool.toolName to argsDigest(tool.input)
             when {
-                // A toolCallId that was already counted is the same emission
-                // re-entering the guard (approval resume / ledger reuse) —
-                // never a new duplicate call.
-                tool.toolCallId in countedToolCallIds -> toExecute += tool
                 // Same-batch twin: its first occurrence is executing in this
                 // very batch, so this one never reaches executeBatch.
                 signature in batchSeenSignatures -> skipped += tool.copy(
@@ -638,5 +667,20 @@ class DefaultRunKernel(
         if (status != null && status in FAILURE_TOOL_STATUSES) return true
         val error = runCatching { obj["error"]?.jsonPrimitive?.contentOrNull }.getOrNull()
         return !error.isNullOrBlank()
+    }
+
+    /**
+     * Best-effort reconstruction of a FINISHED effect's output for the guard
+     * rebuild: decode the persisted payload, falling back to the retained
+     * summary as plain text (the payload is dropped once the result has landed
+     * in the conversation). An empty result counts as "no output" — the same
+     * not-counted treatment the in-run rule gives empty outputs.
+     */
+    private fun ledgerEffectOutput(effect: ToolEffect): List<UIMessagePart> {
+        val payload = effect.resultPayload
+        if (payload != null) {
+            runCatching { Json.decodeFromString<List<UIMessagePart>>(payload) }.getOrNull()?.let { return it }
+        }
+        return effect.resultSummary?.let { listOf(UIMessagePart.Text(it)) } ?: emptyList()
     }
 }

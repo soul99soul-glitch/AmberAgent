@@ -18,9 +18,10 @@ class RoomAgentEventStore(
     private val now: () -> Long = System::currentTimeMillis,
 ) : AgentEventStore {
 
-    override suspend fun appendRun(run: AgentRunRecord) {
-        // insertRun is IGNORE-on-conflict: create-only by design.
-        dao.insertRun(run.toEntity())
+    override suspend fun appendRun(run: AgentRunRecord): Boolean {
+        // insertRun is IGNORE-on-conflict: create-only by design. -1 means a
+        // row for the same runId already existed and nothing was written.
+        return dao.insertRun(run.toEntity()) != -1L
     }
 
     override suspend fun appendEvent(event: AgentEventRecord) {

@@ -1287,10 +1287,11 @@ class ReplayGoldenTest : DurableRuntimeTestBase() {
 
         fun note(runId: String, line: String) = record(runId, Kind.NOTE, null, null, line)
 
-        override suspend fun appendRun(run: AgentRunRecord) {
+        override suspend fun appendRun(run: AgentRunRecord): Boolean {
             val isNew = !delegate.runs.containsKey(run.runId)
-            delegate.appendRun(run)
-            if (isNew) record(run.runId, Kind.RUN, null, run.parentRunId, "run_started")
+            val created = delegate.appendRun(run)
+            if (isNew && created) record(run.runId, Kind.RUN, null, run.parentRunId, "run_started")
+            return created
         }
 
         override suspend fun appendEvent(event: AgentEventRecord) = delegate.appendEvent(event)

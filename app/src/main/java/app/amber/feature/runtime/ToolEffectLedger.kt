@@ -6,9 +6,9 @@ import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -95,7 +95,10 @@ data class ToolEffect(
  *
  * [prepare] is idempotent per (runId, toolCallId): a tool call that was
  * already prepared (same run, or an earlier run of the same conversation
- * after a crash) reuses its effect instead of creating a duplicate.
+ * after a crash) reuses its effect instead of creating a duplicate. A
+ * FINISHED effect with the same args is returned as-is (never a second
+ * row) — a re-emitted call is the duplicate guard's decision, not a new
+ * execution.
  */
 interface ToolEffectLedger {
     suspend fun prepare(
@@ -112,13 +115,25 @@ interface ToolEffectLedger {
 
     suspend fun getByToolCallId(toolCallId: String): ToolEffect?
 
+    /**
+     * Every effect ever prepared for [toolCallId], oldest first (the newest
+     * is the current attempt). Payload-hygiene sweeps iterate ALL rows so a
+     * terminal row is found even when younger rows share the callId.
+     */
+    suspend fun listByToolCallId(toolCallId: String): List<ToolEffect>
+
     suspend fun listByRun(runId: String): List<ToolEffect>
 
     suspend fun listByConversation(conversationId: String): List<ToolEffect>
 
     suspend fun listOutcomeUnknown(): List<ToolEffect>
 
-    /** Post-approval transition. Idempotent: already-STARTED effects stay STARTED. */
+    /**
+     * Post-approval transition. Idempotent: already-STARTED effects stay
+     * STARTED, and a FINISHED effect is never downgraded (a FINISHED row can
+     * surface as a prepare reuse product; the duplicate guard owns it, not a
+     * re-execution).
+     */
     suspend fun markStarted(effectId: String, approvalDigest: String)
 
     /** Success: stores the result payload so it can be replayed without re-execution. */
@@ -171,9 +186,20 @@ class RoomToolEffectLedger(
         messagePersistenceCursor: String?,
     ): ToolEffect {
         val argsDigest = argsDigest(input)
+        val rows = dao.getByToolCallId(toolCallId)
+        // Same run, already FINISHED with the same args (the model re-emitted
+        // a call whose execution is already on the ledger): return the
+        // finished effect instead of minting a second PREPARED row. The
+        // digest match is what the duplicate-tool-call guard keys on, so the
+        // re-emission is skipped by signature and the effect is never
+        // re-executed; markStarted also refuses to rewrite a FINISHED row.
+        rows.firstOrNull {
+            it.runId == runId &&
+                it.status == ToolEffectStatus.FINISHED.name &&
+                it.argsDigest == argsDigest
+        }?.let { return ToolEffect.from(it) }
         // Same run: the previous prepare (approval round) is reused.
-        dao.getByToolCallId(toolCallId)
-            .filter { it.isReusable() }
+        rows.filter { it.isReusable() }
             .firstOrNull { it.runId == runId }
             ?.let { return ToolEffect.from(it) }
         // Same conversation, earlier run (crash then resume with a new runId):
@@ -224,6 +250,9 @@ class RoomToolEffectLedger(
     override suspend fun getByToolCallId(toolCallId: String): ToolEffect? =
         dao.getByToolCallId(toolCallId).lastOrNull()?.let(ToolEffect::from)
 
+    override suspend fun listByToolCallId(toolCallId: String): List<ToolEffect> =
+        dao.getByToolCallId(toolCallId).map(ToolEffect::from)
+
     override suspend fun listByRun(runId: String): List<ToolEffect> =
         dao.listByRun(runId).map(ToolEffect::from)
 
@@ -236,6 +265,7 @@ class RoomToolEffectLedger(
     override suspend fun markStarted(effectId: String, approvalDigest: String) {
         val entity = dao.getByEffectId(effectId) ?: return
         if (entity.status == ToolEffectStatus.STARTED.name) return
+        if (entity.status == ToolEffectStatus.FINISHED.name) return
         dao.upsert(
             entity.copy(
                 status = ToolEffectStatus.STARTED.name,
@@ -356,14 +386,31 @@ internal fun sha256Hex(input: String): String {
 /** Display-only tool-arg metadata keys excluded from both digest and execution args. */
 internal val TOOL_DISPLAY_METADATA_KEYS = setOf("display_title")
 
-/** Strips display-only metadata so the digested args equal the executed args. */
-internal fun JsonElement.withoutToolDisplayMetadata(): JsonElement {
-    val obj = runCatching { jsonObject }.getOrNull() ?: return this
-    if (obj.keys.none { it in TOOL_DISPLAY_METADATA_KEYS }) return this
-    return JsonObject(obj.filterKeys { key -> key !in TOOL_DISPLAY_METADATA_KEYS })
+/**
+ * Strips display-only metadata at every nesting level and canonicalizes the
+ * JSON (recursive lexicographic key sort; array order preserved) so the
+ * digested args equal the executed args and are stable against key-order
+ * permutations from different providers/models.
+ */
+internal fun JsonElement.withoutToolDisplayMetadata(): JsonElement = when (this) {
+    is JsonObject -> JsonObject(
+        entries
+            .filter { (key, _) -> key !in TOOL_DISPLAY_METADATA_KEYS }
+            .associate { (key, value) -> key to value.withoutToolDisplayMetadata() }
+            .toSortedMap(),
+    )
+
+    is JsonArray -> JsonArray(map { it.withoutToolDisplayMetadata() })
+    else -> this
 }
 
-/** Argument digest over the raw input, stripped of display-only metadata. */
+/**
+ * Argument digest over the raw input, stripped of display-only metadata and
+ * canonicalized (recursive key sort). NOTE: digests persisted before the
+ * canonicalization change do not match digests of the same args computed
+ * today — that is acceptable, the digest is an intra-run consistency key
+ * (writer and reader always use the same function within one process).
+ */
 internal fun argsDigest(input: String): String {
     val normalized = runCatching {
         digestJson.parseToJsonElement(input.ifBlank { "{}" })

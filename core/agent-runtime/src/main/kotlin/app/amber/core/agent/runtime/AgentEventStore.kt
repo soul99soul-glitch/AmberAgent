@@ -7,8 +7,13 @@ interface AgentEventStore {
      * Create the run row. Create-only: an existing row for the same runId is
      * left untouched — status changes must go through [transitionRun] so a
      * stale writer can never overwrite a newer or terminal state.
+     *
+     * Returns true when the row was created, false when a row for the same
+     * runId already existed (conflict — nothing was written). Store failures
+     * surface as exceptions, so callers can gate execution on a durable
+     * create (e.g. [appendRun] winning the right to run a launch).
      */
-    suspend fun appendRun(run: AgentRunRecord)
+    suspend fun appendRun(run: AgentRunRecord): Boolean
 
     /**
      * Append an event record. Idempotent on (runId, seq): re-appending an

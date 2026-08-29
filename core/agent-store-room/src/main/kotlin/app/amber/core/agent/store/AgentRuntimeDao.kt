@@ -13,9 +13,10 @@ abstract class AgentRuntimeDao {
 
     // IGNORE makes appendRun create-only: a stale writer re-asserting a run
     // record can never overwrite a newer or terminal state — status changes
-    // must go through transitionStatus (CAS) below.
+    // must go through transitionStatus (CAS) below. Returns the rowId, or -1
+    // when a row for the same runId already existed (conflict).
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    abstract suspend fun insertRun(run: AgentRunEntity)
+    abstract suspend fun insertRun(run: AgentRunEntity): Long
 
     @Update
     abstract suspend fun updateRun(run: AgentRunEntity)

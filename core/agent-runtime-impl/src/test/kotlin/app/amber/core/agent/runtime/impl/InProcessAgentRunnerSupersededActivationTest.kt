@@ -28,6 +28,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.Serializable
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
@@ -68,9 +69,8 @@ class InProcessAgentRunnerSupersededActivationTest {
     private class RecordingEventStore : AgentEventStore {
         val runs = mutableMapOf<String, AgentRunRecord>()
 
-        override suspend fun appendRun(run: AgentRunRecord) {
-            runs.putIfAbsent(run.runId, run)
-        }
+        override suspend fun appendRun(run: AgentRunRecord): Boolean =
+            runs.putIfAbsent(run.runId, run) == null
 
         override suspend fun appendEvent(event: AgentEventRecord) {}
         override suspend fun appendEventAllocatingSeq(event: AgentEventRecord): AgentEventRecord = event
@@ -178,12 +178,15 @@ class InProcessAgentRunnerSupersededActivationTest {
         }
     }
 
+    /** Handler invocation counter, exposed for gate pinning assertions. */
+    private val invocations = AtomicInteger(0)
+
     private fun runnerWithAgent(
         store: AgentEventStore,
         scope: CoroutineScope,
         onInvoke: suspend (invocation: Int) -> FakeArtifact,
     ): InProcessAgentRunner {
-        val invocation = AtomicInteger(0)
+        invocations.set(0)
         val registry = InMemoryAgentRegistry().apply {
             register(
                 descriptor = descriptor,
@@ -194,7 +197,7 @@ class InProcessAgentRunnerSupersededActivationTest {
                     object : Agent<FakeInput, FakeArtifact> {
                         override val descriptor = this@InProcessAgentRunnerSupersededActivationTest.descriptor
                         override val handler = AgentHandler<FakeInput, FakeArtifact> { input, _ ->
-                            onInvoke(invocation.incrementAndGet())
+                            onInvoke(invocations.incrementAndGet())
                         }
                     }
                 },
@@ -289,6 +292,11 @@ class InProcessAgentRunnerSupersededActivationTest {
         val runner = runnerWithAgent(store, runnerScope) { invocation ->
             when (invocation) {
                 1 -> {
+                    // Park the run for approval (the turn-hook shape), then
+                    // unwind while activation 2 is live — the pause-window
+                    // supersede: since the launch gate, a relaunch only runs
+                    // a handler through the pause→RUNNING resume CAS.
+                    store.transitionRun(runId, RunStatus.LIVE_STATES, RunStatus.WAITING_USER)
                     firstRelease.await()
                     FakeArtifact("first")
                 }
@@ -304,15 +312,21 @@ class InProcessAgentRunnerSupersededActivationTest {
             }
         }
 
-        // Activation 1 blocks in its handler; activation 2 supersedes it and
-        // blocks too. jobs[runId] now points at activation 2.
+        // Activation 1 parks the run, then holds inside the handler.
         runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
         advanceUntilIdle()
-        runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
-        advanceUntilIdle()
+        assertEquals(RunStatus.WAITING_USER, store.runs.getValue(runId.value).status)
 
-        // Supersede activation 1: its finally must not unregister the live
-        // job (conditional remove), leaving cancel(runId) effective.
+        // Activation 2 resumes the paused run under the same runId: the
+        // pause→RUNNING CAS applies and it blocks in its handler. jobs[runId]
+        // now points at activation 2.
+        runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
+        advanceUntilIdle()
+        assertEquals(RunStatus.RUNNING, store.runs.getValue(runId.value).status)
+
+        // Supersede activation 1 while activation 2 is live: its post-handler
+        // path stands down (epoch) and its finally must not unregister the
+        // live job (conditional remove), leaving cancel(runId) effective.
         firstRelease.complete(Unit)
         advanceUntilIdle()
         assertEquals(RunStatus.RUNNING, runner.observe(runId).value.status)
@@ -461,6 +475,7 @@ class InProcessAgentRunnerSupersededActivationTest {
         runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
         advanceUntilIdle()
         assertEquals(RunStatus.COMPLETED, runner.observe(runId).value.status)
+        assertEquals(1, invocations.get())
 
         // A subsequent cancel is therefore a clean no-op: it must NOT flip
         // the published terminal snapshot.
@@ -468,11 +483,14 @@ class InProcessAgentRunnerSupersededActivationTest {
         advanceUntilIdle()
         assertEquals(RunStatus.COMPLETED, runner.observe(runId).value.status)
 
-        // A second launch of the same runId works and completes normally:
-        // the write-once row rejects the second activation's terminal CAS,
-        // and the snapshot follows the persisted truth back to COMPLETED.
+        // A second launch of the same runId is gated by the write-once
+        // COMPLETED row: the handler never re-runs, the snapshot and the
+        // store stay COMPLETED, and the StateFlow instance is reused.
+        val flow = runner.observe(runId)
         runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
         advanceUntilIdle()
+        assertEquals(1, invocations.get())
+        assertSame(flow, runner.observe(runId))
         assertEquals(RunStatus.COMPLETED, runner.observe(runId).value.status)
         assertEquals(RunStatus.COMPLETED, store.runs.getValue(runId.value).status)
     }

@@ -189,9 +189,12 @@ class ChatGenerationRoundEngine(
         // and keep counting — the number is the honest issuance index).
         var wireAttempt = 0
 
-        // Last non-null finish_reason seen anywhere in this round (across all
-        // chunks of all stream/complete attempts — the most recent wire truth
-        // wins). Scoped to the round, so it starts fresh every invocation.
+        // The finish_reason of the wire attempt whose output is actually
+        // adopted (primary, retry, Generative-UI repair or vision fallback —
+        // whichever produces the round's messages). Reset before every
+        // provider call so a failed/abandoned attempt can never leak its
+        // finish_reason into the verdict; an attempt that yields no
+        // finish_reason at all is, by definition, not a truncation.
         var lastFinishReason: String? = null
 
         // Durable audit gate — the honest condition is the run's durable path
@@ -285,6 +288,10 @@ class ChatGenerationRoundEngine(
                     attempt: Int,
                     kind: String,
                 ) {
+                    // Per-attempt verdict: forget whatever a previous
+                    // retry/repair/fallback attempt reported — only this
+                    // attempt's finish_reason may decide truncation.
+                    lastFinishReason = null
                     // P1-04: final token budget hard fit — the single fit at
                     // the provider serialization boundary, after every
                     // transformer, mailbox and steer merge. A request that
@@ -461,6 +468,10 @@ class ChatGenerationRoundEngine(
                     attempt: Int,
                     kind: String,
                 ): MessageChunk {
+                    // Per-attempt verdict: forget whatever a previous
+                    // retry/repair/fallback attempt reported — only this
+                    // attempt's finish_reason may decide truncation.
+                    lastFinishReason = null
                     // P1-04: final token budget hard fit at the serialization
                     // boundary (see streamWith for the policy).
                     val fit = TokenBudgetFitter.fit(

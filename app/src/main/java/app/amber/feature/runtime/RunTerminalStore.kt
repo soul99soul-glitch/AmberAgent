@@ -124,17 +124,10 @@ class RoomRunTerminalStore(
 ) : RunTerminalStore {
 
     override suspend fun begin(runId: String, conversationId: String, assistantId: String?) {
-        val existing = dao.getByRunId(runId)
         val nowMs = now()
-        dao.upsert(
-            existing?.copy(
-                conversationId = conversationId,
-                assistantId = assistantId,
-                state = RunTerminalState.RUNNING.name,
-                pauseReason = null,
-                updatedAtMs = nowMs,
-                finishedAtMs = null,
-            ) ?: RunTerminalEntity(
+        // Create path: INSERT only when the runId is new.
+        val inserted = dao.insertIgnore(
+            RunTerminalEntity(
                 runId = runId,
                 conversationId = conversationId,
                 assistantId = assistantId,
@@ -145,41 +138,44 @@ class RoomRunTerminalStore(
                 finishedAtMs = null,
             )
         )
+        if (inserted != -1L) return
+        // Resume path: flip an existing live row back to RUNNING in one
+        // conditional UPDATE. 0 rows = terminal row — write-once wins.
+        val resumed = dao.resumeIfLive(runId, conversationId, assistantId, nowMs)
+        if (resumed == 0) {
+            runCatching { Log.w(TAG, "begin: refusing to re-open terminal run $runId") }
+        }
     }
 
     override suspend fun pause(runId: String, state: RunTerminalState, reason: PauseReason?) {
-        val entity = dao.getByRunId(runId) ?: return
-        if (entity.finishedAtMs != null) return // terminal is write-once
-        dao.upsert(
-            entity.copy(
-                state = state.name,
-                pauseReason = reason?.name,
-                updatedAtMs = now(),
-            )
+        // Conditional UPDATE: 0 rows = missing or already-terminal row — never resurrect.
+        val updated = dao.pauseIfLive(
+            runId = runId,
+            state = state.name,
+            reason = reason?.name,
+            nowMs = now(),
         )
+        if (updated == 0) {
+            runCatching { Log.w(TAG, "pause: no live run row for $runId (requested $state), skipped") }
+        }
     }
 
     override suspend fun finish(runId: String, state: RunTerminalState, reason: PauseReason?) {
-        val entity = dao.getByRunId(runId) ?: return
-        if (entity.finishedAtMs != null) return // terminal is write-once
         if (!state.isTerminal) {
             runCatching { Log.w(TAG, "finish: refusing non-terminal state $state for $runId") }
             return
         }
-        // STEP_LIMIT must never be mapped to COMPLETED (plan §P1-03).
-        if (entity.state == RunTerminalState.STEP_LIMIT.name && state == RunTerminalState.COMPLETED) {
-            runCatching { Log.w(TAG, "finish: refusing to map STEP_LIMIT to COMPLETED for $runId") }
-            return
-        }
-        val nowMs = now()
-        dao.upsert(
-            entity.copy(
-                state = state.name,
-                pauseReason = reason?.name,
-                updatedAtMs = nowMs,
-                finishedAtMs = nowMs,
-            )
+        // Conditional UPDATE: write-once and the STEP_LIMIT→COMPLETED refusal
+        // are enforced by the WHERE clause, not by a read-check-write race.
+        val updated = dao.finishIfLive(
+            runId = runId,
+            state = state.name,
+            reason = reason?.name,
+            nowMs = now(),
         )
+        if (updated == 0) {
+            runCatching { Log.w(TAG, "finish: run $runId not finishable to $state (already terminal or STEP_LIMIT), skipped") }
+        }
     }
 
     override suspend fun cancelWaitingUser(runId: String, conversationId: String): Boolean =

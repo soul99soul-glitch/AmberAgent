@@ -131,6 +131,14 @@ enum class CapabilityPolicy {
  * Groups follow the plan §P2-01 list (filesystem.read, filesystem.write,
  * network.connect, mcp.import, skill.promote, soul.update, workspace.delete)
  * plus mcp.tool for `mcp_call_tool` — a real, distinct MCP domain.
+ *
+ * WARNING — coverage is opt-in: a tool absent from this mapping returns null
+ * and is invisible to the per-run ExecutionPolicy `allowedSystemCapabilities`
+ * dimension (the dimension skips it) and to the capability permission groups.
+ * Mapping a new tool here is the hard prerequisite for those boundaries to
+ * reach it; see the known-bypasses and boundaries list in
+ * feature/runtime/api's ExecutionPolicy.kt. The dynamic `mcp__` prefix rule
+ * below is the only non-literal coverage.
  */
 fun capabilityForTool(name: String): Capability? = when (name) {
     // ---- filesystem.read: workspace / external file reads ----

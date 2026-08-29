@@ -455,7 +455,7 @@ class DefaultRunKernelTest {
     }
 
     @Test
-    fun `same toolCallId re-entering the guard is re-executed, never misjudged as duplicate`() = runTest {
+    fun `same toolCallId re-emitted in the same run is a duplicate and is not re-executed`() = runTest {
         val executions = AtomicInteger(0)
         val readOnly = Tool(
             name = "read_thing",
@@ -465,8 +465,9 @@ class DefaultRunKernelTest {
                 listOf(UIMessagePart.Text("tool-result"))
             },
         )
-        // The same toolCallId passes the guard twice — the approval-resume
-        // shape (ledger reuse of one emission), never a new duplicate call.
+        // The model re-sends the SAME toolCallId after it already executed
+        // successfully — a genuine repeat emission, so the second pass must
+        // be signature-handled (skipped), not unconditionally re-executed.
         val engine = FakeRoundEngine(
             listOf(
                 { toolCallAssistant("call_1", "read_thing") },
@@ -474,16 +475,82 @@ class DefaultRunKernelTest {
                 { textAssistant("完成") },
             ),
         )
+        val terminals = mutableListOf<GenerationTerminal>()
 
-        kernel(engine).run(
+        val chunks = kernel(engine).run(
             session(
                 messages = listOf(UIMessage.user("查一下")),
                 tools = listOf(readOnly),
+                terminals = terminals,
             ),
         ).toList()
 
-        assertEquals("both passes were allowed through", 2, executions.get())
+        // Round 1 executes. Round 2: the counted callId routes through the
+        // signature table (count 1) and gets the structured skip output; the
+        // loop continues into round 3 where the model answers.
+        assertEquals("the body only ever ran once", 1, executions.get())
         assertEquals(3, engine.requests.size)
+        assertTrue(terminals.isEmpty())
+        val roundTwoTool = engine.requests[2].messages.last().getTools().single()
+        assertEquals("call_1", roundTwoTool.toolCallId)
+        assertTrue(roundTwoTool.isExecuted)
+        val skippedOutput = roundTwoTool.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(skippedOutput.contains("\"status\":\"skipped\""))
+        assertTrue(skippedOutput.contains("\"reason\":\"duplicate_tool_call\""))
+        assertTrue(skippedOutput.contains("\"occurrence\":2"))
+        assertEquals("完成", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `an approval-parked call resumes and executes in the follow-up run`() = runTest {
+        val executions = AtomicInteger(0)
+        val guarded = Tool(
+            name = "write_thing",
+            description = "side-effecting write",
+            needsApproval = true,
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("written"))
+            },
+        )
+        // Run 1: the call parks at the approval gate (Pending) — the flow
+        // ends there; resume is always a NEW run() invocation with fresh
+        // guard tables, so the approved call must execute exactly once.
+        val parkEngine = FakeRoundEngine(listOf({ toolCallAssistant("call_1", "write_thing") }))
+        val firstRun = kernel(parkEngine).run(
+            session(
+                messages = listOf(UIMessage.user("写一下")),
+                tools = listOf(guarded),
+            ),
+        ).toList()
+        val pendingTool = lastMessages(firstRun).last().getTools().single()
+        assertEquals(ToolApprovalState.Pending, pendingTool.approvalState)
+        assertEquals(0, executions.get())
+
+        // Run 2: the approval card flipped the call to Approved (as the UI
+        // does); the resumed run executes it without tripping the guard.
+        val approvedMessages = lastMessages(firstRun).map { message ->
+            message.copy(
+                parts = message.parts.map { part ->
+                    if (part is UIMessagePart.Tool && part.toolCallId == "call_1") {
+                        part.copy(approvalState = ToolApprovalState.Approved)
+                    } else {
+                        part
+                    }
+                },
+            )
+        }
+        val resumeEngine = FakeRoundEngine(listOf({ textAssistant("写完了") }))
+        val chunks = kernel(resumeEngine).run(
+            session(
+                messages = approvedMessages,
+                tools = listOf(guarded),
+            ),
+        ).toList()
+
+        assertEquals("the resumed emission executed once", 1, executions.get())
+        assertEquals(1, resumeEngine.requests.size)
+        assertEquals("写完了", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
     }
 
     @Test

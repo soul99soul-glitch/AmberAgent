@@ -34,7 +34,7 @@ class PersistingEventWriterTest {
         val events = mutableListOf<AgentEventRecord>()
         var failOnAppend: Throwable? = null
 
-        override suspend fun appendRun(run: AgentRunRecord) {}
+        override suspend fun appendRun(run: AgentRunRecord): Boolean = true
         override suspend fun appendEvent(event: AgentEventRecord) {}
         override suspend fun appendEventAllocatingSeq(event: AgentEventRecord): AgentEventRecord {
             failOnAppend?.let { throw it }

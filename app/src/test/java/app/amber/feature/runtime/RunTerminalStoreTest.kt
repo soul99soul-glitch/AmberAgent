@@ -61,6 +61,56 @@ class RunTerminalStoreTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun beginOnTerminalRowDoesNotReopenIt() = runBlocking {
+        runTerminalStore.begin("run_1", "conv_1", null)
+        runTerminalStore.finish("run_1", RunTerminalState.FAILED)
+        val finished = runTerminalStore.get("run_1")!!
+
+        // A later begin for the same runId must leave the terminal row byte-still.
+        val later = RoomRunTerminalStore(
+            dao = database.runTerminalDao(),
+            now = { finished.updatedAtMs + 1_000 },
+        )
+        later.begin("run_1", "conv_1", "assistant_2")
+
+        val after = runTerminalStore.get("run_1")!!
+        assertEquals(RunTerminalState.FAILED, after.state)
+        assertEquals(finished.finishedAtMs, after.finishedAtMs)
+        assertEquals(finished.updatedAtMs, after.updatedAtMs)
+        assertNull(after.assistantId)
+    }
+
+    @Test
+    fun pauseAfterFinishDoesNotResurrectRow() = runBlocking {
+        runTerminalStore.begin("run_1", "conv_1", null)
+        runTerminalStore.finish("run_1", RunTerminalState.COMPLETED)
+        val finished = runTerminalStore.get("run_1")!!
+
+        runTerminalStore.pause("run_1", RunTerminalState.WAITING_USER, PauseReason.TOOL_APPROVAL)
+
+        val after = runTerminalStore.get("run_1")!!
+        assertEquals(RunTerminalState.COMPLETED, after.state)
+        assertEquals(finished.finishedAtMs, after.finishedAtMs)
+        assertEquals(finished.updatedAtMs, after.updatedAtMs)
+        assertNull(after.pauseReason)
+    }
+
+    @Test
+    fun beginResumesLivePausedRowAndClearsPauseMetadata() = runBlocking {
+        runTerminalStore.begin("run_1", "conv_1", "assistant_1")
+        runTerminalStore.pause("run_1", RunTerminalState.WAITING_USER, PauseReason.TOOL_APPROVAL)
+        val paused = runTerminalStore.get("run_1")!!
+
+        runTerminalStore.begin("run_1", "conv_1", "assistant_1")
+
+        val resumed = runTerminalStore.get("run_1")!!
+        assertEquals(RunTerminalState.RUNNING, resumed.state)
+        assertNull(resumed.pauseReason)
+        assertNull(resumed.finishedAtMs)
+        assertEquals(paused.startedAtMs, resumed.startedAtMs)
+    }
+
+    @Test
     fun outcomeUnknownIsAnUnfinishedPause() = runBlocking {
         runTerminalStore.begin("run_1", "conv_1", null)
         runTerminalStore.pause("run_1", RunTerminalState.OUTCOME_UNKNOWN, PauseReason.OUTCOME_UNKNOWN)
