@@ -277,7 +277,9 @@ class OpenAiCompatibleAiClient implements AiClient {
     const request: OpenAiRequest = {
       model: params.model,
       messages: messagesToOpenAi(messages),
-      stream: params.stream ?? true,
+      // 真机实证(4/30):fetchStream 在 NetStack 层静默挂死(无 dataReceive/dataEnd/无超时触发);
+      // 非流式同端点正常 → 深读工具循环统一走非流式,流式通道待平台修复后再启
+      stream: false,
     };
     const requestTools: OpenAiRequestTool[] | undefined = toRequestTools(params.tools);
     if (requestTools !== undefined) request.tools = requestTools;
@@ -336,7 +338,9 @@ class OpenAiCompatibleAiClient implements AiClient {
 
   private assertResponse(response: HttpResponse): void {
     if (response.status < 200 || response.status >= 300) {
-      throw new Error(`AiClient ${response.status}: ${response.body.substring(0, 200)}`);
+      const detail: string = response.body.substring(0, 200);
+      hilog.error(0x0001, 'DeepRead.Ai', 'HTTP %{public}d: %{public}s', response.status, detail);
+      throw new Error(`AiClient ${response.status}: ${detail}`);
     }
   }
 

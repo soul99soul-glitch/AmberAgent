@@ -294,6 +294,7 @@ export const createSectionWriterTools = (
   const overviewTool = (): ToolDefinition => ({
     name: WRITER_TOOL_NAMES.OVERVIEW,
     description: 'Internal Deep Read writer. Write the source-backed overview section. UI only renders content written through this tool.',
+    schema: { type: 'object', properties: { summary: { type: 'string' }, references: { type: 'array' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -347,6 +348,7 @@ export const createSectionWriterTools = (
   const narrativeTool = (): ToolDefinition => ({
     name: WRITER_TOOL_NAMES.NARRATIVE,
     description: 'Internal Deep Read writer. Write timeline/story narrative data.',
+    schema: { type: 'object', properties: { timeline: { type: 'array' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -392,6 +394,7 @@ export const createSectionWriterTools = (
   const analysisTool = (): ToolDefinition => ({
     name: WRITER_TOOL_NAMES.ANALYSIS,
     description: 'Internal Deep Read writer. Write the deep analysis section.',
+    schema: { type: 'object', properties: { core_dispute: { type: 'string' }, perspectives: { type: 'array' }, implications: { type: 'string' }, quotes: { type: 'array' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -431,6 +434,7 @@ export const createSectionWriterTools = (
   const extendedReadingTool = (): ToolDefinition => ({
     name: WRITER_TOOL_NAMES.EXTENDED_READING,
     description: 'Internal Deep Read writer. Write source-backed extended reading links and optional real image assets.',
+    schema: { type: 'object', properties: { links: { type: 'array' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -465,6 +469,7 @@ export const createSectionWriterTools = (
   const visualsTool = (): ToolDefinition => ({
     name: VISUALS_TOOL_NAME,
     description: 'Internal Deep Read visual selector. Select hero/inline images only from the pre-fetched candidate pool; never submit arbitrary URLs.',
+    schema: { type: 'object', properties: { hero: { type: 'object' }, inline: { type: 'array' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -514,6 +519,7 @@ export const createSectionWriterTools = (
   const diagramTool = (): ToolDefinition => ({
     name: DIAGRAM_TOOL_NAME,
     description: 'Internal Deep Read diagram writer. Submit only a compact structured diagram spec; raw SVG/HTML/JS forbidden. Use 3-6 short nodes.',
+    schema: { type: 'object', properties: { title: { type: 'string' }, nodes: { type: 'array' }, edges: { type: 'array' }, caption: { type: 'string' } } },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (input: string): Promise<UIMessagePartText[]> => {
@@ -546,6 +552,7 @@ export const createSectionWriterTools = (
   const finishTool = (): ToolDefinition => ({
     name: FINISH_TOOL_NAME,
     description: 'Internal Deep Read writer. Call after every section writer reports ready. Returns missing sections if any remain.',
+    schema: { type: 'object', properties: {} },
     allowsAutoApproval: true,
     isHighRisk: false,
     execute: async (): Promise<UIMessagePartText[]> => {
