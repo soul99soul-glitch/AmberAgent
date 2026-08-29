@@ -30,6 +30,14 @@ export const firstFailureMessage = (o: DeepReadOutput): string | null => {
   return null;
 };
 
+// Android firstFailedStage:第一个 FAILED 段(供"仅重试这一段")
+export const firstFailedStage = (o: DeepReadOutput): DeepReadGenerationStage | null => {
+  for (const s of STAGE_ORDER) {
+    if (o.sectionStates[s]?.status === 'FAILED') return s;
+  }
+  return null;
+};
+
 export const withSectionStatus = (
   o: DeepReadOutput,
   stage: DeepReadGenerationStage,

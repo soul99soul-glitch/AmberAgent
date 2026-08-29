@@ -13,7 +13,7 @@ export type { DeepReadOutput, TimelineEvent, CorePoint, ReadingLink, Perspective
 export { makeEmptyDeepReadOutput } from './domain/models.ts';
 export type { DeepReadGenerationStage, DeepReadGenerationPhase, DeepReadSectionStatus } from './domain/enums.ts';
 export { STAGE_ORDER, STAGE_LABELS, IMAGE_CONFIDENCE, WRITER_TOOL_NAMES } from './domain/enums.ts';
-export { statusOf, sectionsReady, isComplete, firstFailureMessage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle } from './domain/helpers.ts';
+export { statusOf, sectionsReady, isComplete, firstFailureMessage, firstFailedStage, displayHeroImageUrl, displayHeroCaption, hasReadableArticle } from './domain/helpers.ts';
 export type { ModelConfig, ModelRegistry, ModelConfigInit, ModelRegistryOptions } from './domain/model_config.ts';
 export { makeModelConfig, newModelId, createStorageModelRegistry, MODEL_CONFIGS_STORAGE_KEY } from './domain/model_config.ts';
 

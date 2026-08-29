@@ -16,14 +16,15 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput, DeepReadScheduler, RunResult,
 } from '@amber/deepread-domain';
-import { displayHeroImageUrl, firstFailureMessage, isComplete, STAGE_ORDER } from '@amber/deepread-domain';
+import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
+import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
-import { getDeepReadScheduler, getRepository } from '../di/AppContainer.ets';
+import { getDeepReadScheduler, getRepository, getChatKvStore } from '../di/AppContainer.ets';
 import {
   BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT,
-  BODY, META, TITLE, ERROR,
+  BODY, BODY2, META, LABEL, TITLE, ERROR,
 } from '../design/tokens.ets';
 
 const DOMAIN: number = 0x0001;
@@ -56,6 +57,8 @@ struct DeepReadArticlePage {
   @State errorMsg: string = '';
   @State currentStage: string = '';
   @State cancelled: boolean = false;
+  @State confirmed: boolean = true;      // 首用确认(KV deepread_first_use_confirmed)
+  @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
   // G5-S1:重新生成确认对话框
@@ -119,6 +122,13 @@ struct DeepReadArticlePage {
         return;
       }
     }
+    // 首用确认门(Android deepReadFirstUseConfirmed):未确认不自动跑
+    const confirmedRaw: string | null = await getChatKvStore().get('deepread_first_use_confirmed');
+    this.confirmed = confirmedRaw === 'true';
+    if (!this.confirmed) {
+      this.running = false;
+      return;
+    }
     this.scheduler = await getDeepReadScheduler();
     if (!this.pageAlive || token !== this.pageToken) return;
     if (this.unsubscribeOutput !== null) this.unsubscribeOutput();
@@ -155,6 +165,8 @@ struct DeepReadArticlePage {
     if (!this.pageAlive || token !== this.pageToken) return;
     this.output = next;
     this.currentStage = this.phaseLabel(next);
+    const snap: DeepReadProgressSnapshot = deepReadProgressSnapshot(next, this.running);
+    this.progress = snap;
     if (next.generationPhase === 'COMPLETE' || isComplete(next)) this.errorMsg = '';
   }
 
@@ -284,6 +296,47 @@ struct DeepReadArticlePage {
     this.fontScale = next < FONT_SCALE_MIN ? FONT_SCALE_MIN : next;
   }
 
+  // 基础稿判定:fallback 稿部分 READY 但未完成
+  private basicDraftNotice(): string {
+    if (this.output === null || this.running || isComplete(this.output)) return '';
+    if (this.partialError().length > 0) return '';
+    const hasReady: boolean = STAGE_ORDER.some((st: DeepReadGenerationStage): boolean =>
+      this.output !== null && this.output.sectionStates[st]?.status === 'READY');
+    return hasReady ? '基础稿，可继续增强' : '';
+  }
+
+  // 仅重试第一个失败段(Android retryFirstFailure → runOne)
+  private retryFirstFailure(): void {
+    if (this.output === null) {
+      this.generateArticle();
+      return;
+    }
+    const stage: DeepReadGenerationStage | null = firstFailedStage(this.output);
+    if (stage === null) {
+      this.generateArticle();
+      return;
+    }
+    this.running = true;
+    this.errorMsg = '';
+    getDeepReadScheduler().then((sched: DeepReadScheduler): Promise<RunResult> => {
+      this.scheduler = sched;
+      return sched.runSection(this.topicId, this.title, stage,
+        this.sourceUrl.length > 0 ? this.sourceUrl : null);
+    }).then((result: RunResult): void => {
+      if (!this.pageAlive) return;
+      if (result.output !== null) this.applyOutput(result.output, ++this.pageToken);
+      if (!result.ok && result.error !== 'aborted') {
+        this.errorMsg = result.error ?? '该段重试失败';
+      }
+      this.running = false;
+    }).catch((e: Error): void => {
+      if (this.pageAlive) {
+        this.errorMsg = e.message;
+        this.running = false;
+      }
+    });
+  }
+
   // G5-S1:部分失败判定 — 有 output 但 firstFailureMessage 非空
   private partialError(): string {
     if (this.output === null) { return ''; }
@@ -332,12 +385,42 @@ struct DeepReadArticlePage {
         .backgroundColor(BG)
 
         // ── 内容区 ──
-        if (this.running) {
-          // G5-S1:生成中 — RunningStageNotice(阶段 + 步骤指示)
+        if (!this.confirmed) {
+          // 首用确认页(Android DeepReadConfirmation)
+          Column() {
+            Blank()
+            Column() {
+              Text('深度阅读').fontSize(TITLE).fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SERIF).fontColor(INK)
+              Text('将围绕该话题收集资料并生成一篇深度文章')
+                .fontSize(BODY2).fontColor(INK2).margin({ top: 10 })
+                .textAlign(TextAlign.Center)
+              Text('深度阅读会消耗更多 tokens')
+                .fontSize(LABEL).fontColor(INK3).margin({ top: 6 })
+              Text('开始使用').fontSize(BODY).fontColor(ACCENT)
+                .padding({ left: 28, right: 28, top: 12, bottom: 12 })
+                .margin({ top: 24 })
+                .onClick((): void => {
+                  getChatKvStore().put('deepread_first_use_confirmed', 'true')
+                    .then((): void => {
+                      this.confirmed = true;
+                      this.loadArticle(++this.pageToken, false).catch((): void => {});
+                    });
+                })
+            }
+            .alignItems(HorizontalAlign.Center)
+            .width('86%')
+            .padding({ top: 32, bottom: 32 })
+            .backgroundColor(SURFACE)
+            .borderRadius(16)
+            Blank()
+          }.width('100%').layoutWeight(1)
+        } else if (this.running) {
+          // G5-S1:生成中 — RunningStageNotice(百分比胶囊 + 阶段)
           Column() {
             LoadingProgress().width(40).height(40).color(ACCENT)
             Row() {
-              Text(this.currentStage)
+              Text(`${this.progress.label} ${this.progress.percent}%`)
                 .fontSize(META)
                 .fontColor(INK2)
             }
@@ -399,6 +482,13 @@ struct DeepReadArticlePage {
               Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 4 })
               if (this.partialError().length > 0) {
                 this.PartialErrorNotice(this.partialError())
+              }
+              if (this.basicDraftNotice().length > 0) {
+                // 基础稿提示(Android "基础稿，可继续增强")
+                Text('基础稿，可继续增强')
+                  .fontSize(META).fontColor(INK3)
+                  .width('100%').textAlign(TextAlign.Center)
+                  .padding({ top: 8, bottom: 4 })
               }
               if (this.templateFallbackMessage().length > 0) {
                 this.TemplateFallbackNotice(this.templateFallbackMessage())
