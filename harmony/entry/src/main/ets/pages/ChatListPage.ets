@@ -281,6 +281,7 @@ struct ChatListPage {
     else if (id === 'novel') router.pushUrl({ url: 'pages/NovelProjectsPage' });
     else if (id === 'council') router.pushUrl({ url: 'pages/CouncilPage' });
     else if (id === 'apps') router.pushUrl({ url: 'pages/MiniAppListPage' });
+    else if (id === 'webmount') router.pushUrl({ url: 'pages/SettingExperimentalWebMountPage' });
     else promptAction.showToast({ message: '该功能即将上线', duration: 1500 });
   }
 

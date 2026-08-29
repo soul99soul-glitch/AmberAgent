@@ -495,6 +495,19 @@ struct ProfilePage {
             // ── 聊天热力图 ──
             SectionHeader({ label: 'ACTIVITY' })
             this.HeatmapCard()
+
+            // ── 助手管理入口(助手体系唯一 UI 入口:列表/编辑/扩展/工具/MCP/记忆) ──
+            Row() {
+              Text('助手管理').fontColor(INK).fontSize(BODY)
+              Text(' ›').fontColor(INK3).fontSize(BODY)
+            }
+            .padding({ left: 18, right: 18, top: 14, bottom: 14 })
+            .backgroundColor(SURFACE)
+            .borderRadius(RADIUS)
+            .margin({ top: 18 })
+            .onClick((): void => {
+              router.pushUrl({ url: 'pages/ChatAssistantsPage' });
+            })
           } else {
             Column() {
               Text('统计加载中…')

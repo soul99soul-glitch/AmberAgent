@@ -840,9 +840,14 @@ export const getWorkspaceManager = (): PosixWorkspaceManager => {
 };
 
 export const getChatAssistants = async (): Promise<Assistant[]> => {
-  const loaded = await loadAssistants(getChatKvStore());
+  const kv = getChatKvStore();
+  const loaded = await loadAssistants(kv);
   if (loaded !== null && loaded.length > 0) return loaded;
-  return [makeAssistant({ name: '默认助手' })];
+  // 空库:种子落库 — 临时 id 不存在于 KV 时,扩展/工具/MCP/记忆等子页
+  // (裸 loadAssistants 按 id find)会报"助手不存在"
+  const seeded: Assistant[] = [makeAssistant({ name: '默认助手' })];
+  await saveAssistants(kv, seeded);
+  return seeded;
 };
 
 export interface ChatRuntime {
