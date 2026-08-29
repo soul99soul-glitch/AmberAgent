@@ -7,20 +7,29 @@
 //     name 空 → '未命名'/'未命名Lorebook';lorebook desc 非空显示;Switch)
 //   values-zh/strings.xml:18-28,284-285
 // 偏差登记:
-//   - 4 tab 中 quickMessages(:92-126)/skills(:193-217) 未移植(quickMessages
-//     存储/Skills 子系统未移植,P1 登记)→ 本页仅 2 tab
-//   - HorizontalPager+SecondaryTabRow → 顶部二 tab 行(语义等价)
+//   - 4 tab(quickMessages/modeInjections/lorebooks/skills)全量对齐(quickMessages
+//     与 skills 子系统现已真实:KV quick_messages + SkillManager.listSkills)
+//   - HorizontalPager+SecondaryTabRow → 顶部 tab 行(语义等价)
 //   - Set<Uuid> ± id → string[] Set 语义(toggle 去重)
 import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
+import type { SkillMetadata } from '@amber/chat-domain';
 import {
   loadAssistants, saveAssistants, patchAssistant,
 } from '@amber/chat-domain';
 import type { Assistant, Lorebook, PromptInjection } from '@amber/chat-domain';
-import { getChatKvStore } from '../di/AppContainer.ets';
+import { getChatKvStore, getSkillManager } from '../di/AppContainer.ets';
 import { loadLorebooks, loadModeInjections } from '../platform_impl/ExtensionPrefs.ets';
+
+// 全局快捷消息 KV(与 QuickMessagesPage 同键同形;此处只读)
+const QUICK_MESSAGES_KEY: string = 'quick_messages';
+interface QuickMessageEntry {
+  id: string;
+  title: string;
+  content: string;
+}
 
 
 interface RouterParams {
@@ -31,10 +40,12 @@ interface RouterParams {
 @Component
 struct ChatAssistantExtensionsPage {
   @State loaded: boolean = false;
-  @State tab: number = 0; // 0 = 模式注入;1 = 世界书
+  @State tab: number = 1; // 0 = 快捷消息;1 = 模式注入;2 = 世界书;3 = 技能
   @State assistant: Assistant | null = null;
   @State modeInjections: PromptInjection[] = [];
   @State lorebooks: Lorebook[] = [];
+  @State quickMessages: QuickMessageEntry[] = [];
+  @State skills: SkillMetadata[] = [];
   private assistantId: string = '';
 
   aboutToAppear(): void {
@@ -52,9 +63,20 @@ struct ChatAssistantExtensionsPage {
       : (assistants.find((a: Assistant): boolean => a.id === this.assistantId) ?? null);
     const mis: PromptInjection[] = await loadModeInjections(kv);
     const lbs: Lorebook[] = await loadLorebooks(kv);
+    let quicks: QuickMessageEntry[] = [];
+    try {
+      const raw: string | null = await kv.get(QUICK_MESSAGES_KEY);
+      if (raw !== null) {
+        quicks = JSON.parse(raw) as QuickMessageEntry[];
+      }
+    } catch (_e) {
+      quicks = [];
+    }
     this.assistant = found;
     this.modeInjections = mis;
     this.lorebooks = lbs;
+    this.quickMessages = quicks;
+    this.skills = getSkillManager().listSkills();
     this.loaded = true;
   }
 
@@ -77,6 +99,28 @@ struct ChatAssistantExtensionsPage {
         ? cur.lorebookIds.slice() : [...cur.lorebookIds, id])
       : cur.lorebookIds.filter((x: string): boolean => x !== id);
     await this.saveAssistant(patchAssistant(cur, { lorebookIds: ids }));
+  }
+
+  // :103-109 同构 — quickMessageIds ± id
+  private async toggleQuickMessage(id: string, checked: boolean): Promise<void> {
+    if (this.assistant === null) return;
+    const cur: Assistant = this.assistant;
+    const ids: string[] = checked
+      ? (cur.quickMessageIds.indexOf(id) >= 0
+        ? cur.quickMessageIds.slice() : [...cur.quickMessageIds, id])
+      : cur.quickMessageIds.filter((x: string): boolean => x !== id);
+    await this.saveAssistant(patchAssistant(cur, { quickMessageIds: ids }));
+  }
+
+  // :193-217 同构 — enabledSkills ± name(技能以 name 为键,对齐 createSkillTools)
+  private async toggleSkill(name: string, checked: boolean): Promise<void> {
+    if (this.assistant === null) return;
+    const cur: Assistant = this.assistant;
+    const ids: string[] = checked
+      ? (cur.enabledSkills.indexOf(name) >= 0
+        ? cur.enabledSkills.slice() : [...cur.enabledSkills, name])
+      : cur.enabledSkills.filter((x: string): boolean => x !== name);
+    await this.saveAssistant(patchAssistant(cur, { enabledSkills: ids }));
   }
 
   private async saveAssistant(next: Assistant): Promise<void> {
@@ -125,18 +169,28 @@ struct ChatAssistantExtensionsPage {
           Text('助手不存在').fontSize(13).fontColor(INK3)
         }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {
-        // 顶部二 tab(SecondaryTabRow 适配;quickMessages/skills 未移植)
+        // 顶部四 tab(SecondaryTabRow 适配)
         Row() {
-          Text('模式注入')
+          Text('快捷消息')
             .fontSize(13).fontColor(this.tab === 0 ? ACCENT : INK3)
             .textAlign(TextAlign.Center)
             .layoutWeight(1).padding({ top: 10, bottom: 10 })
             .onClick((): void => { this.tab = 0; })
-          Text('世界书')
+          Text('模式注入')
             .fontSize(13).fontColor(this.tab === 1 ? ACCENT : INK3)
             .textAlign(TextAlign.Center)
             .layoutWeight(1).padding({ top: 10, bottom: 10 })
             .onClick((): void => { this.tab = 1; })
+          Text('世界书')
+            .fontSize(13).fontColor(this.tab === 2 ? ACCENT : INK3)
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1).padding({ top: 10, bottom: 10 })
+            .onClick((): void => { this.tab = 2; })
+          Text('技能')
+            .fontSize(13).fontColor(this.tab === 3 ? ACCENT : INK3)
+            .textAlign(TextAlign.Center)
+            .layoutWeight(1).padding({ top: 10, bottom: 10 })
+            .onClick((): void => { this.tab = 3; })
         }
         .width('100%').backgroundColor(SURFACE)
         .border({ width: { bottom: 1 }, color: LINE })
@@ -144,6 +198,46 @@ struct ChatAssistantExtensionsPage {
         Scroll() {
           Column() {
             if (this.tab === 0) {
+              // 快捷消息(:92-126):全局列表 + quickMessageIds 绑定
+              if (this.quickMessages.length === 0) {
+                this.emptyState('没有快捷消息，前往快捷消息管理创建')
+              } else {
+                ForEach(this.quickMessages, (qm: QuickMessageEntry) => {
+                  Row() {
+                    Column() {
+                      Text(qm.title.length > 0 ? qm.title : '未命名')
+                        .fontSize(14).fontColor(INK)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (qm.content.trim().length > 0) {
+                        Text(qm.content)
+                          .fontSize(11).fontColor(INK3).margin({ top: 2 })
+                          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      }
+                    }
+                    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                    .margin({ right: 10 })
+                    Toggle({
+                      type: ToggleType.Switch,
+                      isOn: this.assistant !== null
+                        && this.assistant.quickMessageIds.indexOf(qm.id) >= 0,
+                    })
+                      .selectedColor(ACCENT)
+                      .onChange((v: boolean): void => {
+                        this.toggleQuickMessage(qm.id, v);
+                      })
+                  }
+                  .width('100%')
+                  .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
+                }, (qm: QuickMessageEntry): string => qm.id)
+                Row() {
+                  Text('前往快捷消息管理')
+                    .fontSize(13).fontColor(ACCENT)
+                    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                    .onClick((): void => { router.pushUrl({ url: 'pages/QuickMessagesPage' }); })
+                }
+                .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
+              }
+            } else if (this.tab === 1) {
               if (this.modeInjections.length === 0) {
                 this.emptyState('没有模式注入，前往提示词管理创建')
               } else {
@@ -173,7 +267,7 @@ struct ChatAssistantExtensionsPage {
                 }
                 .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
               }
-            } else {
+            } else if (this.tab === 2) {
               if (this.lorebooks.length === 0) {
                 this.emptyState('没有世界书，前往提示词管理创建')
               } else {
@@ -209,6 +303,46 @@ struct ChatAssistantExtensionsPage {
                     .fontSize(13).fontColor(ACCENT)
                     .padding({ left: 12, right: 12, top: 8, bottom: 8 })
                     .onClick((): void => { this.gotoPrompts(); })
+                }
+                .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
+              }
+            } else {
+              // 技能(:193-217):全局技能列表 + enabledSkills 绑定(name 为键)
+              if (this.skills.length === 0) {
+                this.emptyState('没有技能，前往技能管理查看')
+              } else {
+                ForEach(this.skills, (sk: SkillMetadata) => {
+                  Row() {
+                    Column() {
+                      Text(sk.name)
+                        .fontSize(14).fontColor(INK)
+                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      if (sk.description.trim().length > 0) {
+                        Text(sk.description)
+                          .fontSize(11).fontColor(INK3).margin({ top: 2 })
+                          .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      }
+                    }
+                    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                    .margin({ right: 10 })
+                    Toggle({
+                      type: ToggleType.Switch,
+                      isOn: this.assistant !== null
+                        && this.assistant.enabledSkills.indexOf(sk.name) >= 0,
+                    })
+                      .selectedColor(ACCENT)
+                      .onChange((v: boolean): void => {
+                        this.toggleSkill(sk.name, v);
+                      })
+                  }
+                  .width('100%')
+                  .padding({ left: GUTTER, right: GUTTER, top: 14, bottom: 14 })
+                }, (sk: SkillMetadata): string => sk.name)
+                Row() {
+                  Text('前往技能管理')
+                    .fontSize(13).fontColor(ACCENT)
+                    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                    .onClick((): void => { router.pushUrl({ url: 'pages/SkillsPage' }); })
                 }
                 .width('100%').justifyContent(FlexAlign.Center).margin({ top: 8 })
               }

@@ -513,7 +513,8 @@ struct MessageRow {
       // 阶段 A 接入:用 groupMessageParts 分组渲染,而非直接遍历 parts。
       //   ThinkingBlock → 连续 reasoning+tool 折叠为一组;
       //   ContentBlock → text/image/video/audio/document/mini_app;
-      //   SubAgentBlock/CouncilBlock → 占位卡片(完整 UI 后续梯队)。
+      //   SubAgentBlock/CouncilBlock → 真实卡片(ChatMessageSubAgentStep/
+      //   ChatMessageCouncilStep + SubAgentRunSheet 流式详情)。
       //   reasoning 状态索引仍用原始 part index(通过 ContentBlock.index 或
       //   ThinkingBlock 内 step 遍历时累加获得)。
       Column() {

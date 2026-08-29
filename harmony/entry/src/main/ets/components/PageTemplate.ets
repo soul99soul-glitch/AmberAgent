@@ -175,6 +175,8 @@ export struct BtnFill {
   @Prop label: string = '';
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   onTap: () => void = (): void => {};
+  // V2 按压态:0.975 scale + 透明度(.pressable:active,同 ChatInput attach/send)
+  @State private pressed: boolean = false;
   build(): void {
     Row() {
       Text(this.label)
@@ -190,6 +192,14 @@ export struct BtnFill {
     .padding({ left: 16, right: 16 })
     .borderRadius(8)
     .backgroundColor(this.accentColorStore)
+    .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
+    .opacity(this.pressed ? 0.9 : 1)
+    .onTouch((e: TouchEvent): void => {
+      const down: boolean = e.type === TouchType.Down;
+      animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+        this.pressed = down;
+      });
+    })
     .onClick((): void => { this.onTap(); })
   }
 }
@@ -216,9 +226,12 @@ export struct BtnGhost {
     .borderRadius(8)
     .border({ width: 1, color: LINE })
     .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+    .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
     .onTouch((e: TouchEvent): void => {
-      if (e.type === TouchType.Down) this.pressed = true;
-      else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+      const down: boolean = e.type === TouchType.Down;
+      animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+        this.pressed = down;
+      });
     })
     .onClick((): void => { this.onTap(); })
   }
@@ -333,9 +346,12 @@ export struct NavRow {
       .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
       .onTouch((e: TouchEvent): void => {
-        if (e.type === TouchType.Down) this.pressed = true;
-        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+        const down: boolean = e.type === TouchType.Down;
+        animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+          this.pressed = down;
+        });
       })
       .onClick((): void => { this.onRowClick(); })
       if (!this.isLast) {
@@ -458,9 +474,12 @@ export struct SelectRow {
       .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
       .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
+      .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
       .onTouch((e: TouchEvent): void => {
-        if (e.type === TouchType.Down) this.pressed = true;
-        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressed = false;
+        const down: boolean = e.type === TouchType.Down;
+        animateTo({ duration: 140, curve: Curve.EaseOut }, (): void => {
+          this.pressed = down;
+        });
       })
       .onClick((): void => { this.onRowClick(); })
       if (!this.isLast) {
