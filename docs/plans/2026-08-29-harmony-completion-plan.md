@@ -84,3 +84,54 @@
 1. Phase 5 三项是否立项(cron 受平台配额、WebMount 依赖 webview、终端工程量最大)
 2. 消息搜索降级容忍度:FTS 不可用时 LIKE 降级是否可接受
 3. 排期偏好:按本计划顺序(M1→M3),还是先插队某项
+
+---
+
+## 执行记录(2026-08-29 同日)
+
+**M1-M3 已全部落地**(P0 卫生 / P1 通知接真 / P2 交互补全 / P3 数据与搜索 / P4 呈现层),
+提交:1e6598833(P0+P1)、be16ccf15(P2)、d10c6b8c9(P3)、4c3b1a3c4(P4)。
+通知 e2e 真机验证通过(通知栏真实出现「正在深度阅读」)。
+
+**审计销账(信息滞后,已实现无需重做)**:附件 picker(attach chip 三按钮)、
+Markdown 链接点击(system browsable intent)、SubAgent/Council 完整卡片(436 行组件 +
+RunSheet 流式详情)。
+
+**P2.1 权限 ACL 实测**:READ_CALENDAR 放行;READ_CONTACTS 被 debug profile ACL 拒
+(install 9568289),需 AGC 后台把该权限加入调试 Profile ACL 后解注释 module.json5 对应条目。
+
+**P3.1 消息搜索**:FTS 未用,LIKE 粗筛 + 纯文本精滤(域函数 messageNodeRowPlainText/
+snippetAround/searchMessageHitsIn,RDB + 内存双实现);关键词含引号/换行存在 JSON 转义
+假阴性(登记,可接受)。
+
+## Phase 5 技术方案定稿(2026-08-29,待立项排期)
+
+### 5.1 Cron 执行器
+- **API 已核实**:`WorkSchedulerExtensionAbility`(API 9+,基线内)+ workScheduler 延迟任务;
+  系统对回调资源严格管控(执行窗口受限,约分钟级)。
+- **实现路径**:module.json5 注册 extensionAbilities(WorkSchedulerExtensionAbility 入口,
+  type: 'workScheduler')+ AgentCronStore 的 schedulerPort 由 startWork/stopWork 落真实调度;
+  回调 onWorkStart 里执行任务。
+- **关键工程**:无头聊天生成——ChatPage 5300 行承载全部生成编排,需抽离 headless 生成管线
+  (chat 域纯函数化 runGeneration:provider 解析/流式组装/落库,无 UI 依赖)。这是最大单项,
+  预计 3-5 天 + 真机 24h 长稳(生成 30s-2min 是否落在系统回调窗口内需实测;不满足则改
+  reminderAgentManager 代理提醒 + 用户点开应用执行的降级形态)。
+- **风险**:应用市场上架的延迟任务配额策略;执行窗口可能不够长生成。
+
+### 5.2 WebMount
+- **依赖**:通用 web 预览页(ArkWeb `Web` 组件,API 8+,INTERNET 权限已声明)+ Web 组件
+  javaScriptProxy 双向通道(提取 DOM/执行注入)。
+- **实现路径**:新建 WebMountSession 单例组件(屏外/隐藏 Web 实例池)→ tool 实装
+  (webmount 打开/点击/输入/滚动/截图,webmount_eval 逐次确认门已有)→ ChatPage 工具注册表
+  解除空转门 + 本地工具页去掉 unavailable 标记 → SandboxActivitySheet 接 web 预览。
+- **预估**:4-6 天(含截图能力 pixelmap 导出与站点兼容性调试)。
+
+### 5.3 终端沙箱(HiSH 路线)
+- **Spike 结论(2026-08-29)**:HiSH(MIT)以 `libqemu-system-aarch64.so` 承载完整 arm64
+  Linux 内核 + Alpine qcow2 rootfs,手机形态支持,嵌入仅要求"关于"页标注来源;
+  JIT 仅 Pad/2in1,手机纯解释执行(性能预算需 MVP 实测)。
+- **实现路径**:①native 模块集成 libqemu(NDK 编译链 + hap 内打包 or 首启下载 rootfs——
+  上架政策需确认按需下载二进制的合规性)②terminal_execute MVP(busybox 单命令,stdin/stdout
+  经 IPC 桥接 native 子进程)③会话保持 + workspace 路径映射(9p/共享目录)+ 沙盒页状态真值
+  ④解禁本地工具页 Terminal 开关。
+- **预估**:1-2 周级;建议先做 3 天 MVP spike(busybox ls 跑通)再决定全量投入。
