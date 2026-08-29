@@ -4,8 +4,9 @@
 import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { DeepReadCacheEntry } from '@amber/deepread-domain';
+import { isCacheEntryExpired } from '@amber/deepread-domain';
 import { getRepository } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, SIGNAL, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 
@@ -14,6 +15,7 @@ interface HistoryEntry {
   title: string;
   date: string;
   status: string;
+  expired: boolean;
 }
 
 function historyStatus(entry: DeepReadCacheEntry): string {
@@ -35,6 +37,7 @@ function loadHistory(): Promise<HistoryEntry[]> {
         title: entry.title,
         date: historyDate(entry.updatedAt),
         status: historyStatus(entry),
+        expired: isCacheEntryExpired(entry),
       }),
     ),
   );
@@ -63,6 +66,7 @@ struct DeepReadHistoryPage {
     const params: Record<string, string> = {};
     params['topicId'] = item.id;
     params['title'] = item.title;
+    params['fromHistory'] = 'true';
     router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
   }
 
@@ -85,7 +89,7 @@ struct DeepReadHistoryPage {
             .fontSize(BODY).fontColor(INK2).margin({ top: 12 })
           Text(this.loadError.length > 0
             ? this.loadError
-            : '当前仅使用进程内临时存储，重启后不会保留历史')
+            : '还没有生成过深度阅读')
             .fontSize(META).fontColor(INK3).margin({ top: 6 })
         }.margin({ top: 64 }).padding({ left: 24, right: 24 })
       } else {
@@ -97,6 +101,9 @@ struct DeepReadHistoryPage {
                   .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
                 Row() {
                   Text(item.date).fontSize(LABEL).fontColor(INK3)
+                  Text(item.expired ? '已失效' : '有效').fontSize(LABEL)
+                    .fontColor(item.expired ? '#D19A66' : SIGNAL)
+                    .margin({ left: 12 })
                   Text(item.status).fontSize(LABEL)
                     .fontColor(item.status === '完成' ? ACCENT : DANGER)
                     .margin({ left: 12 })

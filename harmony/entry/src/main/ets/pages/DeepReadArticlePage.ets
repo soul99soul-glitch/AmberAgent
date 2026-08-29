@@ -16,7 +16,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
   DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput, DeepReadScheduler, RunResult,
 } from '@amber/deepread-domain';
-import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
+import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
 import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
 import { MarkdownText } from '../components/MarkdownText.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
@@ -42,6 +42,7 @@ interface ArticleParams {
   title: string;
   sourceUrl?: string;
   force?: string;
+  fromHistory?: string;
 }
 
 @Entry
@@ -59,6 +60,8 @@ struct DeepReadArticlePage {
   @State cancelled: boolean = false;
   @State confirmed: boolean = true;      // 首用确认(KV deepread_first_use_confirmed)
   @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
+  @State fromHistory: boolean = false;
+  @State historyExpired: boolean = false;
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
   @State fontSerif: boolean = false;
@@ -85,6 +88,7 @@ struct DeepReadArticlePage {
     this.title = params.title ?? '';
     this.sourceUrl = params.sourceUrl ?? '';
     const wantsForce: boolean = params.force === 'true';
+    this.fromHistory = params.fromHistory === 'true';
     if (this.topicId.length === 0 || this.title.length === 0) {
       this.errorMsg = '文章参数缺失';
       this.running = false;
@@ -116,11 +120,14 @@ struct DeepReadArticlePage {
     const repository = getRepository();
     const cached: DeepReadCacheEntry | null = await repository.get(this.topicId);
     if (!this.pageAlive || token !== this.pageToken) return;
-    if (!force && cached !== null) {
-      this.applyOutput(cached.output, token);
-      if (isComplete(cached.output)) {
-        this.running = false;
-        return;
+    if (cached !== null) {
+      this.historyExpired = isCacheEntryExpired(cached);
+      if (!force) {
+        this.applyOutput(cached.output, token);
+        if (isComplete(cached.output)) {
+          this.running = false;
+          return;
+        }
       }
     }
     // P5:阅读体验初始值(字号百分比/字体模式;ChatKvStore 只存字符串)
@@ -468,6 +475,15 @@ struct DeepReadArticlePage {
                   .margin({ top: 14 })
               }
               Text(this.currentStage).fontSize(META).fontColor(INK3).margin({ top: 10 })
+              if (this.fromHistory && this.historyExpired) {
+                Text('内容已过 24 小时，可能需要重新生成')
+                  .fontSize(META).fontColor(INK3)
+                  .width('100%').textAlign(TextAlign.Center)
+                  .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+                  .backgroundColor(SURFACE2)
+                  .borderRadius(50)
+                  .margin({ top: 10 })
+              }
               if (this.cancelled) {
                 Row() {
                   Text(this.errorMsg.length > 0 ? this.errorMsg : '生成已取消')
