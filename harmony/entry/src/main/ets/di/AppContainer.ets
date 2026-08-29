@@ -254,7 +254,11 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
     } catch (e) {
       hilog.warn(DOMAIN, TAG, 'DeepRead cache hydrate failed; continuing with empty cache: %{public}s', String(e));
     }
-    const model: string = await container.storage.get<string>('ai_model', 'deepseek-chat');
+    // P5:看板模型独立(deepread_model_id → 空 = 跟随聊天模型 ai_model)
+    const boardModelId: string = await container.storage.get<string>('deepread_model_id', '');
+    const model: string = boardModelId.length > 0
+      ? boardModelId
+      : await container.storage.get<string>('ai_model', 'deepseek-chat');
     const playbook: string = (await getDeepReadPlaybookRepository().read()).markdown;
     const collectRun = (
       messages: UIMessage[],

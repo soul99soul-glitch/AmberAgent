@@ -1,8 +1,9 @@
 // SettingDeepReadPage — 深度阅读设置(AI 配置 + 热榜源开关 + 搜索源配置面板)
 //   原误置于 HistoryPage,归位独立页(首页功能区/设置入口可达)。
-import { ACCENT, BG, INK, INK2, INK3, INK4, SURFACE2, ERROR, SIGNAL, TEXT_STYLES } from '../design/tokens.ets';
+import { ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, TEXT_STYLES, BODY, BODY2 } from '../design/tokens.ets';
 import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, BtnFill, BtnGhost, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { PillSelect } from '../components/ui/Select.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
@@ -49,6 +50,14 @@ struct SettingDeepReadPage {
   @State testStatus: string = '';
   // 模型库(多模型配置,供议会席位 / 小说生成选择)
   @State models: ModelConfig[] = [];
+  // P5:关注筛选 / 阅读体验 / 看板模型
+  @State focusKeywords: string = '';
+  @State focusModeIndex: number = 0;
+  @State fontModeIndex: number = 0;
+  @State fontScalePercent: number = 100;
+  @State boardModelId: string = '';
+  private focusModes: string[] = ['全部', '关注优先', '仅关注'];
+  private fontModes: string[] = ['默认', '衬线'];
   @State newLabel: string = '';
   @State newBaseUrl: string = 'https://api.deepseek.com';
   @State newApiKey: string = '';
@@ -91,6 +100,12 @@ struct SettingDeepReadPage {
     const currentKey: string = await storage.get<string>(selectedSource + '_api_key', '');
     // 加载模型库
     const models: ModelConfig[] = await getModelRegistry().list();
+    // P5:关注筛选/阅读体验/看板模型
+    const focusKeywords: string = await storage.get<string>('deepread_focus_keywords', '');
+    const focusMode: string = await storage.get<string>('deepread_focus_mode', 'all');
+    const fontMode: string = await storage.get<string>('deepread_font_mode', 'default');
+    const fontScale: number = await storage.get<number>('deepread_font_scale', 100);
+    const boardModelId: string = await storage.get<string>('deepread_model_id', '');
     if (!this.pageAlive || token !== this.loadToken) return;
     this.aiKey = aiKey;
     this.aiBaseUrl = aiBaseUrl;
@@ -99,6 +114,33 @@ struct SettingDeepReadPage {
     this.selectedSource = selectedSource;
     this.currentKey = currentKey;
     this.models = models;
+    this.focusKeywords = focusKeywords;
+    this.focusModeIndex = focusMode === 'focus_first' ? 1 : focusMode === 'focus_only' ? 2 : 0;
+    this.fontModeIndex = fontMode === 'serif' ? 1 : 0;
+    this.fontScalePercent = fontScale;
+    this.boardModelId = boardModelId;
+  }
+
+  // P5:保存关注筛选(关键词逗号分隔 → KV)
+  private async saveFocus(): Promise<void> {
+    const kv: Storage = this.storage!;
+    await kv.set<string>('deepread_focus_keywords', this.focusKeywords.trim());
+    const mode: string = this.focusModeIndex === 1 ? 'focus_first'
+      : this.focusModeIndex === 2 ? 'focus_only' : 'all';
+    await kv.set<string>('deepread_focus_mode', mode);
+    this.saved = '关注筛选已保存 ✓';
+  }
+
+  private async saveReading(): Promise<void> {
+    const kv: Storage = this.storage!;
+    await kv.set<string>('deepread_font_mode', this.fontModeIndex === 1 ? 'serif' : 'default');
+    await kv.set<number>('deepread_font_scale', this.fontScalePercent);
+    this.saved = '阅读体验已保存 ✓';
+  }
+
+  private async saveBoardModel(): Promise<void> {
+    await this.storage!.set<string>('deepread_model_id', this.boardModelId.trim());
+    this.saved = '看板模型已保存 ✓';
   }
 
   async loadModels(): Promise<void> {
@@ -207,6 +249,83 @@ struct SettingDeepReadPage {
       PageTitleBar({ title: '深度阅读设置' })
       Scroll() {
         Column() {
+          SectionHeader({ label: '关注筛选' })
+          Column() {
+            TextInput({ text: this.focusKeywords, placeholder: 'AI、大模型、机器人、数码 3C...' })
+              .fontSize(BODY).height(44)
+              .backgroundColor(SURFACE2).borderRadius(8)
+              .onChange((v: string): void => { this.focusKeywords = v; })
+            Row() {
+              Text('筛选模式').fontSize(BODY).fontColor(INK).layoutWeight(1)
+              PillSelect({
+                options: this.focusModes, selectedIndex: this.focusModeIndex,
+                onSelect: (i: number): void => { this.focusModeIndex = i; },
+              })
+            }
+            .width('100%').margin({ top: 8 })
+            Row() {
+              Text('应用').fontSize(BODY2).fontColor(ACCENT)
+                .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+                .onClick((): void => { this.saveFocus(); })
+              Blank()
+            }
+            .width('100%')
+          }
+          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+
+          SectionHeader({ label: '阅读体验' })
+          Column() {
+            Row() {
+              Text('阅读字体').fontSize(BODY).fontColor(INK)
+              Blank()
+              Row() {
+                ForEach(this.fontModes, (m: string, i: number): void => {
+                  Text(m)
+                    .fontSize(BODY2).fontColor(this.fontModeIndex === i ? ACCENT : INK3)
+                    .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                    .borderRadius(8)
+                    .backgroundColor(this.fontModeIndex === i ? SURFACE2 : Color.Transparent)
+                    .onClick((): void => { this.fontModeIndex = i; })
+                }, (m: string): string => m)
+              }
+            }
+            .width('100%')
+            Row() {
+              Text('字号').fontSize(BODY).fontColor(INK)
+              Blank()
+              Text(`${this.fontScalePercent}%`).fontSize(BODY2).fontColor(INK3)
+            }
+            .width('100%').margin({ top: 10 })
+            Slider({ value: this.fontScalePercent, min: 80, max: 130, step: 5, style: SliderStyle.OutSet })
+              .width('100%')
+              .selectedColor(ACCENT)
+              .onChange((v: number): void => { this.fontScalePercent = Math.round(v); })
+            Row() {
+              Blank()
+              Text('保存阅读体验').fontSize(BODY2).fontColor(ACCENT)
+                .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+                .onClick((): void => { this.saveReading(); })
+            }
+            .width('100%')
+          }
+          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+
+          SectionHeader({ label: '看板模型' })
+          Column() {
+            TextInput({ text: this.boardModelId, placeholder: '留空跟随聊天模型(如 deepseek-chat)' })
+              .fontSize(BODY).height(44)
+              .backgroundColor(SURFACE2).borderRadius(8)
+              .onChange((v: string): void => { this.boardModelId = v; })
+            Row() {
+              Blank()
+              Text('保存模型').fontSize(BODY2).fontColor(ACCENT)
+                .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+                .onClick((): void => { this.saveBoardModel(); })
+            }
+            .width('100%').margin({ top: 6 })
+          }
+          .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
+
           SectionHeader({ label: 'AI 配置' })
           Column() {
             Text('API Base URL')

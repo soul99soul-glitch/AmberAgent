@@ -85,10 +85,59 @@ struct BoardPage {
   @State lastUpdatedAt: number = 0;
   @State loading: boolean = false;
   @State hotlistError: string = '';
+  @State focusKeywords: string[] = [];
+  @State focusMode: string = 'all';
   // 条目操作 sheet(Android HotListActionSheet:深度阅读/重新生成/原文/分享)
   @State sheetItem: HotItem | null = null;
   @State sheetForce: boolean = false;
+
+  // Android HotListInterestFilter:匹配任一关键词
+  private matchesFocus(text: string): boolean {
+    const lower: string = text.toLowerCase();
+    for (const k of this.focusKeywords) {
+      if (k.length > 0 && lower.includes(k.toLowerCase())) return true;
+    }
+    return false;
+  }
+
+  private applyFocusFilter(): void {
+    if (this.focusMode === 'all' || this.focusKeywords.length === 0) return;
+    // 聚合话题
+    const matchedTopics: HotTopic[] = this.topics.filter(
+      (t: HotTopic): boolean => this.matchesFocus(t.title));
+    if (this.focusMode === 'focus_only') {
+      this.topics = matchedTopics;
+    } else {
+      const kept: HotTopic[] = matchedTopics;
+      for (const t of this.topics) {
+        if (!kept.includes(t)) kept.push(t);
+      }
+      this.topics = kept;
+    }
+    // 各源条目
+    for (const sec of this.sections) {
+      const matched: HotItem[] = sec.items.filter(
+        (i: HotItem): boolean => this.matchesFocus(i.title));
+      if (this.focusMode === 'focus_only') {
+        sec.items = matched;
+      } else {
+        const kept: HotItem[] = matched.slice();
+        for (const i of sec.items) {
+          if (!kept.includes(i)) kept.push(i);
+        }
+        sec.items = kept;
+      }
+    }
+  }
   aboutToAppear(): void {
+    const storage = getAppContainer().storage;
+    storage.get<string>('deepread_focus_keywords', '').then((raw: string): void => {
+      this.focusKeywords = raw.length > 0 ? raw.split(/[,,]/).map(
+        (k: string): string => k.trim()).filter((k: string): boolean => k.length > 0) : [];
+    }).catch((): void => {});
+    storage.get<string>('deepread_focus_mode', 'all').then((m: string): void => {
+      this.focusMode = m;
+    }).catch((): void => {});
     this.loadHotlist();
   }
 
@@ -214,6 +263,7 @@ struct BoardPage {
               this.sections = acc;
               this.topics = aggregateHotTopics(acc, 10);
               this.lastUpdatedAt = Date.now();
+              this.applyFocusFilter();
             }
             return Promise.resolve();
           }

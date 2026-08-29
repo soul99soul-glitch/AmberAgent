@@ -61,6 +61,7 @@ struct DeepReadArticlePage {
   @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
+  @State fontSerif: boolean = false;
   // G5-S1:重新生成确认对话框
   @State showRegenerateDialog: boolean = false;
   private pageAlive: boolean = false;
@@ -122,6 +123,12 @@ struct DeepReadArticlePage {
         return;
       }
     }
+    // P5:阅读体验初始值(字号百分比/字体模式;ChatKvStore 只存字符串)
+    const scaleRaw: string | null = await getChatKvStore().get('deepread_font_scale');
+    const scalePct: number = scaleRaw !== null ? parseFloat(scaleRaw) : 100;
+    this.fontScale = Math.max(0.8, Math.min(1.3, (Number.isNaN(scalePct) ? 100 : scalePct) / 100));
+    const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
+    this.fontSerif = fontMode === 'serif';
     // 首用确认门(Android deepReadFirstUseConfirmed):未确认不自动跑
     const confirmedRaw: string | null = await getChatKvStore().get('deepread_first_use_confirmed');
     this.confirmed = confirmedRaw === 'true';
