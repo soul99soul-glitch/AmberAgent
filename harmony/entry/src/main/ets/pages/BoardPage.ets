@@ -1,13 +1,13 @@
-// BoardPage — 今日看板(真热榜 + 真本地统计)
+// BoardPage — 深度阅读热榜页(今日看板概念已下线,对齐 Android 产品方向)
 //
-// Android 基准: board/BoardPage.kt(BoardRepository + hotlist collector)。
-//   鸿蒙热榜接 NewsNowProvider.fetchAllSources(真实网络抓取,逐源诚实报错);
-//   本地统计接 ChatRepository(今日会话/pinned/消息条数),无假数据。
+// 内容 = HOTLIST 多源热榜(NewsNowProvider.fetchAllSources 真实网络抓取,逐源诚实报错),
+//   条目点击 → DeepReadArticlePage 生成深度文章;顶栏「历史」→ DeepReadHistoryPage。
+//   原「今日概览」统计区(今日会话/消息条数/已置顶)随今日看板下线移除。
 
-import type { Conversation, ConversationSummary } from '@amber/chat-domain';
 import type { SourceSection, HotItem } from '../platform_impl/NewsNowProvider.ets';
 import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
-import { getAppContainer, getChatRepository } from '../di/AppContainer.ets';
+import { getAppContainer } from '../di/AppContainer.ets';
+
 import {
   BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT,
   BODY2, META, TEXT_STYLES,
@@ -16,46 +16,6 @@ import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router } from '@kit.ArkUI';
-
-@Component
-struct BoardMetricRow {
-  @Prop label: string = '';
-  @Prop valueText: string = '';
-  @Prop isLast: boolean = false;
-  @State private pressed: boolean = false;
-
-  build(): void {
-    Column() {
-      Row() {
-        Text(this.label)
-          .fontSize(BODY2)
-          .fontWeight(600)
-          .lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontFamily(FONT_SANS_SEMIBOLD)
-          .fontColor(INK)
-          .layoutWeight(1)
-        Text(this.valueText)
-          .fontSize(TEXT_STYLES.meta.size)
-          .fontWeight(500)
-          .lineHeight(TEXT_STYLES.meta.lineHeight)
-          .fontFamily(FONT_MONO_MEDIUM)
-          .fontColor(INK3)
-      }
-      .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
-      .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
-      .onTouch((event: TouchEvent): void => {
-        if (event.type === TouchType.Down) this.pressed = true;
-        else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
-      })
-      if (!this.isLast) {
-        PaperSeparator()
-      }
-    }
-    .width('100%')
-  }
-}
 
 @Component
 struct BoardHotItemRow {
@@ -119,54 +79,8 @@ struct BoardPage {
   @State sections: SourceSection[] = [];
   @State loading: boolean = false;
   @State hotlistError: string = '';
-  @State todayConvs: number = 0;
-  @State pinnedConvs: number = 0;
-  @State totalMsgs: number = 0;
-
   aboutToAppear(): void {
-    this.loadStats();
     this.loadHotlist();
-  }
-
-  private loadStats(): void {
-    getChatRepository().list().then((list: ConversationSummary[]): void => {
-      // 本地时区「今天」(updateAt 为 UTC ISO)
-      const now: Date = new Date();
-      const p0 = (n: number): string => n < 10 ? `0${n}` : `${n}`;
-      const today: string = `${now.getFullYear()}-${p0(now.getMonth() + 1)}-${p0(now.getDate())}`;
-      let todayCount: number = 0;
-      let pinned: number = 0;
-      for (const s of list) {
-        const dt: Date = new Date(s.updateAt);
-        const key: string = isNaN(dt.getTime()) ? '' :
-          `${dt.getFullYear()}-${p0(dt.getMonth() + 1)}-${p0(dt.getDate())}`;
-        if (key === today) todayCount++;
-        if (s.isPinned) pinned++;
-      }
-      this.todayConvs = todayCount;
-      this.pinnedConvs = pinned;
-      // 消息条数:逐会话选中分支计数;单条失败跳过不断链
-      let msgs: number = 0;
-      let done: number = 0;
-      if (list.length === 0) {
-        this.totalMsgs = 0;
-        return;
-      }
-      for (const s of list) {
-        getChatRepository().getById(s.id).then((c: Conversation | null): void => {
-          if (c !== null) {
-            for (const n of c.messageNodes) {
-              msgs += n.messages.length;
-            }
-          }
-          done++;
-          if (done >= list.length) this.totalMsgs = msgs;
-        }).catch((): void => {
-          done++;
-          if (done >= list.length) this.totalMsgs = msgs;
-        });
-      }
-    }).catch((): void => { /* 统计失败保持 0,不阻塞热榜 */ });
   }
 
   // 热榜条目 → 深度阅读文章页(topicId = 条目 url,run seedUrl 同源直抓)
@@ -218,15 +132,11 @@ struct BoardPage {
 
   build(): void {
     Column() {
-      PageTitleBar({ title: '今日看板' })
-
-      SectionHeader({ label: '今日概览' })
-      Column() {
-        BoardMetricRow({ label: '今日会话', valueText: `${this.todayConvs}` })
-        BoardMetricRow({ label: '消息条数', valueText: `${this.totalMsgs}` })
-        BoardMetricRow({ label: '已置顶', valueText: `${this.pinnedConvs}`, isLast: true })
-      }
-      .width('100%')
+      PageTitleBar({
+        title: '深度阅读',
+        actionText: '历史',
+        onAction: (): void => { router.pushUrl({ url: 'pages/DeepReadHistoryPage' }); },
+      })
 
       Row() {
         Text('//')
