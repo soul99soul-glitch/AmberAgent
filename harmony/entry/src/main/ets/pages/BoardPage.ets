@@ -6,6 +6,8 @@
 
 import type { SourceSection, HotItem } from '../platform_impl/NewsNowProvider.ets';
 import { createNewsNowProvider } from '../platform_impl/NewsNowProvider.ets';
+import { aggregateHotTopics } from '../platform_impl/HotListAggregator.ets';
+import type { HotTopic } from '../platform_impl/HotListAggregator.ets';
 import { getAppContainer } from '../di/AppContainer.ets';
 
 import {
@@ -77,13 +79,83 @@ struct BoardHotItemRow {
 @Component
 struct BoardPage {
   @State sections: SourceSection[] = [];
+  @State topics: HotTopic[] = [];
+  @State lastUpdatedAt: number = 0;
   @State loading: boolean = false;
   @State hotlistError: string = '';
   aboutToAppear(): void {
     this.loadHotlist();
   }
 
+  private timeAgo(ts: number): string {
+    if (ts <= 0) return '';
+    const diff: number = Math.max(0, Date.now() - ts);
+    const minutes: number = Math.floor(diff / 60_000);
+    if (minutes < 1) return '刚刚更新';
+    if (minutes < 60) return `${minutes}分钟前更新`;
+    if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}小时前更新`;
+    return `${Math.floor(minutes / (24 * 60))}天前更新`;
+  }
+
   // 热榜条目 → 深度阅读文章页(topicId = 条目 url,run seedUrl 同源直抓)
+  // 聚合话题条目:index 0 = 头条(大字),其余索引行
+  @Builder
+  HotTopicEntry(tp: HotTopic, isLead: boolean, isLast: boolean): void {
+    Column() {
+      Row() {
+        Text(`${tp.bestRank}`)
+          .fontSize(isLead ? 22 : TEXT_STYLES.meta.size)
+          .fontWeight(isLead ? FontWeight.Bold : FontWeight.Medium)
+          .lineHeight(isLead ? 28 : TEXT_STYLES.meta.lineHeight)
+          .fontFamily(FONT_MONO_MEDIUM)
+          .fontColor(isLead ? ACCENT : INK4)
+          .width(isLead ? 36 : 28)
+        Column() {
+          Text(tp.title)
+            .fontSize(isLead ? 18 : BODY2)
+            .fontWeight(isLead ? 600 : FontWeight.Normal)
+            .lineHeight(isLead ? 25 : TEXT_STYLES.secondary.lineHeight)
+            .fontFamily(TEXT_STYLES.secondary.family)
+            .fontColor(isLead ? INK : INK2)
+            .layoutWeight(1)
+            .maxLines(isLead ? 3 : 2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Row() {
+            if (tp.sourceCount > 1) {
+              Text(`${tp.sourceCount} 源`)
+                .fontSize(TEXT_STYLES.meta.size).fontColor(ACCENT)
+                .fontWeight(FontWeight.Medium)
+              Text(' · ').fontSize(TEXT_STYLES.meta.size).fontColor(INK4)
+            }
+            if (tp.sources.length > 0 && tp.sources[0].heat.length > 0) {
+              Text(tp.sources[0].heat).fontSize(TEXT_STYLES.meta.size).fontColor(INK4)
+            }
+          }
+          .margin({ top: isLead ? 5 : 2 })
+        }
+        .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ left: 8 })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .constraintSize({ minHeight: isLead ? 72 : 60 })
+      .padding({ left: 16, right: 16, top: isLead ? 14 : 12, bottom: isLead ? 14 : 12 })
+      .onClick((): void => {
+        // 生成入口:话题第一名来源的 url 兼 topicId/seedUrl
+        const first: HotItem = {
+          rank: tp.bestRank,
+          title: tp.title,
+          url: tp.sources.length > 0 ? tp.sources[0].url : '',
+          heat: tp.sources.length > 0 ? tp.sources[0].heat : '',
+        };
+        this.openArticle(first);
+      })
+      if (!isLast) {
+        PaperSeparator()
+      }
+    }
+    .width('100%')
+  }
+
   private openArticle(item: HotItem): void {
     const params: Record<string, string> = {};
     params['topicId'] = item.url;
@@ -104,7 +176,11 @@ struct BoardPage {
         let storageFailed: boolean = false;
         const step = (i: number): Promise<void> => {
           if (i >= all.length) {
-            if (!storageFailed) this.sections = acc;
+            if (!storageFailed) {
+              this.sections = acc;
+              this.topics = aggregateHotTopics(acc, 10);
+              this.lastUpdatedAt = Date.now();
+            }
             return Promise.resolve();
           }
           const sec: SourceSection = all[i];
@@ -165,17 +241,63 @@ struct BoardPage {
           .padding({ left: 16, right: 16, top: 8, bottom: 4 })
       }
 
-      if (this.loading) {
-        Text('抓取热榜中…')
-          .fontSize(BODY2).fontWeight(400).lineHeight(TEXT_STYLES.secondary.lineHeight)
-          .fontFamily(TEXT_STYLES.secondary.family).fontColor(INK3)
-          .width('100%').textAlign(TextAlign.Center).margin({ top: 40 })
+      if (this.loading && this.topics.length === 0 && this.sections.length === 0) {
+        // 骨架屏(首载):标题条×6
+        Column() {
+          ForEach([0, 1, 2, 3, 4, 5], (i: number): void => {
+            Row() {
+              Column().width(24).height(16).borderRadius(4).backgroundColor(SURFACE2)
+              Column().layoutWeight(1).height(16).borderRadius(4).backgroundColor(SURFACE2)
+                .margin({ left: 12 })
+            }
+            .width('100%').padding({ left: 16, right: 16, top: 16, bottom: 16 })
+          }, (i: number): string => `sk-${i}`)
+        }
+        .width('100%').margin({ top: 8 })
       } else {
         List() {
+          if (this.topics.length > 0) {
+            ListItem() {
+              Column() {
+                Row() {
+                  Text('//')
+                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+                    .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
+                  Text(' 综合热点')
+                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+                  Blank()
+                  Text(this.timeAgo(this.lastUpdatedAt))
+                    .fontSize(META).fontColor(INK4)
+                }
+                .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 4 })
+                ForEach(this.topics, (tp: HotTopic, index: number): void => {
+                  this.HotTopicEntry(tp, index === 0, index === Math.min(this.topics.length, 10) - 1)
+                }, (tp: HotTopic): string => tp.id)
+              }
+              .width('100%')
+            }
+          }
           ForEach(this.sections, (sec: SourceSection): void => {
             ListItem() {
               Column() {
-                SectionHeader({ label: sec.sourceName })
+                Row() {
+                  Text('//')
+                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+                    .fontFamily(FONT_MONO_MEDIUM).fontColor(ACCENT)
+                  Text(` ${sec.sourceName}`)
+                    .fontSize(META).fontWeight(500).lineHeight(TEXT_STYLES.meta.lineHeight)
+                    .fontFamily(FONT_MONO_MEDIUM).fontColor(INK3)
+                  Blank()
+                  if (sec.error !== null) {
+                    Text(`⚠ ${this.timeAgo(sec.fetchedAt)}`)
+                      .fontSize(META).fontColor(INK4)
+                  } else if (sec.fetchedAt > 0) {
+                    Text(this.timeAgo(sec.fetchedAt))
+                      .fontSize(META).fontColor(INK4)
+                  }
+                }
+                .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 4 })
                 if (sec.error !== null || sec.items.length === 0) {
                   BoardHotItemRow({
                     rankText: '',
@@ -184,12 +306,12 @@ struct BoardPage {
                     isLast: true,
                   })
                 } else {
-                  ForEach(sec.items.slice(0, 5), (item: HotItem, index: number): void => {
+                  ForEach(sec.items.slice(0, 12), (item: HotItem, index: number): void => {
                     BoardHotItemRow({
                       rankText: `${item.rank}`,
                       title: item.title,
                       heat: item.heat,
-                      isLast: index === Math.min(sec.items.length, 5) - 1,
+                      isLast: index === Math.min(sec.items.length, 12) - 1,
                       onRowClick: (): void => { this.openArticle(item); },
                     })
                   }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)

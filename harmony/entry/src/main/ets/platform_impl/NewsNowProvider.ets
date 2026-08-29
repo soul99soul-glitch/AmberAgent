@@ -43,6 +43,7 @@ interface SourceSection {
   sourceName: string;
   items: HotItem[];
   error: string | null;
+  fetchedAt: number;
 }
 
 // NewsNow API 返回
@@ -69,6 +70,7 @@ export class NewsNowProvider implements SearchProvider {
   // 抓取单个源的热榜
   async fetchSource(preset: NewsNowPreset): Promise<SourceSection> {
     const result: SourceSection = {
+      fetchedAt: Date.now(),
       sourceId: preset.id,
       sourceName: preset.displayName,
       items: [],
