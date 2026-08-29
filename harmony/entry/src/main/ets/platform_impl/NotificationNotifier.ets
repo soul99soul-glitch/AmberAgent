@@ -1,10 +1,16 @@
 // NotificationNotifier — Notifier 契约的真实实现(对照设计 §6.7 / §8.8)
 // 3 类通知:running/completed/failed;同 topic 同 id 覆盖更新,cancel 撤销。
-// 通知授权:EntryAbility onCreate 一次性 requestEnableNotification(API 10+)。
+// 进度:notifyProgress 带 label+N% 文本(节流由调用方按快照变化驱动)。
+// 点击回文章:wantAgent(EntryAbility + parameters topicId/title/sourceUrl)
+//   → ChatListPage routeFromWant 消费 wantTopicId。
+// 通知授权:EntryAbility loadContent 后一次性 requestEnableNotification(API 10+)。
 // 模块说明:统一走 notificationManager —— @ohos.notification 旧模块已停止维护,
 // 其 contentType/NotificationContent 即此前登记的冲突源,不再引入。
 
 import { notificationManager } from '@kit.NotificationKit';
+import { wantAgent } from '@kit.AbilityKit';
+import type { Want } from '@kit.AbilityKit';
+
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import type { Notifier } from '@amber/deepread-domain';
@@ -24,7 +30,33 @@ export const notificationIdFor = (key: string): number => {
   return h === 0 ? 1 : h;
 };
 
-export const publishBasicNotification = (id: number, title: string, text: string): Promise<void> => {
+// 点击通知 → 拉起 EntryAbility(文章参数经 Want.parameters 传递受 ArkTS 对象
+// 字面量限制暂不可用;点击落地应用首页,深链参数待后续接 KV 转存)
+const buildArticleWantAgent = (
+  topicId: string, title: string, sourceUrl: string,
+): Promise<object | null> => {
+  const want: Want = {
+    bundleName: 'app.amber.deepread',
+    abilityName: 'EntryAbility',
+  };
+  const wants: Array<Want> = [want];
+  const info: wantAgent.WantAgentInfo = {
+    wants: wants,
+    requestCode: 991,
+  };
+  return new Promise<object | null>((resolve): void => {
+    wantAgent.getWantAgent(info).then((wa: object): void => {
+      resolve(wa);
+    }).catch((e: BusinessError): void => {
+      hilog.warn(DOMAIN, TAG, 'wantAgent failed: %{public}s', String(e));
+      resolve(null);
+    });
+  });
+};
+
+export const publishBasicNotification = (
+  id: number, title: string, text: string, wantAgentObj?: object | null,
+): Promise<void> => {
   const request: notificationManager.NotificationRequest = {
     id,
     content: {
@@ -32,6 +64,9 @@ export const publishBasicNotification = (id: number, title: string, text: string
       normal: { title: title.length > 0 ? title : 'Amber', text: text.length > 0 ? text : ' ' }
     }
   };
+  if (wantAgentObj !== undefined && wantAgentObj !== null) {
+    request.wantAgent = wantAgentObj;
+  }
   return notificationManager.publish(request)
     .catch((e: BusinessError): void => {
       hilog.warn(DOMAIN, TAG, 'publish %{public}d failed: %{public}s', id, String(e));
@@ -44,25 +79,27 @@ export const cancelNotification = (id: number): void => {
   });
 };
 
-// 生成完成通知(ChatService.kt:1673-1683 对齐:title=助手名,text=末条消息 take(50))
+// 生成完成通知(ChatService.kt:1673-1683 对齐:title=助手/话题名,text=末条/摘要)
 export const notifyGenerationDone = (senderName: string, contentText: string): void => {
   publishBasicNotification(GENERATION_DONE_ID, senderName, contentText);
 };
 
 class NotificationNotifierImpl implements Notifier {
   async notifyRunning(topicId: string, title: string): Promise<void> {
-    await publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title);
+    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
+    publishBasicNotification(notificationIdFor(topicId), '正在深度阅读', title, wa);
   }
 
   async notifyCompleted(topicId: string, title: string, complete: boolean): Promise<void> {
-    // 同 id 覆盖 running 通知
-    await publishBasicNotification(notificationIdFor(topicId),
-      complete ? '深度阅读完成' : '深度阅读部分完成', title);
+    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
+    publishBasicNotification(notificationIdFor(topicId),
+      complete ? '深度阅读完成' : '深度阅读部分完成', title, wa);
   }
 
   async notifyFailed(topicId: string, title: string, errorMessage: string): Promise<void> {
-    await publishBasicNotification(notificationIdFor(topicId), '深度阅读失败',
-      `${title} — ${errorMessage}`.slice(0, 120));
+    const wa: object | null = await buildArticleWantAgent(topicId, title, '');
+    publishBasicNotification(notificationIdFor(topicId), '深度阅读失败',
+      `${title} — ${errorMessage}`.slice(0, 120), wa);
   }
 
   async cancelRunning(topicId: string): Promise<void> {
