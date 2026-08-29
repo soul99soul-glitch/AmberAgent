@@ -9,7 +9,7 @@
 import { BG, INK, INK2, INK3, ERROR, ACCENT, BODY, BODY2, META, LABEL, SURFACE, SURFACE2, LINE, RADIUS } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, PageSpacer, BtnFill } from '../components/PageTemplate.ets';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf } from '../platform_impl/WebMountSites.ets';
+import { loadWebMountSites, saveWebMountSites, makeUserSite, hostOf, isSeedSite, restoreMissingSeedSites, SEED_SITES } from '../platform_impl/WebMountSites.ets';
 import type { UserSiteEntry } from '../platform_impl/WebMountSites.ets';
 
 @Entry
@@ -81,6 +81,12 @@ struct SettingExperimentalWebMountPage {
     }).catch((): void => {});
   }
 
+  // 被移除的内置站数(恢复按钮的显隐条件)
+  private missingSeeds(): number {
+    return SEED_SITES.filter(
+      (s: UserSiteEntry): boolean => !this.sites.some((c: UserSiteEntry): boolean => c.id === s.id)).length;
+  }
+
   build(): void {
     Column() {
       PageTitleBar({ title: 'WebMount 站点' })
@@ -145,9 +151,19 @@ struct SettingExperimentalWebMountPage {
                 Column() {
                   Row() {
                     Column() {
-                      Text(s.name.length > 0 ? s.name : '未命名站点')
-                        .fontSize(BODY).fontColor(INK)
-                        .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Row() {
+                        Text(s.name.length > 0 ? s.name : '未命名站点')
+                          .fontSize(BODY).fontColor(INK)
+                          .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                        if (isSeedSite(s.id)) {
+                          Text('内置')
+                            .fontSize(LABEL).fontColor(INK3)
+                            .padding({ left: 6, right: 6, top: 1, bottom: 1 })
+                            .borderRadius(4)
+                            .border({ width: 0.5, color: LINE })
+                            .margin({ left: 8 })
+                        }
+                      }
                       Text(hostOf(s.url).length > 0 ? hostOf(s.url) : s.url)
                         .fontSize(META).fontColor(INK3).margin({ top: 3 })
                         .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -168,6 +184,13 @@ struct SettingExperimentalWebMountPage {
               // 添加站点(展开式表单)
               if (!this.addOpen) {
                 Row() {
+                  if (this.missingSeeds() > 0) {
+                    Text('恢复内置站点').fontSize(BODY2).fontColor(INK3)
+                      .padding({ left: 14, right: 14, top: 12, bottom: 12 })
+                      .onClick((): void => {
+                        restoreMissingSeedSites(getChatKvStore()).then((): void => { this.refresh(); });
+                      })
+                  }
                   Text('+ 添加网站').fontSize(BODY2).fontColor(ACCENT)
                     .padding({ left: 16, right: 16, top: 12, bottom: 12 })
                     .onClick((): void => {

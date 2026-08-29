@@ -14,14 +14,50 @@ export interface UserSiteEntry {
 
 const SITES_KEY: string = 'webmount_sites';
 
+// 内置站点(UserSiteRegistry.kt SEED_SITES 对齐,id 同名;登录态/OAuth 为后续梯队)
+const seedSite = (id: string, name: string, url: string): UserSiteEntry =>
+  ({ id: id, name: name, url: url });
+
+export const SEED_SITES: UserSiteEntry[] = [
+  seedSite('hackernews', 'Hacker News', 'https://news.ycombinator.com'),
+  seedSite('reddit', 'Reddit', 'https://www.reddit.com'),
+  seedSite('github', 'GitHub', 'https://github.com/login'),
+  seedSite('bilibili', 'Bilibili', 'https://passport.bilibili.com/login'),
+  seedSite('x_com', 'X.com', 'https://x.com/i/flow/login'),
+  seedSite('weibo', '微博', 'https://m.weibo.cn'),
+  seedSite('juejin', '掘金', 'https://juejin.cn/login'),
+  seedSite('zhihu', '知乎', 'https://www.zhihu.com/signin'),
+  seedSite('feishu_docs', '飞书云文档', 'https://www.feishu.cn/wiki'),
+];
+
+export const isSeedSite = (id: string): boolean =>
+  SEED_SITES.some((s: UserSiteEntry): boolean => s.id === id);
+
+// 恢复缺失的内置站点(restoreMissingSeeds 对齐:只补内置,不动用户自建/删除选择
+// 之外的现状;返回恢复数)
+export const restoreMissingSeedSites = async (kv: KeyValueStore): Promise<number> => {
+  const current: UserSiteEntry[] = await loadWebMountSites(kv);
+  const missing: UserSiteEntry[] = SEED_SITES.filter(
+    (s: UserSiteEntry): boolean => !current.some((c: UserSiteEntry): boolean => c.id === s.id));
+  if (missing.length === 0) return 0;
+  await saveWebMountSites(kv, [...current, ...missing]);
+  return missing.length;
+};
+
+// 读取:空库(未初始化)→ 种子落库后返回(与助手种子落库同款一致性原则,
+// 保证子页/工具与设置页数据源一致;用户删除站点后 KV 非空,不会复活)
 export const loadWebMountSites = async (kv: KeyValueStore): Promise<UserSiteEntry[]> => {
   try {
     const raw: string | null = await kv.get(SITES_KEY);
-    if (raw === null) return [];
-    return JSON.parse(raw) as UserSiteEntry[];
+    if (raw !== null) {
+      const parsed: UserSiteEntry[] = JSON.parse(raw) as UserSiteEntry[];
+      if (parsed.length > 0) return parsed;
+    }
   } catch (_e) {
-    return [];
+    // 解码失败 → 重新种子
   }
+  await saveWebMountSites(kv, SEED_SITES);
+  return SEED_SITES;
 };
 
 export const saveWebMountSites = async (kv: KeyValueStore, sites: UserSiteEntry[]): Promise<void> => {
