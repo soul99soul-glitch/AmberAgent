@@ -1,8 +1,11 @@
 // SettingSystemAccessPage — 系统访问(权限)设置页
-// 展示权限状态列表:通讯录 / 日历 / 通知 / 文件
-// 每项显示 已授权 / 未授权 / 不支持 状态徽标
-// NOTE:HarmonyOS 权限模型与 Android 不同;本页仅展示状态,不发起实际授权请求
+// 通讯录 / 日历 / 通知 / 文件 四项:
+//   - 通讯录/日历:checkAccessToken 查真状态,未授权点击发起 requestPermissionsFromUser
+//   - 通知:isNotificationEnabled 查真状态,未授权点击发起 requestEnableNotification
+//   - 文件:鸿蒙文档访问走系统 picker,免权限 → 显示「无需授权」
 import { router } from '@kit.ArkUI';
+import { abilityAccessCtrl, bundleManager, common, Permissions } from '@kit.AbilityKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { FONT_MONO_MEDIUM, FONT_SANS, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import {
   INK, INK3, INK4, SURFACE2, BG, SIGNAL, ERROR,
@@ -15,22 +18,37 @@ interface PermissionItem {
   key: string;
   name: string;
   desc: string;
-  status: string; // 'granted' | 'denied' | 'unsupported'
+  status: string; // 'granted' | 'denied' | 'exempt'
 }
 
 function makePerm(key: string, name: string, desc: string, status: string): PermissionItem {
   return { key: key, name: name, desc: desc, status: status };
 }
 
-function placeholderLoadPermissions(): Promise<PermissionItem[]> {
-  const seed: PermissionItem[] = [
-    makePerm('contacts', '通讯录', '读取联系人以 @ 提及', 'granted'),
-    makePerm('calendar', '日历', '读取日程用于提醒', 'denied'),
-    makePerm('notifications', '通知', '消息生成完成时推送通知', 'granted'),
-    makePerm('files', '文件存储', '访问文档与附件', 'unsupported'),
-  ];
-  return Promise.resolve(seed);
-}
+const atManager = abilityAccessCtrl.createAtManager();
+
+// 应用级 accessTokenId(权限查询入参)
+const appAccessTokenId = (): number => {
+  try {
+    const info = bundleManager.getBundleInfoForSelfSync(
+      bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION);
+    return info.appInfo.accessTokenId;
+  } catch (_e) {
+    return 0;
+  }
+};
+
+const checkPermGranted = async (perm: Permissions): Promise<boolean> => {
+  const tokenId: number = appAccessTokenId();
+  if (tokenId === 0) return false;
+  try {
+    const grant: abilityAccessCtrl.GrantStatus =
+      await atManager.checkAccessToken(tokenId, perm);
+    return grant === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED;
+  } catch (_e) {
+    return false;
+  }
+};
 
 @Entry
 @Component
@@ -39,22 +57,54 @@ struct SettingSystemAccessPage {
   @State loaded: boolean = false;
 
   aboutToAppear(): void {
-    placeholderLoadPermissions().then((list: PermissionItem[]): void => {
-      this.items = list;
-      this.loaded = true;
-    });
+    this.loadPermissions();
+  }
+
+  private async loadPermissions(): Promise<void> {
+    const calendar: boolean = await checkPermGranted('ohos.permission.READ_CALENDAR');
+    let notifEnabled: boolean = false;
+    try {
+      notifEnabled = await notificationManager.isNotificationEnabled();
+    } catch (_e) {
+      notifEnabled = false;
+    }
+    this.items = [
+      makePerm('contacts', '通讯录', '调试 Profile 需加入 ACL 权限(AGC 后台)后解禁', 'acl'),
+      makePerm('calendar', '日历', '读取日程用于提醒', calendar ? 'granted' : 'denied'),
+      makePerm('notifications', '通知', '消息生成完成时推送通知', notifEnabled ? 'granted' : 'denied'),
+      makePerm('files', '文件与附件', '通过系统文件选择器按需选取', 'exempt'),
+    ];
+    this.loaded = true;
   }
 
   private badgeText(status: string): string {
     if (status === 'granted') return '已授权';
     if (status === 'denied') return '未授权';
-    return '不支持';
+    if (status === 'acl') return '暂不可用';
+    return '无需授权';
   }
 
   private badgeColor(status: string): string {
     if (status === 'granted') return SIGNAL;
     if (status === 'denied') return ERROR;
     return INK3;
+  }
+
+  // 未授权项点击 → 发起对应申请;申请回调后重查真状态
+  private requestPermission(p: PermissionItem): void {
+    if (p.status !== 'denied') return;
+    const ctx: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    if (p.key === 'notifications') {
+      notificationManager.requestEnableNotification(ctx)
+        .then((): void => { this.loadPermissions(); })
+        .catch((): void => { this.loadPermissions(); });
+      return;
+    }
+    const perms: Array<Permissions> = ['ohos.permission.READ_CALENDAR'];
+    atManager.requestPermissionsFromUser(ctx, perms)
+      .then((): void => { this.loadPermissions(); })
+      .catch((): void => { this.loadPermissions(); });
   }
 
   private done(): void {
@@ -73,7 +123,13 @@ struct SettingSystemAccessPage {
           Text(p.desc)
             .fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
             .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
-            .fontColor(INK3).margin({ top: 4 })
+            .fontColor(p.status === 'denied' ? INK3 : INK4).margin({ top: 4 })
+          if (p.status === 'denied') {
+            Text('点击申请权限')
+              .fontSize(TEXT_STYLES.tinyTag.size).fontWeight(TEXT_STYLES.tinyTag.weight)
+              .lineHeight(TEXT_STYLES.tinyTag.lineHeight).fontFamily(FONT_MONO_MEDIUM)
+              .fontColor(INK3).margin({ top: 3 })
+          }
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
@@ -91,6 +147,7 @@ struct SettingSystemAccessPage {
       .alignItems(VerticalAlign.Center)
       .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .onClick((): void => { this.requestPermission(p); })
       if (!isLast) {
         PaperSeparator()
       }
@@ -116,7 +173,7 @@ struct SettingSystemAccessPage {
             SectionHeader({ label: '权限状态' })
 
             // 说明条
-            Text('HarmonyOS 权限需在系统设置中授予,此处仅展示当前状态。')
+            Text('点击未授权项可发起申请;文件访问由系统选择器提供,无需授权。')
               .fontSize(LABEL).fontWeight(FontWeight.Normal).lineHeight(TEXT_STYLES.meta.lineHeight)
               .fontFamily(FONT_SANS).fontColor(INK3)
               .width('100%').padding({ left: 16, right: 16, bottom: 8 })

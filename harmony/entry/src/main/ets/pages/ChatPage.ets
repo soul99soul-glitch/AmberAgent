@@ -18,6 +18,8 @@ import { FONT_MONO } from '../design/fonts.ets';
 import { inputMethod } from '@kit.IMEKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { systemShare } from '@kit.ShareKit';
+import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
   Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
   PendingUserMessage, PendingUserMessageMode, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
@@ -3034,12 +3036,30 @@ struct ChatPage {
     if (this.actionsSheetRow !== null) this.confirmDeleteMessage(this.actionsSheetRow);
   }
 
+  // 分享:系统分享面板(Share Kit)为主,面板不可用时降级复制到剪贴板
   private shareMessage(message: UIMessage): void {
     const text: string = toText(message).trim();
     if (text.length === 0) {
       promptAction.showToast({ message: '没有可分享的文本', duration: 1200 });
       return;
     }
+    try {
+      const data: systemShare.SharedData = new systemShare.SharedData({
+        utd: utd.UniformDataType.PLAIN_TEXT,
+        content: text
+      });
+      const controller: systemShare.ShareController = new systemShare.ShareController(data);
+      const ctx: common.UIAbilityContext =
+        this.getUIContext().getHostContext() as common.UIAbilityContext;
+      controller.show(ctx, {
+        anchor: { windowOffset: { x: 660, y: 2200 } }
+      }).catch((): void => { this.fallbackCopyShare(text); });
+    } catch (e) {
+      this.fallbackCopyShare(text);
+    }
+  }
+
+  private fallbackCopyShare(text: string): void {
     try {
       const board: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
       board.setDataSync(pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text));

@@ -20,12 +20,16 @@
 //   - 导入/导出文件 picker + ExportDialog 未移植(外部目录 picker 未移植先例,P1 登记)
 //   - int 输入:toIntOrNull()?.let 语义 = 草稿串 + 确认时解析失败回退最后有效值
 import { promptAction } from '@kit.ArkUI';
+import { fileIo, picker } from '@kit.CoreFileKit';
 import {
   ACCENT, BG, INK, INK3, INK4, LINE, LINE2, OVERLAY, SURFACE, ERROR, META, BODY, BODY2, TEXT_STYLES,
   lineHeightForSize,
 } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, PaperSeparator, BtnFill, Chip } from '../components/PageTemplate.ets';
 import { makeLorebook, makeModeInjection, makeRegexInjection } from '@amber/chat-domain';
+import {
+  decodeLorebooks, decodeModeInjections, encodeLorebooks, encodeModeInjections,
+} from '@amber/chat-domain';
 import type {
   InjectionPosition, InjectionRole, Lorebook, PromptInjection, RegexInjection,
 } from '@amber/chat-domain';
@@ -59,6 +63,12 @@ const parseIntOrNull = (v: string): number | null => {
   const n: number = parseInt(t, 10);
   return Number.isNaN(n) ? null : n;
 };
+
+// 导入文件形状(as 具名 interface 先例:ManagedFileStore.ets:55)
+interface PromptsImportShape {
+  modeInjections?: object[];
+  lorebooks?: object[];
+}
 
 @Entry
 @Component
@@ -126,14 +136,82 @@ struct ChatPromptsPage {
 
   // ===== 模式注入列表操作 =====
 
+  // 导出:DocumentSavePicker → amber-prompts.json(模式注入 + 世界书全量)
+  private exportPrompts(): void {
+    const content: string = '{"version":1,"modeInjections":'
+      + encodeModeInjections(this.modeInjections) + ',"lorebooks":'
+      + encodeLorebooks(this.lorebooks) + '}';
+    const opts: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+    opts.newFileNames = ['amber-prompts.json'];
+    const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker();
+    docPicker.save(opts).then((uris: string[]): void => {
+      if (uris.length === 0) return;
+      const file = fileIo.openSync(uris[0], fileIo.OpenMode.WRITE_ONLY);
+      fileIo.writeSync(file.fd, content);
+      fileIo.closeSync(file);
+      promptAction.showToast({ message: '已导出提示词', duration: 1400 });
+    }).catch((): void => {
+      promptAction.showToast({ message: '导出取消/失败', duration: 1400 });
+    });
+  }
+
+  // 导入:DocumentSelectPicker → 追加合并,同名跳过(decode 失败即整体拒收)
+  private importPrompts(): void {
+    const opts: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+    opts.maxSelectNumber = 1;
+    const docPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker();
+    docPicker.select(opts).then(async (uris: string[]): Promise<void> => {
+      if (uris.length === 0) return;
+      try {
+        const file = fileIo.openSync(uris[0], fileIo.OpenMode.READ_ONLY);
+        const text: string = fileIo.readTextSync(uris[0]);
+        fileIo.closeSync(file);
+        const parsed = JSON.parse(text) as PromptsImportShape;
+        const misRaw = parsed.modeInjections !== undefined
+          ? decodeModeInjections(JSON.stringify(parsed.modeInjections)) : null;
+        const lbsRaw = parsed.lorebooks !== undefined
+          ? decodeLorebooks(JSON.stringify(parsed.lorebooks)) : null;
+        if (misRaw === null && lbsRaw === null) {
+          promptAction.showToast({ message: '文件格式不受支持', duration: 1600 });
+          return;
+        }
+        let added: number = 0;
+        let skipped: number = 0;
+        const kv = getChatKvStore();
+        if (misRaw !== null) {
+          const names: string[] = this.modeInjections.map((m: PromptInjection): string => m.name);
+          const add = misRaw.filter((m: PromptInjection): boolean => names.indexOf(m.name) < 0);
+          skipped += misRaw.length - add.length;
+          added += add.length;
+          await updateModeInjections(kv, (): PromptInjection[] => [...this.modeInjections, ...add]);
+        }
+        if (lbsRaw !== null) {
+          const names: string[] = this.lorebooks.map((l: Lorebook): string => l.name);
+          const add = lbsRaw.filter((l: Lorebook): boolean => names.indexOf(l.name) < 0);
+          skipped += lbsRaw.length - add.length;
+          added += add.length;
+          await updateLorebooks(kv, (): Lorebook[] => [...this.lorebooks, ...add]);
+        }
+        await this.refresh();
+        promptAction.showToast({
+          message: `导入 ${added} 条${skipped > 0 ? `,跳过同名 ${skipped} 条` : ''}`,
+          duration: 1800,
+        });
+      } catch (e) {
+        promptAction.showToast({ message: `导入失败:${String(e)}`, duration: 1800 });
+      }
+    }).catch((): void => {
+      promptAction.showToast({ message: '导入取消', duration: 1200 });
+    });
+  }
+
   private async patchModeInjections(next: PromptInjection[]): Promise<void> {
     await updateModeInjections(getChatKvStore(), (): PromptInjection[] => next);
     await this.refresh();
   }
 
   // useEditState confirm(:183-191):id 定位 → 替换;否则 append
-  private confirmModeInjection(): void {
-    const edited: PromptInjection = {
+  private confirmModeInjection(): void {    const edited: PromptInjection = {
       id: this.miId,
       name: this.miName,
       enabled: this.miEnabled,
@@ -810,6 +888,17 @@ struct ChatPromptsPage {
     Stack() {
       Column() {
         PageTitleBar({ title: '提示词' })
+
+        Row() {
+          Text('导入').fontSize(BODY2).fontColor(INK3)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => { this.importPrompts(); })
+          Text('导出').fontSize(BODY2).fontColor(INK3)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick((): void => { this.exportPrompts(); })
+        }
+        .width('100%').justifyContent(FlexAlign.End)
+        .padding({ left: 16, right: 16, top: 2, bottom: 2 })
 
         if (!this.loaded) {
           Text('加载中…').fontSize(13).fontColor(INK3).margin({ top: 32 })

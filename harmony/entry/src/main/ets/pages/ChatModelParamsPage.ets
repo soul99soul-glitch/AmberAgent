@@ -48,6 +48,9 @@ struct ChatModelParamsPage {
   private bodyValues: JsonValue[] = [];
   private provider: ProviderSetting | null = null;
   private modelRowId: string = '';
+  // 提供商覆写(D-109 补:展示 + 移除;新增/编辑待提供商编辑器支持 detached 模式)
+  @State overwriteName: string = '';
+  private hasOverwrite: boolean = false;
 
   aboutToAppear(): void {
     const params = router.getParams() as RouterParams;
@@ -71,6 +74,9 @@ struct ChatModelParamsPage {
         this.bodyTexts = model.customBodies.map((b: CustomBody): string => JSON.stringify(b.value));
         this.bodyErrors = model.customBodies.map((): string => '');
         this.bodyValues = model.customBodies.map((b: CustomBody): JsonValue => b.value);
+        this.hasOverwrite = model.providerOverwrite !== null;
+        this.overwriteName = model.providerOverwrite !== null
+          ? model.providerOverwrite.name : '';
       }
       this.loaded = true;
     });
@@ -184,6 +190,32 @@ struct ChatModelParamsPage {
     return clone;
   }
 
+  // ProviderOverrideSettings(:251-257)对齐 — 移除覆写(置 null 即时落库)
+  private removeOverwrite(): void {
+    if (this.provider === null) return;
+    const provider: ProviderSetting = this.provider;
+    const models: ProviderModel[] = provider.models.map((m: ProviderModel): ProviderModel => {
+      if (m.id !== this.modelRowId) return m;
+      return {
+        modelId: m.modelId, displayName: m.displayName, id: m.id, type: m.type,
+        customHeaders: m.customHeaders, customBodies: m.customBodies,
+        inputModalities: m.inputModalities, outputModalities: m.outputModalities,
+        abilities: m.abilities, tools: m.tools,
+        contextWindowTokens: m.contextWindowTokens, providerOverwrite: null,
+      };
+    });
+    loadProviders(getChatKvStore()).then((list: ProviderSetting[] | null): void => {
+      const all: ProviderSetting[] = (list ?? []).map((p: ProviderSetting): ProviderSetting => {
+        if (p.id !== provider.id) return p;
+        return this.rebuildProvider(p, models);
+      });
+      saveProviders(getChatKvStore(), all).then((): void => {
+        this.hasOverwrite = false;
+        this.overwriteName = '';
+      });
+    });
+  }
+
   @Builder
   textField(label: string, value: string, placeholder: string, onChange: (v: string) => void) {
     Column() {
@@ -210,6 +242,36 @@ struct ChatModelParamsPage {
       } else {
         Scroll() {
           Column() {
+            // ── 提供商覆写(SettingProviderModelSettingsForm.kt:734-821 对齐) ──
+            SectionHeader({ label: '提供商覆写' })
+            if (this.hasOverwrite) {
+              Column() {
+                Row() {
+                  Column() {
+                    Text(this.overwriteName)
+                      .fontSize(TEXT_STYLES.body.size).fontWeight(600)
+                      .lineHeight(TEXT_STYLES.body.lineHeight).fontColor(INK)
+                      .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text('override')
+                      .fontSize(TEXT_STYLES.tinyTag.size)
+                      .lineHeight(TEXT_STYLES.tinyTag.lineHeight).fontFamily(FONT_MONO)
+                      .fontColor(INK3).margin({ top: 2 })
+                  }
+                  .alignItems(HorizontalAlign.Start).layoutWeight(1).margin({ right: 12 })
+                  BtnGhost({ label: '移除', onTap: (): void => { this.removeOverwrite(); } })
+                }
+                .width('100%').alignItems(VerticalAlign.Center)
+                .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+                PaperSeparator()
+              }
+              .width('100%')
+            }
+            Text('该模型使用独立的提供商参数;新增与编辑覆写随提供商编辑器扩展提供。')
+              .fontSize(TEXT_STYLES.secondary.size)
+              .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
+              .fontColor(INK3).width('100%')
+              .padding({ left: 16, right: 16, top: this.hasOverwrite ? 8 : 12, bottom: 8 })
+
             // ── 自定义 Headers(:315-395) ──
             SectionHeader({ label: `自定义 Headers · ${this.headerNames.length}` })
             ForEach(this.headerNames, (_n: string, i: number) => {

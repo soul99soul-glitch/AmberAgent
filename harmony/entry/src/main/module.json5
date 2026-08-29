@@ -34,14 +34,16 @@
     //   checkAccessTokenSync 对未声明名返回拒绝,权限状态工具如实展示 Denied)
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET", "reason": "$string:reason_internet" },
-      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" }
-      // 以下权限需要 debug profile ACL 包含,模拟器暂注释(Accessibility/通知功能 P2 恢复):
+      { "name": "ohos.permission.GET_NETWORK_INFO", "reason": "$string:reason_network" },
+      // user_grant 权限(debug profile 需含 ACL;WRITE 系/定位/蓝牙随工具实装再解注释):
+      // READ_CONTACTS 需 debug profile ACL 含该权限(当前 AGC 自动 profile 不含,
+      // install 报 9568289);AGC 后台加 ACL 后解注释:
       // { "name": "ohos.permission.READ_CONTACTS", "reason": "$string:reason_contacts",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       // { "name": "ohos.permission.WRITE_CONTACTS", "reason": "$string:reason_contacts",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
-      // { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
-      //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
+      { "name": "ohos.permission.READ_CALENDAR", "reason": "$string:reason_calendar",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       // { "name": "ohos.permission.WRITE_CALENDAR", "reason": "$string:reason_calendar",
       //   "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" } },
       // { "name": "ohos.permission.APPROXIMATELY_LOCATION", "reason": "$string:reason_location",
