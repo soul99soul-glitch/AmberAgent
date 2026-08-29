@@ -91,39 +91,6 @@ import { util } from '@kit.ArkTS';
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
 
-// Phase 7:通知调度(对照设计 §6.7 / §8.8)
-// TODO(notification): notificationManager 的 ContentType/NotificationContent 类型
-// 在 API 26 SDK 有 @ohos.notification vs @ohos.notificationManager 模块冲突,
-// 需 DevEco 验证确切类型后接真实系统通知。当前用 hilog 输出(通知逻辑结构完整:
-// 3 类通知 running/completed/failed + cancel,调度接入 Index startDeepRead 全生命周期)。
-interface DeepReadNotifier {
-  notifyRunning(topicId: string, title: string): Promise<void>;
-  notifyCompleted(topicId: string, title: string, complete: boolean): Promise<void>;
-  notifyFailed(topicId: string, title: string, msg: string): Promise<void>;
-  cancelRunning(topicId: string): Promise<void>;
-}
-
-// 通知实现:当前用 hilog(标 TODO 接真实 notificationManager)
-// ArkTS 要求 interface 用 class implements,不允许对象字面量直接赋值。
-class HilogNotifier implements DeepReadNotifier {
-  async notifyRunning(topicId: string, title: string): Promise<void> {
-    hilog.info(DOMAIN, TAG, '[notifyRunning] topicId=%{public}s title=%{public}s', topicId, title);
-  }
-  async notifyCompleted(topicId: string, _title: string, complete: boolean): Promise<void> {
-    hilog.info(DOMAIN, TAG, '[notifyCompleted] topicId=%{public}s complete=%{public}s', topicId, complete ? 'true' : 'false');
-  }
-  async notifyFailed(topicId: string, _title: string, msg: string): Promise<void> {
-    hilog.warn(DOMAIN, TAG, '[notifyFailed] topicId=%{public}s msg=%{public}s', topicId, msg);
-  }
-  async cancelRunning(topicId: string): Promise<void> {
-    hilog.info(DOMAIN, TAG, '[cancelRunning] topicId=%{public}s', topicId);
-  }
-}
-
-const createRealNotifier = (): DeepReadNotifier => {
-  return new HilogNotifier();
-};
-
 // 容器单例
 interface Container {
   httpClient: HttpClient;

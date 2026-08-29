@@ -22,6 +22,8 @@ import { MarkdownText } from '../components/MarkdownText.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
 import { getDeepReadScheduler, getRepository, getChatKvStore } from '../di/AppContainer.ets';
+import { renderEditorialSlantHtml, DEEPREAD_TEMPLATE_EDITORIAL_SLANT } from '../platform_impl/DeepReadTemplate.ets';
+import { webview } from '@kit.ArkWeb';
 import {
   BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT,
   BODY, BODY2, META, LABEL, TITLE, ERROR,
@@ -62,6 +64,12 @@ struct DeepReadArticlePage {
   @State progress: DeepReadProgressSnapshot = { percent: 0, label: '未开始' };
   @State fromHistory: boolean = false;
   @State historyExpired: boolean = false;
+  @State templateId: string = 'none';   // 模板选择(editorial_slant → WebView 渲染)
+  private webController: webview.WebviewController = new webview.WebviewController();
+
+  private openTemplateInWeb(): void {
+    // 预留:外部打开
+  }
   // G5-S1:字号倍率(驱动 ArticleRenderer)
   @State fontScale: number = FONT_SCALE_DEFAULT;
   @State fontSerif: boolean = false;
@@ -136,6 +144,8 @@ struct DeepReadArticlePage {
     this.fontScale = Math.max(0.8, Math.min(1.3, (Number.isNaN(scalePct) ? 100 : scalePct) / 100));
     const fontMode: string | null = await getChatKvStore().get('deepread_font_mode');
     this.fontSerif = fontMode === 'serif';
+    const tpl: string | null = await getChatKvStore().get('deepread_template_id');
+    this.templateId = tpl !== null ? tpl : 'none';
     // 首用确认门(Android deepReadFirstUseConfirmed):未确认不自动跑
     const confirmedRaw: string | null = await getChatKvStore().get('deepread_first_use_confirmed');
     this.confirmed = confirmedRaw === 'true';
@@ -459,6 +469,22 @@ struct DeepReadArticlePage {
             Text('重试').fontSize(BODY).fontColor(ACCENT).margin({ top: 16 })
               .onClick((): void => { this.generateArticle(); })
           }.width('100%').layoutWeight(1).justifyContent(FlexAlign.Center)
+        } else if (this.output !== null && this.templateId === 'editorial_slant') {
+          // P8:模板渲染路径(editorial_slant → WebView;Web 组件 full-size)
+          Column() {
+            Web({ src: 'about:blank', controller: this.webController })
+              .width('100%').layoutWeight(1)
+              .backgroundColor(BG)
+              .javaScriptAccess(false)
+              .onControllerAttached((): void => {
+                // data: URL 带 '#' 色值会白屏 → loadData + 官方空格兜底参数
+                const html: string = renderEditorialSlantHtml(this.title, this.output);
+                this.webController.loadData(
+                  encodeURIComponent(html).replace(/#/g, '%23'),
+                  'text/html', 'UTF-8', ' ', ' ');
+              })
+          }
+          .width('100%').layoutWeight(1)
         } else if (this.output !== null) {
           // DeepReadOutput 统一组装为 Markdown,复用聊天侧原生 MarkdownText
           Scroll() {

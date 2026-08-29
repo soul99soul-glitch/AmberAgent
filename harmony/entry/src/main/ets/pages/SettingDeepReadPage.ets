@@ -4,6 +4,8 @@ import { ACCENT, BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, ERROR, SIGNAL, TE
 import { FONT_SANS_SEMIBOLD, FONT_MONO_MEDIUM } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, ToggleRow, SelectRow, BtnFill, BtnGhost, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { PillSelect } from '../components/ui/Select.ets';
+import { BUILTIN_TEMPLATES } from '../platform_impl/DeepReadTemplate.ets';
+import type { DeepReadTemplateDef } from '../platform_impl/DeepReadTemplate.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { getAppContainer, getModelRegistry } from '../di/AppContainer.ets';
 import type { Storage, ModelConfig } from '@amber/deepread-domain';
@@ -55,6 +57,7 @@ struct SettingDeepReadPage {
   @State focusModeIndex: number = 0;
   @State fontModeIndex: number = 0;
   @State fontScalePercent: number = 100;
+  @State templateId: string = 'none';
   @State boardModelId: string = '';
   private focusModes: string[] = ['全部', '关注优先', '仅关注'];
   private fontModes: string[] = ['默认', '衬线'];
@@ -106,6 +109,7 @@ struct SettingDeepReadPage {
     const fontMode: string = await storage.get<string>('deepread_font_mode', 'default');
     const fontScale: number = await storage.get<number>('deepread_font_scale', 100);
     const boardModelId: string = await storage.get<string>('deepread_model_id', '');
+    const tplId: string = await storage.get<string>('deepread_template_id', 'none');
     if (!this.pageAlive || token !== this.loadToken) return;
     this.aiKey = aiKey;
     this.aiBaseUrl = aiBaseUrl;
@@ -119,6 +123,13 @@ struct SettingDeepReadPage {
     this.fontModeIndex = fontMode === 'serif' ? 1 : 0;
     this.fontScalePercent = fontScale;
     this.boardModelId = boardModelId;
+    this.templateId = tplId;
+  }
+
+  private async saveTemplate(id: string): Promise<void> {
+    await this.storage!.set<string>('deepread_template_id', id);
+    this.templateId = id;
+    this.saved = '模板已选择 ✓';
   }
 
   // P5:保存关注筛选(关键词逗号分隔 → KV)
@@ -307,6 +318,18 @@ struct SettingDeepReadPage {
                 .onClick((): void => { this.saveReading(); })
             }
             .width('100%')
+            Text('文章模板').fontSize(BODY).fontColor(INK).margin({ top: 12 })
+            Row() {
+              ForEach(BUILTIN_TEMPLATES, (t: DeepReadTemplateDef): void => {
+                Text(t.name)
+                  .fontSize(BODY2).fontColor(this.templateId === t.id ? ACCENT : INK3)
+                  .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+                  .borderRadius(8)
+                  .backgroundColor(this.templateId === t.id ? SURFACE2 : Color.Transparent)
+                  .onClick((): void => { this.saveTemplate(t.id); })
+              }, (t: DeepReadTemplateDef): string => t.id)
+            }
+            .margin({ top: 6 })
           }
           .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 12 })
 
