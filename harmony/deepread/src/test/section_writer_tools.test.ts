@@ -368,7 +368,7 @@ test('finish: not all sections ready → generationComplete=false, missing list 
   assert.equal(w.current().generationComplete, false);
 });
 
-test('finish: all ready → generationComplete=true, status complete', async () => {
+test('finish: all ready → VERIFYING 过渡,二次 finish → COMPLETE', async () => {
   // 预置 4 sections READY
   const preset: DeepReadOutput = {
     ...makeEmptyDeepReadOutput(),
@@ -386,12 +386,17 @@ test('finish: all ready → generationComplete=true, status complete', async () 
   };
   const w = createSectionWriterTools({ topicId: 't1', topicTitle, imageCandidates: [], initialOutput: preset });
   const tool = w.tools(null).find(t => t.name === 'deep_read_finish')!;
-  const out = await tool.execute('{}');
-  const parsed = parseOutput(out);
-  assert.equal(parsed.status, 'complete');
-  assert.deepEqual(parsed.missing, []);
-  assert.equal(w.current().generationComplete, true);
+  const out1 = await tool.execute('{}');
+  const parsed1 = parseOutput(out1);
+  assert.equal(parsed1.status, 'complete');
+  assert.deepEqual(parsed1.missing, []);
+  // 第一次 finish:进入 VERIFYING(补漏),尚未 COMPLETE
+  assert.equal(w.current().generationPhase, 'VERIFYING');
+  assert.equal(w.current().generationComplete, false);
+  // 第二次 finish(补漏通过):落 COMPLETE
+  await tool.execute('{}');
   assert.equal(w.current().generationPhase, 'COMPLETE');
+  assert.equal(w.current().generationComplete, true);
 });
 
 // ===== markRunning / markFailed =====

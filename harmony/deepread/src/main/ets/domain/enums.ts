@@ -10,7 +10,8 @@ export const STAGE_LABELS: Record<DeepReadGenerationStage, string> = {
   EXTENDED_READING: '扩展阅读',
 };
 
-export type DeepReadGenerationPhase = 'IDLE' | 'COLLECTING' | 'PLANNING' | 'WRITING' | 'COMPLETE';
+export type DeepReadGenerationPhase =
+  | 'IDLE' | 'COLLECTING' | 'PLANNING' | 'WRITING' | 'VERIFYING' | 'COMPLETE';
 export type DeepReadSectionStatus = 'PENDING' | 'RUNNING' | 'READY' | 'FAILED';
 export type DeepReadSectionQuality = 'BASIC' | 'STANDARD';
 

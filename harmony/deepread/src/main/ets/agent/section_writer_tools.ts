@@ -559,8 +559,11 @@ export const createSectionWriterTools = (
 
   const executeFinishInternal = (): DeepReadOutput => update(current => ({
     ...current,
-    generationPhase: sectionsReady(current) ? 'COMPLETE' : current.generationPhase,
-    generationComplete: sectionsReady(current),
+    // 全段 READY → 经 VERIFYING(补漏)落 COMPLETE,与 Android 补漏环节对齐
+    generationPhase: sectionsReady(current)
+      ? (current.generationPhase === 'VERIFYING' ? 'COMPLETE' : 'VERIFYING')
+      : current.generationPhase,
+    generationComplete: sectionsReady(current) && current.generationPhase === 'VERIFYING',
   }));
 
   // ===== markPhase / markRunning / markFailed =====
@@ -640,7 +643,19 @@ export const createSectionWriterTools = (
     return current;
   });
 
-  const executeFinish = (): DeepReadOutput => executeFinishInternal();
+  // finishIfPossible 路径:run() 尾段直落 COMPLETE(VERIFYING 过渡仅由模型 finish 工具驱动;
+  // runManager 尾段无第二轮 finish 调用,直接 COMPLETE 防"卡在补漏")
+  const executeFinish = (): DeepReadOutput => {
+    const after = executeFinishInternal();
+    if (after.generationPhase === 'VERIFYING') {
+      return update(current => ({
+        ...current,
+        generationPhase: 'COMPLETE',
+        generationComplete: sectionsReady(current),
+      }));
+    }
+    return after;
+  };
 
   // tools(stages?) — 照搬 Android tools():null → 全部,否则按 stage 过滤 writer tool
   const tools = (stages: Set<DeepReadGenerationStage> | null = null): ToolDefinition[] => {

@@ -25,6 +25,8 @@ export type { Storage } from './platform/storage.ts';
 export type { SearchProvider, SearchProviderRegistry, SearchHit } from './platform/search.ts';
 export type { AiClient, Tool, GenerateTextParams } from './platform/ai_client.ts';
 export type { DeepReadRepository, DeepReadCacheEntry } from './platform/repository.ts';
+export { deepReadProgressSnapshot, isCacheEntryExpired } from './platform/deep_read_progress.ts';
+export type { DeepReadProgressSnapshot } from './platform/deep_read_progress.ts';
 export type { Observable } from './platform/observable.ts';
 export { pollingObservable } from './platform/observable.ts';
 export { DEEP_READ_SCHEMA_SQL } from './platform/database.ts';

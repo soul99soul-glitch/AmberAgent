@@ -230,11 +230,12 @@ export const createScheduler = (deps: SchedulerDeps): DeepReadScheduler => {
   };
 };
 
-// 中断态 phase 判定(照搬设计 §6.5)
+// 中断态 phase 判定(照搬设计 §6.5;VERIFYING=补漏段,同属活动期)
 export const isInterruptedPhase = (output: DeepReadOutput): boolean =>
   output.generationPhase === 'COLLECTING' ||
   output.generationPhase === 'PLANNING' ||
-  output.generationPhase === 'WRITING';
+  output.generationPhase === 'WRITING' ||
+  output.generationPhase === 'VERIFYING';
 
 // ===== 辅助:Observable map + getCurrent(简化;真实 Observable 已有这些) =====
 
