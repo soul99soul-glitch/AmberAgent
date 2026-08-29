@@ -24,7 +24,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.amber.agent.R
 import app.amber.feature.board.hotlist.HotListProviderIds
 import app.amber.feature.board.hotlist.providers.CustomHotListFieldMapping
 import app.amber.feature.board.hotlist.providers.CustomHotListSourceTypes
@@ -56,13 +58,13 @@ fun HotListSourceSettings(
     }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("数据源", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.board_sources_title), style = MaterialTheme.typography.titleSmall)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { showNewsNowDialog = true }) {
                     Text("+ NewsNow")
                 }
                 TextButton(onClick = { showDialog = true }) {
-                    Text("+ 自定义")
+                    Text(stringResource(R.string.board_custom_source_add))
                 }
             }
         }
@@ -73,9 +75,9 @@ fun HotListSourceSettings(
                         Switch(checked = source.id in enabledBuiltIns, onCheckedChange = { onToggleBuiltIn(source.id) })
                         Spacer(Modifier.width(6.dp))
                         Column {
-                            Text(source.label, style = MaterialTheme.typography.bodyMedium)
+                            Text(hotListSourceLabel(source.id), style = MaterialTheme.typography.bodyMedium)
                             if (!source.verified) {
-                                Text("默认关闭", style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
+                                Text(stringResource(R.string.board_source_default_off), style = MaterialTheme.typography.labelSmall, color = workspaceColors().muted)
                             }
                         }
                     }
@@ -83,7 +85,7 @@ fun HotListSourceSettings(
             }
         }
         if (customSources.isNotEmpty()) {
-            Text("自定义源", style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
+            Text(stringResource(R.string.board_custom_sources), style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
             customSources.forEach { source ->
                 Row(
                     Modifier.fillMaxWidth(),
@@ -101,7 +103,7 @@ fun HotListSourceSettings(
                         )
                     }
                     TextButton(onClick = { onDeleteCustom(source) }) {
-                        Text("删除")
+                        Text(stringResource(R.string.delete))
                     }
                 }
             }
@@ -139,11 +141,11 @@ private fun NewsNowPresetDialog(
     val confirmable = selectedIds.isNotEmpty()
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("一键添加 NewsNow 源") },
+        title = { Text(stringResource(R.string.board_newsnow_add_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    "通过 newsnow.busiyi.world 聚合接入第三方热榜（知乎、微博、抖音等），保存后会作为自定义 JSON 源参与下次刷新。",
+                    stringResource(R.string.board_newsnow_add_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -153,7 +155,11 @@ private fun NewsNowPresetDialog(
                         val checked = preset.id in selectedIds
                         SourceChip(
                             selected = checked || alreadyAdded,
-                            label = if (alreadyAdded) "${preset.displayName} ·已加" else preset.displayName,
+                            label = if (alreadyAdded) {
+                                stringResource(R.string.board_newsnow_added, newsNowPresetDisplayName(preset.id))
+                            } else {
+                                newsNowPresetDisplayName(preset.id)
+                            },
                             onClick = {
                                 if (!alreadyAdded) {
                                     selectedIds = if (checked) selectedIds - preset.id else selectedIds + preset.id
@@ -163,7 +169,7 @@ private fun NewsNowPresetDialog(
                     }
                 }
                 Text(
-                    "已加入的源不会重复添加；如需调整请到下方的「自定义源」开关或删除。",
+                    stringResource(R.string.board_newsnow_existing_hint),
                     style = MaterialTheme.typography.labelSmall,
                     color = workspaceColors().muted,
                 )
@@ -177,12 +183,12 @@ private fun NewsNowPresetDialog(
                     onConfirm(picked)
                 },
             ) {
-                Text("添加 ${selectedIds.size} 个")
+                Text(stringResource(R.string.board_newsnow_add_selected, selectedIds.size))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -207,19 +213,19 @@ private fun CustomHotListSourceDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加自定义热榜源") },
+        title = { Text(stringResource(R.string.board_custom_source_add_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("名称") },
+                    label = { Text(stringResource(R.string.board_source_name)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("RSS 或 JSON URL") },
+                    label = { Text(stringResource(R.string.board_source_url)) },
                     singleLine = true,
                 )
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -231,14 +237,14 @@ private fun CustomHotListSourceDialog(
                     }
                 }
                 if (type == CustomHotListSourceTypes.JSON) {
-                    OutlinedTextField(value = itemsPath, onValueChange = { itemsPath = it }, label = { Text("列表路径") }, singleLine = true)
-                    OutlinedTextField(value = titlePath, onValueChange = { titlePath = it }, label = { Text("标题路径") }, singleLine = true)
-                    OutlinedTextField(value = urlPath, onValueChange = { urlPath = it }, label = { Text("链接路径") }, singleLine = true)
-                    OutlinedTextField(value = heatPath, onValueChange = { heatPath = it }, label = { Text("热度路径（可选）") }, singleLine = true)
-                    OutlinedTextField(value = imagePath, onValueChange = { imagePath = it }, label = { Text("图片路径（可选）") }, singleLine = true)
+                    OutlinedTextField(value = itemsPath, onValueChange = { itemsPath = it }, label = { Text(stringResource(R.string.board_source_items_path)) }, singleLine = true)
+                    OutlinedTextField(value = titlePath, onValueChange = { titlePath = it }, label = { Text(stringResource(R.string.board_source_title_path)) }, singleLine = true)
+                    OutlinedTextField(value = urlPath, onValueChange = { urlPath = it }, label = { Text(stringResource(R.string.board_source_link_path)) }, singleLine = true)
+                    OutlinedTextField(value = heatPath, onValueChange = { heatPath = it }, label = { Text(stringResource(R.string.board_source_heat_path)) }, singleLine = true)
+                    OutlinedTextField(value = imagePath, onValueChange = { imagePath = it }, label = { Text(stringResource(R.string.board_source_image_path)) }, singleLine = true)
                 }
                 Text(
-                    "保存后会参与下一次热榜刷新；仅支持 http/https。JSON 路径使用点号，例如 data.list / title / url。",
+                    stringResource(R.string.board_custom_source_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -264,12 +270,12 @@ private fun CustomHotListSourceDialog(
                     )
                 },
             ) {
-                Text("保存")
+                Text(stringResource(R.string.common_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -286,6 +292,37 @@ private fun SourceChip(selected: Boolean, label: String, onClick: () -> Unit) {
     }
 }
 
+@Composable
+private fun hotListSourceLabel(id: String): String = when (id) {
+    HotListProviderIds.BILIBILI -> stringResource(R.string.board_source_bilibili)
+    HotListProviderIds.HACKER_NEWS -> stringResource(R.string.board_source_hacker_news)
+    HotListProviderIds.ARXIV_AI -> stringResource(R.string.board_source_arxiv_ai)
+    HotListProviderIds.INFOQ_AI -> stringResource(R.string.board_source_infoq_ai)
+    HotListProviderIds.WEIBO -> stringResource(R.string.board_source_weibo)
+    HotListProviderIds.ZHIHU -> stringResource(R.string.board_source_zhihu)
+    HotListProviderIds.KR36 -> stringResource(R.string.board_source_36kr)
+    HotListProviderIds.HUGGINGFACE_PAPERS -> stringResource(R.string.board_source_huggingface)
+    HotListProviderIds.GITHUB_TRENDING_AI -> stringResource(R.string.board_source_github)
+    else -> id
+}
+
+@Composable
+private fun newsNowPresetDisplayName(id: String): String = when (id) {
+    "zhihu" -> stringResource(R.string.board_newsnow_zhihu)
+    "weibo" -> stringResource(R.string.board_newsnow_weibo)
+    "douyin" -> stringResource(R.string.board_newsnow_douyin)
+    "coolapk" -> stringResource(R.string.board_newsnow_coolapk)
+    "bilibili-hot-search" -> stringResource(R.string.board_newsnow_bilibili)
+    "v2ex-share" -> stringResource(R.string.board_newsnow_v2ex)
+    "github-trending-today" -> stringResource(R.string.board_newsnow_github)
+    "36kr-quick" -> stringResource(R.string.board_newsnow_36kr)
+    "hupu-zhugandaoretie" -> stringResource(R.string.board_newsnow_hupu)
+    "xueqiu-hotstock" -> stringResource(R.string.board_newsnow_xueqiu)
+    "wallstreetcn-hot" -> stringResource(R.string.board_newsnow_wallstreet)
+    "cls-telegraph" -> stringResource(R.string.board_newsnow_cls)
+    else -> id
+}
+
 data class CustomHotListSourceDraft(
     val name: String,
     val sourceType: String,
@@ -295,18 +332,17 @@ data class CustomHotListSourceDraft(
 
 data class HotListSourceOption(
     val id: String,
-    val label: String,
     val verified: Boolean,
 )
 
 val HOT_LIST_SOURCE_OPTIONS = listOf(
-    HotListSourceOption(HotListProviderIds.BILIBILI, "B站热门", true),
-    HotListSourceOption(HotListProviderIds.HACKER_NEWS, "HackerNews", true),
-    HotListSourceOption(HotListProviderIds.ARXIV_AI, "arXiv AI", true),
-    HotListSourceOption(HotListProviderIds.INFOQ_AI, "InfoQ AI", true),
-    HotListSourceOption(HotListProviderIds.WEIBO, "微博热搜", false),
-    HotListSourceOption(HotListProviderIds.ZHIHU, "知乎热榜", false),
-    HotListSourceOption(HotListProviderIds.KR36, "36Kr", false),
-    HotListSourceOption(HotListProviderIds.HUGGINGFACE_PAPERS, "HF Papers", false),
-    HotListSourceOption(HotListProviderIds.GITHUB_TRENDING_AI, "GitHub AI", false),
+    HotListSourceOption(HotListProviderIds.BILIBILI, true),
+    HotListSourceOption(HotListProviderIds.HACKER_NEWS, true),
+    HotListSourceOption(HotListProviderIds.ARXIV_AI, true),
+    HotListSourceOption(HotListProviderIds.INFOQ_AI, true),
+    HotListSourceOption(HotListProviderIds.WEIBO, false),
+    HotListSourceOption(HotListProviderIds.ZHIHU, false),
+    HotListSourceOption(HotListProviderIds.KR36, false),
+    HotListSourceOption(HotListProviderIds.HUGGINGFACE_PAPERS, false),
+    HotListSourceOption(HotListProviderIds.GITHUB_TRENDING_AI, false),
 )

@@ -14,6 +14,7 @@ import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.common.cache.LruCache
 import app.amber.common.cache.SingleFileCacheStore
 import app.amber.core.ai.prompts.resolveVisionRecognitionPrompt
@@ -28,6 +29,42 @@ import kotlin.time.Duration.Companion.days
 private const val TAG = "VisionTransformer"
 
 class VisualRecognitionException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+
+/** Resolved per call so processing/errors follow the app's current locale. */
+data class OcrStrings(
+    val processing: String,
+    val visionFallback: String,
+    val modelMissing: String,
+    val modelUnsupported: String,
+    val providerMissing: String,
+    val providerCallFailed: (String) -> String,
+    val emptyResult: String,
+    val unknownError: String,
+) {
+    companion object {
+        fun english(): OcrStrings = OcrStrings(
+            processing = "Reading image...",
+            visionFallback = "Switching to the vision model to read the image...",
+            modelMissing = "Configure a vision recognition model first",
+            modelUnsupported = "The vision recognition model does not support image input",
+            providerMissing = "The vision recognition model's provider is unavailable",
+            providerCallFailed = { detail -> "Vision recognition model call failed: $detail" },
+            emptyResult = "The vision recognition model returned no usable content",
+            unknownError = "Vision recognition failed",
+        )
+
+        fun from(context: Context): OcrStrings = OcrStrings(
+            processing = context.getString(R.string.ocr_processing_status),
+            visionFallback = context.getString(R.string.ocr_vision_fallback_status),
+            modelMissing = context.getString(R.string.ocr_error_model_missing),
+            modelUnsupported = context.getString(R.string.ocr_error_model_unsupported),
+            providerMissing = context.getString(R.string.ocr_error_provider_missing),
+            providerCallFailed = { detail -> context.getString(R.string.ocr_error_provider_call_failed, detail) },
+            emptyResult = context.getString(R.string.ocr_error_empty_result),
+            unknownError = context.getString(R.string.ocr_error_unknown),
+        )
+    }
+}
 
 object OcrTransformer : InputMessageTransformer, KoinComponent {
     private val cache by lazy {
@@ -63,7 +100,8 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
 
         return withContext(Dispatchers.IO) {
             try {
-                ctx.processingStatus.value = "正在识别图片..."
+                val strings = OcrStrings.from(ctx.context)
+                ctx.processingStatus.value = strings.processing
                 messages.map { message ->
                     message.copy(
                         parts = message.parts.map { part ->
@@ -73,6 +111,7 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
                                         performImageRecognition(
                                             part = part,
                                             settings = ctx.settings,
+                                            strings = strings,
                                         )
                                     )
                                 }
@@ -93,14 +132,15 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
         settings: Settings,
         promptOverride: String? = null,
         useCache: Boolean = true,
+        strings: OcrStrings = OcrStrings.english(),
     ): String {
         val model = settings.findModelById(settings.ocrModelId)
-            ?: throw VisualRecognitionException("请先配置视觉识别模型")
+            ?: throw VisualRecognitionException(strings.modelMissing)
         if (Modality.IMAGE !in model.inputModalities) {
-            throw VisualRecognitionException("视觉识别模型不支持图片输入")
+            throw VisualRecognitionException(strings.modelUnsupported)
         }
         val providerSetting = model.findProvider(settings.providers)
-            ?: throw VisualRecognitionException("视觉识别模型的提供商不可用")
+            ?: throw VisualRecognitionException(strings.providerMissing)
         val prompt = promptOverride?.trim()?.takeIf { it.isNotBlank() }
             ?: resolveVisionRecognitionPrompt(settings.ocrPrompt)
         val cacheKey = "${part.url}|${model.id}|${prompt.hashCode()}"
@@ -129,12 +169,13 @@ object OcrTransformer : InputMessageTransformer, KoinComponent {
             )
         }.getOrElse {
             if (it is CancellationException) throw it
-            throw VisualRecognitionException("视觉识别模型调用失败：${it.message}", it)
+            val detail = it.message?.takeIf { message -> message.isNotBlank() } ?: strings.unknownError
+            throw VisualRecognitionException(strings.providerCallFailed(detail), it)
         }
         // choices 可能为空（内容过滤等），直接 [0] 会 IOOBE
         val content = result.choices.firstOrNull()?.message?.toText()?.trim().orEmpty()
         if (content.isBlank()) {
-            throw VisualRecognitionException("视觉识别模型没有返回可用内容")
+            throw VisualRecognitionException(strings.emptyResult)
         }
         Log.i(TAG, "performImageToText: $content")
         val visionResult = """

@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.tools
 
+import android.content.Context
 import app.amber.ai.core.Tool
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -35,6 +36,7 @@ import app.amber.feature.webmount.usersites.UserSiteRegistry
  * auto-approval and run-trust cannot bypass the prompt.
  */
 class WebMountPrimitiveTools(
+    context: Context,
     private val pool: WebViewPool,
     private val activityStore: AgentToolActivityStore,
     private val manager: WebMountManager,
@@ -45,7 +47,7 @@ class WebMountPrimitiveTools(
     private val oauthStore: WebMountOAuthTokenStore,
     private val settingsStore: SettingsAggregator,
 ) {
-    private val deps = WebMountDeps(pool, activityStore)
+    private val deps = WebMountDeps(pool, activityStore, context)
 
     fun getTools(includeEval: Boolean = false): List<Tool> = listOfNotNull(
         openTool,

@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.agent.AppScope
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.feature.webmount.core.WebMountOAuthToken
 import java.util.concurrent.ConcurrentHashMap
 
@@ -102,7 +103,7 @@ class WebMountOAuthClient(
         // accept() is single-shot, close() in `finally` tears it down even on early return.
         val loopbackServer: LoopbackOAuthCallbackServer? = if (provider.requiresLoopback) {
             try {
-                LoopbackOAuthCallbackServer()
+                LoopbackOAuthCallbackServer(copy = OAuthDisplayLocalizer.loopback(context))
             } catch (error: Throwable) {
                 Log.e(TAG, "Loopback server bind failed for $providerId", error)
                 return ConnectResult.Failed(error.message ?: error.toString())
@@ -180,7 +181,13 @@ class WebMountOAuthClient(
                 val code = callback.code
                     ?: return ConnectResult.Failed("Provider callback had no `code` param")
 
-                val token = provider.exchangeCode(effectiveCredentials, code, verifier, http)
+                val token = provider.exchangeCode(
+                    effectiveCredentials,
+                    code,
+                    verifier,
+                    http,
+                    errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
+                )
                 store.putToken(providerId, token)
                 // M2.0 review B-2 fix: only consume the pending entry on
                 // confirmed exchange success. Timeout / provider-error /
@@ -241,7 +248,13 @@ class WebMountOAuthClient(
         // bail; the live path will have stored the token.
         val entry = pendingStore.consume(state) ?: return
         runCatching {
-            val token = provider.exchangeCode(credentials, code, entry.codeVerifier, http)
+            val token = provider.exchangeCode(
+                credentials,
+                code,
+                entry.codeVerifier,
+                http,
+                errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
+            )
             store.putToken(entry.providerId, token)
             Log.i(TAG, "Resumed OAuth for ${entry.providerId} after process restart")
         }.onFailure { Log.w(TAG, "Resume token exchange failed for ${entry.providerId}", it) }
@@ -263,7 +276,12 @@ class WebMountOAuthClient(
         val refreshToken = current.refreshToken ?: return null
         val credentials = store.getCredentials(providerId) ?: return null
         return runCatching {
-            val refreshed = provider.refresh(credentials, refreshToken, http)
+            val refreshed = provider.refresh(
+                credentials,
+                refreshToken,
+                http,
+                errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
+            )
             store.putToken(providerId, refreshed)
             refreshed.accessToken
         }.onFailure { Log.w(TAG, "Inline refresh failed for $providerId", it) }

@@ -11,6 +11,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.R
 import app.amber.core.settings.Settings
+import app.amber.core.utils.appLocale
+import app.amber.core.utils.appLocaleDisplayName
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -56,15 +58,15 @@ fun buildPlaceholders(block: PlaceholderBuilder.() -> Unit): Map<String, Placeho
 object DefaultPlaceholderProvider : PlaceholderProvider {
     override val placeholders: Map<String, PlaceholderInfo> = buildPlaceholders {
         placeholder("cur_date", { Text(stringResource(R.string.placeholder_current_date)) }) {
-            LocalDate.now().toDateString()
+            LocalDate.now().toDateString(it.context.appLocale())
         }
 
         placeholder("cur_time", { Text(stringResource(R.string.placeholder_current_time)) }) {
-            LocalTime.now().toTimeString()
+            LocalTime.now().toTimeString(it.context.appLocale())
         }
 
         placeholder("cur_datetime", { Text(stringResource(R.string.placeholder_current_datetime)) }) {
-            LocalDateTime.now().toDateTimeString()
+            LocalDateTime.now().toDateTimeString(it.context.appLocale())
         }
 
         placeholder("model_id", { Text(stringResource(R.string.placeholder_model_id)) }) {
@@ -76,11 +78,11 @@ object DefaultPlaceholderProvider : PlaceholderProvider {
         }
 
         placeholder("locale", { Text(stringResource(R.string.placeholder_locale)) }) {
-            Locale.getDefault().displayName
+            it.context.appLocaleDisplayName()
         }
 
         placeholder("timezone", { Text(stringResource(R.string.placeholder_timezone)) }) {
-            TimeZone.getDefault().displayName
+            TimeZone.getDefault().getDisplayName(it.context.appLocale())
         }
 
         placeholder("system_version", { Text(stringResource(R.string.placeholder_system_version)) }) {
@@ -108,19 +110,19 @@ object DefaultPlaceholderProvider : PlaceholderProvider {
         }
     }
 
-    private fun Temporal.toDateString() = DateTimeFormatter
+    private fun Temporal.toDateString(locale: Locale) = DateTimeFormatter
         .ofLocalizedDate(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(this)
 
-    private fun Temporal.toTimeString() = DateTimeFormatter
+    private fun Temporal.toTimeString(locale: Locale) = DateTimeFormatter
         .ofLocalizedTime(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(this)
 
-    private fun Temporal.toDateTimeString() = DateTimeFormatter
+    private fun Temporal.toDateTimeString(locale: Locale) = DateTimeFormatter
         .ofLocalizedDateTime(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(this)
 
     private fun Context.batteryLevel(): Int {

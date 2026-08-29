@@ -11,41 +11,42 @@ import java.time.format.TextStyle
 import java.time.temporal.ChronoField
 import java.util.Locale
 
-fun Instant.toLocalDate(): String {
+fun Instant.toLocalDate(locale: Locale = Locale.getDefault()): String {
     val zoneId = ZoneId.systemDefault()
     val localDateTime = this.atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(localDateTime)
 }
 
-fun Instant.toLocalDateTime(): String {
+fun Instant.toLocalDateTime(locale: Locale = Locale.getDefault()): String {
     val zoneId = ZoneId.systemDefault()
     val localDateTime = this.atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(localDateTime)
 }
 
-fun Instant.toLocalTime(): String {
+fun Instant.toLocalTime(locale: Locale = Locale.getDefault()): String {
     val zoneId = ZoneId.systemDefault()
     val localDateTime = this.atZone(zoneId).toLocalDateTime()
 
     return DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM)
-        .withLocale(Locale.getDefault())
+        .withLocale(locale)
         .format(localDateTime)
 }
 
-fun LocalDateTime.toLocalString(): String {
-    val locale = Locale.getDefault()
+fun LocalDateTime.toLocalString(locale: Locale = Locale.getDefault()): String {
     val formatter = DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM).withLocale(locale)
     return formatter.format(this)
 }
 
-fun LocalDate.toLocalString(includeYear: Boolean): String {
-    val locale = Locale.getDefault()
+fun LocalDate.toLocalString(
+    includeYear: Boolean,
+    locale: Locale = Locale.getDefault(),
+): String {
     val formatter = if (includeYear) {
         DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale)
     } else {

@@ -28,7 +28,7 @@ val memoryModule = module {
 
     single { MemoryCandidateFilter() }
 
-    single { MemoryExtractor(get(), get(), get(), get(), get(), get()) }
+    single { MemoryExtractor(get(), get(), get(), get(), get(), get(), get()) }
 
     single { MemoryDreamPlanner(get(), get(), get(), get(), get()) }
     single<MemoryDreamPlanProvider> { get<MemoryDreamPlanner>() }

@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.tools
 
+import android.content.Context
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -19,6 +20,7 @@ import app.amber.feature.webmount.primitives.WebViewPool
 internal class WebMountDeps(
     val pool: WebViewPool,
     val activityStore: AgentToolActivityStore,
+    val context: Context,
 )
 
 /**

@@ -323,13 +323,13 @@ private fun toolStatusFromMessagePart(
 
 @Composable
 private fun toolStatusLabel(status: AgentToolStatus): String = when (status) {
-    AgentToolStatus.RUNNING -> "执行中"
-    AgentToolStatus.WAITING_FOR_PERMISSION -> "待授权"
-    AgentToolStatus.SUCCEEDED -> "成功"
-    AgentToolStatus.FAILED -> "失败"
-    AgentToolStatus.TIMED_OUT -> "已超时"
-    AgentToolStatus.INTERRUPTED -> "已中断"
-    AgentToolStatus.CANCELLED -> "已取消"
+    AgentToolStatus.RUNNING -> stringResource(R.string.chat_message_tool_status_running)
+    AgentToolStatus.WAITING_FOR_PERMISSION -> stringResource(R.string.chat_message_tool_status_waiting_permission)
+    AgentToolStatus.SUCCEEDED -> stringResource(R.string.chat_message_tool_status_succeeded)
+    AgentToolStatus.FAILED -> stringResource(R.string.chat_message_tool_status_failed)
+    AgentToolStatus.TIMED_OUT -> stringResource(R.string.chat_message_tool_status_timed_out)
+    AgentToolStatus.INTERRUPTED -> stringResource(R.string.chat_message_tool_status_interrupted)
+    AgentToolStatus.CANCELLED -> stringResource(R.string.chat_message_tool_status_cancelled)
 }
 
 private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (status) {
@@ -344,17 +344,17 @@ private fun toolStatusTone(status: AgentToolStatus): WorkspaceTone = when (statu
 
 @Composable
 private fun toolKindLabel(kind: AgentToolKind, toolName: String): String = when (kind) {
-    AgentToolKind.FILE -> "文件"
-    AgentToolKind.TERMINAL -> "终端"
-    AgentToolKind.MCP -> "MCP"
-    AgentToolKind.SCREEN -> "屏幕"
-    AgentToolKind.WEB -> "网页"
-    AgentToolKind.MEMORY -> "记忆"
+    AgentToolKind.FILE -> stringResource(R.string.chat_message_tool_kind_file)
+    AgentToolKind.TERMINAL -> stringResource(R.string.chat_message_tool_kind_terminal)
+    AgentToolKind.MCP -> stringResource(R.string.chat_message_tool_kind_mcp)
+    AgentToolKind.SCREEN -> stringResource(R.string.chat_message_tool_kind_screen)
+    AgentToolKind.WEB -> stringResource(R.string.chat_message_tool_kind_web)
+    AgentToolKind.MEMORY -> stringResource(R.string.chat_message_tool_kind_memory)
     // Generic fallback used to return toolName itself, which produced the
     // ugly "$toolName · $toolName" duplicate subtitle for any tool not in
     // one of the categorized buckets. Plain "工具" reads cleaner and the
     // tool name still shows on the right of the dot.
-    AgentToolKind.GENERIC -> "工具"
+    AgentToolKind.GENERIC -> stringResource(R.string.chat_message_tool_kind_generic)
 }
 
 @Composable
@@ -575,6 +575,7 @@ private fun toolDisplayTitle(
     memoryAction: String?,
 ): String {
     arguments.toolDisplayTitleHint()?.let { return it }
+    val fileLabel = stringResource(R.string.chat_message_tool_kind_file)
 
     return when (toolName) {
     // P2-06: the approval capsule shows the target memory id, scope and
@@ -587,7 +588,12 @@ private fun toolDisplayTitle(
             val scope = arguments.getStringContent("scope")
             val revision = arguments.getStringContent("revision")
             if (id != null && revision != null) {
-                "编辑记忆 #$id（$scope，rev $revision）"
+                stringResource(
+                    R.string.chat_message_tool_edit_memory_detail,
+                    id,
+                    scope.orEmpty(),
+                    revision,
+                )
             } else {
                 stringResource(R.string.chat_message_tool_edit_memory)
             }
@@ -596,7 +602,7 @@ private fun toolDisplayTitle(
             val id = arguments.getStringContent("id")
             val revision = arguments.getStringContent("revision")
             if (id != null && revision != null) {
-                "删除记忆 #$id（rev $revision）"
+                stringResource(R.string.chat_message_tool_delete_memory_detail, id, revision)
             } else {
                 stringResource(R.string.chat_message_tool_delete_memory)
             }
@@ -610,15 +616,33 @@ private fun toolDisplayTitle(
     )
 
     ToolNames.SCRAPE_WEB -> stringResource(R.string.chat_message_tool_scrape_web)
-    "webview_search_open" -> "打开搜索页 ${arguments.getStringContent("query")?.compactToolPreview(28).orEmpty()}"
-    "webview_open" -> "打开网页 ${arguments.getStringContent("url")?.compactToolPreview(28).orEmpty()}"
-    "webview_wait_for_load" -> "等待网页加载"
-    "webview_read" -> "读取当前网页"
-    "icloud_status" -> "检查 iCloud 挂载"
-    "icloud_list" -> "列出 iCloud ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"
-    "icloud_read" -> "读取 iCloud ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
-    "icloud_write" -> "写入 iCloud ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
-    "icloud_search" -> "搜索 iCloud ${arguments.getStringContent("query")?.compactToolPreview(22).orEmpty()}"
+    "webview_search_open" -> stringResource(
+        R.string.chat_message_tool_webview_search_open,
+        arguments.getStringContent("query")?.compactToolPreview(28).orEmpty(),
+    )
+    "webview_open" -> stringResource(
+        R.string.chat_message_tool_webview_open,
+        arguments.getStringContent("url")?.compactToolPreview(28).orEmpty(),
+    )
+    "webview_wait_for_load" -> stringResource(R.string.chat_message_tool_webview_wait_for_load)
+    "webview_read" -> stringResource(R.string.chat_message_tool_webview_read)
+    "icloud_status" -> stringResource(R.string.chat_message_tool_icloud_status)
+    "icloud_list" -> stringResource(
+        R.string.chat_message_tool_icloud_list,
+        arguments.getStringContent("path")?.compactToolPreview(18).orEmpty(),
+    )
+    "icloud_read" -> stringResource(
+        R.string.chat_message_tool_icloud_read,
+        arguments.getStringContent("path")?.compactToolPreview(22).orEmpty(),
+    )
+    "icloud_write" -> stringResource(
+        R.string.chat_message_tool_icloud_write,
+        arguments.getStringContent("path")?.compactToolPreview(22).orEmpty(),
+    )
+    "icloud_search" -> stringResource(
+        R.string.chat_message_tool_icloud_search,
+        arguments.getStringContent("query")?.compactToolPreview(22).orEmpty(),
+    )
     ToolNames.GET_TIME_INFO -> stringResource(R.string.chat_message_tool_get_time)
     ToolNames.CLIPBOARD -> when (memoryAction) {
         ClipboardActions.READ -> stringResource(R.string.chat_message_tool_clipboard_read)
@@ -629,43 +653,83 @@ private fun toolDisplayTitle(
     ToolNames.USE_SKILL -> {
         val skillName = arguments.getStringContent("name") ?: ""
         val path = arguments.getStringContent("path")
-        if (path != null) "Skill: $skillName / $path" else "Skill: $skillName"
+        if (path != null) {
+            stringResource(R.string.chat_message_tool_use_skill_with_path, skillName, path)
+        } else {
+            stringResource(R.string.chat_message_tool_use_skill, skillName)
+        }
     }
 
-    "file_list" -> "列出 workspace ${arguments.getStringContent("path")?.compactToolPreview(18).orEmpty()}"
-    "file_read" -> "读取文件 ${arguments.getStringContent("path")?.compactToolPreview(22).orEmpty()}"
-    "file_write" -> "写入 ${arguments.pathDisplayName().ifBlank { "文件" }}"
-    "file_edit" -> "编辑 ${arguments.pathDisplayName().ifBlank { "文件" }}"
-    "file_search" -> "搜索文件 ${arguments.getStringContent("query")?.compactToolPreview(22).orEmpty()}"
-    "file_move" -> "移动文件 ${arguments.getStringContent("from")?.compactToolPreview(16).orEmpty()}"
-    "share_file" -> "分享 ${arguments.pathDisplayName().ifBlank { "文件" }}"
-    "share_text" -> "分享文本"
-    "tool_search" -> "查找可用工具"
-    "tools_list" -> "查看工具目录"
-    "tool_policy_explain" -> "检查工具权限"
-    "terminal_execute" -> "执行 Alpine 命令 ${arguments.getStringContent("command")?.compactToolPreview(22).orEmpty()}"
-    "terminal_install_packages" -> "安装终端软件包"
-    "terminal_workspace_flush" -> "同步终端 workspace"
-    "terminal_job_start" -> "启动后台终端任务 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
-    "terminal_job_read" -> "读取后台终端任务"
-    "terminal_job_wait" -> "等待后台终端任务"
-    "terminal_job_stop" -> "停止后台终端任务"
-    "terminal_session_start" -> "启动终端会话"
-    "terminal_session_exec" -> "终端会话执行 ${arguments.getStringContent("command")?.compactToolPreview(20).orEmpty()}"
-    "terminal_session_read" -> "读取终端输出"
-    "terminal_session_stop" -> "停止终端会话"
-    "screen_click" -> "点击屏幕"
-    "screen_long_click" -> "长按屏幕"
-    "screen_swipe" -> "滑动屏幕"
-    "screen_input_text" -> "输入文字"
-    "screen_back" -> "返回"
-    "screen_home" -> "回到桌面"
-    "screen_open_app" -> "打开应用 ${arguments.getStringContent("package")?.compactToolPreview(18).orEmpty()}"
-    "screen_read_ui" -> "读取当前 UI"
-    "screen_screenshot" -> "获取屏幕截图"
-    "vlm_task" -> "执行 VLM 手机任务"
+    "file_list" -> stringResource(
+        R.string.chat_message_tool_file_list,
+        arguments.getStringContent("path")?.compactToolPreview(18).orEmpty(),
+    )
+    "file_read" -> stringResource(
+        R.string.chat_message_tool_file_read,
+        arguments.getStringContent("path")?.compactToolPreview(22).orEmpty(),
+    )
+    "file_write" -> stringResource(
+        R.string.chat_message_tool_file_write,
+        arguments.pathDisplayName().ifBlank { fileLabel },
+    )
+    "file_edit" -> stringResource(
+        R.string.chat_message_tool_file_edit,
+        arguments.pathDisplayName().ifBlank { fileLabel },
+    )
+    "file_search" -> stringResource(
+        R.string.chat_message_tool_file_search,
+        arguments.getStringContent("query")?.compactToolPreview(22).orEmpty(),
+    )
+    "file_move" -> stringResource(
+        R.string.chat_message_tool_file_move,
+        arguments.getStringContent("from")?.compactToolPreview(16).orEmpty(),
+    )
+    "share_file" -> stringResource(
+        R.string.chat_message_tool_share_file,
+        arguments.pathDisplayName().ifBlank { fileLabel },
+    )
+    "share_text" -> stringResource(R.string.chat_message_tool_share_text)
+    "tool_search" -> stringResource(R.string.chat_message_tool_search_available)
+    "tools_list" -> stringResource(R.string.chat_message_tool_list_catalog)
+    "tool_policy_explain" -> stringResource(R.string.chat_message_tool_check_permissions)
+    "terminal_execute" -> stringResource(
+        R.string.chat_message_tool_terminal_execute,
+        arguments.getStringContent("command")?.compactToolPreview(22).orEmpty(),
+    )
+    "terminal_install_packages" -> stringResource(R.string.chat_message_tool_terminal_install_packages)
+    "terminal_workspace_flush" -> stringResource(R.string.chat_message_tool_terminal_workspace_flush)
+    "terminal_job_start" -> stringResource(
+        R.string.chat_message_tool_terminal_job_start,
+        arguments.getStringContent("command")?.compactToolPreview(20).orEmpty(),
+    )
+    "terminal_job_read" -> stringResource(R.string.chat_message_tool_terminal_job_read)
+    "terminal_job_wait" -> stringResource(R.string.chat_message_tool_terminal_job_wait)
+    "terminal_job_stop" -> stringResource(R.string.chat_message_tool_terminal_job_stop)
+    "terminal_session_start" -> stringResource(R.string.chat_message_tool_terminal_session_start)
+    "terminal_session_exec" -> stringResource(
+        R.string.chat_message_tool_terminal_session_exec,
+        arguments.getStringContent("command")?.compactToolPreview(20).orEmpty(),
+    )
+    "terminal_session_read" -> stringResource(R.string.chat_message_tool_terminal_session_read)
+    "terminal_session_stop" -> stringResource(R.string.chat_message_tool_terminal_session_stop)
+    "screen_click" -> stringResource(R.string.chat_message_tool_screen_click)
+    "screen_long_click" -> stringResource(R.string.chat_message_tool_screen_long_click)
+    "screen_swipe" -> stringResource(R.string.chat_message_tool_screen_swipe)
+    "screen_input_text" -> stringResource(R.string.chat_message_tool_screen_input_text)
+    "screen_back" -> stringResource(R.string.chat_message_tool_screen_back)
+    "screen_home" -> stringResource(R.string.chat_message_tool_screen_home)
+    "screen_open_app" -> stringResource(
+        R.string.chat_message_tool_screen_open_app,
+        arguments.getStringContent("package")?.compactToolPreview(18).orEmpty(),
+    )
+    "screen_read_ui" -> stringResource(R.string.chat_message_tool_screen_read_ui)
+    "screen_screenshot" -> stringResource(R.string.chat_message_tool_screen_screenshot)
+    "vlm_task" -> stringResource(R.string.chat_message_tool_vlm_task)
     else -> if (toolName.startsWith("mcp__")) {
-        "MCP ${McpToolNamespace.displayName(toolName).compactToolPreview(26)}"
+        stringResource(
+            R.string.chat_message_tool_mcp,
+            McpToolNamespace.displayName(toolName).compactToolPreview(26),
+        )
     } else {
         stringResource(R.string.chat_message_tool_call_generic, toolName)
     }
@@ -845,7 +909,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         modifier = Modifier.weight(1f, fill = false),
                     )
                     Text(
-                        text = "点击预览",
+                        text = stringResource(R.string.chat_message_tool_preview_workspace_file),
                         style = MaterialTheme.typography.labelSmall,
                         color = workspace.faint,
                     )
@@ -937,8 +1001,11 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     if (isDenied) {
                         val reason = (tool.approvalState as ToolApprovalState.Denied).reason
                         Text(
-                            text = stringResource(R.string.chat_message_tool_denied) +
-                                if (reason.isNotBlank()) ": $reason" else "",
+                            text = if (reason.isNotBlank()) {
+                                stringResource(R.string.chat_message_tool_denied_with_reason, reason)
+                            } else {
+                                stringResource(R.string.chat_message_tool_denied)
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = workspace.red,
                         )

@@ -27,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,6 +47,7 @@ import app.amber.feature.subagent.EXTENDED_SUB_AGENT_OUTPUT_BUDGET_CHARS
 import app.amber.feature.subagent.EXTENDED_SUB_AGENT_TIMEOUT_MS
 import app.amber.feature.subagent.SubAgentDefinition
 import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentDisplay
 import app.amber.feature.subagent.SubAgentMode
 import app.amber.feature.subagent.SubAgentOverride
 import app.amber.feature.subagent.SubAgentRuntimeSetting
@@ -56,6 +58,7 @@ import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.SubAgentAvatar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
+import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
@@ -69,6 +72,9 @@ fun SettingExperimentalSubAgentPage(
     val subAgent = settings.agentRuntime.subAgent
     val council = settings.agentRuntime.modelCouncil
     val navController = LocalNavController.current
+    val context = LocalContext.current
+    val localeTag = context.resources.configuration.locales.toLanguageTags()
+    val displayLocalizer = remember(localeTag) { AppSubAgentDisplayLocalizer(context) }
     val builtIns = remember { SubAgentDefinitions.builtIns }
     // Survives rotation/process death — users hate losing the open card.
     var expandedRoleId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -241,6 +247,7 @@ fun SettingExperimentalSubAgentPage(
                         builtIns.forEach { def ->
                             SubAgentBuiltInRow(
                                 def = def,
+                                display = displayLocalizer.localize(def),
                                 override = subAgent.overrides[def.id],
                                 providers = settings.providers,
                                 expanded = expandedRoleId == def.id,
@@ -362,6 +369,7 @@ private fun <T> SubAgentSelectRow(
 @Composable
 private fun SubAgentBuiltInRow(
     def: SubAgentDefinition,
+    display: SubAgentDisplay,
     override: SubAgentOverride?,
     providers: List<ProviderSetting>,
     expanded: Boolean,
@@ -393,7 +401,7 @@ private fun SubAgentBuiltInRow(
             ) {
                 SubAgentAvatar(
                     id = def.id,
-                    name = def.name,
+                    name = display.name,
                     avatarSize = 24.dp,
                 )
                 Column(
@@ -401,12 +409,12 @@ private fun SubAgentBuiltInRow(
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
-                        text = def.name,
+                        text = display.name,
                         style = MaterialTheme.typography.labelLarge,
                         color = ws.ink,
                     )
                     Text(
-                        text = def.description,
+                        text = display.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = ws.muted,
                         maxLines = if (expanded) Int.MAX_VALUE else 2,
@@ -416,9 +424,14 @@ private fun SubAgentBuiltInRow(
                         val modelLabel = effectiveModel?.let { it.displayName.ifBlank { it.modelId } }
                             ?: stringResource(R.string.setting_subagent_value_inherit)
                         val reasoningLabel = (effective.reasoningLevel ?: ReasoningLevel.AUTO).name.lowercase()
+                        val promptSummary = if (hasPromptOverride) {
+                            stringResource(R.string.setting_subagent_role_prompt_custom)
+                        } else {
+                            ""
+                        }
                         Text(
                             text = stringResource(R.string.setting_subagent_role_summary, modelLabel, reasoningLabel) +
-                                if (hasPromptOverride) " · 提示词：自定义" else "",
+                                promptSummary,
                             style = MaterialTheme.typography.labelSmall,
                             color = ws.faint,
                         )
@@ -475,7 +488,7 @@ private fun SubAgentBuiltInRow(
                     }
                 }
                 Text(
-                    text = "角色提示词",
+                    text = stringResource(R.string.setting_subagent_role_prompt_label),
                     style = MaterialTheme.typography.labelMedium,
                     color = ws.faint,
                 )
@@ -496,14 +509,17 @@ private fun SubAgentBuiltInRow(
                     textStyle = MaterialTheme.typography.bodySmall,
                     placeholder = {
                         Text(
-                            text = "描述这个 SubAgent 的身份、边界、可用工具和输出格式。",
+                            text = stringResource(R.string.setting_subagent_role_prompt_placeholder),
                             style = MaterialTheme.typography.bodySmall,
                             color = ws.faint,
                         )
                     },
                     supportingText = {
                         Text(
-                            text = "${(override?.systemPrompt ?: def.systemPrompt).length.coerceAtMost(8_000)} / 8000 · 留空会恢复默认提示词",
+                            text = stringResource(
+                                R.string.setting_subagent_role_prompt_supporting,
+                                (override?.systemPrompt ?: def.systemPrompt).length.coerceAtMost(8_000),
+                            ),
                             style = MaterialTheme.typography.labelSmall,
                             color = ws.faint,
                         )
@@ -515,14 +531,14 @@ private fun SubAgentBuiltInRow(
                     color = ws.faint,
                 )
                 Text(
-                    text = def.routingHint.ifBlank { def.description },
+                    text = display.routingHint.ifBlank { display.description },
                     style = MaterialTheme.typography.bodySmall,
                     color = ws.muted,
                 )
                 ExperimentActionRow {
                     if (hasPromptOverride) {
                         ExperimentActionButton(
-                            text = "恢复默认提示词",
+                            text = stringResource(R.string.setting_subagent_role_prompt_reset),
                             enabled = true,
                             onClick = { onMutateOverride { it.copy(systemPrompt = null) } },
                         )

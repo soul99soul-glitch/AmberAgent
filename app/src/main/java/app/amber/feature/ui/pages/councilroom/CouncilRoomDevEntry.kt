@@ -4,6 +4,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.res.stringResource
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.repository.ConversationRepository
@@ -86,6 +88,6 @@ fun CouncilRoomDevEntry() {
             navController.navigate(Screen.CouncilRoom(conversationId = conversation.id.toString()))
         }
     }) {
-        Text("Council Room 调试")
+        Text(stringResource(R.string.council_room_debug_title))
     }
 }

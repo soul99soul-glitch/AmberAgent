@@ -2,6 +2,7 @@ package app.amber.core.files
 
 import android.content.Context
 import android.util.Log
+import app.amber.agent.R
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -49,18 +50,31 @@ class SkillManager(
             ?.mapNotNull { dir ->
                 val skillFile = dir.resolve("SKILL.md")
                 if (!skillFile.exists()) {
-                    return@mapNotNull SkillScanIssue(dir.name, "缺少 SKILL.md")
+                    return@mapNotNull SkillScanIssue(
+                        dir.name,
+                        context.getString(
+                            R.string.skills_page_format_error,
+                            context.getString(R.string.skills_page_skill_content_label),
+                        ),
+                    )
                 }
                 runCatching {
                     val frontmatter = SkillFrontmatterParser.parse(skillFile.readText())
                     when {
-                        frontmatter["name"].isNullOrBlank() -> SkillScanIssue(dir.name, "SKILL.md 缺少 name")
+                        frontmatter["name"].isNullOrBlank() ->
+                            SkillScanIssue(dir.name, context.getString(R.string.skills_page_name_error))
                         SkillFrontmatterParser.isPlaceholderDescription(frontmatter["description"]) ->
-                            SkillScanIssue(dir.name, "SKILL.md 缺少有效 description")
+                            SkillScanIssue(
+                                dir.name,
+                                context.getString(
+                                    R.string.skills_page_format_error,
+                                    context.getString(R.string.skills_page_no_description),
+                                ),
+                            )
                         else -> null
                     }
                 }.getOrElse {
-                    SkillScanIssue(dir.name, "SKILL.md 解析失败")
+                    SkillScanIssue(dir.name, context.getString(R.string.skills_page_save_failed))
                 }
             }
             ?: emptyList()

@@ -1,11 +1,13 @@
 package app.amber.feature.miniapp
 
+import android.content.Context
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.Json
+import app.amber.agent.R
 import app.amber.agent.data.db.dao.MiniAppDAO
 import app.amber.agent.data.db.dao.MiniAppAuditLogDAO
 import app.amber.agent.data.db.dao.MiniAppGrantDAO
@@ -21,6 +23,7 @@ import java.security.MessageDigest
 import kotlin.uuid.Uuid
 
 class MiniAppRepository(
+    private val context: Context,
     private val database: AppDatabase,
     private val dao: MiniAppDAO,
     private val grantDao: MiniAppGrantDAO,
@@ -206,7 +209,9 @@ class MiniAppRepository(
     suspend fun rename(id: String, title: String, description: String) {
         dao.rename(
             id = id,
-            title = title.trim().take(40).ifBlank { "未命名小应用" },
+            title = title.trim().take(40).ifBlank {
+                context.getString(R.string.miniapp_untitled)
+            },
             description = description.trim().take(120),
             updatedAt = System.currentTimeMillis(),
         )

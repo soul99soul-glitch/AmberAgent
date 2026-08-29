@@ -110,10 +110,10 @@ fun SettingAgentMemoryPage(
     var memoryInfoDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     val pageTitle = when (subpage) {
         MemorySettingsSubpage.Overview -> stringResource(R.string.setting_agent_memory_title)
-        MemorySettingsSubpage.Recall -> "记忆开关"
-        MemorySettingsSubpage.Worker -> "自动整理"
-        MemorySettingsSubpage.Compaction -> "上下文管理"
-        MemorySettingsSubpage.Library -> "记忆库"
+        MemorySettingsSubpage.Recall -> stringResource(R.string.memory_recall_title)
+        MemorySettingsSubpage.Worker -> stringResource(R.string.memory_worker_title)
+        MemorySettingsSubpage.Compaction -> stringResource(R.string.memory_compaction_title)
+        MemorySettingsSubpage.Library -> stringResource(R.string.memory_library_title)
     }
 
     LaunchedEffect(operationMessage) {
@@ -164,7 +164,7 @@ fun SettingAgentMemoryPage(
                         ) {
                             Icon(
                                 imageVector = Lucide.Play,
-                                contentDescription = "立即运行一次 Daydream",
+                                contentDescription = stringResource(R.string.memory_run_daydream_now),
                             )
                         }
                     }
@@ -332,25 +332,32 @@ private fun MemoryOverviewEntries(
     CardGroup {
         item(
             onClick = { onOpen(MemorySettingsSubpage.Recall) },
-            headlineContent = { Text("记忆开关") },
-            supportingContent = { Text("核心、短期、长期、最近会话、时间提醒、选择性召回。") },
+            headlineContent = { Text(stringResource(R.string.memory_recall_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_recall_desc)) },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Worker) },
-            headlineContent = { Text("自动整理") },
+            headlineContent = { Text(stringResource(R.string.memory_worker_title)) },
             supportingContent = {
-                Text("后台提取、Daydream 自动管理、空闲和充电条件" + if (hasPendingDreamPlan) " · 有手动建议" else " · 待审核 $pendingCandidateCount 条")
+                val suffix = if (hasPendingDreamPlan) {
+                    stringResource(R.string.memory_worker_manual_suffix)
+                } else {
+                    stringResource(R.string.memory_worker_pending_suffix, pendingCandidateCount)
+                }
+                Text(stringResource(R.string.memory_worker_desc, suffix))
             },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Compaction) },
-            headlineContent = { Text("上下文管理") },
-            supportingContent = { Text("压缩策略、提醒模式、默认阈值。") },
+            headlineContent = { Text(stringResource(R.string.memory_compaction_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_compaction_desc)) },
         )
         item(
             onClick = { onOpen(MemorySettingsSubpage.Library) },
-            headlineContent = { Text("记忆库") },
-            supportingContent = { Text("核心 $coreCount · 短期 $shortCount · 长期 $longCount · 候选 $pendingCandidateCount") },
+            headlineContent = { Text(stringResource(R.string.memory_library_title)) },
+            supportingContent = {
+                Text(stringResource(R.string.memory_library_desc, coreCount, shortCount, longCount, pendingCandidateCount))
+            },
         )
     }
 }
@@ -412,9 +419,15 @@ private fun MemoryRecallSubpage(
             },
         )
         item(
-            headlineContent = { Text("选择性召回") },
+            headlineContent = { Text(stringResource(R.string.memory_selective_recall_title)) },
             supportingContent = {
-                Text("每轮最多 ${settings.agentRuntime.memoryRecall.maxItems} 条、${settings.agentRuntime.memoryRecall.maxPromptChars} 字符，不再全量注入。")
+                Text(
+                    stringResource(
+                        R.string.memory_selective_recall_desc,
+                        settings.agentRuntime.memoryRecall.maxItems,
+                        settings.agentRuntime.memoryRecall.maxPromptChars,
+                    )
+                )
             },
             trailingContent = {
                 Switch(
@@ -444,12 +457,14 @@ private fun MemoryWorkerSubpage(
     val canRunDream = worker.enabled && MemoryWorkerDreamGate.isAnyDreamEnabled(worker)
     CardGroup {
         item(
-            headlineContent = { Text("本地整理建议") },
+            headlineContent = { Text(stringResource(R.string.memory_local_maintenance_title)) },
             supportingContent = {
                 Text(
-                    "每 24 小时后台生成待审核整理建议；应用前需要确认。核心记忆不会自动修改。" +
-                        "自动运行需要联网、电量不低；可按设置要求设备空闲。\n" +
-                        "当前候选 $pendingCandidateCount 条，最近事件 $eventCount 条。"
+                    stringResource(
+                        R.string.memory_local_maintenance_desc,
+                        pendingCandidateCount,
+                        eventCount,
+                    )
                 )
             },
             trailingContent = {
@@ -469,9 +484,9 @@ private fun MemoryWorkerSubpage(
             },
         )
         item(
-            headlineContent = { Text("LLM 整理建议") },
+            headlineContent = { Text(stringResource(R.string.memory_llm_maintenance_title)) },
             supportingContent = {
-                Text("开启后，Daydream 可以让模型提出冲突替换等高级建议；仍需人工确认后才会应用。")
+                Text(stringResource(R.string.memory_llm_maintenance_desc))
             },
             trailingContent = {
                 Switch(
@@ -490,8 +505,8 @@ private fun MemoryWorkerSubpage(
             },
         )
         item(
-            headlineContent = { Text("仅设备空闲时自动运行") },
-            supportingContent = { Text("关闭后，自动整理不再要求 Android device idle；仍需要联网和电量不低。") },
+            headlineContent = { Text(stringResource(R.string.memory_idle_only_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_idle_only_desc)) },
             trailingContent = {
                 Switch(
                     checked = worker.runOnlyOnIdle,
@@ -503,8 +518,8 @@ private fun MemoryWorkerSubpage(
         )
         if (!canRunDream) {
             item(
-                headlineContent = { Text("立即运行不可用") },
-                supportingContent = { Text("请先开启本地整理或 LLM 整理建议。") },
+                headlineContent = { Text(stringResource(R.string.memory_run_unavailable_title)) },
+                supportingContent = { Text(stringResource(R.string.memory_run_unavailable_desc)) },
             )
         }
         // The following toggles were removed in favor of defaults:
@@ -611,11 +626,11 @@ private fun MemoryLibrarySubpage(
     }
 
     MemoryRecordsSection(
-        title = "核心记忆",
+        title = stringResource(R.string.memory_core_title),
         emptyText = stringResource(R.string.setting_agent_memory_empty),
         memories = memories,
-        infoTitle = "核心记忆是什么？",
-        infoText = "核心记忆、短期记忆和长期记忆是并列的三类记忆。核心记忆优先级最高，适合手动维护稳定偏好、身份设定和长期规则。",
+        infoTitle = stringResource(R.string.memory_core_info_title),
+        infoText = stringResource(R.string.memory_core_info_body),
         onInfoClick = onInfoClick,
         onAddMemory = onAddMemory,
         onEditMemory = onEditMemory,
@@ -623,7 +638,7 @@ private fun MemoryLibrarySubpage(
     )
 
     MemoryRecordsSection(
-        title = "短期记忆",
+        title = stringResource(R.string.memory_short_title),
         emptyText = stringResource(R.string.setting_agent_memory_short_empty),
         memories = shortTermMemories,
         infoTitle = stringResource(R.string.setting_agent_memory_short_info_title),
@@ -635,7 +650,7 @@ private fun MemoryLibrarySubpage(
     )
 
     MemoryRecordsSection(
-        title = "长期记忆",
+        title = stringResource(R.string.memory_long_title),
         emptyText = stringResource(R.string.setting_agent_memory_long_empty),
         memories = longTermMemories,
         infoTitle = stringResource(R.string.setting_agent_memory_long_info_title),
@@ -655,7 +670,7 @@ private fun MemoryLibrarySubpage(
     if (showPortabilityDialog) {
         AlertDialog(
             onDismissRequest = { showPortabilityDialog = false },
-            title = { Text("导入导出") },
+            title = { Text(stringResource(R.string.memory_import_export_title)) },
             text = {
                 MemoryPortabilitySection(
                     running = running,
@@ -674,7 +689,7 @@ private fun MemoryLibrarySubpage(
     if (showEventsDialog) {
         AlertDialog(
             onDismissRequest = { showEventsDialog = false },
-            title = { Text("事件日志") },
+            title = { Text(stringResource(R.string.memory_event_log_title)) },
             text = { MemoryEventsSection(events = recentMemoryEvents, showTitle = false) },
             confirmButton = {
                 TextButton(onClick = { showEventsDialog = false }) {
@@ -826,7 +841,7 @@ private fun MemorySummarySection(
         }
 
     SectionLabel(
-        text = "Amber 对你的了解",
+        text = stringResource(R.string.memory_summary_title),
         modifier = Modifier.padding(horizontal = 8.dp),
     )
     AmberCard(
@@ -841,14 +856,26 @@ private fun MemorySummarySection(
                 currentProjects.isNotEmpty()
             if (!hasContent) {
                 Text(
-                    text = "暂无可汇总的正式记忆。",
+                    text = stringResource(R.string.memory_summary_empty),
                     style = LocalAmberType.current.secondary,
                     color = workspaceColors().muted,
                 )
             } else {
-                MemorySummaryGroup("稳定偏好", stableMemories, onEditMemory)
-                MemorySummaryGroup("长期项目", longTermProjects, onEditMemory)
-                MemorySummaryGroup("当前短期事项", currentProjects, onEditMemory)
+                MemorySummaryGroup(
+                    title = stringResource(R.string.memory_summary_stable_preferences),
+                    memories = stableMemories,
+                    onEditMemory = onEditMemory,
+                )
+                MemorySummaryGroup(
+                    title = stringResource(R.string.memory_summary_long_term_projects),
+                    memories = longTermProjects,
+                    onEditMemory = onEditMemory,
+                )
+                MemorySummaryGroup(
+                    title = stringResource(R.string.memory_summary_current_short_term),
+                    memories = currentProjects,
+                    onEditMemory = onEditMemory,
+                )
             }
         }
     }
@@ -891,13 +918,22 @@ private fun MemoryCandidateInboxEntry(
     CardGroup {
         item(
             onClick = onToggle,
-            headlineContent = { Text("候选记忆审核") },
+            headlineContent = { Text(stringResource(R.string.memory_candidate_review_title)) },
             supportingContent = {
                 Text(
                     if (candidateCount == 0) {
-                        "暂无待审核候选。"
+                        stringResource(R.string.memory_candidate_empty)
                     } else {
-                        "待审核 $candidateCount 条 · 低置信 $lowConfidenceCount 条 · ${if (expanded) "点击收起" else "点击展开"}"
+                        stringResource(
+                            R.string.memory_candidate_counts,
+                            candidateCount,
+                            lowConfidenceCount,
+                            if (expanded) {
+                                stringResource(R.string.memory_collapse)
+                            } else {
+                                stringResource(R.string.memory_expand)
+                            },
+                        )
                     }
                 )
             },
@@ -917,12 +953,12 @@ private fun MemoryCandidatesSection(
     onIgnoreLowConfidence: () -> Unit,
 ) {
     SectionLabel(
-        text = "候选记忆审核",
+        text = stringResource(R.string.memory_candidate_review_title),
         modifier = Modifier.padding(horizontal = 8.dp),
     )
     if (candidates.isEmpty()) {
         Text(
-            text = "暂无待审核候选。",
+            text = stringResource(R.string.memory_candidate_empty),
             style = LocalAmberType.current.secondary,
             color = workspaceColors().muted,
             modifier = Modifier.padding(horizontal = 8.dp),
@@ -938,7 +974,7 @@ private fun MemoryCandidatesSection(
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onIgnoreLowConfidence) {
-                Text("忽略低置信候选（$lowConfidenceCount）")
+                Text(stringResource(R.string.memory_ignore_low_confidence, lowConfidenceCount))
             }
         }
     }
@@ -950,14 +986,19 @@ private fun MemoryCandidatesSection(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                val reviewSuffix = if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
+                    stringResource(R.string.memory_recommend_manual_review)
+                } else {
+                    ""
+                }
                 Text(
-                    text = buildString {
-                        append("[${candidate.scope.wireName}/${candidate.kind.wireName}] ")
-                        append("confidence ${"%.2f".format(candidate.confidence)}")
-                        if (candidate.confidence >= LOW_CONFIDENCE_CANDIDATE_THRESHOLD) {
-                            append(" · 建议人工审核")
-                        }
-                    },
+                    text = stringResource(
+                        R.string.memory_candidate_meta,
+                        candidate.scope.wireName,
+                        candidate.kind.wireName,
+                        "%.2f".format(candidate.confidence),
+                        reviewSuffix,
+                    ),
                     // Graphite §3: scope/kind tags + confidence value are machine-facts → MONO.
                     style = LocalAmberType.current.meta,
                     color = LocalAmberTokens.current.accent,
@@ -979,10 +1020,10 @@ private fun MemoryCandidatesSection(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { onAccept(candidate.id) }) {
-                        Text("接受")
+                        Text(stringResource(R.string.memory_accept))
                     }
                     TextButton(onClick = { onIgnore(candidate.id) }) {
-                        Text("忽略")
+                        Text(stringResource(R.string.memory_ignore))
                     }
                 }
             }
@@ -1012,12 +1053,12 @@ private fun DreamReviewSection(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "手动整理审核",
+                        stringResource(R.string.memory_manual_review_title),
                         style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
                         color = workspaceColors().ink,
                     )
                     Text(
-                        "手动或后台生成的 diff 都需要确认；后台 Daydream 不会自动应用整理结果。",
+                        stringResource(R.string.memory_manual_review_desc),
                         style = LocalAmberType.current.secondary,
                         color = workspaceColors().muted,
                     )
@@ -1029,9 +1070,14 @@ private fun DreamReviewSection(
 
             plan?.let { persisted ->
                 val current = persisted.plan
-                val summary = "合并 ${current.mergeSuggestions.size} 组 · 提升 ${current.promoteMemoryIds.size} 条 · " +
-                    "归档 ${current.archiveMemoryIds.size} 条 · 替换 ${current.supersedeSuggestions.size} 条 · " +
-                    "忽略候选 ${current.ignoreCandidateIds.size} 条"
+                val summary = stringResource(
+                    R.string.memory_dream_summary,
+                    current.mergeSuggestions.size,
+                    current.promoteMemoryIds.size,
+                    current.archiveMemoryIds.size,
+                    current.supersedeSuggestions.size,
+                    current.ignoreCandidateIds.size,
+                )
                 // Graphite §3: dream-plan summary is a count-dense machine-fact → MONO.
                 Text(
                     summary,
@@ -1039,7 +1085,14 @@ private fun DreamReviewSection(
                     color = workspaceColors().ink,
                 )
                 Text(
-                    text = "来源：${if (persisted.source.name == "AUTO") "自动 Daydream" else "手动生成"}",
+                    text = stringResource(
+                        R.string.memory_dream_source,
+                        if (persisted.source.name == "AUTO") {
+                            stringResource(R.string.memory_dream_source_auto)
+                        } else {
+                            stringResource(R.string.memory_dream_source_manual)
+                        },
+                    ),
                     style = LocalAmberType.current.secondary,
                     color = workspaceColors().muted,
                 )
@@ -1053,22 +1106,35 @@ private fun DreamReviewSection(
                 current.mergeSuggestions.take(5).forEach { suggestion ->
                     // Graphite §3: merge suggestion = #id references → MONO.
                     Text(
-                        text = "合并 #${suggestion.targetMemoryId} <- ${suggestion.duplicateMemoryIds.joinToString(",")}",
+                        text = stringResource(
+                            R.string.memory_dream_merge,
+                            suggestion.targetMemoryId,
+                            suggestion.duplicateMemoryIds.joinToString(","),
+                        ),
                         style = LocalAmberType.current.meta,
                         color = workspaceColors().ink,
                     )
                 }
                 current.supersedeSuggestions.take(5).forEach { suggestion ->
+                    val reasonSuffix = if (suggestion.reason.isNotBlank()) {
+                        stringResource(R.string.memory_dream_reason_suffix, suggestion.reason)
+                    } else {
+                        ""
+                    }
                     Text(
-                        text = "替换 ${suggestion.oldMemoryIds.joinToString(",")} → ${suggestion.newContent}" +
-                            suggestion.reason.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
+                        text = stringResource(
+                            R.string.memory_dream_replace,
+                            suggestion.oldMemoryIds.joinToString(","),
+                            suggestion.newContent,
+                            reasonSuffix,
+                        ),
                         style = LocalAmberType.current.secondary,
                         maxLines = 3,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             } ?: Text(
-                text = "还没有手动整理建议。",
+                text = stringResource(R.string.memory_no_manual_plan),
                 style = LocalAmberType.current.secondary,
                 color = workspaceColors().muted,
             )
@@ -1078,19 +1144,19 @@ private fun DreamReviewSection(
                     enabled = !running,
                     onClick = onPlan,
                 ) {
-                    Text("生成建议")
+                    Text(stringResource(R.string.memory_generate_suggestion))
                 }
                 TextButton(
                     enabled = !running && plan?.plan?.hasChanges == true,
                     onClick = onApply,
                 ) {
-                    Text("应用建议")
+                    Text(stringResource(R.string.memory_apply_suggestion))
                 }
                 TextButton(
                     enabled = !running && plan != null,
                     onClick = onDismiss,
                 ) {
-                    Text("清除")
+                    Text(stringResource(R.string.memory_clear_suggestion))
                 }
             }
         }
@@ -1109,13 +1175,13 @@ private fun MemoryEventsSection(
 ) {
     if (showTitle) {
         SectionLabel(
-            text = "记忆事件日志",
+            text = stringResource(R.string.memory_event_log_title),
             modifier = Modifier.padding(horizontal = 8.dp),
         )
     }
     if (events.isEmpty()) {
         Text(
-            text = "暂无记忆事件。",
+            text = stringResource(R.string.memory_event_log_empty),
             style = LocalAmberType.current.secondary,
             color = workspaceColors().muted,
             modifier = Modifier.padding(horizontal = 8.dp),
@@ -1148,16 +1214,16 @@ private fun MemoryMaintenanceSection(
     onOpenPortability: () -> Unit,
     onOpenEvents: () -> Unit,
 ) {
-    CardGroup(title = { SectionLabel("维护工具") }) {
+    CardGroup(title = { SectionLabel(stringResource(R.string.memory_maintenance_tools_title)) }) {
         item(
             onClick = onOpenPortability,
-            headlineContent = { Text("导入导出") },
-            supportingContent = { Text("Frontmatter 备份与恢复。") },
+            headlineContent = { Text(stringResource(R.string.memory_import_export_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_import_export_desc)) },
         )
         item(
             onClick = onOpenEvents,
-            headlineContent = { Text("事件日志") },
-            supportingContent = { Text("查看最近 $eventCount 条记忆后台事件。") },
+            headlineContent = { Text(stringResource(R.string.memory_event_log_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_event_log_desc, eventCount)) },
         )
     }
 }
@@ -1170,20 +1236,20 @@ private fun MemoryPortabilitySection(
 ) {
     CardGroup {
         item(
-            headlineContent = { Text("Frontmatter 导出") },
-            supportingContent = { Text("导出到外部文件目录 AmberAgentMemory，包含 memories、archive、events 和 manifest。") },
+            headlineContent = { Text(stringResource(R.string.memory_frontmatter_export_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_frontmatter_export_desc)) },
             trailingContent = {
                 TextButton(enabled = !running, onClick = onExport) {
-                    Text("导出")
+                    Text(stringResource(R.string.memory_export))
                 }
             },
         )
         item(
-            headlineContent = { Text("Frontmatter 导入") },
-            supportingContent = { Text("从 AmberAgentMemory 目录读取 .mem.md 文件并写回 Room 主存储。") },
+            headlineContent = { Text(stringResource(R.string.memory_frontmatter_import_title)) },
+            supportingContent = { Text(stringResource(R.string.memory_frontmatter_import_desc)) },
             trailingContent = {
                 TextButton(enabled = !running, onClick = onImport) {
-                    Text("导入")
+                    Text(stringResource(R.string.memory_import))
                 }
             },
         )

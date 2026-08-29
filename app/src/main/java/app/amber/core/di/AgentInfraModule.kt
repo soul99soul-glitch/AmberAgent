@@ -5,6 +5,8 @@ import app.amber.feature.runtime.AgentLiveStatusNotifier
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.runtime.NotificationApprovalTokenRegistry
 import app.amber.feature.runtime.RunOwnershipRegistry
+import app.amber.feature.runtime.ToolActivityTitleLocalizer
+import app.amber.feature.runtime.ToolActivityTitleResolver
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.live.LiveModeManager
 import app.amber.feature.system.AgentPermissionBroker
@@ -37,7 +39,9 @@ import org.koin.dsl.module
  * Extracted from AppModule in M1.5 continuation.
  */
 val agentInfraModule = module {
-    single { AgentToolActivityStore() }
+    single<ToolActivityTitleResolver> { ToolActivityTitleLocalizer(get()) }
+
+    single { AgentToolActivityStore(get()) }
 
     single { AgentTaskStore(get(), get()) }
 

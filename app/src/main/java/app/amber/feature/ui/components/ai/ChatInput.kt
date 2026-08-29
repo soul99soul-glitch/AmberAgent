@@ -112,6 +112,7 @@ import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
+import app.amber.core.ai.vision.ImageAttachmentStrings
 import app.amber.core.ai.vision.ImageAttachmentValidator
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.settings.Settings
@@ -188,9 +189,11 @@ fun ChatInput(
     onCompactContext: () -> Unit = {},
 ) {
     val toaster = LocalToaster.current
+    val context = LocalContext.current
     val providerCatalog = koinInject<ProviderCatalog>()
     val coroutineScope = rememberCoroutineScope()
     val workspace = workspaceColors()
+    val attachmentStrings = remember(context) { ImageAttachmentStrings.from(context) }
     val suggestionFillPulse = remember(conversation.id) { Animatable(0f) }
 
     LaunchedEffect(conversation.id, suggestionFillPulseKey) {
@@ -248,6 +251,7 @@ fun ChatInput(
                         parts = parts,
                         settings = settings,
                         providerCatalog = providerCatalog,
+                        strings = attachmentStrings,
                     )
                 }
                 if (blockingIssue != null) {
@@ -278,6 +282,7 @@ fun ChatInput(
                         parts = parts,
                         settings = settings,
                         providerCatalog = providerCatalog,
+                        strings = attachmentStrings,
                     )
                 }
                 if (blockingIssue != null) {
@@ -306,7 +311,6 @@ fun ChatInput(
         }
     }
 
-    val context = LocalContext.current
     val filesManager: FilesManager = koinInject()
     val httpClient: OkHttpClient = koinInject()
     val usageClient = remember(context, httpClient) {
@@ -361,7 +365,7 @@ fun ChatInput(
             usageStatus = it
         }.onFailure {
             usageStatus = ComposerUsageStatus()
-            usageError = it.message ?: it.toString()
+            usageError = it.toComposerUsageErrorMessage(context)
         }
         usageLoading = false
     }

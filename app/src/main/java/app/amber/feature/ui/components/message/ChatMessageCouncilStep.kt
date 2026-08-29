@@ -41,6 +41,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -55,6 +56,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.WandSparkles
 import app.amber.feature.modelcouncil.ModelCouncilManager
@@ -81,7 +83,12 @@ fun CouncilTaskStepView(
     var showSheet by remember(step.runId) { mutableStateOf(false) }
     val parsedStatus = parseLatestCouncilStatus(step.tools)
     val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
-    val phaseLabels = listOf("听证", "辩论", "权衡", "裁决")
+    val phaseLabels = listOf(
+        stringResource(R.string.chat_message_council_phase_hearing),
+        stringResource(R.string.chat_message_council_phase_debate),
+        stringResource(R.string.chat_message_council_phase_deliberation),
+        stringResource(R.string.chat_message_council_phase_verdict),
+    )
     var phaseIndex by remember(step.runId) { mutableIntStateOf(0) }
     LaunchedEffect(step.runId, isRunning) {
         if (!isRunning) return@LaunchedEffect
@@ -92,23 +99,22 @@ fun CouncilTaskStepView(
     }
     val currentPhase = if (isRunning) phaseLabels[phaseIndex.coerceIn(phaseLabels.indices)]
         else phaseLabels.last()
-    val statusVerb = when (parsedStatus) {
-        ModelCouncilCardStatus.RUNNING -> "正在审议"
-        ModelCouncilCardStatus.COMPLETED -> "已完成"
-        ModelCouncilCardStatus.PARTIAL_FAILED -> "部分失败"
-        ModelCouncilCardStatus.FAILED -> "失败"
-        ModelCouncilCardStatus.CANCELLED -> "已取消"
-        ModelCouncilCardStatus.TIMED_OUT -> "超时"
-        ModelCouncilCardStatus.INTERRUPTED -> "已中断"
+    val statusVerb = parsedStatus.displayLabel()
+    val title = if (isRunning) {
+        stringResource(R.string.chat_message_council_title_running, statusVerb, currentPhase)
+    } else {
+        stringResource(R.string.chat_message_council_title_status, statusVerb)
     }
-    val title = if (isRunning) "@Council $statusVerb · $currentPhase" else "@Council $statusVerb"
-    val seatSubtitle = remember(step.runId, step.tools) {
+    val seatTemplate = stringResource(R.string.chat_message_council_seats)
+    val seatSubtitle = remember(step.runId, step.tools, seatTemplate) {
         val names = manager.snapshot(step.runId)?.seats
             ?.map { it.name.ifBlank { ModelCouncilRolePresets.byName(it.role)?.name ?: it.role } }
             ?.filter { it.isNotBlank() }
             ?.takeIf { it.isNotEmpty() }
             ?: extractCouncilSeatEntries(step.tools).map { it.label }
-        names.takeIf { it.isNotEmpty() }?.joinToString(" / ", prefix = "席位 · ")
+        names.takeIf { it.isNotEmpty() }?.joinToString(" / ")?.let { seatNames ->
+            seatTemplate.format(seatNames)
+        }
     }
     AgentToolCallCapsule(
         title = title,
@@ -132,6 +138,17 @@ fun CouncilTaskStepView(
 
 private enum class ModelCouncilCardStatus {
     RUNNING, COMPLETED, PARTIAL_FAILED, FAILED, CANCELLED, TIMED_OUT, INTERRUPTED
+}
+
+@Composable
+private fun ModelCouncilCardStatus.displayLabel(): String = when (this) {
+    ModelCouncilCardStatus.RUNNING -> stringResource(R.string.chat_message_council_status_running)
+    ModelCouncilCardStatus.COMPLETED -> stringResource(R.string.chat_message_council_status_completed)
+    ModelCouncilCardStatus.PARTIAL_FAILED -> stringResource(R.string.chat_message_council_status_partial_failed)
+    ModelCouncilCardStatus.FAILED -> stringResource(R.string.chat_message_council_status_failed)
+    ModelCouncilCardStatus.CANCELLED -> stringResource(R.string.chat_message_council_status_cancelled)
+    ModelCouncilCardStatus.TIMED_OUT -> stringResource(R.string.chat_message_council_status_timed_out)
+    ModelCouncilCardStatus.INTERRUPTED -> stringResource(R.string.chat_message_council_status_interrupted)
 }
 
 /** Walk model_council_* tools in reverse, find the most recent parsable `status`. */
@@ -180,19 +197,12 @@ private fun ModelCouncilRunSheet(
 
     val parsedStatus = parseLatestCouncilStatus(step.tools)
     val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
-    val statusVerb = when (parsedStatus) {
-        ModelCouncilCardStatus.RUNNING -> "正在审议"
-        ModelCouncilCardStatus.COMPLETED -> "已完成"
-        ModelCouncilCardStatus.PARTIAL_FAILED -> "部分失败"
-        ModelCouncilCardStatus.FAILED -> "失败"
-        ModelCouncilCardStatus.CANCELLED -> "已取消"
-        ModelCouncilCardStatus.TIMED_OUT -> "超时"
-        ModelCouncilCardStatus.INTERRUPTED -> "已中断"
-    }
+    val statusVerb = parsedStatus.displayLabel()
 
     // Resolve seat list from the snapshot (preserves run order). Synthesizer is appended last.
     val snapshot = remember(step.runId) { manager.snapshot(step.runId) }
-    val seatTabs = remember(step.runId, snapshot?.seats, step.tools) {
+    val synthesisLabel = stringResource(R.string.chat_message_council_synthesis)
+    val seatTabs = remember(step.runId, snapshot?.seats, step.tools, synthesisLabel) {
         val seatEntries = snapshot?.seats?.map { seat ->
             CouncilTabEntry(
                 key = seat.seatId,
@@ -201,7 +211,7 @@ private fun ModelCouncilRunSheet(
         }?.takeIf { it.isNotEmpty() } ?: extractCouncilSeatEntries(step.tools)
         // Synthesizer pane is conceptually the "verdict"; show it first so the user sees the
         // bottom-line answer immediately when the run finishes.
-        listOf(CouncilTabEntry(ModelCouncilManager.SYNTHESIZER_SEAT_KEY, "综合裁决")) + seatEntries
+        listOf(CouncilTabEntry(ModelCouncilManager.SYNTHESIZER_SEAT_KEY, synthesisLabel)) + seatEntries
     }
 
     // While the run is still going, default to the FIRST seat tab (index 1) instead of the
@@ -281,11 +291,18 @@ private fun ModelCouncilRunSheet(
                 activeSeatKey?.let { manager.liveTextFlow(step.runId, it) } ?: MutableStateFlow("")
             }
             val liveText by seatFlow.collectAsState()
-            val finalText = remember(step.tools, activeSeatKey) {
+            val failureTemplate = stringResource(R.string.chat_message_council_failure)
+            val warningTemplate = stringResource(R.string.chat_message_council_warning)
+            val finalText = remember(step.tools, activeSeatKey, failureTemplate, warningTemplate) {
                 if (activeSeatKey == ModelCouncilManager.SYNTHESIZER_SEAT_KEY) {
                     extractFinalCouncilSynthesisText(step.tools)
                 } else if (activeSeatKey != null) {
-                    extractFinalCouncilSeatText(step.tools, activeSeatKey)
+                    extractFinalCouncilSeatText(
+                        tools = step.tools,
+                        seatId = activeSeatKey,
+                        failureTemplate = failureTemplate,
+                        warningTemplate = warningTemplate,
+                    )
                 } else ""
             }
             val displayTextSource = if (isRunning) {
@@ -343,7 +360,11 @@ private fun ModelCouncilRunSheet(
             ) {
                 if (displayText.isBlank()) {
                     Text(
-                        text = if (isRunning) "等待此席位输出..." else "（无输出）",
+                        text = if (isRunning) {
+                            stringResource(R.string.chat_message_council_waiting_output)
+                        } else {
+                            stringResource(R.string.chat_message_council_no_output)
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = workspace.faint,
                         modifier = Modifier.padding(top = 8.dp),
@@ -377,7 +398,10 @@ private fun CouncilRoundContent(
     streaming: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val sections = remember(content) { content.toCouncilRoundSections() }
+    val roundTemplate = stringResource(R.string.chat_message_council_round)
+    val sections = remember(content, roundTemplate) {
+        content.toCouncilRoundSections(roundTemplate)
+    }
     val workspace = workspaceColors()
     Column(
         modifier = modifier,
@@ -452,14 +476,18 @@ private fun CouncilObjectiveCard(objective: String) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "议题",
+                    text = stringResource(R.string.chat_message_council_topic),
                     style = MaterialTheme.typography.labelSmall,
                     color = workspace.faint,
                     modifier = Modifier.weight(1f),
                 )
                 if (shouldCollapse) {
                     Text(
-                        text = if (expanded) "收起" else "展开",
+                        text = if (expanded) {
+                            stringResource(R.string.chain_of_thought_collapse)
+                        } else {
+                            stringResource(R.string.chat_message_council_expand)
+                        },
                         style = MaterialTheme.typography.labelSmall,
                         color = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
                     )
@@ -489,13 +517,14 @@ private fun String.shouldCollapseCouncilObjective(): Boolean {
     return length > COUNCIL_OBJECTIVE_COLLAPSE_CHARS || lineCount > COUNCIL_OBJECTIVE_COLLAPSE_LINES
 }
 
-private fun String.toCouncilRoundSections(): List<CouncilRoundSection> {
+private fun String.toCouncilRoundSections(roundTemplate: String): List<CouncilRoundSection> {
     if (!contains(COUNCIL_ROUND_MARKER_TEXT)) {
         return listOf(CouncilRoundSection(label = null, content = this))
     }
     val sections = mutableListOf<CouncilRoundSection>()
     var label: String? = null
     val body = StringBuilder()
+    var sawInternalMarker = false
 
     fun flush() {
         val content = body.toString().trim('\n')
@@ -506,17 +535,35 @@ private fun String.toCouncilRoundSections(): List<CouncilRoundSection> {
     }
 
     lineSequence().forEach { line ->
-        val match = COUNCIL_ROUND_MARKER.matchEntire(line.trim())
+        val match = COUNCIL_ROUND_MARKER.find(line)
         if (match != null) {
+            sawInternalMarker = true
+            val before = line.substring(0, match.range.first).trim()
+            if (before.isNotBlank() && !before.contains(COUNCIL_ROUND_MARKER_TEXT)) {
+                body.appendLine(before)
+            }
             flush()
-            label = match.groupValues[1].replace(Regex("""\s+"""), " ")
+            val round = Regex("""\d+""").find(match.groupValues[1])?.value?.toIntOrNull()
+            label = round?.let { roundTemplate.format(it) }
+            val after = line.substring(match.range.last + 1).trim()
+            if (after.isNotBlank() && !after.contains(COUNCIL_ROUND_MARKER_TEXT)) {
+                body.appendLine(after)
+            }
+        } else if (line.contains(COUNCIL_ROUND_MARKER_TEXT)) {
+            // The marker is an internal protocol token. Drop malformed or embedded variants
+            // instead of letting the Chinese token leak into a localized UI.
+            sawInternalMarker = true
         } else {
             body.appendLine(line)
         }
     }
     flush()
 
-    return sections.ifEmpty { listOf(CouncilRoundSection(label = null, content = this)) }
+    return if (sawInternalMarker) {
+        sections
+    } else {
+        listOf(CouncilRoundSection(label = null, content = this))
+    }
 }
 
 private const val COUNCIL_OBJECTIVE_COLLAPSED_LINES = 3
@@ -590,7 +637,12 @@ private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<Cou
  * tools in reverse means we pick the most recent (richest) turns array; within it, all matching
  * turns are kept in original order.
  */
-private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId: String): String {
+private fun extractFinalCouncilSeatText(
+    tools: List<UIMessagePart.Tool>,
+    seatId: String,
+    failureTemplate: String,
+    warningTemplate: String,
+): String {
     for (tool in tools.asReversed()) {
         val parsed = tool.cachedOutputJsonObject() ?: continue
         val parsedTurns = parsed.payloadArray("turns") ?: continue
@@ -603,10 +655,11 @@ private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId:
                 (warning as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
             }.orEmpty()
             val content = (turn["content"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
-                ?: (turn["error"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }?.let { "失败：$it" }
+                ?: (turn["error"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+                    ?.let { error -> failureTemplate.format(error) }
                 ?: return@mapNotNull null
             val text = buildString {
-                warnings.forEach { warning -> appendLine("提示：$warning") }
+                warnings.forEach { warning -> appendLine(warningTemplate.format(warning)) }
                 if (warnings.isNotEmpty()) appendLine()
                 append(content)
             }

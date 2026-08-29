@@ -367,7 +367,7 @@ private fun SkillIssueCard(issue: SkillScanIssue) {
                     style = MaterialTheme.typography.titleSmallEmphasized,
                 )
                 Text(
-                    text = stringResource(R.string.skills_page_format_error, issue.reason),
+                    text = issue.reason,
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.red,
                 )

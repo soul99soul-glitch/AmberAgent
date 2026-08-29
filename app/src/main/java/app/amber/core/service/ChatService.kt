@@ -114,6 +114,7 @@ import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.capabilityForTool
 import app.amber.feature.tools.createToolSearchTool
 import app.amber.feature.subagent.SubAgentManager
+import app.amber.feature.ui.subagent.AppSubAgentDisplayLocalizer
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.core.automation.ScreenCaptureManager
 import app.amber.core.context.ActiveCompactBoundary
@@ -142,6 +143,7 @@ import app.amber.core.repository.ConversationRepository
 import app.amber.core.repository.MemoryRepository
 import app.amber.core.utils.applyPlaceholders
 import app.amber.core.utils.ChatSendTransitionTracker
+import app.amber.core.utils.appLocale
 import app.amber.core.utils.sendNotification
 import app.amber.feature.runtime.NotificationApprovalCheck
 import app.amber.feature.runtime.NotificationApprovalTokenRegistry
@@ -851,9 +853,9 @@ class ChatService(
             val accepted = session.enqueuePendingUserMessage(pendingMessage)
             if (!accepted) {
                 addError(
-                    IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                    IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
                     conversationId = conversationId,
-                    title = "消息未加入队列"
+                    title = context.getString(R.string.chat_page_queue_message_not_added)
                 )
                 return false
             } else {
@@ -916,9 +918,9 @@ class ChatService(
             firstMessage?.let { message ->
                 if (!session.enqueuePendingUserMessage(message)) {
                     addError(
-                        IllegalStateException("消息队列已满，请先等待或取消一些排队消息。"),
+                        IllegalStateException(context.getString(R.string.chat_page_queue_full_error)),
                         conversationId = conversationId,
-                        title = "消息未加入队列"
+                        title = context.getString(R.string.chat_page_queue_message_not_added)
                     )
                 } else {
                     persistPendingMessagesDurably(conversationId, session.pendingUserMessages.value)
@@ -1015,7 +1017,10 @@ class ChatService(
                             conversationId = conversationId,
                             runner = runner,
                             messageNodeId = userNode.id,
-                            userMessageText = dispatchMessage.previewText(maxChars = 4000),
+                            userMessageText = dispatchMessage.previewText(
+                                maxChars = 4000,
+                                copy = PendingUserMessageDisplayCopy.from(context),
+                            ),
                         )
                         _generationDoneFlow.emit(conversationId)
                     }
@@ -1565,7 +1570,8 @@ class ChatService(
 
             // P1-04: the final token fit could not satisfy the hard budget
             // even after trimming — the request was never sent.
-            is app.amber.core.context.ContextTooLargeException -> "上下文超出模型上限" to cause
+            is app.amber.core.context.ContextTooLargeException ->
+                context.getString(R.string.chat_page_compress_recent_content_too_large) to cause
 
             else -> context.getString(R.string.error_title_generation) to cause
         }
@@ -1582,7 +1588,10 @@ class ChatService(
         val blockingTools = lastMessage.getTools().filter { !it.isExecuted }
         if (blockingTools.isEmpty()) return false
 
-        val userAnswer = message.previewText(maxChars = 4_000)
+        val userAnswer = message.previewText(
+            maxChars = 4_000,
+            copy = PendingUserMessageDisplayCopy.from(context),
+        )
         val explicitApproval = message.isToolApprovalContinuation()
         val hasAskUserAnswer = userAnswer.isNotBlank() &&
             blockingTools.any { it.isPending && it.toolName == ASK_USER_TOOL_NAME }
@@ -1659,7 +1668,10 @@ class ChatService(
 
     private fun PendingUserMessage.isToolApprovalContinuation(): Boolean {
         if (parts.any { it !is UIMessagePart.Text }) return false
-        val raw = previewText(maxChars = 80).trim().lowercase(Locale.ROOT)
+        val raw = previewText(
+            maxChars = 80,
+            copy = PendingUserMessageDisplayCopy.from(context),
+        ).trim().lowercase(Locale.ROOT)
         if (raw.isBlank()) return false
         val compact = raw.replace(Regex("""[\s\p{Punct}，。！？、；：「」『』（）【】《》]+"""), "")
         return compact in TOOL_APPROVAL_CONTINUATION_WORDS ||
@@ -1794,7 +1806,10 @@ class ChatService(
                 if (collected.isNotEmpty()) {
                     persistCurrentPendingMessagesNow(conversationId, this)
                 }
-                buildCollectedPendingUserMessage(listOf(message) + collected)
+                buildCollectedPendingUserMessage(
+                    messages = listOf(message) + collected,
+                    copy = PendingUserMessageDisplayCopy.from(context),
+                )
             }
 
             message.mode == PendingUserMessageMode.STEER -> message.asFollowup()
@@ -2804,7 +2819,10 @@ class ChatService(
 
         val session = getOrCreateSession(conversationId)
         // P8-01: 生成中编辑冲突——明确提示并拒绝，不打断当前生成，也不做任何写操作。
-        val conflictReason = blockedReason(session.isGenerating, "请先停止生成再编辑消息")
+        val conflictReason = blockedReason(
+            session.isGenerating,
+            context.getString(R.string.chat_page_edit_generating),
+        )
         if (conflictReason != null) {
             addError(
                 IllegalStateException(conflictReason),
@@ -2878,7 +2896,10 @@ class ChatService(
         // Minor-1: 生成中切换 user variant 与生成写竞争（saveConversation 可能
         // 覆盖流式写入的下游分支）。与 editMessage 的权威守卫一致：明确提示并
         // 拒绝，不打断当前生成，也不做任何写操作。
-        val conflictReason = blockedReason(session.isGenerating, "请先停止生成再切换消息分支")
+        val conflictReason = blockedReason(
+            session.isGenerating,
+            context.getString(R.string.chat_page_edit_generating),
+        )
         if (conflictReason != null) {
             addError(
                 IllegalStateException(conflictReason),
@@ -3114,6 +3135,7 @@ class ChatService(
                     createSearchTools(
                         settings = settings,
                         includeWebViewFallbackGuidance = includeWebViewFallbackGuidance,
+                        locale = context.appLocale(),
                     )
                 )
             }
@@ -3138,7 +3160,7 @@ class ChatService(
                     call = { ref, input ->
                         val toolCallId = activityStore.startTool(
                             toolName = "mcp__${ref.serverName}__${ref.toolName}",
-                            title = "调用 MCP 工具",
+                            title = context.getString(R.string.tool_activity_mcp_call),
                             inputPreview = input.toString(),
                             runtime = "MCP",
                         )
@@ -3202,6 +3224,7 @@ class ChatService(
                 // P4-02: thread_graph_v2 gate — off keeps the legacy tool set
                 // (no subagent_followup / send_message / interrupt).
                 threadGraphEnabled = threadGraphEnabled,
+                displayLocalizer = AppSubAgentDisplayLocalizer(context),
             ).tools()
         } else {
             profiledRawTools
@@ -3394,6 +3417,7 @@ class ChatService(
                 ledger?.recordApproval(entry)
             },
             runIdProvider = { runId },
+            locale = context.appLocale(),
         )
     }
 
@@ -3648,7 +3672,10 @@ class ChatService(
                                             put("mode", message.mode.name.lowercase())
                                             put("answer", message.answer)
                                             put("created_at_ms", message.createdAtMs)
-                                            put("preview", message.previewText())
+                                            put(
+                                                "preview",
+                                                message.previewText(copy = PendingUserMessageDisplayCopy.from(context)),
+                                            )
                                         }
                                     )
                                 }

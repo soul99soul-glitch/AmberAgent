@@ -188,13 +188,13 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     bottomEnd = 2.dp
                                 )
                             ),
-                        headlineContent = { Text("色系") },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_base_family_title)) },
                         supportingContent = {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Graphite 暖石墨基色；明暗跟随全局模式")
+                                Text(stringResource(R.string.setting_display_page_base_family_desc))
                                 WorkspaceSegmentedChoice(
                                     options = listOf("WARM", "SAGE"),
                                     selected = baseFamily,
@@ -204,7 +204,13 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                                     },
                                     label = { fam ->
                                         Text(
-                                            text = if (fam == "SAGE") "鼠尾草 Sage" else "暖 Warm",
+                                            text = stringResource(
+                                                if (fam == "SAGE") {
+                                                    R.string.setting_display_page_base_family_sage
+                                                } else {
+                                                    R.string.setting_display_page_base_family_warm
+                                                },
+                                            ),
                                             maxLines = 1,
                                             textAlign = TextAlign.Center,
                                             modifier = Modifier.fillMaxWidth(),
@@ -219,7 +225,7 @@ fun SettingDisplayPage(vm: SettingVM = koinViewModel()) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(2.dp)),
-                        headlineContent = { Text("强调色") },
+                        headlineContent = { Text(stringResource(R.string.setting_display_page_accent_color_title)) },
                         supportingContent = {
                             Row(
                                 modifier = Modifier

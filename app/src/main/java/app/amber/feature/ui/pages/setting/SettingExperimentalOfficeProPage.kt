@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -56,6 +57,7 @@ import app.amber.agent.data.db.entity.DocSubscriptionEntity
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.plus
+import app.amber.core.utils.appLocale
 import org.koin.compose.koinInject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -70,12 +72,14 @@ fun SettingExperimentalOfficeProPage(
 ) {
     val officeState by feishuOfficeManager.state.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
+    val appLocale = LocalContext.current.appLocale()
     val scope = rememberCoroutineScope()
     var officeBusy by remember { mutableStateOf(false) }
     var officePackageInput by remember(officeState.targetPackage) { mutableStateOf(officeState.targetPackage) }
     var officeCandidates by remember { mutableStateOf("") }
     val officeSavedToast = stringResource(R.string.setting_officepro_saved)
     val officeDetectNoneToast = stringResource(R.string.setting_officepro_detect_none)
+    val officeCheckFailedToast = stringResource(R.string.setting_officepro_check_failed)
     var docRadarNotify by remember { mutableStateOf(true) }
     var subscriptions by remember { mutableStateOf<List<DocSubscriptionEntity>>(emptyList()) }
     var showWatchDialog by remember { mutableStateOf(false) }
@@ -230,7 +234,7 @@ fun SettingExperimentalOfficeProPage(
                                         subscriptions = docSubscriptionDao.getEnabled()
                                         toaster.show(officeSavedToast)
                                     } catch (e: Exception) {
-                                        toaster.show(e.message ?: "检查失败")
+                                        toaster.show(e.message ?: officeCheckFailedToast)
                                     }
                                     checkBusy = false
                                 }
@@ -267,7 +271,7 @@ fun SettingExperimentalOfficeProPage(
                                 }
                                 if (!doc.hasBaseline) {
                                     Text(
-                                        text = "⚠ 基线未建立",
+                                        text = stringResource(R.string.setting_officepro_doc_baseline_missing),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = workspaceColors().faint,
                                     )
@@ -276,7 +280,7 @@ fun SettingExperimentalOfficeProPage(
                                     Text(
                                         text = stringResource(
                                             R.string.setting_officepro_doc_last_checked,
-                                            formatOfficeProjectUpdatedAt(lastCheckedAt),
+                                            formatOfficeProjectUpdatedAt(lastCheckedAt, appLocale),
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = workspaceColors().faint,
@@ -286,7 +290,7 @@ fun SettingExperimentalOfficeProPage(
                                     Text(
                                         text = stringResource(
                                             R.string.setting_officepro_doc_last_changed,
-                                            formatOfficeProjectUpdatedAt(lastChangedAt),
+                                            formatOfficeProjectUpdatedAt(lastChangedAt, appLocale),
                                             doc.threshold,
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
@@ -581,6 +585,7 @@ private fun WatchDocDialog(
     var thresholdInput by remember { mutableStateOf("500") }
     var intervalInput by remember { mutableStateOf("90") }
     var notifyEnabled by remember { mutableStateOf(true) }
+    val docRequiredFieldsToast = stringResource(R.string.setting_officepro_doc_required_fields)
     val workspace = workspaceColors()
     Dialog(
         onDismissRequest = onDismiss,
@@ -616,14 +621,14 @@ private fun WatchDocDialog(
                     value = urlInput,
                     onValueChange = { urlInput = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("飞书文档 URL") },
+                    label = { Text(stringResource(R.string.setting_officepro_doc_url)) },
                     singleLine = true,
                 )
                 OutlinedTextField(
                     value = titleInput,
                     onValueChange = { titleInput = it },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("文档标题") },
+                    label = { Text(stringResource(R.string.setting_officepro_doc_title)) },
                     singleLine = true,
                 )
                 Row(
@@ -634,14 +639,14 @@ private fun WatchDocDialog(
                         value = thresholdInput,
                         onValueChange = { thresholdInput = it },
                         modifier = Modifier.weight(1f),
-                        label = { Text("变更阈值（字）") },
+                        label = { Text(stringResource(R.string.setting_officepro_change_threshold_chars)) },
                         singleLine = true,
                     )
                     OutlinedTextField(
                         value = intervalInput,
                         onValueChange = { intervalInput = it },
                         modifier = Modifier.weight(1f),
-                        label = { Text("间隔（分钟）") },
+                        label = { Text(stringResource(R.string.setting_officepro_check_interval_minutes)) },
                         singleLine = true,
                     )
                 }
@@ -662,7 +667,7 @@ private fun WatchDocDialog(
                             val threshold = thresholdInput.trim().toIntOrNull() ?: 500
                             val interval = intervalInput.trim().toIntOrNull() ?: 90
                             if (url.isBlank() || title.isBlank()) {
-                                onToast("请填写文档 URL 和标题")
+                                onToast(docRequiredFieldsToast)
                             } else {
                                 onSave(title, url, threshold, interval, notifyEnabled)
                             }
@@ -752,15 +757,15 @@ private suspend fun importOfficeProjectSource(
     }
     val knownSize = sizeBytes
     require(knownSize == null || knownSize <= OFFICE_PROJECT_IMPORT_MAX_BYTES) {
-        "文件超过 50MB，先放入 workspace 后再把路径写入来源引用。"
+        context.getString(R.string.setting_officepro_file_too_large)
     }
     val safeName = (displayName ?: "source-${System.currentTimeMillis()}")
         .toSafeWorkspaceFileName()
     val bytes = resolver.openInputStream(uri)?.use { input ->
         input.readBytes()
-    } ?: error("无法读取选择的文件")
+    } ?: error(context.getString(R.string.setting_officepro_file_read_failed))
     require(bytes.size.toLong() <= OFFICE_PROJECT_IMPORT_MAX_BYTES) {
-        "文件超过 50MB，先放入 workspace 后再把路径写入来源引用。"
+        context.getString(R.string.setting_officepro_file_too_large)
     }
     val mimeType = resolver.getType(uri) ?: "application/octet-stream"
     val projectDir = projectName.toOfficeProjectId()
@@ -769,7 +774,7 @@ private suspend fun importOfficeProjectSource(
 }
 
 private fun String.toOfficeProjectId(): String {
-    val ascii = lowercase()
+    val ascii = lowercase(Locale.ROOT)
         .map { char ->
             when {
                 char in 'a'..'z' || char in '0'..'9' -> char
@@ -789,5 +794,5 @@ private fun String.toSafeWorkspaceFileName(): String =
         .take(120)
         .ifBlank { "source-${System.currentTimeMillis()}" }
 
-private fun formatOfficeProjectUpdatedAt(updatedAtMs: Long): String =
-    SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(updatedAtMs))
+private fun formatOfficeProjectUpdatedAt(updatedAtMs: Long, locale: Locale): String =
+    SimpleDateFormat("yyyy-MM-dd HH:mm", locale).format(Date(updatedAtMs))

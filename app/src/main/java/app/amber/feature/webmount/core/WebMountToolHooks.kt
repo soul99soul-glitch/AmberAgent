@@ -1,6 +1,8 @@
 package app.amber.feature.webmount.core
 
+import android.content.Context
 import kotlinx.serialization.json.JsonElement
+import app.amber.agent.R
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.webmount.cookie.EndpointSpec
@@ -22,6 +24,7 @@ import app.amber.feature.webmount.cookie.WebMountCookieProvider
  * (or throw, for [requireCookies]).
  */
 class WebMountToolHooks(
+    val context: Context,
     private val activityStore: AgentToolActivityStore,
     val stationId: String,
     val runtimeLabel: String,
@@ -75,7 +78,11 @@ class WebMountToolHooks(
         val needed = required.toSet()
         require(bundle.hasAll(needed)) {
             val missing = needed.filter { bundle.value(it) == null }
-            "$stationId 需要登录:缺少 cookie ${missing.joinToString(", ")}。请先在 WebMount 设置页登录。"
+            context.getString(
+                R.string.webmount_missing_cookies,
+                stationId,
+                missing.joinToString(", "),
+            )
         }
         return bundle
     }

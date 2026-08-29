@@ -1,5 +1,6 @@
 package app.amber.feature.modelcouncil
 
+import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
@@ -21,6 +22,7 @@ import app.amber.core.ai.tools.createTimeTool
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
+import app.amber.core.utils.appLocale
 import app.amber.feature.runtime.AgentToolDispatcher
 import kotlin.uuid.Uuid
 
@@ -68,6 +70,7 @@ import kotlin.uuid.Uuid
 class AppCouncilHostToolProvider(
     private val providerCatalog: ProviderCatalog,
     private val toolDispatcher: AgentToolDispatcher,
+    private val context: Context,
     /**
      * Step 6: the sandbox policy captured for this provider's host turns.
      * Stays at the permissive default for a structural v1 reason: this
@@ -85,7 +88,11 @@ class AppCouncilHostToolProvider(
     ) : CouncilHostToolProvider {
 
     override fun isAvailable(settings: Settings): Boolean =
-        createSearchTools(settings, includeWebViewFallbackGuidance = false).any { it.name in HOST_TOOL_NAMES }
+        createSearchTools(
+            settings,
+            includeWebViewFallbackGuidance = false,
+            locale = context.appLocale(),
+        ).any { it.name in HOST_TOOL_NAMES }
 
     override suspend fun generateWithTools(
         settings: Settings,
@@ -103,6 +110,7 @@ class AppCouncilHostToolProvider(
         val provider = model.findProvider(settings.providers)
             ?: return HostToolOutcome.Done("", listOf("Provider not found for host model."))
         val providerImpl = providerCatalog.text(provider)
+        val locale = context.appLocale()
 
         // The "relatively strong" host tool set: web search + page scrape +
         // time (`get_time_info`). Every executed tool must be an explicit
@@ -112,10 +120,14 @@ class AppCouncilHostToolProvider(
         // the allowlist on purpose.
         val tools: List<Tool> = buildList {
             addAll(
-                createSearchTools(settings, includeWebViewFallbackGuidance = false)
+                createSearchTools(
+                    settings,
+                    includeWebViewFallbackGuidance = false,
+                    locale = locale,
+                )
                     .filter { it.name in HOST_TOOL_NAMES }
             )
-            val timeTool = createTimeTool()
+            val timeTool = createTimeTool(locale)
             if (timeTool.name in HOST_TOOL_NAMES) add(timeTool)
             add(createAskUserTool())
         }
@@ -157,7 +169,7 @@ class AppCouncilHostToolProvider(
             }
             streamed.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             if (streamed.getOrNull() == null) {
-                warnings += "主持人调研超时（${timeoutMs}ms）。"
+                warnings += "Host research timed out (${timeoutMs}ms)."
             }
 
             messages = accumulator.snapshot()
@@ -191,7 +203,7 @@ class AppCouncilHostToolProvider(
                     ?.joinToString("") { it.text }
                     .orEmpty()
                     .take(outputBudgetChars)
-                warnings += "主持人已完成 $maxToolRounds 轮调研，基于已获取的信息继续。"
+                warnings += "Host completed $maxToolRounds research rounds; continuing with the information gathered."
                 return HostToolOutcome.Done(finalText, warnings)
             }
 

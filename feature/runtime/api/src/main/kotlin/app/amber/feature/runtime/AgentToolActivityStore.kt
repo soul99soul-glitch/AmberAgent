@@ -8,13 +8,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 
-class AgentToolActivityStore {
+class AgentToolActivityStore(
+    private val titleResolver: ToolActivityTitleResolver = ToolActivityTitleResolver { _, rawTitle, _ -> rawTitle },
+) {
     private val _sandboxActivity = MutableStateFlow<SandboxActivityUiState?>(null)
     val sandboxActivity: StateFlow<SandboxActivityUiState?> = _sandboxActivity.asStateFlow()
     private val conversationScope = ThreadLocal<String?>()
 
     fun start(activity: SandboxActivityUiState) {
-        _sandboxActivity.value = activity.withCurrentConversation()
+        _sandboxActivity.value = activity.copy(
+            title = titleResolver.resolve(
+                toolName = activity.toolName,
+                rawTitle = activity.title,
+                inputPreview = activity.inputPreview,
+            ),
+        ).withCurrentConversation()
     }
 
     suspend fun <T> withConversation(conversationId: String?, block: suspend () -> T): T {

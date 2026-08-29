@@ -41,6 +41,7 @@ import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import kotlinx.serialization.decodeFromString
 import java.util.Locale
 import kotlin.time.Clock
@@ -51,15 +52,31 @@ private const val PERF_TAG = "AmberChatPerf"
 // Guard notes appended to the assistant turn when a kernel guard stops the
 // loop. Both ride the plain-text channel; the run settles terminal
 // (OUTPUT_LIMIT / GUARD_STOPPED via [GenerationTerminal]) — never COMPLETED —
-// and the note persists with the messages.
-private const val OUTPUT_LIMIT_NOTICE = "模型回复达到输出上限，请重试。"
-private const val DUPLICATE_TOOL_CALL_NOTICE = "检测到重复的工具调用，已停止本轮以避免死循环。"
-
+// and the localized note persists with the messages.
 /** Wire reason carried by [GenerationTerminal.GuardStopped]. */
 private const val DUPLICATE_TOOL_CALL_GUARD_REASON = "duplicate_tool_call"
 
 /** Failure-class tool-output statuses — mirrors the UI failure classifier (ChatMessageTools.toolHasFailure). */
 private val FAILURE_TOOL_STATUSES = setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
+
+/** Fixed copy snapshot for kernel-owned text persisted in [UIMessagePart.Text]. */
+private data class RunKernelMessages(
+    val outputLimitNotice: String,
+    val duplicateToolCallNotice: String,
+    val duplicateSameBatchMessage: String,
+    val duplicateExistingMessage: String,
+    val protocolMismatchMessage: String,
+) {
+    companion object {
+        fun from(context: Context): RunKernelMessages = RunKernelMessages(
+            outputLimitNotice = context.getString(R.string.run_kernel_output_limit_notice),
+            duplicateToolCallNotice = context.getString(R.string.run_kernel_duplicate_tool_call_notice),
+            duplicateSameBatchMessage = context.getString(R.string.run_kernel_duplicate_same_batch_message),
+            duplicateExistingMessage = context.getString(R.string.run_kernel_duplicate_existing_message),
+            protocolMismatchMessage = context.getString(R.string.run_kernel_protocol_mismatch_message),
+        )
+    }
+}
 
 /**
  * The runtime-owned tool loop: step budget, tool exposure, write-ahead
@@ -98,6 +115,7 @@ class DefaultRunKernel(
         val runId = session.runId
         val onTerminal = session.onTerminal
         val responsesResume = session.responsesResume
+        val runKernelMessages = RunKernelMessages.from(context)
         // Step 6: the run's sandbox policy — read once, like every other
         // session field; the dispatcher enforces it on every execution.
         val executionPolicy = session.executionPolicy
@@ -321,7 +339,7 @@ class DefaultRunKernel(
                 // completion.
                 if (roundOutcome.outputLimitReached) {
                     val truncatedAssistant = messages.last().copy(
-                        parts = messages.last().parts + UIMessagePart.Text(OUTPUT_LIMIT_NOTICE),
+                        parts = messages.last().parts + UIMessagePart.Text(runKernelMessages.outputLimitNotice),
                     )
                     messages = messages.dropLast(1) + truncatedAssistant
                     emit(GenerationChunk.Messages(messages))
@@ -368,7 +386,7 @@ class DefaultRunKernel(
                                 e,
                             )
                             failures += tool.copy(
-                                output = listOf(UIMessagePart.Text(protocolMismatchOutput())),
+                                output = listOf(UIMessagePart.Text(protocolMismatchOutput(runKernelMessages))),
                             )
                         }
                     }
@@ -489,7 +507,7 @@ class DefaultRunKernel(
             // table BEFORE anything executes — 1st occurrence runs, 2nd is
             // skipped with a structured reminder the model sees through the
             // tool result, 3rd stops the loop entirely.
-            val classification = classifyDuplicates(toolsToProcess, executedSignatures)
+            val classification = classifyDuplicates(toolsToProcess, executedSignatures, runKernelMessages)
             val stoppingTool = classification.stopping
             // Durable path: terminalize the write-ahead effects of the calls
             // the guard rejects. Skipped/stopped calls never reach the
@@ -603,7 +621,7 @@ class DefaultRunKernel(
                         } else {
                             part
                         }
-                    } + UIMessagePart.Text(DUPLICATE_TOOL_CALL_NOTICE),
+                    } + UIMessagePart.Text(runKernelMessages.duplicateToolCallNotice),
                 )
                 messages = messages.dropLast(1) + stoppedAssistant
                 emit(GenerationChunk.Messages(messages))
@@ -699,6 +717,7 @@ class DefaultRunKernel(
     private fun classifyDuplicates(
         tools: List<UIMessagePart.Tool>,
         executedSignatures: Map<Pair<String, String>, Int>,
+        runKernelMessages: RunKernelMessages,
     ): Duplicates {
         val toExecute = mutableListOf<UIMessagePart.Tool>()
         val skipped = mutableListOf<UIMessagePart.Tool>()
@@ -725,9 +744,9 @@ class DefaultRunKernel(
                                 duplicateSkipOutput(
                                     occurrence = 2,
                                     message = if (batchSeen > 0) {
-                                        "同一批工具调用中已出现相同参数的调用，本次同批重复调用被跳过；请基于首个调用的结果继续，不要再次调用。"
+                                        runKernelMessages.duplicateSameBatchMessage
                                     } else {
-                                        "该工具已用相同参数成功执行过，本次重复调用被跳过；请基于已有结果继续，不要再次调用。"
+                                        runKernelMessages.duplicateExistingMessage
                                     },
                                 ),
                             ),
@@ -736,7 +755,14 @@ class DefaultRunKernel(
                 }
                 else -> {
                     stopping = tool.copy(
-                        output = listOf(UIMessagePart.Text(duplicateSkipOutput(occurrence = occurrence))),
+                        output = listOf(
+                            UIMessagePart.Text(
+                                duplicateSkipOutput(
+                                    occurrence = occurrence,
+                                    message = runKernelMessages.duplicateExistingMessage,
+                                ),
+                            ),
+                        ),
                     )
                     break
                 }
@@ -754,7 +780,7 @@ class DefaultRunKernel(
      */
     private fun duplicateSkipOutput(
         occurrence: Int,
-        message: String = "该工具已用相同参数成功执行过，本次重复调用被跳过；请基于已有结果继续，不要再次调用。",
+        message: String,
     ): String = buildJsonObject {
         put("status", "skipped")
         put("reason", "duplicate_tool_call")
@@ -768,12 +794,12 @@ class DefaultRunKernel(
      * different tool or args). "error" is failure-class: the call is never
      * executed and never counted by the duplicate guard.
      */
-    private fun protocolMismatchOutput(): String = buildJsonObject {
+    private fun protocolMismatchOutput(runKernelMessages: RunKernelMessages): String = buildJsonObject {
         put("status", "error")
         put("reason", "tool_effect_protocol_mismatch")
         put(
             "message",
-            "此 tool_call_id 已绑定过不同的工具或参数，本次调用被拒绝且未执行；请改用新的 tool_call_id 重新发起调用。",
+            runKernelMessages.protocolMismatchMessage,
         )
     }.toString()
 

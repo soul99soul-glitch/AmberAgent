@@ -789,6 +789,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             appScope = AppScope(),
             capabilitySnapshotBuilder = AgentCapabilitySnapshotBuilder(),
             promptConfigRepository = AgentPromptConfigRepository(context),
+            context = context,
         )
         val roundEngine = ChatGenerationRoundEngine(
             context = context,

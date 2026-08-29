@@ -44,19 +44,29 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
         params: JsonObject,
         commonOptions: SearchCommonOptions,
         serviceOptions: SearchServiceOptions.BingLocalOptions
+    ): Result<SearchResult> = search(
+        params = params,
+        commonOptions = commonOptions,
+        serviceOptions = serviceOptions,
+        locale = Locale.getDefault(),
+    )
+
+    override suspend fun search(
+        params: JsonObject,
+        commonOptions: SearchCommonOptions,
+        serviceOptions: SearchServiceOptions.BingLocalOptions,
+        locale: Locale,
     ): Result<SearchResult> = withContext(Dispatchers.IO) {
         runCatching {
             val query = params["query"]?.jsonPrimitive?.content ?: error("query is required")
             val url = "https://www.bing.com/search?q=" + URLEncoder.encode(query, "UTF-8")
-            val locale = Locale.getDefault()
-            val acceptLanguage = "${locale.language}-${locale.country},${locale.language}"
             val doc = Jsoup.connect(url)
                 .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
                 .header(
                     "Accept",
                     "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
                 )
-                .header("Accept-Language", acceptLanguage)
+                .header("Accept-Language", acceptLanguage(locale))
                 .header("Accept-Encoding", "gzip, deflate, sdch")
                 .header("Accept-Charset", "utf-8")
                 .header("Connection", "keep-alive")
@@ -110,6 +120,17 @@ object BingSearchService : SearchService<SearchServiceOptions.BingLocalOptions> 
                 text = anchor.parent()?.parent()?.text().orEmpty().take(500),
             )
         }
+    }
+
+    private fun acceptLanguage(locale: Locale): String {
+        val resolved = locale.takeIf { it.language.isNotBlank() && it.toLanguageTag() != "und" }
+            ?: Locale.getDefault()
+        val languageTag = resolved.toLanguageTag().takeIf { it != "und" }
+        val language = resolved.language.takeIf { it.isNotBlank() }
+        return listOfNotNull(
+            languageTag,
+            language?.takeIf { it != languageTag }?.let { "$it;q=0.9" },
+        ).ifEmpty { listOf("en-US", "en;q=0.9") }.joinToString(",")
     }
 
     private fun decodeBingUrl(raw: String): String {

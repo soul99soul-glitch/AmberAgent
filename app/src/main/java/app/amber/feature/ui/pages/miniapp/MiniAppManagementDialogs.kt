@@ -23,8 +23,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import app.amber.agent.R
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
 import app.amber.feature.ui.theme.JetbrainsMono
@@ -41,20 +43,20 @@ fun MiniAppRenameDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名小应用") },
+        title = { Text(stringResource(R.string.miniapp_rename_title)) },
         text = {
             Column {
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it.take(40) },
-                    label = { Text("名称") },
+                    label = { Text(stringResource(R.string.miniapp_name_label)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 OutlinedTextField(
                     value = description,
                     onValueChange = { description = it.take(120) },
-                    label = { Text("描述") },
+                    label = { Text(stringResource(R.string.miniapp_description_label)) },
                     minLines = 2,
                     maxLines = 3,
                     modifier = Modifier
@@ -68,12 +70,12 @@ fun MiniAppRenameDialog(
                 enabled = normalizedTitle.isNotBlank(),
                 onClick = { onConfirm(normalizedTitle, description.trim()) },
             ) {
-                Text("保存")
+                Text(stringResource(R.string.common_save))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -87,16 +89,16 @@ fun MiniAppDeleteDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("删除小应用") },
-        text = { Text("确定删除「${app.title}」吗？历史聊天里的小应用卡片会保留，但再次运行时会显示小应用不存在。") },
+        title = { Text(stringResource(R.string.miniapp_delete_title)) },
+        text = { Text(stringResource(R.string.miniapp_delete_message, app.title)) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("删除", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
@@ -114,9 +116,14 @@ fun rememberMiniAppHtmlExporter(): (MiniAppEntity) -> Unit {
             runCatching {
                 context.contentResolver.openOutputStream(uri)?.use { output ->
                     output.write(app.htmlContent.toByteArray(Charsets.UTF_8))
-                } ?: error("无法打开导出目标")
+                } ?: error(context.getString(R.string.miniapp_export_target_unavailable))
             }.onFailure {
-                Toast.makeText(context, "导出失败：${it.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                val reason = it.message ?: context.getString(R.string.miniapp_unknown_error)
+                Toast.makeText(
+                    context,
+                    context.getString(R.string.miniapp_export_failed, reason),
+                    Toast.LENGTH_SHORT,
+                ).show()
             }
         }
         pendingApp = null
@@ -136,7 +143,7 @@ fun MiniAppVersionHistoryDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("版本历史") },
+        title = { Text(stringResource(R.string.miniapp_version_history)) },
         text = {
             Column(
                 modifier = Modifier
@@ -148,14 +155,22 @@ fun MiniAppVersionHistoryDialog(
                     ListItem(
                         headlineContent = { Text("v${version.versionNumber}") },
                         supportingContent = {
-                            Text(version.changeNote ?: if (version.versionNumber == app.version) "当前版本" else "历史版本")
+                            Text(
+                                version.changeNote ?: stringResource(
+                                    if (version.versionNumber == app.version) {
+                                        R.string.miniapp_current_version
+                                    } else {
+                                        R.string.miniapp_historical_version
+                                    },
+                                )
+                            )
                         },
                         trailingContent = {
                             TextButton(
                                 enabled = version.versionNumber != app.version,
                                 onClick = { onRestore(version) },
                             ) {
-                                Text("恢复")
+                                Text(stringResource(R.string.miniapp_restore))
                             }
                         },
                     )
@@ -164,7 +179,7 @@ fun MiniAppVersionHistoryDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text(stringResource(R.string.update_card_close))
             }
         },
     )

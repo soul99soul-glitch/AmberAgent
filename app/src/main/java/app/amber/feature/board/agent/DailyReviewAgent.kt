@@ -20,6 +20,7 @@ import app.amber.core.repository.ConversationRepository
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.uuid.Uuid
 
 /**
@@ -42,14 +43,18 @@ class DailyReviewAgent(
     private val conversationRepository: ConversationRepository,
     private val appUsageCollector: AppUsageCollector,
 ) {
-    suspend fun run(boardDate: String, phase: String): DailyReviewRunResult {
+    suspend fun run(
+        boardDate: String,
+        phase: String,
+        locale: Locale = Locale.getDefault(),
+    ): DailyReviewRunResult {
         val settings = settingsStore.settingsFlow.value
         val now = System.currentTimeMillis()
 
         // 1. Collect data sources
         val appUsage = appUsageCollector.collectToday(now)
         val completedItems = boardRepository.getCompletedItems(boardDate)
-        val recentChats = collectRecentChatSummaries()
+        val recentChats = collectRecentChatSummaries(locale)
 
         if (appUsage.isEmpty() && completedItems.isEmpty() && recentChats.isEmpty()) {
             return DailyReviewRunResult.Empty
@@ -57,10 +62,10 @@ class DailyReviewAgent(
 
         // 2. Build prompt
         val existing = boardRepository.getDailyReview(boardDate)
-        val prompt = buildPrompt(phase, appUsage, completedItems, recentChats, existing?.content)
+        val prompt = buildPrompt(phase, appUsage, completedItems, recentChats, existing?.content, locale)
 
         // 3. Call LLM
-        val rawMarkdown = callModel(settings, prompt)
+        val rawMarkdown = callModel(settings, prompt, locale)
             ?: return DailyReviewRunResult.Failed("model call failed")
 
         // 4. Compose final content
@@ -94,72 +99,133 @@ class DailyReviewAgent(
         completedItems: List<BoardItemEntity>,
         recentChats: List<String>,
         existingContent: String?,
+        locale: Locale,
     ): String = buildString {
-        appendLine("你是 AmberAgent 的「今日复盘」助理。根据下面的数据生成一份**中文 Markdown** 格式的任务复盘。")
+        val chinese = locale.language.equals("zh", ignoreCase = true)
+        appendLine(
+            if (chinese) {
+                "你是 AmberAgent 的「今日复盘」助理。根据下面的数据生成一份**中文 Markdown** 格式的任务复盘。"
+            } else {
+                "You are AmberAgent's Daily Review assistant. Use the data below to generate a **Markdown task review in English**."
+            }
+        )
         appendLine()
-        appendLine("## 输出要求")
-        appendLine("- 直接输出 Markdown，不要代码围栏、不要 JSON。")
-        appendLine("- 语气：简洁、务实、像给自己写的日记，不要客套话。")
-        appendLine("- 用具体数字和事实，不要空洞总结。")
-        appendLine("- 如果某个数据源为空，跳过该部分，不要写「无数据」。")
+        appendLine(if (chinese) "## 输出要求" else "## Output requirements")
+        appendLine(if (chinese) "- 直接输出 Markdown，不要代码围栏、不要 JSON。" else "- Output Markdown directly; no code fences and no JSON.")
+        appendLine(if (chinese) "- 语气：简洁、务实、像给自己写的日记，不要客套话。" else "- Keep it concise and practical, like a private diary; omit pleasantries.")
+        appendLine(if (chinese) "- 用具体数字和事实，不要空洞总结。" else "- Use concrete numbers and facts; avoid vague summaries.")
+        appendLine(if (chinese) "- 如果某个数据源为空，跳过该部分，不要写「无数据」。" else "- Skip an empty data source instead of writing that data is unavailable.")
         appendLine()
 
         if (phase == PHASE_NOON) {
-            appendLine("## 当前阶段：上午回顾（13:00）")
-            appendLine("覆盖今天从早上到现在的活动。生成以下部分（按需）：")
-            appendLine("1. **已完成事项** — 从看板完成的事项")
-            appendLine("2. **📱 应用使用** — 今天用了哪些 app，各用了多久，结合 app 用途推测在做什么")
-            appendLine("3. **💬 对话摘要** — 今天跟 AI 聊了什么重要话题")
-            appendLine("4. **上午小结** — 一两句话总结上午状态")
-        } else {
-            appendLine("## 当前阶段：下午/晚间补充（19:00）")
-            if (existingContent != null) {
-                appendLine("在已有的上午复盘基础上，**只生成下午新增部分**，格式同上但标题用「下午」。")
+            if (chinese) {
+                appendLine("## 当前阶段：上午回顾（13:00）")
+                appendLine("覆盖今天从早上到现在的活动。生成以下部分（按需）：")
+                appendLine("1. **已完成事项** — 从看板完成的事项")
+                appendLine("2. **📱 应用使用** — 今天用了哪些 app，各用了多久，结合 app 用途推测在做什么")
+                appendLine("3. **💬 对话摘要** — 今天跟 AI 聊了什么重要话题")
+                appendLine("4. **上午小结** — 一两句话总结上午状态")
             } else {
-                appendLine("上午复盘未生成，请生成完整的今日复盘（覆盖全天）。")
+                appendLine("## Current phase: morning review (13:00)")
+                appendLine("Cover activity from this morning through now. Generate the following sections as needed:")
+                appendLine("1. **Completed items** — items completed from the board")
+                appendLine("2. **📱 App usage** — which apps were used and for how long; infer the user's activity from their purpose")
+                appendLine("3. **💬 Conversation summary** — important topics discussed with AI today")
+                appendLine("4. **Morning recap** — one or two sentences summarizing the morning")
             }
-            appendLine("不要重复上午的内容。")
-            if (existingContent != null) {
-                appendLine()
-                appendLine("## 已有的上午复盘内容（参考，不要重复）")
-                appendLine(existingContent.take(2000))
+        } else {
+            if (chinese) {
+                appendLine("## 当前阶段：下午/晚间补充（19:00）")
+                if (existingContent != null) {
+                    appendLine("在已有的上午复盘基础上，**只生成下午新增部分**，格式同上但标题用「下午」。")
+                } else {
+                    appendLine("上午复盘未生成，请生成完整的今日复盘（覆盖全天）。")
+                }
+                appendLine("不要重复上午的内容。")
+                if (existingContent != null) {
+                    appendLine()
+                    appendLine("## 已有的上午复盘内容（参考，不要重复）")
+                    appendLine(existingContent.take(2000))
+                }
+            } else {
+                appendLine("## Current phase: afternoon/evening supplement (19:00)")
+                if (existingContent != null) {
+                    appendLine("Based on the existing morning review, generate **only new afternoon content** using the same format with afternoon headings.")
+                } else {
+                    appendLine("The morning review was not generated; produce a complete review covering the whole day.")
+                }
+                appendLine("Do not repeat the morning content.")
+                if (existingContent != null) {
+                    appendLine()
+                    appendLine("## Existing morning review (reference; do not repeat)")
+                    appendLine(existingContent.take(2000))
+                }
             }
         }
 
         appendLine()
 
-        if (phase == PHASE_NOON) {
+        if (chinese) {
             appendLine("## 旧版回顾兼容提示")
-            appendLine("如果数据不足，可以继续参考应用使用、已完成看板事项和对话主题。")
+            appendLine(
+                if (phase == PHASE_NOON) {
+                    "如果数据不足，可以继续参考应用使用、已完成看板事项和对话主题。"
+                } else {
+                    "如果下午数据不足，可以继续参考应用使用、已完成看板事项和对话主题。"
+                }
+            )
         } else {
-            appendLine("## 旧版回顾兼容提示")
-            appendLine("如果下午数据不足，可以继续参考应用使用、已完成看板事项和对话主题。")
+            appendLine("## Compatibility note for older reviews")
+            appendLine(
+                if (phase == PHASE_NOON) {
+                    "If data is sparse, you may still use app usage, completed board items, and conversation topics."
+                } else {
+                    "If afternoon data is sparse, you may still use app usage, completed board items, and conversation topics."
+                }
+            )
         }
 
         appendLine()
         if (appUsage.isEmpty()) {
-            appendLine("## 注意：应用使用数据不可用")
-            appendLine("可能原因：未授予「使用情况访问」权限。跳过应用使用部分即可。")
+            if (chinese) {
+                appendLine("## 注意：应用使用数据不可用")
+                appendLine("可能原因：未授予「使用情况访问」权限。跳过应用使用部分即可。")
+            } else {
+                appendLine("## Note: app usage data is unavailable")
+                appendLine("Possible reason: usage access permission was not granted. Skip the app usage section.")
+            }
             appendLine()
         }
         if (appUsage.isNotEmpty()) {
-            appendLine("## 数据：应用使用")
+            appendLine(if (chinese) "## 数据：应用使用" else "## Data: app usage")
             for (entry in appUsage) {
-                appendLine("- ${entry.appLabel}（${entry.packageName}）：前台 ${entry.formattedDuration()}")
+                appendLine(
+                    if (chinese) {
+                        "- ${entry.appLabel}（${entry.packageName}）：前台 ${entry.formattedDuration()}"
+                    } else {
+                        "- ${entry.appLabel} (${entry.packageName}): foreground ${entry.formattedDuration()}"
+                    }
+                )
             }
             appendLine()
         }
 
         if (completedItems.isNotEmpty()) {
-            appendLine("## 数据：今日已完成的看板事项")
+            appendLine(if (chinese) "## 数据：今日已完成的看板事项" else "## Data: board items completed today")
             for (item in completedItems) {
-                appendLine("- ${item.title}（来源：${item.sourceType}）")
+                appendLine(
+                    if (chinese) {
+                        "- ${item.title}（来源：${item.sourceType}）"
+                    } else {
+                        "- ${item.title} (source: ${item.sourceType})"
+                    }
+                )
             }
             appendLine()
         }
 
         if (recentChats.isNotEmpty()) {
-            appendLine("## 数据：今日对话主题")
+            appendLine(if (chinese) "## 数据：今日对话主题" else "## Data: conversation topics today")
             for (chat in recentChats) {
                 appendLine("- $chat")
             }
@@ -167,7 +233,7 @@ class DailyReviewAgent(
         }
     }
 
-    private suspend fun collectRecentChatSummaries(): List<String> = runCatching {
+    private suspend fun collectRecentChatSummaries(locale: Locale): List<String> = runCatching {
         val todayStart = java.time.LocalDate.now()
             .atStartOfDay(java.time.ZoneId.systemDefault())
             .toInstant()
@@ -183,11 +249,15 @@ class DailyReviewAgent(
                 val nodeCount = runCatching {
                     conversationRepository.countConversationNodes(conv.id)
                 }.getOrDefault(conv.messageNodes.size)
-                "${conv.title}（${nodeCount}轮对话）"
+                if (locale.language.equals("zh", ignoreCase = true)) {
+                    "${conv.title}（${nodeCount}轮对话）"
+                } else {
+                    "${conv.title} (${nodeCount} conversation turns)"
+                }
             }
     }.getOrElse { emptyList() }
 
-    private suspend fun callModel(settings: Settings, prompt: String): String? {
+    private suspend fun callModel(settings: Settings, prompt: String, locale: Locale): String? {
         val model = resolveModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
         return withTimeout(90_000L) {
@@ -195,7 +265,13 @@ class DailyReviewAgent(
                 val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(
-                        UIMessage.system("你是 AmberAgent 的「今日复盘」助理。根据用户提供的数据生成中文 Markdown 任务复盘。直接输出 Markdown，不要代码围栏。"),
+                        UIMessage.system(
+                            if (locale.language.equals("zh", ignoreCase = true)) {
+                                "你是 AmberAgent 的「今日复盘」助理。根据用户提供的数据生成中文 Markdown 任务复盘。直接输出 Markdown，不要代码围栏。"
+                            } else {
+                                "You are AmberAgent's Daily Review assistant. Generate an English Markdown task review from the user's data. Output Markdown directly; no code fences."
+                            }
+                        ),
                         UIMessage.user(prompt),
                     ),
                     params = TextGenerationParams(

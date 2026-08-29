@@ -39,12 +39,14 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeUiState
+import app.amber.agent.R
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 
@@ -65,6 +67,11 @@ fun LiveBubbleContent(
 ) {
     val tokens = LocalAmberTokens.current
     val context = LocalContext.current
+    val fillDraftFilledMessage = stringResource(R.string.live_fill_result_filled)
+    val fillDraftCopiedMessage = stringResource(R.string.live_fill_result_copied_short)
+    val fillDraftMissingMessage = stringResource(R.string.live_fill_result_missing)
+    val defaultStatusText = stringResource(R.string.live_bubble_status_default)
+    val uncertainResultText = stringResource(R.string.live_result_uncertain)
     var expanded by remember { mutableStateOf(false) }
     var lastSeenMillis by remember { mutableLongStateOf(0L) }
     val hasFreshResult = state.card != null && state.lastUpdatedAtMillis > lastSeenMillis
@@ -173,7 +180,7 @@ fun LiveBubbleContent(
                         .background(if (state.analyzing) tokens.accent else tokens.ink3),
                 )
                 Text(
-                    text = state.statusText.ifBlank { "Amber 伴随" },
+                    text = state.statusText.ifBlank { defaultStatusText },
                     style = LocalAmberType.current.meta,
                     color = tokens.ink3,
                     maxLines = 1,
@@ -181,7 +188,7 @@ fun LiveBubbleContent(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    text = "收起",
+                    text = stringResource(R.string.live_bubble_collapse),
                     style = LocalAmberType.current.meta,
                     color = tokens.ink4,
                 )
@@ -189,13 +196,13 @@ fun LiveBubbleContent(
 
             if (card == null) {
                 Text(
-                    text = "还没有分析结果",
+                    text = stringResource(R.string.live_bubble_no_result),
                     style = LocalAmberType.current.secondary,
                     color = tokens.ink3,
                 )
             } else {
                 Text(
-                    text = card.watching.ifBlank { "不确定" },
+                    text = card.watching.ifBlank { uncertainResultText },
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = tokens.ink,
@@ -227,18 +234,18 @@ fun LiveBubbleContent(
                 if (draftAvailable) {
                     TextButton(onClick = {
                         val message = when (onFillDraft()) {
-                            LiveFillResult.FILLED -> "已填入，发送请自己按"
-                            LiveFillResult.COPIED -> "没找到输入框，已复制"
-                            LiveFillResult.NO_DRAFT -> "还没有可填入的草稿"
+                            LiveFillResult.FILLED -> fillDraftFilledMessage
+                            LiveFillResult.COPIED -> fillDraftCopiedMessage
+                            LiveFillResult.NO_DRAFT -> fillDraftMissingMessage
                         }
                         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
                     }) {
-                        Text("填入", fontSize = 13.sp, color = tokens.accent)
+                        Text(stringResource(R.string.live_fill_action), fontSize = 13.sp, color = tokens.accent)
                     }
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 TextButton(onClick = onRefresh) {
-                    Text("立即分析", fontSize = 13.sp, color = tokens.accent)
+                    Text(stringResource(R.string.live_analyze_now), fontSize = 13.sp, color = tokens.accent)
                 }
             }
         }

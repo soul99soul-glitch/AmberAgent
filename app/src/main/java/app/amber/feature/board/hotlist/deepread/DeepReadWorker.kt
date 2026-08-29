@@ -7,6 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.appLocale
 import app.amber.feature.board.hotlist.HotListRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -36,11 +37,12 @@ class DeepReadWorker(
         if (route is DeepReadWorkerRoute.Invalid) return Result.failure()
         val notifier = get<DeepReadNotifier>()
         val repository = get<HotListRepository>()
+        val locale = applicationContext.appLocale()
         val ttlDays = get<SettingsAggregator>()
             .settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays
 
         try {
-            setForeground(createForegroundInfo(notifier, topicId, title, sourceUrl))
+            setForeground(createForegroundInfo(notifier, topicId, title, sourceUrl, locale))
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (error: Throwable) {
@@ -65,7 +67,7 @@ class DeepReadWorker(
         }
 
         return coroutineScope {
-            val progressJob = launchProgressNotifications(repository, notifier, topicId, title, sourceUrl)
+            val progressJob = launchProgressNotifications(repository, notifier, topicId, title, sourceUrl, locale)
             try {
                 runGeneration(route, topicId, title, sourceUrl, force, repository, notifier, ttlDays)
             } finally {
@@ -173,12 +175,13 @@ class DeepReadWorker(
         topicId: String,
         title: String,
         sourceUrl: String?,
+        locale: java.util.Locale,
     ) = launch {
-        var lastProgress = null.deepReadProgressSnapshot(running = true)
+        var lastProgress = null.deepReadProgressSnapshot(running = true, locale = locale)
         try {
             repository.observeDeepRead(topicId).collect { output ->
                 if (!output.shouldNotifyRunningDeepReadProgress()) return@collect
-                val progress = output.deepReadProgressSnapshot(running = true)
+                val progress = output.deepReadProgressSnapshot(running = true, locale = locale)
                 if (shouldNotifyDeepReadProgress(lastProgress, progress)) {
                     lastProgress = progress
                     try {
@@ -207,8 +210,9 @@ class DeepReadWorker(
         topicId: String,
         title: String,
         sourceUrl: String?,
+        locale: java.util.Locale,
     ): ForegroundInfo {
-        val notification = notifier.buildRunningNotification(topicId, title, sourceUrl)
+        val notification = notifier.buildRunningNotification(topicId, title, sourceUrl, locale = locale)
         val notificationId = DeepReadNotifier.notificationId(topicId)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             ForegroundInfo(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)

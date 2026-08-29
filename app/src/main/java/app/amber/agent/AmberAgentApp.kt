@@ -397,7 +397,7 @@ class AmberAgentApp : Application() {
 
         val boardChannel = NotificationChannelCompat
             .Builder(BOARD_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_LOW)
-            .setName("今日看板")
+            .setName(getString(R.string.notification_channel_today_board))
             .setVibrationEnabled(false)
             .setShowBadge(false)
             .build()
@@ -405,7 +405,7 @@ class AmberAgentApp : Application() {
 
         val deepReadChannel = NotificationChannelCompat
             .Builder(DEEP_READ_NOTIFICATION_CHANNEL_ID, NotificationManagerCompat.IMPORTANCE_DEFAULT)
-            .setName("深度阅读")
+            .setName(getString(R.string.notification_channel_deep_read))
             .setVibrationEnabled(false)
             .setShowBadge(false)
             .build()

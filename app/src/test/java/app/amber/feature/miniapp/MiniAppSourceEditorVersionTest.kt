@@ -37,6 +37,7 @@ class MiniAppSourceEditorVersionTest {
     }
 
     private fun repositoryOf(db: AppDatabase) = MiniAppRepository(
+        context = context,
         database = db,
         dao = db.miniAppDao(),
         grantDao = db.miniAppGrantDao(),

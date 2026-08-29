@@ -76,19 +76,19 @@ private fun TagPreview() {
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Tag(type = TagType.SUCCESS) {
-            Text("测试")
+            Text("Test")
         }
         Tag(type = TagType.ERROR) {
-            Text("测试")
+            Text("Test")
         }
         Tag(type = TagType.WARNING) {
-            Text("测试")
+            Text("Test")
         }
         Tag(type = TagType.INFO) {
-            Text("测试")
+            Text("Test")
         }
         Tag(type = TagType.DEFAULT) {
-            Text("测试")
+            Text("Test")
         }
     }
 }

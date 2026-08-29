@@ -27,11 +27,15 @@ class BoardNotifier(
     private val notificationManager = NotificationManagerCompat.from(context)
 
     fun notifySuccess(itemCount: Int, summary: String) {
-        val text = if (summary.isNotBlank()) summary else "已整理 $itemCount 条内容"
+        val text = if (summary.isNotBlank()) {
+            summary
+        } else {
+            context.getString(R.string.board_notification_updated_content, itemCount)
+        }
         notify(
             NotificationCompat.Builder(context, BOARD_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("今日看板已更新")
+                .setContentTitle(context.getString(R.string.board_notification_updated_title))
                 .setContentText(text.take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(500)))
                 .setContentIntent(buildLaunchPendingIntent())
@@ -47,7 +51,7 @@ class BoardNotifier(
         notify(
             NotificationCompat.Builder(context, BOARD_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("今日看板更新失败")
+                .setContentTitle(context.getString(R.string.board_notification_failed_title))
                 .setContentText(reason.take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(reason.take(500)))
                 .setContentIntent(buildLaunchPendingIntent())

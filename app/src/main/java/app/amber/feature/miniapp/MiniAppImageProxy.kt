@@ -1,9 +1,12 @@
 package app.amber.feature.miniapp
 
+import android.content.Context
 import android.webkit.WebResourceResponse
+import app.amber.agent.R
 import java.io.ByteArrayInputStream
 
 class MiniAppImageProxy(
+    private val context: Context,
     private val httpClient: MiniAppHttpClient,
 ) {
     fun load(url: String): WebResourceResponse {
@@ -18,16 +21,20 @@ class MiniAppImageProxy(
             WebResourceResponse(
                 "image/svg+xml",
                 "utf-8",
-                ByteArrayInputStream(offlinePlaceholderSvg.toByteArray()),
+                ByteArrayInputStream(
+                    offlinePlaceholderSvg(
+                        context.getString(R.string.miniapp_image_load_failed),
+                    ).toByteArray(),
+                ),
             )
         }
     }
 }
 
-private val offlinePlaceholderSvg = """
+private fun offlinePlaceholderSvg(label: String) = """
     <svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480">
       <defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#f3f4f6"/><stop offset="1" stop-color="#e5e7eb"/></linearGradient></defs>
       <rect width="800" height="480" fill="url(#g)"/>
-      <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="#6b7280" font-size="28" font-family="sans-serif">图片无法加载</text>
+      <text x="50%" y="50%" text-anchor="middle" dominant-baseline="middle" fill="#6b7280" font-size="28" font-family="sans-serif">$label</text>
     </svg>
 """.trimIndent()

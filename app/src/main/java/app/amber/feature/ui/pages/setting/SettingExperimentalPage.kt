@@ -98,29 +98,29 @@ fun SettingExperimentalPage() {
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingTodayBoard) },
                         icon = { Icon(Lucide.Newspaper, contentDescription = null) },
-                        title = "今日看板",
-                        description = "Agent 主动整理每日信号，生成待办与关注项",
+                        title = stringResource(R.string.notification_channel_today_board),
+                        description = stringResource(R.string.setting_experimental_today_board_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.MiniAppSettings) },
                         icon = { Icon(Lucide.LayoutDashboard, contentDescription = null) },
-                        title = "小应用",
-                        description = "让 Amber 生成、保存并运行轻量 HTML 工具",
+                        title = stringResource(R.string.session_home_feature_mini_apps),
+                        description = stringResource(R.string.setting_experimental_mini_apps_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SynaraCompanion) },
                         icon = { Icon(Lucide.Server, contentDescription = null) },
                         title = "Synara",
-                        description = "局域网遥控 Mac 上的 Synara 工作台",
+                        description = stringResource(R.string.setting_experimental_synara_desc),
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.ZCode) },
                         icon = { Icon(Lucide.CodeXml, contentDescription = null) },
                         title = "ZCode",
-                        description = "粘贴智谱 ZCode 链接，用内置浏览器打开移动页",
+                        description = stringResource(R.string.setting_experimental_zcode_desc),
                     )
                     // Model Council top-level entry removed — it's now reachable from inside the
                     // SubAgent settings page as an "advanced" section (it's effectively a

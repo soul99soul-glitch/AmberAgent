@@ -49,6 +49,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -68,11 +69,13 @@ import com.composables.icons.lucide.Share2
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.History
 import app.amber.agent.Screen
+import app.amber.agent.R
 import app.amber.agent.Screen.DeepRead
 import app.amber.feature.board.TodayBoardHotListFilterMode
 import app.amber.feature.board.hotlist.HotListDashboard
 import app.amber.feature.board.hotlist.HOT_LIST_TOPIC_DISPLAY_LIMIT
 import app.amber.feature.board.hotlist.HotListItem
+import app.amber.feature.board.hotlist.HotListProviderIds
 import app.amber.feature.board.hotlist.HotListProviderSnapshot
 import app.amber.feature.board.hotlist.HotTopic
 import app.amber.feature.board.hotlist.presentationTitle
@@ -101,6 +104,8 @@ fun TodayBoardPage() {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
+    val shareChooserTitle = stringResource(R.string.board_share_chooser)
+    val sharePanelError = stringResource(R.string.board_share_panel_error)
     var pendingDeepRead by remember { mutableStateOf<PendingDeepReadRequest?>(null) }
     var selectedTopic by remember { mutableStateOf<HotTopic?>(null) }
 
@@ -128,9 +133,9 @@ fun TodayBoardPage() {
                 type = "text/plain"
                 putExtra(Intent.EXTRA_TEXT, text)
             }
-            context.startActivity(Intent.createChooser(intent, "分享热点"))
+            context.startActivity(Intent.createChooser(intent, shareChooserTitle))
         }.onFailure {
-            Toast.makeText(context, "无法打开分享面板", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, sharePanelError, Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -138,15 +143,15 @@ fun TodayBoardPage() {
         topBar = {
             TopAppBar(
                 title = {
-                    Text("深度阅读", fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.deep_read_title), fontWeight = FontWeight.Bold)
                 },
                 navigationIcon = { BackButton() },
                 actions = {
                     IconButton(onClick = { navController.navigate(Screen.DeepReadHistory) }) {
-                        Icon(Lucide.History, contentDescription = "深度阅读历史")
+                        Icon(Lucide.History, contentDescription = stringResource(R.string.deep_read_history_title))
                     }
                     IconButton(onClick = { navController.navigate(Screen.SettingTodayBoard) }) {
-                        Icon(Lucide.Settings, contentDescription = "设置")
+                        Icon(Lucide.Settings, contentDescription = stringResource(R.string.settings))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -155,7 +160,7 @@ fun TodayBoardPage() {
     ) { innerPadding ->
         if (!boardEnabled) {
             Box(Modifier.fillMaxSize().padding(innerPadding), contentAlignment = Alignment.Center) {
-                Text("今日看板未启用\n请在设置中开启", style = LocalAmberType.current.body)
+                Text(stringResource(R.string.board_disabled), style = LocalAmberType.current.body)
             }
             return@Scaffold
         }
@@ -175,8 +180,8 @@ fun TodayBoardPage() {
     pendingDeepRead?.let { request ->
         AlertDialog(
             onDismissRequest = { pendingDeepRead = null },
-            title = { Text("深度阅读会消耗更多 tokens", style = LocalAmberType.current.sessionTitle) },
-            text = { Text("每次生成约消耗 3 万 tokens。后续同一话题 24 小时内会优先使用缓存。", style = LocalAmberType.current.body) },
+            title = { Text(stringResource(R.string.deep_read_cost_title), style = LocalAmberType.current.sessionTitle) },
+            text = { Text(stringResource(R.string.deep_read_cost_message), style = LocalAmberType.current.body) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -191,12 +196,12 @@ fun TodayBoardPage() {
                         }
                     }
                 ) {
-                    Text("继续")
+                    Text(stringResource(R.string.continue_label))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingDeepRead = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -260,8 +265,12 @@ private fun HotListActionSheet(
                 overflow = TextOverflow.Ellipsis,
             )
             if (topic.sources.isNotEmpty()) {
+                val sourceLabels = mutableListOf<String>()
+                for (source in topic.sources) {
+                    sourceLabels += "${hotListProviderName(source.providerId, source.providerName)} #${source.rank}"
+                }
                 Text(
-                    topic.sources.joinToString(" · ") { "${it.providerName} #${it.rank}" },
+                    sourceLabels.joinToString(" · "),
                     style = LocalAmberType.current.meta,
                     color = workspaceColors().muted,
                     maxLines = 1,
@@ -271,23 +280,23 @@ private fun HotListActionSheet(
             Spacer(Modifier.height(10.dp))
             Hairline()
             TopicActionRow(
-                label = "深度阅读",
+                label = stringResource(R.string.deep_read_title),
                 icon = Lucide.NotebookTabs,
                 onClick = onDeepRead,
             )
             TopicActionRow(
-                label = "重新生成",
+                label = stringResource(R.string.regenerate),
                 icon = Lucide.RotateCw,
                 onClick = onRegenerate,
             )
             TopicActionRow(
-                label = "打开原文",
+                label = stringResource(R.string.board_open_original),
                 icon = Lucide.ArrowRight,
                 enabled = topic.primaryUrl() != null,
                 onClick = onOpenOriginal,
             )
             TopicActionRow(
-                label = "分享",
+                label = stringResource(R.string.share),
                 icon = Lucide.Share2,
                 onClick = onShare,
             )
@@ -354,7 +363,7 @@ private fun HotListTab(
     ) {
         if (!dashboard.hasEnabledSources) {
             Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                EmptyLine("未启用热榜数据源。请在设置中至少开启一个来源。")
+                EmptyLine(stringResource(R.string.board_no_enabled_sources))
             }
         } else if (dashboard.isEmpty) {
             HotListSkeleton()
@@ -364,17 +373,17 @@ private fun HotListTab(
             ) {
                 item {
                     RubricHead(
-                        label = "综合热点",
-                        status = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { "${timeAgo(it)}更新" },
+                        label = stringResource(R.string.board_combined_topics),
+                        status = dashboard.lastUpdatedAt.takeIf { it > 0L }?.let { stringResource(R.string.board_updated_ago, timeAgo(it)) },
                     )
                 }
                 if (dashboard.topics.isEmpty()) {
                     item {
                         EmptyLine(
                             if (filterMode == TodayBoardHotListFilterMode.FOCUS_ONLY) {
-                                "没有匹配关注词的热点。可以在今日看板设置里调整关注词，或切换为关注优先。"
+                                stringResource(R.string.board_focus_empty)
                             } else {
-                                "暂时没有可聚合的综合热点。"
+                                stringResource(R.string.board_combined_empty)
                             }
                         )
                     }
@@ -402,15 +411,15 @@ private fun HotListTab(
                 dashboard.providers.forEach { provider ->
                     item("${provider.providerId}-head") {
                         RubricHead(
-                            label = provider.providerName,
-                            status = provider.error?.let { "⚠ 上次更新 ${timeAgo(provider.fetchedAt)}" }
+                            label = hotListProviderName(provider.providerId, provider.providerName),
+                            status = provider.error?.let { stringResource(R.string.board_provider_error_ago, timeAgo(provider.fetchedAt)) }
                                 ?: provider.fetchedAt.takeIf { it > 0L }?.let { timeAgo(it) },
                         )
                     }
                     val providerItems = provider.items.take(12)
                     if (providerItems.isEmpty()) {
                         item("${provider.providerId}-empty") {
-                            EmptyLine(provider.error ?: "暂无数据")
+                            EmptyLine(provider.error ?: stringResource(R.string.board_no_data))
                         }
                     } else {
                         itemsIndexed(
@@ -422,14 +431,20 @@ private fun HotListTab(
                                     rank = item.rank,
                                     title = item.presentationTitle,
                                     dek = null,
-                                    meta = MetaData(source = provider.providerName, detail = item.heat),
+                                    meta = MetaData(
+                                        source = hotListProviderName(provider.providerId, provider.providerName),
+                                        detail = item.heat,
+                                    ),
                                     onClick = { onProviderItemClick(provider, item) },
                                 )
                             } else {
                                 IndexRow(
                                     rank = item.rank,
                                     title = item.presentationTitle,
-                                    meta = MetaData(source = provider.providerName, detail = item.heat),
+                                    meta = MetaData(
+                                        source = hotListProviderName(provider.providerId, provider.providerName),
+                                        detail = item.heat,
+                                    ),
                                     onClick = { onProviderItemClick(provider, item) },
                                     last = index == providerItems.lastIndex,
                                 )
@@ -464,12 +479,30 @@ private fun rank2(rank: Int): String =
     if (rank in 0..99) rank.toString().padStart(2, '0') else rank.toString()
 
 /** Derive the topic meta line from its sources, keeping the same info the old pills showed. */
+@Composable
 private fun topicMeta(topic: HotTopic): MetaData {
-    val labels = topic.sources.take(4).map { "${it.providerName} #${it.rank}" }
+    val labels = mutableListOf<String>()
+    for (source in topic.sources.take(4)) {
+        labels += "${hotListProviderName(source.providerId, source.providerName)} #${source.rank}"
+    }
     return MetaData(
         source = labels.firstOrNull(),
         detail = labels.drop(1).joinToString(" · ").takeIf { it.isNotBlank() },
     )
+}
+
+@Composable
+private fun hotListProviderName(providerId: String, fallback: String): String = when (providerId) {
+    HotListProviderIds.BILIBILI -> stringResource(R.string.board_source_bilibili)
+    HotListProviderIds.HACKER_NEWS -> stringResource(R.string.board_source_hacker_news)
+    HotListProviderIds.WEIBO -> stringResource(R.string.board_source_weibo)
+    HotListProviderIds.ZHIHU -> stringResource(R.string.board_source_zhihu)
+    HotListProviderIds.ARXIV_AI -> stringResource(R.string.board_source_arxiv_ai)
+    HotListProviderIds.INFOQ_AI -> stringResource(R.string.board_source_infoq_ai)
+    HotListProviderIds.KR36 -> stringResource(R.string.board_source_36kr)
+    HotListProviderIds.HUGGINGFACE_PAPERS -> stringResource(R.string.board_source_huggingface)
+    HotListProviderIds.GITHUB_TRENDING_AI -> stringResource(R.string.board_source_github)
+    else -> fallback
 }
 
 @Composable
@@ -620,7 +653,7 @@ private fun HotListSkeleton() {
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { SectionTitle("🔥 综合热点", "正在更新") }
+        item { SectionTitle(stringResource(R.string.board_skeleton_title), stringResource(R.string.board_updating)) }
         items(6) {
             Box(
                 Modifier
@@ -643,15 +676,16 @@ private fun EmptyLine(text: String) {
     )
 }
 
+@Composable
 private fun timeAgo(timestamp: Long): String {
-    if (timestamp <= 0L) return "未知时间"
+    if (timestamp <= 0L) return stringResource(R.string.board_time_unknown)
     val diff = (System.currentTimeMillis() - timestamp).coerceAtLeast(0L)
     val minutes = diff / 60_000L
     return when {
-        minutes < 1 -> "刚刚"
-        minutes < 60 -> "${'$'}{minutes}分钟前"
-        minutes < 24 * 60 -> "${'$'}{minutes / 60}小时前"
-        else -> "${'$'}{minutes / (24 * 60)}天前"
+        minutes < 1 -> stringResource(R.string.board_time_just_now)
+        minutes < 60 -> stringResource(R.string.board_time_minutes_ago, minutes)
+        minutes < 24 * 60 -> stringResource(R.string.board_time_hours_ago, minutes / 60)
+        else -> stringResource(R.string.board_time_days_ago, minutes / (24 * 60))
     }
 }
 

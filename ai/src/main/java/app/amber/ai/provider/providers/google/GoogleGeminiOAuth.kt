@@ -20,6 +20,7 @@ import app.amber.ai.util.json
 import app.amber.ai.provider.providers.OAuthTokenSecureStore
 import app.amber.common.http.await
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
+import app.amber.common.oauth.LoopbackOAuthCopy
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -136,6 +137,97 @@ data class GoogleGeminiAuthStatus(
     }
 }
 
+/** Localized copy for user-visible OAuth and Code Assist session failures. */
+data class GoogleGeminiOAuthCopy(
+    val callbackTimedOut: (timeoutSeconds: Long) -> String,
+    val callbackFailed: (reason: String) -> String,
+    val stateMismatch: (receivedState: String, expectedState: String) -> String,
+    val missingCode: String,
+    val refreshTokenMissing: String,
+    val refreshFailed: (statusCode: Int) -> String,
+    val refreshAccessTokenMissing: String,
+    val sessionMissing: String,
+    val accessTokenEmpty: String,
+    val tokenUnavailable: String,
+    val tokenRefreshFailed: String,
+    val projectMissing: String,
+    val onboardingRequired: String,
+    val tokenExpired: String,
+    val sessionUnavailable: (status: String) -> String,
+    val clientUnavailable: String,
+    val onboardingSessionMissing: String,
+    val onboardingProjectMissing: (response: String) -> String,
+    val onboardingOperationFailed: (response: String) -> String,
+    val onboardingTimedOut: (timeoutSeconds: Long) -> String,
+    val cloudRequestFailed: (method: String, statusCode: Int, body: String) -> String,
+    val cloudResponseInvalid: (method: String, body: String) -> String,
+    val cloudPollFailed: (statusCode: Int, body: String) -> String,
+    val cloudPollResponseInvalid: (body: String) -> String,
+    val tokenExchangeFailed: (statusCode: Int) -> String,
+    val tokenExchangeAccessTokenMissing: String,
+) {
+    companion object {
+        val ENGLISH = GoogleGeminiOAuthCopy(
+            callbackTimedOut = { timeoutSeconds ->
+                "Google authorization timed out; the browser did not return a code within ${timeoutSeconds}s."
+            },
+            callbackFailed = { reason -> "Google authorization failed: $reason" },
+            stateMismatch = { receivedState, expectedState ->
+                "Google authorization state mismatch; the callback may have been tampered with " +
+                    "(got=$receivedState…, expected=$expectedState…)."
+            },
+            missingCode = "Google authorization callback did not include a code parameter.",
+            refreshTokenMissing =
+                "Google OAuth has no refresh token. Sign in again with prompt=consent.",
+            refreshFailed = { statusCode -> "Google OAuth refresh failed: HTTP $statusCode" },
+            refreshAccessTokenMissing =
+                "The Google OAuth refresh response did not contain an access_token.",
+            sessionMissing = "Not signed in to Google OAuth. Sign in from Settings first.",
+            accessTokenEmpty = "The Google OAuth access token is empty. Sign in again.",
+            tokenUnavailable =
+                "The Google OAuth token is unavailable. Return to Settings and sign in again.",
+            tokenRefreshFailed =
+                "The Google OAuth token refresh failed. Return to Settings and sign in again.",
+            projectMissing =
+                "Code Assist onboarding did not return cloudaicompanionProject. " +
+                    "Check the Google account permissions.",
+            onboardingRequired = "Code Assist onboarding is not complete. Try again later.",
+            tokenExpired = "The Google OAuth token expired and could not be refreshed. Sign in again.",
+            sessionUnavailable = { status -> "The Google OAuth session is unavailable: $status." },
+            clientUnavailable =
+                "The Google OAuth client is not initialized because the provider has no app context.",
+            onboardingSessionMissing =
+                "Not signed in to Google OAuth; Code Assist onboarding cannot start.",
+            onboardingProjectMissing = { response ->
+                "onboardUser did not return cloudaicompanionProject. Raw response: $response"
+            },
+            onboardingOperationFailed = { response ->
+                "The onboardUser operation failed: $response"
+            },
+            onboardingTimedOut = { timeoutSeconds ->
+                "onboardUser did not finish after $timeoutSeconds seconds."
+            },
+            cloudRequestFailed = { method, statusCode, body ->
+                "cloudcode-pa $method failed: HTTP $statusCode $body"
+            },
+            cloudResponseInvalid = { method, body ->
+                "cloudcode-pa $method returned invalid JSON: $body"
+            },
+            cloudPollFailed = { statusCode, body ->
+                "cloudcode-pa LRO poll failed: HTTP $statusCode $body"
+            },
+            cloudPollResponseInvalid = { body ->
+                "cloudcode-pa LRO poll returned invalid JSON: $body"
+            },
+            tokenExchangeFailed = { statusCode ->
+                "Google OAuth token exchange failed: HTTP $statusCode"
+            },
+            tokenExchangeAccessTokenMissing =
+                "The Google OAuth response did not contain an access_token.",
+        )
+    }
+}
+
 class GoogleGeminiAuthStore(context: Context) {
     private val store = OAuthTokenSecureStore(
         context = context,
@@ -183,6 +275,7 @@ class GoogleGeminiAuthStore(context: Context) {
 class GoogleGeminiOAuthClient(
     private val httpClient: OkHttpClient,
     private val authStore: GoogleGeminiAuthStore,
+    private val copy: GoogleGeminiOAuthCopy = GoogleGeminiOAuthCopy.ENGLISH,
 ) {
     // 进程级刷新锁：DI 单例与 GoogleProvider 各自实例化 client，
     // 共享同一份存储的 refresh_token，刷新必须跨实例互斥
@@ -207,11 +300,15 @@ class GoogleGeminiOAuthClient(
      * keeping the app in the foreground — loopback socket dies with the process and
      * there's no resume mechanism (unlike webmount's deep-link path).
      */
-    suspend fun authorize(context: Context, providerId: Uuid): GoogleGeminiAuthTokens {
+    suspend fun authorize(
+        context: Context,
+        providerId: Uuid,
+        loopbackCopy: LoopbackOAuthCopy = LoopbackOAuthCopy.ENGLISH,
+    ): GoogleGeminiAuthTokens {
         val server = try {
-            LoopbackOAuthCallbackServer()
+            LoopbackOAuthCallbackServer(copy = loopbackCopy)
         } catch (error: Throwable) {
-            throw IllegalStateException(error.message ?: "无法启动本地回环 server", error)
+            throw IllegalStateException(error.message ?: "Unable to start the local callback server", error)
         }
         return server.use { running ->
             val state = randomState()
@@ -220,14 +317,16 @@ class GoogleGeminiOAuthClient(
             val redirectUri = LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI
             launchBrowser(context, buildAuthorizationUrl(redirectUri, state, challenge))
             val callback = withTimeoutOrNull(AUTH_TIMEOUT_MS) { running.awaitCallback() }
-                ?: error("Google 授权超时 — 浏览器未在 ${AUTH_TIMEOUT_MS / 1000}s 内返回授权码。")
+                ?: error(copy.callbackTimedOut(AUTH_TIMEOUT_MS / 1000))
             require(callback.isSuccess) {
-                "Google 授权失败：${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim()
+                copy.callbackFailed(
+                    "${callback.error.orEmpty()} ${callback.errorDescription.orEmpty()}".trim()
+                )
             }
             require(callback.state == state) {
-                "Google 授权 state 不一致，可能遭到中间人篡改 (got=${callback.state?.take(6)}…, expected=${state.take(6)}…)。"
+                copy.stateMismatch(callback.state?.take(6) ?: "missing", state.take(6))
             }
-            val code = callback.code ?: error("Google 授权回调缺少 code 参数。")
+            val code = callback.code ?: error(copy.missingCode)
             val tokens = exchangeAuthorizationCode(code, verifier, redirectUri)
             authStore.save(providerId, tokens)
             Log.i(TAG, "OAuth tokens stored for provider=$providerId, kicking off cloudcode-pa onboard…")
@@ -245,9 +344,9 @@ class GoogleGeminiOAuthClient(
 
     suspend fun refresh(providerId: Uuid): GoogleGeminiAuthTokens = refreshMutex(providerId).withLock {
         val current = authStore.get(providerId)
-            ?: error("没有可用的 Google OAuth token，请重新登录。")
+            ?: error(copy.sessionMissing)
         val refreshToken = current.refreshToken
-            ?: error("Google OAuth 没有 refresh_token — 通常意味着上次登录时未带 prompt=consent，请重新登录。")
+            ?: error(copy.refreshTokenMissing)
         val body = FormBody.Builder()
             .add("grant_type", "refresh_token")
             .add("refresh_token", refreshToken)
@@ -259,12 +358,12 @@ class GoogleGeminiOAuthClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Google OAuth refresh 失败：HTTP ${response.code}")
+            error(copy.refreshFailed(response.code))
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             // 不回贴原始响应——schema 漂移时响应体可能仍含 refresh_token/id_token
-            ?: error("Google OAuth refresh 响应缺少 access_token")
+            ?: error(copy.refreshAccessTokenMissing)
         val expiresIn = parsed["expires_in"]?.jsonPrimitive?.longOrNull
             ?: (FALLBACK_TOKEN_LIFETIME_MS / 1000)
         // Google may rotate refresh_token; preserve old one if not rotated.
@@ -316,27 +415,27 @@ class GoogleGeminiOAuthClient(
      */
     suspend fun requireUsableSession(providerId: Uuid): GoogleGeminiAuthTokens {
         val current = authStore.get(providerId)
-            ?: error("尚未登录 Google OAuth，请先在设置里登录。")
+            ?: error(copy.sessionMissing)
         require(current.accessToken.isNotBlank()) {
-            "Google OAuth access token 为空，请重新登录。"
+            copy.accessTokenEmpty
         }
         getValidAccessToken(providerId)
-            ?: error("Google OAuth token 不可用，请回到设置重新登录。")
+            ?: error(copy.tokenUnavailable)
         val onboarded = ensureOnboarded(providerId)
         val accessToken = getValidAccessToken(providerId)
-            ?: error("Google OAuth token 刷新失败，请回到设置重新登录。")
+            ?: error(copy.tokenRefreshFailed)
         val resolved = authStore.get(providerId)?.copy(accessToken = accessToken)
             ?: onboarded.copy(accessToken = accessToken)
         val status = GoogleGeminiAuthStatus.from(resolved, System.currentTimeMillis())
         require(status.code == GoogleGeminiAuthStatusCode.READY) {
             when (status.code) {
                 GoogleGeminiAuthStatusCode.PROJECT_MISSING ->
-                    "cloudcode-pa onboarding 没有返回 cloudaicompanionProject，请检查 Google 账号权限。"
+                    copy.projectMissing
                 GoogleGeminiAuthStatusCode.ONBOARDING_REQUIRED ->
-                    "cloudcode-pa onboarding 尚未完成，请稍后重试。"
+                    copy.onboardingRequired
                 GoogleGeminiAuthStatusCode.TOKEN_EXPIRED ->
-                    "Google OAuth token 已过期且无法刷新，请重新登录。"
-                else -> "Google OAuth session 不可用：${status.code.wireValue}。"
+                    copy.tokenExpired
+                else -> copy.sessionUnavailable(status.code.wireValue)
             }
         }
         return resolved
@@ -364,12 +463,12 @@ class GoogleGeminiOAuthClient(
      */
     suspend fun ensureOnboarded(providerId: Uuid): GoogleGeminiAuthTokens {
         val current = authStore.get(providerId)
-            ?: error("尚未登录 Google OAuth，无法 onboard cloudcode-pa。")
+            ?: error(copy.onboardingSessionMissing)
         if (!current.projectId.isNullOrBlank() && !current.onboardedTier.isNullOrBlank()) {
             return current
         }
         val accessToken = getValidAccessToken(providerId)
-            ?: error("无法刷新 Google OAuth token，请重新登录。")
+            ?: error(copy.tokenRefreshFailed)
 
         // 1) loadCodeAssist — CRITICAL: gemini-cli setup.ts:177-183 OMITS the
         // `cloudaicompanionProject` field entirely when the user has no
@@ -429,7 +528,7 @@ class GoogleGeminiOAuthClient(
         )
 
         val resolved = pollOnboardOperation(accessToken, onboardResp)
-            ?: error("onboardUser 没有返回 cloudaicompanionProject。原始响应：${onboardResp.toString().take(300)}")
+            ?: error(copy.onboardingProjectMissing(onboardResp.toString().take(300)))
         val merged = current.copy(projectId = resolved, onboardedTier = chosenTier)
         authStore.save(providerId, merged)
         return merged
@@ -449,7 +548,7 @@ class GoogleGeminiOAuthClient(
                 val response = current["response"]?.jsonObject
                 val errorObj = current["error"]?.jsonObject
                 if (errorObj != null) {
-                    error("onboardUser LRO 报错：${errorObj.toString().take(300)}")
+                    error(copy.onboardingOperationFailed(errorObj.toString().take(300)))
                 }
                 // gemini-cli's OnboardUserResponse keeps the project under
                 // `cloudaicompanionProject.id`, so peel that nested object.
@@ -462,7 +561,7 @@ class GoogleGeminiOAuthClient(
             current = getCloudCodeAssistJson(accessToken, opName)
             Log.d(TAG, "Onboard LRO poll iter=$iteration done=${current["done"]}")
         }
-        error("onboardUser LRO 轮询 ${LRO_POLL_INTERVAL_MS * MAX_LRO_POLL_ITERATIONS / 1000}s 仍未完成")
+        error(copy.onboardingTimedOut(LRO_POLL_INTERVAL_MS * MAX_LRO_POLL_ITERATIONS / 1000))
     }
 
     /**
@@ -560,10 +659,10 @@ class GoogleGeminiOAuthClient(
         val text = response.body?.string().orEmpty()
         Log.i(TAG, "cloudcode-pa $method response (${response.code})")
         if (!response.isSuccessful) {
-            error("cloudcode-pa $method 失败：HTTP ${response.code} ${text.take(300)}")
+            error(copy.cloudRequestFailed(method, response.code, text.take(300)))
         }
         return runCatching { json.parseToJsonElement(text).jsonObject }
-            .getOrElse { error("cloudcode-pa $method 响应不是 JSON：${text.take(300)}") }
+            .getOrElse { error(copy.cloudResponseInvalid(method, text.take(300))) }
     }
 
     /** GET against `https://cloudcode-pa.googleapis.com/v1internal/{operationName}`. Used
@@ -584,10 +683,10 @@ class GoogleGeminiOAuthClient(
         val response = httpClient.newCall(request).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("cloudcode-pa LRO poll 失败：HTTP ${response.code} ${text.take(300)}")
+            error(copy.cloudPollFailed(response.code, text.take(300)))
         }
         return runCatching { json.parseToJsonElement(text).jsonObject }
-            .getOrElse { error("cloudcode-pa LRO poll 响应不是 JSON：${text.take(300)}") }
+            .getOrElse { error(copy.cloudPollResponseInvalid(text.take(300))) }
     }
 
     // ----------------------------------------------------------------------
@@ -636,12 +735,12 @@ class GoogleGeminiOAuthClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Google OAuth token 交换失败：HTTP ${response.code}")
+            error(copy.tokenExchangeFailed(response.code))
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         val accessToken = parsed["access_token"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
             // 不回贴原始响应——schema 漂移时响应体可能仍含 refresh_token/id_token
-            ?: error("Google OAuth 响应缺少 access_token")
+            ?: error(copy.tokenExchangeAccessTokenMissing)
         val refreshToken = parsed["refresh_token"]?.jsonPrimitive?.contentOrNull
         val expiresIn = parsed["expires_in"]?.jsonPrimitive?.longOrNull
             ?: (FALLBACK_TOKEN_LIFETIME_MS / 1000)

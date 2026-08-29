@@ -77,7 +77,7 @@ object SubAgentDefinitions {
     private fun explorer() = SubAgentDefinition(
         id = "explorer",
         name = "Explorer",
-        description = "跨多源（网页 / 文件 / 历史会话 / MCP / 外部文档）快速并行侦察。回答「X 在哪里」「Y 大概有些什么」，速度优先，不深挖。",
+        description = "Fast parallel reconnaissance across web, files, session history, MCP, and external documents. Answers where X is and what Y contains; speed over depth.",
         systemPrompt = rolePrompt(
             role = "Explorer — a fast multi-source reconnaissance specialist for AmberAgent",
             capabilities = """
@@ -103,17 +103,17 @@ object SubAgentDefinitions {
             "mcp_list", "skills_list",
         ),
         routingHint = """
-            何时调用：需要在多个来源快速并行侦察 • 范围广或不确定时 • 决策前要先摸清都有些什么。
-            何时不要：你已经知道具体文件/路径只想读 • 一次性具体查找 • 即将立刻执行下一步。
-            经验：「X 大概有些什么？」→ @explorer。「读这个具体文件」→ 自己干。
+            Delegate when: you need fast parallel reconnaissance across multiple sources • the scope is broad or uncertain • you need a map before deciding.
+            Do not delegate when: you already know the exact file/path • it is a one-off lookup • you are about to execute the next step.
+            Rule of thumb: "What does X contain?" → @explorer. "Read this exact file" → do it yourself.
         """.trimIndent(),
-        phaseLabels = listOf("撒网", "翻看", "整理"),
+        phaseLabels = listOf("Search", "Inspect", "Organize"),
     )
 
     private fun historian() = SubAgentDefinition(
         id = "historian",
         name = "Historian",
-        description = "历史会话搜索 / 主题挖掘 / 跨分片综合。在 task.context 里设置 mode=read|mine|synthesize 区分用法。",
+        description = "Historical-session search, topic mining, and cross-shard synthesis. Set mode=read|mine|synthesize in task.context to select the operation.",
         systemPrompt = rolePrompt(
             role = "Historian — a bounded historical-session specialist for AmberAgent",
             capabilities = """
@@ -138,17 +138,17 @@ object SubAgentDefinitions {
             "conversation_search", "conversation_expand",
         ),
         routingHint = """
-            何时调用：需要回忆过去对话/决策 • 跨多个会话挖某个主题 • 合并多个分片的会话摘要。
-            何时不要：当前对话已经有答案 • 在当前会话里查单条消息。
-            经验：「我们之前是不是聊过 X？」→ @historian。
+            Delegate when: you need to recall past conversations or decisions • mine a topic across sessions • merge summaries from multiple shards.
+            Do not delegate when: the current conversation already contains the answer • you only need one message from the current session.
+            Rule of thumb: "Did we discuss X before?" → @historian.
         """.trimIndent(),
-        phaseLabels = listOf("翻档", "比对", "编年"),
+        phaseLabels = listOf("Retrieve", "Compare", "Timeline"),
     )
 
     private fun oracle() = SubAgentDefinition(
         id = "oracle",
         name = "Oracle",
-        description = "深度推理与评审：架构决策、艰难取舍、反复修不好的 bug 根因、代码/方案 review、关键决定前的二次复议、destructive 操作的权限/隐私/数据风险评估。",
+        description = "Deep reasoning and review for architecture decisions, difficult trade-offs, stubborn bug root causes, code or plan reviews, second opinions, and permission, privacy, or data-loss risks before destructive actions.",
         systemPrompt = rolePrompt(
             role = "Oracle — a high-judgment strategic advisor and reviewer for AmberAgent",
             capabilities = """
@@ -176,17 +176,17 @@ object SubAgentDefinitions {
             "permissions_status", "apps_list", "apps_installed_list",
         ),
         routingHint = """
-            何时调用：长期影响大的决定 • 同一问题改了 2+ 次还没好 • 高风险重构 • 提交前想要二次复议 • 代码/架构 review • destructive 操作前的「真的要做吗？」。
-            何时不要：日常普通选择 • 时间紧、足够好就行 • 你已经很有把握 • 只读或常规操作。
-            经验：「这是架构层判断」→ @oracle。「重写还是打补丁？」→ @oracle。「rm/install/发消息前评估风险」→ @oracle。「直接打补丁」→ 自己干。
+            Delegate when: the decision has long-term impact • the same issue has failed after 2+ fixes • the refactor is high risk • you want a second opinion before submitting • code or architecture needs review • a destructive action needs a "should we really do this?" check.
+            Do not delegate when: it is an ordinary choice • time is tight and good enough is enough • you are already confident • it is read-only or routine.
+            Rule of thumb: architecture judgment, rewrite versus patch, or risk before rm/install/message → @oracle. Apply a straightforward patch yourself.
         """.trimIndent(),
-        phaseLabels = listOf("审视", "权衡", "拍板"),
+        phaseLabels = listOf("Review", "Weigh", "Decide"),
     )
 
     private fun designer() = SubAgentDefinition(
         id = "designer",
         name = "Designer",
-        description = "视觉产出专家：SVG / HTML PPT / HTML widget / VChart 的版式、配色、字体、信息密度、视觉意图。",
+        description = "Visual-output specialist for SVG, HTML slides, HTML widgets, and VChart: layout, color, typography, information density, and visual intent.",
         systemPrompt = rolePrompt(
             role = "Designer — a visual-output specialist for AmberAgent's generative widgets",
             capabilities = """
@@ -208,17 +208,17 @@ object SubAgentDefinitions {
             "conversation_search", "conversation_expand",
         ),
         routingHint = """
-            何时调用：要生成 SVG/PPT/HTML 卡片且在意视觉质量 • 需要设计 system / 配色 / 版式规格 • 评审已有视觉产物。
-            何时不要：随手丢的草图 • 纯数据图表，不在意美感。
-            经验：「用户会看且会评判」→ @designer。
+            Delegate when: generating SVG, slides, or HTML cards where visual quality matters • you need a design system, palette, or layout spec • an existing visual artifact needs review.
+            Do not delegate when: it is a disposable sketch • it is a data-only chart where aesthetics do not matter.
+            Rule of thumb: if users will look at and judge the result → @designer.
         """.trimIndent(),
-        phaseLabels = listOf("构图", "配色", "调版"),
+        phaseLabels = listOf("Compose", "Color", "Refine"),
     )
 
     private fun writer() = SubAgentDefinition(
         id = "writer",
         name = "Writer",
-        description = "中文写作专家：公众号、小红书、邮件、短文、朋友圈、文学性改写、文案润色。重视文笔、节奏、情感、留白。",
+        description = "Chinese-writing specialist for public posts, social captions, email, short prose, literary rewrites, and copy editing. Prioritizes voice, rhythm, feeling, and restraint.",
         systemPrompt = """
             You are Writer — a Chinese-first prose specialist for AmberAgent.
 
@@ -252,17 +252,17 @@ object SubAgentDefinitions {
             "conversation_search", "conversation_expand",
         ),
         routingHint = """
-            何时调用：用户要的中文写作 / 文案 / 故事 / 朋友圈 / 公众号 / 邮件，且对质量有要求 • 给现有文字润色，调整气质和节奏。
-            何时不要：纯事实总结 • 通顺翻译 • 只要英文输出。
-            经验：「写得打动人」→ @writer。「翻译这段公告」→ @fixer 或自己干。
+            Delegate when: the user requests Chinese prose, copy, stories, social posts, public posts, or email with a quality bar • existing writing needs voice or rhythm polishing.
+            Do not delegate when: it is a factual summary • a straightforward translation • English output only.
+            Rule of thumb: "Make it moving" → @writer. "Translate this announcement" → @fixer or do it yourself.
         """.trimIndent(),
-        phaseLabels = listOf("构思", "起笔", "调律", "收尾"),
+        phaseLabels = listOf("Concept", "Draft", "Tune", "Close"),
     )
 
     private fun fixer() = SubAgentDefinition(
         id = "fixer",
         name = "Fixer",
-        description = "便宜模型 + 边界清晰的执行：批量翻译、格式转换（JSON↔Markdown↔YAML）、抽取列表、文件命名、模板填充。",
+        description = "Cheap-model, bounded execution for batch translation, format conversion (JSON↔Markdown↔YAML), list extraction, file naming, and template filling.",
         systemPrompt = rolePrompt(
             role = "Fixer — a fast, cheap, bounded-execution specialist for AmberAgent",
             capabilities = """
@@ -285,12 +285,12 @@ object SubAgentDefinitions {
         // No baked reasoning level: respect the user's "Inherit" choice. The routing hint
         // tells the supervisor to pair this with a cheap fast model + low/off reasoning.
         routingHint = """
-            何时调用：边界清晰的机械变换 • 批量翻译 / 格式化 / 抽取 • 便宜模型显然能搞定。
-            何时不要：需要研究 / 决策 / 审美判断 / 强写作 / 中文文笔。
-            经验：「把这堆改成 Markdown」→ @fixer。「这段重写得更有调性」→ @writer。
-            建议：搭配快速便宜的模型 + 推理设为 OFF 或 LOW。
+            Delegate when: the transformation is mechanically bounded • you need batch translation, formatting, or extraction • a cheap model is clearly sufficient.
+            Do not delegate when: research, decisions, aesthetic judgment, strong writing, or Chinese prose quality is required.
+            Rule of thumb: "Turn this batch into Markdown" → @fixer. "Rewrite this with more character" → @writer.
+            Pair with a fast, inexpensive model and OFF or LOW reasoning.
         """.trimIndent(),
-        phaseLabels = listOf("拆解", "处理", "输出"),
+        phaseLabels = listOf("Break down", "Process", "Output"),
     )
 
     // ---------- Prompt templates ----------

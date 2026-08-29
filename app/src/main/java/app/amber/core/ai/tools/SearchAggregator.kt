@@ -33,7 +33,8 @@ internal object SearchAggregator {
     suspend fun search(
         settings: Settings,
         params: JsonObject,
-        executor: SearchExecutor = ::executeServiceSearch,
+        executor: SearchExecutor? = null,
+        locale: Locale = Locale.getDefault(),
     ): JsonObject = coroutineScope {
         val query = params.string("query") ?: params.string("q") ?: error("query is required")
         val topic = params.string("topic")?.takeIf { it in allowedTopics } ?: "general"
@@ -65,13 +66,14 @@ internal object SearchAggregator {
                     timeRange = timeRange,
                     recencyDays = recencyDays,
                     options = options,
+                    locale = locale,
                 )
                 val result = runCatching {
-                    executor(
-                        options,
-                        serviceParams,
-                        settings.searchCommonOptions.copy(resultSize = perServiceSize.coerceIn(1, 20)),
+                    val commonOptions = settings.searchCommonOptions.copy(
+                        resultSize = perServiceSize.coerceIn(1, 20),
                     )
+                    executor?.invoke(options, serviceParams, commonOptions)
+                        ?: executeServiceSearch(options, serviceParams, commonOptions, locale)
                 }.getOrElse { Result.failure(it) }
                 SearchSourceResult(
                     options = options,
@@ -113,9 +115,7 @@ internal object SearchAggregator {
             if (allImages.isNotEmpty()) {
                 put(
                     "image_instruction",
-                    "搜索结果包含 ${allImages.size} 张相关图片。图片由 AmberAgent 客户端单独处理；" +
-                        "请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。" +
-                        "只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。",
+                    searchImageInstruction(allImages.size, locale),
                 )
             }
             put("sources", buildJsonArray {
@@ -147,12 +147,13 @@ internal object SearchAggregator {
         timeRange: String,
         recencyDays: Int?,
         options: SearchServiceOptions,
+        locale: Locale = Locale.getDefault(),
     ): JsonObject {
         val nativeTopic = options.supportsNativeTopic()
         val effectiveQuery = if (nativeTopic) {
             query
         } else {
-            enhanceQuery(query, topic, timeRange, recencyDays)
+            enhanceQuery(query, topic, timeRange, recencyDays, locale)
         }
         return buildJsonObject {
             put("query", effectiveQuery)
@@ -264,8 +265,9 @@ internal object SearchAggregator {
         topic: String,
         timeRange: String,
         recencyDays: Int?,
+        locale: Locale,
     ): String {
-        val today = LocalDate.now().toLocalString(true)
+        val today = LocalDate.now().toLocalString(true, locale)
         val rangeText = when {
             recencyDays != null -> "last $recencyDays days"
             timeRange == "day" -> "today $today"
@@ -285,12 +287,14 @@ internal object SearchAggregator {
         options: SearchServiceOptions,
         params: JsonObject,
         commonOptions: SearchCommonOptions,
+        locale: Locale,
     ): Result<SearchResult> {
         val service = SearchService.getService(options)
         return service.search(
             params = params,
             commonOptions = commonOptions,
             serviceOptions = options,
+            locale = locale,
         )
     }
 

@@ -22,8 +22,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.amber.agent.R
 import app.amber.feature.modelcouncil.CouncilParticipant
 import app.amber.feature.modelcouncil.CouncilParticipantKind
 import app.amber.feature.modelcouncil.CouncilParticipantStatus
@@ -63,6 +65,7 @@ fun CouncilMembersSheet(
     val workspace = workspaceColors()
     val chatTheme = LocalChatTheme.current
     val members = room.participants.filter { it.status != CouncilParticipantStatus.DISMISSED }
+    val defaultObjective = stringResource(R.string.council_room_default_objective)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -78,7 +81,7 @@ fun CouncilMembersSheet(
             item(key = "header") {
                 Column(modifier = Modifier.padding(bottom = 6.dp)) {
                     Text(
-                        text = room.objective.ifBlank { "议会讨论" },
+                        text = room.objective.ifBlank { defaultObjective },
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = chatTheme.ink,
@@ -94,7 +97,7 @@ fun CouncilMembersSheet(
 
             item(key = "roster-eyebrow") {
                 Text(
-                    text = "// 成员",
+                    text = stringResource(R.string.council_room_members_heading),
                     modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
@@ -138,7 +141,7 @@ fun CouncilMembersSheet(
                                 modifier = Modifier.size(18.dp),
                             )
                             Text(
-                                text = "重新开始议会",
+                                text = stringResource(R.string.council_room_restart),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -153,7 +156,7 @@ fun CouncilMembersSheet(
                     modifier = Modifier.padding(vertical = 14.dp),
                 )
                 Text(
-                    text = "// 综合结论",
+                    text = stringResource(R.string.council_room_synthesis_heading),
                     modifier = Modifier.padding(bottom = 9.dp),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
@@ -171,7 +174,7 @@ fun CouncilMembersSheet(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = chatTheme.accent)
                             Text(
-                                text = "主持正在综合…",
+                                text = stringResource(R.string.council_room_synthesizing),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = workspace.muted,
                             )
@@ -180,7 +183,7 @@ fun CouncilMembersSheet(
 
                     else -> {
                         Text(
-                            text = "讨论进行中，主持会在所有成员发言结束后给出综合结论。",
+                            text = stringResource(R.string.council_room_synthesis_in_progress),
                             style = MaterialTheme.typography.bodyMedium,
                             color = workspace.muted,
                         )
@@ -191,13 +194,21 @@ fun CouncilMembersSheet(
     }
 }
 
+@Composable
 private fun membersSubtitle(room: CouncilRoom): String {
     val hostName = room.host?.name?.ifBlank { "Host" } ?: "Host"
     val memberCount = room.participants.count { it.status != CouncilParticipantStatus.DISMISSED }
     val spoken = room.activeGuests.count { it.status == CouncilParticipantStatus.SPOKEN }
     val total = room.activeGuests.size
     val round = room.round.coerceAtLeast(1)
-    return "主持 $hostName · $memberCount 位成员 · 第 $round 轮 · 已发言 $spoken/$total"
+    return stringResource(
+        R.string.council_room_members_subtitle,
+        hostName,
+        memberCount,
+        round,
+        spoken,
+        total,
+    )
 }
 
 @Composable
@@ -241,16 +252,16 @@ private fun MemberRow(participant: CouncilParticipant, isHost: Boolean) {
 @Composable
 private fun MemberStatusPill(participant: CouncilParticipant, isHost: Boolean) {
     if (isHost) {
-        WorkspaceStatusPill(text = "主持", tone = WorkspaceTone.Warning)
+        WorkspaceStatusPill(text = stringResource(R.string.council_room_host_status), tone = WorkspaceTone.Warning)
         return
     }
     val (label, tone) = when (participant.status) {
-        CouncilParticipantStatus.SPEAKING -> "发言中" to WorkspaceTone.Success
-        CouncilParticipantStatus.WAITING -> "等待" to WorkspaceTone.Neutral
-        CouncilParticipantStatus.SPOKEN -> "已发言" to WorkspaceTone.Neutral
-        CouncilParticipantStatus.INVITED -> "已邀请" to WorkspaceTone.Accent
-        CouncilParticipantStatus.IDLE -> "待发言" to WorkspaceTone.Neutral
-        CouncilParticipantStatus.DISMISSED -> "已移除" to WorkspaceTone.Danger
+        CouncilParticipantStatus.SPEAKING -> stringResource(R.string.council_room_status_speaking) to WorkspaceTone.Success
+        CouncilParticipantStatus.WAITING -> stringResource(R.string.council_room_status_waiting) to WorkspaceTone.Neutral
+        CouncilParticipantStatus.SPOKEN -> stringResource(R.string.council_room_status_spoken) to WorkspaceTone.Neutral
+        CouncilParticipantStatus.INVITED -> stringResource(R.string.council_room_status_invited) to WorkspaceTone.Accent
+        CouncilParticipantStatus.IDLE -> stringResource(R.string.council_room_status_idle) to WorkspaceTone.Neutral
+        CouncilParticipantStatus.DISMISSED -> stringResource(R.string.council_room_status_dismissed) to WorkspaceTone.Danger
     }
     WorkspaceStatusPill(text = label, tone = tone)
 }

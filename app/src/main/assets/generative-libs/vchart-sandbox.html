@@ -12,17 +12,19 @@ html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple
 <script src="./vchart.min.js"></script>
 </head>
 <body>
-<div id="loading">正在渲染图表...</div>
+<div id="loading">{{AMBER_HTML_VCHART_LOADING}}</div>
 <div id="root"></div>
 <div id="error"></div>
 <script>
 (function(){
   var rendered = false;
+  var timeoutError = {{AMBER_HTML_VCHART_TIMEOUT_JS}};
+  var renderErrorPrefix = {{AMBER_HTML_VCHART_ERROR_PREFIX_JS}};
   var timeout = setTimeout(function(){
     if(!rendered){
       document.getElementById('loading').style.display='none';
       document.getElementById('error').style.display='block';
-      document.getElementById('error').textContent='图表渲染超时';
+      document.getElementById('error').textContent=timeoutError;
       try{ AmberWidget.resize(120); }catch(e){}
     }
   }, 5000);
@@ -48,7 +50,7 @@ html,body{margin:0;padding:0;background:transparent;font-family:system-ui,-apple
       }, 100);
     }catch(e){
       document.getElementById('error').style.display='block';
-      document.getElementById('error').textContent='图表渲染失败: ' + (e.message || e);
+      document.getElementById('error').textContent=renderErrorPrefix + ': ' + (e.message || e);
       try{ AmberWidget.resize(120); }catch(ex){}
     }
   };

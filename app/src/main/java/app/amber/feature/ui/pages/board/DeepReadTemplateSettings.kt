@@ -25,6 +25,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import app.amber.agent.R
 import app.amber.feature.board.DeepReadTemplateIds
 import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplatePackage
@@ -48,12 +50,18 @@ fun DeepReadTemplateSettingsRow(
 ) {
     var previewTarget by remember { mutableStateOf<TemplatePreviewTarget?>(null) }
     val darkTheme = LocalDarkMode.current
-    val sampleTitle = "具身智能进入家庭前夜"
+    val sampleTitle = stringResource(R.string.deep_read_sample_title)
+    val templateUnavailableMessage = stringResource(R.string.deep_read_template_unavailable)
+    val templatePreviewFailedTemplate = stringResource(
+        R.string.deep_read_template_preview_failed,
+        "__TEMPLATE_ERROR__",
+    )
     val sampleOutput = remember { DeepReadTemplateRenderer.sampleOutput() }
     val selectedTemplateName = when (board.deepReadTemplateId) {
-        DeepReadTemplateIds.COMPOSE_MAGAZINE -> "默认杂志"
-        DeepReadTemplateIds.EDITORIAL_SLANT -> "斜切图文"
-        else -> customTemplates.firstOrNull { it.id == board.deepReadTemplateId }?.name ?: "当前模板"
+        DeepReadTemplateIds.COMPOSE_MAGAZINE -> stringResource(R.string.deep_read_template_default_magazine)
+        DeepReadTemplateIds.EDITORIAL_SLANT -> stringResource(R.string.deep_read_template_editorial_slant)
+        else -> customTemplates.firstOrNull { it.id == board.deepReadTemplateId }?.name
+            ?: stringResource(R.string.deep_read_template_current)
     }
     fun previewSelectedTemplate() {
         previewTarget = when (board.deepReadTemplateId) {
@@ -68,7 +76,10 @@ fun DeepReadTemplateSettingsRow(
             else -> {
                 val template = customTemplates.firstOrNull { it.id == board.deepReadTemplateId }
                 if (template == null) {
-                    TemplatePreviewTarget(selectedTemplateName, "<html><body><p>当前模板不可用</p></body></html>")
+                    TemplatePreviewTarget(
+                        selectedTemplateName,
+                        "<html><body><p>$templateUnavailableMessage</p></body></html>",
+                    )
                 } else {
                     runCatching {
                         DeepReadTemplateRenderer.renderCustom(
@@ -80,7 +91,10 @@ fun DeepReadTemplateSettingsRow(
                         )
                             .toPreviewTarget(template.name)
                     }.getOrElse {
-                        TemplatePreviewTarget(template.name, "<html><body><p>模板预览失败：${it.message.orEmpty()}</p></body></html>")
+                        TemplatePreviewTarget(
+                            template.name,
+                            "<html><body><p>${templatePreviewFailedTemplate.replace("__TEMPLATE_ERROR__", it.message.orEmpty())}</p></body></html>",
+                        )
                     }
                 }
             }
@@ -88,25 +102,25 @@ fun DeepReadTemplateSettingsRow(
     }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("深度阅读模板", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.deep_read_template_title), style = MaterialTheme.typography.titleSmall)
             TextButton(onClick = onCreateTemplate) {
-                Text("生成新模板")
+                Text(stringResource(R.string.deep_read_template_create))
             }
         }
         Text(
-            "模板会持久化复用；AI 只生成版式模板。预览使用固定样稿，只看 UI 风格，不混入真实新闻内容。",
+            stringResource(R.string.deep_read_template_description),
             style = MaterialTheme.typography.bodySmall,
             color = workspaceColors().muted,
         )
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TemplateChip(
                 selected = board.deepReadTemplateId == DeepReadTemplateIds.COMPOSE_MAGAZINE,
-                label = "默认杂志",
+                label = stringResource(R.string.deep_read_template_default_magazine),
                 onClick = { onSelect(DeepReadTemplateIds.COMPOSE_MAGAZINE) },
             )
             TemplateChip(
                 selected = board.deepReadTemplateId == DeepReadTemplateIds.EDITORIAL_SLANT,
-                label = "斜切图文",
+                label = stringResource(R.string.deep_read_template_editorial_slant),
                 onClick = { onSelect(DeepReadTemplateIds.EDITORIAL_SLANT) },
             )
         }
@@ -116,10 +130,10 @@ fun DeepReadTemplateSettingsRow(
             shape = RoundedCornerShape(18.dp),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
         ) {
-            Text("预览当前模板：$selectedTemplateName")
+            Text(stringResource(R.string.deep_read_template_preview, selectedTemplateName))
         }
         if (customTemplates.isNotEmpty()) {
-            Text("自定义模板", style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
+            Text(stringResource(R.string.deep_read_template_custom), style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
             customTemplates.forEach { template ->
                 Row(
                     Modifier.fillMaxWidth(),
@@ -133,14 +147,14 @@ fun DeepReadTemplateSettingsRow(
                         modifier = Modifier.weight(1f),
                     )
                     TextButton(onClick = { onDelete(template) }) {
-                        Text("删除")
+                        Text(stringResource(R.string.delete))
                     }
                 }
             }
         }
         if (invalidTemplateCount > 0) {
             Text(
-                "$invalidTemplateCount 个本地模板已失效，阅读页会自动回退默认排版。",
+                stringResource(R.string.deep_read_template_invalid_count, invalidTemplateCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -181,11 +195,11 @@ private fun DeepReadTemplatePreviewDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("${target.name} 预览") },
+        title = { Text(stringResource(R.string.deep_read_template_preview, target.name)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "以下是固定占位样稿，只用于判断模板版式和字体层级。",
+                    stringResource(R.string.deep_read_template_preview_description),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                 )
@@ -202,7 +216,7 @@ private fun DeepReadTemplatePreviewDialog(
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text(stringResource(R.string.update_card_close))
             }
         },
     )

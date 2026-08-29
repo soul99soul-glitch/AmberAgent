@@ -155,7 +155,7 @@ fun ErrorCard(
                 ) {
                     if (isGlobal) {
                         Text(
-                            text = "全局",
+                            text = stringResource(R.string.chat_page_error_global),
                             style = MaterialTheme.typography.labelSmall,
                             color = contentColor,
                         )

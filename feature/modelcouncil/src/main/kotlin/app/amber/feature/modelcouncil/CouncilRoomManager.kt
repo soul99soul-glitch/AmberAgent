@@ -447,7 +447,7 @@ class CouncilRoomManager(
             participants = room.participants + guest,
             phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
                 id = msgId(),
-                label = "${guest.name} 加入",
+                label = "${guest.name} joined",
                 mode = room.mode,
                 createdAtMs = now,
             ),
@@ -500,7 +500,7 @@ class CouncilRoomManager(
             round = if (mode == CouncilRoomMode.DEBATE) 0 else room.round,
             phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
                 id = msgId(),
-                label = "切换到 ${modeLabel(mode)}",
+                label = "Switched to ${modeLabel(mode)}",
                 mode = mode,
                 createdAtMs = now,
             ),
@@ -553,8 +553,8 @@ class CouncilRoomManager(
                     val docName = attachments.filterIsInstance<UIMessagePart.Document>()
                         .firstOrNull()?.fileName
                     when {
-                        docName != null -> "讨论用户提供的文件：$docName"
-                        attachments.any { it is UIMessagePart.Image } -> "讨论用户提供的图片"
+                        docName != null -> "Discuss the file provided by the user: $docName"
+                        attachments.any { it is UIMessagePart.Image } -> "Discuss the image provided by the user"
                         else -> room.objective
                     }
                 }
@@ -621,7 +621,7 @@ class CouncilRoomManager(
             }
             val now = nowMs()
             val hostEcho = if (action.instruction.isBlank()) {
-                "${guest.name}，请发言。"
+                "${guest.name}, please speak."
             } else {
                 "${guest.name}，${action.instruction}"
             }
@@ -679,7 +679,7 @@ class CouncilRoomManager(
                     role = "host",
                     round = room.round,
                     mode = room.mode,
-                    text = "${guest.name}，针对 ${seed.authorName} 的发言补充回应。".take(MAX_MESSAGE_CHARS),
+                    text = "${guest.name}, please respond to ${seed.authorName}'s contribution.".take(MAX_MESSAGE_CHARS),
                     createdAtMs = now,
                     status = CouncilMessageStatus.COMPLETED,
                 ),
@@ -725,7 +725,7 @@ class CouncilRoomManager(
                     role = "host",
                     round = room.round,
                     mode = room.mode,
-                    text = "请各位针对 ${seed.authorName} 的发言补充或反驳。".take(MAX_MESSAGE_CHARS),
+                    text = "Please add to or challenge ${seed.authorName}'s contribution.".take(MAX_MESSAGE_CHARS),
                     createdAtMs = now,
                     status = CouncilMessageStatus.COMPLETED,
                 ),
@@ -776,7 +776,7 @@ class CouncilRoomManager(
                 role = "host",
                 round = room.round,
                 mode = room.mode,
-                text = "${guest.name}，换个方向：${action.newDirection}".take(MAX_MESSAGE_CHARS),
+                text = "${guest.name}, consider this direction: ${action.newDirection}".take(MAX_MESSAGE_CHARS),
                 createdAtMs = now,
                 status = CouncilMessageStatus.COMPLETED,
             ),
@@ -1090,7 +1090,7 @@ class CouncilRoomManager(
                     status = statusForMode(room.mode),
                     phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
                         id = msgId(),
-                        label = "第 $round 轮 · ${modeShortLabel(room.mode)}",
+                        label = "Round $round · ${modeShortLabel(room.mode)}",
                         mode = room.mode,
                         createdAtMs = nowMs(),
                     ),
@@ -1181,7 +1181,7 @@ class CouncilRoomManager(
             completeSynthesis(
                 conversationId = conversationId,
                 synthesisMessageId = msgId(),
-                synthesis = "（无法生成综合结论：未找到主持模型，请在设置中为当前助手配置主模型。）",
+                synthesis = "Unable to synthesize: no host model is configured. Configure a primary model for the current assistant in Settings.",
                 warnings = listOf("Host model not found; synthesis skipped."),
             )
             return
@@ -1192,7 +1192,7 @@ class CouncilRoomManager(
                 status = CouncilRoomStatus.FINALIZING,
                 phaseMarkers = room.phaseMarkers + CouncilPhaseMarker(
                     id = msgId(),
-                    label = "Host 综合",
+                    label = "Host synthesis",
                     mode = CouncilRoomMode.SYNTHESIZE,
                     createdAtMs = nowMs(),
                 ),
@@ -1317,7 +1317,7 @@ class CouncilRoomManager(
             .filter { it.authorId == COUNCIL_ROOM_USER_ID && it.attachmentText.isNotBlank() }
             .joinToString("\n\n") { it.attachmentText }
         if (docs.isBlank()) return ""
-        return "\n\n———\n用户附带的文件内容（请结合其作答）：\n" + docs.take(MAX_CONTEXT_CHARS)
+        return "\n\n---\nFile content provided by the user (use it when responding):\n" + docs.take(MAX_CONTEXT_CHARS)
     }
 
     /**
@@ -1335,15 +1335,15 @@ class CouncilRoomManager(
         } ?: return base
         return buildString {
             append(base)
-            append("\n\n———\n最新指引（来自 ${steer.authorName}，请优先据此调整你的发言）：\n")
+            append("\n\n---\nLatest guidance from ${steer.authorName} (prioritize it when adjusting your contribution):\n")
             append(steer.text.take(600))
         }
     }
 
     private fun modeShortLabel(mode: CouncilRoomMode): String = when (mode) {
-        CouncilRoomMode.EXPLORE -> "自由群聊"
-        CouncilRoomMode.DEBATE -> "辩论"
-        CouncilRoomMode.SYNTHESIZE -> "综合"
+        CouncilRoomMode.EXPLORE -> "Explore"
+        CouncilRoomMode.DEBATE -> "Debate"
+        CouncilRoomMode.SYNTHESIZE -> "Synthesize"
     }
 
     /**
@@ -1355,20 +1355,20 @@ class CouncilRoomManager(
     private suspend fun classifyMode(room: CouncilRoom, settings: Settings): CouncilRoomMode? {
         val hostModelId = resolveHostModelId(room, settings) ?: return null
         val prompt = buildString {
-            appendLine("判断下面这个议题更适合哪种多模型讨论模式，只回一个英文词：")
-            appendLine("- explore：开放/发散，集思广益、还没定方向、想多挖角度和可能性。")
-            appendLine("- debate：有明确分歧或要做决策，需要立场对抗、互相质疑、压力测试。")
+            appendLine("Choose the more suitable multi-model discussion mode for the topic below. Reply with one English word only:")
+            appendLine("- explore: open and divergent; brainstorm when the direction is not settled and more angles or possibilities are needed.")
+            appendLine("- debate: clear disagreement or a decision is required; challenge positions and pressure-test the options.")
             appendLine()
-            appendLine("议题：${room.objective}")
+            appendLine("Topic: ${room.objective}")
             appendLine()
-            append("只回 explore 或 debate，不要解释。")
+            append("Reply with explore or debate only; do not explain.")
         }
         val result = runCatching {
             withTimeoutOrNull(20_000L) {
                 modelRunner.generate(
                     settings = settings,
                     modelId = hostModelId,
-                    systemPrompt = "你是一个简洁的分类器，只输出一个英文词。",
+                    systemPrompt = "You are a concise classifier. Output one English word only.",
                     userPrompt = prompt,
                     outputBudgetChars = 50,
                     reasoningLevel = ReasoningLevel.OFF,
@@ -1422,7 +1422,7 @@ class CouncilRoomManager(
                 r.copy(
                     phaseMarkers = r.phaseMarkers + CouncilPhaseMarker(
                         id = msgId(),
-                        label = "主持人正在按需求组建议会…",
+                        label = "Host is assembling a topic-specific council…",
                         mode = r.mode,
                         createdAtMs = nowMs(),
                     ),
@@ -1456,7 +1456,7 @@ class CouncilRoomManager(
                         kind = CouncilParticipantKind.GUEST,
                         modelId = model.id,
                         systemPrompt = perspective.ifBlank {
-                            "请从你的角色视角对议题给出清晰、可验证、不过度发散的判断。"
+                            "From your role's perspective, give a clear, testable, and focused judgment on the topic."
                         },
                         modelName = model.displayName,
                     ),
@@ -1484,13 +1484,13 @@ class CouncilRoomManager(
     ): List<Pair<String, String>> {
         val hostModelId = resolveHostModelId(room, settings) ?: return emptyList()
         val prompt = buildString {
-            appendLine("你是一场多模型议会的主持人。请针对下面的议题，自主设计最合适的 2-$maxGuests 个参会角色——")
-            appendLine("不要套用固定模板，要为这个具体议题量身设计：决策/争议类可设计对抗或评审角色，探索/创作/事实类则按议题真正需要的专业视角或人格来设计。")
-            appendLine("每个角色给两项：")
-            appendLine("- name：简短角色名（中文，4-12 字，体现其立场/专长/视角）")
-            appendLine("- perspective：一句话说明这个角色从什么角度参与、重点关注什么。")
+            appendLine("You are the host of a multi-model council. For the topic below, design the best 2-$maxGuests participant roles independently.")
+            appendLine("Do not reuse a fixed template. Tailor the roles to this topic: decisions or disputes may need opposing or review roles, while exploration, creative, or factual topics need the perspectives or expertise they actually require.")
+            appendLine("Give each role two fields:")
+            appendLine("- name: a short role name (4-12 words) that conveys its position, expertise, or perspective")
+            appendLine("- perspective: one sentence describing the angle this role brings and what it should focus on")
             appendLine()
-            appendLine("议题：$objective")
+            appendLine("Topic: $objective")
             // FULL mode: if the host already ran a pre-topic research turn, the
             // gathered facts live in room.context. Feed them to the roster planner so
             // the bespoke roles are tailored to what was actually found (e.g. once the
@@ -1498,18 +1498,18 @@ class CouncilRoomManager(
             // choices instead of generic "基准评测派"/"产品落地官").
             if (room.context.isNotBlank()) {
                 appendLine()
-                appendLine("已查到的关键事实（请据此选择最契合的分析视角，而非泛泛角色）：")
+                appendLine("Key facts already gathered (use them to choose the most relevant analytical perspectives rather than generic roles):")
                 appendLine(room.context.take(2000))
             }
             appendLine()
-            append("只输出 JSON 数组，例如：[{\"name\":\"成本核算\",\"perspective\":\"从投入产出和长期成本评估方案是否划算。\"}]。不要解释，不要代码块。")
+            append("Output a JSON array only, for example: [{\"name\":\"Cost Analyst\",\"perspective\":\"Evaluate whether the option is worthwhile over the long term based on inputs, outputs, and total cost.\"}]. Do not explain or use a code block.")
         }
         val result = runCatching {
             withTimeoutOrNull(25_000L) {
                 modelRunner.generate(
                     settings = settings,
                     modelId = hostModelId,
-                    systemPrompt = "你只输出 JSON 数组，不要任何多余文字。",
+                    systemPrompt = "Output a JSON array only, with no extra text.",
                     userPrompt = prompt,
                     outputBudgetChars = 800,
                     reasoningLevel = ReasoningLevel.OFF,
@@ -1666,7 +1666,7 @@ class CouncilRoomManager(
             r.copy(
                 phaseMarkers = r.phaseMarkers + CouncilPhaseMarker(
                     id = msgId(),
-                    label = "主持人正在联网调研…",
+                    label = "Host is researching current facts…",
                     mode = r.mode,
                     createdAtMs = nowMs(),
                 ),
@@ -1703,7 +1703,7 @@ class CouncilRoomManager(
                 val merged = if (r.context.isBlank()) {
                     summary.trim().take(MAX_CONTEXT_CHARS)
                 } else {
-                    (r.context.trim() + "\n\n—— 主持人调研补充 ——\n" + summary.trim()).take(MAX_CONTEXT_CHARS)
+                    (r.context.trim() + "\n\n--- Host research supplement ---\n" + summary.trim()).take(MAX_CONTEXT_CHARS)
                 }
                 r.copy(context = merged, updatedAtMs = nowMs())
             }
@@ -1850,7 +1850,7 @@ class CouncilRoomManager(
                         conversationId = conversationId,
                         messageId = messageId,
                         status = CouncilMessageStatus.COMPLETED,
-                        text = "（主持人判断当前讨论已自洽，无需补充外部调研。）",
+                        text = "The host found the discussion self-contained; no additional external research was needed.",
                         warnings = outcome.warnings,
                         error = "",
                         authorId = host.id,
@@ -1881,7 +1881,7 @@ class CouncilRoomManager(
                 // room resumes its running status. We return null (no research
                 // summary) — the user's clarification IS the contribution here.
                 val question = outcome.displayQuestion.trim().ifBlank {
-                    "请补充说明你的需求。"
+                    "Please clarify your request."
                 }
                 completeMessage(
                     conversationId = conversationId,
@@ -2011,7 +2011,7 @@ class CouncilRoomManager(
                 ))
             }
             val question = text.substringAfter(CouncilRoomPrompts.ASK_USER_SENTINEL).trim()
-            return question.ifBlank { "请补充说明你的需求。" }
+            return question.ifBlank { "Please clarify your request." }
         }
         // Normal review: finalize the streaming message in place with the full text.
         mutate(conversationId) { r ->

@@ -45,6 +45,7 @@ import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Settings
 import app.amber.agent.R
+import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionCapability
 import app.amber.feature.system.AgentPermissionRisk
@@ -106,7 +107,11 @@ fun SettingSystemAccessPage(
         try {
             context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: ActivityNotFoundException) {
-            Toast.makeText(context, "无法打开系统权限设置页", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.setting_system_access_open_failed),
+                Toast.LENGTH_SHORT,
+            ).show()
         }
     }
 
@@ -127,13 +132,13 @@ fun SettingSystemAccessPage(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item("summary") {
-                CardGroup(title = { Text("权限中心") }) {
+                CardGroup(title = { Text(stringResource(R.string.setting_system_access_center)) }) {
                     item(
                         leadingContent = { Icon(Lucide.Settings, contentDescription = null) },
-                        headlineContent = { Text("核心运行时权限") },
+                        headlineContent = { Text(stringResource(R.string.setting_system_access_core_runtime_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("按需授权，不做后台静默采集。所有系统工具调用都会先检查权限并写入审计日志。")
+                                Text(stringResource(R.string.setting_system_access_core_runtime_desc))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -147,13 +152,13 @@ fun SettingSystemAccessPage(
                                         },
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
-                                        Text("申请核心权限", maxLines = 1)
+                                        Text(stringResource(R.string.setting_system_access_request_core), maxLines = 1)
                                     }
                                     OutlinedButton(
                                         onClick = { refreshToken++ },
                                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
                                     ) {
-                                        Text("刷新", maxLines = 1)
+                                        Text(stringResource(R.string.setting_system_access_refresh), maxLines = 1)
                                     }
                                 }
                             }
@@ -163,13 +168,14 @@ fun SettingSystemAccessPage(
             }
 
             item("runtime") {
-                CardGroup(title = { Text("运行时权限") }) {
+                CardGroup(title = { Text(stringResource(R.string.setting_system_access_runtime_section)) }) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess == null }
                         .forEach { (capability, status) ->
                             permissionItem(
                                 capability = capability,
                                 status = status,
+                                displayContext = context,
                                 onClick = {
                                     if (status != AgentPermissionStatus.Granted) {
                                         requestRuntime(capability)
@@ -187,13 +193,14 @@ fun SettingSystemAccessPage(
             }
 
             item("special") {
-                CardGroup(title = { Text("特殊权限") }) {
+                CardGroup(title = { Text(stringResource(R.string.setting_system_access_special_section)) }) {
                     capabilities
                         .filter { (capability, _) -> capability.specialAccess != null }
                         .forEach { (capability, status) ->
                             permissionItem(
                                 capability = capability,
                                 status = status,
+                                displayContext = context,
                                 onClick = {
                                     if (status != AgentPermissionStatus.Granted) {
                                         openSpecial(capability)
@@ -211,30 +218,41 @@ fun SettingSystemAccessPage(
             }
 
             item("external_file_access") {
-                CardGroup(title = { Text("外部文件访问范围") }) {
+                CardGroup(title = { Text(stringResource(R.string.setting_system_access_external_section)) }) {
                     item(
                         leadingContent = { Icon(Lucide.FileText, contentDescription = null) },
-                        headlineContent = { Text("全文件访问 allowlist") },
+                        headlineContent = { Text(stringResource(R.string.setting_system_access_external_title)) },
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("授权后也只允许 Agent 访问这里列出的绝对路径前缀。写入、删除和覆盖仍会二次确认。")
+                                Text(stringResource(R.string.setting_system_access_external_desc))
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        text = if (externalAccess.enabled) "已启用" else "未启用",
+                                        text = stringResource(
+                                            if (externalAccess.enabled) {
+                                                R.string.prompt_page_enabled
+                                            } else {
+                                                R.string.prompt_page_disabled
+                                            },
+                                        ),
                                         color = if (externalAccess.enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                                     )
-                                    Text("根目录 ${externalAccess.roots.size} 个")
+                                    Text(
+                                        stringResource(
+                                            R.string.setting_system_access_root_count,
+                                            externalAccess.roots.size,
+                                        )
+                                    )
                                 }
                                 OutlinedTextField(
                                     value = externalRootInput,
                                     onValueChange = { externalRootInput = it },
                                     modifier = Modifier.fillMaxWidth(),
                                     singleLine = true,
-                                    label = { Text("允许访问的绝对路径") },
-                                    supportingText = { Text("例如 /storage/emulated/0/Download 或 /sdcard/Documents") },
+                                    label = { Text(stringResource(R.string.setting_system_access_path_label)) },
+                                    supportingText = { Text(stringResource(R.string.setting_system_access_path_hint)) },
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -261,7 +279,7 @@ fun SettingSystemAccessPage(
                                         },
                                         enabled = externalRootInput.isNotBlank(),
                                     ) {
-                                        Text("加入并启用", maxLines = 1)
+                                        Text(stringResource(R.string.setting_system_access_add_enable), maxLines = 1)
                                     }
                                     OutlinedButton(
                                         onClick = {
@@ -279,7 +297,7 @@ fun SettingSystemAccessPage(
                                             }
                                         },
                                     ) {
-                                        Text("清空", maxLines = 1)
+                                        Text(stringResource(R.string.clear), maxLines = 1)
                                     }
                                 }
                                 if (externalAccess.roots.isNotEmpty()) {
@@ -313,6 +331,7 @@ fun SettingSystemAccessPage(
 private fun CardGroupScope.permissionItem(
     capability: AgentPermissionCapability,
     status: AgentPermissionStatus,
+    displayContext: android.content.Context,
     onClick: () -> Unit,
     action: @Composable () -> Unit,
 ) {
@@ -333,10 +352,10 @@ private fun CardGroupScope.permissionItem(
                 },
             )
         },
-        headlineContent = { Text(capability.title) },
+        headlineContent = { Text(PermissionDisplayLocalizer.title(displayContext, capability)) },
         supportingContent = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(capability.description)
+                Text(PermissionDisplayLocalizer.description(displayContext, capability))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = status.label(),
@@ -357,7 +376,10 @@ private fun CardGroupScope.permissionItem(
                 }
                 if (capability.toolNames.isNotEmpty()) {
                     Text(
-                        text = "工具: ${capability.toolNames.joinToString()}",
+                        text = stringResource(
+                            R.string.setting_system_access_tools,
+                            capability.toolNames.joinToString(),
+                        ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
@@ -373,28 +395,36 @@ private fun PermissionAction(
     onClick: () -> Unit,
 ) {
     when (status) {
-        AgentPermissionStatus.Granted -> Text("已授权", color = MaterialTheme.colorScheme.primary)
-        AgentPermissionStatus.Unsupported -> Text("不支持", color = MaterialTheme.colorScheme.outline)
+        AgentPermissionStatus.Granted -> Text(
+            stringResource(R.string.setting_system_access_status_granted),
+            color = MaterialTheme.colorScheme.primary,
+        )
+        AgentPermissionStatus.Unsupported -> Text(
+            stringResource(R.string.setting_system_access_status_unsupported),
+            color = MaterialTheme.colorScheme.outline,
+        )
         AgentPermissionStatus.Denied,
         AgentPermissionStatus.SpecialNeeded -> {
             OutlinedButton(onClick = onClick) {
-                Text("授权")
+                Text(stringResource(R.string.setting_system_access_authorize))
             }
         }
     }
 }
 
+@Composable
 private fun AgentPermissionStatus.label(): String =
     when (this) {
-        AgentPermissionStatus.Granted -> "已授权"
-        AgentPermissionStatus.Denied -> "未授权"
-        AgentPermissionStatus.SpecialNeeded -> "需系统设置"
-        AgentPermissionStatus.Unsupported -> "当前构建不支持"
+        AgentPermissionStatus.Granted -> stringResource(R.string.setting_system_access_status_granted)
+        AgentPermissionStatus.Denied -> stringResource(R.string.setting_system_access_status_denied)
+        AgentPermissionStatus.SpecialNeeded -> stringResource(R.string.setting_system_access_status_special_needed)
+        AgentPermissionStatus.Unsupported -> stringResource(R.string.setting_system_access_status_unsupported)
     }
 
+@Composable
 private fun AgentPermissionRisk.label(): String =
     when (this) {
-        AgentPermissionRisk.Normal -> "普通"
-        AgentPermissionRisk.Sensitive -> "敏感"
-        AgentPermissionRisk.High -> "高敏感"
+        AgentPermissionRisk.Normal -> stringResource(R.string.setting_system_access_risk_normal)
+        AgentPermissionRisk.Sensitive -> stringResource(R.string.setting_system_access_risk_sensitive)
+        AgentPermissionRisk.High -> stringResource(R.string.setting_system_access_risk_high)
     }

@@ -20,6 +20,7 @@ import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.common.http.AcceptLanguageBuilder
 import app.amber.agent.BuildConfig
+import app.amber.agent.R
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
 import app.amber.core.ai.ChatGenerationRoundEngine
@@ -28,6 +29,7 @@ import app.amber.core.ai.GenerationRoundEngine
 import app.amber.core.ai.RunKernel
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.transformers.TemplateTransformer
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppSearchBridge
 import app.amber.core.settings.prefs.AgentPrefs
@@ -464,6 +466,7 @@ val dataSourceModule = module {
             workspaceManager = get(),
             messageNodeDao = get(),
             conversationDao = get(),
+            copy = OAuthDisplayLocalizer.artifact(get()),
         )
     }
 
@@ -547,9 +550,17 @@ val dataSourceModule = module {
         MessageFtsManager(get())
     }
 
-    single { McpManager(settingsStore = get(), appScope = get(), filesManager = get(), appEventBus = get()) }
+    single {
+        McpManager(
+            context = get(),
+            settingsStore = get(),
+            appScope = get(),
+            filesManager = get(),
+            appEventBus = get(),
+        )
+    }
 
-    single { PermissionDecisionResolver() }
+    single { PermissionDecisionResolver(appContext = get<Context>()) }
 
     single {
         AgentToolDispatcher(
@@ -639,7 +650,13 @@ val dataSourceModule = module {
     }
 
     single { OpenAIProvider(client = get(), context = get()) }
-    single { GoogleProvider(client = get(), context = get()) }
+    single {
+        GoogleProvider(
+            client = get(),
+            context = get(),
+            oauthCopy = OAuthDisplayLocalizer.googleGeminiOAuth(get()),
+        )
+    }
     single { ClaudeProvider(client = get(), context = get()) }
     single<app.amber.ai.provider.providers.openai.StoredResponseApi> {
         get<OpenAIProvider>().storedResponses
@@ -669,7 +686,13 @@ val dataSourceModule = module {
 
     single { OpenAICodexAuthStore(context = get()) }
     single { GoogleGeminiAuthStore(context = get()) }
-    single { GoogleGeminiOAuthClient(httpClient = get(), authStore = get()) }
+    single {
+        GoogleGeminiOAuthClient(
+            httpClient = get(),
+            authStore = get(),
+            copy = OAuthDisplayLocalizer.googleGeminiOAuth(get()),
+        )
+    }
 
     single {
         SyncArchiveManager(
@@ -721,7 +744,13 @@ val dataSourceModule = module {
 
     single { GoogleOAuthConfigGate(context = get()) }
 
-    single { GoogleDriveAppDataClient(httpClient = createGoogleDriveHttpClient(get()), json = get()) }
+    single {
+        GoogleDriveAppDataClient(
+            httpClient = createGoogleDriveHttpClient(get()),
+            json = get(),
+            authorizationExpiredMessage = get<Context>().getString(R.string.backup_google_authorization_expired),
+        )
+    }
 
     single {
         GoogleDriveSyncRepository(
@@ -734,14 +763,15 @@ val dataSourceModule = module {
     // P8-08 首页「继续」聚合：各域来源 + 聚合器。
     single<ContinueCandidateSource> {
         ImageGenerationContinueSource(
+            context = get(),
             runTerminalStore = get(),
             toolEffectLedger = get(),
             conversationDao = get(),
         )
     }
-    single<ContinueCandidateSource> { CouncilContinueSource(conversationDao = get()) }
-    single<ContinueCandidateSource> { DeepReadContinueSource(hotListDao = get()) }
-    single<ContinueCandidateSource> { MiniAppDraftContinueSource(draftDao = get()) }
+    single<ContinueCandidateSource> { CouncilContinueSource(context = get(), conversationDao = get()) }
+    single<ContinueCandidateSource> { DeepReadContinueSource(hotListDao = get(), context = get()) }
+    single<ContinueCandidateSource> { MiniAppDraftContinueSource(context = get(), draftDao = get()) }
 
     single<ContinueDismissStore> { RoomContinueDismissStore(dao = get()) }
 

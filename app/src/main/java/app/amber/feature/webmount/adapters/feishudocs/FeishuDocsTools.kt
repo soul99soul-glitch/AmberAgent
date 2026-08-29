@@ -11,6 +11,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import app.amber.agent.R
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
@@ -218,7 +219,7 @@ class FeishuDocsTools(
                             maxChars = maxChars,
                         )
                     }
-                    val token = requireToken(oauth)
+                    val token = requireToken(hooks, oauth)
                     val ref = resolveDocRef(input)
                     require(ref.docType == "docx") {
                         "feishu_docs_markdown_pack OpenAPI mode requires docx; got ${ref.docType}. Use snapshot_json from feishu_docs_snapshot."
@@ -265,7 +266,7 @@ class FeishuDocsTools(
         },
         execute = { input ->
             hooks.track("feishu_docs_list", "飞书 文档列表", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val folder = input.string("folder_token")
                 val pageSize = (input.long("page_size") ?: 50L).coerceIn(1L, 200L).toInt()
                 val pageToken = input.string("page_token")
@@ -305,7 +306,7 @@ class FeishuDocsTools(
                     require(ref.docType == "docx") {
                         "feishu_docs_read currently supports docx documents; got ${ref.docType}. Use feishu_docs_snapshot for the visible WebView page."
                     }
-                    val token = requireToken(oauth)
+                    val token = requireToken(hooks, oauth)
                     val docId = ref.documentId
                     val start = (input.long("start_char") ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                     val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1L, 200_000L).toInt()
@@ -366,7 +367,7 @@ class FeishuDocsTools(
                     require(ref.docType == "docx") {
                         "feishu_docs_blocks currently supports docx documents; got ${ref.docType}. Use feishu_docs_snapshot for the visible WebView page."
                     }
-                    val token = requireToken(oauth)
+                    val token = requireToken(hooks, oauth)
                     val pageSize = (input.long("page_size") ?: 100L).coerceIn(1L, 500L).toInt()
                     val maxTextChars = (input.long("max_text_chars") ?: 500L).coerceIn(0L, 20_000L).toInt()
                     val includeRaw = input.boolean("include_raw") == true
@@ -416,7 +417,7 @@ class FeishuDocsTools(
         },
         execute = { input ->
             hooks.track("feishu_docs_search", "飞书 搜索", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val query = input.requiredString("query")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 100L).toInt()
                 val results = client.search(token, query, limit)
@@ -448,7 +449,7 @@ class FeishuDocsTools(
         allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_create", "飞书 新建文档", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val title = input.requiredString("title")
                 val folder = input.string("folder_token")
                 val created = client.createDocument(token, title, folder)
@@ -481,7 +482,7 @@ class FeishuDocsTools(
         allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_append_block", "飞书 追加段落", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
                 val parentBlockId = resolveParentBlockId(input, docId)
@@ -536,7 +537,7 @@ class FeishuDocsTools(
         allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_append_heading", "飞书 追加标题", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val docId = input.requiredString("document_id")
                 val level = (input.long("level") ?: error("level is required (1-9)"))
                     .coerceIn(1L, 9L).toInt()
@@ -582,7 +583,7 @@ class FeishuDocsTools(
         allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_append_list_item", "飞书 追加列表项", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
                 val ordered = input.boolean("ordered") == true
@@ -621,7 +622,7 @@ class FeishuDocsTools(
         allowsAutoApproval = false,
         execute = { input ->
             hooks.track("feishu_docs_append_callout", "飞书 追加 Callout", input) {
-                val token = requireToken(oauth)
+                val token = requireToken(hooks, oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
                 val parentBlockId = resolveParentBlockId(input, docId)
@@ -664,9 +665,9 @@ class FeishuDocsTools(
         }
     }
 
-    private suspend fun requireToken(oauth: WebMountOAuthClient): String =
+    private suspend fun requireToken(hooks: WebMountToolHooks, oauth: WebMountOAuthClient): String =
         oauth.getValidAccessToken("feishu")
-            ?: error("飞书 OAuth 未连接 —— 在 WebMount Stations 设置页找到「飞书云文档」一行,先点「编辑凭据」配好 App ID / Secret,再点「Connect」。")
+            ?: error(hooks.context.getString(R.string.feishu_docs_oauth_required))
 
     private fun summaryJson(s: FeishuDocSummary): JsonObject = buildJsonObject {
         put("token", s.token)

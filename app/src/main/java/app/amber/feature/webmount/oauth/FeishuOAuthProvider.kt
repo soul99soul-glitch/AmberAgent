@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.oauth
 
+import android.content.Context
 import io.ktor.client.HttpClient
 import io.ktor.client.request.headers
 import io.ktor.client.request.post
@@ -20,6 +21,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import app.amber.feature.webmount.core.WebMountOAuthToken
+import app.amber.agent.R
 import java.net.URLEncoder
 
 /**
@@ -42,7 +44,7 @@ import java.net.URLEncoder
 object FeishuOAuthProvider : OAuthProvider {
 
     override val id: String = "feishu"
-    override val displayName: String = "飞书"
+    override val displayName: String = "Feishu"
     override val requiresLoopback: Boolean = true
 
     private const val AUTHORIZATION_ENDPOINT = "https://accounts.feishu.cn/open-apis/authen/v1/authorize"
@@ -79,6 +81,7 @@ object FeishuOAuthProvider : OAuthProvider {
         code: String,
         codeVerifier: String,
         http: HttpClient,
+        errorCopy: OAuthProviderErrorCopy,
     ): WebMountOAuthToken {
         // See [buildAuthorizationUrl] — send both app_id/app_secret AND
         // client_id/client_secret so v1 and v2 token endpoints both work.
@@ -94,13 +97,14 @@ object FeishuOAuthProvider : OAuthProvider {
             put("code_verifier", codeVerifier)
             put("redirect_uri", credentials.redirectUri ?: defaultRedirectUri)
         }
-        return tokenRequest(http, body, credentials)
+        return tokenRequest(http, body, credentials, errorCopy)
     }
 
     override suspend fun refresh(
         credentials: OAuthAppCredentials,
         refreshToken: String,
         http: HttpClient,
+        errorCopy: OAuthProviderErrorCopy,
     ): WebMountOAuthToken {
         val body = buildJsonObject {
             put("grant_type", "refresh_token")
@@ -112,17 +116,18 @@ object FeishuOAuthProvider : OAuthProvider {
             }
             put("refresh_token", refreshToken)
         }
-        return tokenRequest(http, body, credentials)
+        return tokenRequest(http, body, credentials, errorCopy)
     }
 
     override fun setupHint(): String =
-        "1. 去飞书开放平台 (open.feishu.cn) 创建一个应用，在「安全设置 → 重定向 URL」里加入：\n" +
-            "   ${LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI}\n" +
-            "   （必须完全一致；飞书不支持自定义 scheme，所以走本地回环 HTTP）。\n" +
-            "2. 把 App ID + App Secret 复制到上方输入框。\n" +
-            "3. 在「权限管理」里开启所需的云文档 scope（如 docs:doc:read / docs:doc:write）。\n" +
-            "提示：授权完成后浏览器会跳回这个本机 URL 取回授权码，AmberAgent 在后台启动一次性回环 server 监听，没有外网暴露。\n" +
-            "注意：OAuth 过程中请不要把 AmberAgent 切到后台被系统杀掉——回环 socket 随进程退出而关闭，被杀后必须从头再来。"
+        "Create a Feishu Open Platform app, register $defaultRedirectUri as the exact redirect URI, " +
+            "then enter the App ID, App Secret, and required document scopes."
+
+    override fun setupHint(context: Context): String =
+        context.getString(
+            R.string.setting_webmount_oauth_feishu_setup_hint,
+            LoopbackOAuthCallbackServer.DEFAULT_REDIRECT_URI,
+        )
 
     // ----------------------------------------------------------------------
 
@@ -130,6 +135,7 @@ object FeishuOAuthProvider : OAuthProvider {
         http: HttpClient,
         body: JsonObject,
         credentials: OAuthAppCredentials,
+        errorCopy: OAuthProviderErrorCopy,
     ): WebMountOAuthToken {
         val response = http.post(TOKEN_ENDPOINT) {
             contentType(ContentType.Application.Json)
@@ -138,7 +144,7 @@ object FeishuOAuthProvider : OAuthProvider {
         }
         val text = response.bodyAsText()
         require(response.status.isSuccess()) {
-            "飞书 token endpoint returned ${response.status.value}: ${text.take(500)}"
+            errorCopy.tokenEndpointFailed(response.status.value, text.take(500))
         }
         val parsed = json.parseToJsonElement(text).jsonObject
         // The v2 endpoint typically returns the OAuth body at the top level:
@@ -148,10 +154,10 @@ object FeishuOAuthProvider : OAuthProvider {
         val errCode = parsed["code"]?.jsonPrimitive?.intOrNull
         if (errCode != null && errCode != 0) {
             val msg = parsed["msg"]?.jsonPrimitive?.contentOrNull ?: "unknown"
-            error("飞书 OAuth error code=$errCode msg=$msg")
+            error(errorCopy.oauthError(errCode, msg))
         }
         val accessToken = payload["access_token"]?.jsonPrimitive?.contentOrNull
-            ?: error("missing access_token in 飞书 response: ${text.take(400)}")
+            ?: error(errorCopy.missingAccessToken(text.take(400)))
         val now = System.currentTimeMillis()
         val expiresIn = payload["expires_in"]?.jsonPrimitive?.longOrNull ?: 7200L
         return WebMountOAuthToken(

@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.ProviderSetting
 import app.amber.agent.Screen
+import app.amber.agent.R
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MAX
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_MIN
 import app.amber.feature.board.DEEP_READ_FONT_SCALE_STEP
@@ -231,7 +233,7 @@ fun SettingTodayBoardPage(
     }
 
     ExperimentalSettingsScaffold(
-        title = pane.title,
+        title = pane.localizedTitle(),
     ) { innerPadding ->
         LazyColumn(
             Modifier.fillMaxSize(),
@@ -241,13 +243,13 @@ fun SettingTodayBoardPage(
             when (pane) {
                 TodayBoardSettingsPane.ROOT -> {
                     item {
-                        ExperimentSectionCard(title = "通用") {
-                            SourceSwitch("启用今日看板", "开启后定时分析信号、刷新热榜并生成回顾", board.enabled) {
+                        ExperimentSectionCard(title = stringResource(R.string.board_settings_general)) {
+                            SourceSwitch(stringResource(R.string.board_enable_title), stringResource(R.string.board_enable_description), board.enabled) {
                                 update { it.copy(enabled = !it.enabled) }
                             }
                             ExperimentDivider()
                             DetailNavigationRow(
-                                title = "模型与后台",
+                                title = stringResource(R.string.board_model_background),
                                 description = "${board.modelSummary(settings)} · ${board.backgroundStrategy.label()}",
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.GENERAL.route))
@@ -257,17 +259,17 @@ fun SettingTodayBoardPage(
                     }
 
                     item {
-                        ExperimentSectionCard(title = "热榜") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_hotlist)) {
                             IntervalRow(board.hotListRefreshIntervalMinutes) { value ->
                                 update { it.copy(hotListRefreshIntervalMinutes = value) }
                             }
                             ExperimentDivider()
-                            SourceSwitch("仅 WiFi", "刷新热榜时只使用未计费网络", board.hotListWifiOnly) {
+                            SourceSwitch(stringResource(R.string.board_wifi_only), stringResource(R.string.board_wifi_only_description), board.hotListWifiOnly) {
                                 update { it.copy(hotListWifiOnly = !it.hotListWifiOnly) }
                             }
                             ExperimentDivider()
                             DetailNavigationRow(
-                                title = "来源、关注词与深度阅读",
+                                title = stringResource(R.string.board_sources_focus_deep_read),
                                 description = hotListSummary(board, customHotListSources, settings),
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.HOT_LIST.route))
@@ -277,9 +279,9 @@ fun SettingTodayBoardPage(
                     }
 
                     item {
-                        ExperimentSectionCard(title = "今日回顾") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_daily_review)) {
                             DetailNavigationRow(
-                                title = "信号来源与关注点",
+                                title = stringResource(R.string.board_signal_sources_focus),
                                 description = reviewSummary(board, focusRules),
                                 onClick = {
                                     navController.navigate(Screen.SettingTodayBoardDetail(TodayBoardSettingsPane.REVIEW.route))
@@ -291,7 +293,7 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.GENERAL -> {
                     item {
-                        ExperimentSectionCard(title = "通用") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_settings_general)) {
                             BoardModelRow(board = board, settings = settings, update = ::update)
                             ExperimentDivider()
                             BackgroundStrategyRow(board.backgroundStrategy) { value ->
@@ -303,7 +305,7 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.HOT_LIST -> {
                     item {
-                        ExperimentSectionCard(title = "热榜源") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_hotlist_sources)) {
                             HotListSourceSettings(
                                 enabledBuiltIns = board.hotListEnabledSources,
                                 customSources = customHotListSources,
@@ -332,7 +334,7 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = "关注筛选") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_focus_filter)) {
                             HotListFocusKeywordEditor(
                                 keywords = board.hotListFocusKeywords,
                                 mode = board.hotListFilterMode,
@@ -342,7 +344,7 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = "深度阅读") {
+                        ExperimentSectionCard(title = stringResource(R.string.deep_read_title)) {
                             ReadingFontRow(board = board, fontStates = fontStates, update = ::update)
                             ExperimentDivider()
                             DeepReadCacheTtlRow(board = board, update = ::update)
@@ -374,7 +376,7 @@ fun SettingTodayBoardPage(
 
                 TodayBoardSettingsPane.REVIEW -> {
                     item {
-                        ExperimentSectionCard(title = "信号来源") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_signal_sources)) {
                             val notifPermissionOk = remember {
                                 runCatching {
                                     android.provider.Settings.Secure.getString(
@@ -388,32 +390,34 @@ fun SettingTodayBoardPage(
                                     PackageManager.PERMISSION_GRANTED
                             }
                             SourceSwitch(
-                                "系统通知",
-                                if (notifPermissionOk) "设备通知和应用提醒" else "需要通知访问权限",
+                                stringResource(R.string.board_signal_notification),
+                                if (notifPermissionOk) stringResource(R.string.board_signal_notification_description)
+                                else stringResource(R.string.board_signal_notification_permission),
                                 BoardSignalSourceType.NOTIFICATION in board.enabledSources,
                             ) { toggleSignalSource(BoardSignalSourceType.NOTIFICATION, ::update) }
                             ExperimentDivider()
                             SourceSwitch(
-                                "日历",
-                                if (calendarPermissionOk) "今日日程和会议" else "需要日历读取权限",
+                                stringResource(R.string.board_signal_calendar),
+                                if (calendarPermissionOk) stringResource(R.string.board_signal_calendar_description)
+                                else stringResource(R.string.board_signal_calendar_permission),
                                 BoardSignalSourceType.CALENDAR in board.enabledSources,
                             ) { toggleSignalSource(BoardSignalSourceType.CALENDAR, ::update) }
                             ExperimentDivider()
-                            SourceSwitch("飞书消息", "未读消息和工作沟通", BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_feishu_messages), stringResource(R.string.board_signal_feishu_messages_description), BoardSignalSourceType.FEISHU_MSG in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_MSG, ::update)
                             }
                             ExperimentDivider()
-                            SourceSwitch("飞书文档", "文档雷达变更信号", BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_feishu_docs), stringResource(R.string.board_signal_feishu_docs_description), BoardSignalSourceType.FEISHU_DOC in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.FEISHU_DOC, ::update)
                             }
                             ExperimentDivider()
-                            SourceSwitch("聊天记录", "最近对话中的真实待办", BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
+                            SourceSwitch(stringResource(R.string.board_signal_chat_history), stringResource(R.string.board_signal_chat_history_description), BoardSignalSourceType.CHAT_HISTORY in board.enabledSources) {
                                 toggleSignalSource(BoardSignalSourceType.CHAT_HISTORY, ::update)
                             }
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = "生成规则") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_generation_rules)) {
                             IncrementalSlider(board.incrementalSignalThreshold) { value ->
                                 update { it.copy(incrementalSignalThreshold = value) }
                             }
@@ -427,7 +431,7 @@ fun SettingTodayBoardPage(
                         }
                     }
                     item {
-                        ExperimentSectionCard(title = "来源权重") {
+                        ExperimentSectionCard(title = stringResource(R.string.board_source_weights)) {
                             SourceWeightsEditor(weights = sourceWeights, onChange = ::updateSourceWeight)
                         }
                     }
@@ -437,17 +441,25 @@ fun SettingTodayBoardPage(
     }
 }
 
-private enum class TodayBoardSettingsPane(val route: String, val title: String) {
-    ROOT("root", "今日看板设置"),
-    GENERAL("general", "通用设置"),
-    HOT_LIST("hot_list", "热榜设置"),
-    REVIEW("review", "今日回顾设置"),
+private enum class TodayBoardSettingsPane(val route: String) {
+    ROOT("root"),
+    GENERAL("general"),
+    HOT_LIST("hot_list"),
+    REVIEW("review"),
     ;
 
     companion object {
         fun fromRoute(route: String?): TodayBoardSettingsPane =
             entries.firstOrNull { it.route == route } ?: ROOT
     }
+}
+
+@Composable
+private fun TodayBoardSettingsPane.localizedTitle(): String = when (this) {
+    TodayBoardSettingsPane.ROOT -> stringResource(R.string.board_settings_title)
+    TodayBoardSettingsPane.GENERAL -> stringResource(R.string.board_settings_general_title)
+    TodayBoardSettingsPane.HOT_LIST -> stringResource(R.string.board_settings_hotlist_title)
+    TodayBoardSettingsPane.REVIEW -> stringResource(R.string.board_settings_review_title)
 }
 
 @Composable
@@ -487,12 +499,14 @@ private fun DetailNavigationRow(
     }
 }
 
+@Composable
 private fun TodayBoardSetting.modelSummary(settings: app.amber.core.settings.Settings): String {
     val boardModelUuid = boardModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
     val boardModel = boardModelUuid?.let { uuid -> settings.findModelById(uuid) }
-    return boardModel?.displayName ?: "跟随主聊天模型"
+    return boardModel?.displayName ?: stringResource(R.string.board_follow_main_model)
 }
 
+@Composable
 private fun hotListSummary(
     board: TodayBoardSetting,
     customSources: List<HotListSourceEntity>,
@@ -500,34 +514,47 @@ private fun hotListSummary(
 ): String {
     val enabledSources = board.hotListEnabledSources.size + customSources.count { it.enabled }
     val searchSummary = if (settings.searchEnabledServiceIds.isNotEmpty()) {
-        "搜索 ${settings.searchEnabledServiceIds.size}/${settings.searchServices.size}"
+        stringResource(R.string.board_search_count, settings.searchEnabledServiceIds.size, settings.searchServices.size)
     } else {
-        "未启用搜索"
+        stringResource(R.string.board_search_disabled)
     }
-    return "${enabledSources} 个热榜源 · ${board.hotListFilterMode.label()} · $searchSummary"
+    return stringResource(
+        R.string.board_hotlist_summary,
+        enabledSources,
+        board.hotListFilterMode.label(),
+        searchSummary,
+    )
 }
 
+@Composable
 private fun reviewSummary(
     board: TodayBoardSetting,
     focusRules: List<BoardFocusRuleEntity>,
 ): String {
     val enabledSourceCount = board.enabledSources.count { it in REVIEW_SIGNAL_SOURCES }
     val activeRuleCount = focusRules.count { it.active }
-    return "$enabledSourceCount 个信号来源 · $activeRuleCount 个关注点 · 阈值 ${board.incrementalSignalThreshold} 条"
+    return stringResource(
+        R.string.board_review_summary,
+        enabledSourceCount,
+        activeRuleCount,
+        board.incrementalSignalThreshold,
+    )
 }
 
+@Composable
 private fun TodayBoardHotListFilterMode.label(): String =
     when (this) {
-        TodayBoardHotListFilterMode.ALL -> "全部"
-        TodayBoardHotListFilterMode.FOCUS_FIRST -> "关注优先"
-        TodayBoardHotListFilterMode.FOCUS_ONLY -> "只看关注"
+        TodayBoardHotListFilterMode.ALL -> stringResource(R.string.board_filter_all)
+        TodayBoardHotListFilterMode.FOCUS_FIRST -> stringResource(R.string.board_filter_focus_first)
+        TodayBoardHotListFilterMode.FOCUS_ONLY -> stringResource(R.string.board_filter_focus_only)
     }
 
+@Composable
 private fun TodayBoardBackgroundStrategy.label(): String =
     when (this) {
-        TodayBoardBackgroundStrategy.SMART -> "智能后台"
-        TodayBoardBackgroundStrategy.WIFI_ONLY -> "仅 WiFi 后台"
-        TodayBoardBackgroundStrategy.FOREGROUND_ONLY -> "仅前台"
+        TodayBoardBackgroundStrategy.SMART -> stringResource(R.string.board_background_smart)
+        TodayBoardBackgroundStrategy.WIFI_ONLY -> stringResource(R.string.board_background_wifi)
+        TodayBoardBackgroundStrategy.FOREGROUND_ONLY -> stringResource(R.string.board_background_foreground)
     }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -541,12 +568,12 @@ private fun HotListFocusKeywordEditor(
     var draft by rememberSaveable(keywords.joinToString("|")) { mutableStateOf(keywords.joinToString("、")) }
     val parsed = normalizeHotListFocusKeywords(listOf(draft))
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("关注筛选", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_focus_filter), style = MaterialTheme.typography.titleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(
-                TodayBoardHotListFilterMode.ALL to "全部",
-                TodayBoardHotListFilterMode.FOCUS_FIRST to "关注优先",
-                TodayBoardHotListFilterMode.FOCUS_ONLY to "只看关注",
+                TodayBoardHotListFilterMode.ALL to stringResource(R.string.board_filter_all),
+                TodayBoardHotListFilterMode.FOCUS_FIRST to stringResource(R.string.board_filter_focus_first),
+                TodayBoardHotListFilterMode.FOCUS_ONLY to stringResource(R.string.board_filter_focus_only),
             ).forEach { (value, label) ->
                 ChoiceChip(selected = mode == value, label = label, onClick = { onModeChange(value) })
             }
@@ -555,7 +582,7 @@ private fun HotListFocusKeywordEditor(
             value = draft,
             onValueChange = { draft = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("AI、大模型、机器人、数码 3C...") },
+            placeholder = { Text(stringResource(R.string.board_focus_placeholder)) },
             minLines = 2,
             maxLines = 4,
         )
@@ -564,7 +591,7 @@ private fun HotListFocusKeywordEditor(
                 enabled = parsed.isNotEmpty(),
                 onClick = { onKeywordsChange(parsed) },
             ) {
-                Text("应用")
+                Text(stringResource(R.string.board_apply))
             }
             TextButton(
                 onClick = {
@@ -572,7 +599,7 @@ private fun HotListFocusKeywordEditor(
                     onKeywordsChange(DEFAULT_HOT_LIST_FOCUS_KEYWORDS)
                 },
             ) {
-                Text("恢复推荐")
+                Text(stringResource(R.string.board_focus_restore))
             }
         }
         if (keywords.isNotEmpty()) {
@@ -595,11 +622,16 @@ private fun DeepReadCacheTtlRow(
     update: (block: (TodayBoardSetting) -> TodayBoardSetting) -> Unit,
 ) {
     // TTL options: 1 / 3 / 7 (default) / 0 (never expire). 0 keeps expiresAt at Long.MAX_VALUE.
-    val options = listOf(1 to "24 小时", 3 to "3 天", 7 to "7 天", 0 to "永久")
+    val options = listOf(
+        1 to stringResource(R.string.board_cache_24_hours),
+        3 to stringResource(R.string.board_cache_3_days),
+        7 to stringResource(R.string.board_cache_7_days),
+        0 to stringResource(R.string.board_cache_forever),
+    )
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("缓存有效期", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_cache_title), style = MaterialTheme.typography.titleSmall)
         Text(
-            "已生成的深读在此期间内不会重复计费。收藏的条目永不过期。",
+            stringResource(R.string.board_cache_description),
             style = MaterialTheme.typography.bodySmall,
             color = workspaceColors().muted,
         )
@@ -625,16 +657,16 @@ private fun ReadingFontRow(
     val installedFonts = fontStates.filter { it.installed && !it.installedPath.isNullOrBlank() }
     val selectedPackAvailable = installedFonts.any { it.pack.id == board.boardReadingFontPackId }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("深度阅读字体", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_reading_font_title), style = MaterialTheme.typography.titleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             ChoiceChip(
                 selected = board.boardReadingFontMode == TodayBoardReadingFontMode.SYSTEM,
-                label = "系统默认",
+                label = stringResource(R.string.board_font_system),
                 onClick = { update { it.copy(boardReadingFontMode = TodayBoardReadingFontMode.SYSTEM) } },
             )
             ChoiceChip(
                 selected = board.boardReadingFontMode == TodayBoardReadingFontMode.SERIF,
-                label = "内置宋体",
+                label = stringResource(R.string.board_font_serif),
                 onClick = {
                     update {
                         it.copy(
@@ -646,9 +678,9 @@ private fun ReadingFontRow(
             )
         }
         if (installedFonts.isEmpty()) {
-            Text("已下载 Slides 字体包会显示在这里；当前深度阅读会使用内置宋体。", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            Text(stringResource(R.string.board_fonts_empty), style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
         } else {
-            Text("已下载 Slides 字体", style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
+            Text(stringResource(R.string.board_fonts_downloaded), style = MaterialTheme.typography.labelMedium, color = workspaceColors().muted)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 installedFonts
                     .sortedWith(compareByDescending<FontPackState> { it.pack.category == FontPackCategory.SERIF }.thenBy { it.pack.displayName })
@@ -670,12 +702,12 @@ private fun ReadingFontRow(
                     }
             }
             if (board.boardReadingFontMode == TodayBoardReadingFontMode.SLIDES_PACK && !selectedPackAvailable) {
-                Text("当前选择的字体包不可用，阅读页会自动回退内置宋体。", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                Text(stringResource(R.string.board_font_unavailable), style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("字号", style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.board_font_size), style = MaterialTheme.typography.bodyMedium)
                 Text("${(board.deepReadFontScale * 100f).roundToInt()}%", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
             }
             NotionSlider(
@@ -708,7 +740,7 @@ private fun BoardModelRow(
         modifier = Modifier.fillMaxWidth().padding(12.dp).animateContentSize(),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Text("看板模型", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_model_title), style = MaterialTheme.typography.titleSmall)
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -728,14 +760,14 @@ private fun BoardModelRow(
             }
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(
-                    text = boardModel?.displayName ?: "跟随主聊天模型",
+                    text = boardModel?.displayName ?: stringResource(R.string.board_follow_main_model),
                     style = MaterialTheme.typography.bodyMedium,
                     color = workspaceColors().ink,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = selectedProvider?.name ?: "使用当前聊天模型",
+                    text = selectedProvider?.name ?: stringResource(R.string.board_using_current_model),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspaceColors().muted,
                     maxLines = 1,
@@ -766,7 +798,7 @@ private fun BoardModelRow(
                     currentModel = boardModel?.id,
                     providers = settings.providers,
                     modelType = ModelType.CHAT,
-                    clearLabel = "跟随主聊天模型",
+                    clearLabel = stringResource(R.string.board_follow_main_model),
                     onClear = { update { it.copy(boardModelId = null) } },
                     onSelect = { model -> update { it.copy(boardModelId = model.id.toString()) } },
                     dense = true,
@@ -781,9 +813,14 @@ private fun BoardModelRow(
 @Composable
 private fun IntervalRow(current: Int, onChange: (Int) -> Unit) {
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("更新间隔", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_refresh_interval), style = MaterialTheme.typography.titleSmall)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(30 to "30 分钟", 60 to "1 小时", 120 to "2 小时", 240 to "4 小时").forEach { (value, label) ->
+            listOf(
+                30 to stringResource(R.string.board_interval_30_minutes),
+                60 to stringResource(R.string.board_interval_1_hour),
+                120 to stringResource(R.string.board_interval_2_hours),
+                240 to stringResource(R.string.board_interval_4_hours),
+            ).forEach { (value, label) ->
                 ChoiceChip(selected = current == value, label = label, onClick = { onChange(value) })
             }
         }
@@ -793,10 +830,13 @@ private fun IntervalRow(current: Int, onChange: (Int) -> Unit) {
 @Composable
 private fun SearchServiceSummary(enabledCount: Int, totalCount: Int) {
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("搜索引擎（深度阅读）", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_search_title), style = MaterialTheme.typography.titleSmall)
         Text(
-            if (enabledCount > 0) "复用当前已启用的 $enabledCount / $totalCount 个搜索服务"
-            else "未启用搜索服务时无法生成深度阅读",
+            if (enabledCount > 0) {
+                stringResource(R.string.board_search_enabled_summary, enabledCount, totalCount)
+            } else {
+                stringResource(R.string.board_search_required)
+            },
             style = MaterialTheme.typography.bodySmall,
             color = workspaceColors().muted,
         )
@@ -812,7 +852,7 @@ private fun FocusRulesEditor(
 ) {
     var input by rememberSaveable { mutableStateOf("") }
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("关注点", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_focus_points), style = MaterialTheme.typography.titleSmall)
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -822,7 +862,7 @@ private fun FocusRulesEditor(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("例如：关注老板的消息") },
+                placeholder = { Text(stringResource(R.string.board_focus_example)) },
                 maxLines = 2,
             )
             TextButton(
@@ -832,11 +872,11 @@ private fun FocusRulesEditor(
                     input = ""
                 },
             ) {
-                Text("添加")
+                Text(stringResource(R.string.add))
             }
         }
         if (rules.isEmpty()) {
-            Text("暂无关注点", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            Text(stringResource(R.string.board_focus_empty_list), style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
         } else {
             rules.forEach { rule ->
                 Row(
@@ -846,7 +886,7 @@ private fun FocusRulesEditor(
                 ) {
                     Switch(checked = rule.active, onCheckedChange = { onToggle(rule, it) })
                     Text(rule.content, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = { onDelete(rule) }) { Text("删除") }
+                    TextButton(onClick = { onDelete(rule) }) { Text(stringResource(R.string.delete)) }
                 }
             }
         }
@@ -860,8 +900,8 @@ private fun SourceWeightsEditor(weights: Map<String, Int>, onChange: (sourceType
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Column(Modifier.weight(1f)) {
-                        Text(source.title, style = MaterialTheme.typography.bodyMedium)
-                        Text(source.description, style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+                        Text(source.localizedTitle(), style = MaterialTheme.typography.bodyMedium)
+                        Text(source.localizedDescription(), style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
                     }
                     val value = weights[source.sourceType] ?: 0
                     Text(if (value > 0) "+$value" else value.toString(), color = workspaceColors().muted)
@@ -895,8 +935,8 @@ private fun SourceSwitch(title: String, description: String, checked: Boolean, o
 private fun IncrementalSlider(value: Int, onValueChange: (Int) -> Unit) {
     Column(Modifier.padding(12.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("信号阈值", style = MaterialTheme.typography.titleSmall)
-            Text("$value 条", style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
+            Text(stringResource(R.string.board_signal_threshold), style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.board_signal_threshold_value, value), style = MaterialTheme.typography.bodySmall, color = workspaceColors().muted)
         }
         NotionSlider(value = value.toFloat(), onValueChangeFinished = { onValueChange(it.toInt()) }, valueRange = 1f..30f)
     }
@@ -905,11 +945,23 @@ private fun IncrementalSlider(value: Int, onValueChange: (Int) -> Unit) {
 @Composable
 private fun BackgroundStrategyRow(current: TodayBoardBackgroundStrategy, onChange: (TodayBoardBackgroundStrategy) -> Unit) {
     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("后台策略", style = MaterialTheme.typography.titleSmall)
+        Text(stringResource(R.string.board_background_strategy), style = MaterialTheme.typography.titleSmall)
         listOf(
-            Triple(TodayBoardBackgroundStrategy.SMART, "智能", "按网络与电量自动调度刷新"),
-            Triple(TodayBoardBackgroundStrategy.WIFI_ONLY, "仅 WiFi", "仅在 WiFi 环境下后台刷新"),
-            Triple(TodayBoardBackgroundStrategy.FOREGROUND_ONLY, "仅前台", "仅在 App 打开时刷新"),
+            Triple(
+                TodayBoardBackgroundStrategy.SMART,
+                stringResource(R.string.board_background_smart),
+                stringResource(R.string.board_background_smart_description),
+            ),
+            Triple(
+                TodayBoardBackgroundStrategy.WIFI_ONLY,
+                stringResource(R.string.board_background_wifi),
+                stringResource(R.string.board_background_wifi_description),
+            ),
+            Triple(
+                TodayBoardBackgroundStrategy.FOREGROUND_ONLY,
+                stringResource(R.string.board_background_foreground),
+                stringResource(R.string.board_background_foreground_description),
+            ),
         ).forEach { (strategy, label, description) ->
             RadioRow(
                 selected = current == strategy,
@@ -968,12 +1020,13 @@ private fun Model.findProviderForBoard(providers: List<ProviderSetting>): Provid
     return providers.firstOrNull { provider -> provider.models.any { it.id == id } }
 }
 
+@Composable
 private fun FontPackCategory.label(): String =
     when (this) {
-        FontPackCategory.SERIF -> "宋/明体"
-        FontPackCategory.SANS -> "黑体"
-        FontPackCategory.HANDWRITING -> "手写"
-        FontPackCategory.MONO -> "等宽"
+        FontPackCategory.SERIF -> stringResource(R.string.board_font_category_serif)
+        FontPackCategory.SANS -> stringResource(R.string.board_font_category_sans)
+        FontPackCategory.HANDWRITING -> stringResource(R.string.board_font_category_handwriting)
+        FontPackCategory.MONO -> stringResource(R.string.board_font_category_mono)
     }
 
 private data class BoardWeightSource(
@@ -982,12 +1035,32 @@ private data class BoardWeightSource(
     val description: String,
 )
 
+@Composable
+private fun BoardWeightSource.localizedTitle(): String = when (sourceType) {
+    BoardSignalSourceType.NOTIFICATION -> stringResource(R.string.board_signal_notification)
+    BoardSignalSourceType.CALENDAR -> stringResource(R.string.board_signal_calendar)
+    BoardSignalSourceType.FEISHU_MSG -> stringResource(R.string.board_signal_feishu_messages)
+    BoardSignalSourceType.FEISHU_DOC -> stringResource(R.string.board_signal_feishu_docs)
+    BoardSignalSourceType.CHAT_HISTORY -> stringResource(R.string.board_signal_chat_history)
+    else -> title
+}
+
+@Composable
+private fun BoardWeightSource.localizedDescription(): String = when (sourceType) {
+    BoardSignalSourceType.NOTIFICATION -> stringResource(R.string.board_signal_notification_weight_description)
+    BoardSignalSourceType.CALENDAR -> stringResource(R.string.board_signal_calendar_weight_description)
+    BoardSignalSourceType.FEISHU_MSG -> stringResource(R.string.board_signal_feishu_messages_weight_description)
+    BoardSignalSourceType.FEISHU_DOC -> stringResource(R.string.board_signal_feishu_docs_weight_description)
+    BoardSignalSourceType.CHAT_HISTORY -> stringResource(R.string.board_signal_chat_history_weight_description)
+    else -> description
+}
+
 private val BOARD_WEIGHT_SOURCES = listOf(
-    BoardWeightSource(BoardSignalSourceType.NOTIFICATION, "系统通知", "设备通知、应用提醒、重要推送"),
-    BoardWeightSource(BoardSignalSourceType.CALENDAR, "日历", "今日日程、会议和时间安排"),
-    BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "飞书消息", "未读消息、群聊和工作沟通"),
-    BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "飞书文档", "文档更新、索引和变更信号"),
-    BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "聊天记录", "最近对话中的真实待办和项目上下文"),
+    BoardWeightSource(BoardSignalSourceType.NOTIFICATION, "System notifications", "Device notifications and app alerts"),
+    BoardWeightSource(BoardSignalSourceType.CALENDAR, "Calendar", "Today's schedule, meetings, and time blocks"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_MSG, "Feishu messages", "Unread messages, group chats, and work communication"),
+    BoardWeightSource(BoardSignalSourceType.FEISHU_DOC, "Feishu documents", "Document updates, indexing, and change signals"),
+    BoardWeightSource(BoardSignalSourceType.CHAT_HISTORY, "Chat history", "Actionable tasks and project context from recent chats"),
 )
 
 private val REVIEW_SIGNAL_SOURCES = setOf(

@@ -1,5 +1,6 @@
 package app.amber.feature.board.hotlist.deepread
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -15,6 +16,7 @@ import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.ui.UIMessage
 import app.amber.agent.AppScope
+import app.amber.agent.R
 import app.amber.feature.board.boardRequestBodies
 import app.amber.feature.board.boardRequestHeaders
 import app.amber.feature.board.hotlist.HotListRepository
@@ -34,10 +36,12 @@ import app.amber.core.settings.resolveTaskChatModel
 import java.net.URI
 import java.security.MessageDigest
 import java.time.LocalDate
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.Uuid
 
 class DeepReadAgentRunManager(
+    private val appContext: Context,
     private val settingsStore: SettingsAggregator,
     private val kernel: RunKernel,
     private val hotListRepository: HotListRepository,
@@ -62,6 +66,7 @@ class DeepReadAgentRunManager(
         val articlePlan: DeepReadArticlePlan,
         val playbookMarkdown: String,
         val writer: DeepReadSectionWriterTools,
+        val locale: Locale,
         // Step 5: the run scope's identity + protocol event writer, threaded
         // from the DeepRead agent handler so kernel rounds can leave a durable
         // audit trail. Null on bare/background callers (no run scope).
@@ -72,9 +77,12 @@ class DeepReadAgentRunManager(
     suspend fun runPreview(
         topicTitle: String,
         seedUrl: String,
+        locale: Locale = Locale.getDefault(),
     ): Result<DeepReadOutput> {
         val normalizedSeedUrl = seedUrl.takeIf { it.isHttpOrHttpsUrl() }
-            ?: return Result.failure(IllegalArgumentException("新闻 Demo 只支持 http/https URL"))
+            ?: return Result.failure(
+                IllegalArgumentException(appContext.getString(R.string.deep_read_demo_failed))
+            )
         val topicId = previewTopicId(normalizedSeedUrl)
         return topicMutex(topicId).withLock {
             try {
@@ -85,6 +93,7 @@ class DeepReadAgentRunManager(
                     stages = DeepReadGenerationStage.entries,
                     seedUrl = normalizedSeedUrl,
                     force = true,
+                    locale = locale,
                 )
             } finally {
                 withContext(NonCancellable) {
@@ -103,6 +112,7 @@ class DeepReadAgentRunManager(
         propagateFailuresWithPartial: Boolean = false,
         runId: String? = null,
         events: AgentEventWriter? = null,
+        locale: Locale = Locale.getDefault(),
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
         if (force) hotListRepository.clearDeepRead(topicId)
 
@@ -114,7 +124,7 @@ class DeepReadAgentRunManager(
 
         val missing = missingStages(cached ?: DeepReadOutput())
         if (shouldDeferDeepReadMissingStages(force, cached, missing, deferMissingStages)) {
-            scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl)
+            scheduleBackgroundFill(topicId, topicTitle, missing, seedUrl, locale)
             return@withLock Result.success(cached ?: DeepReadOutput())
         }
         if (!force && cached != null && cached.sectionsReady()) {
@@ -141,6 +151,7 @@ class DeepReadAgentRunManager(
             propagateFailuresWithPartial = propagateFailuresWithPartial,
             runId = runId,
             events = events,
+            locale = locale,
         )
     }
 
@@ -152,6 +163,7 @@ class DeepReadAgentRunManager(
         propagateFailuresWithPartial: Boolean = false,
         runId: String? = null,
         events: AgentEventWriter? = null,
+        locale: Locale = Locale.getDefault(),
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
         markSectionRunning(topicId, topicTitle, seedUrl, stage)
         generateStages(
@@ -164,6 +176,7 @@ class DeepReadAgentRunManager(
             propagateFailuresWithPartial = propagateFailuresWithPartial,
             runId = runId,
             events = events,
+            locale = locale,
         )
     }
 
@@ -172,6 +185,7 @@ class DeepReadAgentRunManager(
         topicTitle: String,
         stages: List<DeepReadGenerationStage>,
         seedUrl: String?,
+        locale: Locale,
     ) {
         val key = "$topicId:${stages.joinToString(",") { it.name }}"
         if (!backgroundRuns.add(key)) return
@@ -185,7 +199,14 @@ class DeepReadAgentRunManager(
                     // re-paying the 36s budget. This is the biggest measurable
                     // win from Phase E.
                     if (stillMissing.isNotEmpty()) {
-                        generateStages(topicId, topicTitle, stillMissing, seedUrl, force = false)
+                        generateStages(
+                            topicId = topicId,
+                            topicTitle = topicTitle,
+                            stages = stillMissing,
+                            seedUrl = seedUrl,
+                            force = false,
+                            locale = locale,
+                        )
                     }
                 }
             } finally {
@@ -222,6 +243,7 @@ class DeepReadAgentRunManager(
         propagateFailuresWithPartial: Boolean = false,
         runId: String? = null,
         events: AgentEventWriter? = null,
+        locale: Locale = Locale.getDefault(),
     ): Result<DeepReadOutput> {
         val context = createRunContext(
             topicId = topicId,
@@ -232,6 +254,7 @@ class DeepReadAgentRunManager(
             planningPhase = planningPhase,
             runId = runId,
             events = events,
+            locale = locale,
         ).getOrElse { error ->
             if (error is CancellationException) throw error
             return Result.failure(error)
@@ -269,7 +292,7 @@ class DeepReadAgentRunManager(
             }
             val allSectionsReady = context.writer.currentOutput().sectionsReady()
             if (allTargetedReady && allSectionsReady) {
-                val completed = finishIfPossible(context.writer)
+                val completed = finishIfPossible(context.writer, context.locale)
                 persistCompletedArtifact(topicId, topicTitle, completed)
                 return@runCatching completed
             }
@@ -283,13 +306,17 @@ class DeepReadAgentRunManager(
             val missing = stages.filter {
                 context.writer.currentOutput().statusOf(it) != DeepReadSectionStatus.READY
             }
-            markMissingFailed(context.writer, missing, "Agent 未按约定调用分段写入工具，该段未写入。")
+            markMissingFailed(
+                context.writer,
+                missing,
+                appContext.getString(R.string.deep_read_generation_failed),
+            )
             context.writer.markPhase(DeepReadGenerationPhase.IDLE)
             context.writer.currentOutput()
         }.fold(
             onSuccess = { output ->
                 if (output.hasAnyReadySection() || output.isComplete()) Result.success(output) else Result.failure(
-                    IllegalStateException(firstFailure(output) ?: "深度阅读生成失败")
+                    IllegalStateException(firstFailure(output) ?: appContext.getString(R.string.deep_read_generation_failed))
                 )
             },
             onFailure = { error ->
@@ -323,13 +350,16 @@ class DeepReadAgentRunManager(
         planningPhase: DeepReadGenerationPhase,
         runId: String? = null,
         events: AgentEventWriter? = null,
+        locale: Locale,
     ): Result<DeepReadRunContext> {
         return try {
             val settings = settingsStore.settingsFlow.value
             val resolvedModel = resolveModel(settings)
-                ?: return Result.failure(IllegalStateException("请先配置今日看板模型或主聊天模型"))
+                ?: return Result.failure(
+                    IllegalStateException(appContext.getString(R.string.setting_model_page_follow_chat_model_unavailable))
+                )
             if (ModelAbility.TOOL !in resolvedModel.abilities) {
-                return Result.failure(IllegalStateException("深度阅读需要配置支持工具调用的模型"))
+                return Result.failure(IllegalStateException(appContext.getString(R.string.tools_warning)))
             }
             val model = resolvedModel.withBoardRequestOptions(settings)
             if (markCollecting) {
@@ -348,9 +378,10 @@ class DeepReadAgentRunManager(
                 topicTitle = topicTitle,
                 seedUrl = seedUrl,
                 force = force,
+                locale = locale,
             )
             if (prefetchedSources.isEmpty()) {
-                val message = "没有抓到足够的来源，无法生成深度阅读。请检查搜索源或稍后重试。"
+                val message = appContext.getString(R.string.deep_read_generation_failed)
                 Log.w(TAG, "deep read prefetch returned no sources for topic=$topicId")
                 if (markCollecting) {
                     hotListRepository.saveDeepRead(
@@ -378,6 +409,7 @@ class DeepReadAgentRunManager(
             )
             val hiddenSettings = DeepReadHiddenAssistantFactory.create(
                 settings.toIsolatedSubAgentSettings(),
+                locale = locale,
             )
             val playbook = playbookRepository.read()
 
@@ -388,6 +420,7 @@ class DeepReadAgentRunManager(
                 topicTitle = topicTitle,
                 evidencePack = evidencePack,
                 playbookMarkdown = playbook.markdown,
+                locale = locale,
                 runId = runId,
                 events = events,
             )
@@ -403,6 +436,7 @@ class DeepReadAgentRunManager(
                     articlePlan = articlePlan,
                     playbookMarkdown = playbook.markdown,
                     writer = writer,
+                    locale = locale,
                     runId = runId,
                     events = events,
                 )
@@ -450,14 +484,14 @@ class DeepReadAgentRunManager(
     ) {
         val singleStage = listOf(stage)
         val writer = context.writer
-        val writerToolsForStage = writer.tools(stages = setOf(stage))
+        val writerToolsForStage = writer.tools(stages = setOf(stage), locale = context.locale)
             .filter { it.name == stage.writerToolName() }
         val stageTimeoutMs = collectRunTimeoutFor(stage)
         val stageTools = toolSetFactory.forDeepRead(
             settings = context.settings,
             writerTools = writerToolsForStage,
             descriptionContext = DeepReadToolDescriptionContext(
-                stageLabel = stage.label,
+                stageLabel = stage.localizedLabel(context.locale),
                 writerToolName = stage.writerToolName(),
                 stageTimeoutSeconds = stageTimeoutMs.toWholeSeconds(),
             ),
@@ -486,6 +520,7 @@ class DeepReadAgentRunManager(
                     stageTimeoutMs = stageTimeoutMs,
                     playbookMarkdown = context.playbookMarkdown,
                     coverageReport = coverageReport,
+                    locale = context.locale,
                 )
             )
         )
@@ -500,7 +535,11 @@ class DeepReadAgentRunManager(
                         messages = messages,
                         tools = stageTools,
                         writerToolNames = stageWriterToolNamesSet,
-                        statusLabel = "深度阅读 ${stage.label}",
+                        statusLabel = if (context.locale.isChineseLocale()) {
+                            "深度阅读 ${stage.localizedLabel(context.locale)}"
+                        } else {
+                            "Deep Read ${stage.localizedLabel(context.locale)}"
+                        },
                         runId = context.runId,
                         events = context.events,
                     )
@@ -512,7 +551,7 @@ class DeepReadAgentRunManager(
                     return
                 }
                 if (writer.requiredWriteCount == beforeWrites) {
-                    messages = messages + UIMessage.user(buildWriterReminder(singleStage, pass))
+                    messages = messages + UIMessage.user(buildWriterReminder(singleStage, pass, context.locale))
                 }
             }
             val needsFallback = writer.currentOutput().statusOf(stage) != DeepReadSectionStatus.READY ||
@@ -622,8 +661,9 @@ class DeepReadAgentRunManager(
         playbookMarkdown: String,
         runId: String? = null,
         events: AgentEventWriter? = null,
+        locale: Locale,
     ): DeepReadArticlePlan {
-        val fallback = researchHarness.fallbackPlan(topicTitle, evidencePack)
+        val fallback = researchHarness.fallbackPlan(topicTitle, evidencePack, locale)
         val messages = runCatching {
             collectRun(
                 settings = settings.copy(streamOutput = false),
@@ -634,12 +674,13 @@ class DeepReadAgentRunManager(
                             topicTitle = topicTitle,
                             pack = evidencePack,
                             playbookMarkdown = playbookMarkdown,
+                            locale = locale,
                         )
                     )
                 ),
                 tools = emptyList(),
                 writerToolNames = emptySet(),
-                statusLabel = "深度阅读 结构规划",
+                statusLabel = if (locale.isChineseLocale()) "深度阅读 结构规划" else "Deep Read structure planning",
                 runId = runId,
                 events = events,
             )
@@ -653,11 +694,12 @@ class DeepReadAgentRunManager(
             parsed = parsed ?: fallback,
             topicTitle = topicTitle,
             pack = evidencePack,
+            locale = locale,
         )
     }
 
-    private suspend fun finishIfPossible(writer: DeepReadSectionWriterTools): DeepReadOutput {
-        val finish = writer.tools().first { it.name == "deep_read_finish" }
+    private suspend fun finishIfPossible(writer: DeepReadSectionWriterTools, locale: Locale): DeepReadOutput {
+        val finish = writer.tools(locale = locale).first { it.name == "deep_read_finish" }
         finish.execute(kotlinx.serialization.json.buildJsonObject { })
         return writer.currentOutput()
     }
@@ -741,90 +783,222 @@ class DeepReadAgentRunManager(
         stageTimeoutMs: Long,
         playbookMarkdown: String,
         coverageReport: DeepReadCoverageReport? = null,
+        locale: Locale,
     ): String = buildString {
-        appendLine("今天日期：${LocalDate.now()}")
-        appendLine("话题标题：$topicTitle")
-        appendLine("目标段落：${stages.joinToString(" → ") { it.label }}")
+        val chinese = locale.isChineseLocale()
+        appendLine(if (chinese) "今天日期：${LocalDate.now()}" else "Today: ${LocalDate.now()}")
+        appendLine(if (chinese) "话题标题：$topicTitle" else "Topic title: $topicTitle")
+        appendLine(
+            if (chinese) {
+                "目标段落：${stages.joinToString(" → ") { it.localizedLabel(locale) }}"
+            } else {
+                "Target sections: ${stages.joinToString(" -> ") { it.localizedLabel(locale) }}"
+            }
+        )
         appendLine()
-        appendLine("## Deep Read Playbook（本地规则，只读）")
+        appendLine(if (chinese) "## Deep Read Playbook（本地规则，只读）" else "## Deep Read Playbook (local, read-only rules)")
         appendLine(playbookMarkdown.take(PLAYBOOK_PROMPT_LIMIT))
         seedUrl?.takeIf { it.isNotBlank() }?.let { url ->
-            appendLine("用户指定来源 URL：$url")
-            appendLine("该 URL 已在预抓阶段尝试读取，优先使用预抓正文；如下面预抓正文为空再 search_web/scrape_web 补充。")
+            appendLine(if (chinese) "用户指定来源 URL：$url" else "User-specified source URL: $url")
+            appendLine(
+                if (chinese) {
+                    "该 URL 已在预抓阶段尝试读取，优先使用预抓正文；如下面预抓正文为空再 search_web/scrape_web 补充。"
+                } else {
+                    "This URL was attempted during prefetch. Prefer its prefetched text; use search_web/scrape_web only when that text is empty."
+                }
+            )
         }
         appendLine()
-        appendArticlePlan(articlePlan)
+        appendArticlePlan(articlePlan, locale)
         appendLine()
         coverageReport?.let { report ->
-            appendLine("## 本轮补漏目标")
-            appendLine(report.promptSummary())
-            appendLine("只补上述缺项，不要重写整篇。已有段落可保留，只更新目标段落中缺失的事实、立场、影响或来源。")
+            appendLine(if (chinese) "## 本轮补漏目标" else "## Coverage gaps for this pass")
+            appendLine(report.promptSummary(locale))
+            appendLine(
+                if (chinese) {
+                    "只补上述缺项，不要重写整篇。已有段落可保留，只更新目标段落中缺失的事实、立场、影响或来源。"
+                } else {
+                    "Address only those gaps; do not rewrite the whole article. Keep existing sections and update only missing facts, positions, impacts, or sources in the target section."
+                }
+            )
             appendLine()
         }
         appendEvidenceCards(
             cards = stageEvidence,
-            title = "本段证据包（全局共 ${evidencePack.cards.size} 条，本轮只给最相关 ${stageEvidence.size} 条）",
+            title = if (chinese) {
+                "本段证据包（全局共 ${evidencePack.cards.size} 条，本轮只给最相关 ${stageEvidence.size} 条）"
+            } else {
+                "Evidence pack for this section (${evidencePack.cards.size} total; ${stageEvidence.size} most relevant in this pass)"
+            },
             excerptLimit = targetStage.promptExcerptLimit(),
+            locale = locale,
         )
         appendLine()
-        appendArticleContext(existingOutput)
+        appendArticleContext(existingOutput, locale)
         appendLine()
-        appendDeadlineGuidance(targetStage, stageTimeoutMs)
+        appendDeadlineGuidance(targetStage, stageTimeoutMs, locale)
         appendLine()
-        appendLine("## 研究顺序")
-        appendLine("1. 本地 harness 已经完成来源扩展、去重、分桶和结构规划。你只处理当前小目标。")
-        appendLine("2. 仅在以下情况补充 search_web：")
-        appendLine("   - 关键事实（发布时间、价格、官方表态、版本号等）在预抓来源中找不到或互相矛盾")
-        appendLine("   - 用户指定 URL 的预抓正文为空，需要别的 query 命中该话题")
-        appendLine("   - 你需要反面证据时（例如「辟谣」「不实」「未确认」）")
-        if (scrapeWebAvailable) {
-            appendLine("3. 仅在确认某个 URL 比预抓正文更详细时再 scrape_web；不要把预抓已有正文重抓一次。")
+        appendLine(if (chinese) "## 研究顺序" else "## Research order")
+        if (chinese) {
+            appendLine("1. 本地 harness 已经完成来源扩展、去重、分桶和结构规划。你只处理当前小目标。")
+            appendLine("2. 仅在以下情况补充 search_web：")
+            appendLine("   - 关键事实（发布时间、价格、官方表态、版本号等）在预抓来源中找不到或互相矛盾")
+            appendLine("   - 用户指定 URL 的预抓正文为空，需要别的 query 命中该话题")
+            appendLine("   - 你需要反面证据时（例如「辟谣」「不实」「未确认」）")
         } else {
-            appendLine("3. 当前未暴露 scrape_web；只能基于预抓正文 + 必要时的 search_web 摘要写入。")
+            appendLine("1. The local harness has already expanded, deduplicated, bucketed, and planned the sources. Handle only the current target.")
+            appendLine("2. Supplement with search_web only in these cases:")
+            appendLine("   - Key facts (publication time, price, official statement, version, and so on) are missing or contradictory in the prefetched sources")
+            appendLine("   - The prefetched body for the user-specified URL is empty and another query is needed to hit the topic")
+            appendLine("   - You need counter-evidence, such as a denial, a false claim, or an unconfirmed claim")
         }
-        appendLine("4. 本轮只生成目标段落，不要改写或重写未列入目标的段落。")
-        appendLine("5. 完成研究后立即调用对应 writer tool：")
-        stages.forEach { stage -> appendLine("   - ${stage.writerToolName()}：${stage.label}") }
-        appendLine("6. 本轮只暴露目标段 writer tool；如果你输出自由文本但没调工具，系统会尝试把自由文本转换成基础稿。")
-        appendLine("7. 图片只能从 image_candidates 中选择；本轮如果没有视觉 writer，就在目标段 references/links 中保留可用来源。")
-        appendLine("8. 全部 writer 完成后，直接调用 deep_read_finish。")
+        if (scrapeWebAvailable) {
+            appendLine(
+                if (chinese) {
+                    "3. 仅在确认某个 URL 比预抓正文更详细时再 scrape_web；不要把预抓已有正文重抓一次。"
+                } else {
+                    "3. Use scrape_web only after confirming that a URL has more detail than its prefetched text; do not scrape the same prefetched body again."
+                }
+            )
+        } else {
+            appendLine(
+                if (chinese) {
+                    "3. 当前未暴露 scrape_web；只能基于预抓正文 + 必要时的 search_web 摘要写入。"
+                } else {
+                    "3. scrape_web is not exposed in this pass; write only from prefetched text plus search_web snippets when necessary."
+                }
+            )
+        }
+        appendLine(
+            if (chinese) {
+                "4. 本轮只生成目标段落，不要改写或重写未列入目标的段落。"
+            } else {
+                "4. Generate only the target section in this pass; do not edit or rewrite sections outside the target."
+            }
+        )
+        appendLine(if (chinese) "5. 完成研究后立即调用对应 writer tool：" else "5. After research, immediately call the corresponding writer tool:")
+        stages.forEach { stage -> appendLine("   - ${stage.writerToolName()}: ${stage.localizedLabel(locale)}") }
+        appendLine(
+            if (chinese) {
+                "6. 本轮只暴露目标段 writer tool；如果你输出自由文本但没调工具，系统会尝试把自由文本转换成基础稿。"
+            } else {
+                "6. Only the target-section writer tool is exposed in this pass; if you return free text without calling it, the system may convert that text into a basic draft."
+            }
+        )
+        appendLine(
+            if (chinese) {
+                "7. 图片只能从 image_candidates 中选择；本轮如果没有视觉 writer，就在目标段 references/links 中保留可用来源。"
+            } else {
+                "7. Select images only from image_candidates; when no visual writer is available, keep usable sources in the target section's references/links."
+            }
+        )
+        appendLine(
+            if (chinese) {
+                "8. 全部 writer 完成后，直接调用 deep_read_finish。"
+            } else {
+                "8. After all writers are complete, call deep_read_finish directly."
+            }
+        )
         appendLine()
-        appendLine("## 段落要求")
+        appendLine(if (chinese) "## 段落要求" else "## Section requirements")
         if (DeepReadGenerationStage.OVERVIEW in stages) {
-            appendLine("- 概览：约 120-250 字中文杂志导语，说明事件是什么、为什么值得读、哪些事实已核查；完整句子优先，略超可以接受。")
+            appendLine(
+                if (chinese) {
+                    "- 概览：约 120-250 字中文杂志导语，说明事件是什么、为什么值得读、哪些事实已核查；完整句子优先，略超可以接受。"
+                } else {
+                    "- Overview: a 120-250-word magazine-style lead explaining what happened, why it matters, and which facts are verified; prefer complete sentences."
+                }
+            )
         }
         if (DeepReadGenerationStage.NARRATIVE in stages) {
-            appendLine("- 时间轴叙事：事件型写 timeline；观点/产品/人物型可写 core_points，但要有故事性和演化脉络。")
+            appendLine(
+                if (chinese) {
+                    "- 时间轴叙事：事件型写 timeline；观点/产品/人物型可写 core_points，但要有故事性和演化脉络。"
+                } else {
+                    "- Narrative: use timeline for events; opinion/product/person topics may use core_points, but preserve a clear story and evolution."
+                }
+            )
         }
         if (DeepReadGenerationStage.ANALYSIS in stages) {
-            appendLine("- 深度分析：围绕核心分歧、各方立场、影响分析；这一段需要充分 reasoning，但不要输出 reasoning 给 UI。")
+            appendLine(
+                if (chinese) {
+                    "- 深度分析：围绕核心分歧、各方立场、影响分析；这一段需要充分 reasoning，但不要输出 reasoning 给 UI。"
+                } else {
+                    "- Analysis: cover the core dispute, stakeholder positions, and implications; reason thoroughly but do not expose reasoning to the UI."
+                }
+            )
         }
         if (DeepReadGenerationStage.EXTENDED_READING in stages) {
-            appendLine("- 扩展阅读：只放真实来源链接和真实图片资产。")
+            appendLine(if (chinese) "- 扩展阅读：只放真实来源链接和真实图片资产。" else "- Extended reading: include only real source links and real image assets.")
         }
-        appendLine("- 视觉：头图必须来自候选池且 confidence=hero；inline 候选只能作为正文图。不得提交任意 URL、站点 logo、favicon、媒体图标或头像。")
-        appendLine("- 图解：只提交 3-6 个短节点的 diagram spec，节点 label 控制在约 30 字内；流程/因果可保留少量关键跨节点关系，但避免网状交叉。禁止 raw SVG/HTML/JS/外链资源。图解不参与段落完成状态，不需要就隐藏。")
+        appendLine(
+            if (chinese) {
+                "- 视觉：头图必须来自候选池且 confidence=hero；inline 候选只能作为正文图。不得提交任意 URL、站点 logo、favicon、媒体图标或头像。"
+            } else {
+                "- Visuals: the hero image must come from the candidate pool with confidence=hero; inline candidates are for body images only. Never submit arbitrary URLs, site logos, favicons, media icons, or avatars."
+            }
+        )
+        appendLine(
+            if (chinese) {
+                "- 图解：只提交 3-6 个短节点的 diagram spec，节点 label 控制在约 30 字内；流程/因果可保留少量关键跨节点关系，但避免网状交叉。禁止 raw SVG/HTML/JS/外链资源。图解不参与段落完成状态，不需要就隐藏。"
+            } else {
+                "- Diagrams: submit only a 3-6-node diagram spec with labels around 30 characters; flow/causal diagrams may keep a few important cross-node relations, but avoid tangled networks. No raw SVG/HTML/JS or external resources. Diagrams do not determine section completion and may be omitted."
+            }
+        )
         appendLine()
-        appendLine("正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。")
+        appendLine(
+            if (chinese) {
+                "- 用户可见的 summary、timeline/core_points、analysis、extended_reading、references 和图片说明一律使用中文；URL、专有名词及必要原文保持不变。"
+            } else {
+                "- Write all user-visible summary, timeline/core_points, analysis, extended_reading, references, and image captions in English; keep URLs, proper nouns, and necessary original names unchanged."
+            }
+        )
+        appendLine(if (chinese) "正文输出不会被 UI 消费。不要输出完整 JSON，不要写 Markdown 长文作为最终答案。" else "The UI does not consume free-form text. Do not return the full JSON or a long Markdown article as the final answer.")
     }
 
     private fun StringBuilder.appendDeadlineGuidance(
         stage: DeepReadGenerationStage,
         stageTimeoutMs: Long,
+        locale: Locale,
     ) {
+        val chinese = locale.isChineseLocale()
         val stageSeconds = stageTimeoutMs.toWholeSeconds()
-        appendLine("## 时间预算（硬约束）")
-        appendLine("- 本段运行预算约 ${stageSeconds} 秒。")
-        appendLine("- 你必须把第一优先级放在调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。")
-        appendLine("- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。")
-        appendLine("- 如果证据不够完整，先基于现有证据写保守版本；不要为了补全而耗尽本段预算。")
+        appendLine(if (chinese) "## 时间预算（硬约束）" else "## Time budget (hard constraint)")
+        appendLine(if (chinese) "- 本段运行预算约 ${stageSeconds} 秒。" else "- This section has a runtime budget of about ${stageSeconds} seconds.")
+        appendLine(
+            if (chinese) {
+                "- 你必须把第一优先级放在调用 ${stage.writerToolName()}；不要先输出长文、完整 JSON 或 Markdown 草稿。"
+            } else {
+                "- Prioritize calling ${stage.writerToolName()} above all else; do not output a long article, complete JSON, or Markdown draft first."
+            }
+        )
+        appendLine(
+            if (chinese) {
+                "- 预抓证据包是主材料。除非关键事实缺失或互相矛盾，不要连续 search_web / scrape_web。"
+            } else {
+                "- The prefetched evidence pack is the primary material. Do not chain search_web / scrape_web calls unless key facts are missing or contradictory."
+            }
+        )
+        appendLine(
+            if (chinese) {
+                "- 如果证据不够完整，先基于现有证据写保守版本；不要为了补全而耗尽本段预算。"
+            } else {
+                "- If the evidence is incomplete, write a cautious version from what is available; do not exhaust this section's budget trying to fill every gap."
+            }
+        )
         if (stage == DeepReadGenerationStage.EXTENDED_READING) {
-            appendLine("- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。")
+            appendLine(
+                if (chinese) {
+                    "- 扩展阅读不是长文写作：从本段证据包挑选 4-8 条真实来源链接，必要时带 image_assets，然后立即调用 writer tool。"
+                } else {
+                    "- Extended reading is not long-form writing: choose 4-8 real source links from this section's evidence pack, add image_assets when needed, then call the writer tool immediately."
+                }
+            )
         }
     }
 
-    private fun StringBuilder.appendArticlePlan(plan: DeepReadArticlePlan) {
-        appendLine("## Article Plan（本地 harness 规划，只读）")
+    private fun StringBuilder.appendArticlePlan(plan: DeepReadArticlePlan, locale: Locale) {
+        appendLine(if (locale.isChineseLocale()) "## Article Plan（本地 harness 规划，只读）" else "## Article Plan (local harness plan, read-only)")
         appendLine("- angle: ${plan.overviewAngle}")
         if (plan.narrativeSlots.isNotEmpty()) {
             appendLine("- narrative_slots: ${plan.narrativeSlots.joinToString(" / ")}")
@@ -847,10 +1021,17 @@ class DeepReadAgentRunManager(
         cards: List<DeepReadEvidenceCard>,
         title: String = "Evidence Pack",
         excerptLimit: Int = PROMPT_SOURCE_EXCERPT_LIMIT,
+        locale: Locale,
     ) {
         appendLine("## $title")
         if (cards.isEmpty()) {
-            appendLine("- 本段没有可用证据（理论上不会到这里）。")
+            appendLine(
+                if (locale.isChineseLocale()) {
+                    "- 本段没有可用证据（理论上不会到这里）。"
+                } else {
+                    "- No usable evidence is available for this section (this should not normally occur)."
+                }
+            )
             return
         }
         cards.forEach { card ->
@@ -881,12 +1062,24 @@ class DeepReadAgentRunManager(
         }
     }
 
-    private fun buildWriterReminder(stages: List<DeepReadGenerationStage>, pass: Int): String = buildString {
-        appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
-        appendLine("时间提醒：现在请直接调用 writer tool。")
-        appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
-        stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.label}") }
-        appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
+    private fun buildWriterReminder(
+        stages: List<DeepReadGenerationStage>,
+        pass: Int,
+        locale: Locale,
+    ): String = buildString {
+        if (locale.isChineseLocale()) {
+            appendLine("Supervisor reminder #${pass + 1}: 上一轮没有任何 deep_read_write_* 写入。")
+            appendLine("时间提醒：现在请直接调用 writer tool。")
+            appendLine("UI 不会消费你的自由文本。请立刻继续研究缺口，然后调用以下 writer tool 中至少一个：")
+            stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.localizedLabel(locale)}") }
+            appendLine("如果来源不足，只把当前段落写为 FAILED 的决定留给系统；不要用自由文本交差。")
+        } else {
+            appendLine("Supervisor reminder #${pass + 1}: the previous pass made no deep_read_write_* call.")
+            appendLine("Time reminder: call the writer tool directly now.")
+            appendLine("The UI does not consume free-form text. Continue researching the gap, then call at least one of these writer tools:")
+            stages.forEach { stage -> appendLine("- ${stage.writerToolName()} for ${stage.localizedLabel(locale)}") }
+            appendLine("If evidence is insufficient, let the system mark this section FAILED; do not substitute free-form text.")
+        }
     }
 
     private fun Tool.withEvidenceRecording(registry: DeepReadEvidenceRegistry): Tool {
@@ -901,16 +1094,16 @@ class DeepReadAgentRunManager(
         )
     }
 
-    private fun StringBuilder.appendArticleContext(output: DeepReadOutput) {
+    private fun StringBuilder.appendArticleContext(output: DeepReadOutput, locale: Locale) {
         val current = output.withInferredSectionStates()
-        appendLine("## 当前稿件正文（补段时必须覆盖）")
+        appendLine(if (locale.isChineseLocale()) "## 当前稿件正文（补段时必须覆盖）" else "## Current article content (must be covered when supplementing a section)")
         appendLine(
             "section_states: " + DeepReadGenerationStage.entries.joinToString(", ") {
                 "${it.name.lowercase()}=${current.statusOf(it).name.lowercase()}"
             }
         )
         if (!current.hasAnyReadySection() && current.summary.isBlank()) {
-            appendLine("- 暂无已写入段落。")
+            appendLine(if (locale.isChineseLocale()) "- 暂无已写入段落。" else "- No sections have been written yet.")
             return
         }
         if (current.summary.isNotBlank()) {
@@ -1064,7 +1257,8 @@ class DeepReadAgentRunManager(
     private fun Long.toWholeSeconds(): Long = (this / 1_000L).coerceAtLeast(1L)
 
     private fun timeoutFailureMessage(stage: DeepReadGenerationStage, timeoutMs: Long): String =
-        "${stage.label}超时未完成（本段预算约 ${timeoutMs.toWholeSeconds()} 秒）。"
+        "${appContext.getString(R.string.notification_live_status_timed_out)}: " +
+            "${stageLabel(stage)} (${timeoutMs.toWholeSeconds()}s)"
 
     private fun stageFailureMessage(
         stage: DeepReadGenerationStage,
@@ -1074,8 +1268,26 @@ class DeepReadAgentRunManager(
         if (error.isDeepReadTimeoutLike()) {
             timeoutFailureMessage(stage, timeoutMs)
         } else {
-            "${stage.label}生成失败：${error.message ?: error::class.simpleName.orEmpty()}"
+            "${stageFailureLabel(stage)}: ${error.message ?: error::class.simpleName.orEmpty()}"
         }
+
+    private fun stageLabel(stage: DeepReadGenerationStage): String = appContext.getString(
+        when (stage) {
+            DeepReadGenerationStage.OVERVIEW -> R.string.deep_read_overview
+            DeepReadGenerationStage.NARRATIVE -> R.string.deep_read_narrative
+            DeepReadGenerationStage.ANALYSIS -> R.string.deep_read_analysis
+            DeepReadGenerationStage.EXTENDED_READING -> R.string.deep_read_reading
+        }
+    )
+
+    private fun stageFailureLabel(stage: DeepReadGenerationStage): String = appContext.getString(
+        when (stage) {
+            DeepReadGenerationStage.OVERVIEW -> R.string.deep_read_overview_failed
+            DeepReadGenerationStage.NARRATIVE -> R.string.deep_read_narrative_failed
+            DeepReadGenerationStage.ANALYSIS -> R.string.deep_read_analysis_failed
+            DeepReadGenerationStage.EXTENDED_READING -> R.string.deep_read_reading_failed
+        }
+    )
 
     private fun Throwable.isDeepReadTimeoutLike(): Boolean {
         if (this is TimeoutCancellationException) return true
@@ -1121,6 +1333,15 @@ class DeepReadAgentRunManager(
             "Read timed out",
         )
     }
+}
+
+private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+private fun DeepReadGenerationStage.localizedLabel(locale: Locale): String = when (this) {
+    DeepReadGenerationStage.OVERVIEW -> if (locale.isChineseLocale()) "概览" else "Overview"
+    DeepReadGenerationStage.NARRATIVE -> if (locale.isChineseLocale()) "时间轴叙事" else "Narrative"
+    DeepReadGenerationStage.ANALYSIS -> if (locale.isChineseLocale()) "深度分析" else "Analysis"
+    DeepReadGenerationStage.EXTENDED_READING -> if (locale.isChineseLocale()) "扩展阅读" else "Extended reading"
 }
 
 private fun DeepReadGenerationStage.writerToolName(): String = when (this) {

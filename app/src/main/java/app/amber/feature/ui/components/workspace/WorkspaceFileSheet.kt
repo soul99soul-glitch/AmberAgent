@@ -51,6 +51,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -63,7 +64,12 @@ import com.composables.icons.lucide.X
 import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Folder
 import com.composables.icons.lucide.RefreshCw
+import app.amber.agent.R
+import app.amber.core.utils.appLocale
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -112,7 +118,7 @@ fun WorkspaceFileSheet(
                     onClick = { scope.launch { pagerState.animateScrollToPage(0) } },
                     text = {
                         Text(
-                            text = "最近文件",
+                            text = stringResource(R.string.workspace_recent_files),
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = if (pagerState.currentPage == 0) FontWeight.SemiBold else FontWeight.Normal,
                             ),
@@ -124,7 +130,7 @@ fun WorkspaceFileSheet(
                     onClick = { scope.launch { pagerState.animateScrollToPage(1) } },
                     text = {
                         Text(
-                            text = "目录结构",
+                            text = stringResource(R.string.workspace_directory),
                             style = MaterialTheme.typography.labelLarge.copy(
                                 fontWeight = if (pagerState.currentPage == 1) FontWeight.SemiBold else FontWeight.Normal,
                             ),
@@ -184,24 +190,24 @@ fun WorkspaceFileSheet(
         AlertDialog(
             onDismissRequest = { pendingAction = null },
             title = { Text(target.name) },
-            text = { Text("选择要对这个 workspace 文件执行的操作。") },
+            text = { Text(stringResource(R.string.workspace_file_action_description)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         pendingAction = null
                         shareWorkspaceFile(context, vm.shareableFile(target.path), target)
                     }
-                ) { Text("分享") }
+                ) { Text(stringResource(R.string.share)) }
             },
             dismissButton = {
                 Row {
-                    TextButton(onClick = { pendingAction = null }) { Text("取消") }
+                    TextButton(onClick = { pendingAction = null }) { Text(stringResource(R.string.cancel)) }
                     TextButton(
                         onClick = {
                             pendingAction = null
                             pendingDelete = target
                         }
-                    ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                    ) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
                 }
             },
         )
@@ -210,9 +216,9 @@ fun WorkspaceFileSheet(
     pendingDelete?.let { target ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("删除文件") },
+            title = { Text(stringResource(R.string.setting_files_page_delete_file_title)) },
             text = {
-                Text("将从 workspace 中永久删除「${target.name}」，无法撤销。")
+                Text(stringResource(R.string.workspace_delete_file_message, target.name))
             },
             confirmButton = {
                 TextButton(
@@ -220,10 +226,10 @@ fun WorkspaceFileSheet(
                         vm.deleteFile(target.path)
                         pendingDelete = null
                     }
-                ) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                ) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+                TextButton(onClick = { pendingDelete = null }) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -239,7 +245,7 @@ private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "Workspace 文件",
+            text = stringResource(R.string.workspace_files_title),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
         )
@@ -250,14 +256,14 @@ private fun HeaderRow(onRefresh: () -> Unit, onDismiss: () -> Unit) {
             IconButton(onClick = onRefresh, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Lucide.RefreshCw,
-                    contentDescription = "刷新",
+                    contentDescription = stringResource(R.string.setting_officepro_refresh),
                     modifier = Modifier.size(20.dp),
                 )
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                 Icon(
                     Lucide.X,
-                    contentDescription = "关闭",
+                    contentDescription = stringResource(R.string.update_card_close),
                     modifier = Modifier.size(20.dp),
                 )
             }
@@ -272,7 +278,7 @@ private fun RecentFilesList(
     onLongPressFile: (WorkspaceFileItem) -> Unit,
 ) {
     if (files.isEmpty()) {
-        EmptyState(message = "还没有最近修改的文件")
+        EmptyState(message = stringResource(R.string.workspace_no_recent_files))
         return
     }
     LazyColumn(
@@ -305,7 +311,11 @@ private fun DirectoryBrowser(
             onNavigateUp = onNavigateUp,
         )
         if (items.isEmpty()) {
-            EmptyState(message = if (currentPath.isEmpty()) "Workspace 还没有文件" else "此文件夹是空的")
+            EmptyState(
+                message = stringResource(
+                    if (currentPath.isEmpty()) R.string.workspace_no_files else R.string.workspace_empty_folder,
+                )
+            )
             return
         }
         LazyColumn(
@@ -344,7 +354,7 @@ private fun Breadcrumb(
             IconButton(onClick = onNavigateUp, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = Lucide.ArrowLeft,
-                    contentDescription = "返回上级",
+                    contentDescription = stringResource(R.string.workspace_back_to_parent),
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -404,6 +414,7 @@ private fun Breadcrumb(
 
 @Composable
 private fun FolderRow(folder: WorkspaceFileItem, onClick: () -> Unit) {
+    val appLocale = LocalContext.current.appLocale()
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -428,7 +439,7 @@ private fun FolderRow(folder: WorkspaceFileItem, onClick: () -> Unit) {
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            text = formatTime(folder.lastModified),
+            text = formatTime(folder.lastModified, appLocale),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -442,6 +453,7 @@ private fun FileRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     val extColor = extColor(file.extension)
     Row(
         modifier = Modifier
@@ -466,7 +478,7 @@ private fun FileRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = buildMeta(file),
+                text = buildMeta(file, appLocale),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -483,6 +495,7 @@ private fun RecentFileRow(
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     val extColor = extColor(file.extension)
     Row(
         modifier = Modifier
@@ -507,7 +520,7 @@ private fun RecentFileRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = buildRecentMeta(file),
+                text = buildRecentMeta(file, appLocale),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -521,13 +534,14 @@ private fun RecentFileRow(
 
 @Composable
 private fun ExtBadge(extension: String, color: androidx.compose.ui.graphics.Color) {
+    val appLocale = LocalContext.current.appLocale()
     if (extension.isBlank()) return
     Surface(
         shape = RoundedCornerShape(4.dp),
         color = color.copy(alpha = 0.12f),
     ) {
         Text(
-            text = extension.uppercase().take(4),
+            text = extension.uppercase(appLocale).take(4),
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
             color = color,
@@ -556,34 +570,45 @@ private fun extColor(extension: String): androidx.compose.ui.graphics.Color = wh
     else -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
-private fun buildMeta(file: WorkspaceFileItem): String {
+@Composable
+private fun buildMeta(file: WorkspaceFileItem, locale: Locale): String {
     val parts = mutableListOf<String>()
-    file.sizeBytes?.let { parts.add(formatSize(it)) }
-    if (file.lastModified > 0) parts.add(formatTime(file.lastModified))
+    file.sizeBytes?.let { parts.add(formatSize(it, locale)) }
+    if (file.lastModified > 0) parts.add(formatTime(file.lastModified, locale))
     return parts.joinToString(" · ")
 }
 
-private fun buildRecentMeta(file: WorkspaceFileItem): String {
+@Composable
+private fun buildRecentMeta(file: WorkspaceFileItem, locale: Locale): String {
     val parent = file.path.substringBeforeLast('/', "").ifEmpty { "/" }
     val parts = mutableListOf(parent)
-    file.sizeBytes?.let { parts.add(formatSize(it)) }
-    if (file.lastModified > 0) parts.add(formatTime(file.lastModified))
+    file.sizeBytes?.let { parts.add(formatSize(it, locale)) }
+    if (file.lastModified > 0) parts.add(formatTime(file.lastModified, locale))
     return parts.joinToString(" · ")
 }
 
-internal fun formatSize(bytes: Long): String = when {
+@Composable
+internal fun formatSize(bytes: Long): String =
+    formatSize(bytes, LocalContext.current.appLocale())
+
+private fun formatSize(bytes: Long, locale: Locale): String = when {
     bytes < 1024 -> "${bytes}B"
     bytes < 1024 * 1024 -> "${bytes / 1024}KB"
-    else -> "${"%.1f".format(bytes.toDouble() / (1024 * 1024))}MB"
+    else -> "${"%.1f".format(locale, bytes.toDouble() / (1024 * 1024))}MB"
 }
 
-internal fun formatTime(epochMs: Long): String {
+@Composable
+internal fun formatTime(epochMs: Long): String =
+    formatTime(epochMs, LocalContext.current.appLocale())
+
+@Composable
+private fun formatTime(epochMs: Long, locale: Locale): String {
     val diff = System.currentTimeMillis() - epochMs
     return when {
-        diff < 60_000 -> "刚刚"
-        diff < 3600_000 -> "${diff / 60_000}分钟前"
-        diff < 86_400_000 -> "${diff / 3600_000}小时前"
-        else -> java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(epochMs))
+        diff < 60_000 -> stringResource(R.string.workspace_time_just_now)
+        diff < 3600_000 -> stringResource(R.string.workspace_time_minutes_ago, diff / 60_000)
+        diff < 86_400_000 -> stringResource(R.string.workspace_time_hours_ago, diff / 3600_000)
+        else -> SimpleDateFormat("MM-dd HH:mm", locale).format(Date(epochMs))
     }
 }
 
@@ -593,23 +618,27 @@ private fun shareWorkspaceFile(
     item: WorkspaceFileItem,
 ) {
     if (file == null || !file.isFile) {
-        Toast.makeText(context, "文件不可分享", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, R.string.workspace_file_not_shareable, Toast.LENGTH_SHORT).show()
         return
     }
     runCatching {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val mimeType = MimeTypeMap.getSingleton()
-            .getMimeTypeFromExtension(item.extension.lowercase())
+            .getMimeTypeFromExtension(item.extension.lowercase(Locale.ROOT))
             ?: "application/octet-stream"
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = mimeType
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(intent, "分享文件")
+        val chooser = Intent.createChooser(intent, context.getString(R.string.workspace_share_file_title, item.name))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(chooser)
     }.onFailure { error ->
-        Toast.makeText(context, error.message ?: "无法打开分享面板", Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            error.message ?: context.getString(R.string.workspace_share_failed),
+            Toast.LENGTH_SHORT,
+        ).show()
     }
 }

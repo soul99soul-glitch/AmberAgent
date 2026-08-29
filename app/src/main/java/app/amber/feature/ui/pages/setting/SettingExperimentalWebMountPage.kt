@@ -114,6 +114,7 @@ fun SettingExperimentalWebMountPage(
     val globalEnabled by webMountManager.globalEnabledFlow.collectAsStateWithLifecycle()
     val evalEnabled by webMountManager.evalEnabledFlow.collectAsStateWithLifecycle()
     val toaster = LocalToaster.current
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
     // Per-site UI state.
@@ -233,7 +234,7 @@ fun SettingExperimentalWebMountPage(
                             primary = true,
                             onClick = {
                                 scope.launch {
-                                    val installed = installWebMountSlashCommand(settingsStore)
+                                    val installed = installWebMountSlashCommand(context, settingsStore)
                                     toaster.show(
                                         if (installed) slashInstalledMessage else slashAlreadyInstalledMessage
                                     )
@@ -505,7 +506,7 @@ fun SettingExperimentalWebMountPage(
                 initialAppId = existing?.appId.orEmpty(),
                 initialAppSecret = existing?.appSecret.orEmpty(),
                 initialScope = existing?.scope.orEmpty(),
-                providerHint = provider.setupHint(),
+                providerHint = provider.setupHint(context),
                 onDismiss = { oauthEditDialog = null },
                 onSave = { appId, appSecret, scopeText ->
                     if (appId.isBlank()) {
@@ -1313,22 +1314,12 @@ private fun iconForIconKey(iconKey: String?) = when (iconKey) {
  * the site.
  */
 private suspend fun installWebMountSlashCommand(
+    context: android.content.Context,
     settingsStore: app.amber.core.settings.prefs.SettingsAggregator,
 ): Boolean {
     val current = settingsStore.settingsFlow.value
     val existing = current.quickMessages.firstOrNull { it.title.equals("webmount", ignoreCase = true) }
-    val template = """
-        请用 WebMount 工具帮我完成下面这件事。准则:
-        1. 先调 wm_stations 看我现在哪些网站可用、登录态如何。
-        2. 涉及的网站不在列表里就 wm_site_add 加进来 (默认 needs_login=true)。
-        3. 如果某个站 login_status="unknown" 不要假设我没登录 — 直接 wm_open + wm_extract 试,
-           只有页面真出登录墙再让我去设置页登录。
-        4. 公开网站直接 wm_open + wm_extract,不需要登录。
-        5. 用完一次后,如果这是个用户加的自定义站且能记下有用 selectors,顺手调 wm_profile_synthesize
-           保存 hints,下次更快。
-
-        我的任务:
-    """.trimIndent()
+    val template = context.getString(R.string.setting_webmount_quick_message_template).trimEnd()
     val quickMessage = existing ?: app.amber.core.model.QuickMessage(
         title = "webmount",
         content = template + "\n",  // trailing newline so cursor lands on a fresh line

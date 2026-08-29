@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,6 +50,7 @@ import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
 import app.amber.core.service.PendingUserMessage
+import app.amber.core.service.PendingUserMessageDisplayCopy
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.core.service.previewText
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -108,9 +110,17 @@ internal fun TimelineHistoryLoadingIndicator(
             AgentWaitingDot(modifier = Modifier.size(18.dp))
             Text(
                 text = if (prefetching) {
-                    "正在预取更早消息 $loadedNodeCount/$totalNodeCount"
+                    stringResource(
+                        R.string.chat_page_loading_older_prefetching,
+                        loadedNodeCount,
+                        totalNodeCount,
+                    )
                 } else {
-                    "更早消息准备中 $loadedNodeCount/$totalNodeCount"
+                    stringResource(
+                        R.string.chat_page_loading_older_preparing,
+                        loadedNodeCount,
+                        totalNodeCount,
+                    )
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = workspace.muted,
@@ -258,6 +268,7 @@ internal fun ContextCompactInProgressMarker(
     streamingText: String = "",
 ) {
     val workspace = workspaceColors()
+    val compactingSubtitle = stringResource(R.string.chat_context_auto_compacting_subtitle)
     val transition = rememberInfiniteTransition(label = "compactShimmer")
     val phase by transition.animateFloat(
         // Sweep range is wider than [0, 1] so the highlight band travels off both
@@ -338,7 +349,7 @@ internal fun ContextCompactInProgressMarker(
             if (proseOnly.length > 220) proseOnly.take(220) + "…" else proseOnly
         }
         Text(
-            text = tailText.ifBlank { stringResource(R.string.chat_context_auto_compacting_subtitle) },
+            text = tailText.ifBlank { compactingSubtitle },
             style = MaterialTheme.typography.labelSmall,
             color = workspace.muted,
             maxLines = 3,
@@ -414,6 +425,7 @@ internal fun PendingUserMessageBubble(
     onOpenQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val workspace = workspaceColors()
     val accent = LocalChatTheme.current.accent
     val borderColor = when (message.mode) {
@@ -453,7 +465,9 @@ internal fun PendingUserMessageBubble(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = message.previewText(),
+                            text = message.previewText(
+                                copy = PendingUserMessageDisplayCopy.from(context),
+                            ),
                             modifier = Modifier.weight(1f, fill = false),
                             style = MaterialTheme.typography.bodyMedium,
                             color = textColor,
@@ -466,7 +480,7 @@ internal fun PendingUserMessageBubble(
                         ) {
                             Icon(
                                 imageVector = Lucide.X,
-                                contentDescription = "取消排队消息",
+                                contentDescription = stringResource(R.string.chat_page_cancel_queued_message),
                                 tint = cancelTint,
                                 modifier = Modifier.size(15.dp),
                             )
@@ -475,7 +489,7 @@ internal fun PendingUserMessageBubble(
                 }
                 if (queueCount != null && queueCount > 0) {
                     Text(
-                        text = "已排队 $queueCount 条",
+                        text = stringResource(R.string.chat_page_queued_message_count, queueCount),
                         modifier = Modifier
                             .padding(top = 4.dp, end = 2.dp)
                             .clickable { onOpenQueue() },

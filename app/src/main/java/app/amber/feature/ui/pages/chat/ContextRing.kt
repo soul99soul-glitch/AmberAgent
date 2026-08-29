@@ -45,6 +45,8 @@ import androidx.compose.ui.window.Popup
 import app.amber.feature.ui.theme.LocalAmberType
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.res.stringResource
+import app.amber.agent.R
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
@@ -265,7 +267,7 @@ private fun ContextUsagePopup(
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp),
                 ) {
                     Text(
-                        text = "用量与上下文",
+                        text = stringResource(R.string.context_ring_usage_context),
                         fontSize = 13.sp,
                         color = theme.inkSoft,
                         letterSpacing = 0.3.sp,
@@ -274,16 +276,16 @@ private fun ContextUsagePopup(
 
                     if (quotaSupported) {
                         UsageRow(
-                            label = "5 小时额度",
+                            label = stringResource(R.string.context_ring_five_hour_quota),
                             value = 0.46f,
-                            caption = "46 / 100 次",
+                            caption = stringResource(R.string.context_ring_five_hour_caption),
                             fillColor = theme.accent,
                             theme = theme,
                         )
                         UsageRow(
-                            label = "本周额度",
+                            label = stringResource(R.string.context_ring_weekly_quota),
                             value = 0.18f,
-                            caption = "450 / 2,500 次",
+                            caption = stringResource(R.string.context_ring_weekly_caption),
                             fillColor = theme.accent,
                             theme = theme,
                         )
@@ -323,7 +325,11 @@ private fun ContextUsagePopup(
                     ) {
                         // V3: 本次 = lastAssistantMessage.usage.totalTokens
                         val turnVal = lastTurnTotalTokens?.let { formatTokens(it) + " tok" } ?: "—"
-                        MetaStat(label = "本次", value = turnVal, theme = theme)
+                        MetaStat(
+                            label = stringResource(R.string.context_ring_this_turn),
+                            value = turnVal,
+                            theme = theme,
+                        )
                         // 缓存命中率: cached / prompt * 100%, 跳过 prompt==0 (避免除零 / N/A 时显示 —)
                         val promptTokens = lastTurnPromptTokens ?: 0
                         val cachedTokens = lastTurnCachedTokens ?: 0
@@ -331,14 +337,22 @@ private fun ContextUsagePopup(
                             val pct = (cachedTokens * 100.0 / promptTokens).coerceIn(0.0, 100.0)
                             "${pct.toInt()}%"
                         } else "—"
-                        MetaStat(label = "缓存命中", value = cacheVal, theme = theme)
+                        MetaStat(
+                            label = stringResource(R.string.context_ring_cache_hit),
+                            value = cacheVal,
+                            theme = theme,
+                        )
                         // 速度: completion_tokens / elapsed_seconds → tok/s. elapsed=null 时 —
                         val completionTokens = lastTurnCompletionTokens ?: 0
                         val speedVal = if (lastTurnElapsedMs != null && lastTurnElapsedMs > 0L && completionTokens > 0) {
                             val tps = completionTokens.toDouble() / (lastTurnElapsedMs / 1000.0)
                             "${tps.toInt()} tok/s"
                         } else "—"
-                        MetaStat(label = "速度", value = speedVal, theme = theme)
+                        MetaStat(
+                            label = stringResource(R.string.context_ring_speed),
+                            value = speedVal,
+                            theme = theme,
+                        )
                     }
                 }
             }

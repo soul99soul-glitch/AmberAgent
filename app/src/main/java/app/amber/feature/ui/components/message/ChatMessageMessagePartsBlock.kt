@@ -63,6 +63,7 @@ import app.amber.agent.Screen
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import app.amber.core.ai.generative.GenerativeUiPlanner
+import app.amber.core.ai.generative.GenerativeWidgetCopy
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import app.amber.feature.ui.components.richtext.StreamingSingleTextMarkdown
@@ -98,6 +99,7 @@ internal fun MessagePartsBlock(
     val context = LocalContext.current
     val navController = LocalNavController.current
     val workspace = workspaceColors()
+    val generativeWidgetCopy = remember(context) { GenerativeWidgetCopy.from(context) }
 
     // 消息输出HapticFeedback
     val settings = LocalSettings.current
@@ -120,9 +122,9 @@ internal fun MessagePartsBlock(
     // Render parts in original order (group thinking/tool as chain-of-thought)
     val groupedParts = remember(parts) { parts.groupMessageParts() }
     val contentBlockKeys = remember(groupedParts) { groupedParts.stableContentBlockKeys() }
-    val hasVisibleWidgetContent = remember(parts) {
+    val hasVisibleWidgetContent = remember(parts, generativeWidgetCopy) {
         parts.filterIsInstance<UIMessagePart.Text>().any { part ->
-            GenerativeWidgetParser.hasRenderableWidget(part.text)
+            GenerativeWidgetParser.hasRenderableWidget(part.text, copy = generativeWidgetCopy)
         }
     }
     // A Text block is "the streaming tail" (still being appended to) if and ONLY

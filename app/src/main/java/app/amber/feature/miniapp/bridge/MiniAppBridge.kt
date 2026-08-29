@@ -28,6 +28,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import app.amber.agent.R
 import app.amber.feature.miniapp.MiniAppAiBridge
 import app.amber.feature.miniapp.MiniAppBridgeException
 import app.amber.feature.miniapp.MiniAppBridgeRequest
@@ -49,6 +50,7 @@ import app.amber.feature.miniapp.MiniAppValidationException
 import app.amber.feature.miniapp.MiniAppWorkspaceWriter
 import app.amber.feature.miniapp.minimalHostContext
 import app.amber.agent.data.db.entity.MiniAppEntity
+import app.amber.core.utils.appLocale
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -176,7 +178,7 @@ class MiniAppBridge(
             "search" -> {
                 sandbox.require(MiniAppPermission.Search)
                 audit(method, MiniAppPermission.Search, "MiniApp search request", params)
-                searchBridge.search(params)
+                searchBridge.search(params, locale = context.appLocale())
             }
 
             "clipboard.copy" -> {
@@ -197,7 +199,11 @@ class MiniAppBridge(
             "host.getConversationContext" -> {
                 sandbox.require(MiniAppPermission.HostContext)
                 val maxChars = (params["maxChars"]?.jsonPrimitive?.intOrNull ?: 6000).coerceIn(200, 8000)
-                confirm("允许读取上下文？", "「${appProvider().title}」想读取最小化会话上下文。") {
+                val appTitle = appProvider().title
+                confirm(
+                    context.getString(R.string.miniapp_confirm_context_title),
+                    context.getString(R.string.miniapp_confirm_context_message, appTitle),
+                ) {
                     audit(method, MiniAppPermission.HostContext, "host.context", params)
                     appProvider().minimalHostContext(maxChars)
                 }
@@ -218,8 +224,12 @@ class MiniAppBridge(
                             is MiniAppSendDecision.Denied -> throw MiniAppBridgeException(decision.code, decision.message)
                             is MiniAppSendDecision.RequireConfirm ->
                                 confirm(
-                                    "允许写入并发送？",
-                                    "「${appProvider().title}」想写入并发送到会话 ${conversationId.take(24)}。",
+                                    context.getString(R.string.miniapp_confirm_send_title),
+                                    context.getString(
+                                        R.string.miniapp_confirm_send_message,
+                                        appProvider().title,
+                                        conversationId.take(24),
+                                    ),
                                 ) { JsonNull }
                             MiniAppSendDecision.AllowAuto -> Unit
                         }
@@ -232,7 +242,14 @@ class MiniAppBridge(
                         conversationWriter.writeAndSend(conversationId, text, attachments).toJson()
                     }
 
-                    else -> confirm("允许写回聊天？", text.take(300)) {
+                    else -> confirm(
+                        context.getString(R.string.miniapp_confirm_draft_title),
+                        context.getString(
+                            R.string.miniapp_confirm_draft_message,
+                            appProvider().title,
+                            text.take(300),
+                        ),
+                    ) {
                         audit(
                             method,
                             MiniAppPermission.HostSendToConversation,
@@ -251,7 +268,15 @@ class MiniAppBridge(
                 val effectId = params.stringOrNull("effectId")?.take(120)?.ifBlank { null }
                 val type = params.stringOrNull("type")?.take(40)?.ifBlank { null } ?: "note"
                 val mimeType = params.stringOrNull("mimeType")?.take(40)?.ifBlank { null } ?: "text/plain"
-                confirm("允许创建内容卡片？", "$title\n\n${content.take(260)}") {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_artifact_title),
+                    context.getString(
+                        R.string.miniapp_confirm_artifact_message,
+                        appProvider().title,
+                        title,
+                        content.take(260),
+                    ),
+                ) {
                     audit(method, MiniAppPermission.HostCreateArtifact, "host.createArtifact", JsonPrimitive(content))
                     // P3-04: board summary is only a UI projection — the registry
                     // row written below is the persisted source of truth.
@@ -265,7 +290,14 @@ class MiniAppBridge(
             "ai.generate" -> {
                 sandbox.require(MiniAppPermission.AiGenerate)
                 val prompt = params.string("prompt").take(8000)
-                confirm("允许调用 Amber.ai？", prompt.take(360)) {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_ai_title),
+                    context.getString(
+                        R.string.miniapp_confirm_ai_message,
+                        appProvider().title,
+                        prompt.take(360),
+                    ),
+                ) {
                     audit(method, MiniAppPermission.AiGenerate, "ai.generate", JsonPrimitive(prompt))
                     aiBridge.generate(appId, params)
                 }
@@ -338,7 +370,14 @@ class MiniAppBridge(
                 sandbox.require(MiniAppPermission.Launch)
                 val targetAppId = params.string("appId")
                 MiniAppLaunchLimiter.check()
-                confirm("打开另一个小应用？", "「${appProvider().title}」想打开小应用 $targetAppId。") {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_launch_title),
+                    context.getString(
+                        R.string.miniapp_confirm_launch_message,
+                        appProvider().title,
+                        targetAppId,
+                    ),
+                ) {
                     val target = repository.getById(targetAppId)
                         ?: throw MiniAppValidationException("Target MiniApp does not exist")
                     audit(method, MiniAppPermission.Launch, "launch", JsonPrimitive(target.id))
@@ -349,7 +388,13 @@ class MiniAppBridge(
 
             "clipboard.read" -> {
                 sandbox.require(MiniAppPermission.ClipboardRead)
-                confirm("允许读取剪贴板？", "「${appProvider().title}」想读取当前剪贴板文本。") {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_clipboard_title),
+                    context.getString(
+                        R.string.miniapp_confirm_clipboard_message,
+                        appProvider().title,
+                    ),
+                ) {
                     val text = systemBridge.readClipboard()
                     audit(method, MiniAppPermission.ClipboardRead, "clipboard.read", JsonPrimitive(text))
                     JsonPrimitive(text)
@@ -359,7 +404,13 @@ class MiniAppBridge(
             "location.getCurrent" -> {
                 sandbox.require(MiniAppPermission.Location)
                 val accuracy = params.stringOrNull("accuracy")?.takeIf { it == "fine" } ?: "coarse"
-                confirm("允许读取位置？", "「${appProvider().title}」想读取 $accuracy 位置。") {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_location_title),
+                    context.getString(
+                        R.string.miniapp_confirm_location_message,
+                        appProvider().title,
+                    ),
+                ) {
                     val location = systemBridge.currentLocation(accuracy)
                     audit(method, MiniAppPermission.Location, "location.getCurrent", JsonPrimitive(accuracy))
                     location
@@ -370,7 +421,14 @@ class MiniAppBridge(
                 sandbox.require(MiniAppPermission.Sensor)
                 val type = params.string("type")
                 val intervalMs = (params["intervalMs"]?.jsonPrimitive?.intOrNull ?: 500).coerceAtLeast(250)
-                confirm("允许读取传感器？", "「${appProvider().title}」想订阅 $type 传感器。") {
+                confirm(
+                    context.getString(R.string.miniapp_confirm_sensor_title),
+                    context.getString(
+                        R.string.miniapp_confirm_sensor_message,
+                        appProvider().title,
+                        type,
+                    ),
+                ) {
                     audit(method, MiniAppPermission.Sensor, "sensor.subscribe", JsonPrimitive(type))
                     buildJsonObject { put("subscriptionId", subscribeSensor(type, intervalMs)) }
                 }

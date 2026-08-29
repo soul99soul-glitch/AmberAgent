@@ -69,6 +69,6 @@ val repositoryModule = module {
     }
 
     single {
-        MiniAppRepository(get(), get(), get(), get(), get(), get(), get())
+        MiniAppRepository(get(), get(), get(), get(), get(), get(), get(), get())
     }
 }

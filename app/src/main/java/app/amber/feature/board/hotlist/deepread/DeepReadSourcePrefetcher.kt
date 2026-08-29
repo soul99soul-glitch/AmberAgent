@@ -24,6 +24,7 @@ import app.amber.search.SearchServiceOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URI
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -69,8 +70,9 @@ class DeepReadSourcePrefetcher(
         topicTitle: String,
         seedUrl: String? = null,
         force: Boolean = false,
+        locale: Locale = Locale.getDefault(),
     ): List<DeepReadSource> {
-        val cacheKey = "$topicId|${seedUrl.orEmpty()}"
+        val cacheKey = "$topicId|${seedUrl.orEmpty()}|${locale.toLanguageTag()}"
         val now = System.currentTimeMillis()
         if (!force) {
             cache[cacheKey]?.let { entry ->
@@ -96,7 +98,7 @@ class DeepReadSourcePrefetcher(
                     Log.w(TAG, "deep read prefetch: no enabled search services; falling back to seeds only")
                     return@coroutineScope seedFallback
                 }
-                val queries = buildDeepReadQueries(topicTitle)
+                val queries = buildDeepReadQueries(topicTitle, locale)
                 Log.i(
                     TAG,
                     "deep read prefetch services=${enabled.joinToString { it.deepReadServiceLabel() }} " +
@@ -108,7 +110,7 @@ class DeepReadSourcePrefetcher(
                         async {
                             try {
                                 withTimeoutOrNull(SEARCH_TIMEOUT_MS) {
-                                    searchWithService(service, query, SEARCH_RESULTS_PER_QUERY)
+                                    searchWithService(service, query, SEARCH_RESULTS_PER_QUERY, locale)
                                         .getOrNull()
                                         ?.let { result ->
                                             SearchBucket(
@@ -327,13 +329,14 @@ class DeepReadSourcePrefetcher(
         options: SearchServiceOptions,
         topicTitle: String,
         resultSize: Int,
+        locale: Locale,
     ): Result<SearchResult> {
         val params = buildJsonObject {
             put("query", topicTitle)
             put("topic", "news")
         }
         val service = SearchService.getService(options)
-        return service.search(params, SearchCommonOptions(resultSize = resultSize), options)
+        return service.search(params, SearchCommonOptions(resultSize = resultSize), options, locale)
     }
 
     private suspend fun scrapeWithService(options: SearchServiceOptions, url: String): String? {
@@ -555,32 +558,58 @@ class DeepReadSourcePrefetcher(
         return merged
     }
 
-    private fun buildDeepReadQueries(topicTitle: String): List<String> {
+    private fun buildDeepReadQueries(topicTitle: String, locale: Locale): List<String> {
         val lower = topicTitle.lowercase()
         val currentYear = java.time.LocalDate.now().year
-        val queries = mutableListOf(
-            topicTitle,
-            "$topicTitle $currentYear 最新 今日",
-            "$topicTitle 前因后果 时间线 背景",
-            "$topicTitle 时间线 事件梳理 最新进展",
-            "$topicTitle 官方 声明 通报",
-            "$topicTitle 核心矛盾 争议 影响",
-            "$topicTitle 各方反应 国际影响 专家解读",
-            "$topicTitle background timeline context controversy",
-            "$topicTitle latest news $currentYear",
-            "$topicTitle official statement reactions analysis implications",
-            "$topicTitle 图片 现场图 截图",
-            "$topicTitle 发布会 PPT 演示 文稿 图片",
-            "$topicTitle screenshot presentation slide keynote",
-        )
+        val queries = if (locale.isChineseLocale()) {
+            mutableListOf(
+                topicTitle,
+                "$topicTitle $currentYear 最新 今日",
+                "$topicTitle 前因后果 时间线 背景",
+                "$topicTitle 时间线 事件梳理 最新进展",
+                "$topicTitle 官方 声明 通报",
+                "$topicTitle 核心矛盾 争议 影响",
+                "$topicTitle 各方反应 国际影响 专家解读",
+                "$topicTitle background timeline context controversy",
+                "$topicTitle latest news $currentYear",
+                "$topicTitle official statement reactions analysis implications",
+                "$topicTitle 图片 现场图 截图",
+                "$topicTitle 发布会 PPT 演示 文稿 图片",
+                "$topicTitle screenshot presentation slide keynote",
+            )
+        } else {
+            mutableListOf(
+                topicTitle,
+                "$topicTitle latest news $currentYear",
+                "$topicTitle background timeline context",
+                "$topicTitle timeline developments latest",
+                "$topicTitle official statement notice",
+                "$topicTitle central dispute controversy impact",
+                "$topicTitle reactions international impact expert analysis",
+                "$topicTitle images event photos screenshots",
+                "$topicTitle launch presentation slides images",
+                "$topicTitle screenshot presentation slide keynote",
+            )
+        }
         if (listOf("发布会", "ppt", "演示", "截图", "小米", "特斯拉", "八败两胜").any { it in lower || it in topicTitle }) {
-            queries += "$topicTitle PPT 截图 发布会 图"
-            queries += "$topicTitle 现场图 演示文稿"
+            if (locale.isChineseLocale()) {
+                queries += "$topicTitle PPT 截图 发布会 图"
+                queries += "$topicTitle 现场图 演示文稿"
+            } else {
+                queries += "$topicTitle presentation screenshots launch"
+                queries += "$topicTitle event photos presentation slides"
+            }
         }
         if (listOf("gemini", "google", "openai", "claude", "deepseek", "gpt", "llm", "大模型", "模型", "flash").any { it in lower }) {
-            queries += "$topicTitle 发布 价格 跑分 性能 评价"
-            queries += "$topicTitle pricing benchmark performance model card"
-            queries += "$topicTitle official announcement availability API pricing"
+            if (locale.isChineseLocale()) {
+                queries += "$topicTitle 发布 价格 跑分 性能 评价"
+                queries += "$topicTitle pricing benchmark performance model card"
+                queries += "$topicTitle official announcement availability API pricing"
+            } else {
+                queries += "$topicTitle release pricing benchmarks performance review"
+                queries += "$topicTitle pricing benchmark performance model card"
+                queries += "$topicTitle official announcement availability API pricing"
+            }
         }
         if ("gemini" in lower || "google" in lower) {
             queries += "Google I/O $currentYear $topicTitle Gemini announcement pricing benchmarks"
@@ -789,6 +818,8 @@ private fun SearchServiceOptions.supportsDeepReadScrape(): Boolean =
 
 private fun String.isHttpOrHttpsUrl(): Boolean =
     startsWith("http://") || startsWith("https://")
+
+private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
 
 private fun SearchServiceOptions.deepReadServiceKey(): String = when (this) {
     is SearchServiceOptions.BingLocalOptions -> "bing"

@@ -1,8 +1,10 @@
 package app.amber.core.ai.transformers
 
+import android.content.Context
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.feature.miniapp.MiniAppOutputParser
 import app.amber.feature.miniapp.MiniAppRepository
 import org.koin.core.component.KoinComponent
@@ -44,7 +46,7 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
                 expectedBaseVersion = revisionVersion,
                 sourceMessageId = message.id.toString(),
                 changeNote = revisionChangeNote(lastUserText),
-            ) ?: return revisionFailed(messages, assistantIndex, message, textPartIndex, textPart)
+            ) ?: return revisionFailed(ctx.context, messages, assistantIndex, message, textPartIndex, textPart)
         } else {
             repository.saveGenerated(
                 output = output,
@@ -53,9 +55,9 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
         }
         val ref = repository.toCardRef(entity)
         val statusText = if (revisionAppId != null) {
-            "已更新小应用：${entity.title} v${entity.version}"
+            ctx.context.getString(R.string.miniapp_status_updated, entity.title, entity.version)
         } else {
-            "已生成小应用：${entity.title}"
+            ctx.context.getString(R.string.miniapp_status_generated, entity.title)
         }
         val updated = message.copy(
             parts = buildList {
@@ -99,6 +101,7 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
     }
 
     private fun revisionFailed(
+        context: Context,
         messages: List<UIMessage>,
         assistantIndex: Int,
         message: UIMessage,
@@ -109,7 +112,7 @@ object MiniAppOutputTransformer : OutputMessageTransformer, KoinComponent {
             parts = message.parts.mapIndexed { index, part ->
                 if (index == textPartIndex) {
                     UIMessagePart.Text(
-                        text = "小应用更新失败：目标小应用不存在，或已经被更新。请打开最新的小应用卡片后重新点击「修改」。",
+                        text = context.getString(R.string.miniapp_status_update_failed),
                         metadata = textPart.metadata,
                     )
                 } else {

@@ -51,7 +51,7 @@ class ExternalCliModelCouncilRunner(
                 timeoutMillis = timeoutMs,
                 runtime = runtime,
                 toolName = "model_council_external_cli",
-                title = "Model Council 外部 CLI · ${seat.name}",
+                title = "Model Council External CLI · ${seat.name}",
                 syncWorkspace = false,
                 flushWorkspace = false,
                 outputCallback = { line ->

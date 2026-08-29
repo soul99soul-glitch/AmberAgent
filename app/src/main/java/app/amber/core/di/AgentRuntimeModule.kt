@@ -79,7 +79,7 @@ val agentRuntimeModule = module {
                 inputClass = DeepReadInput::class,
                 inputSerializer = DeepReadInput.serializer(),
                 artifactSerializer = DeepReadArtifact.serializer(),
-                factory = { DeepReadAgentAdapter(get()) },
+                factory = { DeepReadAgentAdapter(get(), get()) },
             )
             register(
                 descriptor = SubAgentTurnDescriptor.value,
@@ -282,6 +282,7 @@ val agentRuntimeModule = module {
         app.amber.feature.modelcouncil.AppCouncilHostToolProvider(
             providerCatalog = get(),
             toolDispatcher = get(),
+            context = get<Context>(),
             // Step 6: v1 default codifies no new restriction. The real reason
             // it must stay permissive here is structural, not the tool
             // allowlist: this provider is a DI singleton constructed at app

@@ -106,6 +106,32 @@ data class SubAgentDefinition(
     val phaseLabels: List<String> = emptyList(),
 )
 
+/**
+ * Presentation-only fields for a subagent definition.
+ *
+ * Keep this separate from [SubAgentDefinition]: the latter is persisted in the thread payload
+ * and supplies the model protocol, while this value can be localized by the app UI.
+ */
+data class SubAgentDisplay(
+    val name: String,
+    val description: String,
+    val routingHint: String,
+    val phaseLabels: List<String>,
+) {
+    companion object {
+        fun from(definition: SubAgentDefinition): SubAgentDisplay = SubAgentDisplay(
+            name = definition.name,
+            description = definition.description,
+            routingHint = definition.routingHint,
+            phaseLabels = definition.phaseLabels,
+        )
+    }
+}
+
+fun interface SubAgentDisplayLocalizer {
+    fun localize(definition: SubAgentDefinition): SubAgentDisplay
+}
+
 /** Apply a partial user override on top of a built-in definition. */
 fun SubAgentDefinition.applyOverride(o: SubAgentOverride?): SubAgentDefinition {
     if (o == null) return this

@@ -15,7 +15,7 @@ class ImageAttachmentValidatorTest {
         )
 
         assertEquals(ImageAttachmentStatusKind.BLOCKED, status.kind)
-        assertTrue(status.message.contains("图片来源暂不支持"))
+        assertTrue(status.message.contains("image source is not supported"))
     }
 
     @Test
@@ -26,6 +26,6 @@ class ImageAttachmentValidatorTest {
         )
 
         assertEquals(ImageAttachmentStatusKind.BLOCKED, status?.kind)
-        assertTrue(status?.message?.contains("一次最多发送 4 张图片") == true)
+        assertTrue(status?.message?.contains("At most 4 images") == true)
     }
 }

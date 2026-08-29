@@ -9,6 +9,7 @@ import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.JsonInstantPretty
 import app.amber.core.utils.toLocalDate
+import java.util.Locale
 
 internal fun buildAgentSoulPrompt(soulMarkdown: String) =
     soulMarkdown.trim().takeIf { it.isNotBlank() }?.let { soul ->
@@ -137,7 +138,10 @@ private fun buildGenerativeUiModelGuidance(model: Model?): String {
     }
 }
 
-internal suspend fun buildRecentChatsPrompt(conversationRepo: ConversationRepository): String {
+internal suspend fun buildRecentChatsPrompt(
+    conversationRepo: ConversationRepository,
+    locale: Locale = Locale.getDefault(),
+): String {
     val recentConversations = conversationRepo.getRecentConversations(limit = 10)
     if (recentConversations.isNotEmpty()) {
         return buildString {
@@ -150,7 +154,7 @@ internal suspend fun buildRecentChatsPrompt(conversationRepo: ConversationReposi
                 recentConversations.forEach { conversation ->
                     add(buildJsonObject {
                         put("title", conversation.title)
-                        put("last_chat", conversation.updateAt.toLocalDate())
+                        put("last_chat", conversation.updateAt.toLocalDate(locale))
                     })
                 }
             }

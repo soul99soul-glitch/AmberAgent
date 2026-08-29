@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.ai
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.net.Uri
@@ -280,14 +281,14 @@ internal fun Bitmap.looksBlank(): Boolean {
     return channelRange < 8 && minRed > 245 && minGreen > 245 && minBlue > 245
 }
 
-internal fun sandboxStatusLabel(status: ToolActivityStatus): String = when (status) {
-    ToolActivityStatus.RUNNING -> "执行中"
-    ToolActivityStatus.WAITING_FOR_PERMISSION -> "待授权"
-    ToolActivityStatus.SUCCEEDED -> "成功"
-    ToolActivityStatus.FAILED -> "失败"
-    ToolActivityStatus.TIMED_OUT -> "已超时"
-    ToolActivityStatus.INTERRUPTED -> "已中断"
-    ToolActivityStatus.CANCELLED -> "已取消"
+internal fun sandboxStatusLabel(context: Context, status: ToolActivityStatus): String = when (status) {
+    ToolActivityStatus.RUNNING -> context.getString(R.string.chat_sandbox_status_running)
+    ToolActivityStatus.WAITING_FOR_PERMISSION -> context.getString(R.string.chat_sandbox_status_waiting_permission)
+    ToolActivityStatus.SUCCEEDED -> context.getString(R.string.chat_sandbox_status_succeeded)
+    ToolActivityStatus.FAILED -> context.getString(R.string.chat_sandbox_status_failed)
+    ToolActivityStatus.TIMED_OUT -> context.getString(R.string.chat_sandbox_status_timed_out)
+    ToolActivityStatus.INTERRUPTED -> context.getString(R.string.chat_sandbox_status_interrupted)
+    ToolActivityStatus.CANCELLED -> context.getString(R.string.chat_sandbox_status_cancelled)
 }
 
 internal fun sandboxStatusContainerColor(status: ToolActivityStatus): Color = when (status) {
@@ -319,9 +320,10 @@ internal fun SandboxActivityUiState.operationPreviewKind(): String = when {
     else -> toolName
 }
 
-internal fun SandboxActivityUiState.operationPreviewText(): String {
+internal fun SandboxActivityUiState.operationPreviewText(context: Context): String {
     if (toolName == "agent_idle") {
-        return "• ${inputPreview.ifBlank { "等待下一次工具调用" }}\n常驻预览已开启"
+        return "• ${inputPreview.ifBlank { context.getString(R.string.chat_sandbox_waiting_for_tool_call) }}\n" +
+            context.getString(R.string.chat_sandbox_persistent_preview_enabled)
     }
 
     val previewUrl = operationPreviewUrl()
@@ -331,7 +333,7 @@ internal fun SandboxActivityUiState.operationPreviewText(): String {
             append('\n')
             append(inputPreview.ifBlank { title }.compactForSandbox(42))
             append('\n')
-            append(sandboxStatusLabel(status))
+            append(sandboxStatusLabel(context, status))
         }
     }
 
@@ -344,7 +346,7 @@ internal fun SandboxActivityUiState.operationPreviewText(): String {
         if (tail.isNotBlank()) {
             append(tail.lines().takeLast(3).joinToString("\n").compactForSandbox(96))
         } else {
-            append(runtime.ifBlank { sandboxStatusLabel(status) }.compactForSandbox(36))
+            append(runtime.ifBlank { sandboxStatusLabel(context, status) }.compactForSandbox(36))
         }
     }
 }
@@ -367,25 +369,23 @@ internal fun SandboxActivityUiState.operationPreviewUrl(): String? {
     return null
 }
 
-internal fun SandboxActivityUiState.stepProgressText(): String {
-    if (toolName == "agent_idle") return "待命"
+internal fun SandboxActivityUiState.stepProgressText(context: Context): String {
+    if (toolName == "agent_idle") return context.getString(R.string.chat_sandbox_idle)
     val current = stepIndex
     val total = stepTotal
     return if (current != null && total != null) {
         "$current/$total"
     } else {
-        sandboxStatusLabel(status)
+        sandboxStatusLabel(context, status)
     }
 }
 
-internal fun SandboxActivityUiState.terminalTranscript(): String = buildString {
+internal fun SandboxActivityUiState.terminalTranscript(context: Context): String = buildString {
     append("$ ")
     append(inputPreview.ifBlank { title })
     append('\n')
     if (runtime.isNotBlank()) {
-        append("正在调用内嵌 ")
-        append(runtime)
-        append(" 执行工具")
+        append(context.getString(R.string.chat_sandbox_calling_embedded, runtime))
         append('\n')
     }
     if (workspace.isNotBlank()) {
@@ -394,14 +394,14 @@ internal fun SandboxActivityUiState.terminalTranscript(): String = buildString {
         append('\n')
     }
     append("status: ")
-    append(sandboxStatusLabel(status))
+    append(sandboxStatusLabel(context, status))
     append('\n')
     if (outputTail.isNotBlank()) {
         append('\n')
         append(outputTail)
     } else if (status == ToolActivityStatus.RUNNING || status == ToolActivityStatus.WAITING_FOR_PERMISSION) {
         append('\n')
-        append("等待工具返回输出...")
+        append(context.getString(R.string.chat_sandbox_waiting_tool_output))
     }
 }
 
@@ -463,6 +463,7 @@ private fun AgentOperationPreviewPeek(
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val previewUrl = activity.operationPreviewUrl()
     val workspace = workspaceColors()
     // V3 convo-tool-result.jsx PreviewThumb: 8dp 圆角 + previewBg surface + 1dp hair edge + 单层柔影 0.06
@@ -495,7 +496,7 @@ private fun AgentOperationPreviewPeek(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = activity.operationPreviewText(),
+                    text = activity.operationPreviewText(context),
                     color = workspace.muted,
                     style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                     maxLines = 4,
@@ -629,11 +630,15 @@ private fun WebOperationPreviewPlaceholder(
     webState: WebViewOperationState?,
     workspace: app.amber.feature.ui.components.ui.WorkspaceColors,
 ) {
-    val title = webState?.title.orEmpty().ifBlank { "网页预览" }
+    val webPreviewTitle = stringResource(R.string.chat_sandbox_web_preview)
+    val title = webState?.title.orEmpty().ifBlank { webPreviewTitle }
     val detail = when {
         webState?.lastError?.isNotBlank() == true -> webState.lastError
-        webState?.isLoading == true -> "正在加载 ${url.webHostPreview()}"
-        webState?.status == WebViewLoadStatus.STALLED -> "网页加载较慢"
+        webState?.isLoading == true -> stringResource(
+            R.string.chat_sandbox_loading_web,
+            url.webHostPreview(),
+        )
+        webState?.status == WebViewLoadStatus.STALLED -> stringResource(R.string.chat_sandbox_web_load_slow)
         else -> url
     }
     Column(
@@ -670,6 +675,7 @@ private fun SandboxStepPeek(
     onNext: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val workspace = workspaceColors()
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     // V3 convo-tool-result.jsx ResultPill spec:
@@ -727,7 +733,7 @@ private fun SandboxStepPeek(
                     left = true,
                 )
                 Text(
-                    text = activity.stepProgressText(),
+                    text = activity.stepProgressText(context),
                     fontSize = 9.5.sp,
                     letterSpacing = 0.4.sp,
                     color = theme.inkSoft,
@@ -770,6 +776,7 @@ private fun SandboxStepArrow(
 @Composable
 private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
     // V3 ResultPill spec: 16dp accent 实心圆 + 10dp 白勾。失败/取消保留状态色映射。
+    val context = LocalContext.current
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
     val workspace = workspaceColors()
     val (bg, ink) = when (status) {
@@ -783,7 +790,7 @@ private fun SandboxStepStatusIcon(status: ToolActivityStatus) {
     Surface(
         modifier = Modifier
             .size(16.dp)
-            .semantics { stateDescription = sandboxStatusLabel(status) },
+            .semantics { stateDescription = sandboxStatusLabel(context, status) },
         shape = CircleShape,
         color = bg,
         contentColor = ink,
@@ -814,6 +821,7 @@ private fun SandboxSheetHeader(
     onPrevious: (() -> Unit)?,
     onNext: (() -> Unit)?,
 ) {
+    val context = LocalContext.current
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -856,7 +864,7 @@ private fun SandboxSheetHeader(
                     contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
                 ) {
                     Text(
-                        text = "中断",
+                        text = stringResource(R.string.chat_sandbox_interrupt),
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                         style = MaterialTheme.typography.labelSmall,
                         maxLines = 1,
@@ -869,7 +877,7 @@ private fun SandboxSheetHeader(
                 left = true,
             )
             Text(
-                text = activity.stepProgressText(),
+                text = activity.stepProgressText(context),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -888,23 +896,25 @@ private fun SandboxToolActivityContent(
     activity: SandboxActivityUiState,
     modifier: Modifier = Modifier,
 ) {
+    val waitingOutput = stringResource(R.string.chat_sandbox_waiting_tool_output)
+    val noOutput = stringResource(R.string.chat_sandbox_no_output)
     Column(
         modifier = modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         SandboxSheetCodeBlock(
-            title = "调用内容",
+            title = stringResource(R.string.chat_sandbox_call_input),
             language = if (activity.toolName.startsWith("terminal_")) "shell" else "text",
             content = activity.inputPreview.ifBlank { activity.title },
         )
         SandboxSheetCodeBlock(
-            title = "调用结果",
+            title = stringResource(R.string.chat_sandbox_call_result),
             language = "text",
             content = activity.outputTail.ifBlank {
                 if (activity.status == ToolActivityStatus.RUNNING || activity.status == ToolActivityStatus.WAITING_FOR_PERMISSION) {
-                    "等待工具返回输出..."
+                    waitingOutput
                 } else {
-                    "无输出"
+                    noOutput
                 }
             },
         )
@@ -1055,8 +1065,12 @@ private fun WebOperationPreviewLoadingOverlay(
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                val loadingWeb = stringResource(
+                    R.string.chat_sandbox_loading_web,
+                    url.webHostPreview(),
+                )
                 Text(
-                    text = webState?.title?.takeIf { it.isNotBlank() } ?: "正在加载网页",
+                    text = webState?.title?.takeIf { it.isNotBlank() } ?: loadingWeb,
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
@@ -1067,7 +1081,9 @@ private fun WebOperationPreviewLoadingOverlay(
                     text = when {
                         webState?.lastError?.isNotBlank() == true -> webState.lastError
                         webState?.readableText?.isNotBlank() == true -> webState.readableText.compactForSandbox(120)
-                        webState?.status == WebViewLoadStatus.STALLED -> "网页加载较慢，正在保留当前预览"
+                        webState?.status == WebViewLoadStatus.STALLED -> stringResource(
+                            R.string.chat_sandbox_web_load_slow_keep_preview,
+                        )
                         else -> url.webHostPreview()
                     },
                     style = MaterialTheme.typography.bodySmall,

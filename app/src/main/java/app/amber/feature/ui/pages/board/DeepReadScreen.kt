@@ -56,6 +56,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -94,6 +95,7 @@ import app.amber.feature.board.hotlist.deepread.errorOf
 import app.amber.feature.board.hotlist.deepread.hasAnyReadySection
 import app.amber.feature.board.hotlist.deepread.sectionFailureMessage
 import app.amber.feature.board.hotlist.deepread.withInferredSectionStates
+import app.amber.agent.R
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRenderer
 import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateRepository
 import app.amber.feature.board.hotlist.deepread.verifiedImageUrls
@@ -106,6 +108,7 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.font.SlidesFontRepository
 import app.amber.feature.ui.components.richtext.MarkdownNew
 import app.amber.feature.ui.theme.LocalDarkMode
+import app.amber.core.utils.appLocale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -144,6 +147,7 @@ fun DeepReadScreen(
     val confirmed = settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed
     val board = settings.agentRuntime.todayBoard
     val deepReadFontScale = board.deepReadFontScale.coerceIn(DEEP_READ_FONT_SCALE_MIN, DEEP_READ_FONT_SCALE_MAX)
+    val appLocale = LocalView.current.context.appLocale()
     val readingFontFamily = rememberBoardReadingFontFamily(
         mode = board.boardReadingFontMode,
         fontPackId = board.boardReadingFontPackId,
@@ -228,8 +232,8 @@ fun DeepReadScreen(
     val sectionFailureMessage = output?.sectionFailureMessage()
     val firstFailedStage = output?.firstFailedStage()
     val failureRetryLabel = when {
-        firstFailedStage != null -> "仅重试这一段"
-        else -> "重试"
+        firstFailedStage != null -> stringResource(R.string.deep_read_retry_section)
+        else -> stringResource(R.string.retry)
     }
     fun retryFirstFailure() {
         firstFailedStage?.let(::runOne) ?: runAll(force = false)
@@ -272,17 +276,17 @@ fun DeepReadScreen(
             )
 
             fromHistory && output == null -> DeepReadError(
-                error = "历史内容无法读取或已不存在",
+                error = stringResource(R.string.deep_read_history_unavailable),
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                 onRetry = { runAll(force = true) },
-                retryLabel = "重新生成",
+                retryLabel = stringResource(R.string.regenerate),
             )
 
             fromHistory && output?.hasAnyReadySection() != true -> DeepReadError(
-                error = "这条历史还没有可显示的内容",
+                error = stringResource(R.string.deep_read_history_empty_content),
                 modifier = Modifier.statusBarsPadding().navigationBarsPadding(),
                 onRetry = { runAll(force = true) },
-                retryLabel = "重新生成",
+                retryLabel = stringResource(R.string.regenerate),
             )
 
             templateSelected && !selectedCustomMissing -> {
@@ -317,7 +321,7 @@ fun DeepReadScreen(
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                     when {
                         generating -> RunningStageNotice(
-                            progress = data.deepReadProgressSnapshot(running = true),
+                            progress = data.deepReadProgressSnapshot(running = true, locale = appLocale),
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -332,7 +336,7 @@ fun DeepReadScreen(
                             modifier = noticeModifier,
                         )
                         historyExpired -> TemplateFallbackNotice(
-                            message = "内容已过 24 小时，可能需要重新生成",
+                            message = stringResource(R.string.deep_read_history_expired_notice),
                             modifier = noticeModifier,
                         )
                     }
@@ -365,7 +369,7 @@ fun DeepReadScreen(
                             onRetrySection = ::runOne,
                         )
                         RunningStageNotice(
-                            progress = data.deepReadProgressSnapshot(running = true),
+                            progress = data.deepReadProgressSnapshot(running = true, locale = appLocale),
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .statusBarsPadding()
@@ -418,7 +422,7 @@ fun DeepReadScreen(
 
                     when {
                         generating -> RunningStageNotice(
-                            progress = data.deepReadProgressSnapshot(running = true),
+                            progress = data.deepReadProgressSnapshot(running = true, locale = appLocale),
                             modifier = noticeModifier,
                         )
                         runError != null && !complete -> DeepReadPartialErrorNotice(
@@ -433,15 +437,15 @@ fun DeepReadScreen(
                             modifier = noticeModifier,
                         )
                         selectedCustomMissing -> TemplateFallbackNotice(
-                            message = "模板不可用，已回退默认排版",
+                            message = stringResource(R.string.deep_read_template_unavailable),
                             modifier = noticeModifier,
                         )
                         invalidTemplateCount > 0 && !templateSelected -> TemplateFallbackNotice(
-                            message = "$invalidTemplateCount 个模板不可用，已回退默认排版",
+                            message = stringResource(R.string.deep_read_invalid_template_count, invalidTemplateCount),
                             modifier = noticeModifier,
                         )
                         historyExpired -> TemplateFallbackNotice(
-                            message = "内容已过 24 小时，可能需要重新生成",
+                            message = stringResource(R.string.deep_read_history_expired_notice),
                             modifier = noticeModifier,
                         )
                     }
@@ -510,7 +514,7 @@ private fun DeepReadPartialErrorNotice(
     error: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
-    retryLabel: String = "重试",
+    retryLabel: String? = null,
 ) {
     Surface(
         modifier = modifier,
@@ -524,7 +528,9 @@ private fun DeepReadPartialErrorNotice(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                formatDeepReadError(error).detail.ifBlank { "后续段落生成中断，已保留已写出的内容" },
+                formatDeepReadError(error).detail.ifBlank {
+                    stringResource(R.string.deep_read_partial_content_preserved)
+                },
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onErrorContainer,
@@ -535,7 +541,7 @@ private fun DeepReadPartialErrorNotice(
                 onClick = onRetry,
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
             ) {
-                Text(retryLabel)
+                Text(retryLabel ?: stringResource(R.string.retry))
             }
         }
     }
@@ -718,17 +724,17 @@ private fun DeepReadConfirmation(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 Text(
-                    "深度阅读会消耗更多 tokens",
+                    stringResource(R.string.deep_read_cost_title),
                     style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Light, color = palette.ink)
                         .withReadingFont(fontFamily),
                 )
                 Text(
-                    "单篇深读约消耗 3-10 万 tokens（取决于来源数量和模型多步程度）。已生成的话题在缓存有效期内不会重复计费。",
+                    stringResource(R.string.deep_read_cost_message),
                     style = MaterialTheme.typography.bodyMedium.copy(lineHeight = 24.sp, color = palette.muted)
                         .withReadingFont(fontFamily),
                 )
                 Button(onClick = onConfirm) {
-                    Text("继续生成")
+                    Text(stringResource(R.string.deep_read_continue_generation))
                 }
             }
         }
@@ -924,7 +930,7 @@ private fun MagazineHeroFrame(
             fontFamily = fontFamily,
         )
         DeepReadSectionStatus.FAILED -> SectionErrorCard(
-            label = "概览生成失败",
+            label = stringResource(R.string.deep_read_overview_failed),
             errorMessage = errorMessage,
             onRetry = onRetry,
             palette = palette,
@@ -932,7 +938,7 @@ private fun MagazineHeroFrame(
             modifier = Modifier.padding(horizontal = 30.dp, vertical = 36.dp),
         )
         DeepReadSectionStatus.PENDING -> SectionPlaceholder(
-            label = "概览待生成",
+            label = stringResource(R.string.deep_read_overview_pending),
             palette = palette,
             modifier = Modifier.padding(horizontal = 30.dp, vertical = 36.dp),
         )
@@ -965,20 +971,20 @@ private fun NarrativeFrame(
             }
         }
         DeepReadSectionStatus.RUNNING -> SectionSkeleton(
-            label = "时间轴叙事",
+            label = stringResource(R.string.deep_read_narrative),
             palette = palette,
             fontFamily = fontFamily,
             lineCount = 4,
         )
         DeepReadSectionStatus.FAILED -> SectionErrorCard(
-            label = "时间轴叙事生成失败",
+            label = stringResource(R.string.deep_read_narrative_failed),
             errorMessage = errorMessage,
             onRetry = onRetry,
             palette = palette,
             fontFamily = fontFamily,
         )
         DeepReadSectionStatus.PENDING -> SectionPlaceholder(
-            label = "时间轴叙事待生成",
+            label = stringResource(R.string.deep_read_narrative_pending),
             palette = palette,
         )
     }
@@ -996,20 +1002,20 @@ private fun AnalysisFrame(
     when (status) {
         DeepReadSectionStatus.READY -> AnalysisSection(analysis, palette, fontFamily)
         DeepReadSectionStatus.RUNNING -> SectionSkeleton(
-            label = "深度分析",
+            label = stringResource(R.string.deep_read_analysis),
             palette = palette,
             fontFamily = fontFamily,
             lineCount = 3,
         )
         DeepReadSectionStatus.FAILED -> SectionErrorCard(
-            label = "深度分析生成失败",
+            label = stringResource(R.string.deep_read_analysis_failed),
             errorMessage = errorMessage,
             onRetry = onRetry,
             palette = palette,
             fontFamily = fontFamily,
         )
         DeepReadSectionStatus.PENDING -> SectionPlaceholder(
-            label = "深度分析待生成",
+            label = stringResource(R.string.deep_read_analysis_pending),
             palette = palette,
         )
     }
@@ -1028,23 +1034,23 @@ private fun ReadingFrame(
         DeepReadSectionStatus.READY -> if (links.isNotEmpty()) {
             ReadingSection(links, palette, fontFamily)
         } else {
-            SectionPlaceholder(label = "暂无扩展阅读", palette = palette)
+            SectionPlaceholder(label = stringResource(R.string.deep_read_reading_empty), palette = palette)
         }
         DeepReadSectionStatus.RUNNING -> SectionSkeleton(
-            label = "扩展阅读",
+            label = stringResource(R.string.deep_read_reading),
             palette = palette,
             fontFamily = fontFamily,
             lineCount = 3,
         )
         DeepReadSectionStatus.FAILED -> SectionErrorCard(
-            label = "扩展阅读生成失败",
+            label = stringResource(R.string.deep_read_reading_failed),
             errorMessage = errorMessage,
             onRetry = onRetry,
             palette = palette,
             fontFamily = fontFamily,
         )
         DeepReadSectionStatus.PENDING -> SectionPlaceholder(
-            label = "扩展阅读待生成",
+            label = stringResource(R.string.deep_read_reading_pending),
             palette = palette,
         )
     }
@@ -1088,7 +1094,10 @@ private fun HeroSkeleton(
         SkeletonLine(palette = palette, widthFraction = 0.92f)
         SkeletonLine(palette = palette, widthFraction = 0.75f)
         Text(
-            "正在写入概览…",
+            stringResource(
+                R.string.deep_read_writing,
+                stringResource(R.string.deep_read_overview),
+            ),
             style = MaterialTheme.typography.labelSmall,
             color = palette.muted,
         )
@@ -1112,7 +1121,7 @@ private fun SectionSkeleton(
             SkeletonLine(palette = palette, widthFraction = fraction)
         }
         Text(
-            "正在写入${label}…",
+            stringResource(R.string.deep_read_writing, label),
             style = MaterialTheme.typography.labelSmall,
             color = palette.muted,
         )
@@ -1165,7 +1174,7 @@ private fun SectionErrorCard(
                 onClick = onRetry,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
             ) {
-                Text("仅重试这一段")
+                Text(stringResource(R.string.deep_read_retry_section))
             }
         }
     }
@@ -1457,7 +1466,7 @@ private fun TimelineSection(
     fontFamily: FontFamily?,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
-        SectionKicker("时间轴", palette)
+        SectionKicker(stringResource(R.string.deep_read_timeline), palette)
         events.forEach { event ->
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
                 TimelineMarker(highlight = event.isHighlight, palette = palette)
@@ -1510,10 +1519,10 @@ private fun CorePointsSection(
     fontFamily: FontFamily?,
 ) {
     val title = when (type) {
-        "product" -> "功能亮点"
-        "person" -> "人物背景"
-        "opinion" -> "核心论点"
-        else -> "关键脉络"
+        "product" -> stringResource(R.string.deep_read_core_points_product)
+        "person" -> stringResource(R.string.deep_read_core_points_person)
+        "opinion" -> stringResource(R.string.deep_read_core_points_opinion)
+        else -> stringResource(R.string.deep_read_core_points_default)
     }
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         SectionKicker(title, palette)
@@ -1559,12 +1568,12 @@ private fun DiagramSection(
     fontFamily: FontFamily?,
 ) {
     val label = when (diagram.type) {
-        "causal_chain" -> "因果链"
-        "process_flow" -> "流程图"
-        "stakeholder_map" -> "关系图"
-        "system_structure" -> "结构图"
-        "comparison_matrix" -> "对比图"
-        else -> "图解"
+        "causal_chain" -> stringResource(R.string.deep_read_diagram_causal_chain)
+        "process_flow" -> stringResource(R.string.deep_read_diagram_process_flow)
+        "stakeholder_map" -> stringResource(R.string.deep_read_diagram_stakeholder_map)
+        "system_structure" -> stringResource(R.string.deep_read_diagram_system_structure)
+        "comparison_matrix" -> stringResource(R.string.deep_read_diagram_comparison_matrix)
+        else -> stringResource(R.string.deep_read_diagram_default)
     }
     val nodeLabels = diagram.nodes.associate { it.id to it.label }
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -1692,7 +1701,7 @@ private fun EditorialImage(
 @Composable
 private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        SectionKicker("深度分析", palette)
+        SectionKicker(stringResource(R.string.deep_read_analysis), palette)
         val analysisCoreDispute = analysis.coreDispute
         if (!analysisCoreDispute.isNullOrBlank()) {
             DeepReadMarkdownText(
@@ -1723,7 +1732,11 @@ private fun AnalysisSection(analysis: DeepAnalysis, palette: MagazinePalette, fo
 @Composable
 private fun PerspectiveRow(perspective: Perspective, palette: MagazinePalette, fontFamily: FontFamily?) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(perspective.holder ?: "观点", style = MaterialTheme.typography.labelMedium, color = palette.accent)
+        Text(
+            perspective.holder ?: stringResource(R.string.deep_read_viewpoint),
+            style = MaterialTheme.typography.labelMedium,
+            color = palette.accent,
+        )
         DeepReadMarkdownText(
             text = perspective.viewpoint,
             style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, color = palette.ink)
@@ -1758,7 +1771,7 @@ private fun ReadingSection(links: List<ReadingLink>, palette: MagazinePalette, f
     val uriHandler = LocalUriHandler.current
     val visibleLinks = links.take(8)
     Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
-        SectionKicker("扩展阅读", palette)
+        SectionKicker(stringResource(R.string.deep_read_reading), palette)
         Spacer(Modifier.height(14.dp))
         visibleLinks.forEachIndexed { index, link ->
             Row(
@@ -1839,9 +1852,9 @@ private fun DeepReadError(
     error: String,
     modifier: Modifier,
     onRetry: () -> Unit,
-    retryLabel: String = "重试",
+    retryLabel: String? = null,
 ) {
-    val ui = remember(error) { formatDeepReadError(error) }
+    val ui = formatDeepReadError(error)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             modifier = Modifier
@@ -1886,7 +1899,9 @@ private fun DeepReadError(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Button(onClick = onRetry) { Text(retryLabel) }
+            Button(onClick = onRetry) {
+                Text(retryLabel ?: stringResource(R.string.retry))
+            }
         }
     }
 }
@@ -1898,14 +1913,15 @@ private data class DeepReadErrorUi(
     val suggestion: String?,
 )
 
+@Composable
 private fun formatDeepReadError(error: String): DeepReadErrorUi {
     val normalized = error.replace(Regex("\\s+"), " ").trim()
     if (normalized.isBlank()) {
         return DeepReadErrorUi(
-            title = "深度阅读生成失败",
+            title = stringResource(R.string.deep_read_generation_failed),
             reason = null,
-            detail = "没有收到具体错误信息。",
-            suggestion = "可以重试一次，或切换模型后再生成。",
+            detail = stringResource(R.string.deep_read_error_no_details),
+            suggestion = stringResource(R.string.deep_read_error_retry_or_switch),
         )
     }
     val lines = error.trim().lines().map { it.trim() }.filter { it.isNotBlank() }
@@ -1919,11 +1935,12 @@ private fun formatDeepReadError(error: String): DeepReadErrorUi {
             ?.groupValues
             ?.getOrNull(1)
     val title = when {
-        "被拒绝" in firstLine || httpCode == "400" -> "模型请求被拒绝"
-        httpCode in setOf("401", "403") -> "模型鉴权失败"
-        httpCode == "429" -> "模型额度或频率受限"
-        httpCode in setOf("500", "502", "503", "504") -> "模型服务异常"
-        else -> "深度阅读生成失败"
+        "被拒绝" in firstLine || "rejected" in firstLine.lowercase() || httpCode == "400" ->
+            stringResource(R.string.deep_read_error_request_rejected)
+        httpCode in setOf("401", "403") -> stringResource(R.string.deep_read_error_auth)
+        httpCode == "429" -> stringResource(R.string.deep_read_error_rate_limited)
+        httpCode in setOf("500", "502", "503", "504") -> stringResource(R.string.deep_read_error_service)
+        else -> stringResource(R.string.deep_read_generation_failed)
     }
     val detail = lines
         .drop(1)
@@ -1944,17 +1961,19 @@ private fun formatDeepReadError(error: String): DeepReadErrorUi {
 }
 
 private fun looksLikeSuggestion(text: String): Boolean =
-    listOf("可以", "建议", "请", "可能", "稍后", "切换").any { it in text }
+    listOf("可以", "建议", "请", "可能", "稍后", "切换", "retry", "switch", "check", "may", "later")
+        .any { it in text || it in text.lowercase() }
 
+@Composable
 private fun defaultDeepReadErrorSuggestion(httpCode: String?, message: String): String? {
     val lower = message.lowercase()
     return when {
         httpCode == "400" && listOf("reject", "rejected", "safety", "policy", "blocked").any { it in lower } ->
-            "可能是来源正文或提示词触发了模型安全策略。可以换一个模型，或减少来源正文后重试。"
-        httpCode == "400" -> "请求被模型服务判定为无效。建议换模型或重新生成一次。"
-        httpCode in setOf("401", "403") -> "请检查这个模型的 API Key、Base URL、模型名和账号权限。"
-        httpCode == "429" -> "当前模型可能达到额度或频率限制，稍后重试或切换模型。"
-        httpCode in setOf("500", "502", "503", "504") -> "这是模型服务端错误，稍后重试通常可以恢复。"
+            stringResource(R.string.deep_read_error_safety_suggestion)
+        httpCode == "400" -> stringResource(R.string.deep_read_error_invalid_request_suggestion)
+        httpCode in setOf("401", "403") -> stringResource(R.string.deep_read_error_auth_suggestion)
+        httpCode == "429" -> stringResource(R.string.deep_read_error_rate_limit_suggestion)
+        httpCode in setOf("500", "502", "503", "504") -> stringResource(R.string.deep_read_error_service_suggestion)
         else -> null
     }
 }

@@ -38,6 +38,7 @@ class MarkdownToAnnotatedStringTest {
             source = result.preprocessed,
             root = result.tree,
             style = testStyle,
+            imageFallbackLabel = "Image",
             enableLatexRendering = enableLatexRendering,
         )
     }
@@ -164,6 +165,7 @@ class MarkdownToAnnotatedStringTest {
             source = result.preprocessed,
             root = result.tree,
             style = testStyle,
+            imageFallbackLabel = "Image",
             onClickUrl = { opened = it },
         )
 
@@ -259,6 +261,7 @@ class MarkdownToAnnotatedStringTest {
             source = result.preprocessed,
             root = result.tree,
             style = testStyle,
+            imageFallbackLabel = "Image",
             codeHighlights = mapOf(streamingCodeBlockKey("kotlin", body) to tokens),
         )
 
@@ -288,6 +291,7 @@ class MarkdownToAnnotatedStringTest {
             source = result.preprocessed,
             root = result.tree,
             style = testStyle,
+            imageFallbackLabel = "Image",
             codeHighlights = mapOf(streamingCodeBlockKey("kotlin", body) to tokens),
         )
 
@@ -380,7 +384,14 @@ class MarkdownToAnnotatedStringTest {
     fun `image renders as image placeholder label`() {
         val md = render("![alt](https://example.com/img.png)")
 
-        assertEquals("[图片: alt]", md.text)
+        assertEquals("[Image: alt]", md.text)
+    }
+
+    @Test
+    fun `image without alt uses localized placeholder label`() {
+        val md = render("![](https://example.com/img.png)")
+
+        assertEquals("[Image]", md.text)
     }
 
     @Test

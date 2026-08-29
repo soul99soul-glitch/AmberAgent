@@ -111,8 +111,8 @@ fun SettingAgentExtensionsPage() {
                     item(
                         onClick = { navController.navigate(Screen.SettingSlidesFonts) },
                         leadingContent = { Icon(Lucide.Package, null) },
-                        supportingContent = { Text("下载中文字体包，提高生成式幻灯片的还原度") },
-                        headlineContent = { Text("Slides 字体资源") },
+                        supportingContent = { Text(stringResource(R.string.setting_slides_fonts_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_slides_fonts_title)) },
                     )
                     // "Agent 运行时任务" entry intentionally hidden from end users — that page
                     // is a developer-facing harness debug view (审批原因 / 并发批次 / 能力快照
@@ -421,8 +421,10 @@ fun SettingCronTasksPage(
     deleteTask?.let { task ->
         AlertDialog(
             onDismissRequest = { deleteTask = null },
-            title = { Text("删除定时任务") },
-            text = { Text("确定删除「${task.title}」吗？这会取消后续计划运行。") },
+            title = { Text(stringResource(R.string.setting_cron_tasks_delete_title)) },
+            text = {
+                Text(stringResource(R.string.setting_cron_tasks_delete_message, task.title))
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -432,12 +434,12 @@ fun SettingCronTasksPage(
                         }
                     },
                 ) {
-                    Text("删除")
+                    Text(stringResource(R.string.delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteTask = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )
@@ -503,21 +505,24 @@ private fun CronTaskActions(
             onCheckedChange = onToggle,
         )
         IconButton(onClick = { expanded = true }) {
-            Icon(Lucide.EllipsisVertical, contentDescription = "更多操作")
+            Icon(
+                Lucide.EllipsisVertical,
+                contentDescription = stringResource(R.string.setting_cron_tasks_more_actions),
+            )
         }
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
             DropdownMenuItem(
-                text = { Text("查看详情") },
+                text = { Text(stringResource(R.string.setting_cron_tasks_view_details)) },
                 onClick = {
                     expanded = false
                     onShowDetails()
                 },
             )
             DropdownMenuItem(
-                text = { Text("立即运行") },
+                text = { Text(stringResource(R.string.setting_cron_tasks_run_now)) },
                 leadingIcon = { Icon(Lucide.Play, null) },
                 onClick = {
                     expanded = false
@@ -525,7 +530,7 @@ private fun CronTaskActions(
                 },
             )
             DropdownMenuItem(
-                text = { Text("删除") },
+                text = { Text(stringResource(R.string.delete)) },
                 leadingIcon = { Icon(Lucide.Trash2, null) },
                 onClick = {
                     expanded = false
@@ -552,33 +557,49 @@ private fun CronTaskDetailDialog(
                 modifier = Modifier.widthIn(max = 520.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                CronDetailLine("任务 ID", task.id)
-                CronDetailLine("计划", "${task.cronExpression} · ${task.timezoneId}")
-                CronDetailLine("下次运行", formatEpochMillis(task.nextRunAtMs))
-                CronDetailLine("最近运行", formatEpochMillis(task.lastRunAtMs))
-                CronDetailLine("状态", "${task.lastStatus.name.lowercase()} · 已运行 ${task.runCount} 次")
-                CronDetailLine("会话", task.conversationId)
+                CronDetailLine(stringResource(R.string.setting_cron_tasks_detail_id), task.id)
+                CronDetailLine(
+                    stringResource(R.string.setting_cron_tasks_detail_schedule),
+                    "${task.cronExpression} · ${task.timezoneId}",
+                )
+                CronDetailLine(
+                    stringResource(R.string.setting_cron_tasks_detail_next_run),
+                    formatEpochMillis(task.nextRunAtMs),
+                )
+                CronDetailLine(
+                    stringResource(R.string.setting_cron_tasks_detail_last_run),
+                    formatEpochMillis(task.lastRunAtMs),
+                )
+                CronDetailLine(
+                    stringResource(R.string.setting_cron_tasks_detail_status),
+                    stringResource(
+                        R.string.setting_cron_tasks_detail_status_value,
+                        task.lastStatus.name.lowercase(),
+                        task.runCount,
+                    ),
+                )
+                CronDetailLine(stringResource(R.string.setting_cron_tasks_detail_conversation), task.conversationId)
                 task.lastError?.takeIf { it.isNotBlank() }?.let {
-                    CronDetailLine("错误", it)
+                    CronDetailLine(stringResource(R.string.setting_cron_tasks_detail_error), it)
                 }
-                CronDetailLine("Prompt", task.prompt)
+                CronDetailLine(stringResource(R.string.setting_cron_tasks_detail_prompt), task.prompt)
             }
         },
         confirmButton = {
             TextButton(onClick = onOpenConversation) {
-                Text("打开会话")
+                Text(stringResource(R.string.setting_cron_tasks_open_conversation))
             }
         },
         dismissButton = {
             Row {
                 TextButton(onClick = onRunNow) {
-                    Text("立即运行")
+                    Text(stringResource(R.string.setting_cron_tasks_run_now))
                 }
                 TextButton(onClick = onDelete) {
-                    Text("删除")
+                    Text(stringResource(R.string.delete))
                 }
                 TextButton(onClick = onDismiss) {
-                    Text("关闭")
+                    Text(stringResource(R.string.update_card_close))
                 }
             }
         },

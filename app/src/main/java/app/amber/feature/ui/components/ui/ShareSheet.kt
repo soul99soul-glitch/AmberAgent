@@ -22,7 +22,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.amber.agent.R
 import app.amber.ai.provider.ProviderSetting
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Share2
@@ -52,7 +54,7 @@ fun ShareSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("共享你的LLM模型", style = MaterialTheme.typography.titleLarge)
+                    Text(stringResource(R.string.share_sheet_title), style = MaterialTheme.typography.titleLarge)
 
                     IconButton(
                         onClick = {

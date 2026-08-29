@@ -24,6 +24,27 @@ import kotlinx.serialization.json.put
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/** Localized labels used when a chat message is materialized as an artifact. */
+data class ArtifactLocalizedCopy(
+    val imageLabel: String,
+    val videoLabel: String,
+    val audioLabel: String,
+    val reasoningBlock: String,
+    val unnamedMessage: String,
+    val editedFrom: (String) -> String,
+) {
+    companion object {
+        val ENGLISH = ArtifactLocalizedCopy(
+            imageLabel = "Image",
+            videoLabel = "Video",
+            audioLabel = "Audio",
+            reasoningBlock = "> Reasoning\n\n",
+            unnamedMessage = "Unnamed message",
+            editedFrom = { source -> "(edited from $source)" },
+        )
+    }
+}
+
 /**
  * Workspace Artifact Registry — P3-01.
  *
@@ -48,6 +69,7 @@ class ArtifactRepository(
     private val workspaceManager: WorkspaceManager,
     private val messageNodeDao: MessageNodeDAO,
     private val conversationDao: ConversationDAO,
+    private val copy: ArtifactLocalizedCopy = ArtifactLocalizedCopy.ENGLISH,
 ) {
     val observeAll: Flow<List<Artifact>> = dao.observeAll().map { list -> list.map { it.toArtifact() } }
 
@@ -76,12 +98,12 @@ class ArtifactRepository(
         includeReasoning: Boolean,
         existingArtifactId: String? = null,
     ): Artifact {
-        val content = ChatMessageContentBuilder.build(message, includeReasoning)
+        val content = ChatMessageContentBuilder.build(message, includeReasoning, copy)
         val digest = sha256Hex(content)
         val size = content.toByteArray(Charsets.UTF_8).size.toLong()
-        val title = ChatMessageContentBuilder.titleOf(message, content)
+        val title = ChatMessageContentBuilder.titleOf(message, content, copy)
         val now = System.currentTimeMillis()
-        val metadata = ChatMessageContentBuilder.metadata(message, includeReasoning)
+        val metadata = ChatMessageContentBuilder.metadata(message, includeReasoning, copy)
         return if (existingArtifactId != null) {
             val existing = requireNotNull(dao.getById(existingArtifactId)) {
                 "Artifact not found: $existingArtifactId"
@@ -285,11 +307,11 @@ class ArtifactRepository(
             return ReparseResult.Failed(artifact.artifactId, "source_unavailable")
         }
         val includeReasoning = ChatMessageContentBuilder.includeReasoning(artifact.metadataJson)
-        val content = ChatMessageContentBuilder.build(message, includeReasoning)
+        val content = ChatMessageContentBuilder.build(message, includeReasoning, copy)
         val now = System.currentTimeMillis()
         writeContentFile(artifact.contentLocator, content)
         val updated = artifact.toEntity().copy(
-            title = ChatMessageContentBuilder.titleOf(message, content),
+            title = ChatMessageContentBuilder.titleOf(message, content, copy),
             contentDigest = sha256Hex(content),
             sizeBytes = content.toByteArray(Charsets.UTF_8).size.toLong(),
             parserVersion = CHAT_PARSER_VERSION,
@@ -446,7 +468,11 @@ object ChatMessageContentBuilder {
     /** P6-02: tool part whose output carries generated images. */
     const val GENERATE_IMAGE_TOOL_NAME = "generate_image"
 
-    fun build(message: UIMessage, includeReasoning: Boolean): String {
+    fun build(
+        message: UIMessage,
+        includeReasoning: Boolean,
+        copy: ArtifactLocalizedCopy = ArtifactLocalizedCopy.ENGLISH,
+    ): String {
         val parts = mutableListOf<String>()
         message.parts.forEach { part ->
             when (part) {
@@ -459,17 +485,19 @@ object ChatMessageContentBuilder {
                         ?.let { it as? JsonPrimitive }
                         ?.contentOrNull
                     if (!sourceRef.isNullOrBlank()) {
-                        parts += "![图片](${part.url}) (修改自 $sourceRef)"
+                        parts += "![${copy.imageLabel}](${part.url}) ${copy.editedFrom(sourceRef)}"
                     } else {
-                        parts += "![图片](${part.url})"
+                        parts += "![${copy.imageLabel}](${part.url})"
                     }
                 }
                 is UIMessagePart.Document -> parts += "[${part.fileName}](${part.url})"
-                is UIMessagePart.Video -> parts += "[视频](${part.url})"
-                is UIMessagePart.Audio -> parts += "[音频](${part.url})"
+                is UIMessagePart.Video -> parts += "[${copy.videoLabel}](${part.url})"
+                is UIMessagePart.Audio -> parts += "[${copy.audioLabel}](${part.url})"
                 is UIMessagePart.MiniApp -> parts += "[MiniApp: ${part.title}]"
                 is UIMessagePart.Reasoning ->
-                    if (includeReasoning && part.reasoning.isNotBlank()) parts += "> 推理过程\n\n${part.reasoning}"
+                    if (includeReasoning && part.reasoning.isNotBlank()) {
+                        parts += "${copy.reasoningBlock}${part.reasoning}"
+                    }
                 // P6-02: generated images live inside the generate_image tool
                 // part's output — include them so saving an assistant message
                 // to the Workspace captures the generated (or edited) images.
@@ -480,9 +508,9 @@ object ChatMessageContentBuilder {
                                 ?.let { it as? JsonPrimitive }
                                 ?.contentOrNull
                             if (!sourceRef.isNullOrBlank()) {
-                                parts += "![图片](${imagePart.url}) (修改自 $sourceRef)"
+                                parts += "![${copy.imageLabel}](${imagePart.url}) ${copy.editedFrom(sourceRef)}"
                             } else {
-                                parts += "![图片](${imagePart.url})"
+                                parts += "![${copy.imageLabel}](${imagePart.url})"
                             }
                         }
                     }
@@ -491,27 +519,35 @@ object ChatMessageContentBuilder {
         return parts.joinToString("\n\n")
     }
 
-    fun titleOf(message: UIMessage, content: String): String {
+    fun titleOf(
+        message: UIMessage,
+        content: String,
+        copy: ArtifactLocalizedCopy = ArtifactLocalizedCopy.ENGLISH,
+    ): String {
         content.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(60)
             ?.takeIf { it.isNotEmpty() }?.let { return it }
         val attachment = message.parts.filterIsInstance<UIMessagePart.Document>().firstOrNull()
-        return attachment?.fileName ?: "未命名消息"
+        return attachment?.fileName ?: copy.unnamedMessage
     }
 
     /** Domain metadata persisted on the artifact row (not in settings). */
-    fun metadata(message: UIMessage, includeReasoning: Boolean): String {
+    fun metadata(
+        message: UIMessage,
+        includeReasoning: Boolean,
+        copy: ArtifactLocalizedCopy = ArtifactLocalizedCopy.ENGLISH,
+    ): String {
         val attachments = message.parts.flatMap { part ->
             when (part) {
-                is UIMessagePart.Image -> listOf(AttachmentRef("图片", part.url, "image/*"))
+                is UIMessagePart.Image -> listOf(AttachmentRef(copy.imageLabel, part.url, "image/*"))
                 is UIMessagePart.Document -> listOf(AttachmentRef(part.fileName, part.url, part.mime))
-                is UIMessagePart.Video -> listOf(AttachmentRef("视频", part.url, part.mime))
+                is UIMessagePart.Video -> listOf(AttachmentRef(copy.videoLabel, part.url, part.mime))
                 is UIMessagePart.Audio ->
-                    listOf(AttachmentRef(part.fileName.ifBlank { "音频" }, part.url, part.mime))
+                    listOf(AttachmentRef(part.fileName.ifBlank { copy.audioLabel }, part.url, part.mime))
                 // P6-02: generated images live in the tool part output.
                 is UIMessagePart.Tool ->
                     if (part.toolName == GENERATE_IMAGE_TOOL_NAME) {
                         part.output.filterIsInstance<UIMessagePart.Image>()
-                            .map { AttachmentRef("图片", it.url, "image/*") }
+                            .map { AttachmentRef(copy.imageLabel, it.url, "image/*") }
                     } else {
                         emptyList()
                     }

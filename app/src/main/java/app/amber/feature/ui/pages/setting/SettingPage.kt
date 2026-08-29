@@ -268,8 +268,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
-                        supportingContent = { Text("Google 云同步、本地加密备份与完整数据恢复") },
-                        headlineContent = { Text("同步与备份") },
+                        supportingContent = { Text(stringResource(R.string.setting_page_backup_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
@@ -295,8 +295,8 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         // P7-03：存储占用与按时间清理会话。
                         onClick = { navController.navigate(Screen.SettingStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
-                        supportingContent = { Text("存储占用分类统计与按时间清理会话（置顶保留）") },
-                        headlineContent = { Text("存储占用与清理") },
+                        supportingContent = { Text(stringResource(R.string.setting_page_storage_cleanup_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                     )
                 }
             }

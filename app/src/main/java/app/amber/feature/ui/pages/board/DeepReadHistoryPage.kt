@@ -27,10 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import app.amber.agent.Screen
+import app.amber.agent.R
 import app.amber.feature.board.hotlist.DeepReadHistoryItem
 import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.ui.components.nav.BackButton
@@ -57,7 +59,7 @@ fun DeepReadHistoryPage(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("深度阅读历史") },
+                title = { Text(stringResource(R.string.deep_read_history_title)) },
                 navigationIcon = { BackButton() },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
@@ -71,7 +73,7 @@ fun DeepReadHistoryPage(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("还没有生成过深度阅读", color = colors.muted)
+                Text(stringResource(R.string.deep_read_history_empty), color = colors.muted)
             }
             return@Scaffold
         }
@@ -144,27 +146,36 @@ private fun DeepReadHistoryRow(
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
         ) {
             Text(
-                if (item.pinned) "取消收藏" else "收藏",
+                if (item.pinned) {
+                    stringResource(R.string.deep_read_unfavorite)
+                } else {
+                    stringResource(R.string.deep_read_favorite)
+                },
                 style = MaterialTheme.typography.labelSmall,
             )
         }
         // Pinned items are always fresh; only show expired/valid for unpinned ones.
         if (!item.pinned) {
             WorkspaceStatusPill(
-                text = if (item.expired) "已失效" else "有效",
+                text = if (item.expired) {
+                    stringResource(R.string.deep_read_expired)
+                } else {
+                    stringResource(R.string.deep_read_active)
+                },
                 tone = if (item.expired) WorkspaceTone.Warning else WorkspaceTone.Success,
             )
         } else {
             WorkspaceStatusPill(
-                text = "已收藏",
+                text = stringResource(R.string.deep_read_pinned),
                 tone = WorkspaceTone.Accent,
             )
         }
     }
 }
 
+@Composable
 private fun formatHistoryTime(timestamp: Long): String {
-    if (timestamp <= 0L) return "未知时间"
+    if (timestamp <= 0L) return stringResource(R.string.board_time_unknown)
     return Instant.ofEpochMilli(timestamp)
         .atZone(ZoneId.systemDefault())
         .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))

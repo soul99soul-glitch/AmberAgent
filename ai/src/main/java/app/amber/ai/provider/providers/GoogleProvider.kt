@@ -26,6 +26,7 @@ import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatus
+import app.amber.ai.provider.providers.google.GoogleGeminiOAuthCopy
 import app.amber.ai.ui.ImageAspectRatio
 import app.amber.ai.ui.ImageGenerationItem
 import app.amber.ai.ui.ImageGenerationResult
@@ -56,6 +57,7 @@ private const val TAG = "GoogleProvider"
 class GoogleProvider(
     private val client: OkHttpClient,
     context: Context? = null,
+    private val oauthCopy: GoogleGeminiOAuthCopy = GoogleGeminiOAuthCopy.ENGLISH,
 ) : TextModelGateway<ProviderSetting.Google>, ImageModelGateway<ProviderSetting.Google> {
     private val keyRoulette = if (context != null) KeyRoulette.lru(context) else KeyRoulette.default()
     private val contentAdapter = GeminiGenerateContentAdapter()
@@ -70,6 +72,7 @@ class GoogleProvider(
             app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient(
                 client,
                 app.amber.ai.provider.providers.google.GoogleGeminiAuthStore(it),
+                copy = oauthCopy,
             )
         }
 
@@ -90,10 +93,10 @@ class GoogleProvider(
         providerSetting: ProviderSetting.Google,
     ): Pair<String, String> {
         val client = geminiOAuthClient
-            ?: error("Gemini OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
+            ?: error(oauthCopy.clientUnavailable)
         val session = client.requireUsableSession(providerSetting.id)
         val projectId = session.projectId
-            ?: error("cloudcode-pa onboarding 没有返回 cloudaicompanionProject，请检查 Google 账号权限。")
+            ?: error(oauthCopy.projectMissing)
         return session.accessToken to projectId
     }
 
@@ -143,7 +146,7 @@ class GoogleProvider(
             if (isCodeAssistOAuthMode(providerSetting)) {
                 geminiOAuthClient
                     ?.requireUsableSession(providerSetting.id)
-                    ?: error("Gemini OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
+                    ?: error(oauthCopy.clientUnavailable)
                 return@withContext app.amber.ai.provider.providers.google.defaultGeminiOAuthModelList()
             }
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")

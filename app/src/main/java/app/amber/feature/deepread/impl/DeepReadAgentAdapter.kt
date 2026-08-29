@@ -1,5 +1,6 @@
 package app.amber.feature.deepread.impl
 
+import android.content.Context
 import app.amber.core.agent.runtime.Agent
 import app.amber.core.agent.runtime.AgentDescriptor
 import app.amber.core.agent.runtime.AgentHandler
@@ -10,9 +11,11 @@ import app.amber.feature.deepread.api.DeepReadInput
 import app.amber.feature.board.hotlist.deepread.DeepReadAgentRunManager
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
+import app.amber.core.utils.appLocale
 
 class DeepReadAgentAdapter(
     private val runManager: DeepReadAgentRunManager,
+    private val context: Context,
 ) : Agent<DeepReadInput, DeepReadArtifact> {
 
     override val descriptor: AgentDescriptor = DeepReadDescriptor.value
@@ -21,6 +24,7 @@ class DeepReadAgentAdapter(
         scope.events.commit(
             DeepReadEventPayload.GenerationPhaseChanged(phase = "collecting")
         )
+        val locale = context.appLocale()
 
         val output = try {
             when {
@@ -36,6 +40,7 @@ class DeepReadAgentAdapter(
                     // (gated by the kernel's durable-path check).
                     runId = scope.runId.value,
                     events = scope.events,
+                    locale = locale,
                 ).getOrThrow()
 
                 input.stages.size == 1 -> runManager.runSection(
@@ -46,6 +51,7 @@ class DeepReadAgentAdapter(
                     propagateFailuresWithPartial = input.propagateFailuresWithPartial,
                     runId = scope.runId.value,
                     events = scope.events,
+                    locale = locale,
                 ).getOrThrow()
 
                 else -> error("DeepRead agent supports at most one explicit stage, got ${input.stages}")

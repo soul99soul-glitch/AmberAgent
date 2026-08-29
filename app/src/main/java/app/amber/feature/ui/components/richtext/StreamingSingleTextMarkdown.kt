@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.Color
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
 import app.amber.core.utils.openUrl
+import app.amber.agent.R
 import app.amber.feature.ui.components.message.MessageRenderCache
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.highlight.HighlightToken
@@ -153,12 +155,19 @@ fun StreamingSingleTextMarkdown(
     val singleTextStyle = rememberMarkdownSingleTextStyle()
     val enableLatexRendering = LocalSettings.current.displaySetting.enableLatexRendering
     val context = LocalContext.current
+    val imageFallbackLabel = stringResource(R.string.html_asset_slides_fallback_image)
     val onClickUrl = remember(context) {
         { url: String -> context.openUrl(url) }
     }
     // Reading the snapshot map inside remember subscribes this cache to map
     // writes — a late-arriving token batch re-maps with the colored spans.
-    val annotated = remember(data, singleTextStyle, onClickUrl, enableLatexRendering) {
+    val annotated = remember(
+        data,
+        singleTextStyle,
+        onClickUrl,
+        enableLatexRendering,
+        imageFallbackLabel,
+    ) {
         mdNodeToAnnotatedString(
             source = data.preprocessed,
             root = data.tree,
@@ -166,6 +175,7 @@ fun StreamingSingleTextMarkdown(
             onClickUrl = onClickUrl,
             codeHighlights = codeHighlights.toMap(),
             enableLatexRendering = enableLatexRendering,
+            imageFallbackLabel = imageFallbackLabel,
         )
     }
 

@@ -57,6 +57,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -65,7 +67,9 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.core.ai.vision.ImageAttachmentStatusKind
+import app.amber.core.ai.vision.ImageAttachmentStrings
 import app.amber.core.ai.vision.ImageAttachmentValidator
 import app.amber.core.files.FilesManager
 import app.amber.feature.modelcouncil.CouncilParticipant
@@ -221,7 +225,10 @@ fun CouncilRoomComposer(
             }
             if (mentionedNames.isNotEmpty()) {
                 Text(
-                    text = "发送给 · ${mentionedNames.joinToString("、")}",
+                    text = stringResource(
+                        R.string.council_room_send_to,
+                        mentionedNames.joinToString(stringResource(R.string.council_room_mention_separator)),
+                    ),
                     modifier = Modifier.padding(start = 18.dp, bottom = 6.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = tokens.accent,
@@ -271,7 +278,7 @@ fun CouncilRoomComposer(
                     ) {
                         Icon(
                             imageVector = Lucide.Plus,
-                            contentDescription = "添加附件",
+                            contentDescription = stringResource(R.string.council_room_add_attachment),
                             tint = if (attachExpanded) tokens.accent else tokens.ink3,
                             modifier = Modifier
                                 .size(24.dp)
@@ -306,7 +313,7 @@ fun CouncilRoomComposer(
                             ) {
                                 Icon(
                                     imageVector = Lucide.Image,
-                                    contentDescription = "图片",
+                                    contentDescription = stringResource(R.string.photo),
                                     tint = tokens.ink3,
                                     modifier = Modifier.size(23.dp),
                                 )
@@ -323,7 +330,7 @@ fun CouncilRoomComposer(
                             ) {
                                 Icon(
                                     imageVector = Lucide.FileText,
-                                    contentDescription = "文件",
+                                    contentDescription = stringResource(R.string.upload_file),
                                     tint = tokens.ink3,
                                     modifier = Modifier.size(23.dp),
                                 )
@@ -358,7 +365,7 @@ fun CouncilRoomComposer(
                                 Box(modifier = Modifier.padding(vertical = 9.dp)) {
                                     if (textFieldValue.text.isEmpty()) {
                                         Text(
-                                            text = "输入消息",
+                                            text = stringResource(R.string.chat_input_compose_placeholder),
                                             style = MaterialTheme.typography.bodyLarge,
                                             color = tokens.ink3,
                                         )
@@ -379,6 +386,9 @@ fun CouncilRoomComposer(
                 val armed = textFieldValue.text.isNotBlank() || attachments.isNotEmpty()
                 val running = room.status.running && room.messages.any { it.role != "user" }
                 val showStop = running && !armed
+                val sendContentDescription = stringResource(
+                    if (showStop) R.string.stop else R.string.send,
+                )
                 // Mirror the main chat composer's send/stop button exactly: an
                 // accent-filled circle with a white glyph — ArrowUp to send, Cancel01
                 // (×) to stop; neutral surface only when idle with an empty draft.
@@ -418,13 +428,13 @@ fun CouncilRoomComposer(
                         }
                         .semantics {
                             role = Role.Button
-                            contentDescription = if (showStop) "停止" else "发送"
+                            contentDescription = sendContentDescription
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = if (showStop) Lucide.X else Lucide.ArrowUp,
-                        contentDescription = if (showStop) "停止" else "发送",
+                        contentDescription = sendContentDescription,
                         tint = sendIconTint,
                         modifier = Modifier.size(22.dp),
                     )
@@ -490,7 +500,7 @@ private fun MentionPopup(
             }
             if (candidates.isEmpty()) {
                 Text(
-                    text = "无匹配成员",
+                    text = stringResource(R.string.council_room_no_matching_members),
                     modifier = Modifier.padding(12.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspace.faint,
@@ -510,6 +520,8 @@ private fun CouncilAttachmentStrip(
     val tokens = LocalAmberTokens.current
     val settings = LocalSettings.current
     val toaster = LocalToaster.current
+    val context = LocalContext.current
+    val attachmentStrings = remember(context) { ImageAttachmentStrings.from(context) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -521,20 +533,21 @@ private fun CouncilAttachmentStrip(
             when (part) {
                 is UIMessagePart.Image -> {
                     val status by produceState(
-                        ImageAttachmentValidator.checking(),
+                        ImageAttachmentValidator.checking(attachmentStrings),
+                        context,
                         part.url,
                         settings.chatModelId,
                         settings.ocrModelId,
                         settings.providers,
                     ) {
                         value = withContext(Dispatchers.IO) {
-                            ImageAttachmentValidator.inspectImage(part, settings)
+                            ImageAttachmentValidator.inspectImage(part, settings, attachmentStrings)
                         }
                     }
                     Box {
                         AsyncImage(
                             model = part.url,
-                            contentDescription = "图片附件",
+                            contentDescription = stringResource(R.string.council_room_image_attachment),
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
                                 .size(56.dp)
@@ -633,7 +646,7 @@ private fun AttachmentRemoveBadge(onClick: () -> Unit, modifier: Modifier = Modi
     ) {
         Icon(
             imageVector = Lucide.X,
-            contentDescription = "移除附件",
+            contentDescription = stringResource(R.string.chat_input_remove_attachment),
             tint = Color.White,
             modifier = Modifier.size(12.dp),
         )

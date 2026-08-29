@@ -1,5 +1,6 @@
 package app.amber.core.ai.mcp
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -23,6 +24,7 @@ import java.security.SecureRandom
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.io.encoding.Base64
+import app.amber.agent.R
 
 private const val TAG = "McpOAuthClient"
 
@@ -41,6 +43,7 @@ private const val TAG = "McpOAuthClient"
  */
 class McpOAuthClient(
     private val httpClient: OkHttpClient,
+    private val context: Context,
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
@@ -115,7 +118,7 @@ class McpOAuthClient(
                     return@withContext meta
                 }
             }
-            error("无法发现受保护资源元数据 (protected resource metadata)")
+            oauthError(context.getString(R.string.setting_mcp_status_error))
         }
 
     /**
@@ -131,7 +134,7 @@ class McpOAuthClient(
                     return@withContext meta
                 }
             }
-            error("无法发现授权服务器元数据 (authorization server metadata): $issuer")
+            oauthError(issuer)
         }
 
     /** 动态客户端注册 (RFC 7591)，返回 client_id (公共客户端通常无 secret)。 */
@@ -185,7 +188,7 @@ class McpOAuthClient(
         resource: String,
     ): String {
         val base = authorizationEndpoint.toHttpUrlOrNull()
-            ?: error("非法的授权端点: $authorizationEndpoint")
+            ?: oauthError(authorizationEndpoint)
         return base.newBuilder()
             .addQueryParameter("response_type", "code")
             .addQueryParameter("client_id", clientId)
@@ -345,6 +348,10 @@ class McpOAuthClient(
                 }
             })
         }
+
+    private fun oauthError(detail: String): Nothing = error(
+        context.getString(R.string.oauth_loopback_failure_message, detail)
+    )
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()

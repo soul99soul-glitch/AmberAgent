@@ -28,6 +28,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -54,6 +55,7 @@ import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
+import app.amber.core.utils.appLocale
 import org.koin.androidx.compose.koinViewModel
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -151,6 +153,7 @@ private fun HeatmapCard(conversationsPerDay: Map<LocalDate, Int>, modifier: Modi
 
 @Composable
 private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
+    val appLocale = LocalContext.current.appLocale()
     val today = LocalDate.now()
     val startSunday = today
         .with(TemporalAdjusters.previousOrSame(DayOfWeek.SUNDAY))
@@ -230,7 +233,7 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>) {
                                 text = if (isYearLabel) {
                                     labelDate.year.toString()
                                 } else {
-                                    labelDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
+                                    labelDate.month.getDisplayName(TextStyle.SHORT, appLocale)
                                 },
                                 modifier = Modifier.wrapContentWidth(unbounded = true),
                                 style = if (isYearLabel) {
@@ -350,6 +353,7 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int) {
 
 @Composable
 private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
+    val appLocale = LocalContext.current.appLocale()
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -362,13 +366,13 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
                 icon = Lucide.ChartColumn,
                 label = stringResource(R.string.stats_page_total_conversations),
-                value = formatCount(stats.totalConversations.toLong()),
+                value = formatCount(stats.totalConversations.toLong(), appLocale),
             )
             StatCard(
                 modifier = Modifier.weight(1f),
                 icon = Lucide.MessageCircle,
                 label = stringResource(R.string.stats_page_total_messages),
-                value = formatCount(stats.totalMessages.toLong()),
+                value = formatCount(stats.totalMessages.toLong(), appLocale),
             )
         }
         Row(
@@ -379,13 +383,13 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
                 modifier = Modifier.weight(1f),
                 icon = Lucide.Cpu,
                 label = stringResource(R.string.stats_page_input_tokens),
-                value = formatTokens(stats.totalPromptTokens),
+                value = formatTokens(stats.totalPromptTokens, appLocale),
             )
             StatCard(
                 modifier = Modifier.weight(1f),
                 icon = Lucide.Cpu,
                 label = stringResource(R.string.stats_page_output_tokens),
-                value = formatTokens(stats.totalCompletionTokens),
+                value = formatTokens(stats.totalCompletionTokens, appLocale),
             )
         }
         if (stats.totalCachedTokens > 0) {
@@ -393,14 +397,14 @@ private fun StatsGrid(stats: AppStats, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxWidth(),
                 icon = Lucide.Zap,
                 label = stringResource(R.string.stats_page_cached_tokens),
-                value = formatTokens(stats.totalCachedTokens),
+                value = formatTokens(stats.totalCachedTokens, appLocale),
             )
         }
         StatCard(
             modifier = Modifier.fillMaxWidth(),
             icon = Lucide.Rocket,
             label = stringResource(R.string.stats_page_launch_count),
-            value = formatCount(stats.launchCount.toLong()),
+            value = formatCount(stats.launchCount.toLong(), appLocale),
         )
     }
 }
@@ -442,15 +446,15 @@ private fun StatCard(
     }
 }
 
-private fun formatCount(count: Long): String = when {
-    count >= 1_000_000 -> "%.1fM".format(count / 1_000_000.0)
-    count >= 1_000 -> "%.1fK".format(count / 1_000.0)
+private fun formatCount(count: Long, locale: Locale): String = when {
+    count >= 1_000_000 -> "%.1fM".format(locale, count / 1_000_000.0)
+    count >= 1_000 -> "%.1fK".format(locale, count / 1_000.0)
     else -> count.toString()
 }
 
-private fun formatTokens(count: Long): String = when {
-    count >= 1_000_000_000 -> "%.2fB".format(count / 1_000_000_000.0)
-    count >= 1_000_000 -> "%.2fM".format(count / 1_000_000.0)
-    count >= 1_000 -> "%.1fK".format(count / 1_000.0)
+private fun formatTokens(count: Long, locale: Locale): String = when {
+    count >= 1_000_000_000 -> "%.2fB".format(locale, count / 1_000_000_000.0)
+    count >= 1_000_000 -> "%.2fM".format(locale, count / 1_000_000.0)
+    count >= 1_000 -> "%.1fK".format(locale, count / 1_000.0)
     else -> count.toString()
 }

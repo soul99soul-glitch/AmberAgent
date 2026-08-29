@@ -4,6 +4,7 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.agent.R
 import app.amber.core.sync.core.RestoreScope
 import app.amber.core.sync.core.SYNC_ARCHIVE_EXTENSION
 import app.amber.core.sync.core.SyncArchiveManager
@@ -75,8 +77,8 @@ class BackupVM(
     val operationState = MutableStateFlow<UiState<SyncPreview>>(UiState.Idle)
     val pendingImportPreview = MutableStateFlow<SyncPreview?>(null)
     val googleSession = MutableStateFlow<GoogleDriveAuthSession?>(null)
-    val googleMessage = MutableStateFlow("")
-    val localMessage = MutableStateFlow("")
+    val googleMessage = MutableStateFlow<BackupMessage?>(null)
+    val localMessage = MutableStateFlow<BackupMessage?>(null)
     val backupActivity = MutableStateFlow<BackupActivity?>(null)
     val pendingGoogleAuthorization = MutableStateFlow<PendingIntent?>(null)
     val pendingCloudRestore = MutableStateFlow(false)
@@ -86,9 +88,9 @@ class BackupVM(
 
     // P7-01 provider 状态（WebDAV / 本地文件夹）。
     val webDavSnapshots = MutableStateFlow<List<SyncSnapshot>>(emptyList())
-    val webDavMessage = MutableStateFlow("")
+    val webDavMessage = MutableStateFlow<BackupMessage?>(null)
     val localFolderSnapshots = MutableStateFlow<List<SyncSnapshot>>(emptyList())
-    val folderMessage = MutableStateFlow("")
+    val folderMessage = MutableStateFlow<BackupMessage?>(null)
     val folderInfo = MutableStateFlow<PersistedFolderStore.Folder?>(null)
     val pendingDeleteConfirm = MutableStateFlow<SyncSnapshot?>(null)
     val pendingUploadConflict = MutableStateFlow<UploadConflictChoice?>(null)
@@ -164,7 +166,7 @@ class BackupVM(
                     }
                 }.onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
+                    googleMessage.value = backupMessage(R.string.backup_google_authorization_failed, error.message.orEmpty())
                     recordError(error)
                 }
             } finally {
@@ -190,7 +192,7 @@ class BackupVM(
                     operationState.value = UiState.Idle
                 }.onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    googleMessage.value = "Google 授权失败：${error.message.orEmpty()}"
+                    googleMessage.value = backupMessage(R.string.backup_google_authorization_failed, error.message.orEmpty())
                     recordError(error)
                 }
             } finally {
@@ -211,9 +213,9 @@ class BackupVM(
     fun cancelGoogleAuthorization(resultCode: Int? = null) {
         googleAuthorizationInFlight = false
         googleMessage.value = if (resultCode == 0) {
-            "Google 授权未完成或被系统取消"
+            backupMessage(R.string.backup_google_authorization_not_completed)
         } else {
-            "Google 授权已取消"
+            backupMessage(R.string.backup_google_authorization_cancelled)
         }
         operationState.value = UiState.Idle
     }
@@ -246,7 +248,7 @@ class BackupVM(
                     // 授权成功后由 applyGoogleSession 自动继续上传。
                     pendingGoogleUpload = PendingGoogleUpload(passphrase, encryptionMode)
                     connectGoogle()
-                    googleMessage.value = "请先完成 Google Drive 授权，再上传云端快照。"
+                    googleMessage.value = backupMessage(R.string.backup_google_authorization_required_upload)
                     return
                 }
                 uploadGoogle(SyncMode.FULL, passphrase, encryptionMode = encryptionMode)
@@ -273,7 +275,7 @@ class BackupVM(
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再上传云端快照。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_required_upload)
             return
         }
         // P7-02：口令模式必须输入自定义口令；设备绑定模式由引擎使用本机密钥。
@@ -291,20 +293,28 @@ class BackupVM(
         overwrite: Boolean,
     ) {
         if (googleUnavailable()) return
-        val uploadTitle = if (overwrite) "正在覆盖云端快照" else "正在上传云端快照"
+        val uploadTitleRes = if (overwrite) {
+            R.string.backup_activity_uploading_cloud_overwrite
+        } else {
+            R.string.backup_activity_uploading_cloud
+        }
         var lastUploadPercent: Int? = null
         var emittedUnknownProgress = false
         viewModelScope.launch {
             operationState.value = UiState.Loading
             backupActivity.value = BackupActivity(
-                title = if (overwrite) "准备覆盖云端快照" else "准备上传云端快照",
-                detail = "正在连接 Google Drive",
+                titleRes = if (overwrite) {
+                    R.string.backup_activity_prepare_cloud_overwrite
+                } else {
+                    R.string.backup_activity_prepare_cloud_upload
+                },
+                detailRes = R.string.backup_activity_connect_google_drive,
             )
             runCatching {
                 val activeSession = refreshGoogleSessionForOperation() ?: session
                 backupActivity.value = BackupActivity(
-                    title = uploadTitle,
-                    detail = "正在生成加密备份文件",
+                    titleRes = uploadTitleRes,
+                    detailRes = R.string.backup_activity_generating_encrypted_backup,
                 )
                 googleDriveSyncRepository.upload(
                     session = activeSession,
@@ -317,7 +327,7 @@ class BackupVM(
                             if (percent != lastUploadPercent) {
                                 lastUploadPercent = percent
                                 backupActivity.value = BackupActivity(
-                                    title = uploadTitle,
+                                    titleRes = uploadTitleRes,
                                     detail = "$percent%",
                                     progress = percent / 100f,
                                 )
@@ -326,8 +336,8 @@ class BackupVM(
                             if (!emittedUnknownProgress) {
                                 emittedUnknownProgress = true
                                 backupActivity.value = BackupActivity(
-                                    title = uploadTitle,
-                                    detail = "正在上传...",
+                                    titleRes = uploadTitleRes,
+                                    detailRes = R.string.backup_activity_uploading,
                                 )
                             }
                         }
@@ -352,13 +362,13 @@ class BackupVM(
                         )
                     )
                 }
-                googleMessage.value = ""
+                googleMessage.value = null
                 backupActivity.value = null
                 operationState.value = UiState.Success(result.preview)
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                googleMessage.value = "云端上传失败：${error.message.orEmpty()}"
+                googleMessage.value = backupMessage(R.string.backup_cloud_upload_failed, error.message.orEmpty())
                 recordGoogleDriveError(error)
             }
         }
@@ -369,7 +379,7 @@ class BackupVM(
         if (googleUnavailable()) return
         val session = googleSession.value ?: run {
             connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再覆盖云端快照。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_required_overwrite)
             return
         }
         pendingCloudUploadRequest = null
@@ -389,14 +399,14 @@ class BackupVM(
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再下载云端快照。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_required_download)
             return
         }
         viewModelScope.launch {
             operationState.value = UiState.Loading
             backupActivity.value = BackupActivity(
-                title = "正在读取云端快照",
-                detail = "正在获取 Google Drive 列表",
+                titleRes = R.string.backup_activity_reading_cloud_snapshot,
+                detailRes = R.string.backup_activity_fetching_google_drive_list,
             )
             runCatching {
                 googleDriveSyncRepository.listSnapshots(refreshGoogleSessionForOperation() ?: session)
@@ -404,17 +414,17 @@ class BackupVM(
                 backupActivity.value = null
                 if (snapshots.isEmpty()) {
                     operationState.value = UiState.Error(IllegalStateException("Google Drive 云端还没有同步快照"))
-                    googleMessage.value = "Google Drive 云端还没有同步快照"
+                    googleMessage.value = backupMessage(R.string.backup_cloud_no_snapshots)
                 } else {
                     cloudSnapshots.value = snapshots
                     cloudSnapshotPickerVisible.value = true
-                    googleMessage.value = ""
+                    googleMessage.value = null
                     operationState.value = UiState.Idle
                 }
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                googleMessage.value = "云端列表读取失败：${error.message.orEmpty()}"
+                googleMessage.value = backupMessage(R.string.backup_cloud_list_failed, error.message.orEmpty())
                 recordGoogleDriveError(error)
             }
         }
@@ -425,14 +435,14 @@ class BackupVM(
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再下载云端快照。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_required_download)
             return
         }
         viewModelScope.launch {
             cloudSnapshotPickerVisible.value = false
             operationState.value = UiState.Loading
             backupActivity.value = BackupActivity(
-                title = "正在下载云端快照",
+                titleRes = R.string.backup_activity_downloading_cloud_snapshot,
                 detail = file.name,
             )
             runCatching {
@@ -447,12 +457,12 @@ class BackupVM(
                 pendingCloudRestoreRevision = result.file.revisionKey
                 pendingCloudRestore.value = true
                 pendingImportPreview.value = result.preview
-                googleMessage.value = ""
+                googleMessage.value = null
                 operationState.value = UiState.Success(result.preview)
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                googleMessage.value = "云端下载失败：${error.message.orEmpty()}"
+                googleMessage.value = backupMessage(R.string.backup_cloud_download_failed, error.message.orEmpty())
                 recordGoogleDriveError(error)
             }
         }
@@ -490,10 +500,10 @@ class BackupVM(
         }
         viewModelScope.launch {
             operationState.value = UiState.Loading
-            localMessage.value = ""
+            localMessage.value = null
             backupActivity.value = BackupActivity(
-                title = "正在导出本地备份",
-                detail = "正在生成加密备份文件",
+                titleRes = R.string.backup_activity_exporting_local_backup,
+                detailRes = R.string.backup_activity_generating_encrypted_backup,
             )
             runCatching {
                 localBackupRepository.exportToUri(
@@ -514,13 +524,13 @@ class BackupVM(
                         )
                     )
                 }
-                localMessage.value = "已导出本地备份。"
+                localMessage.value = backupMessage(R.string.backup_local_exported)
                 backupActivity.value = null
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                localMessage.value = "本地导出失败：${error.message.orEmpty()}"
+                localMessage.value = backupMessage(R.string.backup_local_export_failed, error.message.orEmpty())
                 recordError(error)
             }
         }
@@ -531,21 +541,21 @@ class BackupVM(
         viewModelScope.launch {
             operationState.value = UiState.Loading
             backupActivity.value = BackupActivity(
-                title = "正在读取本地备份",
-                detail = "正在解析备份文件",
+                titleRes = R.string.backup_activity_reading_local_backup,
+                detailRes = R.string.backup_activity_parsing_backup_file,
             )
             runCatching {
                 localBackupRepository.inspectUri(uri)
             }.onSuccess { preview ->
                 backupActivity.value = null
                 pendingImportPreview.value = preview
-                localMessage.value = "已读取本地备份，确认后可恢复。"
+                localMessage.value = backupMessage(R.string.backup_local_imported)
                 operationState.value = UiState.Success(preview)
             }.onFailure { error ->
                 pendingLocalRestoreUri = null
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                localMessage.value = "本地导入失败：${error.message.orEmpty()}"
+                localMessage.value = backupMessage(R.string.backup_local_import_failed, error.message.orEmpty())
                 recordError(error)
             }
         }
@@ -565,7 +575,7 @@ class BackupVM(
             val error = IllegalStateException("没有待恢复的本地备份")
             backupActivity.value = null
             operationState.value = UiState.Error(error)
-            localMessage.value = error.message.orEmpty()
+            localMessage.value = backupMessage(R.string.backup_no_pending_local_backup)
             return
         }
         runRestoreVerify(passphrase, scope, preserveConversations, preserveGenMedia) { request ->
@@ -589,8 +599,8 @@ class BackupVM(
         }
         operationState.value = UiState.Loading
         backupActivity.value = BackupActivity(
-            title = "正在恢复备份",
-            detail = "覆盖本机数据",
+            titleRes = R.string.backup_activity_restoring_backup,
+            detailRes = R.string.backup_activity_overwriting_local_data,
         )
         viewModelScope.launch {
             runCatching {
@@ -611,10 +621,11 @@ class BackupVM(
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                localMessage.value = "恢复失败：${error.message.orEmpty()}"
-                googleMessage.value = "恢复失败：${error.message.orEmpty()}"
-                webDavMessage.value = "恢复失败：${error.message.orEmpty()}"
-                folderMessage.value = "恢复失败：${error.message.orEmpty()}"
+                val restoreError = backupMessage(R.string.backup_restore_failed, error.message.orEmpty())
+                localMessage.value = restoreError
+                googleMessage.value = restoreError
+                webDavMessage.value = restoreError
+                folderMessage.value = restoreError
                 recordError(error)
             }
         }
@@ -647,7 +658,7 @@ class BackupVM(
             )
         }
         pendingCloudRestoreRevision = ""
-        localMessage.value = "已恢复备份，建议重启应用以确保所有数据生效。"
+        localMessage.value = backupMessage(R.string.backup_restore_applied_restart_hint)
     }
 
     /** P7-02：取消恢复 —— 解密后未写入，不残留任何临时文件。 */
@@ -678,8 +689,8 @@ class BackupVM(
     ) {
         operationState.value = UiState.Loading
         backupActivity.value = BackupActivity(
-            title = "正在验证备份",
-            detail = "正在校验口令与加密头",
+            titleRes = R.string.backup_activity_verifying_backup,
+            detailRes = R.string.backup_activity_verifying_encryption_header,
         )
         pendingRestoreSource.value = when {
             pendingProviderRestore.value != null -> RestoreSource.Provider
@@ -705,10 +716,14 @@ class BackupVM(
                     pendingRestoreSource.value = null
                     pendingRestoreRequest = null
                     operationState.value = UiState.Error(error)
-                    localMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    googleMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    webDavMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    folderMessage.value = "恢复验证失败：${error.message.orEmpty()}"
+                    val restoreVerificationError = backupMessage(
+                        R.string.backup_restore_verification_failed,
+                        error.message.orEmpty(),
+                    )
+                    localMessage.value = restoreVerificationError
+                    googleMessage.value = restoreVerificationError
+                    webDavMessage.value = restoreVerificationError
+                    folderMessage.value = restoreVerificationError
                     recordError(error)
                 }
         }
@@ -728,7 +743,7 @@ class BackupVM(
                     )
                 )
             }
-            webDavMessage.value = "已保存 WebDAV 配置（凭据加密存储）。"
+            webDavMessage.value = backupMessage(R.string.backup_webdav_config_saved)
         }
     }
 
@@ -739,12 +754,16 @@ class BackupVM(
             runCatching { webDavSyncProvider.listSnapshots() }
                 .onSuccess { snapshots ->
                     webDavSnapshots.value = snapshots
-                    webDavMessage.value = if (snapshots.isEmpty()) "WebDAV 上没有快照" else "共 ${snapshots.size} 个快照"
+                    webDavMessage.value = if (snapshots.isEmpty()) {
+                        backupMessage(R.string.backup_webdav_no_snapshots)
+                    } else {
+                        backupMessage(R.string.backup_snapshot_count, snapshots.size)
+                    }
                     operationState.value = UiState.Idle
                 }
                 .onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    webDavMessage.value = "WebDAV 列表读取失败：${error.message.orEmpty()}"
+                    webDavMessage.value = backupMessage(R.string.backup_webdav_list_failed, error.message.orEmpty())
                 }
         }
     }
@@ -768,7 +787,10 @@ class BackupVM(
         }
         viewModelScope.launch {
             operationState.value = UiState.Loading
-            backupActivity.value = BackupActivity(title = "正在上传 WebDAV 快照", detail = "正在生成加密备份文件")
+            backupActivity.value = BackupActivity(
+                titleRes = R.string.backup_activity_uploading_webdav_snapshot,
+                detailRes = R.string.backup_activity_generating_encrypted_backup,
+            )
             runCatching {
                 webDavSyncProvider.uploadSnapshot(
                     SyncProviderUploadRequest(
@@ -781,7 +803,7 @@ class BackupVM(
             }.onSuccess { snapshot ->
                 backupActivity.value = null
                 webDavSnapshots.value = listOf(snapshot) + webDavSnapshots.value
-                webDavMessage.value = "已上传快照 ${snapshot.name}"
+                webDavMessage.value = backupMessage(R.string.backup_snapshot_uploaded, snapshot.name)
                 operationState.value = UiState.Success(pendingImportPreview.value ?: SyncPreview(
                     manifest = snapshot.manifest.toArchiveManifest(),
                     fileName = snapshot.name,
@@ -790,7 +812,7 @@ class BackupVM(
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                webDavMessage.value = "WebDAV 上传失败：${error.message.orEmpty()}"
+                webDavMessage.value = backupMessage(R.string.backup_webdav_upload_failed, error.message.orEmpty())
             }
         }
     }
@@ -800,7 +822,10 @@ class BackupVM(
         viewModelScope.launch {
             cloudSnapshotPickerVisible.value = false
             operationState.value = UiState.Loading
-            backupActivity.value = BackupActivity(title = "正在下载 WebDAV 快照", detail = snapshot.name)
+            backupActivity.value = BackupActivity(
+                titleRes = R.string.backup_activity_downloading_webdav_snapshot,
+                detail = snapshot.name,
+            )
             runCatching { webDavSyncProvider.downloadSnapshot(snapshot.snapshotId) }
                 .onSuccess { file ->
                     backupActivity.value = null
@@ -814,7 +839,7 @@ class BackupVM(
                 .onFailure { error ->
                     backupActivity.value = null
                     operationState.value = UiState.Error(error)
-                    webDavMessage.value = "WebDAV 下载失败：${error.message.orEmpty()}"
+                    webDavMessage.value = backupMessage(R.string.backup_webdav_download_failed, error.message.orEmpty())
                 }
         }
     }
@@ -827,12 +852,12 @@ class BackupVM(
                 .onSuccess {
                     pendingDeleteConfirm.value = null
                     webDavSnapshots.value = webDavSnapshots.value.filterNot { it.snapshotId == snapshot.snapshotId }
-                    webDavMessage.value = "已删除远端快照"
+                    webDavMessage.value = backupMessage(R.string.backup_remote_snapshot_deleted)
                     operationState.value = UiState.Idle
                 }
                 .onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    webDavMessage.value = "删除失败：${error.message.orEmpty()}"
+                    webDavMessage.value = backupMessage(R.string.backup_delete_failed, error.message.orEmpty())
                 }
         }
     }
@@ -842,7 +867,7 @@ class BackupVM(
         val session = googleSession.value
         if (session == null) {
             connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再删除云端快照。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_required_delete)
             return
         }
         viewModelScope.launch {
@@ -852,11 +877,11 @@ class BackupVM(
             }.onSuccess {
                 pendingDeleteConfirm.value = null
                 cloudSnapshots.value = cloudSnapshots.value.filterNot { it.id == file.id }
-                googleMessage.value = "已删除云端快照"
+                googleMessage.value = backupMessage(R.string.backup_cloud_snapshot_deleted)
                 operationState.value = UiState.Idle
             }.onFailure { error ->
                 operationState.value = UiState.Error(error)
-                googleMessage.value = "删除失败：${error.message.orEmpty()}"
+                googleMessage.value = backupMessage(R.string.backup_delete_failed, error.message.orEmpty())
                 recordGoogleDriveError(error)
             }
         }
@@ -883,7 +908,10 @@ class BackupVM(
         if (!providerV2Enabled.value) return
         persistedFolderStore.save(uri.toString(), displayName)
         folderInfo.value = persistedFolderStore.read()
-        folderMessage.value = "已选择文件夹：${displayName.ifBlank { uri.toString() }}"
+        folderMessage.value = backupMessage(
+            R.string.backup_folder_selected,
+            displayName.ifBlank { uri.toString() },
+        )
         refreshLocalFolderSnapshots()
     }
 
@@ -894,12 +922,16 @@ class BackupVM(
             runCatching { localFolderSyncProvider.listSnapshots() }
                 .onSuccess { snapshots ->
                     localFolderSnapshots.value = snapshots
-                    folderMessage.value = if (snapshots.isEmpty()) "文件夹里没有快照" else "共 ${snapshots.size} 个快照"
+                    folderMessage.value = if (snapshots.isEmpty()) {
+                        backupMessage(R.string.backup_folder_no_snapshots)
+                    } else {
+                        backupMessage(R.string.backup_snapshot_count, snapshots.size)
+                    }
                     operationState.value = UiState.Idle
                 }
                 .onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    folderMessage.value = "快照列表读取失败：${error.message.orEmpty()}"
+                    folderMessage.value = backupMessage(R.string.backup_folder_list_failed, error.message.orEmpty())
                 }
         }
     }
@@ -923,7 +955,10 @@ class BackupVM(
         }
         viewModelScope.launch {
             operationState.value = UiState.Loading
-            backupActivity.value = BackupActivity(title = "正在上传本地文件夹快照", detail = "正在生成加密备份文件")
+            backupActivity.value = BackupActivity(
+                titleRes = R.string.backup_activity_uploading_folder_snapshot,
+                detailRes = R.string.backup_activity_generating_encrypted_backup,
+            )
             runCatching {
                 localFolderSyncProvider.uploadSnapshot(
                     SyncProviderUploadRequest(
@@ -936,7 +971,7 @@ class BackupVM(
             }.onSuccess { snapshot ->
                 backupActivity.value = null
                 localFolderSnapshots.value = listOf(snapshot) + localFolderSnapshots.value
-                folderMessage.value = "已上传快照 ${snapshot.name}"
+                folderMessage.value = backupMessage(R.string.backup_snapshot_uploaded, snapshot.name)
                 operationState.value = UiState.Success(SyncPreview(
                     manifest = snapshot.manifest.toArchiveManifest(),
                     fileName = snapshot.name,
@@ -945,7 +980,7 @@ class BackupVM(
             }.onFailure { error ->
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                folderMessage.value = "上传失败：${error.message.orEmpty()}"
+                folderMessage.value = backupMessage(R.string.backup_folder_upload_failed, error.message.orEmpty())
             }
         }
     }
@@ -954,7 +989,10 @@ class BackupVM(
         if (!providerV2Enabled.value) return
         viewModelScope.launch {
             operationState.value = UiState.Loading
-            backupActivity.value = BackupActivity(title = "正在下载本地文件夹快照", detail = snapshot.name)
+            backupActivity.value = BackupActivity(
+                titleRes = R.string.backup_activity_downloading_folder_snapshot,
+                detail = snapshot.name,
+            )
             runCatching { localFolderSyncProvider.downloadSnapshot(snapshot.snapshotId) }
                 .onSuccess { file ->
                     backupActivity.value = null
@@ -968,7 +1006,7 @@ class BackupVM(
                 .onFailure { error ->
                     backupActivity.value = null
                     operationState.value = UiState.Error(error)
-                    folderMessage.value = "下载失败：${error.message.orEmpty()}"
+                    folderMessage.value = backupMessage(R.string.backup_folder_download_failed, error.message.orEmpty())
                 }
         }
     }
@@ -982,12 +1020,12 @@ class BackupVM(
                     pendingDeleteConfirm.value = null
                     localFolderSnapshots.value =
                         localFolderSnapshots.value.filterNot { it.snapshotId == snapshot.snapshotId }
-                    folderMessage.value = "已删除文件夹快照"
+                    folderMessage.value = backupMessage(R.string.backup_folder_snapshot_deleted)
                     operationState.value = UiState.Idle
                 }
                 .onFailure { error ->
                     operationState.value = UiState.Error(error)
-                    folderMessage.value = "删除失败：${error.message.orEmpty()}"
+                    folderMessage.value = backupMessage(R.string.backup_delete_failed, error.message.orEmpty())
                 }
         }
     }
@@ -1089,13 +1127,12 @@ class BackupVM(
 
     private suspend fun restoreGoogleSessionIfPossible() {
         if (!googleConfigStatus.available) {
-            googleMessage.value = googleConfigStatus.reason
             return
         }
         val syncSettings = settingsStore.settingsFlow.value.syncSettings
         if (!syncSettings.googleEnabled || syncSettings.googleAccountEmail.isBlank()) return
         if (googleAuthorizationInFlight || googleSession.value != null) return
-        googleMessage.value = "正在恢复 Google 连接..."
+        googleMessage.value = backupMessage(R.string.backup_activity_restoring_google_connection)
         runCatching {
             googleDriveSyncRepository.restoreAuthorizedSession()
         }.onSuccess { outcome ->
@@ -1105,11 +1142,14 @@ class BackupVM(
                 }
 
                 is GoogleDriveAuthorizationOutcome.ResolutionRequired -> {
-                    googleMessage.value = "上次连接：${syncSettings.googleAccountEmail}，需要点一下重新确认授权。"
+                    googleMessage.value = backupMessage(
+                        R.string.backup_google_reauthorize,
+                        syncSettings.googleAccountEmail,
+                    )
                 }
             }
         }.onFailure { error ->
-            googleMessage.value = "Google 连接恢复失败：${error.message.orEmpty()}"
+            googleMessage.value = backupMessage(R.string.backup_google_connection_failed, error.message.orEmpty())
             recordError(error)
         }
     }
@@ -1138,7 +1178,7 @@ class BackupVM(
 
     private suspend fun applyGoogleSession(session: GoogleDriveAuthSession) {
         googleSession.value = session
-        googleMessage.value = "已连接：${session.label}"
+        googleMessage.value = backupMessage(R.string.backup_google_connected, session.label)
         settingsStore.update { current ->
             current.copy(
                 syncSettings = current.syncSettings.copy(
@@ -1173,7 +1213,7 @@ class BackupVM(
                 googleDriveSyncRepository.clearCachedToken(error.accessToken)
             }
             googleSession.value = null
-            googleMessage.value = "Google 授权已过期，请点 Google 账号刷新连接。"
+            googleMessage.value = backupMessage(R.string.backup_google_authorization_expired)
             settingsStore.update { current ->
                 current.copy(
                     syncSettings = current.syncSettings.copy(
@@ -1189,7 +1229,6 @@ class BackupVM(
     private fun googleUnavailable(): Boolean {
         if (googleConfigStatus.available) return false
         val error = IllegalStateException(googleConfigStatus.reason)
-        googleMessage.value = googleConfigStatus.reason
         operationState.value = UiState.Error(error)
         return true
     }
@@ -1206,8 +1245,17 @@ data class UploadConflictChoice(
     val providerId: String,
 )
 
+data class BackupMessage(
+    @StringRes val resourceId: Int,
+    val formatArgs: List<Any> = emptyList(),
+)
+
+private fun backupMessage(@StringRes resourceId: Int, vararg formatArgs: Any): BackupMessage =
+    BackupMessage(resourceId = resourceId, formatArgs = formatArgs.toList())
+
 data class BackupActivity(
-    val title: String,
+    @StringRes val titleRes: Int,
+    @StringRes val detailRes: Int? = null,
     val detail: String = "",
     val progress: Float? = null,
 )

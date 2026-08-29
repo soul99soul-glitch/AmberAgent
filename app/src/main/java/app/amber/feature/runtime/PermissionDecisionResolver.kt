@@ -1,5 +1,6 @@
 package app.amber.feature.runtime
 
+import android.content.Context
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -16,6 +17,7 @@ import app.amber.feature.tools.Capability
 import app.amber.feature.tools.CapabilityPolicy
 import app.amber.core.ai.tools.TOOL_THEME_PACK_IMPORT
 import app.amber.core.utils.JsonInstant
+import app.amber.agent.R
 import java.util.UUID
 
 enum class PermissionDecisionAction {
@@ -78,7 +80,125 @@ data class PermissionDecisionTrace(
     }
 }
 
-class PermissionDecisionResolver {
+/**
+ * Resolved at the runtime boundary. Action/source/enum values remain stable
+ * machine fields; only human-facing decision reasons are localized.
+ */
+data class PermissionDecisionStrings(
+    val toolNotFound: (String) -> String,
+    val userAlreadyDecided: String,
+    val themePackForeground: String,
+    val askUser: String,
+    val capabilityPolicyBlocked: (String) -> String,
+    val bothAutoApproval: String,
+    val alwaysAsk: String,
+    val mandatoryBypassed: String,
+    val mandatoryApproval: String,
+    val historianPreapproved: String,
+    val subagentBypassed: String,
+    val subagentCannotSilent: String,
+    val readOnly: String,
+    val highRisk: String,
+    val runTrust: String,
+    val highRiskAuto: String,
+    val globalAuto: String,
+    val requiresApproval: String,
+    val capabilityDisabled: (String, String) -> String,
+    val capabilityAsk: (String, String) -> String,
+    val capabilityAutoMandatory: (String, String) -> String,
+    val capabilityAutoHighRisk: (String, String) -> String,
+    val scope: (CapabilityPermissionScope) -> String,
+) {
+    companion object {
+        fun english(): PermissionDecisionStrings = PermissionDecisionStrings(
+            toolNotFound = { toolName ->
+                "Tool not found or not exposed. If this tool came from tools_list, " +
+                    "call tool_search with query=\"$toolName\" first, then retry."
+            },
+            userAlreadyDecided = "User already decided.",
+            themePackForeground = "Theme package import must be explicitly confirmed in the foreground.",
+            askUser = "ask_user always needs a human answer.",
+            capabilityPolicyBlocked = { capability -> "Capability $capability policy blocked this invocation." },
+            bothAutoApproval = "Both auto-approval toggles allow unattended tool execution.",
+            alwaysAsk = "Tool always requires explicit human approval.",
+            mandatoryBypassed = "Mandatory approval was bypassed by explicit high-risk auto-approval settings.",
+            mandatoryApproval = "Tool requires explicit human approval unless high-risk auto-approval is enabled.",
+            historianPreapproved = "Historian subagent pre-approved for read-only history tool.",
+            subagentBypassed = "Sub Agent approval was bypassed by explicit high-risk auto-approval settings.",
+            subagentCannotSilent = "Sub Agent context cannot silently run this tool.",
+            readOnly = "Tool is read-only for this invocation.",
+            highRisk = "High-risk invocation requires explicit approval.",
+            runTrust = "Tool was approved earlier in this run.",
+            highRiskAuto = "High-risk auto-approval allowed this invocation.",
+            globalAuto = "Global auto-approval allowed this invocation.",
+            requiresApproval = "Tool requires approval.",
+            capabilityDisabled = { capability, scope ->
+                "Capability $capability is disabled by $scope policy."
+            },
+            capabilityAsk = { capability, scope ->
+                "Capability $capability requires explicit human approval by $scope policy."
+            },
+            capabilityAutoMandatory = { capability, scope ->
+                "Capability $capability $scope auto policy cannot bypass the tool's mandatory per-call approval."
+            },
+            capabilityAutoHighRisk = { capability, scope ->
+                "Capability $capability is high-risk; $scope auto policy requires the explicit high-risk auto-approval setting."
+            },
+            scope = { it.name.lowercase() },
+        )
+
+        fun from(context: Context): PermissionDecisionStrings = PermissionDecisionStrings(
+            toolNotFound = { toolName ->
+                context.getString(R.string.permission_decision_reason_tool_not_found, toolName)
+            },
+            userAlreadyDecided = context.getString(R.string.permission_decision_reason_user_already_decided),
+            themePackForeground = context.getString(R.string.permission_decision_reason_theme_pack_foreground),
+            askUser = context.getString(R.string.permission_decision_reason_ask_user),
+            capabilityPolicyBlocked = { capability ->
+                context.getString(R.string.permission_decision_reason_capability_policy_blocked, capability)
+            },
+            bothAutoApproval = context.getString(R.string.permission_decision_reason_both_auto_approval),
+            alwaysAsk = context.getString(R.string.permission_decision_reason_always_ask),
+            mandatoryBypassed = context.getString(R.string.permission_decision_reason_mandatory_bypassed),
+            mandatoryApproval = context.getString(R.string.permission_decision_reason_mandatory_approval),
+            historianPreapproved = context.getString(R.string.permission_decision_reason_subagent_history),
+            subagentBypassed = context.getString(R.string.permission_decision_reason_subagent_bypassed),
+            subagentCannotSilent = context.getString(R.string.permission_decision_reason_subagent_cannot_silent),
+            readOnly = context.getString(R.string.permission_decision_reason_read_only),
+            highRisk = context.getString(R.string.permission_decision_reason_high_risk),
+            runTrust = context.getString(R.string.permission_decision_reason_run_trust),
+            highRiskAuto = context.getString(R.string.permission_decision_reason_high_risk_auto),
+            globalAuto = context.getString(R.string.permission_decision_reason_global_auto),
+            requiresApproval = context.getString(R.string.permission_decision_reason_requires_approval),
+            capabilityDisabled = { capability, scope ->
+                context.getString(R.string.permission_decision_reason_capability_disabled, capability, scope)
+            },
+            capabilityAsk = { capability, scope ->
+                context.getString(R.string.permission_decision_reason_capability_ask, capability, scope)
+            },
+            capabilityAutoMandatory = { capability, scope ->
+                context.getString(R.string.permission_decision_reason_capability_auto_mandatory, capability, scope)
+            },
+            capabilityAutoHighRisk = { capability, scope ->
+                context.getString(R.string.permission_decision_reason_capability_auto_high_risk, capability, scope)
+            },
+            scope = { scope ->
+                val resId = when (scope) {
+                    CapabilityPermissionScope.GLOBAL -> R.string.permission_decision_scope_global
+                    CapabilityPermissionScope.ASSISTANT -> R.string.permission_decision_scope_assistant
+                    CapabilityPermissionScope.WORKSPACE -> R.string.permission_decision_scope_workspace
+                    CapabilityPermissionScope.CONVERSATION -> R.string.permission_decision_scope_conversation
+                    CapabilityPermissionScope.SESSION -> R.string.permission_decision_scope_session
+                }
+                context.getString(resId)
+            },
+        )
+    }
+}
+
+class PermissionDecisionResolver(
+    private val appContext: Context? = null,
+) {
     fun resolve(
         toolDef: Tool?,
         tool: UIMessagePart.Tool,
@@ -88,7 +208,11 @@ class PermissionDecisionResolver {
         invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
         capabilityPermissions: CapabilityPermissionState? = null,
         permissionContext: CapabilityPermissionContext? = null,
+        strings: PermissionDecisionStrings? = null,
     ): PermissionDecision {
+        val localized = strings
+            ?: appContext?.let(PermissionDecisionStrings::from)
+            ?: PermissionDecisionStrings.english()
         var capabilityPolicyScope: CapabilityPermissionScope? = null
         fun decision(
             action: PermissionDecisionAction,
@@ -114,7 +238,7 @@ class PermissionDecisionResolver {
         if (toolDef == null) {
             return decision(
                 PermissionDecisionAction.DENY,
-                "Tool not found or not exposed. If this tool came from tools_list, call tool_search with query=\"${tool.toolName}\" first, then retry.",
+                localized.toolNotFound(tool.toolName),
                 "tool_lookup",
                 null
             )
@@ -133,7 +257,7 @@ class PermissionDecisionResolver {
             )
         }
         if (tool.approvalState !is ToolApprovalState.Auto) {
-            return decision(PermissionDecisionAction.ALLOW, "User already decided.", "approval_state", policy)
+            return decision(PermissionDecisionAction.ALLOW, localized.userAlreadyDecided, "approval_state", policy)
         }
         // Theme package import is a foreground-only user action. Keep this
         // gate ahead of the unattended toggles: even explicit high-risk auto
@@ -141,13 +265,13 @@ class PermissionDecisionResolver {
         if (tool.toolName == TOOL_THEME_PACK_IMPORT) {
             return decision(
                 PermissionDecisionAction.ASK,
-                "主题包导入必须在前台由用户明确确认。",
+                localized.themePackForeground,
                 "theme_pack_foreground",
                 policy,
             )
         }
         if (tool.toolName == ASK_USER_TOOL_NAME && policy.needsApproval) {
-            return decision(PermissionDecisionAction.ASK, "ask_user always needs a human answer.", "hitl", policy)
+            return decision(PermissionDecisionAction.ASK, localized.askUser, "hitl", policy)
         }
         // P2-01 capability layer (only when the capability_permissions flag is
         // on). DISABLED/ASK policies preempt every auto-approval level; the
@@ -162,12 +286,13 @@ class PermissionDecisionResolver {
                     state = capabilityPermissions,
                     context = permissionContext,
                     autoApproveHighRiskTools = autoApproveHighRiskTools,
+                    strings = localized,
                 )
                 capabilityPolicyScope = adjustment.scope
                 if (adjustment.hardDecision != null) {
                     return decision(
                         adjustment.hardDecision,
-                        adjustment.reason ?: "Capability ${capability.id} policy blocked this invocation.",
+                        adjustment.reason ?: localized.capabilityPolicyBlocked(capability.id),
                         "capability",
                         policy,
                     )
@@ -178,13 +303,13 @@ class PermissionDecisionResolver {
         if (autoApproveTools && autoApproveHighRiskTools) {
             return decision(
                 PermissionDecisionAction.ALLOW,
-                "Both auto-approval toggles allow unattended tool execution.",
+                localized.bothAutoApproval,
                 "settings_unattended",
                 policy,
             )
         }
         if (policy.alwaysAsk) {
-            return decision(PermissionDecisionAction.ASK, "Tool always requires explicit human approval.", "always_ask", policy)
+            return decision(PermissionDecisionAction.ASK, localized.alwaysAsk, "always_ask", policy)
         }
         // Mandatory approval gate — stricter than regular auto-approval and
         // prior in-run trust, but still respects the explicit "auto approve
@@ -195,14 +320,14 @@ class PermissionDecisionResolver {
             if (autoApproveTools && autoApproveHighRiskTools) {
                 return decision(
                     PermissionDecisionAction.ALLOW,
-                    "Mandatory approval was bypassed by explicit high-risk auto-approval settings.",
+                    localized.mandatoryBypassed,
                     "settings_high_risk_mandatory",
                     policy,
                 )
             }
             return decision(
                 PermissionDecisionAction.ASK,
-                "Tool requires explicit human approval unless high-risk auto-approval is enabled.",
+                localized.mandatoryApproval,
                 "mandatory_approval",
                 policy,
             )
@@ -214,7 +339,7 @@ class PermissionDecisionResolver {
                 // manager already minted a bounded SessionAccessGrant for this run.
                 return decision(
                     PermissionDecisionAction.ALLOW,
-                    "Historian subagent pre-approved for read-only history tool.",
+                    localized.historianPreapproved,
                     "subagent_history",
                     policy,
                 )
@@ -228,30 +353,30 @@ class PermissionDecisionResolver {
                 ) {
                     return decision(
                         PermissionDecisionAction.ALLOW,
-                        "Sub Agent approval was bypassed by explicit high-risk auto-approval settings.",
+                        localized.subagentBypassed,
                         "settings_high_risk_subagent",
                         policy,
                     )
                 }
-                return decision(PermissionDecisionAction.ASK, "Sub Agent context cannot silently run this tool.", "subagent", policy)
+                return decision(PermissionDecisionAction.ASK, localized.subagentCannotSilent, "subagent", policy)
             }
         }
         if (!policy.needsApproval) {
-            return decision(PermissionDecisionAction.ALLOW, "Tool is read-only for this invocation.", "policy", policy)
+            return decision(PermissionDecisionAction.ALLOW, localized.readOnly, "policy", policy)
         }
         if (policy.risk == ToolRisk.High && !autoApproveHighRiskTools) {
-            return decision(PermissionDecisionAction.ASK, "High-risk invocation requires explicit approval.", "risk", policy)
+            return decision(PermissionDecisionAction.ASK, localized.highRisk, "risk", policy)
         }
         if (tool.toolName in autoApprovedToolNames && tool.toolName != ASK_USER_TOOL_NAME && policy.risk != ToolRisk.High) {
-            return decision(PermissionDecisionAction.ALLOW, "Tool was approved earlier in this run.", "run_trust", policy)
+            return decision(PermissionDecisionAction.ALLOW, localized.runTrust, "run_trust", policy)
         }
         if (autoApproveTools && autoApproveHighRiskTools && policy.risk == ToolRisk.High) {
-            return decision(PermissionDecisionAction.ALLOW, "High-risk auto-approval allowed this invocation.", "settings_high_risk", policy)
+            return decision(PermissionDecisionAction.ALLOW, localized.highRiskAuto, "settings_high_risk", policy)
         }
         if (autoApproveTools && policy.autoApprovable) {
-            return decision(PermissionDecisionAction.ALLOW, "Global auto-approval allowed this invocation.", "settings", policy)
+            return decision(PermissionDecisionAction.ALLOW, localized.globalAuto, "settings", policy)
         }
-        return decision(PermissionDecisionAction.ASK, "Tool requires approval.", "ui", policy)
+        return decision(PermissionDecisionAction.ASK, localized.requiresApproval, "ui", policy)
     }
 
     /**
@@ -287,6 +412,7 @@ class PermissionDecisionResolver {
         state: CapabilityPermissionState,
         context: CapabilityPermissionContext?,
         autoApproveHighRiskTools: Boolean,
+        strings: PermissionDecisionStrings,
     ): CapabilityAdjustment {
         val floor = capability.riskFloor
         val effectiveRisk = if (floor.ordinal > policy.risk.ordinal) floor else policy.risk
@@ -302,14 +428,14 @@ class PermissionDecisionResolver {
         return when (selected?.policy) {
             CapabilityPolicy.DISABLED -> CapabilityAdjustment(
                 PermissionDecisionAction.DENY,
-                "Capability ${capability.id} is disabled by ${selected.scope.name.lowercase()} policy.",
+                strings.capabilityDisabled(capability.id, strings.scope(selected.scope)),
                 adjusted,
                 selected.scope,
             )
 
             CapabilityPolicy.ASK -> CapabilityAdjustment(
                 PermissionDecisionAction.ASK,
-                "Capability ${capability.id} requires explicit human approval by ${selected.scope.name.lowercase()} policy.",
+                strings.capabilityAsk(capability.id, strings.scope(selected.scope)),
                 adjusted,
                 selected.scope,
             )
@@ -318,14 +444,14 @@ class PermissionDecisionResolver {
                 if (policy.mandatoryApproval || policy.alwaysAsk) {
                     CapabilityAdjustment(
                         PermissionDecisionAction.ASK,
-                        "Capability ${capability.id} ${selected.scope.name.lowercase()} auto policy cannot bypass the tool's mandatory per-call approval.",
+                        strings.capabilityAutoMandatory(capability.id, strings.scope(selected.scope)),
                         adjusted,
                         selected.scope,
                     )
                 } else if (effectiveRisk == ToolRisk.High && !autoApproveHighRiskTools) {
                     CapabilityAdjustment(
                         PermissionDecisionAction.ASK,
-                        "Capability ${capability.id} is high-risk; ${selected.scope.name.lowercase()} auto policy requires the explicit high-risk auto-approval setting.",
+                        strings.capabilityAutoHighRisk(capability.id, strings.scope(selected.scope)),
                         adjusted,
                         selected.scope,
                     )

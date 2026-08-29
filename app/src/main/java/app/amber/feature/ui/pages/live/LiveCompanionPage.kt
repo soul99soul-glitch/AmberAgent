@@ -36,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,9 +47,11 @@ import com.composables.icons.lucide.Eye
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Sparkles
 import app.amber.agent.Screen
+import app.amber.agent.R
 import app.amber.ai.provider.ModelType
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentChatModel
+import app.amber.core.utils.appLocale
 import app.amber.feature.live.LiveAnalysisMode
 import app.amber.feature.live.LiveFillResult
 import app.amber.feature.live.LiveModeCard
@@ -64,6 +67,7 @@ import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.uuid.Uuid
 
@@ -82,6 +86,9 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
     val liveSetting = settings.agentRuntime.liveMode
     val tokens = LocalAmberTokens.current
     val scrollState = rememberScrollState()
+    val fillDraftFilledMessage = stringResource(R.string.live_fill_result_filled)
+    val fillDraftCopiedMessage = stringResource(R.string.live_fill_result_copied)
+    val fillDraftMissingMessage = stringResource(R.string.live_fill_result_missing)
 
     val companionModelId = remember(settings, liveSetting.companionModelId) {
         val id = liveSetting.companionModelId?.let { runCatching { Uuid.parse(it) }.getOrNull() }
@@ -123,16 +130,16 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
             // ── 阻塞态引导 / 错误 / 进度 ──
             when {
                 state.needsAccessibility -> GuidanceCard(
-                    title = "需要开启无障碍",
-                    body = "伴随要读取另一侧应用的内容。开启 AmberAgent 无障碍服务后，再回到这里开始。",
-                    action = "去开启",
+                    title = stringResource(R.string.live_accessibility_required_title),
+                    body = stringResource(R.string.live_accessibility_required_body),
+                    action = stringResource(R.string.live_open_accessibility_settings),
                     onAction = { context.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) },
                 )
 
                 state.noModelConfigured -> GuidanceCard(
-                    title = "需要配置模型",
-                    body = "伴随会复用聊天模型做短分析。先选一个可用模型，再回来启动。",
-                    action = "去设置",
+                    title = stringResource(R.string.live_model_required_title),
+                    body = stringResource(R.string.live_model_required_body),
+                    action = stringResource(R.string.live_open_model_settings),
                     onAction = { navController.navigate(Screen.SettingModels) },
                 )
             }
@@ -151,23 +158,24 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
 
             // ── 上次分析 ──
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionLabel("上次分析")
+                SectionLabel(stringResource(R.string.live_last_analysis))
                 val card = state.card
                 if (card != null) {
+                    val actionKey = state.resultActionKey()
                     LiveResultCard(
                         card = card,
                         state = state,
                         modelId = companionModelId,
-                        actionLabel = state.resultActionLabel(),
+                        actionKey = actionKey,
                         stale = state.requestedAction.isNotBlank(),
                         pendingAction = state.requestedAction,
                         enabled = state.active && !state.paused && !state.analyzing,
                         onInstruction = vm::submitFocusInstruction,
                         onFillDraft = {
                             val msg = when (vm.fillDraft()) {
-                                LiveFillResult.FILLED -> "已填入，发送请自己按"
-                                LiveFillResult.COPIED -> "没找到输入框，草稿已复制到剪贴板"
-                                LiveFillResult.NO_DRAFT -> "还没有可填入的草稿"
+                                LiveFillResult.FILLED -> fillDraftFilledMessage
+                                LiveFillResult.COPIED -> fillDraftCopiedMessage
+                                LiveFillResult.NO_DRAFT -> fillDraftMissingMessage
                             }
                             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                         },
@@ -179,7 +187,7 @@ fun LiveCompanionPage(vm: LiveCompanionVM = koinViewModel()) {
 
             // ── CONFIG ──
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                SectionLabel("CONFIG")
+                SectionLabel(stringResource(R.string.live_config))
                 ConfigCard(
                     aggressive = liveSetting.analysisMode == LiveAnalysisMode.AGGRESSIVE,
                     onSelectMode = { aggressive ->
@@ -221,7 +229,12 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                 modifier = Modifier.size(40.dp).pressable(onClick = onBack),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Lucide.ArrowLeft, contentDescription = "返回", tint = t.ink, modifier = Modifier.size(22.dp))
+                Icon(
+                    Lucide.ArrowLeft,
+                    contentDescription = stringResource(R.string.back),
+                    tint = t.ink,
+                    modifier = Modifier.size(22.dp),
+                )
             }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -231,13 +244,18 @@ private fun LiveHeader(live: Boolean, onBack: () -> Unit, onSettings: () -> Unit
                     }
                     LiveDot(idle = !live, dotSize = 4.dp)
                 }
-                Text("AI 伴随", style = type.screenTitle, color = t.ink)
+                Text(stringResource(R.string.live_companion_title), style = type.screenTitle, color = t.ink)
             }
             Box(
                 modifier = Modifier.size(40.dp).pressable(onClick = onSettings),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(Lucide.Settings, contentDescription = "设置", tint = t.ink2, modifier = Modifier.size(20.dp))
+                Icon(
+                    Lucide.Settings,
+                    contentDescription = stringResource(R.string.settings),
+                    tint = t.ink2,
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
         Hairline()
@@ -309,8 +327,8 @@ private fun MasterCard(
 
         Hairline()
         ToggleRow(
-            label = "自动分析",
-            hint = "页面稳定后触发",
+            label = stringResource(R.string.live_auto_analysis),
+            hint = stringResource(R.string.live_auto_analysis_hint),
             checked = autoRefresh,
             onCheckedChange = onToggleAutoRefresh,
         )
@@ -318,8 +336,12 @@ private fun MasterCard(
         if (state.active) {
             Hairline()
             ToggleRow(
-                label = "暂停伴随",
-                hint = if (state.paused) "已暂停读取" else "临时停止分析",
+                label = stringResource(R.string.live_pause_companion),
+                hint = if (state.paused) {
+                    stringResource(R.string.live_paused_reading)
+                } else {
+                    stringResource(R.string.live_pause_analysis_hint)
+                },
                 checked = state.paused,
                 onCheckedChange = { onPauseResume() },
             )
@@ -348,11 +370,27 @@ private fun ConfigCard(
             verticalArrangement = Arrangement.spacedBy(11.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("分析模式", style = type.body.copy(fontWeight = FontWeight.Medium), color = t.ink, modifier = Modifier.weight(1f))
-                Text(if (aggressive) "screenshot" else "text-only", style = type.meta, color = t.ink3)
+                Text(
+                    stringResource(R.string.live_analysis_mode),
+                    style = type.body.copy(fontWeight = FontWeight.Medium),
+                    color = t.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (aggressive) {
+                        stringResource(R.string.live_analysis_mode_screenshot)
+                    } else {
+                        stringResource(R.string.live_analysis_mode_text_only)
+                    },
+                    style = type.meta,
+                    color = t.ink3,
+                )
             }
             AmberSeg(
-                options = listOf("保守 · 文字", "激进 · 截屏"),
+                options = listOf(
+                    stringResource(R.string.live_mode_conservative),
+                    stringResource(R.string.live_mode_aggressive),
+                ),
                 selectedIndex = if (aggressive) 1 else 0,
                 onSelect = { onSelectMode(it == 1) },
             )
@@ -360,8 +398,8 @@ private fun ConfigCard(
 
         Hairline()
         ToggleRow(
-            label = "悬浮气泡",
-            hint = "其它应用上显示",
+            label = stringResource(R.string.live_bubble),
+            hint = stringResource(R.string.live_bubble_hint),
             checked = bubbleEnabled,
             onCheckedChange = onToggleBubble,
         )
@@ -375,13 +413,18 @@ private fun ConfigCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Icon(Lucide.Settings, contentDescription = null, tint = t.ink3, modifier = Modifier.size(17.dp))
-            Text("分析模型", style = type.body.copy(fontWeight = FontWeight.Medium), color = t.ink, modifier = Modifier.weight(1f))
+            Text(
+                stringResource(R.string.live_analysis_model),
+                style = type.body.copy(fontWeight = FontWeight.Medium),
+                color = t.ink,
+                modifier = Modifier.weight(1f),
+            )
             ModelSelector(
                 modelId = modelId,
                 providers = providers,
                 type = ModelType.CHAT,
                 allowClear = true,
-                emptyLabel = "跟随聊天模型",
+                emptyLabel = stringResource(R.string.live_follow_chat_model),
                 onClear = onClearModel,
                 onSelect = { model -> onSelectModel(model.id.toString()) },
             )
@@ -391,22 +434,29 @@ private fun ConfigCard(
 
 // ───────────────────────────── result card ─────────────────────────────
 
-private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+private fun formatLiveTime(timestampMs: Long, locale: Locale): String =
+    SimpleDateFormat("HH:mm", locale).format(Date(timestampMs))
 
 @Composable
 private fun LiveResultCard(
     card: LiveModeCard,
     state: LiveModeUiState,
     modelId: String?,
-    actionLabel: String,
+    actionKey: String,
     stale: Boolean,
     pendingAction: String,
     enabled: Boolean,
     onInstruction: (String) -> Unit,
     onFillDraft: () -> Unit,
 ) {
+    val appLocale = LocalContext.current.appLocale()
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
+    val currentAppFallback = stringResource(R.string.live_current_app)
+    val uncertainResultText = stringResource(R.string.live_result_uncertain)
+    val screenUnclearText = stringResource(R.string.live_result_screen_unclear)
+    val noClearRiskText = stringResource(R.string.live_result_no_clear_risk)
+    val actionLabel = actionKey.localizedActionLabel()
     AmberCard {
         Column(
             modifier = Modifier.padding(14.dp),
@@ -424,7 +474,7 @@ private fun LiveResultCard(
                 ) {
                     Icon(Lucide.Eye, contentDescription = null, tint = t.ink3, modifier = Modifier.size(13.dp))
                     Text(
-                        text = state.currentAppLabel.ifBlank { "当前应用" },
+                        text = state.currentAppLabel.ifBlank { currentAppFallback },
                         style = type.tinyTag,
                         color = t.ink2,
                         maxLines = 1,
@@ -433,50 +483,96 @@ private fun LiveResultCard(
                 }
                 Spacer(modifier = Modifier.weight(1f))
                 if (state.lastUpdatedAtMillis > 0L) {
-                    Text(text = timeFormat.format(state.lastUpdatedAtMillis), style = type.meta, color = t.ink4)
+                    Text(
+                        text = formatLiveTime(state.lastUpdatedAtMillis, appLocale),
+                        style = type.meta,
+                        color = t.ink4,
+                    )
                 }
             }
 
             if (stale && pendingAction.isNotBlank()) {
                 Text(
-                    text = "新的“$pendingAction”还在处理，下面先保留上一张卡片。",
+                    text = stringResource(
+                        R.string.live_new_action_pending,
+                        pendingAction.localizedActionLabel(),
+                    ),
                     style = type.secondary,
                     color = t.ink3,
                 )
             }
 
-            when (actionLabel) {
+            when (actionKey) {
                 "找重点" -> {
-                    LiveSection(title = "结论", content = card.watching.ifBlank { "不确定" }, prominent = true)
-                    LiveSection(title = "重点", items = card.keyPoints, emptyText = "暂时没有提取到明确重点。")
+                    LiveSection(
+                        title = stringResource(R.string.live_result_conclusion),
+                        content = card.watching.ifBlank { uncertainResultText },
+                        prominent = true,
+                    )
+                    LiveSection(
+                        title = stringResource(R.string.live_result_key_points),
+                        items = card.keyPoints,
+                        emptyText = stringResource(R.string.live_result_no_key_points),
+                    )
                 }
                 "总结" -> {
-                    LiveSection(title = "总结", content = card.watching.ifBlank { "这块屏幕信息还不够明确。" }, prominent = true)
-                    LiveSection(title = "关键信息", items = card.keyPoints)
+                    LiveSection(
+                        title = stringResource(R.string.live_result_summary),
+                        content = card.watching.ifBlank { screenUnclearText },
+                        prominent = true,
+                    )
+                    LiveSection(title = stringResource(R.string.live_result_key_information), items = card.keyPoints)
                 }
                 "找下一步" -> {
-                    LiveSection(title = "下一步建议", items = card.suggestions, emptyText = "暂时没有足够信息判断下一步。")
-                    LiveSection(title = "判断依据", items = card.keyPoints)
-                    LiveSection(title = "正在看什么", content = card.watching.ifBlank { "这块屏幕信息还不够明确。" })
+                    LiveSection(
+                        title = stringResource(R.string.live_result_next_steps),
+                        items = card.suggestions,
+                        emptyText = stringResource(R.string.live_result_no_next_step_info),
+                    )
+                    LiveSection(title = stringResource(R.string.live_result_basis), items = card.keyPoints)
+                    LiveSection(
+                        title = stringResource(R.string.live_result_what_is_visible),
+                        content = card.watching.ifBlank { screenUnclearText },
+                    )
                 }
                 "查风险" -> {
-                    LiveSection(title = "结论", content = card.watching.ifBlank { "暂未发现明确风险" }, prominent = true)
-                    LiveSection(title = "风险点", items = card.keyPoints, emptyText = "暂时没有发现明确风险。")
+                    LiveSection(
+                        title = stringResource(R.string.live_result_conclusion),
+                        content = card.watching.ifBlank { noClearRiskText },
+                        prominent = true,
+                    )
+                    LiveSection(
+                        title = stringResource(R.string.live_result_risks),
+                        items = card.keyPoints,
+                        emptyText = stringResource(R.string.live_result_no_risk_points),
+                    )
                 }
                 "写回复" -> {
-                    LiveSection(title = "回复草稿", content = card.suggestions.firstOrNull() ?: card.watching, prominent = true)
-                    LiveSection(title = "语气", items = card.keyPoints)
-                    PillButton(text = "填入对方输入框", accent = true, onClick = onFillDraft)
+                    LiveSection(
+                        title = stringResource(R.string.live_result_reply_draft),
+                        content = card.suggestions.firstOrNull() ?: card.watching,
+                        prominent = true,
+                    )
+                    LiveSection(title = stringResource(R.string.live_result_tone), items = card.keyPoints)
+                    PillButton(
+                        text = stringResource(R.string.live_fill_other_input),
+                        accent = true,
+                        onClick = onFillDraft,
+                    )
                 }
                 else -> {
-                    LiveSection(title = "正在看什么", content = card.watching.ifBlank { "这块屏幕信息还不够明确。" }, prominent = true)
-                    LiveSection(title = "重点内容", items = card.keyPoints)
-                    LiveSection(title = "可以怎么做", items = card.suggestions)
+                    LiveSection(
+                        title = stringResource(R.string.live_result_what_is_visible),
+                        content = card.watching.ifBlank { screenUnclearText },
+                        prominent = true,
+                    )
+                    LiveSection(title = stringResource(R.string.live_result_key_content), items = card.keyPoints)
+                    LiveSection(title = stringResource(R.string.live_result_what_to_do), items = card.suggestions)
                 }
             }
 
             DynamicActionChips(
-                currentAction = if (stale && pendingAction.isNotBlank()) pendingAction else actionLabel,
+                currentAction = if (stale && pendingAction.isNotBlank()) pendingAction else actionKey,
                 enabled = enabled,
                 onInstruction = onInstruction,
             )
@@ -499,15 +595,23 @@ private fun EmptyResultCard(state: LiveModeUiState) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = if (state.active) "等待第一张伴随卡片" else "伴随尚未开启",
+                text = if (state.active) {
+                    stringResource(R.string.live_empty_waiting_card)
+                } else {
+                    stringResource(R.string.live_empty_not_started)
+                },
                 style = type.sessionTitle,
                 color = t.ink,
             )
             Text(
                 text = when {
-                    !state.active -> "开启后读取另一侧应用内容，页面稳定后调用模型分析。"
-                    state.currentAppLabel.isNotBlank() ->
-                        "已读取：${state.currentAppLabel}${state.currentTitle.takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()}"
+                    !state.active -> stringResource(R.string.live_empty_inactive_hint)
+                    state.currentAppLabel.isNotBlank() -> stringResource(
+                        R.string.live_empty_current_app,
+                        listOf(state.currentAppLabel, state.currentTitle)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                    )
                     else -> state.statusText
                 },
                 style = type.body,
@@ -554,11 +658,14 @@ private fun DynamicActionChips(
     enabled: Boolean,
     onInstruction: (String) -> Unit,
 ) {
-    val actions = remember(currentAction) {
-        listOf("找重点", "帮我写回复", "有什么风险", "下一步", "总结一下")
-            .filterNot { it.liveActionLabel() == currentAction }
-            .take(3)
-    }
+    val actions = listOf(
+        "找重点" to stringResource(R.string.live_action_find_focus),
+        "帮我写回复" to stringResource(R.string.live_action_write_reply),
+        "有什么风险" to stringResource(R.string.live_action_check_risks),
+        "下一步" to stringResource(R.string.live_action_find_next_step),
+        "总结一下" to stringResource(R.string.live_action_summarize),
+    ).filterNot { (command, _) -> command.liveActionKey() == currentAction.liveActionKey() }
+        .take(3)
     if (actions.isEmpty()) return
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -568,18 +675,18 @@ private fun DynamicActionChips(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        actions.forEach { action ->
+        actions.forEach { (command, label) ->
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(999.dp))
                     .background(t.surface2)
                     .then(
-                        Modifier.pressable(onClick = { if (enabled) onInstruction(action) }, enabled = enabled),
+                        Modifier.pressable(onClick = { if (enabled) onInstruction(command) }, enabled = enabled),
                     )
                     .padding(horizontal = 13.dp, vertical = 7.dp),
             ) {
                 Text(
-                    text = action,
+                    text = label,
                     style = type.secondary,
                     color = if (enabled) t.ink2 else t.ink4,
                     maxLines = 1,
@@ -596,6 +703,8 @@ private fun ActionProgressCard(state: LiveModeUiState) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
     val action = state.requestedAction
+    val actionLabel = action.localizedActionLabel()
+    val resultTitle = action.localizedResultTitle()
     val retrying = state.nextAnalysisAfterMillis > System.currentTimeMillis()
     Row(
         modifier = Modifier
@@ -614,20 +723,20 @@ private fun ActionProgressCard(state: LiveModeUiState) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 text = when {
-                    retrying -> "${action}排队中"
-                    state.analyzing -> "正在$action"
-                    state.paused -> "${action}已暂停"
-                    else -> "已收到：$action"
+                    retrying -> stringResource(R.string.live_action_queued, actionLabel)
+                    state.analyzing -> stringResource(R.string.live_action_running, actionLabel)
+                    state.paused -> stringResource(R.string.live_action_paused, actionLabel)
+                    else -> stringResource(R.string.live_action_received, actionLabel)
                 },
                 style = type.body.copy(fontWeight = FontWeight.Medium),
                 color = t.ink,
             )
             Text(
                 text = when {
-                    retrying -> "模型服务忙，恢复后结果会显示在“${action.resultTitle()}”里。"
-                    state.analyzing -> "完成后直接覆盖下面的结果卡片。"
-                    state.paused -> "点击继续后再读取屏幕并生成结果。"
-                    else -> "等待屏幕稳定后开始，结果会显示在“${action.resultTitle()}”里。"
+                    retrying -> stringResource(R.string.live_action_retry_hint, resultTitle)
+                    state.analyzing -> stringResource(R.string.live_action_running_hint)
+                    state.paused -> stringResource(R.string.live_action_paused_hint)
+                    else -> stringResource(R.string.live_action_received_hint, resultTitle)
                 },
                 style = type.secondary,
                 color = t.ink3,
@@ -671,7 +780,7 @@ private fun ErrorNote(title: String, error: String, retrying: Boolean) {
         Text(text = error, style = type.secondary, color = t.ink2)
         if (retrying) {
             Text(
-                text = "这不是读取频率导致的错误，而是模型服务暂时不可用。",
+                text = stringResource(R.string.live_retry_unavailable_hint),
                 style = type.secondary,
                 color = t.ink3,
             )
@@ -791,38 +900,46 @@ private fun PillButton(text: String, accent: Boolean, onClick: () -> Unit, modif
 
 // ───────────────────────────── state helpers ─────────────────────────────
 
-private fun LiveModeUiState.masterTitle(): String =
-    when {
-        !active -> "未开启"
-        paused -> "已暂停"
-        error != null && nextAnalysisAfterMillis > System.currentTimeMillis() -> "模型繁忙"
-        error != null -> "分析失败"
-        analyzing -> "分析中"
-        card != null -> "伴随中"
-        currentAppLabel.isNotBlank() -> "读取中"
-        else -> "已开启"
-    }
+@Composable
+private fun LiveModeUiState.masterTitle(): String = when {
+    !active -> stringResource(R.string.live_master_not_enabled)
+    paused -> stringResource(R.string.live_master_paused)
+    error != null && nextAnalysisAfterMillis > System.currentTimeMillis() -> stringResource(R.string.live_master_model_busy)
+    error != null -> stringResource(R.string.live_master_analysis_failed)
+    analyzing -> stringResource(R.string.live_master_analyzing)
+    card != null -> stringResource(R.string.live_master_companion_active)
+    currentAppLabel.isNotBlank() -> stringResource(R.string.live_master_reading)
+    else -> stringResource(R.string.live_master_enabled)
+}
 
+@Composable
 private fun LiveModeUiState.masterSubtitle(autoRefresh: Boolean): String {
     val target = listOf(currentAppLabel, currentTitle).filter { it.isNotBlank() }.joinToString(" · ")
-    val mode = if (autoRefresh) "自动分析" else "手动分析"
+    val mode = if (autoRefresh) {
+        stringResource(R.string.live_auto_analysis)
+    } else {
+        stringResource(R.string.live_manual_analysis)
+    }
+    val analyzingHint = stringResource(R.string.live_master_analyzing_hint)
     return when {
-        !active -> "开启后自动监听前台应用"
-        paused -> "已停止读取和模型调用"
-        error != null && nextAnalysisAfterMillis > System.currentTimeMillis() -> "仍会读取屏幕，模型调用退避中"
-        requestedAction.isNotBlank() -> "结果会显示在“${requestedAction.resultTitle()}”里"
-        analyzing -> target.ifBlank { "正在整理当前屏幕" }
-        target.isNotBlank() -> "$target · $mode"
-        else -> "$statusText · $mode"
+        !active -> stringResource(R.string.live_master_disabled_hint)
+        paused -> stringResource(R.string.live_master_paused_hint)
+        error != null && nextAnalysisAfterMillis > System.currentTimeMillis() -> stringResource(R.string.live_master_busy_hint)
+        requestedAction.isNotBlank() -> stringResource(
+            R.string.live_master_result_hint,
+            requestedAction.localizedResultTitle(),
+        )
+        analyzing -> target.ifBlank { analyzingHint }
+        target.isNotBlank() -> stringResource(R.string.live_master_target_mode, target, mode)
+        else -> stringResource(R.string.live_master_status_mode, statusText, mode)
     }
 }
 
-private fun LiveModeUiState.resultActionLabel(): String =
-    completedAction.ifBlank {
-        currentFocus.liveActionLabel().takeUnless { it == "屏幕分析" } ?: "屏幕分析"
-    }
+private fun LiveModeUiState.resultActionKey(): String = completedAction.ifBlank {
+    currentFocus.liveActionKey().takeUnless { it == "屏幕分析" } ?: "屏幕分析"
+}
 
-private fun String.liveActionLabel(): String {
+private fun String.liveActionKey(): String {
     val text = trim()
     return when {
         text.isBlank() -> "屏幕分析"
@@ -835,12 +952,24 @@ private fun String.liveActionLabel(): String {
     }
 }
 
-private fun String.resultTitle(): String = when (this) {
-    "屏幕分析" -> "伴随结果"
-    "找重点" -> "找重点结果"
-    "总结" -> "总结结果"
-    "找下一步" -> "下一步建议"
-    "查风险" -> "风险点"
-    "写回复" -> "回复建议"
-    else -> "${this}结果"
+@Composable
+private fun String.localizedActionLabel(): String = when (this) {
+    "屏幕分析" -> stringResource(R.string.live_action_screen_analysis)
+    "找重点" -> stringResource(R.string.live_action_find_focus)
+    "总结" -> stringResource(R.string.live_action_summarize)
+    "找下一步" -> stringResource(R.string.live_action_find_next_step)
+    "查风险" -> stringResource(R.string.live_action_check_risks)
+    "写回复" -> stringResource(R.string.live_action_write_reply)
+    else -> this
+}
+
+@Composable
+private fun String.localizedResultTitle(): String = when (this) {
+    "屏幕分析" -> stringResource(R.string.live_result_title_companion)
+    "找重点" -> stringResource(R.string.live_result_title_focus)
+    "总结" -> stringResource(R.string.live_result_title_summary)
+    "找下一步" -> stringResource(R.string.live_result_title_next_step)
+    "查风险" -> stringResource(R.string.live_result_title_risks)
+    "写回复" -> stringResource(R.string.live_result_title_reply)
+    else -> stringResource(R.string.live_result_title_custom, this)
 }

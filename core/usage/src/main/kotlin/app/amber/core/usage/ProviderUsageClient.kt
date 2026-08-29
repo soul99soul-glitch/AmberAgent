@@ -33,6 +33,37 @@ data class ProviderUsageMetric(
     val detail: String? = null,
 )
 
+/** Stable machine-readable failures for the app-facing usage consumer. */
+enum class ProviderUsageErrorCode {
+    UNSUPPORTED_ENDPOINT,
+    KIMI_API_KEY_CODING_PLAN_UNSUPPORTED,
+    KIMI_LOGIN_REQUIRED,
+    KIMI_REQUEST_FAILED,
+    KIMI_USAGE_MISSING,
+    MOONSHOT_BALANCE_REQUEST_FAILED,
+    MINIMAX_REQUEST_FAILED,
+    MINIMAX_LOGIN_REQUIRED,
+    ZHIPU_REQUEST_FAILED,
+    ZHIPU_DATA_MISSING,
+    MIMO_LOGIN_REQUIRED,
+    MIMO_REQUEST_FAILED,
+    GENERIC_BALANCE_REQUEST_FAILED,
+}
+
+/**
+ * A usage failure carries no translated copy. The app maps [code] to its
+ * localized UI string while preserving provider labels, protocol fields, and
+ * the server response excerpt passed in the structured fields below.
+ */
+class ProviderUsageException(
+    val code: ProviderUsageErrorCode,
+    val providerLabel: String? = null,
+    val protocolField: String? = null,
+    val loginBaseUrl: String? = null,
+    val httpCode: Int? = null,
+    val serverMessage: String? = null,
+) : IllegalStateException()
+
 class ProviderUsageClient(
     private val client: OkHttpClient,
 ) {
@@ -59,7 +90,7 @@ class ProviderUsageClient(
             provider.balanceOption.enabled ->
                 fetchGenericBalance(provider)
 
-            else -> error("当前 provider 暂未配置 /usage 查询端点。")
+            else -> throw ProviderUsageException(ProviderUsageErrorCode.UNSUPPORTED_ENDPOINT)
         }
     }
 
@@ -83,11 +114,11 @@ class ProviderUsageClient(
                 else -> ""
             }
             if (authToken.isBlank()) {
-                error(
+                throw ProviderUsageException(
                     if (pastedKey.startsWith("sk-")) {
-                        "sk- API Key 无法查询 Coding Plan 用量（Moonshot 订阅与开放平台是两套独立鉴权）。请在设置 → WebMount 登录 https://www.kimi.com 后再试。"
+                        ProviderUsageErrorCode.KIMI_API_KEY_CODING_PLAN_UNSUPPORTED
                     } else {
-                        "Kimi Coding Plan 需要 kimi-auth 登录态。请先在设置 → WebMount 登录 https://www.kimi.com。"
+                        ProviderUsageErrorCode.KIMI_LOGIN_REQUIRED
                     }
                 )
             }
@@ -131,12 +162,21 @@ class ProviderUsageClient(
         val response = client.newCall(request).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Kimi Coding Plan 用量查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.KIMI_REQUEST_FAILED,
+                providerLabel = "Kimi Coding Plan",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
 
         val usages = JSONObject(text).optJSONArray("usages") ?: JSONArray()
         val usage = usages.objects().firstOrNull { it.optString("scope") == "FEATURE_CODING" }
-            ?: error("Kimi 响应中没有 FEATURE_CODING 用量。")
+            ?: throw ProviderUsageException(
+                code = ProviderUsageErrorCode.KIMI_USAGE_MISSING,
+                providerLabel = "Kimi",
+                protocolField = "FEATURE_CODING",
+            )
         val weekly = usage.optJSONObject("detail")
         val rateLimit = usage.optJSONArray("limits")?.optJSONObject(0)?.optJSONObject("detail")
         return ProviderUsageStatus(
@@ -159,7 +199,12 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("Kimi/Moonshot 余额查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MOONSHOT_BALANCE_REQUEST_FAILED,
+                providerLabel = "Kimi/Moonshot",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         val data = JSONObject(text).optJSONObject("data") ?: JSONObject(text)
         return ProviderUsageStatus(
@@ -197,7 +242,12 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("MiniMax Token Plan 查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MINIMAX_REQUEST_FAILED,
+                providerLabel = "MiniMax Token Plan",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         return parseMiniMaxUsage(text)
     }
@@ -208,7 +258,11 @@ class ProviderUsageClient(
         val base = if (provider.baseUrl.contains("minimaxi", ignoreCase = true)) china else global
         val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
         if (cookie.isBlank()) {
-            error("MiniMax Token Plan 需要控制台登录态。请先在 WebView/WebMount 登录 $base。")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MINIMAX_LOGIN_REQUIRED,
+                providerLabel = "MiniMax Token Plan",
+                loginBaseUrl = base,
+            )
         }
         val response = client.newCall(
             Request.Builder()
@@ -223,7 +277,12 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("MiniMax Token Plan 查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MINIMAX_REQUEST_FAILED,
+                providerLabel = "MiniMax Token Plan",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         return parseMiniMaxUsage(text)
     }
@@ -271,10 +330,19 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("智谱 GLM Coding Plan 用量查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.ZHIPU_REQUEST_FAILED,
+                providerLabel = "智谱 GLM Coding Plan",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         val root = JSONObject(text)
-        val data = root.optJSONObject("data") ?: error("智谱响应中缺少 data。")
+        val data = root.optJSONObject("data") ?: throw ProviderUsageException(
+            code = ProviderUsageErrorCode.ZHIPU_DATA_MISSING,
+            providerLabel = "智谱",
+            protocolField = "data",
+        )
         val limits = data.optJSONArray("limits") ?: JSONArray()
         val metrics = limits.objects().mapNotNull { limit ->
             val type = limit.optString("type")
@@ -283,7 +351,7 @@ class ProviderUsageClient(
                 type == "TOKENS_LIMIT" && limit.optInt("unit") == 3 && number == 5 -> "5h"
                 type == "TOKENS_LIMIT" -> limit.windowLabel().ifBlank { "tokens" }
                 type == "TIME_LIMIT" -> "time"
-                else -> type.lowercase(Locale.getDefault()).ifBlank { "quota" }
+                else -> type.lowercase(Locale.ROOT).ifBlank { "quota" }
             }
             val percent = limit.optInt("percentage", -1).takeIf { it >= 0 }?.coerceIn(0, 100)
             val quota = limit.firstInt("usage")
@@ -309,7 +377,11 @@ class ProviderUsageClient(
         val base = "https://platform.xiaomimimo.com"
         val cookie = CookieManager.getInstance().getCookie(base).orEmpty()
         if (!cookie.hasCookie("api-platform_serviceToken") || !cookie.hasCookie("userId")) {
-            error("小米 MiMo Token Plan 需要控制台登录态。请先在 WebView/WebMount 登录 $base。")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MIMO_LOGIN_REQUIRED,
+                providerLabel = "小米 MiMo Token Plan",
+                loginBaseUrl = base,
+            )
         }
         val balance = runCatching { fetchMiMoJson("$base/api/v1/balance", cookie) }.getOrNull()
         val detail = runCatching { fetchMiMoJson("$base/api/v1/tokenPlan/detail", cookie) }.getOrNull()
@@ -354,7 +426,12 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("小米 MiMo 查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.MIMO_REQUEST_FAILED,
+                providerLabel = "小米 MiMo",
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         return JSONObject(text)
     }
@@ -371,7 +448,12 @@ class ProviderUsageClient(
         ).await()
         val text = response.body?.string().orEmpty()
         if (!response.isSuccessful) {
-            error("${provider.name} 余额查询失败：HTTP ${response.code} ${text.take(180)}")
+            throw ProviderUsageException(
+                code = ProviderUsageErrorCode.GENERIC_BALANCE_REQUEST_FAILED,
+                providerLabel = provider.name,
+                httpCode = response.code,
+                serverMessage = text.take(180),
+            )
         }
         return ProviderUsageStatus(
             title = "${provider.name} Balance",
@@ -390,8 +472,8 @@ class ProviderUsageClient(
     private fun ProviderSetting.OpenAI.looksLike(vararg hints: String, model: Model?): Boolean {
         val haystack = listOf(name, baseUrl, model?.modelId.orEmpty(), model?.displayName.orEmpty())
             .joinToString(" ")
-            .lowercase(Locale.getDefault())
-        return hints.any { it.lowercase(Locale.getDefault()) in haystack }
+            .lowercase(Locale.ROOT)
+        return hints.any { it.lowercase(Locale.ROOT) in haystack }
     }
 
     private fun JSONObject.toQuotaMetric(label: String): ProviderUsageMetric {
@@ -476,7 +558,7 @@ class ProviderUsageClient(
 
     private fun Long.formatResetDetail(): String {
         val millis = if (this < 10_000_000_000L) this * 1000L else this
-        return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(millis))
+        return SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(millis))
     }
 
     /** Three claims extracted from the kimi-auth JWT payload — the Kimi billing gateway

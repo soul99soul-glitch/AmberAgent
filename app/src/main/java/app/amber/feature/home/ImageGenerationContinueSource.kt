@@ -1,5 +1,7 @@
 package app.amber.feature.home
 
+import android.content.Context
+import app.amber.agent.R
 import app.amber.agent.data.db.dao.ConversationDAO
 import app.amber.feature.runtime.RunTerminal
 import app.amber.feature.runtime.RunTerminalState
@@ -27,6 +29,7 @@ import java.time.Instant
  * Home UI.
  */
 class ImageGenerationContinueSource(
+    private val context: Context,
     private val runTerminalStore: RunTerminalStore,
     private val toolEffectLedger: ToolEffectLedger,
     private val conversationDao: ConversationDAO,
@@ -49,7 +52,18 @@ class ImageGenerationContinueSource(
                 }
                 if (exists) existingConversationIds += run.conversationId
             }
-            emit(imageGenerationContinueCandidates(runs, effectsByRun, existingConversationIds))
+            emit(
+                imageGenerationContinueCandidates(
+                    runs = runs,
+                    effectsByRun = effectsByRun,
+                    existingConversationIds = existingConversationIds,
+                    copy = ImageGenerationContinueCopy(
+                        title = context.getString(R.string.setting_page_built_in_tools_image_generation),
+                        waitingSummary = context.getString(R.string.notification_live_status_island_waiting_title),
+                        runningSummary = context.getString(R.string.notification_live_status_island_execute_title),
+                    ),
+                )
+            )
             delay(pollIntervalMillis)
         }
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
@@ -64,6 +78,7 @@ internal fun imageGenerationContinueCandidates(
     runs: List<RunTerminal>,
     effectsByRun: Map<String, List<ToolEffect>>,
     existingConversationIds: Set<String>,
+    copy: ImageGenerationContinueCopy = ImageGenerationContinueCopy.DEFAULT,
 ): List<ContinueCandidate> = runs.flatMap { run ->
     if (run.conversationId !in existingConversationIds) return@flatMap emptyList()
     effectsByRun[run.runId].orEmpty()
@@ -80,8 +95,8 @@ internal fun imageGenerationContinueCandidates(
                 sourceKind = ContinueSourceKind.IMAGE_GENERATION,
                 sourceId = "${run.conversationId}:${effect.toolCallId}",
                 route = ContinueRoute.Chat(conversationId = run.conversationId),
-                title = "AI 生图",
-                summary = if (waitingForUser) "需要确认图片生成结果" else "正在生成图片",
+                title = copy.title,
+                summary = if (waitingForUser) copy.waitingSummary else copy.runningSummary,
                 lastUpdatedAt = Instant.ofEpochMilli(updatedAtMs),
                 status = if (waitingForUser) {
                     ContinueStatus.WAITING_USER
@@ -91,6 +106,20 @@ internal fun imageGenerationContinueCandidates(
                 isRunning = !waitingForUser,
             )
         }
+}
+
+internal data class ImageGenerationContinueCopy(
+    val title: String,
+    val waitingSummary: String,
+    val runningSummary: String,
+) {
+    companion object {
+        val DEFAULT = ImageGenerationContinueCopy(
+            title = "Image generation",
+            waitingSummary = "Waiting for confirmation",
+            runningSummary = "Generating",
+        )
+    }
 }
 
 private const val GENERATE_IMAGE_TOOL_NAME = "generate_image"

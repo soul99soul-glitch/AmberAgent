@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -45,6 +46,7 @@ import kotlinx.coroutines.withContext
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.X
 import com.composables.icons.lucide.Share
+import app.amber.agent.R
 import app.amber.feature.workspace.WorkspaceManager
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import java.io.File
@@ -70,6 +72,8 @@ fun WorkspaceFilePreview(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val readFailedMessage = stringResource(R.string.workspace_read_failed)
+    val decodeImageFailedMessage = stringResource(R.string.workspace_decode_image_failed)
     var content by remember { mutableStateOf<PreviewContent?>(null) }
 
     LaunchedEffect(relativePath) {
@@ -86,17 +90,17 @@ fun WorkspaceFilePreview(
                         forcePlain = forcePlain,
                         truncated = truncated,
                     )
-                }.getOrElse { PreviewContent.Error(it.message ?: "读取失败") }
+                }.getOrElse { PreviewContent.Error(it.message ?: readFailedMessage) }
             }
             in setOf("png", "jpg", "jpeg", "gif", "webp") -> {
                 runCatching {
                     val bytes = workspaceManager.readBytes(relativePath)
                     val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                     if (bitmap != null) PreviewContent.Image(bitmap)
-                    else PreviewContent.Error("无法解码图片")
-                }.getOrElse { PreviewContent.Error(it.message ?: "读取失败") }
+                    else PreviewContent.Error(decodeImageFailedMessage)
+                }.getOrElse { PreviewContent.Error(it.message ?: readFailedMessage) }
             }
-            else -> PreviewContent.Error("不支持预览此文件类型 (.$ext)")
+            else -> PreviewContent.Error(context.getString(R.string.workspace_preview_unsupported, ext))
         }
     }
 
@@ -125,9 +129,11 @@ fun WorkspaceFilePreview(
                             )
                         },
                     ) {
-                        Icon(Lucide.Share, contentDescription = "分享")
+                        Icon(Lucide.Share, contentDescription = stringResource(R.string.share))
                     }
-                    IconButton(onClick = onDismiss) { Icon(Lucide.X, contentDescription = "关闭") }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Lucide.X, contentDescription = stringResource(R.string.update_card_close))
+                    }
                 }
                 when (val c = content) {
                     null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -136,7 +142,14 @@ fun WorkspaceFilePreview(
                         Column(modifier = Modifier.fillMaxSize()) {
                             if (c.truncated || c.forcePlain && relativePath.endsWith(".md", ignoreCase = true)) {
                                 Text(
-                                    text = if (c.truncated) "文件过大，已截取前 ${MAX_TEXT_PREVIEW_CHARS / 1000}K 字符" else "内容超过渲染上限，已降级为纯文本",
+                                    text = if (c.truncated) {
+                                        stringResource(
+                                            R.string.workspace_preview_truncated,
+                                            MAX_TEXT_PREVIEW_CHARS / 1000,
+                                        )
+                                    } else {
+                                        stringResource(R.string.workspace_preview_plain_text)
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -186,9 +199,18 @@ private fun shareWorkspacePreviewFile(
                 putExtra(Intent.EXTRA_SUBJECT, staged.name)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "分享 ${staged.name}"))
+            context.startActivity(
+                Intent.createChooser(
+                    intent,
+                    context.getString(R.string.workspace_share_file_title, staged.name),
+                )
+            )
         }.onFailure { error ->
-            Toast.makeText(context, error.message ?: "无法打开分享面板", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                error.message ?: context.getString(R.string.workspace_share_failed),
+                Toast.LENGTH_SHORT,
+            ).show()
         }
     }
 }

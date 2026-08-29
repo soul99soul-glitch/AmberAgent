@@ -29,8 +29,8 @@ class MemoryDreamNotifier(
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("AmberAgent 正在生成整理建议")
-                .setContentText("正在检查短期和长期记忆")
+                .setContentTitle(context.getString(R.string.memory_notification_running_title))
+                .setContentText(context.getString(R.string.memory_notification_running_text))
                 .setContentIntent(buildLaunchPendingIntent())
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -44,9 +44,9 @@ class MemoryDreamNotifier(
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("已生成记忆整理建议")
-                .setContentText(plan.summaryText())
-                .setStyle(NotificationCompat.BigTextStyle().bigText(plan.summaryText()))
+                .setContentTitle(context.getString(R.string.memory_notification_pending_title))
+                .setContentText(plan.summaryText(context))
+                .setStyle(NotificationCompat.BigTextStyle().bigText(plan.summaryText(context)))
                 .setContentIntent(buildLaunchPendingIntent())
                 .setOngoing(false)
                 .setAutoCancel(true)
@@ -60,7 +60,7 @@ class MemoryDreamNotifier(
         notify(
             NotificationCompat.Builder(context, MEMORY_NOTIFICATION_CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("Daydream 整理失败")
+                .setContentTitle(context.getString(R.string.memory_notification_failed_title))
                 .setContentText(message.take(120))
                 .setStyle(NotificationCompat.BigTextStyle().bigText(message.take(500)))
                 .setContentIntent(buildLaunchPendingIntent())
@@ -105,6 +105,11 @@ class MemoryDreamNotifier(
     }
 }
 
-private fun MemoryDreamPlan.summaryText(): String =
-    "合并 ${mergeSuggestions.size} · 提升 ${promoteMemoryIds.size} · " +
-        "归档 ${archiveMemoryIds.size} · 替换 ${supersedeSuggestions.size} · 忽略候选 ${ignoreCandidateIds.size}"
+private fun MemoryDreamPlan.summaryText(context: Context): String = context.getString(
+    R.string.memory_notification_summary,
+    mergeSuggestions.size,
+    promoteMemoryIds.size,
+    archiveMemoryIds.size,
+    supersedeSuggestions.size,
+    ignoreCandidateIds.size,
+)

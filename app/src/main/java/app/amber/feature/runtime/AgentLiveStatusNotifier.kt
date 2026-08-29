@@ -553,90 +553,106 @@ class AgentLiveStatusNotifier(
         }
 
     private fun AgentLiveStatusKind.xiaomiIslandVisual(content: String): XiaomiIslandVisual {
+        val runningToolPrefix = context.getString(R.string.notification_live_status_running_tool, "")
         val objectText = content
-            .removePrefix("正在处理：")
-            .removePrefix("正在处理:")
+            .removePrefix(runningToolPrefix)
             .trim()
-            .ifBlank { "准备下一步" }
+            .ifBlank { context.getString(R.string.notification_live_status_island_next_step) }
             .compact(24)
+        val isSearch = objectText.contains(
+            context.getString(R.string.notification_live_status_island_search_keyword),
+            ignoreCase = true,
+        )
         return when (this) {
             AgentLiveStatusKind.PLANNING -> XiaomiIslandVisual(
-                title = "整理思路",
-                content = "拆解任务与上下文",
-                summary = "构思",
+                title = context.getString(R.string.notification_live_status_island_planning_title),
+                content = context.getString(R.string.notification_live_status_island_planning_content),
+                summary = context.getString(R.string.notification_live_status_island_planning_summary),
                 accentColor = XIAOMI_ISLAND_THINKING_COLOR,
                 trackColor = XIAOMI_ISLAND_THINKING_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.RUNNING_TOOL -> XiaomiIslandVisual(
-                title = if (objectText.contains("搜索")) "正在检索" else "正在执行",
+                title = context.getString(
+                    if (isSearch) {
+                        R.string.notification_live_status_island_search_title
+                    } else {
+                        R.string.notification_live_status_island_execute_title
+                    }
+                ),
                 content = objectText,
-                summary = if (objectText.contains("搜索")) "检索" else "执行",
+                summary = context.getString(
+                    if (isSearch) {
+                        R.string.notification_live_status_island_search_summary
+                    } else {
+                        R.string.notification_live_status_island_execute_summary
+                    }
+                ),
                 accentColor = XIAOMI_ISLAND_ACCENT_COLOR,
                 trackColor = XIAOMI_ISLAND_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.WAITING_PERMISSION,
             AgentLiveStatusKind.WAITING_USER -> XiaomiIslandVisual(
-                title = "等待确认",
-                content = "授权后继续执行",
-                summary = "待准",
+                title = context.getString(R.string.notification_live_status_island_waiting_title),
+                content = context.getString(R.string.notification_live_status_island_waiting_content),
+                summary = context.getString(R.string.notification_live_status_island_waiting_summary),
                 accentColor = XIAOMI_ISLAND_WAITING_COLOR,
                 trackColor = XIAOMI_ISLAND_WAITING_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.WRITING -> XiaomiIslandVisual(
-                title = "撰写回复",
-                content = "整理结果与表达",
-                summary = "成稿",
+                title = context.getString(R.string.notification_live_status_island_writing_title),
+                content = context.getString(R.string.notification_live_status_island_writing_content),
+                summary = context.getString(R.string.notification_live_status_island_writing_summary),
                 accentColor = XIAOMI_ISLAND_WRITING_COLOR,
                 trackColor = XIAOMI_ISLAND_WRITING_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.COMPLETED -> XiaomiIslandVisual(
-                title = "任务完成",
-                content = "结果已准备好",
-                summary = "完成",
+                title = context.getString(R.string.notification_live_status_island_completed_title),
+                content = context.getString(R.string.notification_live_status_island_completed_content),
+                summary = context.getString(R.string.notification_live_status_island_completed_summary),
                 accentColor = XIAOMI_ISLAND_WRITING_COLOR,
                 trackColor = XIAOMI_ISLAND_WRITING_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.FAILED -> XiaomiIslandVisual(
-                title = "执行遇阻",
+                title = context.getString(R.string.notification_live_status_island_failed_title),
                 content = objectText,
-                summary = "异常",
+                summary = context.getString(R.string.notification_live_status_island_failed_summary),
                 accentColor = XIAOMI_ISLAND_ERROR_COLOR,
                 trackColor = XIAOMI_ISLAND_ERROR_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.TIMED_OUT -> XiaomiIslandVisual(
-                title = "执行超时",
+                title = context.getString(R.string.notification_live_status_island_timed_out_title),
                 content = objectText,
-                summary = "超时",
+                summary = context.getString(R.string.notification_live_status_island_timed_out_summary),
                 accentColor = XIAOMI_ISLAND_ERROR_COLOR,
                 trackColor = XIAOMI_ISLAND_ERROR_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.INTERRUPTED -> XiaomiIslandVisual(
-                title = "执行中断",
+                title = context.getString(R.string.notification_live_status_island_interrupted_title),
                 content = objectText,
-                summary = "中断",
+                summary = context.getString(R.string.notification_live_status_island_interrupted_summary),
                 accentColor = XIAOMI_ISLAND_WAITING_COLOR,
                 trackColor = XIAOMI_ISLAND_WAITING_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.CANCELLED -> XiaomiIslandVisual(
-                title = "已停止",
-                content = "本次执行已取消",
-                summary = "已停",
+                title = context.getString(R.string.notification_live_status_island_cancelled_title),
+                content = context.getString(R.string.notification_live_status_island_cancelled_content),
+                summary = context.getString(R.string.notification_live_status_island_cancelled_summary),
                 accentColor = XIAOMI_ISLAND_ERROR_COLOR,
                 trackColor = XIAOMI_ISLAND_ERROR_TRACK_COLOR,
             )
 
             AgentLiveStatusKind.IDLE -> XiaomiIslandVisual(
-                title = "Amber",
-                content = "等待任务",
-                summary = "待命",
+                title = context.getString(R.string.app_name),
+                content = context.getString(R.string.notification_live_status_island_idle_content),
+                summary = context.getString(R.string.notification_live_status_island_idle_summary),
                 accentColor = XIAOMI_ISLAND_ACCENT_COLOR,
                 trackColor = XIAOMI_ISLAND_TRACK_COLOR,
             )

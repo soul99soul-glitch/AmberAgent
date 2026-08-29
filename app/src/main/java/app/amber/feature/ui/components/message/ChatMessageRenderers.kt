@@ -26,10 +26,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.AssistantAffectScope
 import app.amber.core.model.AssistantRegex
+import app.amber.core.ai.generative.GenerativeWidgetCopy
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.core.ai.generative.GenerativeWidgetSegment
 import app.amber.feature.ui.components.richtext.MarkdownBlock
@@ -145,17 +147,23 @@ internal fun AssistantMarkdownBlockOrWidgets(
     onStreamingVisibleFrame: (() -> Unit)? = null,
     onStreamingVisualActiveChange: ((Boolean) -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    val generativeWidgetCopy = remember(context) { GenerativeWidgetCopy.from(context) }
     val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
-    val canRenderWidget = remember(generativeUiEnabled, content) {
+    val canRenderWidget = remember(generativeUiEnabled, content, generativeWidgetCopy) {
         generativeUiEnabled &&
             (GenerativeWidgetParser.containsWidgetFence(content) ||
-                GenerativeWidgetParser.containsFullHtmlDeckPayload(content))
+                GenerativeWidgetParser.containsFullHtmlDeckPayload(
+                    content,
+                    copy = generativeWidgetCopy,
+                ))
     }
 
     if (!canRenderWidget && content.looksLikeMiniAppJsonPayload()) {
         MiniAppJsonPreview(
             content = content,
             streaming = streaming,
+            copy = generativeWidgetCopy,
             modifier = modifier,
         )
         return
@@ -183,8 +191,12 @@ internal fun AssistantMarkdownBlockOrWidgets(
         return
     }
 
-    val segments = remember(content, streaming) {
-        GenerativeWidgetParser.parse(content, streaming = streaming)
+    val segments = remember(content, streaming, generativeWidgetCopy) {
+        GenerativeWidgetParser.parse(
+            content,
+            streaming = streaming,
+            copy = generativeWidgetCopy,
+        )
     }
     Column(
         modifier = modifier,
@@ -230,6 +242,7 @@ internal fun AssistantMarkdownBlockOrWidgets(
 private fun MiniAppJsonPreview(
     content: String,
     streaming: Boolean,
+    copy: GenerativeWidgetCopy,
     modifier: Modifier = Modifier,
 ) {
     val scrollState = rememberScrollState()
@@ -258,7 +271,7 @@ private fun MiniAppJsonPreview(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                text = if (streaming) "正在生成小应用" else "MiniApp JSON",
+                text = if (streaming) copy.miniAppGenerating else copy.miniAppJsonTitle,
                 style = MaterialTheme.typography.labelMedium,
                 color = chatTheme.accent,
             )
@@ -304,6 +317,8 @@ internal fun ReasoningWidgetRescue(
     streaming: Boolean,
     onGenerativeWidgetAction: (String) -> Unit,
 ) {
+    val context = LocalContext.current
+    val generativeWidgetCopy = remember(context) { GenerativeWidgetCopy.from(context) }
     val generativeUiEnabled = LocalSettings.current.agentRuntime.generativeUi.enabled
     if (!generativeUiEnabled) return
 
@@ -312,10 +327,14 @@ internal fun ReasoningWidgetRescue(
             (step as? ThinkingStep.ReasoningStep)?.reasoning?.reasoning
         }
     }
-    val segments = remember(reasoningTexts, streaming) {
+    val segments = remember(reasoningTexts, streaming, generativeWidgetCopy) {
         reasoningTexts.flatMap { reasoning ->
             val widgetSource = reasoning.reasoningWidgetSource() ?: return@flatMap emptyList()
-            GenerativeWidgetParser.parse(widgetSource, streaming = streaming)
+            GenerativeWidgetParser.parse(
+                widgetSource,
+                streaming = streaming,
+                copy = generativeWidgetCopy,
+            )
                 .filter { segment ->
                     segment is GenerativeWidgetSegment.Widget || segment is GenerativeWidgetSegment.Loading
                 }

@@ -29,10 +29,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import app.amber.agent.R
 import app.amber.ai.ui.UIMessagePart
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.AlarmClock
@@ -73,7 +75,7 @@ fun MiniAppChatCard(
         scope.launch {
             val app = repository.getById(part.appId)
             if (app == null) {
-                Toast.makeText(context, "小应用不存在", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, R.string.miniapp_not_found, Toast.LENGTH_SHORT).show()
             } else {
                 action(app)
             }
@@ -107,7 +109,7 @@ fun MiniAppChatCard(
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onRun) {
-                    Text("运行")
+                    Text(stringResource(R.string.miniapp_run))
                 }
                 OutlinedButton(
                     onClick = {
@@ -117,7 +119,7 @@ fun MiniAppChatCard(
                         }
                     },
                 ) {
-                    Text("修改")
+                    Text(stringResource(R.string.miniapp_modify))
                 }
                 Box(
                     modifier = Modifier
@@ -127,7 +129,7 @@ fun MiniAppChatCard(
                 ) {
                     Icon(
                         imageVector = Lucide.EllipsisVertical,
-                        contentDescription = "更多操作",
+                        contentDescription = stringResource(R.string.miniapp_more_actions),
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -137,7 +139,7 @@ fun MiniAppChatCard(
                     ) {
                         if (showSourceButton) {
                             DropdownMenuItem(
-                                text = { Text("查看源码") },
+                                text = { Text(stringResource(R.string.miniapp_view_source)) },
                                 leadingIcon = { Icon(Lucide.CodeXml, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -146,7 +148,7 @@ fun MiniAppChatCard(
                             )
                         }
                         DropdownMenuItem(
-                            text = { Text("打开列表") },
+                            text = { Text(stringResource(R.string.miniapp_open_list)) },
                             leadingIcon = { Icon(Lucide.List, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -154,7 +156,7 @@ fun MiniAppChatCard(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("导出 HTML") },
+                            text = { Text(stringResource(R.string.miniapp_export_html)) },
                             leadingIcon = { Icon(Lucide.Download, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -162,7 +164,7 @@ fun MiniAppChatCard(
                             },
                         )
                         DropdownMenuItem(
-                            text = { Text("版本历史") },
+                            text = { Text(stringResource(R.string.miniapp_version_history)) },
                             leadingIcon = { Icon(Lucide.AlarmClock, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -194,10 +196,15 @@ fun MiniAppChatCard(
                         repository.restoreVersion(target.id, version.versionNumber)
                     }.onSuccess { restored ->
                         if (restored == null) {
-                            Toast.makeText(context, "恢复失败：小应用不存在", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, R.string.miniapp_restore_not_found, Toast.LENGTH_SHORT).show()
                         }
                     }.onFailure {
-                        Toast.makeText(context, "恢复失败：${it.message ?: "未知错误"}", Toast.LENGTH_SHORT).show()
+                        val reason = it.message ?: context.getString(R.string.miniapp_unknown_error)
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.miniapp_restore_failed, reason),
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     }
                     versionTarget = null
                 }
@@ -208,18 +215,18 @@ fun MiniAppChatCard(
     modifyTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { modifyTarget = null },
-            title = { Text("修改小应用") },
+            title = { Text(stringResource(R.string.miniapp_modify_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "基于「${target.title}」v${target.version} 继续迭代。写下你想改什么，Amber 会生成新版并写入版本历史。",
+                        text = stringResource(R.string.miniapp_modify_description, target.title, target.version),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     OutlinedTextField(
                         value = modifyRequest,
                         onValueChange = { modifyRequest = it },
-                        placeholder = { Text("例如：把按钮改小一点，增加今日统计，并支持联网刷新新闻") },
+                        placeholder = { Text(stringResource(R.string.miniapp_modify_placeholder)) },
                         minLines = 3,
                     )
                 }
@@ -234,12 +241,12 @@ fun MiniAppChatCard(
                         }
                     },
                 ) {
-                    Text("发送修改")
+                    Text(stringResource(R.string.miniapp_send_modification))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { modifyTarget = null }) {
-                    Text("取消")
+                    Text(stringResource(R.string.cancel))
                 }
             },
         )

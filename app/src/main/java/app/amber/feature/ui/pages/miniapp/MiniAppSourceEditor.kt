@@ -40,12 +40,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import app.amber.agent.R
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.miniapp.MiniAppPermission
@@ -79,16 +81,14 @@ fun MiniAppSourceEditorDialog(
     val unsaved = MiniAppSourceChecks.hasUnsavedChanges(app.htmlContent, editorText)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val saveFailedMessage = stringResource(R.string.miniapp_save_failed)
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = buildString {
-                        append("源码 · ${app.title}")
-                        append(" v${app.version}")
-                    },
+                    text = stringResource(R.string.miniapp_source_title, app.title, app.version),
                     modifier = Modifier.weight(1f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -105,7 +105,7 @@ fun MiniAppSourceEditorDialog(
                                 .background(MaterialTheme.colorScheme.error, CircleShape),
                         )
                         Text(
-                            text = "未保存",
+                            text = stringResource(R.string.miniapp_unsaved),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error,
                         )
@@ -128,7 +128,7 @@ fun MiniAppSourceEditorDialog(
                             )
                         }
                         Text(
-                            text = "仅查看模式。编辑源码、校验、预览并保存为新的版本。",
+                            text = stringResource(R.string.miniapp_source_view_only_description),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -170,14 +170,14 @@ fun MiniAppSourceEditorDialog(
                 MODE_VIEW -> TextButton(
                     onClick = { mode = MODE_EDIT },
                     enabled = !saving,
-                ) { Text("编辑") }
+                ) { Text(stringResource(R.string.edit)) }
 
                 MODE_EDIT -> Row {
                     TextButton(
                         enabled = !saving,
                         onClick = {
                             scope.launch {
-                                val found = MiniAppSourceChecks.issues(editorText)
+                                val found = MiniAppSourceChecks.issues(editorText, context)
                                 if (found.isNotEmpty()) {
                                     issues = found
                                     return@launch
@@ -195,7 +195,7 @@ fun MiniAppSourceEditorDialog(
                                 }.onFailure { error ->
                                     saving = false
                                     issues = listOf(
-                                        MiniAppSourceChecks.Issue(error.message ?: "保存失败")
+                                        MiniAppSourceChecks.Issue(error.message ?: saveFailedMessage)
                                     )
                                 }
                             }
@@ -204,31 +204,31 @@ fun MiniAppSourceEditorDialog(
                         if (saving) {
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         } else {
-                            Text("保存")
+                            Text(stringResource(R.string.common_save))
                         }
                     }
                 }
 
-                else -> TextButton(onClick = { mode = MODE_EDIT }) { Text("返回编辑") }
+                else -> TextButton(onClick = { mode = MODE_EDIT }) { Text(stringResource(R.string.miniapp_back_to_edit)) }
             }
         },
         dismissButton = {
             when (mode) {
-                MODE_VIEW -> TextButton(onClick = onDismiss) { Text("关闭") }
+                MODE_VIEW -> TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_card_close)) }
                 MODE_EDIT -> Row {
                     TextButton(
                         onClick = {
                             if (unsaved) {
                                 editorText = app.htmlContent
                                 issues = null
-                                Toast.makeText(context, "已放弃更改", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
                             }
                             mode = MODE_VIEW
                         },
-                    ) { Text("放弃更改") }
+                    ) { Text(stringResource(R.string.miniapp_discard_changes)) }
                     TextButton(
                         onClick = { mode = MODE_PREVIEW },
-                    ) { Text("预览") }
+                    ) { Text(stringResource(R.string.code_block_preview)) }
                 }
                 else -> Row {
                     TextButton(
@@ -236,12 +236,12 @@ fun MiniAppSourceEditorDialog(
                             if (unsaved) {
                                 editorText = app.htmlContent
                                 issues = null
-                                Toast.makeText(context, "已放弃更改", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, R.string.miniapp_discarded, Toast.LENGTH_SHORT).show()
                             }
                             mode = MODE_EDIT
                         },
-                    ) { Text("放弃更改") }
-                    TextButton(onClick = onDismiss) { Text("关闭") }
+                    ) { Text(stringResource(R.string.miniapp_discard_changes)) }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.update_card_close)) }
                 }
             }
         },
@@ -273,8 +273,8 @@ private fun MiniAppSourcePreview(
         runCatching { json.decodeFromString<List<String>>(app.permissionsJson) }.getOrDefault(emptyList()).toSet()
     }
     val previewToken = remember { Uuid.random().toString() }
-    val shellHtml = remember(html, previewToken) {
-        MiniAppShell.inject(html, bridgeScript = "", sessionToken = previewToken)
+    val shellHtml = remember(context, html, previewToken) {
+        MiniAppShell.inject(context, html, bridgeScript = "", sessionToken = previewToken)
     }
     var webView by remember { mutableStateOf<WebView?>(null) }
 

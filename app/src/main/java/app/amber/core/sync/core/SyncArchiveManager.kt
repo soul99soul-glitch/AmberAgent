@@ -19,6 +19,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import app.amber.agent.R
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
@@ -77,8 +78,12 @@ class SyncArchiveManager(
         // （NO_PASSPHRASE_FALLBACK）只存在于 v1 旧格式的读取兼容分支。
         val passphrase = when (request.encryptionMode) {
             SyncEncryptionMode.PASSPHRASE -> {
-                require(request.passphrase.isNotBlank()) { "自定义备份口令不能为空" }
-                require(request.passphrase != NO_PASSPHRASE_FALLBACK) { "这个口令是内部保留值，请换一个口令" }
+                require(request.passphrase.isNotBlank()) {
+                    context.getString(R.string.backup_passphrase_required)
+                }
+                require(request.passphrase != NO_PASSPHRASE_FALLBACK) {
+                    context.getString(R.string.backup_reserved_passphrase)
+                }
                 request.passphrase
             }
             SyncEncryptionMode.DEVICE_BOUND -> deviceBoundBackupKey.getOrCreate()
@@ -137,14 +142,17 @@ class SyncArchiveManager(
         return try {
             val parsed = parseArchive(file, encryptedPayloadFile)
             require(crypto.sha256(encryptedPayloadFile) == parsed.manifest.payloadSha256) {
-                "备份文件校验失败"
+                context.getString(R.string.backup_incompatible)
             }
             val passphrase = resolveRestorePassphrase(parsed.manifest, request)
             try {
                 crypto.decrypt(encryptedPayloadFile, payloadFile, passphrase, parsed.manifest)
             } catch (error: Throwable) {
                 // GCM 认证标签失败 = 口令错误或文件损坏；两者对外不区分。
-                throw IllegalArgumentException("备份口令错误或备份文件已损坏", error)
+                throw IllegalArgumentException(
+                    context.getString(R.string.backup_incompatible),
+                    error,
+                )
             }
             val payloadPreview = readPayloadPreview(payloadFile)
             SyncRestoreVerification(
@@ -218,8 +226,10 @@ class SyncArchiveManager(
             .toSet()
         val missingDatasets = requiredDatasets - presentDatasets
         require(missingDatasets.isEmpty()) {
-            "同步备份 v${verification.preview.manifest.archiveVersion} 缺少完整恢复所需数据集，" +
-                "已拒绝 EVERYTHING 恢复以避免清空缺失表：${missingDatasets.sorted().joinToString()}"
+            context.getString(
+                R.string.backup_format_incompatible,
+                missingDatasets.sorted().joinToString(),
+            )
         }
     }
 
@@ -483,7 +493,9 @@ class SyncArchiveManager(
             }
         }
 
-        val restoredSettingsJson = settingsJson ?: error("同步备份缺少 settings.json")
+        val restoredSettingsJson = settingsJson ?: error(
+            context.getString(R.string.backup_format_incompatible, "settings.json")
+        )
 
         val currentSettings = settingsStore.settingsFlow.value
         val decodedSettings = redactor.decodeSettingsForRestore(
@@ -893,15 +905,19 @@ class SyncArchiveManager(
                 zip.closeEntry()
             }
         }
-        val manifestJsonValue = manifestJson ?: error("同步备份缺少 manifest.json")
-        require(hasEncryptedPayload) { "同步备份缺少 payload.enc" }
+        val manifestJsonValue = manifestJson ?: error(
+            context.getString(R.string.backup_format_incompatible, "manifest.json")
+        )
+        require(hasEncryptedPayload) {
+            context.getString(R.string.backup_format_incompatible, "payload.enc")
+        }
         val manifest = json.decodeFromString<SyncManifest>(manifestJsonValue)
         // P7-02：v2 = 当前新格式；v1 = 只读迁移（含历史固定口令格式的受控兼容分支）。
         require(
             manifest.archiveVersion == CURRENT_ARCHIVE_VERSION ||
                 manifest.archiveVersion == LEGACY_ARCHIVE_VERSION
         ) {
-            "不支持的同步备份版本：${manifest.archiveVersion}"
+            context.getString(R.string.backup_archive_incompatible, manifest.archiveVersion)
         }
         return ParsedSyncArchive(manifest = manifest)
     }
@@ -926,10 +942,14 @@ class SyncArchiveManager(
 
         manifest.encryptionMode == SyncEncryptionMode.DEVICE_BOUND ->
             deviceBoundBackupKey.current()
-                ?: throw IllegalStateException("设备绑定备份只能在其创建设备上恢复")
+                ?: throw IllegalStateException(
+                    context.getString(R.string.backup_device_bound_restore_hint)
+                )
 
         else -> {
-            require(request.passphrase.isNotBlank()) { "同步口令不能为空" }
+            require(request.passphrase.isNotBlank()) {
+                context.getString(R.string.backup_passphrase_required)
+            }
             request.passphrase
         }
     }

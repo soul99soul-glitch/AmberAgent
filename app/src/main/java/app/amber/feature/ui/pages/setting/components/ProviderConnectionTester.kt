@@ -21,6 +21,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +55,7 @@ fun ProviderConnectionTester(
     var showTestDialog by remember { mutableStateOf(false) }
     val providerCatalog = koinInject<ProviderCatalog>()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     ProviderIconButton(
         imageVector = Lucide.Cable,
@@ -147,12 +149,19 @@ fun ProviderConnectionTester(
                             ?.filterIsInstance<UIMessagePart.Tool>()
                             ?.firstOrNull()
                         val result = if (toolCall != null) {
-                            "调用: ${toolCall.toolName}  入参: ${toolCall.input}"
+                            context.getString(
+                                R.string.setting_provider_connection_tester_tool_call_result,
+                                toolCall.toolName,
+                                toolCall.input,
+                            )
                         } else {
                             val text = message?.parts
                                 ?.filterIsInstance<UIMessagePart.Text>()
                                 ?.joinToString("") { it.text } ?: ""
-                            "未调用工具，响应: $text"
+                            context.getString(
+                                R.string.setting_provider_connection_tester_tool_not_called,
+                                text,
+                            )
                         }
                         toolsState = UiState.Success(result)
                     }.onFailure { toolsState = UiState.Error(it) }
@@ -211,17 +220,17 @@ private fun ProviderConnectionDialog(
                     onSelect = onModelChange,
                 )
                 TestResultItem(
-                    label = "非流式",
+                    label = stringResource(R.string.setting_provider_connection_tester_non_streaming),
                     state = nonStreamingState,
                     resultText = (nonStreamingState as? UiState.Success)?.data ?: "",
                 )
                 TestResultItem(
-                    label = "流式",
+                    label = stringResource(R.string.setting_provider_connection_tester_streaming),
                     state = streamingState,
                     resultText = streamingText,
                 )
                 TestResultItem(
-                    label = "工具调用",
+                    label = stringResource(R.string.setting_provider_connection_tester_tool_call),
                     state = toolsState,
                     resultText = (toolsState as? UiState.Success)?.data ?: "",
                 )

@@ -1,5 +1,6 @@
 package app.amber.core.ai.vision
 
+import android.content.Context
 import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.ProviderCatalog
@@ -7,6 +8,7 @@ import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import kotlinx.coroutines.CancellationException
+import app.amber.agent.R
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
@@ -31,21 +33,58 @@ data class VisionModelHealth(
     val isAvailable: Boolean get() = kind == VisionModelHealthKind.AVAILABLE
 }
 
+/**
+ * Resolved once at a production boundary so the health checker never owns a
+ * global locale or Context. Tests can use [english] without Android resources.
+ */
+data class VisionModelHealthStrings(
+    val checking: String,
+    val available: String,
+    val notConfigured: String,
+    val unsupported: String,
+    val providerMissing: String,
+    val failed: (String) -> String,
+    val unknownError: String,
+) {
+    companion object {
+        fun english(): VisionModelHealthStrings = VisionModelHealthStrings(
+            checking = "Checking",
+            available = "Available",
+            notConfigured = "Not configured",
+            unsupported = "Image input unsupported",
+            providerMissing = "Provider unavailable",
+            failed = { detail -> "Unavailable: $detail" },
+            unknownError = "Health check failed",
+        )
+
+        fun from(context: Context): VisionModelHealthStrings = VisionModelHealthStrings(
+            checking = context.getString(R.string.vision_model_health_checking),
+            available = context.getString(R.string.vision_model_health_available),
+            notConfigured = context.getString(R.string.vision_model_health_not_configured),
+            unsupported = context.getString(R.string.vision_model_health_unsupported),
+            providerMissing = context.getString(R.string.vision_model_health_provider_missing),
+            failed = { detail -> context.getString(R.string.vision_model_health_failed, detail) },
+            unknownError = context.getString(R.string.vision_model_health_unknown_error),
+        )
+    }
+}
+
 object VisionModelHealthChecker {
-    fun checking(): VisionModelHealth =
-        VisionModelHealth(VisionModelHealthKind.CHECKING, "检测中")
+    fun checking(strings: VisionModelHealthStrings = VisionModelHealthStrings.english()): VisionModelHealth =
+        VisionModelHealth(VisionModelHealthKind.CHECKING, strings.checking)
 
     suspend fun probe(
         settings: Settings,
         providerCatalog: ProviderCatalog,
+        strings: VisionModelHealthStrings = VisionModelHealthStrings.english(),
     ): VisionModelHealth {
         val model = settings.findModelById(settings.ocrModelId)
-            ?: return VisionModelHealth(VisionModelHealthKind.NOT_CONFIGURED, "未配置")
+            ?: return VisionModelHealth(VisionModelHealthKind.NOT_CONFIGURED, strings.notConfigured)
         if (Modality.IMAGE !in model.inputModalities) {
-            return VisionModelHealth(VisionModelHealthKind.UNSUPPORTED, "不支持图片")
+            return VisionModelHealth(VisionModelHealthKind.UNSUPPORTED, strings.unsupported)
         }
         val providerSetting = model.findProvider(settings.providers)
-            ?: return VisionModelHealth(VisionModelHealthKind.PROVIDER_MISSING, "提供商不可用")
+            ?: return VisionModelHealth(VisionModelHealthKind.PROVIDER_MISSING, strings.providerMissing)
         val provider = providerCatalog.text(providerSetting)
         return runCatching {
             provider.complete(
@@ -63,10 +102,11 @@ object VisionModelHealthChecker {
                 params = TextGenerationParams(model = model),
             )
         }.fold(
-            onSuccess = { VisionModelHealth(VisionModelHealthKind.AVAILABLE, "可用") },
+            onSuccess = { VisionModelHealth(VisionModelHealthKind.AVAILABLE, strings.available) },
             onFailure = {
                 if (it is CancellationException) throw it
-                VisionModelHealth(VisionModelHealthKind.FAILED, "不可用：${it.message ?: "检测失败"}")
+                val detail = it.message?.takeIf { message -> message.isNotBlank() } ?: strings.unknownError
+                VisionModelHealth(VisionModelHealthKind.FAILED, strings.failed(detail))
             },
         )
     }

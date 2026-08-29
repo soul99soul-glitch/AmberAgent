@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.zcode
 
+import androidx.annotation.StringRes
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,9 +26,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.utils.plus
 import app.amber.feature.ui.components.nav.BackButton
@@ -55,14 +58,17 @@ fun ZCodePage(
     val toaster = LocalToaster.current
     val workspace = workspaceColors()
     val scope = rememberCoroutineScope()
+    val scanNotUrlMessage = stringResource(R.string.zcode_scan_not_url)
+    val cameraPermissionMessage = stringResource(R.string.zcode_camera_permission_required)
+    val scanFailedShortMessage = stringResource(R.string.zcode_scan_failed_short)
     val saved by store.urlFlow.collectAsStateWithLifecycle(initialValue = "")
     var draft by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<ZCodeUiMessage?>(null) }
 
     fun openZCodeUrl(raw: String) {
         val url = normalizeZCodeUrl(raw)
         if (url == null) {
-            error = "请输入有效的 http(s) 链接"
+            error = ZCodeUiMessage(R.string.zcode_invalid_url)
             return
         }
         scope.launch {
@@ -76,28 +82,31 @@ fun ZCodePage(
             is QRResult.QRSuccess -> {
                 val content = result.content.rawValue.orEmpty().trim()
                 if (content.isEmpty()) {
-                    error = "二维码内容为空"
+                    error = ZCodeUiMessage(R.string.zcode_empty_qr_content)
                     return@rememberLauncherForActivityResult
                 }
                 draft = content
                 error = null
                 val url = normalizeZCodeUrl(content)
                 if (url == null) {
-                    error = "扫到的内容不是有效的 http(s) 链接"
-                    toaster.show("扫码成功，但不是有效链接", type = ToastType.Error)
+                    error = ZCodeUiMessage(R.string.zcode_invalid_scanned_url)
+                    toaster.show(scanNotUrlMessage, type = ToastType.Error)
                 } else {
                     openZCodeUrl(url)
                 }
             }
 
             QRResult.QRMissingPermission -> {
-                error = "需要相机权限才能扫码"
-                toaster.show("需要相机权限才能扫码", type = ToastType.Error)
+                error = ZCodeUiMessage(R.string.zcode_camera_permission_required)
+                toaster.show(cameraPermissionMessage, type = ToastType.Error)
             }
 
             is QRResult.QRError -> {
-                error = "扫码失败：${result.exception.message ?: result}"
-                toaster.show("扫码失败", type = ToastType.Error)
+                error = ZCodeUiMessage(
+                    R.string.zcode_scan_failed,
+                    listOf(result.exception.message ?: result.toString()),
+                )
+                toaster.show(scanFailedShortMessage, type = ToastType.Error)
             }
 
             QRResult.QRUserCanceled -> Unit
@@ -127,12 +136,12 @@ fun ZCodePage(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "打开智谱 ZCode 移动页",
+                text = stringResource(R.string.zcode_page_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = workspace.ink,
             )
             Text(
-                text = "粘贴 ZCode 分享/远程链接，或点击输入框右侧扫码，Amber 用内置浏览器打开。",
+                text = stringResource(R.string.zcode_page_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = workspace.muted,
             )
@@ -144,7 +153,7 @@ fun ZCodePage(
                     error = null
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("ZCode 链接") },
+                label = { Text(stringResource(R.string.zcode_url_label)) },
                 placeholder = { Text("https://…") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
@@ -152,7 +161,7 @@ fun ZCodePage(
                     IconButton(onClick = { scanQrCodeLauncher.launch(null) }) {
                         Icon(
                             imageVector = Lucide.ScanQrCode,
-                            contentDescription = "扫描二维码",
+                            contentDescription = stringResource(R.string.zcode_scan_qr),
                         )
                     }
                 },
@@ -160,7 +169,7 @@ fun ZCodePage(
 
             error?.let {
                 Text(
-                    text = it,
+                    text = stringResource(it.resourceId, *it.formatArgs.toTypedArray()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.error,
                 )
@@ -171,11 +180,16 @@ fun ZCodePage(
                 enabled = draft.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("打开")
+                Text(stringResource(R.string.zcode_open))
             }
         }
     }
 }
+
+private data class ZCodeUiMessage(
+    @StringRes val resourceId: Int,
+    val formatArgs: List<Any> = emptyList(),
+)
 
 /** Accept bare host by prefixing https; reject non-http schemes. */
 internal fun normalizeZCodeUrl(raw: String): String? {

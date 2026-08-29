@@ -24,8 +24,10 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.util.ImageEncodingException
 import app.amber.core.ai.transformers.transforms
+import app.amber.core.ai.transformers.OcrStrings
 import app.amber.core.ai.generative.GenerativeUiPlanner
 import app.amber.core.ai.generative.GenerativeUiWidgetRequirement
+import app.amber.core.ai.generative.GenerativeWidgetCopy
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.settings.findProvider
@@ -34,6 +36,7 @@ import app.amber.core.context.ConversationContextEngine
 import app.amber.core.context.ConversationContextPlanner
 import app.amber.core.context.TokenBudgetFitter
 import app.amber.core.context.TokenFitResult
+import app.amber.core.utils.appLocale
 import app.amber.core.memory.recall.MemoryRecallStore
 import app.amber.core.repository.ConversationRepository
 import app.amber.agent.R
@@ -145,10 +148,16 @@ class ChatGenerationRoundEngine(
         val speculativeRunner = request.speculativeRunner
         val loopBudgetPrompt = request.loopBudgetPrompt
         val responsesResume = request.responsesResume
+        val ocrStrings = OcrStrings.from(context)
+        val generativeWidgetCopy = GenerativeWidgetCopy.from(context)
 
         var messages: List<UIMessage> = request.messages
         val sessionDefaults = settings.resolveSessionDefaults(model)
-        val memoryContextPrompt = memoryRecallStore.buildPrompt(settings, messages)
+        val memoryContextPrompt = memoryRecallStore.buildPrompt(
+            settings = settings,
+            messages = messages,
+            locale = context.appLocale(),
+        )
         val systemParts = buildSystemPromptParts(
             settings = settings,
             model = model,
@@ -364,7 +373,7 @@ class ChatGenerationRoundEngine(
                     )
                     onUpdateMessages(GenerationUpdate.full(messages))
                     if (widgetRequirement.required && !messages.hasPendingToolCalls()) {
-                        messages.visibleWidgetIssue(widgetRequirement)?.let { issue ->
+                        messages.visibleWidgetIssue(widgetRequirement, generativeWidgetCopy)?.let { issue ->
                             throw GenerativeUiInvalidWidgetStreamException(issue)
                         }
                     }
@@ -388,9 +397,9 @@ class ChatGenerationRoundEngine(
                         messages = baseMessages
                         onUpdateMessages(GenerationUpdate.full(messages))
                         processingStatus.value = if (generativeUiWidgetRequirement.expectSlides) {
-                            "正在修复演示卡片..."
+                            generativeWidgetCopy.repairingPresentation
                         } else {
-                            "正在切换为可见输出模式生成可视化..."
+                            generativeWidgetCopy.switchingToVisibleOutput
                         }
                         // Streaming speculative execution may already have started a
                         // side-effectful tool before the widget guard rejects this
@@ -415,11 +424,15 @@ class ChatGenerationRoundEngine(
                         // skeleton widget appended to its perfectly good text — visible
                         // as the "widget keeps appearing on every reply" loop the user
                         // reported.
-                        val retryIssue = messages.visibleWidgetIssue(generativeUiWidgetRequirement)
+                        val retryIssue = messages.visibleWidgetIssue(
+                            generativeUiWidgetRequirement,
+                            generativeWidgetCopy,
+                        )
                         val shouldAppendLocalFallback = if (generativeUiWidgetRequirement.required) {
                             retryIssue != null && !messages.hasPendingToolCalls()
                         } else {
-                            !messages.hasVisibleWidgetFence() && !messages.hasMeaningfulVisibleAssistantText()
+                            !messages.hasVisibleWidgetFence(generativeWidgetCopy) &&
+                                !messages.hasMeaningfulVisibleAssistantText()
                         }
                         if (shouldAppendLocalFallback) {
                             messages = messages.withLocalGenerativeUiFallbackWidget(
@@ -432,7 +445,7 @@ class ChatGenerationRoundEngine(
                         return@runProviderCallWithRetry
                     }
                     if (!canUseVisionFallback || !shouldFallbackToVisionRecognition(error)) throw error
-                    processingStatus.value = "正在改用视觉识别模型读取图片..."
+                    processingStatus.value = ocrStrings.visionFallback
                     streamWith(
                         providerMessages = prepareInternalMessages(forceImageToText = true),
                         streamParams = params,
@@ -508,7 +521,7 @@ class ChatGenerationRoundEngine(
                     )
                 } catch (error: Throwable) {
                     if (!canUseVisionFallback || !shouldFallbackToVisionRecognition(error)) throw error
-                    processingStatus.value = "正在改用视觉识别模型读取图片..."
+                    processingStatus.value = ocrStrings.visionFallback
                     generateWith(
                         providerMessages = prepareInternalMessages(forceImageToText = true),
                         attempt = wireAttempt++,
@@ -527,12 +540,15 @@ class ChatGenerationRoundEngine(
                         }
                     }
                 }
-                val widgetIssue = messages.visibleWidgetIssue(generativeUiWidgetRequirement)
+                val widgetIssue = messages.visibleWidgetIssue(
+                    generativeUiWidgetRequirement,
+                    generativeWidgetCopy,
+                )
                 if (widgetIssue != null && !messages.hasPendingToolCalls()) {
                     processingStatus.value = if (generativeUiWidgetRequirement.expectSlides) {
-                        "正在修复演示卡片..."
+                        generativeWidgetCopy.repairingPresentation
                     } else {
-                        "正在切换为可见输出模式生成可视化..."
+                        generativeWidgetCopy.switchingToVisibleOutput
                     }
                     // The first non-streaming response can already contain tool calls;
                     // the fallback is a visible-output repair, not a second tool turn.
@@ -558,7 +574,10 @@ class ChatGenerationRoundEngine(
                         }
                     }
                     if (
-                        messages.visibleWidgetIssue(generativeUiWidgetRequirement) != null &&
+                        messages.visibleWidgetIssue(
+                            generativeUiWidgetRequirement,
+                            generativeWidgetCopy,
+                        ) != null &&
                         !messages.hasPendingToolCalls()
                     ) {
                         messages = messages.withLocalGenerativeUiFallbackWidget(
@@ -596,8 +615,12 @@ class ChatGenerationRoundEngine(
                 setting = settings.agentRuntime.generativeUi,
                 messages = messages,
                 hasImageGenTool = hasImageGenTool,
+                settingsPath = context.getString(R.string.setting_page_model_and_services) +
+                    " → " + context.getString(R.string.setting_model_page_image_gen_model),
             ).takeIf { it.isNotBlank() }?.let(::add)
-            if (settings.agentRuntime.enableRecentChatsReference) add(buildRecentChatsPrompt(conversationRepo))
+            if (settings.agentRuntime.enableRecentChatsReference) {
+                add(buildRecentChatsPrompt(conversationRepo, context.appLocale()))
+            }
         }.joinToString("\n\n")
 
         val toolPrompt = tools.mapNotNull { tool ->
@@ -686,25 +709,28 @@ class ChatGenerationRoundEngine(
     private fun List<UIMessage>.hasImageParts(): Boolean =
         any { message -> message.parts.any { it is UIMessagePart.Image && it.url.isNotBlank() } }
 
-    private fun List<UIMessage>.hasVisibleWidgetFence(): Boolean =
+    private fun List<UIMessage>.hasVisibleWidgetFence(copy: GenerativeWidgetCopy): Boolean =
         lastOrNull { it.role == MessageRole.ASSISTANT }
             ?.parts
             ?.filterIsInstance<UIMessagePart.Text>()
-            ?.any { GenerativeWidgetParser.hasRenderableWidget(it.text) } == true
+            ?.any { GenerativeWidgetParser.hasRenderableWidget(it.text, copy = copy) } == true
 
     private fun List<UIMessage>.hasPendingToolCalls(): Boolean =
         lastOrNull { it.role == MessageRole.ASSISTANT }
             ?.getTools()
             ?.any { !it.isExecuted } == true
 
-    private fun List<UIMessage>.visibleWidgetIssue(requirement: GenerativeUiWidgetRequirement): String? {
+    private fun List<UIMessage>.visibleWidgetIssue(
+        requirement: GenerativeUiWidgetRequirement,
+        copy: GenerativeWidgetCopy,
+    ): String? {
         if (!requirement.required) return null
         val content = lastOrNull { it.role == MessageRole.ASSISTANT }
             ?.parts
             ?.filterIsInstance<UIMessagePart.Text>()
             ?.joinToString("\n") { it.text }
             .orEmpty()
-        return GenerativeWidgetParser.widgetQualityIssue(content, requirement)
+        return GenerativeWidgetParser.widgetQualityIssue(content, requirement, copy = copy)
     }
 
     /**

@@ -22,8 +22,15 @@ class FeishuChangeNotifier(
         notify(
             NotificationCompat.Builder(context, CHANNEL_ID)
                 .setSmallIcon(R.drawable.amberagent_live_status_icon)
-                .setContentTitle("飞书文档有重要变更")
-                .setContentText("「$docTitle」+${changeCount}字 — ${summary.take(80)}")
+                .setContentTitle(context.getString(R.string.notification_feishu_change_title))
+                .setContentText(
+                    context.getString(
+                        R.string.notification_feishu_change_content,
+                        docTitle,
+                        changeCount,
+                        summary.take(80),
+                    )
+                )
                 .setStyle(NotificationCompat.BigTextStyle().bigText(summary.take(500)))
                 .setContentIntent(buildLaunchPendingIntent(changeId))
                 .setOngoing(false)

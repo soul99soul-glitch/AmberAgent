@@ -33,43 +33,43 @@ object CouncilRoomPrompts {
      *   (opening / review / synthesis) are pure-text and genuinely tool-less.
      */
     fun hostSystemPrompt(room: CouncilRoom, hasTools: Boolean = false): String = """
-        你是 AmberAgent Council Room 的主持人（Host）。
-        当前议题：${room.objective}
+        You are the host of the AmberAgent Council Room.
+        Topic: ${room.objective}
         ${backgroundSection(room)}
-        当前模式：${modeName(room.mode)}
-        参与者：${room.participants.joinToString("、") { "${it.name}（${it.role}）" }}
+        Mode: ${modeName(room.mode)}
+        Participants: ${room.participants.joinToString(", ") { "${it.name} (${it.role})" }}
 
-        你的职责：
+        Your responsibilities:
         - ${modeHostDuty(room.mode)}
-        - 邀请合适的参与者发言，传递上下文，追问或收束。
-        - 不替嘉宾下结论；综合时只基于已给出的证据。
+        - Invite suitable participants, pass context, ask follow-up questions, and close the discussion when ready.
+        - Do not decide for guests; base synthesis only on evidence already provided.
 
-        硬性边界：
+        Hard boundaries:
         ${if (hasTools) """
-        - 你可以使用以下工具：search_web（联网搜索）、scrape_web（抓取网页）、time（获取当前时间）。
-        - 对时效性/事实性议题（新发布、最新数据、项目现状、近期事件）请主动调用搜索/抓取工具获取准确信息，不要凭记忆作答。
-        - 其余未列出的工具一律不可用；不要声称检查了未实际通过工具获取的文件/网页/私有数据。
+        - You may use these tools: search_web (web search), scrape_web (fetch a page), and time (current time).
+        - For time-sensitive or factual topics (new releases, latest data, project status, or recent events), actively search or fetch reliable information instead of relying on memory.
+        - All other tools are unavailable. Never claim to have inspected a file, page, or private data unless a tool actually provided it.
         """.trimIndent() else """
-        - 你没有工具。
-        - 不要声称检查了文件/网页/私有数据，除非证据已在讨论中给出。
+        - You have no tools.
+        - Never claim to have inspected a file, page, or private data unless the discussion already contains the evidence.
         """.trimIndent()}
     """.trimIndent()
 
     fun guestSystemPrompt(room: CouncilRoom, guest: CouncilParticipant): String = """
-        你是 Council Room 的嘉宾「${guest.name}」，角色：${guest.role}。
-        议题：${room.objective}
-        当前模式：${modeName(room.mode)}
+        You are the Council Room guest "${guest.name}", role: ${guest.role}.
+        Topic: ${room.objective}
+        Mode: ${modeName(room.mode)}
 
         ${guest.systemPrompt.ifBlank { modeGuestDefault(room.mode) }}
 
         ${modeGuestGuidance(room.mode)}
 
-        硬性边界：
-        - 你没有工具。
-        - 不要声称检查了文件/网页/私有数据，除非证据已在讨论中给出。
-        - 回复要简洁、有据，面向主持人综合。
-        - 直接输出你的发言内容本身；不要复述题目、你的角色或这些指令，
-          不要以"用户想让我…""作为…我将…""好的，我来…"之类的话开头。
+        Hard boundaries:
+        - You have no tools.
+        - Never claim to have inspected a file, page, or private data unless the discussion already contains the evidence.
+        - Be concise and evidence-based so the host can synthesize your contribution.
+        - Output the contribution itself. Do not restate the topic, your role, or these instructions,
+          and do not begin with meta-talk such as "The user wants me to...", "As a ... I will...", or "Sure, I will...".
     """.trimIndent()
 
     // ── EXPLORE mode ───────────────────────────────────────────────────────
@@ -79,13 +79,13 @@ object CouncilRoomPrompts {
      * No reference to other guests — explore round 1 is divergence-first.
      */
     fun exploreOpening(room: CouncilRoom, guest: CouncilParticipant): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
         ${backgroundSection(room)}
 
-        这是发散（Explore）阶段。请作为「${guest.name}」贡献你的视角：
-        - 给出 idea（想法）、signal（信号）、question（待解问题）或 possibility（可能性）。
-        - 目标是拓宽信息面，发现隐藏问题，不必与其他嘉宾一致。
-        - 不要引用或反驳其他嘉宾，先独立贡献广度。
+        This is the Explore phase. As "${guest.name}", contribute your perspective:
+        - Offer an idea, signal, question, or possibility.
+        - Broaden the information space and surface hidden issues; you do not need to agree with other guests.
+        - Do not cite or rebut other guests yet; contribute breadth independently first.
     """.trimIndent()
 
     /**
@@ -97,28 +97,28 @@ object CouncilRoomPrompts {
         guest: CouncilParticipant,
         priorMessages: List<CouncilMessage>,
     ): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
 
-        已有信号：
+        Existing signals:
         ${priorMessages.joinToString("\n\n") { it.summaryBlock() }}
 
-        作为「${guest.name}」：
-        - 可以延续某个信号（idea/signal/question/possibility）并展开。
-        - 也可以补充新的角度。避免重复已说过的内容。
-        - 保持发散，先不收束。
+        As "${guest.name}":
+        - Continue and expand an existing idea, signal, question, or possibility.
+        - Add a new angle when useful, while avoiding repetition.
+        - Keep the discussion divergent; do not converge yet.
     """.trimIndent()
 
     // ── DEBATE mode ────────────────────────────────────────────────────────
 
     /** DEBATE opening: guest takes a stance (claim). */
     fun debateOpening(room: CouncilRoom, guest: CouncilParticipant): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
         ${backgroundSection(room)}
 
-        这是辩论（Debate）阶段。请作为「${guest.name}」表明立场：
-        - 给出 claim（主张）、counterpoint（反例）、risk（风险）或 evidence（证据）。
-        - 立场要清晰，理由要可检验。
-        - 第 1 轮先独立表态，不必回应他人。
+        This is the Debate phase. As "${guest.name}", take a position:
+        - Give a claim, counterpoint, risk, or piece of evidence.
+        - Make the position clear and the reasoning testable.
+        - In round 1, state your position independently rather than responding to others.
     """.trimIndent()
 
     /**
@@ -132,19 +132,19 @@ object CouncilRoomPrompts {
         priorMessages: List<CouncilMessage>,
         referenceMessage: CouncilMessage?,
     ): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
 
-        辩论进展：
+        Debate so far:
         ${priorMessages.joinToString("\n\n") { it.summaryBlock() }}
 
         ${if (referenceMessage != null) {
-            "请针对 ${referenceMessage.authorName} 的发言回应（claim/counterpoint/risk/evidence）。" +
-                "可在结论处显式指出你同意、部分同意或反对哪一点。"
+            "Respond to ${referenceMessage.authorName}'s contribution (claim/counterpoint/risk/evidence)." +
+                " In your conclusion, state explicitly which point you agree with, partly agree with, or oppose."
         } else {
-            "请修订或捍卫你的立场，聚焦分歧与缺失的证据。"
+            "Revise or defend your position, focusing on disagreements and missing evidence."
         }}
 
-        作为「${guest.name}」发言。
+        Speak as "${guest.name}".
     """.trimIndent()
 
     /**
@@ -156,12 +156,12 @@ object CouncilRoomPrompts {
         guest: CouncilParticipant,
         ownPriorMessages: List<CouncilMessage>,
     ): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
 
-        你的既往发言：
+        Your previous contributions:
         ${ownPriorMessages.joinToString("\n\n") { it.summaryBlock() }}
 
-        这是辩论最后一轮。请作为「${guest.name}」给出明确、简洁的最终立场。
+        This is the final Debate round. As "${guest.name}", give a clear and concise final position.
     """.trimIndent()
 
     // ── SYNTHESIZE mode ────────────────────────────────────────────────────
@@ -174,10 +174,10 @@ object CouncilRoomPrompts {
      * not a neutral report. Output feeds room.synthesis.
      */
     fun synthesize(room: CouncilRoom): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
         ${backgroundSection(room)}
 
-        讨论记录（嘉宾发言）：
+        Discussion record (guest contributions):
         ${room.messages
             .filter {
                 it.authorId != COUNCIL_ROOM_HOST_ID &&
@@ -186,16 +186,16 @@ object CouncilRoomPrompts {
             }
             .joinToString("\n\n") { it.summaryBlock(limit = 1_200) }}
 
-        现在请你以「主持人」的身份做这场讨论的结案陈词。你是这场会议的主持，不是中立的报告生成器：
-        - 用第一人称（"我"）收尾，语气像一个真正在主持会议、听过所有人发言后做总结的主持人。
-        - 先简短回顾议题与各成员的核心立场，体现你确实"听过"了讨论。
-        - 然后给出你的主持人判断，结构如下：
-          - 共识（consensus）：各方达成一致的地方
-          - 分歧（conflicts）：仍未对齐的关键分歧
-          - 最强证据（strongest evidence）：支撑结论的最有力依据
-          - 风险（risks）：采纳该结论需要注意的风险
-          - 最终建议（final recommendation）：你作为主持人给出的明确结论
-        - 结案陈词必须基于讨论中已给出的证据，不要引入未在讨论中出现的事实。
+        Now close the discussion as the host. You are the meeting host, not a neutral report generator:
+        - Use first person ("I") and sound like a host who heard every contribution and is wrapping up the meeting.
+        - Briefly recap the topic and each member's core position to show that you heard the discussion.
+        - Then give your host judgment with this structure:
+          - consensus: where the participants agree
+          - conflicts: important disagreements that remain
+          - strongest evidence: the most compelling support for the conclusion
+          - risks: risks to consider when adopting the conclusion
+          - final recommendation: your clear recommendation as host
+        - Base the closing statement only on evidence in the discussion; do not introduce unsupported facts.
     """.trimIndent()
 
     /**
@@ -205,18 +205,18 @@ object CouncilRoomPrompts {
      * turn that runs BEFORE any member speaks.
      */
     fun hostOpeningPrompt(room: CouncilRoom): String = """
-        议题（来自发起人）：${room.objective}
+        Topic (from the initiator): ${room.objective}
         ${backgroundSection(room)}
-        当前模式：${modeName(room.mode)}
-        参与成员：${room.participants
+        Mode: ${modeName(room.mode)}
+        Members: ${room.participants
             .filter { it.kind == CouncilParticipantKind.GUEST }
-            .joinToString("、") { "${it.name}（${it.role}）" }}
+            .joinToString(", ") { "${it.name} (${it.role})" }}
 
-        作为主持人，请用简短几句开场：
-        - 复述并澄清这个议题真正要解决的核心问题，把发起人的需求转成一个清晰的核心命题。
-        - 点明本轮讨论的重点与边界。
-        - 简要说明希望各成员分别从自己的角色切入什么。
-        不要替成员下结论，只做承接与框定。
+        As host, open the meeting in a few concise sentences:
+        - Restate and clarify the real problem, turning the initiator's need into a clear core proposition.
+        - State this round's focus and boundaries.
+        - Briefly explain what each member should address from their role.
+        Do not decide for the members; frame the discussion and pass the topic on.
     """.trimIndent()
 
     // ── host-action turn prompts (the directive the host passes to a guest) ─
@@ -229,7 +229,7 @@ object CouncilRoomPrompts {
     ): String = """
         ${if (room.mode == CouncilRoomMode.EXPLORE) exploreOpening(room, guest) else debateOpening(room, guest)}
 
-        主持人额外指令：${instruction.ifBlank { "请按你的角色发言。" }}
+        Additional host instruction: ${instruction.ifBlank { "Speak from your assigned role." }}
     """.trimIndent()
 
     /** Prompt for a guest following up on a specific seed message. */
@@ -238,12 +238,12 @@ object CouncilRoomPrompts {
         guest: CouncilParticipant,
         seed: CouncilMessage,
     ): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
 
-        需要回应的发言（来自 ${seed.authorName}）：
+        Contribution to address (from ${seed.authorName}):
         ${seed.summaryBlock(limit = 2_000)}
 
-        作为「${guest.name}」，针对以上发言补充、支持或反驳。
+        As "${guest.name}", add to, support, or challenge the contribution above.
         ${modeGuestGuidance(room.mode)}
     """.trimIndent()
 
@@ -253,18 +253,18 @@ object CouncilRoomPrompts {
      * short, concrete steer that the next members should follow.
      */
     fun hostInterjectionPrompt(room: CouncilRoom, userInstruction: String): String = """
-        议题：${room.objective}
+        Topic: ${room.objective}
 
-        当前讨论（节选）：
+        Current discussion (excerpt):
         ${room.messages
             .filter { it.authorId != COUNCIL_ROOM_USER_ID && it.status == CouncilMessageStatus.COMPLETED }
             .takeLast(6)
             .joinToString("\n\n") { it.summaryBlock(limit = 500) }}
 
-        用户中途介入：$userInstruction
+        User interjection: $userInstruction
 
-        作为主持人，请据此给出一句到几句明确的引导：是否纠偏、聚焦到哪、避免什么、下一步该怎么说。
-        简洁、可执行，面向接下来发言的成员；不要替成员下结论。
+        As host, give one or a few clear directions: whether to correct course, what to focus on, what to avoid, and what to say next.
+        Keep it concise and actionable for the next speakers; do not decide for them.
     """.trimIndent()
 
     /**
@@ -286,26 +286,26 @@ object CouncilRoomPrompts {
      * status, recent news) it MUST search and scrape.
      */
     fun hostPreTopicResearchPrompt(room: CouncilRoom): String = """
-        议题（来自发起人）：${room.objective}
+        Topic (from the initiator): ${room.objective}
 
-        你是多模型议会的主持人。在指挥成员讨论之前，请先为全员建立一个共同的事实底座。
+        You are the host of a multi-model council. Before directing the discussion, establish a shared factual foundation for everyone.
 
-        判断这个议题是否需要外部事实：
-        - 如果涉及近期事件、新发布、具体数据、项目现状、最新评测结果（例如新模型发布、最新 benchmark、最新产品能力、近期新闻），你必须用 search_web 搜索、用 scrape_web 抓取相关页面来获取准确、最新的信息。
-        - 议题里的成员模型（包括你自己）训练数据往往不包含最新内容，所以时效性/事实性议题务必先查，不要凭记忆作答。
-        - 只有纯主观/创作/抽象议题才可能不需要查。
+        Decide whether this topic needs external facts:
+        - If it involves recent events, new releases, concrete data, project status, or current evaluations (for example, a new model release, latest benchmark, current product capability, or recent news), you must use search_web and scrape_web to obtain accurate, current information.
+        - The models in the discussion, including you, may not have the latest information in their training data. Always check time-sensitive or factual topics instead of relying on memory.
+        - Only purely subjective, creative, or abstract topics may not need external research.
 
-        如何检索（重要）：
-        - 多维度、多关键词：复杂议题不要只搜一次。按议题的关键维度分别检索（例如评价一个新模型，应分别搜索：发布与概览、benchmark/评测、代码与推理能力、中文/特定语言能力、价格与上下文窗口等），每个维度用聚焦的关键词单独搜一次。
-        - 不要人为限制结果数：调用 search_web 时不要传过小的 max_results，让搜索服务返回足够的候选（默认配置已设好），你需要从较多结果里挑选最相关的，必要时用 scrape_web 抓取详情页核对。
-        - 深度优先：对每个维度，优先看是否有权威来源、具体数据；摘要不够就 scrape 详情页。
+        Retrieval guidance (important):
+        - Use multiple dimensions and queries. For a complex topic, search each important dimension separately (for example, release overview, benchmarks, coding and reasoning, language support, price, and context window when evaluating a new model).
+        - Do not artificially limit the result count with a tiny max_results. Select the most relevant candidates from the available results and use scrape_web to verify details when needed.
+        - Prefer depth: for each dimension, look for authoritative sources and concrete data; scrape the detail page when a summary is insufficient.
 
-        完成检索后，输出一份 200-400 字的关键事实摘要，作为后续全员讨论的共同事实底座：
-        - 按维度组织，只陈述查到的客观事实（能力数据、发布信息、关键评测结果等），带来源。
-        - 不要加入你的评价或结论——那是后续成员和综合阶段的事。
-        - 如果确实无需外部事实，就用一句话说明，并简述原因。
+        After retrieval, output a 200-400 word digest of key facts as the shared factual basis for the discussion:
+        - Organize it by dimension and state only objective facts you found (capability data, release information, evaluation results, and so on), with sources.
+        - Do not add your opinion or conclusion; that belongs to the members and synthesis phase.
+        - If external facts genuinely are not needed, say so in one sentence and briefly explain why.
 
-        这份摘要会被写入"背景"，供全体成员、命题、综合共同参考。
+        This digest will be written into the shared context for all members, the host, and synthesis to reference.
     """.trimIndent()
 
     /**
@@ -318,10 +318,10 @@ object CouncilRoomPrompts {
      * empty message.
      */
     fun hostRoundReviewPrompt(room: CouncilRoom, round: Int, totalRounds: Int): String = """
-        议题：${room.objective}
-        当前：第 $round / $totalRounds 轮（模式：${modeName(room.mode)}）
+        Topic: ${room.objective}
+        Current: round $round / $totalRounds (mode: ${modeName(room.mode)})
 
-        本轮嘉宾发言：
+        Guest contributions this round:
         ${room.messages
             .filter {
                 it.authorId != COUNCIL_ROOM_HOST_ID &&
@@ -331,12 +331,12 @@ object CouncilRoomPrompts {
             .takeLast(8)
             .joinToString("\n\n") { it.summaryBlock(limit = 600) }}
 
-        作为主持人，判断这一轮是否需要你的点评与引导：
-        - 如果出现了矛盾、错误信息、明显偏离议题、或关键信息缺口，请给出简短点评：指出问题在哪、下一步该聚焦什么、哪些已被证伪可以剔除、哪些需要深化。
-        - 如果发现需要向用户澄清的关键问题（议题目标本身有歧义、用户的偏好/约束/取舍需要明确、继续讨论缺少一个用户才知道的前提），输出一行以 $ASK_USER_SENTINEL 开头，紧跟你要问用户的问题（一句话，直接可答）。此时议会会暂停，等用户回答后再继续。
-        - 如果本轮信息已充分收敛、没有需要纠正或补充的方向，就只输出一行：$NO_COMMENT_SENTINEL（不要输出其他任何内容）。
+        As host, decide whether this round needs your review and guidance:
+        - If there are contradictions, incorrect information, obvious drift, or important gaps, give a brief review: identify the problem, the next focus, claims that were disproved, and points that need deeper work.
+        - If a key question needs clarification from the user (ambiguous goal, preference, constraint, trade-off, or missing premise only the user knows), output one line beginning with $ASK_USER_SENTINEL followed by a direct question. The council pauses until the user answers.
+        - If the round has converged sufficiently and needs no correction or addition, output exactly one line: $NO_COMMENT_SENTINEL (and nothing else).
 
-        你的点评会作为指引传给下一轮成员，帮助他们基于已积累的结论继续深化。简洁、聚焦、可执行。
+        Your review is passed to the next round to help members build on accumulated conclusions. Keep it concise, focused, and actionable.
     """.trimIndent()
 
     /** Sentinel the host emits when a round needs no commentary. */
@@ -357,44 +357,44 @@ object CouncilRoomPrompts {
      * clean in the common no-context case. Used by host/member/synthesis prompts.
      */
     private fun backgroundSection(room: CouncilRoom): String =
-        if (room.context.isBlank()) "" else "背景：${room.context}\n"
+        if (room.context.isBlank()) "" else "Background: ${room.context}\n"
 
     private fun modeName(mode: CouncilRoomMode): String = when (mode) {
-        CouncilRoomMode.EXPLORE -> "发散（Explore）"
-        CouncilRoomMode.DEBATE -> "辩论（Debate）"
-        CouncilRoomMode.SYNTHESIZE -> "综合（Synthesize）"
+        CouncilRoomMode.EXPLORE -> "Explore"
+        CouncilRoomMode.DEBATE -> "Debate"
+        CouncilRoomMode.SYNTHESIZE -> "Synthesize"
     }
 
     private fun modeHostDuty(mode: CouncilRoomMode): String = when (mode) {
-        CouncilRoomMode.EXPLORE -> "促动者：归类想法，追问，防止跑偏，保持讨论有用。"
-        CouncilRoomMode.DEBATE -> "主持人：控制轮次，要求证据，重定向重复，推动收敛。"
-        CouncilRoomMode.SYNTHESIZE -> "裁决者：只综合已给出的证据，给出最终建议。"
+        CouncilRoomMode.EXPLORE -> "Facilitator: group ideas, ask follow-ups, prevent drift, and keep the discussion useful."
+        CouncilRoomMode.DEBATE -> "Moderator: control rounds, require evidence, redirect repetition, and drive convergence."
+        CouncilRoomMode.SYNTHESIZE -> "Adjudicator: synthesize only the evidence provided and give a final recommendation."
     }
 
     private fun modeGuestDefault(mode: CouncilRoomMode): String = when (mode) {
-        CouncilRoomMode.EXPLORE -> "贡献 idea/signal/question/possibility，拓宽信息面。"
-        CouncilRoomMode.DEBATE -> "给出 claim/counterpoint/risk/evidence，立场清晰可检验。"
-        CouncilRoomMode.SYNTHESIZE -> "（综合阶段通常不需要嘉宾发言）"
+        CouncilRoomMode.EXPLORE -> "Contribute an idea, signal, question, or possibility to broaden the information space."
+        CouncilRoomMode.DEBATE -> "Give a claim, counterpoint, risk, or piece of evidence with a clear, testable position."
+        CouncilRoomMode.SYNTHESIZE -> "The synthesis phase normally does not need a guest contribution."
     }
 
     private fun modeGuestGuidance(mode: CouncilRoomMode): String = when (mode) {
-        CouncilRoomMode.EXPLORE -> "发散优先：先广度，不急于收束。"
-        CouncilRoomMode.DEBATE -> "对抗优先：聚焦分歧、反例、风险与证据。"
-        CouncilRoomMode.SYNTHESIZE -> "已进入综合阶段。"
+        CouncilRoomMode.EXPLORE -> "Prefer divergence: broaden first and do not rush to converge."
+        CouncilRoomMode.DEBATE -> "Prefer constructive opposition: focus on disagreements, counterexamples, risks, and evidence."
+        CouncilRoomMode.SYNTHESIZE -> "The council has entered the synthesis phase."
     }
 }
 
 /** Render a message as a labeled block for prompt inclusion. */
 internal fun CouncilMessage.summaryBlock(limit: Int = 700): String {
     val refs = listOfNotNull(
-        replyToMessageId?.let { "回复 #$it" },
-        continuesFromMessageId?.let { "延续 #$it" },
-    ).joinToString("，").ifBlank { "" }
-    val header = listOf(roundLabel(), "$authorName（$role）", refs.ifBlank { "" })
+        replyToMessageId?.let { "reply #$it" },
+        continuesFromMessageId?.let { "continues #$it" },
+    ).joinToString(", ").ifBlank { "" }
+    val header = listOf(roundLabel(), "$authorName ($role)", refs.ifBlank { "" })
         .filter { it.isNotBlank() }
         .joinToString(" / ")
     val body = (text.ifBlank { error }).take(limit)
     return "$header:\n$body"
 }
 
-private fun CouncilMessage.roundLabel(): String = "第 $round 轮"
+private fun CouncilMessage.roundLabel(): String = "Round $round"

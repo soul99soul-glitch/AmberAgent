@@ -38,6 +38,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -67,6 +68,7 @@ import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Eye
 import app.amber.agent.R
 import app.amber.core.ai.vision.VisionModelHealthChecker
+import app.amber.core.ai.vision.VisionModelHealthStrings
 import app.amber.core.ai.prompts.DEFAULT_COMPRESS_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_OCR_PROMPT
 import app.amber.core.ai.prompts.DEFAULT_SUGGESTION_PROMPT
@@ -243,7 +245,7 @@ private fun DefaultImageGenerationModelSetting(
         icon = Lucide.WandSparkles,
         trailing = {
             WorkspaceTextButton(
-                text = "提示词",
+                text = stringResource(R.string.setting_model_page_prompt),
                 onClick = { showPromptSheet = true },
                 tone = WorkspaceTone.Accent,
             )
@@ -304,7 +306,7 @@ private fun ImagePromptInjectionSheet(
                     .padding(24.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("正在读取本地 Markdown 配置…", color = workspace.muted)
+                Text(stringResource(R.string.setting_model_page_image_prompt_loading), color = workspace.muted)
             }
             return@ModalBottomSheet
         }
@@ -321,11 +323,11 @@ private fun ImagePromptInjectionSheet(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "生图默认 Prompt 注入",
+                    text = stringResource(R.string.setting_model_page_image_prompt_title),
                     style = MaterialTheme.typography.titleLarge,
                 )
                 Text(
-                    text = "保存到 app 私有 agent_prompts/image-generation.md，主 agent 也能通过 agent_prompt_config 修改。",
+                    text = stringResource(R.string.setting_model_page_image_prompt_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = workspace.muted,
                 )
@@ -337,12 +339,12 @@ private fun ImagePromptInjectionSheet(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "启用默认注入",
+                        text = stringResource(R.string.setting_model_page_image_prompt_enable),
                         style = MaterialTheme.typography.bodyMedium,
                         color = workspace.ink,
                     )
                     Text(
-                        text = "用于稳定画面倾向，不作为可见预设。",
+                        text = stringResource(R.string.setting_model_page_image_prompt_enable_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = workspace.muted,
                     )
@@ -358,7 +360,7 @@ private fun ImagePromptInjectionSheet(
                 minLines = 4,
                 maxLines = 8,
                 shape = RoundedCornerShape(10.dp),
-                label = { Text("默认倾向") },
+                label = { Text(stringResource(R.string.setting_model_page_image_prompt_default_label)) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = workspace.note,
                     unfocusedContainerColor = workspace.note,
@@ -379,7 +381,7 @@ private fun ImagePromptInjectionSheet(
                 minLines = 4,
                 maxLines = 8,
                 shape = RoundedCornerShape(10.dp),
-                label = { Text("避免倾向") },
+                label = { Text(stringResource(R.string.setting_model_page_image_prompt_negative_label)) },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = workspace.note,
                     unfocusedContainerColor = workspace.note,
@@ -422,7 +424,7 @@ private fun ImagePromptInjectionSheet(
                         }
                     },
                 ) {
-                    Text("保存")
+                    Text(stringResource(R.string.common_save))
                 }
             }
         }
@@ -513,14 +515,17 @@ private fun DefaultOcrModelSetting(
     vm: SettingVM,
 ) {
     var showModal by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val healthStrings = remember(context) { VisionModelHealthStrings.from(context) }
     val providerCatalog = koinInject<ProviderCatalog>()
     val health by produceState(
-        initialValue = VisionModelHealthChecker.checking(),
-        key1 = settings.ocrModelId,
-        key2 = settings.providers,
+        initialValue = VisionModelHealthChecker.checking(healthStrings),
+        key1 = context,
+        key2 = settings.ocrModelId,
+        key3 = settings.providers,
     ) {
         value = withContext(Dispatchers.IO) {
-            VisionModelHealthChecker.probe(settings, providerCatalog)
+            VisionModelHealthChecker.probe(settings, providerCatalog, healthStrings)
         }
     }
     ModelTaskSetting(
@@ -599,22 +604,28 @@ private fun DefaultMemoryWorkerModelSetting(
     val followsCompress = worker.followCompressModel && settings.findModelById(worker.modelId) == null
     val fallbackModel = settings.resolveTaskChatModel(settings.compressModelId)
         ?: settings.resolveTaskChatModel(settings.chatModelId)
+    val fallbackModelName = fallbackModel?.displayName
+        ?: stringResource(R.string.setting_model_page_follow_compress_model_unavailable)
     SettingModelRow(
-        title = "记忆提取模型",
-        description = "用于对话结束后提取候选记忆，轻量稳定即可",
+        title = stringResource(R.string.setting_model_page_memory_worker_title),
+        description = stringResource(R.string.setting_model_page_memory_worker_desc),
         icon = Lucide.Settings,
     ) {
         ModelPickerRow(
             description = if (followsCompress) {
-                "当前跟随压缩模型：${fallbackModel?.displayName ?: "不可用"}"
+                stringResource(R.string.setting_model_page_follow_compress_model_desc, fallbackModelName)
             } else {
                 null
             },
             modelId = worker.modelId,
             providers = settings.providers,
             allowClear = true,
-            emptyLabel = if (followsCompress) "跟随压缩模型" else null,
-            clearContentDescription = "恢复跟随压缩模型",
+            emptyLabel = if (followsCompress) {
+                stringResource(R.string.setting_model_page_follow_compress_model)
+            } else {
+                null
+            },
+            clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_compress_model),
             onClear = {
                 vm.updateSettings(
                     settings.copy(
@@ -652,22 +663,28 @@ private fun DefaultDaydreamModelSetting(
     val followsCompress = worker.daydreamFollowCompressModel && settings.findModelById(worker.daydreamModelId) == null
     val fallbackModel = settings.resolveTaskChatModel(settings.compressModelId)
         ?: settings.resolveTaskChatModel(settings.chatModelId)
+    val fallbackModelName = fallbackModel?.displayName
+        ?: stringResource(R.string.setting_model_page_follow_compress_model_unavailable)
     SettingModelRow(
-        title = "Daydream 模型",
-        description = "用于后台整理、合并和审查记忆，建议选择推理更强的模型",
+        title = stringResource(R.string.setting_model_page_daydream_model_title),
+        description = stringResource(R.string.setting_model_page_daydream_model_desc),
         icon = Lucide.Brain,
     ) {
         ModelPickerRow(
             description = if (followsCompress) {
-                "当前跟随压缩模型：${fallbackModel?.displayName ?: "不可用"}"
+                stringResource(R.string.setting_model_page_follow_compress_model_desc, fallbackModelName)
             } else {
                 null
             },
             modelId = worker.daydreamModelId,
             providers = settings.providers,
             allowClear = true,
-            emptyLabel = if (followsCompress) "跟随压缩模型" else null,
-            clearContentDescription = "恢复跟随压缩模型",
+            emptyLabel = if (followsCompress) {
+                stringResource(R.string.setting_model_page_follow_compress_model)
+            } else {
+                null
+            },
+            clearContentDescription = stringResource(R.string.setting_model_page_restore_follow_compress_model),
             onClear = {
                 vm.updateSettings(
                     settings.copy(

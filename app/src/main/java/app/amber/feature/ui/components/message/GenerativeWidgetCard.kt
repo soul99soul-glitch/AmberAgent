@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -93,6 +94,7 @@ import com.composables.icons.lucide.Download
 import com.composables.icons.lucide.FileArchive
 import com.composables.icons.lucide.Pause
 import com.composables.icons.lucide.Play
+import app.amber.agent.R
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.ai.generative.GenerativeWidgetSanitizeStatus
 import app.amber.core.ai.generative.GenerativeWidgetSanitizer
@@ -223,9 +225,10 @@ fun GenerativeWidgetCard(
                 Surface(
                     onClick = {
                         toaster.show(
-                            "当前预览使用系统字体，可在 Slides 字体资源中下载 ${
-                                hint.pack?.displayName ?: hint.requestedPackId
-                            }",
+                            context.getString(
+                                R.string.generative_widget_system_font_hint,
+                                hint.pack?.displayName ?: hint.requestedPackId,
+                            ),
                         )
                     },
                     shape = RoundedCornerShape(999.dp),
@@ -233,7 +236,7 @@ fun GenerativeWidgetCard(
                     contentColor = chatTheme.accent,
                 ) {
                     Text(
-                        text = "使用系统字体 · 下载字体",
+                        text = stringResource(R.string.generative_widget_system_font_download),
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
                     )
@@ -256,7 +259,7 @@ fun GenerativeWidgetCard(
 
                 GenerativeWidgetSanitizeStatus.EMPTY -> {
                     Text(
-                        text = "可视化为空，已忽略。",
+                        text = stringResource(R.string.generative_widget_empty_ignored),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -264,7 +267,7 @@ fun GenerativeWidgetCard(
 
                 GenerativeWidgetSanitizeStatus.TOO_LARGE -> {
                     Text(
-                        text = "可视化过大，已转为代码块。",
+                        text = stringResource(R.string.generative_widget_too_large_code_block),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -273,7 +276,7 @@ fun GenerativeWidgetCard(
 
                 GenerativeWidgetSanitizeStatus.UNSAFE -> {
                     Text(
-                        text = "可视化包含不安全内容，已转为代码块。",
+                        text = stringResource(R.string.generative_widget_unsafe_code_block),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -298,9 +301,9 @@ fun GenerativeWidgetCard(
                     ) {
                         Text(
                             text = when (widget.renderer) {
-                                "slides" -> "▶ 打开演示"
-                                GuizangHtmlDeckValidator.RENDERER -> "▶ 打开 Live 演示"
-                                else -> "▶ 交互式图表"
+                                "slides" -> stringResource(R.string.generative_widget_open_presentation)
+                                GuizangHtmlDeckValidator.RENDERER -> stringResource(R.string.generative_widget_open_live_presentation)
+                                else -> stringResource(R.string.generative_widget_open_interactive_chart)
                             },
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             style = MaterialTheme.typography.labelMedium,
@@ -334,7 +337,7 @@ fun GenerativeWidgetCard(
                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         ) {
                             Text(
-                                text = "分享 ZIP",
+                                text = stringResource(R.string.generative_widget_share_zip),
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
@@ -344,7 +347,7 @@ fun GenerativeWidgetCard(
             }
             if (!widget.complete && sanitized.status == GenerativeWidgetSanitizeStatus.READY) {
                 Text(
-                    text = "正在生成可视化...",
+                    text = stringResource(R.string.generative_widget_generating),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -424,7 +427,8 @@ fun ExpandedGenerativeWidgetDialog(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = widget.title?.takeIf { it.isNotBlank() } ?: "可视化卡片",
+                            text = widget.title?.takeIf { it.isNotBlank() }
+                                ?: stringResource(R.string.generative_widget_card_title),
                             style = if (headerCompact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -456,7 +460,10 @@ fun ExpandedGenerativeWidgetDialog(
                                     }
                                 },
                             ) {
-                                Icon(Lucide.FileArchive, contentDescription = "分享 ZIP")
+                                Icon(
+                                    Lucide.FileArchive,
+                                    contentDescription = stringResource(R.string.generative_widget_share_zip),
+                                )
                             }
                         }
                         IconButton(
@@ -464,7 +471,10 @@ fun ExpandedGenerativeWidgetDialog(
                                 val activity = context.getActivity()
                                 val target = webView
                                 if (activity == null || target == null) {
-                                    toaster.show("暂时无法保存这张卡片", type = ToastType.Error)
+                                    toaster.show(
+                                        context.getString(R.string.generative_widget_save_unavailable),
+                                        type = ToastType.Error,
+                                    )
                                     return@IconButton
                                 }
                                 val isPresentation = isPresentationRenderer && widget.specJson != null
@@ -481,12 +491,15 @@ fun ExpandedGenerativeWidgetDialog(
                                     }
                                 } else {
                                     scope.launch {
-                                        toaster.show("正在保存 JPG")
+                                        toaster.show(context.getString(R.string.generative_widget_saving_jpg))
                                         val bitmap = withContext(Dispatchers.Main) {
                                             target.captureWidgetBitmap()
                                         }
                                         if (bitmap == null) {
-                                            toaster.show("卡片还没渲染完成", type = ToastType.Error)
+                                            toaster.show(
+                                                context.getString(R.string.generative_widget_jpg_not_rendered),
+                                                type = ToastType.Error,
+                                            )
                                             return@launch
                                         }
                                         val saved = withContext(Dispatchers.IO) {
@@ -494,17 +507,29 @@ fun ExpandedGenerativeWidgetDialog(
                                         }
                                         bitmap.recycle()
                                         toaster.show(
-                                            message = if (saved) "已保存 JPG 到相册" else "保存失败",
+                                            message = context.getString(
+                                                if (saved) {
+                                                    R.string.generative_widget_saved_jpg
+                                                } else {
+                                                    R.string.generative_widget_save_failed
+                                                },
+                                            ),
                                             type = if (saved) ToastType.Success else ToastType.Error,
                                         )
                                     }
                                 }
                             },
                         ) {
-                            Icon(Lucide.Download, contentDescription = "保存 JPG")
+                            Icon(
+                                Lucide.Download,
+                                contentDescription = stringResource(R.string.generative_widget_save_jpg),
+                            )
                         }
                         IconButton(onClick = onDismissRequest) {
-                            Icon(Lucide.X, contentDescription = "关闭")
+                            Icon(
+                                Lucide.X,
+                                contentDescription = stringResource(R.string.generative_widget_close),
+                            )
                         }
                     }
                     BoxWithConstraints(
@@ -662,7 +687,7 @@ fun GenerativeWidgetLoading(modifier: Modifier = Modifier) {
         border = BorderStroke(1.dp, chatTheme.surfaceEdge),
     ) {
         Text(
-            text = "正在生成可视化...",
+            text = stringResource(R.string.generative_widget_generating),
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 18.dp),
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -906,13 +931,16 @@ private suspend fun shareGuizangDeckArchive(
     coverHtml: String,
     toaster: ToasterState,
 ) {
-    toaster.show("正在打包全功能 HTML…")
+    toaster.show(context.getString(R.string.generative_widget_pack_full_html))
     val archive = runCatching {
         withContext(Dispatchers.IO) {
             createGuizangDeckArchive(context, title, specJson, coverHtml)
         }
     }.getOrElse { error ->
-        toaster.show(error.message ?: "打包失败", type = ToastType.Error)
+        toaster.show(
+            error.message ?: context.getString(R.string.generative_widget_pack_failed),
+            type = ToastType.Error,
+        )
         return
     }
     runCatching {
@@ -921,17 +949,30 @@ private suspend fun shareGuizangDeckArchive(
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_TITLE, archive.name)
-            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck")
+            putExtra(
+                Intent.EXTRA_SUBJECT,
+                title?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.generative_widget_core_full_html_deck_title),
+            )
             clipData = ClipData.newUri(context.contentResolver, archive.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(intent, "分享全功能 HTML ZIP")
+        val chooser = Intent.createChooser(
+            intent,
+            context.getString(R.string.generative_widget_share_full_html_zip),
+        )
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(chooser)
     }.onSuccess {
-        toaster.show("已打开分享菜单", type = ToastType.Success)
+        toaster.show(
+            context.getString(R.string.generative_widget_share_menu_opened),
+            type = ToastType.Success,
+        )
     }.onFailure { error ->
-        toaster.show(error.message ?: "无法打开分享菜单", type = ToastType.Error)
+        toaster.show(
+            error.message ?: context.getString(R.string.generative_widget_share_menu_failed),
+            type = ToastType.Error,
+        )
     }
 }
 
@@ -949,10 +990,15 @@ private fun createGuizangDeckArchive(
         ?.forEach { it.delete() }
     val archive = File(dir, "AmberAgent_${safeTitle}_full_html_$now.zip")
     val deck = GuizangHtmlDeckValidator.normalizeSpecJson(specJson)
-        ?: error("全功能 HTML 数据格式不正确，无法分享")
+        ?: error(context.getString(R.string.generative_widget_full_html_invalid_data))
     val validation = GuizangHtmlDeckValidator.validateDeck(deck)
     if (!validation.valid) {
-        error("全功能 HTML 不安全或过大，无法分享: ${validation.reason.orEmpty()}")
+        error(
+            context.getString(
+                R.string.generative_widget_full_html_unsafe_data,
+                validation.reason.orEmpty(),
+            )
+        )
     }
     val exportHtml = GuizangHtmlDeckValidator.rewriteRuntimeUrlsForArchive(deck.html)
     ZipOutputStream(FileOutputStream(archive)).use { zip ->
@@ -960,7 +1006,11 @@ private fun createGuizangDeckArchive(
             name = "manifest.json",
             text = JSONObject()
                 .put("type", "amberagent-full-html")
-                .put("title", title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck")
+                .put(
+                    "title",
+                    title?.takeIf { it.isNotBlank() }
+                        ?: context.getString(R.string.generative_widget_core_full_html_deck_title),
+                )
                 .put("source", deck.source ?: GuizangHtmlDeckValidator.RENDERER)
                 .put("allow_remote_images", deck.allowRemoteImages)
                 .put("allow_remote_fonts", deck.allowRemoteFonts)
@@ -973,13 +1023,13 @@ private fun createGuizangDeckArchive(
         zip.writeTextEntry(
             "README.md",
             """
-            # ${title?.takeIf { it.isNotBlank() } ?: "Full HTML Deck"}
+            # ${title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.generative_widget_core_full_html_deck_title)}
 
-            - `index.html`: Full HTML deck, with Motion One and Lucide URLs rewritten to local files.
-            - `assets/motion.min.js`: bundled Motion One runtime.
-            - `assets/lucide.min.js`: bundled Lucide runtime.
-            - `cover.svg`: optional chat preview cover.
-            - Remote images/fonts may still load if the deck references them and the viewer has network access.
+            ${context.getString(R.string.generative_widget_full_html_readme_index_html)}
+            ${context.getString(R.string.generative_widget_full_html_readme_motion_js)}
+            ${context.getString(R.string.generative_widget_full_html_readme_lucide_js)}
+            ${context.getString(R.string.generative_widget_full_html_readme_cover_svg)}
+            ${context.getString(R.string.generative_widget_full_html_readme_remote_assets)}
             """.trimIndent(),
         )
         val cover = coverHtml.trim()
@@ -997,13 +1047,16 @@ private suspend fun shareSlidesDeckArchive(
     coverHtml: String,
     toaster: ToasterState,
 ) {
-    toaster.show("正在打包幻灯片…")
+    toaster.show(context.getString(R.string.generative_widget_pack_slides))
     val archive = runCatching {
         withContext(Dispatchers.IO) {
             createSlidesDeckArchive(context, title, specJson, coverHtml)
         }
     }.getOrElse { error ->
-        toaster.show(error.message ?: "打包失败", type = ToastType.Error)
+        toaster.show(
+            error.message ?: context.getString(R.string.generative_widget_pack_failed),
+            type = ToastType.Error,
+        )
         return
     }
     runCatching {
@@ -1012,17 +1065,30 @@ private suspend fun shareSlidesDeckArchive(
             type = "application/zip"
             putExtra(Intent.EXTRA_STREAM, uri)
             putExtra(Intent.EXTRA_TITLE, archive.name)
-            putExtra(Intent.EXTRA_SUBJECT, title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
+            putExtra(
+                Intent.EXTRA_SUBJECT,
+                title?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.generative_widget_slides_default_title),
+            )
             clipData = ClipData.newUri(context.contentResolver, archive.name, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        val chooser = Intent.createChooser(intent, "分享幻灯片 ZIP")
+        val chooser = Intent.createChooser(
+            intent,
+            context.getString(R.string.generative_widget_share_slides_zip),
+        )
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(chooser)
     }.onSuccess {
-        toaster.show("已打开分享菜单", type = ToastType.Success)
+        toaster.show(
+            context.getString(R.string.generative_widget_share_menu_opened),
+            type = ToastType.Success,
+        )
     }.onFailure { error ->
-        toaster.show(error.message ?: "无法打开分享菜单", type = ToastType.Error)
+        toaster.show(
+            error.message ?: context.getString(R.string.generative_widget_share_menu_failed),
+            type = ToastType.Error,
+        )
     }
 }
 
@@ -1040,10 +1106,15 @@ private fun createSlidesDeckArchive(
         ?.forEach { it.delete() }
     val archive = File(dir, "AmberAgent_${safeTitle}_$now.zip")
     val normalizedSlides = VChartSpecValidator.normalizeSlidesDeckSpecJson(specJson)
-        ?: error("幻灯片数据格式不正确，无法分享")
+        ?: error(context.getString(R.string.generative_widget_slides_invalid_data))
     val validation = VChartSpecValidator.validateSlidesSpec(normalizedSlides)
     if (!validation.valid) {
-        error("幻灯片数据不安全或过大，无法分享: ${validation.reason.orEmpty()}")
+        error(
+            context.getString(
+                R.string.generative_widget_slides_unsafe_data,
+                validation.reason.orEmpty(),
+            )
+        )
     }
     val deckObject = JSONObject(normalizedSlides)
     val prettySlides = deckObject.toString(2)
@@ -1053,7 +1124,11 @@ private fun createSlidesDeckArchive(
             name = "manifest.json",
             text = JSONObject()
                 .put("type", "amberagent-slides")
-                .put("title", title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
+                .put(
+                    "title",
+                    title?.takeIf { it.isNotBlank() }
+                        ?: context.getString(R.string.generative_widget_slides_default_title),
+                )
                 .put("slide_count", slideCount)
                 .put("created_at_ms", now)
                 .toString(2),
@@ -1064,13 +1139,13 @@ private fun createSlidesDeckArchive(
         zip.writeTextEntry(
             "README.md",
             """
-            # ${title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides"}
+            # ${title?.takeIf { it.isNotBlank() } ?: context.getString(R.string.generative_widget_slides_default_title)}
 
-            - `index.html`: 离线预览页面，解压后用浏览器打开。
-            - `slides.json`: AmberAgent slides renderer 使用的原始结构化内容，包含 style/accent/fontPack。
-            - `theme.json`: 当前 deck 的主题与字体 fallback 信息。
-            - `cover.svg`: 如果存在，是聊天内联预览封面。
-            - 默认不内嵌大型中文字体；离线预览会使用系统 fallback 字体。
+            ${context.getString(R.string.generative_widget_slides_readme_index_html)}
+            ${context.getString(R.string.generative_widget_slides_readme_slides_json)}
+            ${context.getString(R.string.generative_widget_slides_readme_theme_json)}
+            ${context.getString(R.string.generative_widget_slides_readme_cover_svg)}
+            ${context.getString(R.string.generative_widget_slides_readme_font_fallback)}
             """.trimIndent(),
         )
         val cover = coverHtml.trim()
@@ -1102,11 +1177,14 @@ private fun ZipOutputStream.writeAssetEntry(context: Context, name: String, asse
 }
 
 private fun buildStandaloneSlidesHtml(context: Context, title: String?, specJson: String): String {
-    val safeTitle = htmlEscape(title?.takeIf { it.isNotBlank() } ?: "AmberAgent Slides")
-    val slidesLiteral = JSONObject.quote(specJson.toScriptSafeJsonString())
+    val safeTitle = htmlEscape(
+        title?.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.generative_widget_slides_default_title),
+    )
+    val slidesLiteral = specJson.toScriptSafeJsonLiteral()
     val sandbox = context.assets.open("generative-libs/slides-sandbox.html")
         .use { it.reader(Charsets.UTF_8).readText() }
-    return sandbox
+    return context.localizeSlidesSandbox(sandbox)
         .replace("<head>", "<head>\n<title>$safeTitle</title>")
         .replace(
             "</body>",
@@ -1117,6 +1195,60 @@ private fun buildStandaloneSlidesHtml(context: Context, title: String?, specJson
             </script>
             </body>
             """.trimIndent(),
+        )
+}
+
+private fun Context.localizeSlidesSandbox(template: String): String {
+    fun jsString(resourceId: Int): String =
+        getString(resourceId).toScriptSafeJsonLiteral()
+
+    return template
+        .replace(
+            "{{AMBER_HTML_SLIDES_PREVIOUS_SLIDE}}",
+            htmlEscape(getString(R.string.generative_widget_previous_slide)),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_NEXT_SLIDE}}",
+            htmlEscape(getString(R.string.generative_widget_next_slide)),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_FALLBACK_SLIDE_JS}}",
+            jsString(R.string.html_asset_slides_fallback_slide),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_FALLBACK_CONTENT_JS}}",
+            jsString(R.string.html_asset_slides_fallback_content),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_FALLBACK_IMAGE_JS}}",
+            jsString(R.string.html_asset_slides_fallback_image),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_ERROR_EMPTY_JS}}",
+            jsString(R.string.html_asset_slides_error_empty),
+        )
+        .replace(
+            "{{AMBER_HTML_SLIDES_ERROR_PREFIX_JS}}",
+            jsString(R.string.html_asset_slides_error_prefix),
+        )
+}
+
+private fun Context.localizeVChartSandbox(template: String): String {
+    fun jsString(resourceId: Int): String =
+        getString(resourceId).toScriptSafeJsonLiteral()
+
+    return template
+        .replace(
+            "{{AMBER_HTML_VCHART_LOADING}}",
+            htmlEscape(getString(R.string.html_asset_vchart_loading)),
+        )
+        .replace(
+            "{{AMBER_HTML_VCHART_TIMEOUT_JS}}",
+            jsString(R.string.html_asset_vchart_timeout),
+        )
+        .replace(
+            "{{AMBER_HTML_VCHART_ERROR_PREFIX_JS}}",
+            jsString(R.string.html_asset_vchart_error_prefix),
         )
 }
 
@@ -1133,8 +1265,9 @@ private fun htmlEscape(value: String): String =
         .replace(">", "&gt;")
         .replace("\"", "&quot;")
 
-private fun String.toScriptSafeJsonString(): String =
-    replace("<", "\\u003C")
+private fun String.toScriptSafeJsonLiteral(): String =
+    JSONObject.quote(this)
+        .replace("<", "\\u003C")
         .replace(">", "\\u003E")
         .replace("&", "\\u0026")
         .replace("\u2028", "\\u2028")
@@ -1148,11 +1281,14 @@ private suspend fun captureSlidesToJpg(
     toaster: com.dokar.sonner.ToasterState,
     settleDelayMs: Long = 160L,
 ) {
-    toaster.show("正在保存演示…")
+    toaster.show(context.getString(R.string.generative_widget_save_presentation))
     val count = evaluateJsAwait(webView, "window.__getSlideCount && window.__getSlideCount()")
         ?.toIntOrNull() ?: 0
     if (count <= 0) {
-        toaster.show("幻灯片还没渲染完成", type = ToastType.Error)
+        toaster.show(
+            context.getString(R.string.generative_widget_slides_not_rendered),
+            type = ToastType.Error,
+        )
         return
     }
     val originalSlide = evaluateJsAwait(webView, "window.__getCurrentSlide && window.__getCurrentSlide()")
@@ -1196,9 +1332,18 @@ private suspend fun captureSlidesToJpg(
         }
     }
     when {
-        saved == count -> toaster.show("已保存 $count 页到相册", type = ToastType.Success)
-        saved > 0 -> toaster.show("仅保存 $saved/$count 页", type = ToastType.Warning)
-        else -> toaster.show("保存失败", type = ToastType.Error)
+        saved == count -> toaster.show(
+            context.getString(R.string.generative_widget_saved_slides_to_gallery, count),
+            type = ToastType.Success,
+        )
+        saved > 0 -> toaster.show(
+            context.getString(R.string.generative_widget_saved_slides_partial, saved, count),
+            type = ToastType.Warning,
+        )
+        else -> toaster.show(
+            context.getString(R.string.generative_widget_save_failed),
+            type = ToastType.Error,
+        )
     }
 }
 
@@ -1269,7 +1414,10 @@ private fun GuizangHtmlDeckWebView(
 
     if (!validated.valid || deck == null) {
         Text(
-            text = "全功能 HTML 校验失败: ${validated.reason.orEmpty()}",
+            text = stringResource(
+                R.string.generative_widget_full_html_validation_failed,
+                validated.reason.orEmpty(),
+            ),
             modifier = modifier.padding(16.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
@@ -1441,7 +1589,10 @@ private fun GuizangHtmlDeckWebView(
                         runDeckAction("window.__amberDeckPrev && window.__amberDeckPrev();")
                     },
                 ) {
-                    Icon(Lucide.ArrowLeft, contentDescription = "上一页")
+                    Icon(
+                        Lucide.ArrowLeft,
+                        contentDescription = stringResource(R.string.generative_widget_previous_slide),
+                    )
                 }
                 Text(
                     text = if (slideCount > 0) "${currentSlide + 1}/$slideCount" else "0/0",
@@ -1451,7 +1602,11 @@ private fun GuizangHtmlDeckWebView(
                 IconButton(onClick = { setLowPowerMode(!lowPower) }) {
                     Icon(
                         if (lowPower) Lucide.Play else Lucide.Pause,
-                        contentDescription = if (lowPower) "恢复动画" else "低功耗",
+                        contentDescription = if (lowPower) {
+                            stringResource(R.string.generative_widget_resume_animation)
+                        } else {
+                            stringResource(R.string.generative_widget_low_power)
+                        },
                     )
                 }
                 IconButton(
@@ -1459,7 +1614,10 @@ private fun GuizangHtmlDeckWebView(
                         runDeckAction("window.__amberDeckNext && window.__amberDeckNext();")
                     },
                 ) {
-                    Icon(Lucide.ArrowRight, contentDescription = "下一页")
+                    Icon(
+                        Lucide.ArrowRight,
+                        contentDescription = stringResource(R.string.generative_widget_next_slide),
+                    )
                 }
             }
         }
@@ -1679,7 +1837,10 @@ private fun RichSandboxWebView(
 
     if (!validated.valid) {
         Text(
-            text = "交互式图表数据校验失败: ${validated.reason.orEmpty()}",
+            text = stringResource(
+                R.string.generative_widget_chart_validation_failed,
+                validated.reason.orEmpty(),
+            ),
             modifier = modifier.padding(16.dp),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error,
@@ -1782,10 +1943,15 @@ private fun RichSandboxWebView(
                     // the https font requests cross-origin and silently blocked.
                     // Delay until after one layout pass so viewport height is non-zero.
                     val sandboxHtml = context.assets.open(assetFile).bufferedReader().readText()
+                    val localizedSandboxHtml = when (renderer) {
+                        "vchart" -> context.localizeVChartSandbox(sandboxHtml)
+                        "slides" -> context.localizeSlidesSandbox(sandboxHtml)
+                        else -> sandboxHtml
+                    }
                     post {
                         loadDataWithBaseURL(
                             "https://amberagent.local/",
-                            sandboxHtml,
+                            localizedSandboxHtml,
                             "text/html",
                             "utf-8",
                             null,

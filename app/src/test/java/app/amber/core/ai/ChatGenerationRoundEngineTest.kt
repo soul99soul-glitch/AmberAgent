@@ -156,6 +156,7 @@ class ChatGenerationRoundEngineTest : DurableRuntimeTestBase() {
             appScope = AppScope(),
             capabilitySnapshotBuilder = AgentCapabilitySnapshotBuilder(),
             promptConfigRepository = AgentPromptConfigRepository(context),
+            context = context,
         )
         return ChatGenerationRoundEngine(
             context = context,

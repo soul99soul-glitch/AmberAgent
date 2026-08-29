@@ -63,6 +63,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import app.amber.feature.ui.hooks.ImeLazyListAutoScroller
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -83,6 +84,7 @@ import app.amber.feature.modelcouncil.CouncilPhaseMarker
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.running
+import app.amber.agent.R
 import app.amber.feature.ui.components.richtext.MarkdownBlock
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
@@ -718,7 +720,10 @@ private fun CouncilSpeakingStrip(participant: CouncilParticipant, onClick: () ->
         ) {
             CouncilBreathingDot(color = workspace.green)
             Text(
-                text = "${participant.name.ifBlank { participant.id }} 正在发言…",
+                text = stringResource(
+                    R.string.council_room_speaking,
+                    participant.name.ifBlank { participant.id },
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 color = workspace.muted,
             )
@@ -778,6 +783,7 @@ private fun CouncilParticipant.modelLabel(): String =
 @Composable
 private fun CouncilTimelineEmpty(room: CouncilRoom) {
     val chatTheme = LocalChatTheme.current
+    val emptyObjective = stringResource(R.string.council_room_empty_objective)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -792,13 +798,13 @@ private fun CouncilTimelineEmpty(room: CouncilRoom) {
             color = chatTheme.ink,
         )
         Text(
-            text = room.objective.ifBlank { "把问题交给多模型一起讨论。" },
+            text = room.objective.ifBlank { emptyObjective },
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Medium,
             color = chatTheme.ink,
         )
         Text(
-            text = "发送第一条消息，或邀请成员开始发言。",
+            text = stringResource(R.string.council_room_empty_hint),
             style = MaterialTheme.typography.bodyMedium,
             color = chatTheme.inkFaint,
         )
@@ -870,7 +876,7 @@ private fun TimelineMessageRow(
                 border = BorderStroke(1.dp, chatTheme.surfaceEdge),
             ) {
                 Text(
-                    text = "主持人撤回发言",
+                    text = stringResource(R.string.council_room_host_withdrew),
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = chatTheme.inkFaint,
@@ -909,7 +915,7 @@ private fun TimelineMessageRow(
                 Column(modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp)) {
                     if (isTopic) {
                         Text(
-                            text = "议题 · 发起人",
+                            text = stringResource(R.string.council_room_topic_author),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = chatTheme.userBubbleInk.copy(alpha = 0.55f),
@@ -961,7 +967,7 @@ private fun TimelineMessageRow(
             }
             if (isSynthesis) {
                 Text(
-                    text = "主持人总结",
+                    text = stringResource(R.string.council_room_host_summary),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = chatTheme.accent,
@@ -1005,7 +1011,7 @@ private fun CouncilBubbleAttachments(attachments: List<UIMessagePart>, modifier:
         attachments.filterIsInstance<UIMessagePart.Image>().forEach { img ->
             AsyncImage(
                 model = img.url,
-                contentDescription = "图片附件",
+                contentDescription = stringResource(R.string.council_room_image_attachment),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .widthIn(max = 220.dp)
@@ -1014,7 +1020,7 @@ private fun CouncilBubbleAttachments(attachments: List<UIMessagePart>, modifier:
         }
         attachments.filterIsInstance<UIMessagePart.Document>().forEach { doc ->
             Text(
-                text = "文件 · ${doc.fileName}",
+                text = stringResource(R.string.council_room_file_attachment, doc.fileName),
                 style = MaterialTheme.typography.labelMedium,
                 color = chatTheme.userBubbleInk,
                 maxLines = 1,
@@ -1038,7 +1044,7 @@ private fun AuthorLabel(msg: CouncilMessage, isHost: Boolean, modelLabel: String
                 fontWeight = FontWeight.SemiBold,
                 color = if (isHost) workspace.amber else workspace.ink,
             )
-            val displayRole = if (isHost) "主持人" else msg.role
+            val displayRole = if (isHost) stringResource(R.string.council_room_host_status) else msg.role
             if (displayRole.isNotBlank() && displayRole != msg.authorName) {
                 CouncilRolePill(text = displayRole, isHost = isHost)
             }
@@ -1151,18 +1157,24 @@ private fun StreamingPlaceholder() {
 @Composable
 private fun ReferenceFootnotes(msg: CouncilMessage, room: CouncilRoom, alignEnd: Boolean) {
     val workspace = workspaceColors()
-    val notes = buildList {
-        msg.replyToMessageId?.let { id ->
-            val name = room.messages.firstOrNull { it.id == id }?.authorName ?: "已删除"
-            add("↳ 回复 $name")
-        }
-        msg.continuesFromMessageId?.let { id ->
-            val name = room.messages.firstOrNull { it.id == id }?.authorName ?: "已删除"
-            add("↳ 延续 $name 的论点")
-        }
-        // (Removed the "由 Host 邀请" note — in auto-orchestration every member is
-        // host-invited, so it was on every bubble and carried no signal.)
+    val deletedAuthor = stringResource(R.string.council_room_deleted_author)
+    val replyName = msg.replyToMessageId?.let { id ->
+        room.messages.firstOrNull { it.id == id }?.authorName ?: deletedAuthor
     }
+    val continuationName = msg.continuesFromMessageId?.let { id ->
+        room.messages.firstOrNull { it.id == id }?.authorName ?: deletedAuthor
+    }
+    val replyNote = if (replyName != null) {
+        stringResource(R.string.council_room_reply_reference, replyName)
+    } else {
+        null
+    }
+    val continuationNote = if (continuationName != null) {
+        stringResource(R.string.council_room_continuation_reference, continuationName)
+    } else {
+        null
+    }
+    val notes = listOfNotNull(replyNote, continuationNote)
     if (notes.isEmpty()) return
     Column(
         modifier = Modifier
@@ -1216,7 +1228,7 @@ private fun CouncilAskUserCard(
                     color = chatTheme.accentSoft,
                 ) {
                     Text(
-                        text = "主持人提问",
+                        text = stringResource(R.string.council_room_host_question),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold,
@@ -1241,7 +1253,9 @@ private fun CouncilAskUserCard(
                         value = answer,
                         onValueChange = { answer = it },
                         modifier = Modifier.weight(1f),
-                        placeholder = { Text("回答主持人…", color = workspace.faint) },
+                        placeholder = {
+                            Text(stringResource(R.string.council_room_answer_host_hint), color = workspace.faint)
+                        },
                         shape = RoundedCornerShape(999.dp),
                         colors = androidx.compose.material3.TextFieldDefaults.colors(
                             focusedContainerColor = chatTheme.surface,
@@ -1277,7 +1291,7 @@ private fun CouncilAskUserCard(
                 }
             } else {
                 Text(
-                    text = "已回答",
+                    text = stringResource(R.string.council_room_answered),
                     modifier = Modifier.padding(top = 10.dp),
                     style = MaterialTheme.typography.labelSmall,
                     color = workspace.faint,

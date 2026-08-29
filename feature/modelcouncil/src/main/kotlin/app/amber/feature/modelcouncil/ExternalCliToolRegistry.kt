@@ -35,7 +35,7 @@ object ExternalCliToolRegistry {
             binary = "gemini",
             missingMessage = "gemini CLI not found in this runtime. Install Gemini CLI in Termux/selected runtime or use provider model seats.",
             credentialHome = ".gemini",
-            modelPlaceholder = "例如 gemini-2.5-pro",
+            modelPlaceholder = "e.g. gemini-2.5-pro",
             seatCommand = { promptFile, modelArg ->
                 "gemini --skip-trust --approval-mode plan --output-format text$modelArg --prompt \"${'$'}(cat \"$promptFile\")\""
             },
@@ -51,7 +51,7 @@ object ExternalCliToolRegistry {
             binary = "agy",
             missingMessage = "Antigravity CLI (agy) not found in this runtime. Install Antigravity CLI in the selected runtime or choose another external CLI.",
             credentialHome = ".gemini/antigravity-cli",
-            modelPlaceholder = "例如 gemini-3-pro",
+            modelPlaceholder = "e.g. gemini-3-pro",
             seatCommand = { promptFile, modelArg ->
                 """
                 if agy --help 2>&1 | grep -Eq -- '(^|[[:space:],])(-p|--prompt)([=,[:space:]]|${'$'})'; then
@@ -80,7 +80,7 @@ object ExternalCliToolRegistry {
             binary = "codex",
             missingMessage = "codex CLI not found in this runtime. Install Codex CLI in the selected runtime or choose another external CLI.",
             credentialHome = ".codex",
-            modelPlaceholder = "例如 gpt-5.2-codex",
+            modelPlaceholder = "e.g. gpt-5.2-codex",
             seatCommand = { promptFile, modelArg ->
                 "codex exec --sandbox read-only$modelArg \"${'$'}(cat \"$promptFile\")\""
             },
@@ -95,7 +95,7 @@ object ExternalCliToolRegistry {
             binary = "claude",
             missingMessage = "Claude Code (claude) not found in this runtime. Install Claude Code in the selected runtime or choose another external CLI.",
             credentialHome = ".claude",
-            modelPlaceholder = "例如 sonnet",
+            modelPlaceholder = "e.g. sonnet",
             seatCommand = { promptFile, modelArg ->
                 "claude -p --output-format text --permission-mode plan$modelArg \"${'$'}(cat \"$promptFile\")\""
             },
@@ -111,7 +111,7 @@ object ExternalCliToolRegistry {
             binary = "kimi",
             missingMessage = "Kimi CLI (kimi) not found in this runtime. Install Kimi CLI in the selected runtime or choose another external CLI.",
             credentialHome = ".kimi",
-            modelPlaceholder = "例如 kimi-k2",
+            modelPlaceholder = "e.g. kimi-k2",
             seatCommand = { promptFile, modelArg ->
                 "kimi --print --final-message-only --output-format text$modelArg --prompt \"${'$'}(cat \"$promptFile\")\""
             },

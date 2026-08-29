@@ -323,6 +323,7 @@ private fun HomeHeader(
     onOpenProfile: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val defaultUserName = stringResource(R.string.user_default_name)
 
     // 终端光标：1.05s steps 闪烁（前半段不透明，后半段隐藏）
     val transition = rememberInfiniteTransition(label = "home-cursor")
@@ -405,7 +406,7 @@ private fun HomeHeader(
             contentAlignment = Alignment.Center,
         ) {
             UIAvatar(
-                name = settings.displaySetting.userNickname.ifBlank { stringResource(R.string.user_default_name) },
+                name = settings.displaySetting.userNickname.ifBlank { defaultUserName },
                 value = settings.displaySetting.userAvatar,
                 size = 34.dp,
                 containerColor = tokens.accent,
@@ -415,10 +416,24 @@ private fun HomeHeader(
     }
 }
 
+@Composable
 private fun todayLabel(): String {
     val now = LocalDate.now()
-    val weekday = arrayOf("周日", "周一", "周二", "周三", "周四", "周五", "周六")[now.dayOfWeek.value % 7]
-    return "今天 · ${now.monthValue}月${now.dayOfMonth}日 $weekday"
+    val weekday = arrayOf(
+        stringResource(R.string.session_home_weekday_sunday),
+        stringResource(R.string.session_home_weekday_monday),
+        stringResource(R.string.session_home_weekday_tuesday),
+        stringResource(R.string.session_home_weekday_wednesday),
+        stringResource(R.string.session_home_weekday_thursday),
+        stringResource(R.string.session_home_weekday_friday),
+        stringResource(R.string.session_home_weekday_saturday),
+    )[now.dayOfWeek.value % 7]
+    return stringResource(
+        R.string.session_home_today_label,
+        now.monthValue,
+        now.dayOfMonth,
+        weekday,
+    )
 }
 
 /* ------------------------------------------------------------------ search --- */
@@ -449,7 +464,7 @@ private fun HomeSearchField(onClick: () -> Unit) {
                 tint = tokens.ink3,
             )
             Text(
-                text = "搜索会话",
+                text = stringResource(R.string.chat_page_search_chats),
                 fontSize = 14.5.sp,
                 color = tokens.ink4,
             )
@@ -483,11 +498,11 @@ private fun HomeFeatureRail(
 ) {
     val tokens = LocalAmberTokens.current
     val features = listOf(
-        FeatureEntry(Lucide.BookOpenText, "深度阅读", onDeepRead),
-        FeatureEntry(Lucide.Grid2x2, "小应用", onMiniApps),
-        FeatureEntry(Lucide.Pen, "小说创作", onNovel),
-        FeatureEntry(Lucide.Earth, "站点", onWebMount),
-        FeatureEntry(Lucide.MessageCircle, "模型议会", onCouncil),
+        FeatureEntry(Lucide.BookOpenText, stringResource(R.string.session_home_feature_deep_read), onDeepRead),
+        FeatureEntry(Lucide.Grid2x2, stringResource(R.string.session_home_feature_mini_apps), onMiniApps),
+        FeatureEntry(Lucide.Pen, stringResource(R.string.session_home_feature_novel), onNovel),
+        FeatureEntry(Lucide.Earth, stringResource(R.string.session_home_feature_sites), onWebMount),
+        FeatureEntry(Lucide.MessageCircle, stringResource(R.string.session_home_feature_council), onCouncil),
     )
 
     Row(
@@ -571,7 +586,7 @@ private fun ContinueSectionHeader(count: Int) {
             tint = tokens.accent,
         )
         Text(
-            text = "继续",
+            text = stringResource(R.string.session_home_continue),
             fontFamily = JetBrainsMonoFamily,
             fontSize = 12.sp,
             letterSpacing = 0.4.sp,
@@ -643,7 +658,7 @@ private fun ContinueCandidateRow(
             ) {
                 Icon(
                     imageVector = Lucide.X,
-                    contentDescription = "暂时隐藏",
+                    contentDescription = stringResource(R.string.session_home_hide_continue_candidate),
                     modifier = Modifier.size(15.dp),
                     tint = tokens.ink4,
                 )
@@ -663,10 +678,10 @@ private fun ContinueCandidateRow(
 private fun ContinueStatusChip(status: ContinueStatus) {
     val tokens = LocalAmberTokens.current
     val (label, color) = when (status) {
-        ContinueStatus.WAITING_USER -> "待处理" to tokens.accent
-        ContinueStatus.FAILED_RESUMABLE -> "可继续" to tokens.signal
-        ContinueStatus.PAUSED -> "已暂停" to tokens.ink3
-        ContinueStatus.DRAFT -> "草稿" to tokens.ink3
+        ContinueStatus.WAITING_USER -> stringResource(R.string.session_home_status_waiting) to tokens.accent
+        ContinueStatus.FAILED_RESUMABLE -> stringResource(R.string.session_home_status_resumable) to tokens.signal
+        ContinueStatus.PAUSED -> stringResource(R.string.session_home_status_paused) to tokens.ink3
+        ContinueStatus.DRAFT -> stringResource(R.string.session_home_status_draft) to tokens.ink3
     }
     Box(
         modifier = Modifier
@@ -697,6 +712,10 @@ private fun HomeSessionRow(
     onTogglePin: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
+    val newMessageLabel = stringResource(R.string.chat_page_new_message)
+    val deleteLabel = stringResource(R.string.delete)
+    val pinLabel = stringResource(R.string.history_page_pin)
+    val unpinLabel = stringResource(R.string.history_page_unpin)
     val dismissState = rememberSwipeToDismissBoxState(
         positionalThreshold = SwipeToDismissBoxDefaults.positionalThreshold,
         // 置顶是「动作后行仍保留」的方向：在 confirmValueChange 里执行动作并返回
@@ -738,15 +757,19 @@ private fun HomeSessionRow(
                 ) {
                     Icon(
                         imageVector = if (isDelete) Lucide.Trash2 else Lucide.Pin,
-                        contentDescription = if (isDelete) "删除" else "置顶",
+                        contentDescription = if (isDelete) {
+                            deleteLabel
+                        } else {
+                            if (conversation.isPinned) unpinLabel else pinLabel
+                        },
                         modifier = Modifier.size(17.dp),
                         tint = if (isDelete) tokens.accentInk else tokens.accent,
                     )
                     Text(
                         text = when {
-                            isDelete -> "删除"
-                            conversation.isPinned -> "取消置顶"
-                            else -> "置顶"
+                            isDelete -> deleteLabel
+                            conversation.isPinned -> unpinLabel
+                            else -> pinLabel
                         },
                         fontFamily = JetBrainsMonoFamily,
                         fontSize = 10.sp,
@@ -776,7 +799,7 @@ private fun HomeSessionRow(
                     ) {
                         Text(
                             text = conversation.title.ifBlank {
-                                stringResource(id = R.string.chat_page_new_message)
+                                newMessageLabel
                             },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -861,6 +884,7 @@ private fun SessionCountBadge(count: Int) {
 }
 
 /** 相对时间：今天 → HH:mm，昨天 → 昨天，更早 → M月d日（跨年带年份）。 */
+@Composable
 private fun sessionTimeLabel(instant: Instant): String {
     val zone = ZoneId.systemDefault()
     val dateTime = instant.atZone(zone)
@@ -868,9 +892,18 @@ private fun sessionTimeLabel(instant: Instant): String {
     val date = dateTime.toLocalDate()
     return when {
         date == today -> String.format("%02d:%02d", dateTime.hour, dateTime.minute)
-        date == today.minusDays(1) -> "昨天"
-        date.year == today.year -> "${date.monthValue}月${date.dayOfMonth}日"
-        else -> "${date.year}年${date.monthValue}月${date.dayOfMonth}日"
+        date == today.minusDays(1) -> stringResource(R.string.chat_page_yesterday)
+        date.year == today.year -> stringResource(
+            R.string.session_home_date_month_day,
+            date.monthValue,
+            date.dayOfMonth,
+        )
+        else -> stringResource(
+            R.string.session_home_date_year_month_day,
+            date.year,
+            date.monthValue,
+            date.dayOfMonth,
+        )
     }
 }
 
@@ -892,7 +925,7 @@ private fun HomeEmptyState(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center,
         )
         Text(
-            text = "暂无会话，点击右下角按钮开始",
+            text = stringResource(R.string.session_home_empty_hint),
             fontSize = 13.5.sp,
             color = tokens.ink3,
             textAlign = TextAlign.Center,

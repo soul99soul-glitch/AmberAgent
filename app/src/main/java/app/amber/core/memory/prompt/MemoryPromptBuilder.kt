@@ -1,17 +1,20 @@
 package app.amber.core.memory.prompt
 
 import app.amber.core.memory.model.MemoryRecord
+import java.util.Locale
 
 object MemoryPromptBuilder {
     fun buildMemoryContext(
         records: List<MemoryRecord>,
         debug: Boolean = false,
         debugDetails: Map<Int, String> = emptyMap(),
+        locale: Locale = Locale.ENGLISH,
     ): String {
         if (records.isEmpty()) return ""
         return buildString {
             appendLine("<memory_context>")
-            appendLine("以下是与当前请求相关的记忆；若与当前用户消息冲突，以当前用户消息为准。")
+            appendLine("The following memories are relevant to the current request. If they conflict with the current user message, follow the current message.")
+            appendLine("Use app locale ${locale.toLanguageTag().ifBlank { Locale.ENGLISH.toLanguageTag() }} for user-facing text.")
             records.forEachIndexed { index, record ->
                 append("- ")
                 append("[")

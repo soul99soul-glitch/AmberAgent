@@ -10,11 +10,16 @@ import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.time.MemoryFreshness
 import app.amber.core.memory.time.MemoryTimeAnchorParser
 import kotlin.math.max
+import java.util.Locale
 
 class MemoryRecallStore(
     private val memoryRepository: MemoryRepository,
 ) {
-    suspend fun buildPrompt(settings: Settings, messages: List<UIMessage>): String {
+    suspend fun buildPrompt(
+        settings: Settings,
+        messages: List<UIMessage>,
+        locale: Locale = Locale.ENGLISH,
+    ): String {
         val selections = recallSelections(settings, messages)
         val records = selections.map { it.record }
         memoryRepository.touchMemories(selections.map { it.record.id })
@@ -28,6 +33,7 @@ class MemoryRecallStore(
             } else {
                 emptyMap()
             },
+            locale = locale,
         )
     }
 

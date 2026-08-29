@@ -1,7 +1,11 @@
 package app.amber.core.service
 
+import android.content.Context
 import kotlinx.serialization.Serializable
+import app.amber.agent.R
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.utils.appLocale
+import java.util.Locale
 
 const val MAX_PENDING_USER_MESSAGES = 20
 
@@ -28,17 +32,46 @@ fun PendingUserMessage.asFollowup(): PendingUserMessage {
     return if (mode == PendingUserMessageMode.FOLLOWUP) this else copy(mode = PendingUserMessageMode.FOLLOWUP)
 }
 
-fun buildCollectedPendingUserMessage(messages: List<PendingUserMessage>): PendingUserMessage {
+data class PendingUserMessageDisplayCopy(
+    val imageLabel: String,
+    val videoLabel: String,
+    val audioLabel: String,
+    val fileLabel: String,
+    val localeTag: String = Locale.ENGLISH.toLanguageTag(),
+) {
+    companion object {
+        val ENGLISH = PendingUserMessageDisplayCopy(
+            imageLabel = "Images",
+            videoLabel = "Video",
+            audioLabel = "Audio",
+            fileLabel = "File",
+        )
+
+        fun from(context: Context): PendingUserMessageDisplayCopy = PendingUserMessageDisplayCopy(
+            imageLabel = context.getString(R.string.chat_message_tool_preview_images),
+            videoLabel = context.getString(R.string.permission_display_media_video_title),
+            audioLabel = context.getString(R.string.permission_display_media_audio_title),
+            fileLabel = context.getString(R.string.chat_message_tool_kind_file),
+            localeTag = context.appLocale().toLanguageTag().ifBlank { Locale.ENGLISH.toLanguageTag() },
+        )
+    }
+}
+
+fun buildCollectedPendingUserMessage(
+    messages: List<PendingUserMessage>,
+    copy: PendingUserMessageDisplayCopy = PendingUserMessageDisplayCopy.ENGLISH,
+): PendingUserMessage {
     require(messages.isNotEmpty()) { "messages must not be empty" }
     if (messages.size == 1) {
         return messages.single().asFollowup()
     }
     val text = buildString {
-        appendLine("下面是用户在上一轮运行时连续排队补充的消息，请按顺序处理：")
+        appendLine("The following messages were queued during the previous run. Process them in order.")
+        appendLine("Use app locale ${copy.localeTag} for user-facing text and preserve protocol/schema field names.")
         messages.forEachIndexed { index, message ->
             appendLine()
             appendLine("Queued #${index + 1}:")
-            appendLine(message.previewText(maxChars = 4_000))
+            appendLine(message.previewText(maxChars = 4_000, copy = copy))
         }
     }.trim()
     return PendingUserMessage(
@@ -50,14 +83,17 @@ fun buildCollectedPendingUserMessage(messages: List<PendingUserMessage>): Pendin
     )
 }
 
-fun PendingUserMessage.previewText(maxChars: Int = 180): String {
+fun PendingUserMessage.previewText(
+    maxChars: Int = 180,
+    copy: PendingUserMessageDisplayCopy = PendingUserMessageDisplayCopy.ENGLISH,
+): String {
     val text = parts.joinToString(separator = "\n") { part ->
         when (part) {
             is UIMessagePart.Text -> part.text
-            is UIMessagePart.Image -> "[图片]"
-            is UIMessagePart.Video -> "[视频]"
-            is UIMessagePart.Audio -> "[音频]"
-            is UIMessagePart.Document -> "[文件] ${part.fileName}"
+            is UIMessagePart.Image -> "[${copy.imageLabel}]"
+            is UIMessagePart.Video -> "[${copy.videoLabel}]"
+            is UIMessagePart.Audio -> "[${copy.audioLabel}]"
+            is UIMessagePart.Document -> "[${copy.fileLabel}] ${part.fileName}"
             else -> part.toString()
         }
     }.trim()

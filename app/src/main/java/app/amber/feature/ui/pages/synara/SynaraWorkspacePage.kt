@@ -27,11 +27,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import app.amber.agent.R
 import app.amber.feature.ui.context.LocalNavController
 
 private const val TAG = "SynaraWorkspace"
@@ -82,7 +84,10 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text(text = validationError, color = MaterialTheme.colorScheme.error)
+            Text(
+                text = stringResource(validationError.resourceId()),
+                color = MaterialTheme.colorScheme.error,
+            )
         }
         return
     }

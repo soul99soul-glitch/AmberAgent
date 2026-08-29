@@ -1,5 +1,7 @@
 package app.amber.core.ai
 
+import android.content.Context
+import android.content.res.Configuration
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
@@ -22,6 +24,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.RuntimeEnvironment
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -66,10 +69,20 @@ class DefaultRunKernelTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     private fun kernel(engine: GenerationRoundEngine): DefaultRunKernel = DefaultRunKernel(
-        context = RuntimeEnvironment.getApplication(),
+        context = testContext(),
         toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
         roundEngine = engine,
     )
+
+    /** Keep legacy copy assertions deterministic while production follows the app locale. */
+    private fun testContext(): Context {
+        val application = RuntimeEnvironment.getApplication()
+        return application.createConfigurationContext(
+            Configuration(application.resources.configuration).apply {
+                setLocale(Locale.SIMPLIFIED_CHINESE)
+            },
+        )
+    }
 
     private fun session(
         messages: List<UIMessage>,

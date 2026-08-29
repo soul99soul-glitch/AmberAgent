@@ -830,13 +830,17 @@ class FeishuOfficeTools(
             toolName = toolName,
             title = title,
             inputPreview = input.safePreview().toString(),
-            runtime = "小米办公 Pro / Android Accessibility",
+            runtime = manager.accessibilityRuntimeLabel(),
         )
+        val localizedTitle = activityStore.sandboxActivity.value
+            ?.takeIf { it.toolCallId == toolCallId }
+            ?.title
+            ?: title
         agentTaskStore.register(
             AgentTaskSnapshot(
                 taskId = toolCallId,
                 type = "officepro",
-                title = title,
+                title = localizedTitle,
                 queueState = AgentTaskQueueState.ACTIVE,
                 status = AgentTaskStatus.RUNNING,
                 sourceToolName = toolName,
@@ -869,9 +873,7 @@ class FeishuOfficeTools(
     }
 
     private fun ensureEnabled() {
-        require(manager.state.value.enabled) {
-            "飞书办公增强模式未启用。请先在 设置 > 实验性功能 > 飞书办公增强模式 打开。"
-        }
+        manager.requireEnabled()
     }
 
     private fun kotlinx.serialization.json.JsonObjectBuilder.putState(state: FeishuOfficeEnhancementState) {

@@ -17,6 +17,7 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
+import java.util.Locale
 import kotlin.uuid.Uuid
 
 class HotListTitleLocalizer(
@@ -27,11 +28,12 @@ class HotListTitleLocalizer(
     suspend fun localize(
         snapshots: List<HotListProviderSnapshot>,
         previousSnapshots: Map<String, HotListProviderSnapshot> = emptyMap(),
+        locale: Locale = Locale.getDefault(),
     ): List<HotListProviderSnapshot> {
-        val reusedSnapshots = reuseCachedTitles(snapshots, previousSnapshots)
+        val reusedSnapshots = reuseCachedTitles(snapshots, previousSnapshots, locale)
         val targets = reusedSnapshots.flatMapIndexed { snapshotIndex, snapshot ->
             snapshot.items.mapIndexedNotNull { itemIndex, item ->
-                if (item.needsChineseDisplayTitle()) {
+                if (item.needsLocalizedDisplayTitle(locale)) {
                     TranslationTarget(
                         id = "$snapshotIndex:$itemIndex",
                         source = snapshot.providerName,
@@ -45,7 +47,7 @@ class HotListTitleLocalizer(
         if (targets.isEmpty()) return reusedSnapshots
 
         val settings = settingsStore.settingsFlow.value
-        val translations = translateTitles(settings, targets)
+        val translations = translateTitles(settings, targets, locale)
         if (translations.isEmpty()) return reusedSnapshots
 
         return reusedSnapshots.mapIndexed { snapshotIndex, snapshot ->
@@ -63,13 +65,16 @@ class HotListTitleLocalizer(
     private fun reuseCachedTitles(
         snapshots: List<HotListProviderSnapshot>,
         previousSnapshots: Map<String, HotListProviderSnapshot>,
+        locale: Locale,
     ): List<HotListProviderSnapshot> =
         snapshots.map { snapshot ->
             val cachedTitles = previousSnapshots[snapshot.providerId]
                 ?.items
                 .orEmpty()
                 .mapNotNull { item ->
-                    val display = item.displayTitle?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    val display = item.displayTitle
+                        ?.takeIf { it.isNotBlank() && it.isCompatibleDisplayTitle(locale) }
+                        ?: return@mapNotNull null
                     item.cacheKey()?.let { key -> key to display }
                 }
                 .toMap()
@@ -78,7 +83,7 @@ class HotListTitleLocalizer(
             } else {
                 snapshot.copy(
                     items = snapshot.items.map { item ->
-                        if (!item.displayTitle.isNullOrBlank()) {
+                        if (item.displayTitle.orEmpty().isCompatibleDisplayTitle(locale)) {
                             item
                         } else {
                             item.cacheKey()?.let(cachedTitles::get)?.let { item.copy(displayTitle = it) } ?: item
@@ -91,16 +96,23 @@ class HotListTitleLocalizer(
     private suspend fun translateTitles(
         settings: Settings,
         targets: List<TranslationTarget>,
+        locale: Locale,
     ): Map<String, String> {
         val model = resolveModel(settings) ?: return emptyMap()
         val provider = model.findProvider(settings.providers) ?: return emptyMap()
-        val prompt = buildPrompt(targets)
+        val prompt = buildPrompt(targets, locale)
         return try {
             val response = withTimeout(MODEL_TIMEOUT_MS) {
                 providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(
-                        UIMessage.system("你是 AmberAgent 的中文资讯标题编辑。仅输出合法 JSON。"),
+                        UIMessage.system(
+                            if (locale.isChineseLocale()) {
+                                "你是 AmberAgent 的中文资讯标题编辑。仅输出合法 JSON。"
+                            } else {
+                                "You are AmberAgent's news-title editor. Translate titles into concise natural English and output valid JSON only."
+                            }
+                        ),
                         UIMessage.user(prompt),
                     ),
                     params = TextGenerationParams(
@@ -132,13 +144,22 @@ class HotListTitleLocalizer(
             ?: settings.resolveTaskChatModel(settings.chatModelId)
     }
 
-    private fun buildPrompt(targets: List<TranslationTarget>): String = buildString {
-        appendLine("请把下面热榜标题改写成自然简洁的简体中文展示标题。")
-        appendLine("- 不要改变专有名词、产品名、公司名和仓库名。")
-        appendLine("- GitHub 仓库标题可以写成「GitHub 项目：owner/repo」。")
-        appendLine("- 不要加入原标题之外的新事实。")
-        appendLine("- 每条 28 个汉字以内，保留必要英文名。")
-        appendLine("- 仅输出 JSON：{\"items\":[{\"id\":\"0:1\",\"title\":\"中文标题\"}]}")
+    private fun buildPrompt(targets: List<TranslationTarget>, locale: Locale): String = buildString {
+        if (locale.isChineseLocale()) {
+            appendLine("请把下面热榜标题改写成自然简洁的${locale.displayLanguageForPrompt()}展示标题。")
+            appendLine("- 不要改变专有名词、产品名、公司名和仓库名。")
+            appendLine("- GitHub 仓库标题可以写成「GitHub 项目：owner/repo」。")
+            appendLine("- 不要加入原标题之外的新事实。")
+            appendLine("- 每条 28 个字以内，保留必要英文名。")
+            appendLine("- 仅输出 JSON：{\"items\":[{\"id\":\"0:1\",\"title\":\"中文标题\"}]}")
+        } else {
+            appendLine("Rewrite the following hot-list titles as concise, natural English display titles.")
+            appendLine("- Do not change proper nouns, product names, company names, or repository names.")
+            appendLine("- A GitHub repository title may be phrased as \"GitHub project: owner/repo\".")
+            appendLine("- Do not add facts that are absent from the original title.")
+            appendLine("- Keep each title within 80 characters and retain necessary original names.")
+            appendLine("- Output JSON only: {\"items\":[{\"id\":\"0:1\",\"title\":\"English title\"}]}")
+        }
         appendLine()
         targets.forEach { target ->
             appendLine("${target.id} | ${target.source} | ${target.title}")
@@ -180,13 +201,27 @@ class HotListTitleLocalizer(
         if (start >= 0 && end > start) add(text.substring(start, end + 1))
     }
 
-    private fun HotListItem.needsChineseDisplayTitle(): Boolean {
-        val display = displayTitle.orEmpty()
-        if (display.countCjk() >= 2) return false
+    private fun HotListItem.needsLocalizedDisplayTitle(locale: Locale): Boolean {
         val cjk = title.countCjk()
         val latin = title.countLatin()
-        return cjk < 2 && latin >= 4
+        return if (locale.isChineseLocale()) {
+            !displayTitle.orEmpty().isCompatibleDisplayTitle(locale) && cjk < 2 && latin >= 4
+        } else {
+            !displayTitle.orEmpty().isCompatibleDisplayTitle(locale) && cjk >= 2
+        }
     }
+
+    private fun String.isCompatibleDisplayTitle(locale: Locale): Boolean =
+        isNotBlank() && if (locale.isChineseLocale()) countCjk() >= 2 else countCjk() < 2
+
+    private fun Locale.isChineseLocale(): Boolean = language.equals("zh", ignoreCase = true)
+
+    private fun Locale.displayLanguageForPrompt(): String =
+        if (country.equals("TW", ignoreCase = true) || script.equals("Hant", ignoreCase = true)) {
+            "繁體中文"
+        } else {
+            "简体中文"
+        }
 
     private fun HotListItem.cacheKey(): String? =
         (url?.takeIf { it.isNotBlank() } ?: title.takeIf { it.isNotBlank() })

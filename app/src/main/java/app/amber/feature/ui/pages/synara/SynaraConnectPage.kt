@@ -32,7 +32,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.plus
@@ -62,11 +64,12 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val workspace = workspaceColors()
     val draft = ui.draft
+    val unknownQrError = stringResource(R.string.synara_unknown_error)
 
     fun normalizedConnection(): SynaraConnection? {
         val error = draft.validationError()
         if (error != null) {
-            vm.reportError(error)
+            vm.reportError(error.resourceId())
             return null
         }
         return draft.copy(
@@ -78,7 +81,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
     fun pairFromScan(raw: String) {
         val parsed = SynaraConnection.fromQrPayload(raw)
         if (parsed == null) {
-            vm.reportError("二维码不是 Synara 配对链接（应为 http://IP:3773/?token=…）")
+            vm.reportError(R.string.synara_pairing_invalid)
             return
         }
         vm.updateDraft { parsed }
@@ -97,8 +100,11 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
     val scanQrLauncher = rememberLauncherForActivityResult(ScanQRCode()) { result ->
         when (result) {
             is QRResult.QRSuccess -> pairFromScan(result.content.rawValue.orEmpty())
-            QRResult.QRMissingPermission -> vm.reportError("需要相机权限才能扫码")
-            is QRResult.QRError -> vm.reportError("扫码失败：${result.exception.message ?: "未知错误"}")
+            QRResult.QRMissingPermission -> vm.reportError(R.string.synara_camera_permission_required)
+            is QRResult.QRError -> vm.reportError(
+                R.string.synara_qr_scan_failed,
+                result.exception.message ?: unknownQrError,
+            )
             QRResult.QRUserCanceled -> Unit
         }
     }
@@ -106,7 +112,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = "Synara",
+                title = stringResource(R.string.synara_title),
                 navigationIcon = { BackButton() },
             )
         },
@@ -120,14 +126,12 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = "遥控 Mac 上的 Synara 工作台",
+                text = stringResource(R.string.synara_page_title),
                 style = MaterialTheme.typography.titleMedium,
                 color = workspace.ink,
             )
             Text(
-                text = "手机与 Mac 需在同一局域网（或 Tailscale）。\n" +
-                    "桌面版默认只监听 127.0.0.1，请先在 Mac 上运行 LAN bridge。\n" +
-                    "默认在 Amber 内全屏 WebView 打开；若异常可用 Chrome 兜底。",
+                text = stringResource(R.string.synara_page_description),
                 style = MaterialTheme.typography.bodyMedium,
                 color = workspace.muted,
             )
@@ -143,10 +147,16 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.width(8.dp))
-                Text(if (ui.checking) "正在验证配对…" else "扫码一键配对")
+                Text(
+                    if (ui.checking) {
+                        stringResource(R.string.synara_pairing_verifying)
+                    } else {
+                        stringResource(R.string.synara_pairing_scan)
+                    },
+                )
             }
             Text(
-                text = "Mac 终端运行 LAN bridge 后会直接打印配对二维码，扫码即自动填充并进入工作台。",
+                text = stringResource(R.string.synara_pairing_help),
                 style = MaterialTheme.typography.bodySmall,
                 color = workspace.muted,
             )
@@ -155,8 +165,8 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 value = draft.host,
                 onValueChange = { host -> vm.updateDraft { it.copy(host = host) } },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Mac 地址") },
-                placeholder = { Text("例如 192.168.100.107") },
+                label = { Text(stringResource(R.string.synara_mac_address_label)) },
+                placeholder = { Text(stringResource(R.string.synara_mac_address_hint)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
@@ -167,7 +177,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                     vm.updateDraft { it.copy(port = port) }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("端口") },
+                label = { Text(stringResource(R.string.synara_port_label)) },
                 placeholder = { Text("${SynaraConnection.DEFAULT_PORT}") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -176,17 +186,20 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 value = draft.token,
                 onValueChange = { token -> vm.updateDraft { it.copy(token = token) } },
                 modifier = Modifier.fillMaxWidth(),
-                label = { Text("Auth Token") },
-                placeholder = { Text("SYNARA_AUTH_TOKEN") },
+                label = { Text(stringResource(R.string.synara_auth_token_label)) },
+                placeholder = { Text(stringResource(R.string.synara_auth_token_hint)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 supportingText = {
-                    Text("来自 Mac 桌面进程环境变量 SYNARA_AUTH_TOKEN，等同密码")
+                    Text(stringResource(R.string.synara_auth_token_supporting))
                 },
             )
 
             Text(
-                text = "目标：${runCatching { draft.httpBaseUrl() }.getOrDefault("—")}",
+                text = stringResource(
+                    R.string.synara_target,
+                    runCatching { draft.httpBaseUrl() }.getOrDefault("—"),
+                ),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = workspace.muted,
@@ -194,7 +207,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
 
             ui.lastCheckMessage?.let { message ->
                 Text(
-                    text = message,
+                    text = stringResource(message.resourceId, *message.formatArgs.toTypedArray()),
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (ui.lastCheckOk == true) {
                         MaterialTheme.colorScheme.primary
@@ -222,7 +235,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                             strokeWidth = 2.dp,
                         )
                     }
-                    Text("测试连接")
+                    Text(stringResource(R.string.synara_test_connection))
                 }
                 Button(
                     onClick = {
@@ -241,7 +254,7 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                     enabled = !ui.checking && draft.isConfigured,
                     modifier = Modifier.weight(1f),
                 ) {
-                    Text("进入工作台")
+                    Text(stringResource(R.string.synara_open_workbench))
                 }
             }
 
@@ -253,13 +266,11 @@ fun SynaraConnectPage(vm: SynaraVM = koinViewModel()) {
                 },
                 enabled = !ui.checking && draft.isConfigured,
             ) {
-                Text("用 Chrome 打开（备用）")
+                Text(stringResource(R.string.synara_open_chrome))
             }
 
             Text(
-                text = "Mac 侧快速启动（桌面已打开时）：\n" +
-                    "  python3 scripts/synara-lan-bridge.py\n" +
-                    "终端会打印带 token 的完整 URL。",
+                text = stringResource(R.string.synara_mac_quick_start),
                 style = MaterialTheme.typography.bodySmall,
                 fontFamily = FontFamily.Monospace,
                 color = workspace.muted,

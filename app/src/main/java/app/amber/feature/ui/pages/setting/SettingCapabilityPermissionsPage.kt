@@ -17,11 +17,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.CircleCheck
 import com.composables.icons.lucide.X
+import app.amber.agent.R
+import app.amber.core.localization.PermissionDisplayLocalizer
 import app.amber.feature.runtime.ApprovalHistoryEntry
 import app.amber.feature.tools.Capability
 import app.amber.feature.tools.CapabilityPolicy
@@ -40,18 +44,20 @@ import java.util.Locale
 /**
  * P2-01 capability permissions settings (parity plan §P2-01 #4/#5):
  * per-capability disabled/ask/auto policy + recent approval history.
- * New UI copy is not localized (repo convention).
+ * Static capability labels follow the app locale; ids and dynamic audit data
+ * remain unchanged.
  */
 @Composable
 fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val context = LocalContext.current
     val policies by vm.policies.collectAsStateWithLifecycle()
     val history by vm.approvalHistory.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = "Capability 权限",
+                title = stringResource(R.string.setting_capability_permissions_title),
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
             )
@@ -66,7 +72,7 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
         ) {
             item {
                 Text(
-                    "「自动」策略对高风险能力（风险底线 High）仍需同时开启全局「自动批准」与「高风险自动批准」；禁用单个能力不影响其他能力。",
+                    stringResource(R.string.setting_capability_permissions_high_risk_note),
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(horizontal = 8.dp),
                 )
@@ -75,28 +81,40 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { SectionLabel("Capability 策略") },
+                    title = { SectionLabel(stringResource(R.string.setting_capability_permissions_policy_section)) },
                 ) {
                     Capability.entries.forEach { capability ->
                         item(
                             supportingContent = {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
-                                        "${capability.id} · 风险底线 ${capability.riskFloor.displayName()}",
+                                        stringResource(
+                                            R.string.setting_capability_permissions_risk_floor,
+                                            capability.id,
+                                            capability.riskFloor.displayName(),
+                                        ),
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                     FlowRow(
                                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        policyChip("默认", null, capability, policies[capability], vm::setPolicy)
+                                        policyChip(
+                                            stringResource(R.string.setting_capability_permissions_policy_default),
+                                            null,
+                                            capability,
+                                            policies[capability],
+                                            vm::setPolicy,
+                                        )
                                         CapabilityPolicy.entries.forEach { mode ->
                                             policyChip(mode.displayName(), mode, capability, policies[capability], vm::setPolicy)
                                         }
                                     }
                                 }
                             },
-                            headlineContent = { Text(capability.label) },
+                            headlineContent = {
+                                Text(PermissionDisplayLocalizer.capabilityLabel(context, capability))
+                            },
                         )
                     }
                 }
@@ -105,12 +123,16 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
-                    title = { SectionLabel("最近审批") },
+                    title = { SectionLabel(stringResource(R.string.setting_capability_permissions_recent_approval_section)) },
                 ) {
                     if (history.isEmpty()) {
                         item(
-                            headlineContent = { Text("暂无审批记录") },
-                            supportingContent = { Text("批准或拒绝工具调用后会显示在这里（仅保存参数摘要，不保存参数明文）。") },
+                            headlineContent = {
+                                Text(stringResource(R.string.setting_capability_permissions_no_history))
+                            },
+                            supportingContent = {
+                                Text(stringResource(R.string.setting_capability_permissions_history_desc))
+                            },
                         )
                     } else {
                         history.forEach { entry ->
@@ -124,16 +146,34 @@ fun SettingCapabilityPermissionsPage(vm: SettingCapabilityPermissionsVM = koinVi
                                 supportingContent = {
                                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                         Text(
-                                            "${entry.capability?.label ?: entry.capabilityId ?: "未映射"} · ${entry.source} · ${formatTime(entry.approvedAtMs)}",
+                                            "${entry.capability?.let { PermissionDisplayLocalizer.capabilityLabel(context, it) }
+                                                ?: entry.capabilityId
+                                                ?: stringResource(R.string.setting_capability_permissions_unmapped)} · ${entry.source} · ${formatTime(entry.approvedAtMs)}",
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                         Text(
-                                            "digest ${entry.argsDigest.take(12)}… · effect ${entry.effectId?.take(8) ?: "-"}",
+                                            stringResource(
+                                                R.string.setting_capability_permissions_digest_effect,
+                                                entry.argsDigest.take(12),
+                                                entry.effectId?.take(8) ?: "-",
+                                            ),
                                             style = MaterialTheme.typography.labelSmall,
                                         )
                                     }
                                 },
-                                headlineContent = { Text("${entry.toolName} · ${if (entry.decision == "approved") "批准" else "拒绝"}") },
+                                headlineContent = {
+                                    Text(
+                                        stringResource(
+                                            R.string.setting_capability_permissions_tool_decision,
+                                            entry.toolName,
+                                            if (entry.decision == "approved") {
+                                                stringResource(R.string.setting_capability_permissions_decision_approved)
+                                            } else {
+                                                stringResource(R.string.setting_capability_permissions_decision_denied)
+                                            },
+                                        )
+                                    )
+                                },
                             )
                         }
                     }
@@ -158,16 +198,18 @@ private fun policyChip(
     )
 }
 
+@Composable
 private fun CapabilityPolicy.displayName(): String = when (this) {
-    CapabilityPolicy.DISABLED -> "禁用"
-    CapabilityPolicy.ASK -> "询问"
-    CapabilityPolicy.AUTO -> "自动"
+    CapabilityPolicy.DISABLED -> stringResource(R.string.setting_capability_permissions_policy_disabled)
+    CapabilityPolicy.ASK -> stringResource(R.string.setting_capability_permissions_policy_ask)
+    CapabilityPolicy.AUTO -> stringResource(R.string.setting_capability_permissions_policy_auto)
 }
 
+@Composable
 private fun ToolRisk.displayName(): String = when (this) {
-    ToolRisk.Normal -> "普通"
-    ToolRisk.Sensitive -> "敏感"
-    ToolRisk.High -> "高"
+    ToolRisk.Normal -> stringResource(R.string.setting_capability_permissions_risk_normal)
+    ToolRisk.Sensitive -> stringResource(R.string.setting_capability_permissions_risk_sensitive)
+    ToolRisk.High -> stringResource(R.string.setting_capability_permissions_risk_high)
 }
 
 private val historyTimeFormat = SimpleDateFormat("MM-dd HH:mm", Locale.US)

@@ -45,6 +45,7 @@ internal object SearchOrchestrator {
         params: JsonObject,
         includeWebViewFallback: Boolean = true,
         executor: OrchestratorSearchExecutor = ::executeSourceSearch,
+        locale: Locale = Locale.getDefault(),
     ): JsonObject = coroutineScope {
         val query = params.string("query") ?: params.string("q") ?: error("query is required")
         val topic = params.string("topic")?.lowercase(Locale.ROOT)?.takeIf { it in allowedTopics } ?: "general"
@@ -97,6 +98,7 @@ internal object SearchOrchestrator {
             timeRange = timeRange,
             recencyDays = recencyDays,
             depth = depth,
+            locale = locale,
         )
         val perCallSize = max(4, ((maxResults + sources.size - 1) / sources.size) + 3)
             .coerceIn(4, 20)
@@ -108,6 +110,7 @@ internal object SearchOrchestrator {
             timeRange = timeRange,
             recencyDays = recencyDays,
             maxResults = perCallSize,
+            locale = locale,
         )
 
         val sourceResults = calls.map { request ->
@@ -169,9 +172,7 @@ internal object SearchOrchestrator {
             if (allImages.isNotEmpty()) {
                 put(
                     "image_instruction",
-                    "搜索结果包含 ${allImages.size} 张相关图片。图片由 AmberAgent 客户端单独处理；" +
-                        "请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。" +
-                        "只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。",
+                    searchImageInstruction(allImages.size, locale),
                 )
             }
             put("sources", sourceStatusJson(sourceResults = sourceResults, sources = sources, calls = calls))
@@ -234,6 +235,7 @@ internal object SearchOrchestrator {
         settings: Settings,
         params: JsonObject,
         includeWebViewFallback: Boolean = true,
+        locale: Locale = Locale.getDefault(),
     ): JsonObject {
         val query = params.string("query") ?: params.string("q") ?: ""
         val topic = params.string("topic")?.lowercase(Locale.ROOT)?.takeIf { it in allowedTopics } ?: "general"
@@ -244,7 +246,11 @@ internal object SearchOrchestrator {
         val allowWebView = params.boolean("allow_webview") ?: false
         val requestedServices = params.serviceSelectors()
         val sources = buildSources(settings, requestedServices, query = query, topic = topic).take(MAX_SOURCES)
-        val variants = if (query.isBlank()) emptyList() else buildQueryVariants(query, topic, timeRange, recencyDays, depth)
+        val variants = if (query.isBlank()) {
+            emptyList()
+        } else {
+            buildQueryVariants(query, topic, timeRange, recencyDays, depth, locale)
+        }
         return buildJsonObject {
             put("query", query)
             put("topic", topic)
@@ -332,6 +338,7 @@ internal object SearchOrchestrator {
         timeRange: String,
         recencyDays: Int?,
         maxResults: Int,
+        locale: Locale,
     ): List<SourceSearchRequest> {
         if (sources.isEmpty() || variants.isEmpty()) return emptyList()
         val calls = mutableListOf<SourceSearchRequest>()
@@ -346,6 +353,7 @@ internal object SearchOrchestrator {
                 timeRange = timeRange,
                 recencyDays = recencyDays,
                 maxResults = maxResults,
+                locale = locale,
             )
         }
         var variantIndex = 1
@@ -362,6 +370,7 @@ internal object SearchOrchestrator {
                     timeRange = timeRange,
                     recencyDays = recencyDays,
                     maxResults = maxResults,
+                    locale = locale,
                 )
             }
             variantIndex++
@@ -375,8 +384,9 @@ internal object SearchOrchestrator {
         timeRange: String,
         recencyDays: Int?,
         depth: String,
+        locale: Locale = Locale.getDefault(),
     ): List<String> {
-        val today = LocalDate.now().toLocalString(true)
+        val today = LocalDate.now().toLocalString(true, locale)
         val variants = linkedSetOf(query.trim())
         val timeText = when {
             recencyDays != null -> "last $recencyDays days"
@@ -434,6 +444,7 @@ internal object SearchOrchestrator {
                     params = request.serviceParams(),
                     commonOptions = commonOptions,
                     serviceOptions = SearchServiceOptions.BingLocalOptions(),
+                    locale = request.locale,
                 )
             }
             OrchestratorSource.BuiltInWikipedia -> WikipediaSearchService.search(request.query, commonOptions)
@@ -445,6 +456,7 @@ internal object SearchOrchestrator {
                     params = request.serviceParams(),
                     commonOptions = commonOptions,
                     serviceOptions = source.options,
+                    locale = request.locale,
                 )
             }
         }
@@ -712,6 +724,7 @@ internal object SearchOrchestrator {
         val timeRange: String,
         val recencyDays: Int?,
         val maxResults: Int,
+        val locale: Locale = Locale.getDefault(),
     )
 
     private data class SourceSearchResult(
@@ -927,3 +940,15 @@ internal typealias OrchestratorSearchExecutor = suspend (
     SearchOrchestrator.SourceSearchRequest,
     SearchCommonOptions,
 ) -> Result<SearchResult>
+
+internal fun searchImageInstruction(imageCount: Int, locale: Locale): String {
+    return if (locale.language.lowercase(Locale.ROOT) == "zh") {
+        "搜索结果包含 ${imageCount} 张相关图片。图片由 AmberAgent 客户端单独处理；" +
+            "请不要在回复正文中使用 ![](url) Markdown 图片语法，也不要输出任何图片渲染代码块。" +
+            "只需要写好文字内容，并优先给用到的来源附上 [站点名](来源URL) 链接。"
+    } else {
+        "The search results include $imageCount related images. AmberAgent handles images separately; " +
+            "do not use ![](url) Markdown image syntax or output image-rendering code blocks in the reply. " +
+            "Write the text response and prefer [site name](source URL) links for sources you use."
+    }
+}

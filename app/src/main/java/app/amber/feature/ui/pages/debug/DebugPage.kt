@@ -35,11 +35,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
+import app.amber.agent.R
 import app.amber.common.android.Logging
 import app.amber.core.model.Avatar
 import app.amber.core.settings.Capability
@@ -59,7 +61,6 @@ import kotlin.uuid.Uuid
 @Composable
 fun DebugPage(vm: DebugVM = koinViewModel()) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
     Scaffold(
         topBar = {
             TopAppBar(
@@ -122,6 +123,7 @@ fun DebugPage(vm: DebugVM = koinViewModel()) {
 @Composable
 private fun MainPage(vm: DebugVM) {
     val settings = LocalSettings.current
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .padding(8.dp)
@@ -167,9 +169,9 @@ private fun MainPage(vm: DebugVM) {
         val toaster = LocalToaster.current
         Button(
             onClick = {
-                toaster.show("测试 ${counter++}")
-                toaster.show("测试 ${counter++}", type = ToastType.Info)
-                toaster.show("测试 ${counter++}", type = ToastType.Error)
+                toaster.show(context.getString(R.string.debug_test_toast, counter++))
+                toaster.show(context.getString(R.string.debug_test_toast, counter++), type = ToastType.Info)
+                toaster.show(context.getString(R.string.debug_test_toast, counter++), type = ToastType.Error)
             }
         ) {
             Text("toast")
@@ -184,33 +186,33 @@ private fun MainPage(vm: DebugVM) {
                 )
             }
         ) {
-            Text("重置Chat模型")
+            Text(stringResource(R.string.debug_reset_chat_model))
         }
 
         Button(
             onClick = {
-                error("测试崩溃 ${Random.nextInt(0..1000)}")
+                error(context.getString(R.string.debug_crash_message, Random.nextInt(0..1000)))
             }
         ) {
-            Text("崩溃")
+            Text(stringResource(R.string.debug_crash_button))
         }
 
         Button(
             onClick = {
                 vm.createOversizedConversation(30)
-                toaster.show("正在创建 30MB 超大对话...")
+                toaster.show(context.getString(R.string.debug_create_oversized_toast, 30))
             }
         ) {
-            Text("创建超大对话 (30MB)")
+            Text(stringResource(R.string.debug_create_oversized_button, 30))
         }
 
         Button(
             onClick = {
                 vm.createConversationWithMessages(1024)
-                toaster.show("正在创建 1024 条消息对话...")
+                toaster.show(context.getString(R.string.debug_create_messages_toast, 1024))
             }
         ) {
-            Text("创建 1024 个消息的聊天")
+            Text(stringResource(R.string.debug_create_messages_button, 1024))
         }
 
         HorizontalDivider()
@@ -277,11 +279,11 @@ private fun MainPage(vm: DebugVM) {
         val tokenFitReceipts by vm.tokenFitReceipts.collectAsStateWithLifecycle()
         Text("Final Token Fit (last ${tokenFitReceipts.size})", style = MaterialTheme.typography.labelMedium)
         if (tokenFitReceipts.isEmpty()) {
-            Text("暂无裁剪记录", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.debug_no_token_fit_records), style = MaterialTheme.typography.bodySmall)
         } else {
             tokenFitReceipts.take(8).forEach { receipt ->
                 val trimmed = if (receipt.trimmedMessages.isEmpty()) {
-                    "无裁剪"
+                    stringResource(R.string.debug_no_trimmed_messages)
                 } else {
                     receipt.trimmedMessages.joinToString(", ") { "${it.provenance.name}×${it.count}" }
                 }

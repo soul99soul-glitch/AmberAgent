@@ -112,9 +112,9 @@ li{margin:.34em 0;}
 <body>
 <div class="deck" id="deck"></div>
 <div class="nav" id="nav">
-  <button id="prev" type="button" aria-label="上一页">‹</button>
+  <button id="prev" type="button" aria-label="{{AMBER_HTML_SLIDES_PREVIOUS_SLIDE}}">‹</button>
   <span class="indicator" id="ind">1 / 1</span>
-  <button id="next" type="button" aria-label="下一页">›</button>
+  <button id="next" type="button" aria-label="{{AMBER_HTML_SLIDES_NEXT_SLIDE}}">›</button>
 </div>
 <div id="error"></div>
 <script>
@@ -123,6 +123,11 @@ li{margin:.34em 0;}
   var totalSlides = 0;
   var deckEl = null;
   var deckSpec = null;
+  var fallbackSlideLabel = {{AMBER_HTML_SLIDES_FALLBACK_SLIDE_JS}};
+  var fallbackContentLabel = {{AMBER_HTML_SLIDES_FALLBACK_CONTENT_JS}};
+  var fallbackImageLabel = {{AMBER_HTML_SLIDES_FALLBACK_IMAGE_JS}};
+  var emptyDataError = {{AMBER_HTML_SLIDES_ERROR_EMPTY_JS}};
+  var renderErrorPrefix = {{AMBER_HTML_SLIDES_ERROR_PREFIX_JS}};
 
   function esc(value){
     return String(value == null ? '' : value)
@@ -216,7 +221,7 @@ li{margin:.34em 0;}
       var title = itemTitle(item);
       var body = itemBody(item);
       if(!title && item && typeof item === 'object'){
-        title = '内容';
+        title = fallbackContentLabel;
         body = compactObject(item);
       }
       if(body){
@@ -264,7 +269,7 @@ li{margin:.34em 0;}
       var src = typeof item === 'object' ? safeImage(pick(item, ['src','url','dataUri'])) : safeImage(item);
       var caption = typeof item === 'object' ? pick(item, ['caption','title','alt']) : '';
       if(src) return '<figure class="media"><img src="'+esc(src)+'" alt="'+esc(caption || '')+'"></figure>';
-      return '<div class="media">'+esc(caption || 'Image')+'</div>';
+      return '<div class="media">'+esc(caption || fallbackImageLabel)+'</div>';
     }).join('') + '</div>';
   }
 
@@ -339,7 +344,7 @@ li{margin:.34em 0;}
     var accent = safeColor(pick(slide, ['accent','accentColor','color']) || (deckSpec && deckSpec.accent));
     if(accent) div.style.setProperty('--accent', accent);
 
-    var title = pick(slide, ['title','name','heading','h1','header']) || (index === 0 && deckSpec && deckSpec.title) || ('Slide ' + (index + 1));
+    var title = pick(slide, ['title','name','heading','h1','header']) || (index === 0 && deckSpec && deckSpec.title) || (fallbackSlideLabel + ' ' + (index + 1));
     var subtitle = pick(slide, ['subtitle','tagline','h2','subheading']);
     var kicker = pick(slide, ['kicker','meta','label','section']);
     var notes = pick(slide, ['notes','note','footer','speaker_notes','speakerNotes']);
@@ -395,7 +400,7 @@ li{margin:.34em 0;}
     try{
       var parsed = JSON.parse(slidesJson);
       deckSpec = normalizeDeck(parsed);
-      if(!deckSpec || !Array.isArray(deckSpec.slides) || deckSpec.slides.length === 0) throw new Error('空幻灯片数据');
+      if(!deckSpec || !Array.isArray(deckSpec.slides) || deckSpec.slides.length === 0) throw new Error(emptyDataError);
       deckEl = document.getElementById('deck');
       deckEl.innerHTML = '';
       totalSlides = deckSpec.slides.length;
@@ -434,7 +439,7 @@ li{margin:.34em 0;}
       try{ AmberWidget.resize(Math.max(window.innerHeight, 360)); }catch(e){}
     }catch(e){
       document.getElementById('error').style.display='block';
-      document.getElementById('error').textContent='幻灯片渲染失败: '+(e.message||e);
+      document.getElementById('error').textContent=renderErrorPrefix+': '+(e.message||e);
       try{ AmberWidget.resize(120); }catch(ex){}
     }
   };

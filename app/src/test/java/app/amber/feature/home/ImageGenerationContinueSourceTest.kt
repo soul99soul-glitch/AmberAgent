@@ -25,7 +25,7 @@ class ImageGenerationContinueSourceTest {
         assertEquals(ContinueRoute.Chat(run.conversationId), candidate.route)
         assertEquals(ContinueStatus.FAILED_RESUMABLE, candidate.status)
         assertTrue(candidate.isRunning)
-        assertEquals("正在生成图片", candidate.summary)
+        assertEquals("Generating", candidate.summary)
     }
 
     @Test
@@ -39,7 +39,7 @@ class ImageGenerationContinueSourceTest {
 
         assertEquals(ContinueStatus.WAITING_USER, candidate.status)
         assertFalse(candidate.isRunning)
-        assertEquals("需要确认图片生成结果", candidate.summary)
+        assertEquals("Waiting for confirmation", candidate.summary)
     }
 
     @Test

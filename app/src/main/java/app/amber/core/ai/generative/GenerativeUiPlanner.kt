@@ -65,6 +65,7 @@ object GenerativeUiPlanner {
         setting: GenerativeUiSetting,
         messages: List<UIMessage>,
         hasImageGenTool: Boolean = false,
+        settingsPath: String = "Settings → Models → Image Generation Model",
     ): String {
         if (!setting.enabled) return ""
         val latestUserText = latestUserText(messages)
@@ -102,7 +103,7 @@ object GenerativeUiPlanner {
                         // Image gen wanted but not configured. Tell the user
                         // why instead of silently fall back to a bad SVG.
                         appendLine("The user asked for a photographic / painted image but no image-generation model is configured.")
-                        appendLine("Briefly tell them to set one in Settings → 模型 → 生图模型, then offer a quick SVG sketch as a temporary alternative if it would still be useful.")
+                        appendLine("Briefly tell them to set one in $settingsPath, then offer a quick SVG sketch as a temporary alternative if it would still be useful.")
                     }
                 }
 
@@ -127,7 +128,7 @@ object GenerativeUiPlanner {
                     }
                     appendLine("  2. Emit a show-widget SVG for diagrams, charts, schematics, simple icons, line-art logos.")
                     appendLine("  3. Emit a show-widget renderer for slides if multi-slide presentation is the right form.")
-                    appendLine("Use the subject and any style cues in the request to decide. If genuinely 50/50, ask once: \"想要矢量草图（精确、可编辑）还是生成的图像（纹理丰富、写实感）?\"")
+                    appendLine("Use the subject and any style cues in the request to decide. If genuinely 50/50, ask once: \"Would you like a vector sketch (precise, editable) or a generated image (rich texture, more realistic)?\"")
                     if (toolMediated) {
                         appendLine("If the user delegated to a tool/skill/subagent in the same message, run that first and only emit a visual when the visual itself is the final artifact.")
                     }

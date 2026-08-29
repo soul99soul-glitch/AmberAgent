@@ -65,6 +65,7 @@ import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.openai.OpenAICodexOAuthClient
 import app.amber.ai.provider.providers.openai.supportsResponsesResume
 import app.amber.agent.R
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.writeClipboardText
 import app.amber.feature.ui.components.ai.ProviderBalanceText
@@ -304,7 +305,15 @@ private fun ProviderConsoleIdentity(
             ) {
                 ProviderLiveDot(enabled = provider.enabled && provider.hasUsableAuth())
                 Text(
-                    text = "${if (provider.enabled && provider.hasUsableAuth()) "已连接" else "未连接"} · ${provider.providerAuthLabel()} · ${provider.models.size} 模型",
+                    text = stringResource(
+                        if (provider.enabled && provider.hasUsableAuth()) {
+                            R.string.setting_provider_page_connection_summary_connected
+                        } else {
+                            R.string.setting_provider_page_connection_summary_disconnected
+                        },
+                        provider.providerAuthLabel(),
+                        provider.models.size,
+                    ),
                     style = type.meta.copy(fontSize = 10.5.sp),
                     color = t.ink3,
                     maxLines = 1,
@@ -325,7 +334,7 @@ private fun ProviderProtocolSection(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
 ) {
-    ProviderSectionLabel("协议")
+    ProviderSectionLabel(stringResource(R.string.setting_provider_page_protocol))
     val options = ProviderSetting.Types.map { type ->
         ProviderSegOption(type, type.simpleName ?: "")
     }
@@ -345,7 +354,7 @@ private fun ProviderAuthSection(
     autoStartOAuth: Boolean,
     onAutoStartConsumed: () -> Unit,
 ) {
-    ProviderSectionLabel("鉴权")
+    ProviderSectionLabel(stringResource(R.string.setting_provider_page_authentication))
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (provider) {
             is ProviderSetting.OpenAI -> OpenAIAuthConsole(
@@ -491,9 +500,9 @@ private fun ProviderEndpointSection(
     provider: ProviderSetting,
     onEdit: (ProviderSetting) -> Unit,
 ) {
-    ProviderSectionLabel("端点")
+    ProviderSectionLabel(stringResource(R.string.setting_provider_page_endpoint))
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        ProviderLabeledField("显示名称") {
+        ProviderLabeledField(stringResource(R.string.setting_provider_page_display_name)) {
             ProviderTextField(
                 value = provider.name,
                 onValueChange = { onEdit(provider.copyProvider(name = it.trim())) },
@@ -640,10 +649,10 @@ private fun ProviderAccountSection(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    ProviderSectionLabel("账户")
+    ProviderSectionLabel(stringResource(R.string.setting_provider_page_account))
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ProviderSwitchRow(
-            title = "获取账户余额",
+            title = stringResource(R.string.setting_provider_page_get_account_balance),
             checked = provider.balanceOption.enabled,
             onCheckedChange = {
                 onEdit(provider.copy(balanceOption = provider.balanceOption.copy(enabled = it)))
@@ -980,7 +989,11 @@ private fun GeminiOAuthConsole(
         if (geminiOAuthBusy) return
         geminiOAuthBusy = true
         try {
-            val tokens = geminiOAuthClient.authorize(context, provider.id)
+            val tokens = geminiOAuthClient.authorize(
+                context,
+                provider.id,
+                loopbackCopy = OAuthDisplayLocalizer.loopback(context),
+            )
             geminiTokens = tokens
             val isAllObsolete = provider.models.isNotEmpty() &&
                 provider.models.all { it.modelId in OBSOLETE_GEMINI_OAUTH_MODEL_IDS }
@@ -996,7 +1009,10 @@ private fun GeminiOAuthConsole(
                 )
             )
             toaster.show(
-                context.getString(R.string.setting_provider_page_gemini_oauth_login_success, tokens.email ?: "Google 账号"),
+                context.getString(
+                    R.string.setting_provider_page_gemini_oauth_login_success,
+                    tokens.email ?: context.getString(R.string.setting_provider_page_google_account),
+                ),
                 type = ToastType.Success,
             )
         } catch (error: CancellationException) {

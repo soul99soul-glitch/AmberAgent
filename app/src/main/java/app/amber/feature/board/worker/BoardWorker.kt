@@ -13,6 +13,7 @@ import app.amber.feature.board.agent.BoardRunResult
 import app.amber.feature.board.agent.DailyReviewAgent
 import app.amber.feature.board.aggregator.SignalAggregator
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.appLocale
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.time.LocalDate
@@ -45,13 +46,14 @@ class BoardWorker(
         val agent = get<BoardAgent>()
         val notifier = get<BoardNotifier>()
         val scheduler = get<BoardScheduler>()
+        val locale = applicationContext.appLocale()
 
         // Manual / incremental runs shouldn't touch the anchor cadence. The next
         // anchor is re-enqueued in the finally below — doing it upfront with
         // REPLACE on the same unique work name cancels this very run.
         val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
         try {
-            return runCycle(aggregator, repository, agent, notifier)
+            return runCycle(aggregator, repository, agent, notifier, locale)
         } finally {
             if (isAnchor && !isStopped) {
                 withContext(NonCancellable) {
@@ -66,6 +68,7 @@ class BoardWorker(
         repository: BoardRepository,
         agent: BoardAgent,
         notifier: BoardNotifier,
+        locale: java.util.Locale,
     ): Result {
         val boardDate = repository.resolveBoardDate()
 
@@ -80,7 +83,7 @@ class BoardWorker(
         if (scored.isEmpty()) {
             repository.markSignalsProcessed(batch.consideredSignalIds)
             pruneOldItems(repository, boardDate)
-            maybeRunDailyReview(boardDate)
+            maybeRunDailyReview(boardDate, locale)
             return Result.success()
         }
 
@@ -89,6 +92,7 @@ class BoardWorker(
             scoredSignals = scored,
             focusRules = rules,
             boardDate = boardDate,
+            locale = locale,
         )
 
         when (result) {
@@ -99,7 +103,7 @@ class BoardWorker(
                     summary = result.summary,
                 )
                 pruneOldItems(repository, boardDate)
-                maybeRunDailyReview(boardDate)
+                maybeRunDailyReview(boardDate, locale)
                 return Result.success()
             }
 
@@ -110,7 +114,7 @@ class BoardWorker(
                 // only deletes processed=1 rows).
                 repository.markSignalsProcessed(batch.consideredSignalIds)
                 pruneOldItems(repository, boardDate)
-                maybeRunDailyReview(boardDate)
+                maybeRunDailyReview(boardDate, locale)
                 return Result.success()
             }
 
@@ -131,7 +135,7 @@ class BoardWorker(
      * - 12:00–14:59 → noon phase (first generation)
      * - 18:00–23:59 → evening phase (append to noon)
      */
-    private suspend fun maybeRunDailyReview(boardDate: String) {
+    private suspend fun maybeRunDailyReview(boardDate: String, locale: java.util.Locale) {
         val now = ZonedDateTime.now()
         val hour = now.hour
         val phase = when (hour) {
@@ -141,7 +145,7 @@ class BoardWorker(
         }
         runCatching {
             val agent = get<DailyReviewAgent>()
-            agent.run(boardDate, phase)
+            agent.run(boardDate, phase, locale)
         }.onFailure {
             android.util.Log.w("BoardWorker", "daily review failed", it)
         }

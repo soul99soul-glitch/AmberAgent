@@ -2,6 +2,8 @@ package app.amber.feature.ui.components.ai
 
 import app.amber.feature.subagent.SubAgentDefinition
 import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentDisplay
+import app.amber.feature.subagent.SubAgentDisplayLocalizer
 import app.amber.feature.subagent.SubAgentMode
 
 internal enum class MentionRoleKind {
@@ -22,6 +24,10 @@ internal fun buildMentionRoleItems(
     subAgentMode: SubAgentMode = SubAgentMode.ROSTER,
     customSubAgents: List<SubAgentDefinition> = emptyList(),
     subAgents: List<SubAgentDefinition> = SubAgentDefinitions.builtIns,
+    councilDescription: String = "Start a model council discussion",
+    displayLocalizer: SubAgentDisplayLocalizer = SubAgentDisplayLocalizer {
+        SubAgentDisplay.from(it)
+    },
 ): List<MentionRoleItem> = buildList {
     if (subAgentEnabled) {
         val visibleSubAgents = if (subAgentMode == SubAgentMode.SMART_DYNAMIC) {
@@ -30,11 +36,12 @@ internal fun buildMentionRoleItems(
             subAgents + customSubAgents
         }
         visibleSubAgents.forEach { role ->
+            val display = displayLocalizer.localize(role)
             add(
                 MentionRoleItem(
                     id = role.id,
-                    name = role.name,
-                    description = role.description,
+                    name = display.name,
+                    description = display.description,
                     kind = MentionRoleKind.SUBAGENT,
                 )
             )
@@ -45,7 +52,7 @@ internal fun buildMentionRoleItems(
             MentionRoleItem(
                 id = "council",
                 name = "Council",
-                description = "发起模型议会共同讨论",
+                description = councilDescription,
                 kind = MentionRoleKind.COUNCIL,
             )
         )

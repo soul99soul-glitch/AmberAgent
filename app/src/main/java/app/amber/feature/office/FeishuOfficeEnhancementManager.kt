@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 import app.amber.agent.AppScope
+import app.amber.agent.R
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.system.AgentPermissionStatus
 import app.amber.feature.system.AmberNotificationListenerService
@@ -180,6 +181,15 @@ class FeishuOfficeEnhancementManager(
     fun refresh() {
         refreshTick.value = System.currentTimeMillis()
     }
+
+    fun requireEnabled() {
+        require(state.value.enabled) {
+            context.getString(R.string.feishu_office_not_enabled)
+        }
+    }
+
+    fun accessibilityRuntimeLabel(): String =
+        context.getString(R.string.feishu_office_runtime_accessibility)
 
     suspend fun detectPackages(): List<FeishuOfficePackageCandidate> = withContext(Dispatchers.IO) {
         val pm = context.packageManager

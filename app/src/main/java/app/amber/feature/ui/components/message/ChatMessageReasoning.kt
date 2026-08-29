@@ -207,10 +207,12 @@ private fun ReasoningContent(
 ) {
     val workspace = workspaceColors()
     val isPreview = expandState == ReasoningCardState.Preview
-    val displayText = remember(reasoning.reasoning, loading, expandState) {
+    val omittedPrefixTemplate = stringResource(R.string.chat_message_reasoning_omitted)
+    val displayText = remember(reasoning.reasoning, loading, expandState, omittedPrefixTemplate) {
         reasoning.reasoning.toDisplayReasoningText(
             loading = loading,
             expanded = expandState == ReasoningCardState.Expanded,
+            omittedPrefixTemplate = omittedPrefixTemplate,
         )
     }
     // Streaming treatment only while the display text is the plain growing
@@ -407,11 +409,15 @@ fun ChainOfThoughtScope.ChatMessageReasoningStep(
     )
 }
 
+@Composable
 private fun ReasoningLevel?.reasoningBudgetLabel(): String? = when (this) {
     null,
     ReasoningLevel.OFF -> null
-    ReasoningLevel.AUTO -> "auto"
-    else -> "≤ ${this.budgetTokens.formatReasoningBudget()} tokens"
+    ReasoningLevel.AUTO -> stringResource(R.string.reasoning_auto)
+    else -> stringResource(
+        R.string.chat_message_reasoning_budget_tokens,
+        this.budgetTokens.formatReasoningBudget(),
+    )
 }
 
 private fun Int.formatReasoningBudget(): String {
@@ -421,11 +427,12 @@ private fun Int.formatReasoningBudget(): String {
 internal fun String.toDisplayReasoningText(
     loading: Boolean,
     expanded: Boolean,
+    omittedPrefixTemplate: String = "… 已省略前 %1\$d 字，以保持流式思考界面流畅。",
 ): String {
     val limit = reasoningDisplayLimit(loading = loading, expanded = expanded)
     if (length <= limit) return this
     val omitted = length - limit
-    return "… 已省略前 $omitted 字，以保持流式思考界面流畅。\n\n" + takeLast(limit)
+    return omittedPrefixTemplate.format(omitted) + "\n\n" + takeLast(limit)
 }
 
 internal fun String.isReasoningTailTrimmed(

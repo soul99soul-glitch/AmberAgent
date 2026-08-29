@@ -117,8 +117,8 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         item(
                             onClick = { navController.navigate(Screen.SettingCapabilityPermissions) },
                             leadingContent = { Icon(Lucide.Layers, null) },
-                            supportingContent = { Text("按能力分组管理 disabled/ask/auto 策略，查看最近审批记录（需在 Debug 页开启 capability_permissions）") },
-                            headlineContent = { Text("Capability 权限") },
+                            supportingContent = { Text(stringResource(R.string.setting_agent_permissions_capability_desc)) },
+                            headlineContent = { Text(stringResource(R.string.setting_agent_permissions_capability_title)) },
                         )
                     }
                 }

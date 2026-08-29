@@ -34,6 +34,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import app.amber.agent.R
 import app.amber.ai.core.InputSchema
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.AppScope
@@ -56,6 +57,7 @@ private const val BASE_RECONNECT_DELAY_MS = 1000L
 private const val MAX_RECONNECT_DELAY_MS = 30000L
 
 class McpManager(
+    private val context: Context,
     private val settingsStore: SettingsAggregator,
     private val appScope: AppScope,
     private val filesManager: FilesManager,
@@ -91,7 +93,7 @@ class McpManager(
         settingsStore = settingsStore,
         appScope = appScope,
         appEventBus = appEventBus,
-        oauthClient = McpOAuthClient(okHttpClient),
+        oauthClient = McpOAuthClient(okHttpClient, context),
         updateStatus = { configId, status ->
             syncingStatus.value = syncingStatus.value + (configId to status)
         },
@@ -503,7 +505,10 @@ class McpManager(
         if (currentAttempt > MAX_RECONNECT_ATTEMPTS) {
             Log.w(TAG, "Max reconnect attempts reached for ${config.commonOptions.name}")
             appScope.launch {
-                setStatus(config, McpStatus.Error("连接断开，已达最大重连次数"))
+                setStatus(
+                    config,
+                    McpStatus.Error(context.getString(R.string.setting_mcp_status_error)),
+                )
             }
             return
         }

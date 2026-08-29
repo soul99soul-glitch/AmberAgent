@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.debug
 
+import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
@@ -24,8 +25,10 @@ import kotlinx.datetime.toLocalDateTime
 import kotlin.time.Clock
 import kotlin.random.Random
 import kotlin.uuid.Uuid
+import app.amber.agent.R
 
 class DebugVM(
+    private val context: Application,
     private val settingsStore: SettingsAggregator,
     private val conversationRepository: ConversationRepository,
     private val capabilityFlags: CapabilityFlags,
@@ -85,8 +88,8 @@ class DebugVM(
                 // 生成一个包含大量文本的消息（约 100KB 每条）
                 val largeText = buildString {
                     repeat(100) {
-                        append("这是一段很长的测试文本，用于测试 CursorWindow 的大小限制。")
-                        append("Row too big to fit into CursorWindow 错误通常发生在单行数据超过 2MB 时。")
+                        append(context.getString(R.string.debug_oversized_test_text))
+                        append(context.getString(R.string.debug_cursor_window_error_text))
                         append("Lorem ipsum dolor sit amet, consectetur adipiscing elit. ")
                         append("Index: $index, Block: $it. ")
                     }
@@ -101,7 +104,11 @@ class DebugVM(
                 val assistantMessage = UIMessage(
                     id = Uuid.random(),
                     role = MessageRole.ASSISTANT,
-                    parts = listOf(UIMessagePart.Text("回复: $largeText")),
+                    parts = listOf(
+                        UIMessagePart.Text(
+                            context.getString(R.string.debug_assistant_reply_prefix, largeText)
+                        )
+                    ),
                     createdAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
                 )
 
@@ -115,7 +122,7 @@ class DebugVM(
             val conversation = Conversation(
                 id = Uuid.random(),
                 assistantId = AMBER_AGENT_ID,
-                title = "超大对话测试 (${sizeMB}MB)",
+                title = context.getString(R.string.debug_oversized_conversation_title, sizeMB),
                 messageNodes = messageNodes,
             )
 
@@ -141,7 +148,7 @@ class DebugVM(
             val conversation = Conversation(
                 id = Uuid.random(),
                 assistantId = AMBER_AGENT_ID,
-                title = "${messageCount}条消息测试",
+                title = context.getString(R.string.debug_messages_conversation_title, messageCount),
                 messageNodes = messageNodes,
             )
 
@@ -150,12 +157,13 @@ class DebugVM(
     }
 
     private fun randomMessageText(index: Int, role: MessageRole): String {
-        val fragments = listOf(
-            "快速", "随机", "消息", "样例", "用于", "测试", "列表", "渲染", "滚动", "性能",
-            "聊天", "对话", "内容", "结构", "验证", "分页", "顺序", "稳定", "系统",
-        )
+        val fragments = context.getString(R.string.debug_random_message_fragments).split('|')
         val wordCount = Random.nextInt(6, 14)
-        val prefix = if (role == MessageRole.USER) "用户" else "助手"
+        val prefix = if (role == MessageRole.USER) {
+            context.getString(R.string.debug_user_prefix)
+        } else {
+            context.getString(R.string.debug_assistant_prefix)
+        }
         val body = List(wordCount) { fragments.random() }.joinToString(" ")
         return "$prefix#${index + 1}: $body"
     }

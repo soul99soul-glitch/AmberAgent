@@ -61,7 +61,7 @@ import app.amber.feature.ui.components.richtext.tree.textIn
  *   settled arm's bar/indent needs drawBehind/ParagraphStyle — unavailable.
  * - table: the settled extractor's rows in one monospace block, header bold
  *   (alignment and cell composables are unavailable inside one Text).
- * - image: "[图片: alt]"; horizontal rule: "———".
+ * - image: a localized "[label: alt]" placeholder; horizontal rule: "———".
  * - MathInline / MathBlock: the settled renderer's delimiter normalization in
  *   a monospace fallback (real KaTeX needs a composable/canvas); HtmlBlock /
  *   Unknown remain raw source passthrough.
@@ -133,6 +133,8 @@ private data class MdBlockCtx(
     val listLevel: Int,
     /** Streaming fallback keeps source delimiters when LaTeX rendering is off. */
     val enableLatexRendering: Boolean,
+    /** Localized label used for image placeholders in the streaming text. */
+    val imageFallbackLabel: String,
 )
 
 private class JoinedBlock(
@@ -170,11 +172,13 @@ internal fun mdNodeToAnnotatedString(
     onClickUrl: (String) -> Unit = {},
     codeHighlights: Map<String, List<HighlightToken>> = emptyMap(),
     enableLatexRendering: Boolean = true,
+    imageFallbackLabel: String,
 ): AnnotatedString {
     val ctx = MdBlockCtx(
         style = style,
         listLevel = 0,
         enableLatexRendering = enableLatexRendering,
+        imageFallbackLabel = imageFallbackLabel,
     )
     val children = if (root.type == MdNodeType.Root) root.children else listOf(root)
     return joinBlocks(buildBlocks(children, source, ctx, onClickUrl, codeHighlights), style)
@@ -747,7 +751,7 @@ private fun AnnotatedString.Builder.appendInlineNode(
 
         node.type == MdNodeType.Link -> appendLink(node, source, ctx, onClickUrl)
 
-        node.type == MdNodeType.Image -> appendImage(node, source)
+        node.type == MdNodeType.Image -> appendImage(node, source, ctx.imageFallbackLabel)
 
         // A single AnnotatedString cannot embed the settled JLatexMath
         // composable. Reuse its delimiter normalization and keep the formula
@@ -838,7 +842,11 @@ private fun streamingClickableLink(
     )
 }
 
-private fun AnnotatedString.Builder.appendImage(node: MdNode, source: String) {
+private fun AnnotatedString.Builder.appendImage(
+    node: MdNode,
+    source: String,
+    fallbackLabel: String,
+) {
     val alt = node.linkLabel?.trim { it == '[' || it == ']' }?.takeIf { it.isNotBlank() }
-    append(if (alt != null) "[图片: $alt]" else "[图片]")
+    append(if (alt != null) "[$fallbackLabel: $alt]" else "[$fallbackLabel]")
 }

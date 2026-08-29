@@ -25,16 +25,50 @@ data class OAuthCallbackResult(
     val isSuccess: Boolean get() = error == null && !code.isNullOrBlank()
 }
 
+/** Human-readable strings supplied by the Android app's current locale. */
+data class LoopbackOAuthCopy(
+    val successMessage: String,
+    val failureMessage: (String) -> String,
+    val notFoundMessage: String,
+    val bindFailure: String,
+    val serverClosed: String,
+    val requestLineEmpty: String,
+    val headersUnterminated: String,
+    val requestTooLarge: String,
+    val invalidRequest: String,
+    val waitingForCallback: String,
+    val missingQuery: String,
+    val requestLineUnterminated: String,
+) {
+    companion object {
+        val ENGLISH = LoopbackOAuthCopy(
+            successMessage = "Authorization complete. You may close this page.",
+            failureMessage = { reason -> "Authorization failed: $reason" },
+            notFoundMessage = "Not found.",
+            bindFailure = "Unable to bind the local callback port.",
+            serverClosed = "The local callback server was closed.",
+            requestLineEmpty = "The request line was empty.",
+            headersUnterminated = "The request headers were not terminated.",
+            requestTooLarge = "The request exceeded the size limit.",
+            invalidRequest = "The HTTP request could not be parsed.",
+            waitingForCallback = "Waiting for GET /callback.",
+            missingQuery = "The callback did not include query parameters.",
+            requestLineUnterminated = "The request line was not terminated.",
+        )
+    }
+}
+
 /** A single-use RFC 8252 loopback redirect listener for the Google and Feishu OAuth flows. */
 class LoopbackOAuthCallbackServer(
     val port: Int = DEFAULT_PORT,
     private val acceptedSocketReadTimeoutMillis: Int = DEFAULT_ACCEPTED_SOCKET_READ_TIMEOUT_MILLIS,
+    private val copy: LoopbackOAuthCopy = LoopbackOAuthCopy.ENGLISH,
 ) : Closeable {
     private val serverSocket: ServerSocket = try {
         ServerSocket(port, 1, InetAddress.getByName("127.0.0.1"))
     } catch (error: Exception) {
         throw IllegalStateException(
-            "无法绑定 127.0.0.1:$port — 另一个 app 可能正在使用此端口。",
+            copy.bindFailure,
             error,
         )
     }
@@ -50,7 +84,7 @@ class LoopbackOAuthCallbackServer(
                     if (!continuation.isActive || serverSocket.isClosed) {
                         runCatching { client.close() }
                         if (continuation.isActive) {
-                            continuation.resume(failure("loopback_accept_failed", "服务器已关闭"))
+                            continuation.resume(failure("loopback_accept_failed", copy.serverClosed))
                         }
                         return@suspendCancellableCoroutine
                     }
@@ -69,7 +103,9 @@ class LoopbackOAuthCallbackServer(
             } catch (error: Exception) {
                 close()
                 if (continuation.isActive) {
-                    continuation.resume(failure("loopback_accept_failed", error.message))
+                    continuation.resume(
+                        failure("loopback_accept_failed", error.message ?: copy.serverClosed),
+                    )
                 }
             }
         }
@@ -84,11 +120,11 @@ class LoopbackOAuthCallbackServer(
         val handled = try {
             val input = BufferedInputStream(socket.getInputStream())
             val requestLine = readLine(input, MAX_REQUEST_LINE_BYTES)
-                ?: throw MalformedRequestException("请求行为空")
+                ?: throw MalformedRequestException(copy.requestLineEmpty)
             var headerBytes = 0
             while (true) {
                 val header = readLine(input, MAX_REQUEST_LINE_BYTES)
-                    ?: throw MalformedRequestException("请求头未结束")
+                    ?: throw MalformedRequestException(copy.headersUnterminated)
                 headerBytes += header.length + 2
                 if (headerBytes > MAX_HEADER_BYTES) throw RequestTooLargeException()
                 if (header.isEmpty()) break
@@ -96,7 +132,7 @@ class LoopbackOAuthCallbackServer(
             parseRequestLine(requestLine)
         } catch (_: RequestTooLargeException) {
             HandledRequest(
-                result = failure("request_too_large", "请求超过大小限制"),
+                result = failure("request_too_large", copy.requestTooLarge),
                 terminal = true,
                 statusCode = 400,
             )
@@ -121,7 +157,7 @@ class LoopbackOAuthCallbackServer(
         val parts = line.split(' ', limit = 3)
         if (parts.size != 3 || parts[0].isBlank() || parts[1].isBlank() || !parts[2].startsWith("HTTP/")) {
             return HandledRequest(
-                result = failure("invalid_request", "无法解析 HTTP 请求"),
+                result = failure("invalid_request", copy.invalidRequest),
                 terminal = true,
                 statusCode = 400,
             )
@@ -132,7 +168,7 @@ class LoopbackOAuthCallbackServer(
         val path = target.substringBefore('?')
         if (method != "GET" || path != "/callback") {
             return HandledRequest(
-                result = failure("ignored_non_callback_path", "等待 GET /callback"),
+                result = failure("ignored_non_callback_path", copy.waitingForCallback),
                 terminal = false,
                 statusCode = 404,
             )
@@ -141,7 +177,7 @@ class LoopbackOAuthCallbackServer(
         val queryStart = target.indexOf('?')
         if (queryStart < 0) {
             return HandledRequest(
-                result = failure("missing_query", "回调缺少查询参数"),
+                result = failure("missing_query", copy.missingQuery),
                 terminal = true,
                 statusCode = 200,
             )
@@ -174,14 +210,13 @@ class LoopbackOAuthCallbackServer(
 
     private fun writeResponse(socket: Socket, request: HandledRequest) {
         val body = when {
-            request.statusCode == 404 -> NOT_FOUND_HTML
-            request.result.isSuccess -> SUCCESS_HTML
-            else -> FAILURE_HTML.replace(
-                "{ERROR}",
-                htmlEscape(
+            request.statusCode == 404 -> pageHtml(copy.notFoundMessage)
+            request.result.isSuccess -> pageHtml(copy.successMessage)
+            else -> pageHtml(
+                copy.failureMessage(
                     request.result.error.orEmpty().ifBlank { "unknown" } +
                         (request.result.errorDescription?.let { ": $it" } ?: ""),
-                ),
+                )
             )
         }.toByteArray(Charsets.UTF_8)
         val response = buildString {
@@ -206,7 +241,7 @@ class LoopbackOAuthCallbackServer(
             when (val value = input.read()) {
                 -1 -> {
                     if (bytes.size() == 0) return null
-                    throw MalformedRequestException("请求行未结束")
+                    throw MalformedRequestException(copy.requestLineUnterminated)
                 }
                 '\n'.code -> return bytes.toString(Charsets.ISO_8859_1.name()).removeSuffix("\r")
                 else -> {
@@ -235,15 +270,11 @@ class LoopbackOAuthCallbackServer(
         const val DEFAULT_PORT = 53682
         const val DEFAULT_REDIRECT_URI = "http://127.0.0.1:$DEFAULT_PORT/callback"
 
-        private const val SUCCESS_HTML =
-            "<!doctype html><html><body>授权完成，可以关闭此页面。</body></html>"
-        private const val FAILURE_HTML =
-            "<!doctype html><html><body>授权失败：{ERROR}</body></html>"
-        private const val NOT_FOUND_HTML =
-            "<!doctype html><html><body>Not found.</body></html>"
-
         private fun failure(error: String, description: String?): OAuthCallbackResult =
             OAuthCallbackResult(null, null, error, description)
+
+        private fun pageHtml(message: String): String =
+            "<!doctype html><html><body>${htmlEscape(message)}</body></html>"
 
         private fun htmlEscape(value: String): String = buildString(value.length) {
             for (char in value) {

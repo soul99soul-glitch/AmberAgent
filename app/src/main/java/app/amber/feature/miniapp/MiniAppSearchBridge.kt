@@ -13,11 +13,15 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import app.amber.core.ai.tools.SearchAggregator
 import app.amber.core.settings.prefs.SettingsAggregator
+import java.util.Locale
 
 class MiniAppSearchBridge(
     private val settingsStore: SettingsAggregator,
 ) {
-    suspend fun search(params: JsonObject): JsonObject {
+    suspend fun search(
+        params: JsonObject,
+        locale: Locale = Locale.getDefault(),
+    ): JsonObject {
         val query = params["query"]?.jsonPrimitive?.contentOrNull?.take(160)
             ?: throw MiniAppValidationException("Missing query")
         val limit = params["limit"]?.jsonPrimitive?.intOrNull?.coerceIn(1, 8) ?: 6
@@ -28,6 +32,7 @@ class MiniAppSearchBridge(
                 put("topic", params["topic"]?.jsonPrimitive?.contentOrNull ?: "news")
                 put("max_results", limit)
             },
+            locale = locale,
         )
         val status = result["status"]?.jsonPrimitive?.contentOrNull ?: "error"
         val items = result["items"]?.jsonArray ?: JsonArray(emptyList())

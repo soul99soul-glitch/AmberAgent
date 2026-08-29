@@ -28,8 +28,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.amber.agent.R
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.ui.components.ds.SectionLabel
@@ -83,7 +85,7 @@ fun ThemeLibrarySection(
             context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
         }.getOrNull()
         if (json == null) {
-            importError = listOf("无法读取所选文件")
+            importError = listOf(context.getString(R.string.setting_theme_library_read_failed))
             return@rememberLauncherForActivityResult
         }
         scope.launch {
@@ -99,46 +101,61 @@ fun ThemeLibrarySection(
         val text = JsonInstant.encodeToString(ThemePackage.serializer(), pkg)
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_SUBJECT, "Amber 主题包：${pkg.name}")
+            putExtra(
+                Intent.EXTRA_SUBJECT,
+                context.getString(R.string.setting_theme_library_export_subject, pkg.name),
+            )
             putExtra(Intent.EXTRA_TEXT, text)
         }
-        runCatching { context.startActivity(Intent.createChooser(send, "导出主题包")) }
+        runCatching {
+            context.startActivity(
+                Intent.createChooser(
+                    send,
+                    context.getString(R.string.setting_theme_library_export_chooser),
+                )
+            )
+        }
     }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
         CardGroup(
             modifier = Modifier.padding(horizontal = 2.dp),
-            title = { SectionLabel("主题库") },
+            title = { SectionLabel(stringResource(R.string.setting_theme_library_title)) },
         ) {
             item(
-                headlineContent = { Text("导出当前主题") },
-                supportingContent = { Text("把当前色系、强调色、字体与布局导出为主题包 JSON，可分享或备份") },
+                headlineContent = { Text(stringResource(R.string.setting_theme_library_export_current_title)) },
+                supportingContent = { Text(stringResource(R.string.setting_theme_library_export_current_desc)) },
                 trailingContent = {
-                    TextButton(onClick = exportCurrent) { Text("导出", color = workspace.ink) }
+                    TextButton(onClick = exportCurrent) {
+                        Text(stringResource(R.string.export_title), color = workspace.ink)
+                    }
                 },
             )
             item(
-                headlineContent = { Text("导入主题包") },
-                supportingContent = { Text("从文件导入主题包（JSON）；内置主题不可被导入包覆盖") },
+                headlineContent = { Text(stringResource(R.string.setting_theme_library_import_title)) },
+                supportingContent = { Text(stringResource(R.string.setting_theme_library_import_desc)) },
                 trailingContent = {
                     TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }) {
-                        Text("导入", color = workspace.ink)
+                        Text(stringResource(R.string.setting_theme_library_import_action), color = workspace.ink)
                     }
                 },
             )
 
             // 内置主题
-            listOf("WARM" to "暖石墨 Warm", "SAGE" to "鼠尾草 Sage").forEach { (family, label) ->
+            listOf(
+                "WARM" to R.string.setting_theme_library_builtin_warm,
+                "SAGE" to R.string.setting_theme_library_builtin_sage,
+            ).forEach { (family, labelRes) ->
                 val active = displaySetting.amberBaseFamily == family &&
                     displaySetting.appliedThemePackageId == null
                 item(
                     headlineContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(label)
+                            Text(stringResource(labelRes))
                             if (active) BuiltinActiveTag()
                         }
                     },
-                    supportingContent = { Text("内置主题 · 明暗跟随系统模式") },
+                    supportingContent = { Text(stringResource(R.string.setting_theme_library_builtin_desc)) },
                     trailingContent = {
                         TextButton(
                             onClick = {
@@ -147,12 +164,23 @@ fun ThemeLibrarySection(
                                         ThemePackageApplyResult.Applied,
                                         ThemePackageApplyResult.AlreadyApplied,
                                         -> null
-                                        ThemePackageApplyResult.Reverted -> "应用失败，已回退到上一个主题"
-                                        else -> "应用失败"
+                                        ThemePackageApplyResult.Reverted -> context.getString(R.string.setting_theme_library_apply_reverted_error)
+                                        else -> context.getString(R.string.setting_theme_library_apply_error)
                                     }
                                 }
                             },
-                        ) { Text(if (active) "使用中" else "应用", color = if (active) workspace.faint else workspace.ink) }
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (active) {
+                                        R.string.setting_theme_library_active
+                                    } else {
+                                        R.string.setting_theme_library_apply
+                                    },
+                                ),
+                                color = if (active) workspace.faint else workspace.ink,
+                            )
+                        }
                     },
                 )
             }
@@ -167,7 +195,9 @@ fun ThemeLibrarySection(
                             if (applied) BuiltinActiveTag()
                         }
                     },
-                    supportingContent = { Text("导入主题 · ${entity.id}") },
+                    supportingContent = {
+                        Text(stringResource(R.string.setting_theme_library_imported_detail, entity.id))
+                    },
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             TextButton(
@@ -177,25 +207,38 @@ fun ThemeLibrarySection(
                                             ThemePackageApplyResult.Applied,
                                             ThemePackageApplyResult.AlreadyApplied,
                                             -> null
-                                            ThemePackageApplyResult.Reverted -> "应用失败，已回退到上一个主题"
-                                            else -> "应用失败"
+                                            ThemePackageApplyResult.Reverted -> context.getString(R.string.setting_theme_library_apply_reverted_error)
+                                            else -> context.getString(R.string.setting_theme_library_apply_error)
                                         }
                                     }
                                 },
-                            ) { Text(if (applied) "使用中" else "应用", color = if (applied) workspace.faint else workspace.ink) }
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (applied) {
+                                            R.string.setting_theme_library_active
+                                        } else {
+                                            R.string.setting_theme_library_apply
+                                        },
+                                    ),
+                                    color = if (applied) workspace.faint else workspace.ink,
+                                )
+                            }
                             TextButton(
                                 onClick = {
                                     scope.launch { manager.remove(entity.id) }
                                 },
-                            ) { Text("移除", color = workspace.faint) }
+                            ) {
+                                Text(stringResource(R.string.setting_theme_library_remove), color = workspace.faint)
+                            }
                         }
                     },
                 )
             }
             if (importedPackages.isEmpty()) {
                 item(
-                    headlineContent = { Text("暂无导入的主题包") },
-                    supportingContent = { Text("导入后在这里应用或移除") },
+                    headlineContent = { Text(stringResource(R.string.setting_theme_library_empty_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_theme_library_empty_desc)) },
                 )
             }
         }
@@ -210,18 +253,30 @@ fun ThemeLibrarySection(
                 manager.discardTryOn(pkg.id, preview.candidateDigest)
                 importPreview = null
             },
-            title = { Text("导入主题包") },
+            title = { Text(stringResource(R.string.setting_theme_library_import_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(pkg.name, style = MaterialTheme.typography.titleMedium)
                     ThemePackageTokenPreview(preview.candidate)
                     Text(
-                        "颜色 ${pkg.colors.size} · 字体 ${pkg.fonts.size} · 布局 ${pkg.layout.size}" +
-                            if (pkg.id.startsWith(ThemePackage.BUILTIN_ID_PREFIX)) " · 内置保留 id" else "",
+                        stringResource(
+                            R.string.setting_theme_library_token_counts,
+                            pkg.colors.size,
+                            pkg.fonts.size,
+                            pkg.layout.size,
+                            if (pkg.id.startsWith(ThemePackage.BUILTIN_ID_PREFIX)) {
+                                stringResource(R.string.setting_theme_library_builtin_id_suffix)
+                            } else {
+                                ""
+                            },
+                        ),
                     )
                     if (preview.unknownTokens.isNotEmpty()) {
                         Text(
-                            "以下 token 不在允许列表内，已保留但不会应用：${preview.unknownTokens.joinToString("、")}",
+                            stringResource(
+                                R.string.setting_theme_library_unknown_tokens,
+                                preview.unknownTokens.joinToString(", "),
+                            ),
                             color = Color(0xFFB45F06),
                         )
                     }
@@ -236,8 +291,8 @@ fun ThemeLibrarySection(
                                 ThemePackageApplyResult.Applied,
                                 ThemePackageApplyResult.AlreadyApplied,
                                 -> null
-                                ThemePackageApplyResult.Reverted -> "应用失败，已回退到上一个主题"
-                                else -> "应用失败"
+                                ThemePackageApplyResult.Reverted -> context.getString(R.string.setting_theme_library_apply_reverted_error)
+                                else -> context.getString(R.string.setting_theme_library_apply_error)
                             }
                             if (result == ThemePackageApplyResult.Applied ||
                                 result == ThemePackageApplyResult.AlreadyApplied
@@ -246,7 +301,7 @@ fun ThemeLibrarySection(
                             }
                         }
                     },
-                ) { Text("导入并应用") }
+                ) { Text(stringResource(R.string.setting_theme_library_import_apply)) }
             },
             dismissButton = {
                 TextButton(
@@ -254,7 +309,7 @@ fun ThemeLibrarySection(
                         manager.discardTryOn(pkg.id, preview.candidateDigest)
                         importPreview = null
                     },
-                ) { Text("取消") }
+                ) { Text(stringResource(R.string.cancel)) }
             },
         )
     }
@@ -263,10 +318,12 @@ fun ThemeLibrarySection(
     importError?.let { issues ->
         AlertDialog(
             onDismissRequest = { importError = null },
-            title = { Text("无法导入主题包") },
+            title = { Text(stringResource(R.string.setting_theme_library_import_failed_title)) },
             text = { Text(issues.joinToString("\n")) },
             confirmButton = {
-                TextButton(onClick = { importError = null }) { Text("知道了") }
+                TextButton(onClick = { importError = null }) {
+                    Text(stringResource(R.string.update_card_close))
+                }
             },
         )
     }
@@ -305,7 +362,11 @@ private fun ThemePackageTokenPreview(displaySetting: DisplaySetting) {
             )
         }
         Text(
-            "字体 ${displaySetting.chatFontFamily.name.lowercase()} · 字号 ${displaySetting.fontSizeRatio}",
+            stringResource(
+                R.string.setting_theme_library_font_summary,
+                displaySetting.chatFontFamily.name.lowercase(),
+                displaySetting.fontSizeRatio,
+            ),
             color = tokens.ink2,
             style = MaterialTheme.typography.labelSmall,
         )
@@ -321,7 +382,7 @@ private fun BuiltinActiveTag() {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = "使用中",
+            text = stringResource(R.string.setting_theme_library_active),
             style = MaterialTheme.typography.labelSmall,
             color = workspace.ink,
         )

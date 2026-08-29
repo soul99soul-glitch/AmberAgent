@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
  * stations run in parallel — probing HN doesn't block probing GitHub.
  */
 class WebMountManager(
-    context: Context,
+    private val context: Context,
     private val adapters: List<WebMountAdapter>,
     // Phase 2 M2.0.5: now plumbed into per-adapter WebMountToolHooks so
     // cookie-auth adapters can call `hooks.cookies()` instead of threading
@@ -159,6 +159,7 @@ class WebMountManager(
     private val cachedToolsByAdapter: Map<String, List<Tool>> by lazy {
         adapters.associate { adapter ->
             val hooks = WebMountToolHooks(
+                context = context,
                 activityStore = activityStore,
                 stationId = adapter.id,
                 runtimeLabel = "WebMount/${adapter.displayName}",

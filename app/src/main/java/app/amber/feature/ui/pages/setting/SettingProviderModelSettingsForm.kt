@@ -815,14 +815,14 @@ private fun ProviderOverrideSettings(
             )
             ProviderLedgerRow("base_url") {
                 Text(
-                    text = "› — (继承)",
+                    text = "› — (${stringResource(R.string.setting_subagent_value_inherit)})",
                     style = type.meta.copy(fontSize = 12.sp),
                     color = t.ink3,
                 )
             }
             ProviderLedgerRow("api_key") {
                 Text(
-                    text = "› — (继承)",
+                    text = "› — (${stringResource(R.string.setting_subagent_value_inherit)})",
                     style = type.meta.copy(fontSize = 12.sp),
                     color = t.ink3,
                 )

@@ -21,10 +21,12 @@ import app.amber.feature.board.TodayBoardSetting
 import app.amber.feature.board.TodayBoardBackgroundStrategy
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.utils.appLocale
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class HotListScheduler(
@@ -129,7 +131,11 @@ class HotListWorker(
                 }
             }.awaitAll()
         }
-        val localizedSnapshots = get<HotListTitleLocalizer>().localize(snapshots, cachedBeforeFetch)
+        val localizedSnapshots = get<HotListTitleLocalizer>().localize(
+            snapshots = snapshots,
+            previousSnapshots = cachedBeforeFetch,
+            locale = applicationContext.appLocale(),
+        )
         localizedSnapshots
             .filter { !it.stale }
             .filter { localized ->

@@ -15,6 +15,8 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.ExternalCliToolRegistry
 import app.amber.feature.runtime.ExecutionPolicy
 import app.amber.feature.subagent.SubAgentDefinitions
+import app.amber.feature.subagent.SubAgentDisplay
+import app.amber.feature.subagent.SubAgentDisplayLocalizer
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentMode
 import app.amber.feature.subagent.SubAgentToolProfile
@@ -35,6 +37,10 @@ class SubAgentTools(
     // P4-02: thread_graph_v2 gate — off keeps the legacy tool set (no
     // followup/send/interrupt) and the legacy in-memory behavior.
     private val threadGraphEnabled: Boolean = false,
+    /** Presentation metadata is localized by the app; custom definitions stay verbatim. */
+    private val displayLocalizer: SubAgentDisplayLocalizer = SubAgentDisplayLocalizer {
+        SubAgentDisplay.from(it)
+    },
 ) {
     fun tools(): List<Tool> = buildList {
         add(listTool())
@@ -55,8 +61,9 @@ class SubAgentTools(
         parameters = { InputSchema.Obj(properties = buildJsonObject {}) },
         execute = {
             val rosterText = subAgentManager.listBuiltIns().joinToString("\n\n") { agent ->
-                val routing = agent.routingHint.takeIf { it.isNotBlank() }?.let { "\nrouting:\n$it" }.orEmpty()
-                "@${agent.id} (${agent.name})\ndescription: ${agent.description}\ntools: ${agent.toolAllowlist.sorted().joinToString(", ")}$routing"
+                val display = displayLocalizer.localize(agent)
+                val routing = display.routingHint.takeIf { it.isNotBlank() }?.let { "\nrouting:\n$it" }.orEmpty()
+                "@${agent.id} (${display.name})\ndescription: ${display.description}\ntools: ${agent.toolAllowlist.sorted().joinToString(", ")}$routing"
             }
             val payload = buildJsonObject {
                 put("status", "ok")
@@ -96,10 +103,11 @@ class SubAgentTools(
                 }
                 appendLine()
                 builtIns.forEach { agent ->
-                    appendLine("@${agent.id} (${agent.name})")
-                    appendLine("- ${agent.description}")
-                    if (agent.routingHint.isNotBlank()) {
-                        agent.routingHint.lineSequence().forEach { line ->
+                    val display = displayLocalizer.localize(agent)
+                    appendLine("@${agent.id} (${display.name})")
+                    appendLine("- ${display.description}")
+                    if (display.routingHint.isNotBlank()) {
+                        display.routingHint.lineSequence().forEach { line ->
                             val trimmed = line.trim()
                             if (trimmed.isNotEmpty()) appendLine("  $trimmed")
                         }

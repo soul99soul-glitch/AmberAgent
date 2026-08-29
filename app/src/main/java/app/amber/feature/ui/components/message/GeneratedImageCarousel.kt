@@ -44,6 +44,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
@@ -58,6 +59,7 @@ import com.composables.icons.lucide.Share2
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.launch
 import app.amber.ai.ui.UIMessagePart
+import app.amber.agent.R
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
@@ -102,6 +104,9 @@ fun GeneratedImageCarousel(
     val settingsStore: SettingsAggregator = koinInject()
     val providerCatalog: ProviderCatalog = koinInject()
     val eventBus: AppEventBus = koinInject()
+    val savingMessage = stringResource(R.string.generated_image_saving)
+    val savedMessage = stringResource(R.string.generated_image_saved)
+    val copiedMessage = stringResource(R.string.generated_image_copied)
 
     // P6-02 capability gate — no edit entry when the provider cannot edit.
     // Keyed on the model/provider identity so switching the image-generation
@@ -180,14 +185,14 @@ fun GeneratedImageCarousel(
         ) {
             ActionRow(
                 icon = Lucide.Download,
-                label = "保存到相册",
+                label = stringResource(R.string.generated_image_save_to_gallery),
                 onClick = {
                     actionSheetTarget = null
                     scope.launch {
                         runCatching {
-                            toaster.show("正在保存")
+                            toaster.show(savingMessage)
                             filesManager.saveMessageImage(context, target.url)
-                            toaster.show(message = "已保存图片", type = ToastType.Success)
+                            toaster.show(message = savedMessage, type = ToastType.Success)
                         }.onFailure {
                             toaster.show(message = it.toString(), type = ToastType.Error)
                         }
@@ -196,17 +201,17 @@ fun GeneratedImageCarousel(
             )
             ActionRow(
                 icon = Lucide.Copy,
-                label = "复制图片",
+                label = stringResource(R.string.copy),
                 onClick = {
                     actionSheetTarget = null
                     runCatching { copyImageToClipboard(context, target.url) }
-                        .onSuccess { toaster.show(message = "已复制图片", type = ToastType.Success) }
+                        .onSuccess { toaster.show(message = copiedMessage, type = ToastType.Success) }
                         .onFailure { toaster.show(message = it.toString(), type = ToastType.Error) }
                 },
             )
             ActionRow(
                 icon = Lucide.Share2,
-                label = "分享",
+                label = stringResource(R.string.share),
                 onClick = {
                     actionSheetTarget = null
                     runCatching { shareImage(context, target.url) }
@@ -216,7 +221,7 @@ fun GeneratedImageCarousel(
             if (editSupported && target.url.startsWith("file://")) {
                 ActionRow(
                     icon = Lucide.PenLine,
-                    label = "修改",
+                    label = stringResource(R.string.edit),
                     onClick = {
                         actionSheetTarget = null
                         editTarget = target
@@ -253,14 +258,14 @@ private fun EditGeneratedImageDialog(
     onConfirm: (prompt: String) -> Unit,
 ) {
     val workspace = workspaceColors()
-    val prefill = "请修改这张图片："
+    val prefill = stringResource(R.string.generated_image_prompt_prefill)
     var prompt by remember { mutableStateOf(prefill) }
     AlertDialog(
         onDismissRequest = onDismiss,
         containerColor = workspace.paper,
         titleContentColor = workspace.ink,
         textContentColor = workspace.ink,
-        title = { Text("修改图片", style = MaterialTheme.typography.titleMedium) },
+        title = { Text(stringResource(R.string.generated_image_edit_title), style = MaterialTheme.typography.titleMedium) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Surface(
@@ -270,7 +275,7 @@ private fun EditGeneratedImageDialog(
                 ) {
                     AsyncImage(
                         model = sourceImageUrl,
-                        contentDescription = "待修改的图片",
+                        contentDescription = stringResource(R.string.generated_image_pending_edit),
                         contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -281,7 +286,7 @@ private fun EditGeneratedImageDialog(
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it },
-                    label = { Text("修改提示") },
+                    label = { Text(stringResource(R.string.generated_image_prompt_label)) },
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -292,12 +297,12 @@ private fun EditGeneratedImageDialog(
                 enabled = prompt.trim().isNotEmpty() && prompt.trim() != prefill,
                 onClick = { onConfirm(prompt.trim()) },
             ) {
-                Text("生成")
+                Text(stringResource(R.string.generated_image_generate))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.cancel))
             }
         },
     )
