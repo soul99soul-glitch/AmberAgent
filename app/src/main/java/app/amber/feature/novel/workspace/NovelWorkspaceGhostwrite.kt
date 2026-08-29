@@ -15,7 +15,7 @@ import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.first
 
 /**
  * Ghostwrite on the workspace model. One chapter = one auto-committing agent turn
@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.toList
  */
 class NovelWorkspaceGhostwriteCoordinator(
     private val runtime: NovelWorkspaceRuntime,
+    private val turnLauncher: NovelTurnLauncher,
 ) {
 
     data class GhostwriteChapterResult(
@@ -51,9 +52,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         // A wedged/trickling provider could otherwise hang a chapter turn for the
         // OkHttp read-timeout window or longer with no feedback anywhere; bound it
         // and surface as a chapter failure (retry/stop logic then applies).
-        val events = try {
-            kotlinx.coroutines.withTimeout(CHAPTER_TURN_TIMEOUT_MS) {
-                runtime.runTurn(
+        val turnHandle = turnLauncher.launch(
             NovelWorkspaceRuntime.TurnRequest(
                 projectDirectory = projectDirectory,
                 branchId = branchId,
@@ -68,14 +67,26 @@ class NovelWorkspaceGhostwriteCoordinator(
                 injection = injection,
                 ownerJobId = ownerJobId,
                 ownerExecutionId = ownerExecutionId,
-                ),
-                ).toList()
+            ),
+            runtime,
+        )
+        // One turn emits exactly one terminal event (Completed or Failed); the
+        // deltas in between are not needed for an unattended chapter.
+        val terminal = try {
+            kotlinx.coroutines.withTimeout(CHAPTER_TURN_TIMEOUT_MS) {
+                turnHandle.events.first { event ->
+                    event is NovelWorkspaceRuntime.TurnEvent.Completed ||
+                        event is NovelWorkspaceRuntime.TurnEvent.Failed
+                }
             }
         } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
-            // withTimeout cancels the turn; the runtime's rollback-on-cancel has run.
+            // The launcher already cancelled the run when withTimeout cancelled
+            // the collect; wait for the handler's rollback-on-cancel to settle
+            // so the chapter failure never races the restore writes.
+            runCatching { turnHandle.awaitTerminal() }
             return GhostwriteChapterResult(commitId = null, error = "本章生成超时（${CHAPTER_TURN_TIMEOUT_MS / 60_000} 分钟无完成），已中止本轮")
         }
-        val failure = events.filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Failed>().lastOrNull()
+        val failure = terminal as? NovelWorkspaceRuntime.TurnEvent.Failed
         if (failure != null) return GhostwriteChapterResult(commitId = null, error = failure.message)
         // A canon commit happened iff the ledger head advanced past where we started.
         val ledgerAfterTurn = NovelWorkspaceLedger.load(projectDirectory)
@@ -91,9 +102,7 @@ class NovelWorkspaceGhostwriteCoordinator(
         // Host-write fallback (device-proven): many providers narrate the chapter
         // as plain text instead of calling the write tool. A substantial final
         // answer IS the chapter — file it host-side and commit.
-        val finalText = events
-            .filterIsInstance<NovelWorkspaceRuntime.TurnEvent.Completed>()
-            .lastOrNull()
+        val finalText = (terminal as? NovelWorkspaceRuntime.TurnEvent.Completed)
             ?.finalText
             ?.trim()
             .orEmpty()

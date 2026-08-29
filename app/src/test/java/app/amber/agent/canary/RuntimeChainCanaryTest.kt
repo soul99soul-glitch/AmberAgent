@@ -19,7 +19,9 @@ import app.amber.ai.ui.UIMessageChoice
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.AILoggingManager
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.ChatRunCoordinator
+import app.amber.core.ai.ChatGenerationRoundEngine
+import app.amber.core.ai.DefaultRunKernel
+import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.transformers.InputMessageTransformer
@@ -100,7 +102,7 @@ import kotlin.uuid.Uuid
  *     provider, with a single hard fit at the provider boundary.
  *
  * Canary rules:
- *  - Real production components only: ChatRunCoordinator, AgentToolDispatcher
+ *  - Real production components only: DefaultRunKernel (+ ChatGenerationRoundEngine), AgentToolDispatcher
  *    (write-ahead), RoomToolEffectLedger, RoomRunTerminalStore,
  *    RunRecoveryService, RunOwnershipRegistry, TokenBudgetFitter. Fakes sit
  *    only at the external boundaries: the provider stream (a scripted
@@ -162,7 +164,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("已写入 /tmp/canary.txt。"))),
             ),
         )
-        val handler = chatRunCoordinator(provider, flags)
+        val handler = defaultRunKernel(provider, flags)
         val conversation = canaryConversation(conversationId, listOf(UIMessage.user("$MARKER_WRITE 写入一个文件")))
         conversationRepository().insertConversation(conversation)
         runTerminalStore.begin(runId, conversationId.toString(), null)
@@ -170,9 +172,11 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         // Round 1: streamed tool call → approval gate. WAITING_USER is
         // persisted (a pause — never a completion), and the approval card is
         // bound to effect_id + run_id (failure output is locatable).
+        val round1Events = RecordingEventWriter()
         val round1 = runRound(
             handler, settings, model, conversation.currentMessages, conversation, runId,
             tools = listOf(toolDef),
+            lifecycleEvents = round1Events,
         )
         publishTerminal(runId, round1.terminal, round1.error)
         assertNull("chain1 round1 must not fail, runId=$runId", round1.error)
@@ -195,18 +199,50 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         assertEquals(ToolEffectClass.NON_IDEMPOTENT_WRITE, prepared.effectClass)
         assertEquals(runId, prepared.runId)
 
+        // Step 3: the write-ahead prepare also entered the protocol event
+        // stream, aligned with the ledger by effectId; the approval park
+        // itself emits nothing.
+        val preparedEvent = round1Events.committed
+            .filterIsInstance<app.amber.core.agent.runtime.ToolLifecycleEvent.Prepared>()
+            .single()
+        assertEquals(effectId, preparedEvent.effectId)
+        assertEquals("call_chain1_1", preparedEvent.toolCallId)
+        assertEquals(TOOL_SIDE_EFFECT, preparedEvent.toolName)
+        assertEquals(ToolEffectClass.NON_IDEMPOTENT_WRITE.name, preparedEvent.effectClass)
+        assertEquals(prepared.argsDigest, preparedEvent.argsDigest)
+        // Step 5: the round's wire request also left exactly one audit
+        // RequestSnapshot on the stream, and exactly one Prepared fired for
+        // the one prepared effect. A multiset (not a type-set): duplicates
+        // of either event are a regression the set form would silently pass.
+        assertEquals(
+            "runId=$runId",
+            mapOf("Prepared" to 1, "RequestSnapshot" to 1),
+            round1Events.committed.groupingBy { it::class.simpleName!! }.eachCount(),
+        )
+
         // Round 2 (same runId): the user approves → STARTED → side effect
         // executes exactly once → FINISHED with the result payload → the tool
         // result lands in the conversation message → the next turn streams the
         // final answer → the caller publishes COMPLETED.
         val approvedMessages = approveTool(pendingMessages, "call_chain1_1")
+        val round2Events = RecordingEventWriter()
         val round2 = runRound(
             handler, settings, model, approvedMessages, conversation, runId,
             tools = listOf(toolDef),
+            lifecycleEvents = round2Events,
         )
         publishTerminal(runId, round2.terminal, round2.error)
         assertNull("chain1 round2 must not fail, runId=$runId", round2.error)
         assertNull("no pause on the completion round, runId=$runId", round2.terminal)
+
+        // Step 3: the resumed round executes without a re-prepare — exactly
+        // Started → Finished(FINISHED), aligned with the same effectId.
+        val round2Lifecycle = round2Events.committed
+            .filterIsInstance<app.amber.core.agent.runtime.ToolLifecycleEvent>()
+        assertEquals(listOf("Started", "Finished"), round2Lifecycle.map { it::class.simpleName })
+        assertTrue(round2Lifecycle.all { it.effectId == effectId })
+        val finishedEvent = round2Lifecycle.last() as app.amber.core.agent.runtime.ToolLifecycleEvent.Finished
+        assertEquals(app.amber.core.agent.runtime.ToolLifecycleEvent.Finished.Status.FINISHED, finishedEvent.status)
 
         val finished = ledger.get(effectId)!!
         assertEquals("runId=$runId effectId=$effectId", ToolEffectStatus.FINISHED, finished.status)
@@ -241,7 +277,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 MARKER_FINISH to CanaryProvider.Script(listOf(textChunk("另一个会话的完整回复"))),
             ),
         )
-        val handler = chatRunCoordinator(provider, flags)
+        val handler = defaultRunKernel(provider, flags)
         val registry = RunOwnershipRegistry()
         val runIdStop = "canary-chain2-run-stop"
         val runIdFinish = "canary-chain2-run-finish"
@@ -257,25 +293,29 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         val outcomes = mutableMapOf<String, Throwable?>()
         val jobStop = launch {
             runCatching {
-                handler.generateText(
-                    settings = settings,
-                    model = model,
-                    messages = listOf(UIMessage.user("$MARKER_STOP 写一篇长文")),
-                    conversation = canaryConversation(convStop, listOf(UIMessage.user("$MARKER_STOP 写一篇长文"))),
-                    runId = runIdStop,
-                    onTerminal = { },
+                handler.run(
+                    GenerationRunSession(
+                        settings = settings,
+                        model = model,
+                        messages = listOf(UIMessage.user("$MARKER_STOP 写一篇长文")),
+                        conversation = canaryConversation(convStop, listOf(UIMessage.user("$MARKER_STOP 写一篇长文"))),
+                        runId = runIdStop,
+                        onTerminal = { },
+                    ),
                 ).collect { chunksStop += it }
             }.onSuccess { outcomes[runIdStop] = null }.onFailure { outcomes[runIdStop] = it }
         }
         val jobFinish = launch {
             runCatching {
-                handler.generateText(
-                    settings = settings,
-                    model = model,
-                    messages = listOf(UIMessage.user("$MARKER_FINISH 帮我总结")),
-                    conversation = canaryConversation(convFinish, listOf(UIMessage.user("$MARKER_FINISH 帮我总结"))),
-                    runId = runIdFinish,
-                    onTerminal = { },
+                handler.run(
+                    GenerationRunSession(
+                        settings = settings,
+                        model = model,
+                        messages = listOf(UIMessage.user("$MARKER_FINISH 帮我总结")),
+                        conversation = canaryConversation(convFinish, listOf(UIMessage.user("$MARKER_FINISH 帮我总结"))),
+                        runId = runIdFinish,
+                        onTerminal = { },
+                    ),
                 ).collect { }
             }.onSuccess { outcomes[runIdFinish] = null }.onFailure { outcomes[runIdFinish] = it }
         }
@@ -370,7 +410,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         )
 
         // Round 1 — approval pause, exactly like chain 1.
-        val handler = chatRunCoordinator(provider, flags)
+        val handler = defaultRunKernel(provider, flags)
         val round1 = runRound(
             handler, settings, model, conversation.currentMessages, conversation, runId,
             tools = listOf(toolDef),
@@ -388,14 +428,16 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         runTerminalStore.begin(runId, conversationId.toString(), null) // approval resume, same runId
         val job = launch {
             runCatching {
-                handler.generateText(
-                    settings = settings,
-                    model = model,
-                    messages = approveTool(round1.lastMessages, "call_chain3_1"),
-                    tools = listOf(toolDef),
-                    conversation = conversation,
-                    runId = runId,
-                    onTerminal = { },
+                handler.run(
+                    GenerationRunSession(
+                        settings = settings,
+                        model = model,
+                        messages = approveTool(round1.lastMessages, "call_chain3_1"),
+                        tools = listOf(toolDef),
+                        conversation = conversation,
+                        runId = runId,
+                        onTerminal = { },
+                    ),
                 ).collect { }
             }
         }
@@ -439,7 +481,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         assertEquals("effectId=${effect.effectId}", ToolEffectStatus.RECONCILED, ledgerAfter.get(effect.effectId)!!.status)
         completeExecution.set(true)
         runTerminalStore.begin(runId, conversationId.toString(), null) // resume the same runId
-        val handler2 = chatRunCoordinator(provider, flags)
+        val handler2 = defaultRunKernel(provider, flags)
         val round3 = runRound(
             handler2, settings, model, approveTool(round1.lastMessages, "call_chain3_1"), conversation, runId,
             tools = listOf(toolDef),
@@ -481,7 +523,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("副作用已生效，任务完成。"))),
             ),
         )
-        val handlerPrepared = chatRunCoordinator(providerPrepared, flags)
+        val handlerPrepared = defaultRunKernel(providerPrepared, flags)
         val roundPrepared1 = runRound(
             handlerPrepared, settings, model, conversationPrepared.currentMessages, conversationPrepared, runIdPrepared,
             tools = listOf(preparedToolDef),
@@ -558,7 +600,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
                 AFTER_TOOL to CanaryProvider.Script(listOf(textChunk("查询完成，未发现异常。"))),
             ),
         )
-        val handler = chatRunCoordinator(provider, flags)
+        val handler = defaultRunKernel(provider, flags)
         // Transformer that expands the current user request AFTER prompt
         // assembly (the OCR-style growth that previously made requests
         // silently over-budget).
@@ -642,7 +684,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         conversationRepository().insertConversation(tooLargeConversation)
         runTerminalStore.begin(tooLargeRunId, tooLargeConversationId.toString(), null)
         val provider2 = CanaryProvider(scripts = mapOf(MARKER_TOO_LARGE to CanaryProvider.Script(listOf(textChunk("不可达")))))
-        val handler2 = chatRunCoordinator(provider2, flags)
+        val handler2 = defaultRunKernel(provider2, flags)
         val receivedBefore = provider2.received.size
         val tooLargeOutcome = runRound(
             handler2, settings, model,
@@ -720,7 +762,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             messageNodes = messages.map { MessageNode.of(it) },
         )
 
-    private fun chatRunCoordinator(providerImpl: CanaryProvider, flags: CapabilityFlags): ChatRunCoordinator {
+    private fun defaultRunKernel(providerImpl: CanaryProvider, flags: CapabilityFlags): DefaultRunKernel {
         val httpClient = OkHttpClient()
         val providerCatalog = ProviderCatalog(
             openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
@@ -748,16 +790,19 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
             capabilitySnapshotBuilder = AgentCapabilitySnapshotBuilder(),
             promptConfigRepository = AgentPromptConfigRepository(context),
         )
-        return ChatRunCoordinator(
+        val roundEngine = ChatGenerationRoundEngine(
             context = context,
             providerCatalog = providerCatalog,
             json = json,
-            memoryRepo = memoryRepo,
             memoryRecallStore = MemoryRecallStore(memoryRepo),
             conversationRepo = conversationRepo,
             aiLoggingManager = AILoggingManager(),
             conversationContextEngine = contextEngine,
+        )
+        return DefaultRunKernel(
+            context = context,
             toolDispatcher = AgentToolDispatcher(json, PermissionDecisionResolver()),
+            roundEngine = roundEngine,
             toolEffectLedger = ledger,
             capabilityFlags = flags,
             capabilityPermissionStore = null,
@@ -775,7 +820,7 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
     }
 
     private suspend fun runRound(
-        handler: ChatRunCoordinator,
+        handler: DefaultRunKernel,
         settings: Settings,
         model: Model,
         messages: List<UIMessage>,
@@ -784,26 +829,41 @@ class RuntimeChainCanaryTest : DurableRuntimeTestBase() {
         tools: List<Tool> = emptyList(),
         inputTransformers: List<InputMessageTransformer> = emptyList(),
         consumeSteer: suspend () -> List<UIMessage> = { emptyList() },
+        lifecycleEvents: app.amber.core.agent.runtime.AgentEventWriter? = null,
     ): RoundOutcome {
         val chunks = mutableListOf<GenerationChunk>()
         var terminal: GenerationTerminal? = null
         val error = runCatching {
-            handler.generateText(
-                settings = settings,
-                model = model,
-                messages = messages,
-                inputTransformers = inputTransformers,
-                tools = tools,
-                maxSteps = 8,
-                autoApproveTools = false,
-                invocationContext = ToolInvocationContext.Normal,
-                conversation = conversation,
-                consumeSteerMessages = consumeSteer,
-                runId = runId,
-                onTerminal = { terminal = it },
+            handler.run(
+                GenerationRunSession(
+                    settings = settings,
+                    model = model,
+                    messages = messages,
+                    inputTransformers = inputTransformers,
+                    tools = tools,
+                    maxSteps = 8,
+                    autoApproveTools = false,
+                    invocationContext = ToolInvocationContext.Normal,
+                    conversation = conversation,
+                    consumeSteerMessages = consumeSteer,
+                    runId = runId,
+                    onTerminal = { terminal = it },
+                    toolLifecycleEvents = lifecycleEvents,
+                ),
             ).collect { chunks += it }
         }.exceptionOrNull()
         return RoundOutcome(chunks, terminal, error)
+    }
+
+    /** Step 3 recording writer: captures the protocol events a round emits. */
+    private class RecordingEventWriter : app.amber.core.agent.runtime.AgentEventWriter {
+        val committed = mutableListOf<app.amber.core.agent.runtime.AgentEventPayload.Final>()
+        override fun emit(transient: app.amber.core.agent.runtime.AgentEventPayload.Transient) {}
+        override suspend fun commit(final: app.amber.core.agent.runtime.AgentEventPayload.Final) {
+            committed += final
+        }
+        override suspend fun flush() {}
+        override suspend fun commitError(throwable: Throwable, recoverable: Boolean) {}
     }
 
     /**

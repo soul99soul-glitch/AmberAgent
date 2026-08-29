@@ -13,6 +13,7 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.feature.modelcouncil.ExternalCliToolRegistry
+import app.amber.feature.runtime.ExecutionPolicy
 import app.amber.feature.subagent.SubAgentDefinitions
 import app.amber.feature.subagent.SubAgentManager
 import app.amber.feature.subagent.SubAgentMode
@@ -23,6 +24,13 @@ class SubAgentTools(
     private val subAgentManager: SubAgentManager,
     private val parentConversationId: Uuid,
     private val parentRunId: String? = null,
+    /**
+     * P1-7: the parent run's sandbox policy, captured at tool-assembly time
+     * (same value the run's dispatcher gate enforces). Handed to every child
+     * the parent starts so a tightened parent run cannot be widened by its
+     * subagents. Null keeps the permissive v1 default.
+     */
+    private val parentPolicy: ExecutionPolicy? = null,
     private val parentToolsProvider: () -> List<Tool>,
     // P4-02: thread_graph_v2 gate — off keeps the legacy tool set (no
     // followup/send/interrupt) and the legacy in-memory behavior.
@@ -196,6 +204,7 @@ class SubAgentTools(
                 input = input.jsonObject,
                 parentTools = parentToolsProvider(),
                 parentRunId = parentRunId,
+                parentPolicy = parentPolicy,
             )
             listOf(UIMessagePart.Text(payload.toString()))
         }
@@ -292,6 +301,7 @@ class SubAgentTools(
                 input = input.jsonObject,
                 parentTools = parentToolsProvider(),
                 parentRunId = parentRunId,
+                parentPolicy = parentPolicy,
             )
             listOf(UIMessagePart.Text(payload.toString()))
         }

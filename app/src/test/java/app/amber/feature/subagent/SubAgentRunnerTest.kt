@@ -8,7 +8,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationTerminal
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
 import app.amber.core.model.AssistantMemory
@@ -29,7 +30,7 @@ class SubAgentRunnerTest {
     @Test
     fun pureTextRunFallsBackWhenReportToolArgumentsFailAfterVisibleText() = runBlocking {
         val runner = GenerationSubAgentRunner(
-            FakeGenerator(
+            FakeKernel(
                 error = IllegalArgumentException(
                     "invalid params: invalid function arguments json string for tool_call_id call_1"
                 )
@@ -55,7 +56,7 @@ class SubAgentRunnerTest {
 
     @Test
     fun ordinaryGenerationErrorIsNotTreatedAsCompletedEvenWithVisibleText() = runBlocking {
-        val runner = GenerationSubAgentRunner(FakeGenerator(error = IllegalStateException("network unavailable")))
+        val runner = GenerationSubAgentRunner(FakeKernel(error = IllegalStateException("network unavailable")))
 
         val result = runner.run(
             settings = settings(),
@@ -73,7 +74,7 @@ class SubAgentRunnerTest {
     @Test
     fun toolEnabledRunDoesNotFallbackOnReportToolArgumentError() = runBlocking {
         val runner = GenerationSubAgentRunner(
-            FakeGenerator(
+            FakeKernel(
                 error = IllegalArgumentException(
                     "invalid params: invalid function arguments json string for tool_call_id call_1"
                 )
@@ -117,7 +118,7 @@ class SubAgentRunnerTest {
             ),
         )
         val runner = GenerationSubAgentRunner(
-            FakeGenerator(
+            FakeKernel(
                 assistantMessage = UIMessage(
                     role = MessageRole.ASSISTANT,
                     parts = listOf(searchTool, UIMessagePart.Text(visibleAnswer)),
@@ -139,6 +140,50 @@ class SubAgentRunnerTest {
         assertEquals(SubAgentRunStatus.COMPLETED, result.status)
         assertEquals(visibleAnswer, liveText.value)
         assertTrue(liveParts.value.any { it is UIMessagePart.Tool && it.toolName == "search_web" })
+    }
+
+    @Test
+    fun narrowedParentPolicyReachesTheChildSession() = runBlocking {
+        val kernel = SessionCapturingKernel()
+        val runner = GenerationSubAgentRunner(kernel)
+        val liveText = MutableStateFlow("")
+        val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
+
+        // Parent narrows the child's sandbox (allowShell=false); the payload
+        // carries no extra narrowing. The child session must carry exactly the
+        // parent policy — a child can never widen it.
+        runner.run(
+            settings = settings(),
+            definition = definition(toolAllowlist = emptySet()),
+            task = task(),
+            tools = emptyList(),
+            liveText = liveText,
+            liveParts = liveParts,
+            parentPolicy = app.amber.feature.runtime.ExecutionPolicy(allowShell = false),
+        )
+
+        // (The runner may issue a second report-retry kernel run; every child
+        // session must carry the same policy.)
+        val seen = kernel.sessions.first().executionPolicy
+        assertEquals(false, seen.allowShell)
+        assertTrue(kernel.sessions.all { it.executionPolicy == seen })
+
+        // Parent-permissive + payload narrowing: the child policy passes through.
+        val kernel2 = SessionCapturingKernel()
+        GenerationSubAgentRunner(kernel2).run(
+            settings = settings(),
+            definition = definition(toolAllowlist = emptySet()),
+            task = task(),
+            tools = emptyList(),
+            liveText = MutableStateFlow(""),
+            liveParts = MutableStateFlow(emptyList()),
+            childPolicy = app.amber.feature.runtime.ExecutionPolicy(
+                allowedDomains = listOf("example.com"),
+            ),
+        )
+        val narrowed = kernel2.sessions.first().executionPolicy
+        assertEquals(listOf("example.com"), narrowed.allowedDomains)
+        assertEquals(true, narrowed.allowShell)
     }
 
     private fun settings(): Settings {
@@ -173,32 +218,23 @@ class SubAgentRunnerTest {
         boundaries = "Do not use external sources.",
     )
 
-    private inner class FakeGenerator(
+    private inner class FakeKernel(
         private val error: Throwable? = null,
         private val assistantMessage: UIMessage = UIMessage.assistant(visibleAnswer),
-    ) : Generator {
-        override fun generateText(
-            settings: Settings,
-            model: Model,
-            messages: List<UIMessage>,
-            inputTransformers: List<InputMessageTransformer>,
-            outputTransformers: List<OutputMessageTransformer>,
-            memories: List<AssistantMemory>?,
-            tools: List<Tool>,
-            maxSteps: Int,
-            processingStatus: MutableStateFlow<String?>,
-            autoApproveTools: Boolean,
-            autoApproveHighRiskTools: Boolean,
-            autoApprovedToolNames: Set<String>,
-            invocationContext: ToolInvocationContext,
-            conversation: Conversation?,
-            consumeSteerMessages: suspend () -> List<UIMessage>,
-            runId: String?,
-            onTerminal: (suspend (GenerationTerminal) -> Unit)?,
-            responsesResume: app.amber.ai.provider.ResponsesResumeRequest?,
-        ): Flow<GenerationChunk> = flow {
-            emit(GenerationChunk.Messages(messages + assistantMessage))
+    ) : RunKernel {
+        override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
+            emit(GenerationChunk.Messages(session.messages + assistantMessage))
             error?.let { throw it }
+        }
+    }
+
+    /** Records every session the kernel is asked to run. */
+    private inner class SessionCapturingKernel : RunKernel {
+        val sessions = mutableListOf<GenerationRunSession>()
+
+        override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
+            sessions += session
+            emit(GenerationChunk.Messages(session.messages + UIMessage.assistant(visibleAnswer)))
         }
     }
 }

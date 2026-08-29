@@ -22,8 +22,10 @@ import app.amber.common.http.AcceptLanguageBuilder
 import app.amber.agent.BuildConfig
 import app.amber.core.ai.AIRequestInterceptor
 import app.amber.core.ai.RequestLoggingInterceptor
-import app.amber.core.ai.ChatRunCoordinator
-import app.amber.core.ai.Generator
+import app.amber.core.ai.ChatGenerationRoundEngine
+import app.amber.core.ai.DefaultRunKernel
+import app.amber.core.ai.GenerationRoundEngine
+import app.amber.core.ai.RunKernel
 import app.amber.core.ai.tools.LocalTools
 import app.amber.core.ai.transformers.TemplateTransformer
 import app.amber.feature.miniapp.MiniAppAiBridge
@@ -526,7 +528,8 @@ val dataSourceModule = module {
     // P1-02/P1-03: cold-start recovery — reconciles ledger effects and keeps
     // WAITING_USER runs resumable after process death. P6-01: also resolves
     // runs with a stored server-side OpenAI Response (status query + missing
-    // event fetch + terminal settle) when the capability is on.
+    // event fetch + terminal settle) when the capability is on. Step 3-4:
+    // every run_terminal settle is mirrored into the protocol run row.
     single {
         RunRecoveryService(
             ledger = get(),
@@ -536,6 +539,7 @@ val dataSourceModule = module {
             storedResponseGateway = get(),
             capabilityFlags = get(),
             resumeStore = get(),
+            agentEventStore = get(),
         )
     }
 
@@ -556,22 +560,28 @@ val dataSourceModule = module {
     }
 
     single {
-        ChatRunCoordinator(
+        ChatGenerationRoundEngine(
             context = get(),
             providerCatalog = get(),
             json = get(),
-            memoryRepo = get(),
             memoryRecallStore = get(),
             conversationRepo = get(),
             aiLoggingManager = get(),
             conversationContextEngine = get(),
+        )
+    }
+    single {
+        DefaultRunKernel(
+            context = get(),
             toolDispatcher = get(),
+            roundEngine = get(),
             toolEffectLedger = get(),
             capabilityFlags = get(),
             capabilityPermissionStore = get(),
         )
     }
-    single<Generator> { get<ChatRunCoordinator>() }
+    single<GenerationRoundEngine> { get<ChatGenerationRoundEngine>() }
+    single<RunKernel> { get<DefaultRunKernel>() }
 
     single<OkHttpClient> {
         val acceptLang = AcceptLanguageBuilder.fromAndroid(get())

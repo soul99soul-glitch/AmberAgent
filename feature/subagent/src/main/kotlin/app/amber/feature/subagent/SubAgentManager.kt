@@ -23,10 +23,15 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.agent.runtime.AgentRunId
+import app.amber.core.agent.runtime.AgentRunner
+import app.amber.core.agent.runtime.RunStatus
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
+import app.amber.core.settings.Settings
 import app.amber.feature.history.SessionAccessGrantStore
+import app.amber.feature.runtime.ExecutionPolicy
 import app.amber.core.infra.AppScope
 import app.amber.feature.task.AgentTaskSnapshot
 import app.amber.feature.task.AgentTaskOutputRef
@@ -46,9 +51,17 @@ class SubAgentManager(
     private val appScope: AppScope,
     private val settingsStore: SettingsAggregator,
     private val json: Json,
-    private val runner: SubAgentRunner,
     private val agentTaskStore: AgentTaskStore,
     private val sessionAccessGrantStore: SessionAccessGrantStore,
+    /**
+     * Kernel entry: every generation turn runs as an [AgentRunner] run
+     * (descriptor [SubAgentTurnDescriptor]). The manager owns the durable
+     * THREAD lifecycle (ThreadGraphStore); the runner owns the per-turn RUN
+     * lifecycle (run row + CAS + artifact). Runtime objects reach the turn
+     * handler through [turnPayloads], keyed by the per-turn run id.
+     */
+    private val agentRunner: AgentRunner,
+    private val turnPayloads: SubAgentTurnPayloads,
     // P4-02: persistent thread graph (thread_graph_v2 flag). Null/flag-off
     // keeps the exact legacy in-memory behavior — no store writes, no reads.
     private val threadGraphStore: ThreadGraphStore? = null,
@@ -88,6 +101,11 @@ class SubAgentManager(
         input: JsonObject,
         parentTools: List<Tool>,
         parentRunId: String? = null,
+        /**
+         * P1-7: the parent run's sandbox policy at subagent_start time. Null
+         * (producer cannot know it) keeps the permissive v1 default.
+         */
+        parentPolicy: ExecutionPolicy? = null,
     ): JsonObject = withContext(Dispatchers.IO) {
         val settings = settingsStore.settingsFlow.value
         val subAgentSetting = settings.agentRuntime.subAgent
@@ -229,45 +247,28 @@ class SubAgentManager(
             mailboxes[runId] = Channel(Channel.UNLIMITED)
         }
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
-            val result = try {
-                withTimeout(definition.timeoutMs) {
-                    runner.run(
-                        settings,
-                        effectiveDefinition,
-                        effectiveTask,
-                        scopedSubAgentTools(allowedTools),
-                        liveText,
-                        liveParts,
-                        // P4-02: runId + onTerminal activate the generator's
-                        // durable path for this child run — child tool effects
-                        // land in the unified ToolEffectLedger under the child
-                        // runId (plan §P4-02). onTerminal only handles the
-                        // pause (approval); terminal states are persisted by
-                        // finish() once the runner returns.
-                        runId = if (threadGraph) runId else null,
-                        onTerminal = if (threadGraph) {
-                            { terminal -> handleChildTerminal(runtimeRun, terminal) }
-                        } else {
-                            null
-                        },
-                        consumeSteerMessages = if (threadGraph) {
-                            { drainMailbox(runId) }
-                        } else {
-                            { emptyList() }
-                        },
-                    )
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                return@launch
-            } catch (error: Throwable) {
-                val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
+        if (!launchTurn(
+                runtimeRun = runtimeRun,
+                settings = settings,
+                tools = scopedSubAgentTools(allowedTools),
+                liveText = liveText,
+                liveParts = liveParts,
+                threadGraph = threadGraph,
+                previousAnswer = "",
+                parentConversationId = parentConversationId,
+                parentRunId = parentRunId,
+                followup = false,
+                parentPolicy = parentPolicy,
+            )
+        ) {
+            finish(
+                runId,
                 SubAgentResult(
-                    status = if (timedOut) SubAgentRunStatus.TIMED_OUT else SubAgentRunStatus.FAILED,
-                    error = error.message ?: error::class.java.simpleName,
-                )
-            }
-            finish(runId, result, displayText = liveText.value)
+                    status = SubAgentRunStatus.FAILED,
+                    error = "Sub-agent turn agent is not registered in the kernel.",
+                ),
+            )
+            return@withContext errorPayload("launch_failed", "Sub-agent turn could not be launched.")
         }
 
         runToPayload(run)
@@ -315,7 +316,8 @@ class SubAgentManager(
     suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.IO) {
         val runtimeRun = runs[runId]
         if (runtimeRun != null) {
-            runtimeRun.job?.cancel()
+            runtimeRun.pendingTerminal = SubAgentRunStatus.CANCELLED
+            runtimeRun.turnRunId?.let(agentRunner::cancel)
             finish(
                 runId,
                 SubAgentResult(
@@ -349,6 +351,8 @@ class SubAgentManager(
         input: JsonObject,
         parentTools: List<Tool>,
         parentRunId: String? = null,
+        /** P1-7: same contract as [start] — the calling run's sandbox policy. */
+        parentPolicy: ExecutionPolicy? = null,
     ): JsonObject = withContext(Dispatchers.IO) {
         if (!threadGraphEnabled()) {
             return@withContext errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
@@ -390,6 +394,7 @@ class SubAgentManager(
             parentTools = parentTools,
             parentRunId = parentRunId,
             previousAnswer = restored.previousAnswer,
+            parentPolicy = parentPolicy,
         )
         read(threadId)
     }
@@ -444,7 +449,8 @@ class SubAgentManager(
             if (live.status != SubAgentRunStatus.RUNNING) {
                 return@withContext errorPayload("thread_not_running", "Thread $threadId is not running.")
             }
-            runtimeRun.job?.cancel()
+            runtimeRun.pendingTerminal = SubAgentRunStatus.INTERRUPTED
+            runtimeRun.turnRunId?.let(agentRunner::cancel)
             // Preserve the thread: status INTERRUPTED + a result carrying the
             // text produced so far; the node stays (followup can continue it).
             // The terminal snapshot is written back under the run lock (same
@@ -493,7 +499,8 @@ class SubAgentManager(
             ) {
                 val live = runs[node.threadId]
                 if (live != null) {
-                    live.job?.cancel()
+                    live.pendingTerminal = SubAgentRunStatus.CANCELLED
+                    live.turnRunId?.let(agentRunner::cancel)
                     finish(
                         node.threadId,
                         SubAgentResult(
@@ -745,6 +752,7 @@ class SubAgentManager(
         parentTools: List<Tool>,
         parentRunId: String?,
         previousAnswer: String,
+        parentPolicy: ExecutionPolicy?,
     ) {
         val settings = settingsStore.settingsFlow.value
         val now = Instant.now().toEpochMilli()
@@ -786,32 +794,166 @@ class SubAgentManager(
                 mailboxes[threadId]?.trySend(UIMessage.user(message.payload))
             }
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
-            val result = try {
-                withTimeout(definition.timeoutMs) {
-                    runner.run(
-                        settings,
-                        definition,
-                        task,
-                        scopedSubAgentTools(allowedTools),
-                        liveText,
-                        liveParts,
-                        runId = threadId,
-                        onTerminal = { terminal -> handleChildTerminal(runtimeRun, terminal) },
-                        consumeSteerMessages = { drainMailbox(threadId) },
-                        previousAnswer = previousAnswer,
-                    )
-                }
-            } catch (error: kotlinx.coroutines.CancellationException) {
-                return@launch
-            } catch (error: Throwable) {
-                val timedOut = error is kotlinx.coroutines.TimeoutCancellationException
+        if (!launchTurn(
+                runtimeRun = runtimeRun,
+                settings = settings,
+                tools = scopedSubAgentTools(allowedTools),
+                liveText = liveText,
+                liveParts = liveParts,
+                threadGraph = true,
+                previousAnswer = previousAnswer,
+                parentConversationId = parentConversationId,
+                parentRunId = parentRunId,
+                followup = true,
+                parentPolicy = parentPolicy,
+            )
+        ) {
+            finish(
+                threadId,
                 SubAgentResult(
-                    status = if (timedOut) SubAgentRunStatus.TIMED_OUT else SubAgentRunStatus.FAILED,
-                    error = error.message ?: error::class.java.simpleName,
+                    status = SubAgentRunStatus.FAILED,
+                    error = "Sub-agent turn agent is not registered in the kernel.",
+                ),
+            )
+        }
+    }
+
+    /**
+     * Launch one generation turn of a thread as an [AgentRunner] run. The
+     * threadId stays the durable thread identity; the turn gets a FRESH run
+     * id so a followup never re-opens a run row that already reached a
+     * write-once terminal state. Returns false when the turn agent is not
+     * registered (the caller settles the thread as FAILED).
+     */
+    private fun launchTurn(
+        runtimeRun: RuntimeRun,
+        settings: Settings,
+        tools: List<Tool>,
+        liveText: MutableStateFlow<String>,
+        liveParts: MutableStateFlow<List<UIMessagePart>>,
+        threadGraph: Boolean,
+        previousAnswer: String,
+        parentConversationId: Uuid,
+        parentRunId: String?,
+        followup: Boolean,
+        parentPolicy: ExecutionPolicy?,
+    ): Boolean {
+        val threadId = runtimeRun.snapshot.runId
+        val turnRunId = AgentRunId.new()
+        // P4-02: kernelRunId + onTerminal activate the kernel's durable path
+        // for this child turn — child tool effects land in the unified
+        // ToolEffectLedger under the per-turn run id. onTerminal only handles
+        // the pause (approval); terminal states are persisted by finish()
+        // once the turn's artifact lands.
+        turnPayloads.register(
+            turnRunId.value,
+            SubAgentTurnPayloads.Payload(
+                threadId = threadId,
+                settings = settings,
+                definition = runtimeRun.snapshot.definition,
+                task = runtimeRun.snapshot.task,
+                tools = tools,
+                liveText = liveText,
+                liveParts = liveParts,
+                kernelRunId = if (threadGraph) turnRunId.value else null,
+                onTerminal = if (threadGraph) {
+                    { terminal -> handleChildTerminal(runtimeRun, terminal) }
+                } else {
+                    null
+                },
+                consumeSteerMessages = if (threadGraph) {
+                    { drainMailbox(threadId) }
+                } else {
+                    { emptyList() }
+                },
+                previousAnswer = previousAnswer,
+                parentPolicy = parentPolicy,
+            ),
+        )
+        val handle = agentRunner.launch(
+            SubAgentTurnDescriptor.ID,
+            SubAgentTurnInput(
+                threadId = threadId,
+                parentConversationId = parentConversationId.toString(),
+                parentRunId = parentRunId,
+                definitionId = runtimeRun.snapshot.definition.id,
+                objective = runtimeRun.snapshot.task.objective,
+                followup = followup,
+            ),
+            requestedRunId = turnRunId,
+        ).getOrElse {
+            turnPayloads.remove(turnRunId.value)
+            return false
+        }
+        runtimeRun.turnRunId = handle.runId
+        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+            awaitTurnTerminal(runtimeRun, handle.runId)
+        }
+        return true
+    }
+
+    /**
+     * Settle the thread from its turn's terminal (or approval-pause) state.
+     * A completed/parked turn carries the [SubAgentResult] artifact; a FAILED
+     * run carries the cause. The turn timeout is enforced here, at the
+     * manager: on expiry the turn is cancelled and the thread settles as
+     * TIMED_OUT (pendingTerminal tells the observer the manager owns the
+     * terminal write for manager-initiated cancel/interrupt/timeout).
+     */
+    private suspend fun awaitTurnTerminal(runtimeRun: RuntimeRun, turnRunId: AgentRunId) {
+        val threadId = runtimeRun.snapshot.runId
+        try {
+            val snapshot = try {
+                withTimeout(runtimeRun.snapshot.definition.timeoutMs) {
+                    agentRunner.observe(turnRunId).first { it.status.isTerminal || it.status.isPause }
+                }
+            } catch (timeout: kotlinx.coroutines.TimeoutCancellationException) {
+                runtimeRun.pendingTerminal = SubAgentRunStatus.TIMED_OUT
+                agentRunner.cancel(turnRunId)
+                finish(
+                    threadId,
+                    SubAgentResult(
+                        status = SubAgentRunStatus.TIMED_OUT,
+                        error = timeout.message ?: "Subagent turn timed out.",
+                    ),
+                    displayText = liveTextFlows[threadId]?.value.orEmpty(),
                 )
+                return
             }
-            finish(threadId, result, displayText = liveText.value)
+            val displayText = liveTextFlows[threadId]?.value.orEmpty()
+            when {
+                // COMPLETED and a realigned approval pause both carry the
+                // result artifact (the runner keeps it on the snapshot when
+                // the terminal CAS is rejected by a persisted pause).
+                snapshot.artifact is SubAgentResult ->
+                    finish(threadId, snapshot.artifact as SubAgentResult, displayText)
+
+                snapshot.status == RunStatus.CANCELLED && runtimeRun.pendingTerminal != null -> Unit
+
+                // Defensive: a turn cancelled without the manager initiating
+                // it must not leave the thread RUNNING forever.
+                snapshot.status == RunStatus.CANCELLED ->
+                    finish(
+                        threadId,
+                        SubAgentResult(
+                            status = SubAgentRunStatus.CANCELLED,
+                            summary = "Subagent run was cancelled.",
+                        ),
+                        displayText,
+                    )
+
+                else ->
+                    finish(
+                        threadId,
+                        SubAgentResult(
+                            status = SubAgentRunStatus.FAILED,
+                            error = snapshot.error?.message ?: "Subagent turn ended ${snapshot.status}",
+                        ),
+                        displayText,
+                    )
+            }
+        } finally {
+            turnPayloads.remove(turnRunId.value)
         }
     }
 
@@ -885,7 +1027,16 @@ class SubAgentManager(
 
     private class RuntimeRun(
         @Volatile var snapshot: SubAgentRun,
+        /** Awaits the current turn's terminal/pause and settles the thread. */
         @Volatile var job: Job? = null,
+        /** Run id of the in-flight generation turn (null between turns). */
+        @Volatile var turnRunId: AgentRunId? = null,
+        /**
+         * Set by manager-initiated cancel/interrupt/timeout BEFORE the turn
+         * is cancelled, so the awaiter knows the manager owns the terminal
+         * write (and which status) when the runner reports CANCELLED.
+         */
+        @Volatile var pendingTerminal: SubAgentRunStatus? = null,
         /** P1-03: the generator reported StepLimit for this run (see [finish]). */
         @Volatile var stepLimited: Boolean = false,
     )

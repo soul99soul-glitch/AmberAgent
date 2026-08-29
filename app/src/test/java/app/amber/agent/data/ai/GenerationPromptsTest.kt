@@ -3,7 +3,6 @@ package app.amber.core.ai
 import app.amber.ai.provider.Model
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
 import app.amber.core.settings.GenerativeUiSetting
-import app.amber.core.model.AssistantMemory
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -16,24 +15,6 @@ class GenerationPromptsTest {
         assertTrue(prompt.contains("<agents_md>"))
         assertTrue(prompt.contains("Stay agentic."))
         assertTrue(prompt.contains("</agents_md>"))
-    }
-
-    @Test
-    fun memoryPromptSkipsEmptyBuckets() {
-        val prompt = buildLongTermMemoryPrompt(emptyList())
-
-        assertTrue(prompt.isEmpty())
-    }
-
-    @Test
-    fun memoryPromptLabelsLayer() {
-        val prompt = buildShortTermMemoryPrompt(
-            listOf(AssistantMemory(id = 7, content = "Current task is packaging a skill."))
-        )
-
-        assertTrue(prompt.contains("Short-Term Memories"))
-        assertTrue(prompt.contains("Current task is packaging a skill."))
-        assertFalse(prompt.contains("Long-Term Memories"))
     }
 
     @Test

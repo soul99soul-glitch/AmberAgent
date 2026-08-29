@@ -157,6 +157,7 @@ object PreparedContextEditor {
             val text = part.text
             text.contains("\"status\":\"failed\"", ignoreCase = true) ||
                 text.contains("\"status\":\"denied\"", ignoreCase = true) ||
+                text.contains("\"status\":\"policy_denied\"", ignoreCase = true) ||
                 text.contains("\"approval_required\"", ignoreCase = true) ||
                 text.contains("\"error\"", ignoreCase = true)
         }

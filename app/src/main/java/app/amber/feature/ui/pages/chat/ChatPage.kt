@@ -1510,7 +1510,7 @@ private fun JsonObject.indicatesFailure(): Boolean {
     return !error.isNullOrBlank() ||
         (exitCode != null && exitCode != 0) ||
         failed ||
-        status in setOf("failed", "error", "denied", "timed_out", "interrupted")
+        status in setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
 }
 
 private fun UIMessagePart.Tool.outputTail(outputJson: JsonObject): String {

@@ -6,7 +6,8 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
 import app.amber.core.ai.transformers.InputMessageTransformer
 import app.amber.core.ai.transformers.OutputMessageTransformer
 import app.amber.core.settings.Settings
@@ -44,6 +45,91 @@ class NovelWorkspaceRuntimeTest {
     val tempFolder = TemporaryFolder()
 
     private val exportedAt = Instant.parse("2026-08-19T00:00:00Z")
+
+    /**
+     * Coordinator wired through the real kernel chain (registry + runner +
+     * payload mailbox) with the scripted fake kernel behind the runtime —
+     * ghostwrite chapters now execute as AgentRunner runs.
+     */
+    /**
+     * Coordinator wired through the real kernel chain (registry + runner +
+     * payload mailbox) with the scripted fake kernel behind the runtime —
+     * ghostwrite chapters now execute as AgentRunner runs. The runner shares
+     * the test scheduler so `withTimeout` in the coordinator and the handler
+     * run on the same (virtual) clock.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private fun ghostwriteCoordinator(
+        runtime: NovelWorkspaceRuntime,
+        scheduler: kotlinx.coroutines.test.TestCoroutineScheduler? = null,
+        eventStore: app.amber.core.agent.runtime.InMemoryAgentEventStore? = null,
+    ): NovelWorkspaceGhostwriteCoordinator {
+        val payloads = NovelTurnPayloads()
+        val registry = app.amber.core.agent.runtime.impl.InMemoryAgentRegistry().apply {
+            register(
+                descriptor = NovelTurnDescriptor.value,
+                inputClass = NovelTurnInput::class,
+                inputSerializer = NovelTurnInput.serializer(),
+                artifactSerializer = NovelTurnArtifact.serializer(),
+                factory = { NovelTurnAgent(payloads) },
+            )
+        }
+        val scope = scheduler?.let {
+            kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() +
+                    kotlinx.coroutines.test.StandardTestDispatcher(it),
+            )
+        }
+        // Step 3: when the test shares the store, scopes get the real
+        // persisting writer so the turn's domain events land in agent_event.
+        val scopeFactory: ((app.amber.core.agent.runtime.AgentRunId, app.amber.core.agent.runtime.AgentInput) -> app.amber.core.agent.runtime.RunScope)? =
+            eventStore?.let { store ->
+                val codecs = mapOf(
+                    NovelTurnEventPayload.ToolActivity::class.qualifiedName!! to
+                        app.amber.core.agent.runtime.AgentEventPayloadCodec(
+                            NovelTurnEventPayload.TYPE_TOOL_ACTIVITY,
+                            NovelTurnEventPayload.ToolActivity.serializer(),
+                        ),
+                    NovelTurnEventPayload.TurnCompleted::class.qualifiedName!! to
+                        app.amber.core.agent.runtime.AgentEventPayloadCodec(
+                            NovelTurnEventPayload.TYPE_TURN_COMPLETED,
+                            NovelTurnEventPayload.TurnCompleted.serializer(),
+                        ),
+                    NovelTurnEventPayload.TurnFailed::class.qualifiedName!! to
+                        app.amber.core.agent.runtime.AgentEventPayloadCodec(
+                            NovelTurnEventPayload.TYPE_TURN_FAILED,
+                            NovelTurnEventPayload.TurnFailed.serializer(),
+                        ),
+                )
+                ({ runId, _ ->
+                    app.amber.core.agent.runtime.adapter.LegacyRunScope(
+                        runId = runId,
+                        events = app.amber.core.agent.runtime.impl.PersistingEventWriter(
+                            runId = runId,
+                            parentRunId = null,
+                            agentDescriptorId = NovelTurnDescriptor.ID.value,
+                            store = store,
+                            json = kotlinx.serialization.json.Json,
+                            codecs = codecs,
+                        ),
+                    )
+                })
+            }
+        val runner = app.amber.core.agent.runtime.impl.InProcessAgentRunner(
+            registry,
+            eventStore ?: app.amber.core.agent.runtime.InMemoryAgentEventStore(),
+            runScopeFactory = scopeFactory ?: { id, _ ->
+                app.amber.core.agent.runtime.adapter.LegacyRunScope(runId = id)
+            },
+            scope = scope ?: kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+            ),
+        )
+        return NovelWorkspaceGhostwriteCoordinator(
+            runtime,
+            NovelTurnLauncher(runner, payloads),
+        )
+    }
 
     private fun installProject(): File {
         val dir = tempFolder.root.resolve("project")
@@ -90,7 +176,7 @@ class NovelWorkspaceRuntimeTest {
     }
 
     /** Mimics GenerationHandler: executes tool calls itself, then produces the final answer. */
-    private class LoopingFakeGenerator(
+    private class LoopingFakeKernel(
         private val toolCalls: List<Pair<String, JsonElement>>,
         private val finalText: String,
         /** First N generateText calls throw, simulating transient provider failures. */
@@ -99,36 +185,17 @@ class NovelWorkspaceRuntimeTest {
         private val failAfterTools: Boolean = false,
         /** Test hook for a durable owner change while the provider turn is in flight. */
         private val beforeFinal: (() -> Unit)? = null,
-    ) : Generator {
+    ) : RunKernel {
         var calls = 0
         var lastAutoApprovedToolNames: Set<String> = emptySet()
 
-        override fun generateText(
-            settings: Settings,
-            model: Model,
-            messages: List<UIMessage>,
-            inputTransformers: List<InputMessageTransformer>,
-            outputTransformers: List<OutputMessageTransformer>,
-            memories: List<app.amber.core.model.AssistantMemory>?,
-            tools: List<Tool>,
-            maxSteps: Int,
-            processingStatus: MutableStateFlow<String?>,
-            autoApproveTools: Boolean,
-            autoApproveHighRiskTools: Boolean,
-            autoApprovedToolNames: Set<String>,
-            invocationContext: app.amber.feature.runtime.ToolInvocationContext,
-            conversation: app.amber.core.model.Conversation?,
-            consumeSteerMessages: suspend () -> List<UIMessage>,
-            runId: String?,
-            onTerminal: (suspend (app.amber.core.ai.GenerationTerminal) -> Unit)?,
-            responsesResume: app.amber.ai.provider.ResponsesResumeRequest?,
-        ): Flow<GenerationChunk> = flow {
+        override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
             calls += 1
-            lastAutoApprovedToolNames = autoApprovedToolNames
+            lastAutoApprovedToolNames = session.autoApprovedToolNames
             if (calls <= failFirstNCalls) throw RuntimeException("provider 429")
             val executed = mutableListOf<UIMessagePart.Tool>()
             for ((name, input) in toolCalls) {
-                val tool = tools.first { it.name == name }
+                val tool = session.tools.first { it.name == name }
                 val output = tool.execute(input)
                 executed.add(
                     UIMessagePart.Tool(
@@ -145,7 +212,7 @@ class NovelWorkspaceRuntimeTest {
                 role = MessageRole.ASSISTANT,
                 parts = executed + UIMessagePart.Text(finalText),
             )
-            emit(GenerationChunk.Messages(messages + assistant))
+            emit(GenerationChunk.Messages(session.messages + assistant))
         }
     }
 
@@ -163,7 +230,7 @@ class NovelWorkspaceRuntimeTest {
     fun `free writes land immediately, canon writes wait for the author`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     // drafts/ is free: must land during the turn.
                     "novel_workspace_write" to buildJsonObject {
@@ -217,7 +284,7 @@ class NovelWorkspaceRuntimeTest {
     fun `reject drops the proposal without touching the book`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/主线/plot/current.md")
@@ -251,7 +318,7 @@ class NovelWorkspaceRuntimeTest {
         session.tools().forEach { tool ->
             assertFalse("${tool.name} must not pause the generic approval pipeline", tool.needsApproval)
         }
-        val generator = LoopingFakeGenerator(emptyList(), "完成。")
+        val generator = LoopingFakeKernel(emptyList(), "完成。")
         NovelWorkspaceRuntime(generator).runTurn(request(dir)).toList()
         assertEquals(setOf("novel_workspace_write"), generator.lastAutoApprovedToolNames)
     }
@@ -260,7 +327,7 @@ class NovelWorkspaceRuntimeTest {
     fun `model front matter never replaces host identity and host files refuse writes`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/主线/chapters/001-山呼.md")
@@ -293,7 +360,7 @@ class NovelWorkspaceRuntimeTest {
     fun `read list grep status tools answer from the store`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_list" to buildJsonObject { put("prefix", "branches/主线/chapters") },
                     "novel_workspace_read" to buildJsonObject { put("path", "branches/主线/chapters/001-山呼.md") },
@@ -322,7 +389,7 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `collect draft as new chapter commits and consumes the draft`() {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
         store.write(
             "drafts/abc12345.md",
@@ -357,7 +424,7 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `collect append keeps identity and replacing a middle chapter records the unresolved gate`() {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
 
         // Append keeps the chapter's host identity and joins the draft.
@@ -390,7 +457,7 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `manual edit preserves identity, commits, and gates middle edits`() {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
 
         // Edit the only chapter's title + body: identity preserved, one manual commit.
@@ -429,7 +496,7 @@ class NovelWorkspaceRuntimeTest {
     fun `autoApproveCanon writes canon directly and commits at turn end`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/主线/chapters/002-入汴.md")
@@ -475,8 +542,8 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `ghostwrite batch derives progress from the ledger, not a counter`() = runTest {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(runtime)
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
+        val coordinator = ghostwriteCoordinator(runtime, testScheduler)
         val store = NovelWorkspaceStore(dir)
 
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 2)
@@ -508,7 +575,7 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `undo last collect restores files, moves head back, and is single-level`() {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
         val headBefore = NovelWorkspaceLedger.load(dir).head
 
@@ -529,7 +596,7 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `ghostwrite batch retries a transient chapter failure exactly once`() = runTest {
         val dir = installProject()
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = listOf(
                 "novel_workspace_write" to buildJsonObject {
                     put("path", "branches/主线/chapters/002-入汴.md")
@@ -539,7 +606,7 @@ class NovelWorkspaceRuntimeTest {
             finalText = "第二章完成。",
             failFirstNCalls = 1,
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(
@@ -559,12 +626,12 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `ghostwrite batch fails with the surfaced error when the retry also fails`() = runTest {
         val dir = installProject()
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = emptyList(),
             finalText = "",
             failFirstNCalls = 5, // more failures than attempts: both must fail
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(
@@ -582,9 +649,54 @@ class NovelWorkspaceRuntimeTest {
     }
 
     @Test
+    fun `ghostwrite chapter writes its domain events into the run event stream`() = runTest {
+        val dir = installProject()
+        val generator = LoopingFakeKernel(
+            toolCalls = listOf(
+                "novel_workspace_write" to buildJsonObject {
+                    put("path", "branches/主线/chapters/002-入汴.md")
+                    put("content", "第二章正文。")
+                },
+            ),
+            finalText = "第二章完成。",
+        )
+        val eventStore = app.amber.core.agent.runtime.InMemoryAgentEventStore()
+        val coordinator = ghostwriteCoordinator(
+            NovelWorkspaceRuntime(generator),
+            testScheduler,
+            eventStore = eventStore,
+        )
+        val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
+
+        val result = coordinator.runBatch(
+            job = job,
+            projectDirectory = dir,
+            branchId = "B-1",
+            settings = Settings(),
+            model = Model(),
+            isPaused = { false },
+        ) { }
+        assertTrue(result is NovelWorkspaceGhostwriteCoordinator.BatchResult.Completed)
+
+        // Step 3: one runner run, carrying the turn's domain trail —
+        // tool activity first, then the terminal completion.
+        val runIds = eventStore.events.map { it.runId }.distinct()
+        assertEquals(1, runIds.size)
+        val types = eventStore.events.map { it.type }
+        assertEquals(
+            listOf(NovelTurnEventPayload.TYPE_TOOL_ACTIVITY, NovelTurnEventPayload.TYPE_TURN_COMPLETED),
+            types,
+        )
+        assertTrue(eventStore.events.all { it.agentDescriptorId == NovelTurnDescriptor.ID.value })
+        assertTrue(eventStore.events.all { it.isFinal })
+        val completed = eventStore.events.last()
+        assertTrue(completed.payload.contains("\"finalTextLength\":6")) // "第二章完成。"
+    }
+
+    @Test
     fun `ghostwrite canon writes are locked to one target chapter`() = runTest {
         val dir = installProject()
-        val runtime = NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), ""))
+        val runtime = NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), ""))
         val store = NovelWorkspaceStore(dir)
 
         // Give the book a second chapter so chapter 1 is a middle chapter (newest = 2).
@@ -592,7 +704,7 @@ class NovelWorkspaceRuntimeTest {
         runtime.collectDraft(dir, "B-1", "主线", "drafts/d1.md", NovelWorkspaceCollectTarget.NewChapter, chapterTitle = "入汴")
 
         val gw = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     // Older chapter: refused (would trip the D-D gate in this turn's commit).
                     "novel_workspace_write" to buildJsonObject {
@@ -667,7 +779,7 @@ class NovelWorkspaceRuntimeTest {
     fun `failed ghostwrite turn rolls back uncommitted canon writes`() = runTest {
         val dir = installProject()
         val runtime = NovelWorkspaceRuntime(
-            LoopingFakeGenerator(
+            LoopingFakeKernel(
                 toolCalls = listOf(
                     "novel_workspace_write" to buildJsonObject {
                         put("path", "branches/主线/chapters/002-入汴.md")
@@ -701,11 +813,11 @@ class NovelWorkspaceRuntimeTest {
     fun `narrated chapter answer is filed host-side when the model skips the write tool`() = runTest {
         val dir = installProject()
         val chapter = "赵大摸黑进了柴房。\n\n" + ("外头风声更紧了，他数着自己的心跳等天亮。" ).repeat(60)
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = emptyList(),
             finalText = "# 火起\n\n$chapter",
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(
@@ -732,7 +844,7 @@ class NovelWorkspaceRuntimeTest {
     fun `non-chapter tool commit does not suppress narrated chapter filing`() = runTest {
         val dir = installProject()
         val chapter = "赵大摸黑进了柴房。\n\n" + "外头风声更紧了，他数着自己的心跳等天亮。".repeat(60)
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = listOf(
                 "novel_workspace_write" to buildJsonObject {
                     put("path", "branches/主线/plan/this-chapter.md")
@@ -741,7 +853,7 @@ class NovelWorkspaceRuntimeTest {
             ),
             finalText = "# 火起\n\n$chapter",
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(
@@ -761,11 +873,11 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `short filler answer is not filed as a chapter`() = runTest {
         val dir = installProject()
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = emptyList(),
             finalText = "我先看一下现状。", // 72 chars of filler → below threshold
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         val job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(
@@ -813,8 +925,8 @@ class NovelWorkspaceRuntimeTest {
     @Test
     fun `job owner claim and conditional transitions preserve the latest user state`() {
         val dir = installProject()
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(
-            NovelWorkspaceRuntime(LoopingFakeGenerator(emptyList(), "")),
+        val coordinator = ghostwriteCoordinator(
+            NovelWorkspaceRuntime(LoopingFakeKernel(emptyList(), "")),
         )
         val first = coordinator.newJob(dir, "主线", targetChapterCount = 1)
         val duplicate = runCatching { coordinator.newJob(dir, "主线", targetChapterCount = 1) }
@@ -863,7 +975,7 @@ class NovelWorkspaceRuntimeTest {
     fun `pause during provider turn prevents the chapter commit`() = runTest {
         val dir = installProject()
         lateinit var job: NovelWorkspaceGhostwriteJob
-        val generator = LoopingFakeGenerator(
+        val generator = LoopingFakeKernel(
             toolCalls = listOf(
                 "novel_workspace_write" to buildJsonObject {
                     put("path", "branches/主线/plan/this-chapter.md")
@@ -884,7 +996,7 @@ class NovelWorkspaceRuntimeTest {
                 )
             },
         )
-        val coordinator = NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(generator))
+        val coordinator = ghostwriteCoordinator(NovelWorkspaceRuntime(generator), testScheduler)
         job = coordinator.newJob(dir, "主线", targetChapterCount = 1)
 
         val result = coordinator.runBatch(

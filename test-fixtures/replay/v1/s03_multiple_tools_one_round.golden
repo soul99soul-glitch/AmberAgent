@@ -1,0 +1,10 @@
+# amber-replay-golden schema=v1 scenario=s03_multiple_tools_one_round
+run_started
+tool_prepared tool=golden_lookup_a
+tool_prepared tool=golden_lookup_b
+tool_started tool=golden_lookup_a
+tool_started tool=golden_lookup_b
+tool_finished tool=golden_lookup_a status=finished
+tool_finished tool=golden_lookup_b status=finished
+assistant_message
+run_terminal status=completed

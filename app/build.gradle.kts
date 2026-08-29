@@ -263,6 +263,13 @@ android {
                 "updateMarkdownSnapshots",
                 (project.findProperty("updateMarkdownSnapshots") as? String) ?: "false",
             )
+            // Replay goldens (test-fixtures/replay/v1): same regen pattern —
+            // ./gradlew :app:testDebugUnitTest --tests "*ReplayGoldenTest" -PupdateGoldens=true
+            it.systemProperty(
+                "updateGoldens",
+                (project.findProperty("updateGoldens") as? String) ?: "false",
+            )
+            it.systemProperty("goldenDir", rootProject.file("test-fixtures").absolutePath)
         }
     }
     sourceSets {

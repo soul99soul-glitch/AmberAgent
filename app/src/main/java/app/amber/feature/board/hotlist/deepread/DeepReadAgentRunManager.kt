@@ -25,7 +25,9 @@ import app.amber.feature.subagent.toIsolatedSubAgentSettings
 import app.amber.feature.tools.AgentToolSetFactory
 import app.amber.feature.tools.DeepReadToolDescriptionContext
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
+import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
@@ -37,7 +39,7 @@ import kotlin.uuid.Uuid
 
 class DeepReadAgentRunManager(
     private val settingsStore: SettingsAggregator,
-    private val generator: Generator,
+    private val kernel: RunKernel,
     private val hotListRepository: HotListRepository,
     private val toolSetFactory: AgentToolSetFactory,
     private val sourcePrefetcher: DeepReadSourcePrefetcher,
@@ -60,6 +62,11 @@ class DeepReadAgentRunManager(
         val articlePlan: DeepReadArticlePlan,
         val playbookMarkdown: String,
         val writer: DeepReadSectionWriterTools,
+        // Step 5: the run scope's identity + protocol event writer, threaded
+        // from the DeepRead agent handler so kernel rounds can leave a durable
+        // audit trail. Null on bare/background callers (no run scope).
+        val runId: String?,
+        val events: AgentEventWriter?,
     )
 
     suspend fun runPreview(
@@ -94,6 +101,8 @@ class DeepReadAgentRunManager(
         seedUrl: String? = null,
         deferMissingStages: Boolean = true,
         propagateFailuresWithPartial: Boolean = false,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
         if (force) hotListRepository.clearDeepRead(topicId)
 
@@ -130,6 +139,8 @@ class DeepReadAgentRunManager(
             seedUrl = seedUrl,
             force = force,
             propagateFailuresWithPartial = propagateFailuresWithPartial,
+            runId = runId,
+            events = events,
         )
     }
 
@@ -139,6 +150,8 @@ class DeepReadAgentRunManager(
         stage: DeepReadGenerationStage,
         seedUrl: String? = null,
         propagateFailuresWithPartial: Boolean = false,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): Result<DeepReadOutput> = topicMutex(topicId).withLock {
         markSectionRunning(topicId, topicTitle, seedUrl, stage)
         generateStages(
@@ -149,6 +162,8 @@ class DeepReadAgentRunManager(
             markCollecting = false,
             planningPhase = DeepReadGenerationPhase.WRITING,
             propagateFailuresWithPartial = propagateFailuresWithPartial,
+            runId = runId,
+            events = events,
         )
     }
 
@@ -205,6 +220,8 @@ class DeepReadAgentRunManager(
         markCollecting: Boolean = true,
         planningPhase: DeepReadGenerationPhase = DeepReadGenerationPhase.PLANNING,
         propagateFailuresWithPartial: Boolean = false,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): Result<DeepReadOutput> {
         val context = createRunContext(
             topicId = topicId,
@@ -213,6 +230,8 @@ class DeepReadAgentRunManager(
             force = force,
             markCollecting = markCollecting,
             planningPhase = planningPhase,
+            runId = runId,
+            events = events,
         ).getOrElse { error ->
             if (error is CancellationException) throw error
             return Result.failure(error)
@@ -302,6 +321,8 @@ class DeepReadAgentRunManager(
         force: Boolean,
         markCollecting: Boolean,
         planningPhase: DeepReadGenerationPhase,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): Result<DeepReadRunContext> {
         return try {
             val settings = settingsStore.settingsFlow.value
@@ -367,6 +388,8 @@ class DeepReadAgentRunManager(
                 topicTitle = topicTitle,
                 evidencePack = evidencePack,
                 playbookMarkdown = playbook.markdown,
+                runId = runId,
+                events = events,
             )
             Result.success(
                 DeepReadRunContext(
@@ -380,6 +403,8 @@ class DeepReadAgentRunManager(
                     articlePlan = articlePlan,
                     playbookMarkdown = playbook.markdown,
                     writer = writer,
+                    runId = runId,
+                    events = events,
                 )
             )
         } catch (cancel: CancellationException) {
@@ -476,6 +501,8 @@ class DeepReadAgentRunManager(
                         tools = stageTools,
                         writerToolNames = stageWriterToolNamesSet,
                         statusLabel = "深度阅读 ${stage.label}",
+                        runId = context.runId,
+                        events = context.events,
                     )
                 }
                 val stageReady = writer.currentOutput().statusOf(stage) == DeepReadSectionStatus.READY
@@ -541,11 +568,14 @@ class DeepReadAgentRunManager(
         tools: List<app.amber.ai.core.Tool>,
         writerToolNames: Set<String>,
         statusLabel: String,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): List<UIMessage> {
         var latest = messages
         suspend fun runWith(stream: Boolean) {
-            generator.generateText(
-                settings = settings.copy(streamOutput = stream),
+            kernel.run(
+                GenerationRunSession(
+                    settings = settings.copy(streamOutput = stream),
                 model = model,
                 messages = messages,
                 memories = emptyList(),
@@ -557,8 +587,17 @@ class DeepReadAgentRunManager(
                 autoApprovedToolNames = writerToolNames,
                 invocationContext = ToolInvocationContext.Normal,
                 conversation = null,
-                inputTransformers = emptyList(),
-                outputTransformers = emptyList(),
+                // Step 5: thread the run scope's identity and event writer the
+                // same way SubAgentRunner does; the kernel's durable-path gate
+                // decides whether anything is emitted.
+                runId = runId,
+                toolLifecycleEvents = events,
+                // Step 6: v1 default codifies no new restriction; narrowing
+                // arrives via sub-agent payloads.
+                executionPolicy = app.amber.feature.runtime.ExecutionPolicy.permissive(),
+                    inputTransformers = emptyList(),
+                    outputTransformers = emptyList(),
+                ),
             ).collect { chunk ->
                 if (chunk is GenerationChunk.Messages) latest = chunk.messages
             }
@@ -581,6 +620,8 @@ class DeepReadAgentRunManager(
         topicTitle: String,
         evidencePack: DeepReadEvidencePack,
         playbookMarkdown: String,
+        runId: String? = null,
+        events: AgentEventWriter? = null,
     ): DeepReadArticlePlan {
         val fallback = researchHarness.fallbackPlan(topicTitle, evidencePack)
         val messages = runCatching {
@@ -599,6 +640,8 @@ class DeepReadAgentRunManager(
                 tools = emptyList(),
                 writerToolNames = emptySet(),
                 statusLabel = "深度阅读 结构规划",
+                runId = runId,
+                events = events,
             )
         }.getOrElse { error ->
             if (error is CancellationException) throw error

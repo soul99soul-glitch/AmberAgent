@@ -33,6 +33,8 @@ class SpeculativeToolRunner(
     private val invocationContext: ToolInvocationContext = ToolInvocationContext.Normal,
     private val capabilityPermissions: CapabilityPermissionState? = null,
     private val permissionContext: CapabilityPermissionContext? = null,
+    /** Step 6: the run's sandbox policy — speculative runs are gated like final ones. */
+    private val executionPolicy: ExecutionPolicy = ExecutionPolicy.permissive(),
 ) {
     private val states = ConcurrentHashMap<String, SpeculativeToolState>()
     private val jobs = ConcurrentHashMap<String, Deferred<UIMessagePart.Tool?>>()
@@ -72,6 +74,7 @@ class SpeculativeToolRunner(
                             invocationContext = invocationContext,
                             capabilityPermissions = capabilityPermissions,
                             permissionContext = permissionContext,
+                            executionPolicy = executionPolicy,
                         )
                         updateStateIfCurrent(tool) { state ->
                             state.copy(

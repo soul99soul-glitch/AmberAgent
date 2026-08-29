@@ -101,7 +101,7 @@ val boardModule = module {
     single {
         DeepReadAgentRunManager(
             settingsStore = get(),
-            generator = get(),
+            kernel = get(),
             hotListRepository = get(),
             artifactRepository = get(),
             toolSetFactory = get(),

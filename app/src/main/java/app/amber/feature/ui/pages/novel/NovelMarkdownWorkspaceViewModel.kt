@@ -3,13 +3,14 @@ package app.amber.feature.ui.pages.novel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.amber.ai.core.MessageRole
-import app.amber.core.ai.Generator
+import app.amber.core.ai.RunKernel
 import app.amber.core.settings.findModelById
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectSettingsStore
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
+import app.amber.feature.novel.workspace.NovelTurnLauncher
 import app.amber.feature.novel.workspace.NovelWorkspaceCollectTarget
 import app.amber.feature.novel.workspace.NovelWorkspacePrompts
 import app.amber.feature.novel.workspace.NovelWorkspaceRuntime
@@ -121,11 +122,12 @@ class NovelMarkdownWorkspaceViewModel(
     private val repository: NovelWorkspaceProjectRepository,
     private val settingsAggregator: SettingsAggregator,
     private val ghostwriteController: NovelWorkspaceGhostwriteController,
-    generator: Generator,
+    private val turnLauncher: NovelTurnLauncher,
+    kernel: RunKernel,
 ) : ViewModel() {
 
     val projectId: String = projectId
-    private val runtime = NovelWorkspaceRuntime(generator)
+    private val runtime = NovelWorkspaceRuntime(kernel)
     private val _state = MutableStateFlow(NovelMarkdownWorkspaceUiState())
     val state: StateFlow<NovelMarkdownWorkspaceUiState> = _state.asStateFlow()
 
@@ -248,7 +250,7 @@ class NovelMarkdownWorkspaceViewModel(
             android.util.Log.i("NovelWorkspace", "send: turn starting (blank=$isBlankBook)")
             var finalText = ""
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                 NovelWorkspaceRuntime.TurnRequest(
                     projectDirectory = directory,
                     branchId = branch,
@@ -267,7 +269,8 @@ class NovelMarkdownWorkspaceViewModel(
                     maxSteps = if (isBlankBook) 32 else 16,
                     injection = _state.value.injection,
                 ),
-            ).collect { event ->
+                runtime,
+            ).events.collect { event ->
                 when (event) {
                     is NovelWorkspaceRuntime.TurnEvent.Delta -> {
                         finalText += event.text
@@ -376,7 +379,7 @@ class NovelMarkdownWorkspaceViewModel(
         )
         viewModelScope.launch {
             var finalText = ""
-            runtime.runTurn(
+            turnLauncher.launch(
                 NovelWorkspaceRuntime.TurnRequest(
                     projectDirectory = directory,
                     branchId = branch,
@@ -386,7 +389,8 @@ class NovelMarkdownWorkspaceViewModel(
                     settings = settings,
                     model = model,
                 ),
-            ).collect { event ->
+                runtime,
+            ).events.collect { event ->
                 when (event) {
                     is NovelWorkspaceRuntime.TurnEvent.Delta -> {
                         finalText += event.text
@@ -899,7 +903,7 @@ class NovelMarkdownWorkspaceViewModel(
         )
         viewModelScope.launch {
             var report = ""
-            runtime.runTurn(
+            turnLauncher.launch(
                 NovelWorkspaceRuntime.TurnRequest(
                     projectDirectory = directory,
                     branchId = branch,
@@ -910,7 +914,8 @@ class NovelMarkdownWorkspaceViewModel(
                     model = model,
                     injection = _state.value.injection,
                 ),
-            ).collect { event ->
+                runtime,
+            ).events.collect { event ->
                 when (event) {
                     is NovelWorkspaceRuntime.TurnEvent.Delta -> report += event.text
                     is NovelWorkspaceRuntime.TurnEvent.Failed ->
@@ -1044,7 +1049,7 @@ class NovelMarkdownWorkspaceViewModel(
         turnJob?.cancel()
         turnJob = viewModelScope.launch {
             try {
-                runtime.runTurn(
+                turnLauncher.launch(
                     NovelWorkspaceRuntime.TurnRequest(
                         projectDirectory = directory,
                         branchId = branch,
@@ -1055,7 +1060,8 @@ class NovelMarkdownWorkspaceViewModel(
                         model = model,
                         injection = _state.value.injection,
                     ),
-                ).collect { event ->
+                    runtime,
+                ).events.collect { event ->
                     when (event) {
                         is NovelWorkspaceRuntime.TurnEvent.Completed -> {
                             val producedPlan = withContext(Dispatchers.IO) {

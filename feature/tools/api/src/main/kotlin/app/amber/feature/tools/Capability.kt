@@ -56,6 +56,51 @@ enum class Capability(
      * （保持免审批）。
      */
     PROVIDER_CONFIG("provider.config", ToolRisk.High, "Provider 配置"),
+
+    // ---- Device-permission families (P1-5) -------------------------------
+    // Android runtime-permission domains, so the per-run
+    // allowedSystemCapabilities dimension can also see the device tools.
+    // Append-safe: persistence keys by [id] string (unknown ids are skipped on
+    // decode) and the approval UI enumerates Capability.entries dynamically.
+    // Read and send/write stay split per the existing READ/WRITE style; an
+    // Android runtime permission prompt remains the outer enforcement — these
+    // entries add a per-run allowlist on top, not a replacement.
+
+    /** Device SMS reads (READ_SMS): sms_list, sms_read. */
+    SMS_READ("sms.read", ToolRisk.Sensitive, "短信读取"),
+
+    /** Device SMS send (SEND_SMS): sms_send. */
+    SMS_SEND("sms.send", ToolRisk.High, "短信发送"),
+
+    /** Device call log reads (READ_CALL_LOG): call_log_list. */
+    CALL_LOG_READ("calllog.read", ToolRisk.Sensitive, "通话记录读取"),
+
+    /** Device dialing (CALL_PHONE): call_phone. */
+    CALL_PHONE("call.phone", ToolRisk.High, "电话拨打"),
+
+    /** Device contacts reads (READ_CONTACTS): contacts_search. */
+    CONTACTS_READ("contacts.read", ToolRisk.Sensitive, "通讯录读取"),
+
+    /** Device contacts writes (WRITE_CONTACTS): contacts_write. */
+    CONTACTS_WRITE("contacts.write", ToolRisk.High, "通讯录写入"),
+
+    /** Device location fix (ACCESS_FINE_LOCATION): location_current. */
+    LOCATION_CURRENT("location.current", ToolRisk.Sensitive, "位置获取"),
+
+    // v1 不变量：floor 不得超过任何已映射工具在 ToolRegistry 的自身 risk
+    // （floor 只许不抬，保证 capability_permissions flag ON 时审批侧零行为变化）。
+    // 抬 floor 会让"有映射但无持久化授权记录"的工具被无条件提高 effectiveRisk，
+    // 从而改变 flag-off 时的判定（ALLOW 变 ASK、run_trust 失效等）。
+    // allowedSystemCapabilities 沙箱维度的语义不依赖 risk。
+
+    /** Device microphone capture (RECORD_AUDIO): audio_record_once（自身 Normal）. */
+    AUDIO_RECORD("audio.record", ToolRisk.Normal, "麦克风录音"),
+
+    /** Device screen capture (MediaProjection): screen_screenshot（自身 Sensitive）. */
+    SCREEN_CAPTURE("screen.capture", ToolRisk.Sensitive, "屏幕截图"),
+
+    /** Device clipboard read/write: clipboard_tool（自身 Normal）. */
+    CLIPBOARD_ACCESS("clipboard.access", ToolRisk.Normal, "剪贴板读写"),
     ;
 
     companion object {
@@ -141,6 +186,23 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     // stays approval-free. ----
     "provider_config_apply", "provider_refresh_models", "settings_set_model_slot",
     -> Capability.PROVIDER_CONFIG
+
+    // ---- device-permission families (P1-5): real registered device tools so
+    // the allowedSystemCapabilities dimension covers them. Other system-access
+    // surfaces (device_phone_state, calendar_*, media_search, usage_stats,
+    // notification_*, apps_*, battery/network/wifi/device info) stay unmapped
+    // for now — mapping them is a follow-up decision, not silently required. ----
+    "sms_list", "sms_read",
+    -> Capability.SMS_READ
+    "sms_send" -> Capability.SMS_SEND
+    "call_log_list" -> Capability.CALL_LOG_READ
+    "call_phone" -> Capability.CALL_PHONE
+    "contacts_search" -> Capability.CONTACTS_READ
+    "contacts_write" -> Capability.CONTACTS_WRITE
+    "location_current" -> Capability.LOCATION_CURRENT
+    "audio_record_once" -> Capability.AUDIO_RECORD
+    "screen_screenshot" -> Capability.SCREEN_CAPTURE
+    "clipboard_tool" -> Capability.CLIPBOARD_ACCESS
 
     // Expanded MCP entries keep the `mcp__server__tool` namespace at the
     // permission boundary; they must not become unclassified tools merely

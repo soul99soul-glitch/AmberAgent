@@ -2,88 +2,44 @@ package app.amber.core.ai
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.SYSTEM_PROMPT_CACHE_CONTROL_METADATA
 import app.amber.ai.core.SYSTEM_PROMPT_CACHE_EPHEMERAL
-import app.amber.ai.core.Tool
 import app.amber.ai.core.merge
-import app.amber.ai.provider.CustomBody
 import app.amber.ai.provider.Modality
-import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderCatalog
-import app.amber.ai.provider.ProviderSetting
-import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
-import app.amber.ai.registry.ModelRegistry
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.MessageChunk
 import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessagePart
-import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.handleMessageChunk
 import app.amber.ai.util.ImageEncodingException
-import app.amber.core.ai.transformers.InputMessageTransformer
-import app.amber.core.ai.transformers.MessageTransformer
-import app.amber.core.ai.transformers.OutputMessageTransformer
-import app.amber.core.ai.transformers.onGenerationFinish
 import app.amber.core.ai.transformers.transforms
-import app.amber.core.ai.transformers.visualTransforms
-import app.amber.core.ai.transformers.visualTransformsStreamingTail
 import app.amber.core.ai.generative.GenerativeUiPlanner
 import app.amber.core.ai.generative.GenerativeUiWidgetRequirement
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
-import app.amber.feature.runtime.AgentToolDispatcher
-import app.amber.feature.runtime.AgentLoopBudgetPrompt
-import app.amber.feature.runtime.CapabilityPermissionContext
-import app.amber.feature.runtime.CapabilityPermissionStore
-import app.amber.feature.runtime.SpeculativeToolRunner
-import app.amber.feature.runtime.ToolEffectLedger
-import app.amber.feature.runtime.ToolInvocationContext
-import app.amber.feature.runtime.ToolLedgerContext
-import app.amber.feature.tools.ToolEffectClass
-import app.amber.feature.tools.ToolExposureState
-import app.amber.feature.tools.effectClass
-import app.amber.core.settings.Settings
-import app.amber.core.settings.Capability
-import app.amber.core.settings.CapabilityFlags
-import app.amber.core.settings.findModelById
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.resolveSessionDefaults
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.context.ConversationContextPlanner
 import app.amber.core.context.TokenBudgetFitter
+import app.amber.core.context.TokenFitResult
 import app.amber.core.memory.recall.MemoryRecallStore
-import app.amber.core.model.AMBER_AGENT_ID
-import app.amber.core.model.AssistantMemory
-import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
-import app.amber.core.repository.MemoryRepository
 import app.amber.agent.R
-import app.amber.agent.BuildConfig
-import java.util.Locale
-import kotlin.uuid.Uuid
-import kotlin.time.Clock
+import kotlinx.serialization.json.Json
 
-private const val TAG = "ChatRunCoordinator"
-private const val PERF_TAG = "AmberChatPerf"
+private const val TAG = "GenerationRoundEngine"
 // 2026-05-15 — flush cadence rationale.
 //
 // Was 200ms historically. User feedback after that: "一坨一坨蹦出来", not
@@ -126,393 +82,71 @@ private class GenerativeUiInvalidWidgetStreamException(
     val issue: String,
 ) : RuntimeException("Generative UI stream completed without a valid widget: $issue")
 
-// GenerationChunk + GenerationUpdate moved to :core:ai:generation:api so
-// consumers (subagent, board, chat impl, DeepRead) can depend on the
-// interface module without pulling the heavy :app implementation. See
-// commit T4.2 — Phase D cascade un-deferral.
+/**
+ * finish_reason values that mean the reply was cut off by the output token
+ * limit, across the provider vocabularies this app speaks (OpenAI `length`,
+ * Responses `max_output_tokens`, Anthropic/Gemini `max_tokens`). Case- and
+ * whitespace-insensitive; every other reason (stop / tool_calls / unknown /
+ * null) is a normal stop.
+ */
+private val OUTPUT_LIMIT_FINISH_REASONS = setOf("length", "max_tokens", "max_output_tokens")
 
-class ChatRunCoordinator(
+/** The engine-side normalization: raw provider string → loop semantics. */
+internal fun finishReasonTruncatesOutput(finishReason: String?): Boolean =
+    finishReason != null && finishReason.trim().lowercase() in OUTPUT_LIMIT_FINISH_REASONS
+
+/**
+ * The last non-null `finish_reason` carried by this chunk's choices. Both
+ * consumption points of a round (streaming collect and non-streaming
+ * complete) feed this — [MessageStreamAccumulator] and
+ * [handleMessageChunk] drop the field, so it must be lifted here or the
+ * kernel never sees it.
+ */
+internal fun MessageChunk.lastFinishReason(): String? =
+    choices.lastOrNull { it.finishReason != null }?.finishReason
+
+/**
+ * The production [GenerationRoundEngine]: one model round end-to-end —
+ * session defaults, memory recall, system-prompt assembly, context-engine
+ * preparation, input transforms, provider streaming/completion with retry,
+ * and the Generative-UI / vision fallbacks.
+ *
+ * The loop policy around the round (budget, exposure, approval, ledger,
+ * dispatch) lives in [DefaultRunKernel]; this engine never makes loop
+ * decisions.
+ */
+class ChatGenerationRoundEngine(
     private val context: Context,
     private val providerCatalog: ProviderCatalog,
     private val json: Json,
-    private val memoryRepo: MemoryRepository,
     private val memoryRecallStore: MemoryRecallStore,
     private val conversationRepo: ConversationRepository,
     private val aiLoggingManager: AILoggingManager,
     private val conversationContextEngine: ConversationContextEngine,
-    private val toolDispatcher: AgentToolDispatcher,
-    private val toolEffectLedger: ToolEffectLedger? = null,
-    private val capabilityFlags: CapabilityFlags? = null,
-    private val capabilityPermissionStore: CapabilityPermissionStore? = null,
-) : Generator {
-    override fun generateText(
-        settings: Settings,
-        model: Model,
-        messages: List<UIMessage>,
-        inputTransformers: List<InputMessageTransformer>,
-        outputTransformers: List<OutputMessageTransformer>,
-        memories: List<AssistantMemory>?,
-        tools: List<Tool>,
-        maxSteps: Int,
-        processingStatus: MutableStateFlow<String?>,
-        autoApproveTools: Boolean,
-        autoApproveHighRiskTools: Boolean,
-        autoApprovedToolNames: Set<String>,
-        invocationContext: ToolInvocationContext,
-        conversation: Conversation?,
-        consumeSteerMessages: suspend () -> List<UIMessage>,
-        runId: String?,
-        onTerminal: (suspend (GenerationTerminal) -> Unit)?,
-        responsesResume: app.amber.ai.provider.ResponsesResumeRequest?,
-    ): Flow<GenerationChunk> = flow {
-        coroutineScope {
+) : GenerationRoundEngine {
+
+    override suspend fun generateRound(
+        request: GenerationRoundRequest,
+        onUpdateMessages: suspend (GenerationUpdate) -> Unit,
+    ): GenerationRoundOutcome {
+        val settings = request.settings
+        val transformers = request.transformers
+        val model = request.model
+        // Provider resolution lives in the round engine: the kernel deals in
+        // loop policy only, and a mid-run catalog refresh is picked up at the
+        // next round boundary (same philosophy as toolExposure.refresh).
         val provider = model.findProvider(settings.providers) ?: error("Provider not found")
         val providerImpl = providerCatalog.text(provider)
+        val tools = request.tools
+        val memories = request.memories
+        val stream = request.stream
+        val processingStatus = request.processingStatus
+        val conversation = request.conversation
+        val speculativeRunner = request.speculativeRunner
+        val loopBudgetPrompt = request.loopBudgetPrompt
+        val responsesResume = request.responsesResume
 
-        // Durable runtime path (P1-02 + P1-03): fixed for the whole run —
-        // the flags are read once here, never mid-run.
-        val durablePath = runId != null &&
-            onTerminal != null &&
-            toolEffectLedger != null &&
-            capabilityFlags != null &&
-            capabilityFlags.isEnabled(Capability.DurableToolEffects) &&
-            capabilityFlags.isEnabled(Capability.TypedRunTerminal)
-
-        // P2-01 capability permissions: fixed for the whole run. Non-null only
-        // when the capability_permissions flag is on; null keeps the pre-P2-01
-        // global normal/high-risk switch behavior untouched.
-        val capabilityState = if (capabilityFlags?.isEnabled(Capability.CapabilityPermissions) == true &&
-            capabilityPermissionStore != null
-        ) {
-            capabilityPermissionStore.state()
-        } else {
-            null
-        }
-        // These IDs come from the actual generation inputs. Workspace has no
-        // identity in this call chain yet, so it intentionally remains unset;
-        // no placeholder ID is allowed to make a scoped policy match.
-        val permissionContext = CapabilityPermissionContext(
-            assistantId = AMBER_AGENT_ID.toString(),
-            conversationId = conversation?.id?.toString(),
-            sessionId = runId,
-        )
-
-        var messages: List<UIMessage> = messages
-        val toolExposure = ToolExposureState.from(tools)
-        var terminal: GenerationTerminal? = null
-        var brokeEarly = false
-
-        for (stepIndex in 0 until maxSteps) {
-            Log.i(TAG, "streamText: start step #$stepIndex (${model.id})")
-
-            // Recipe import/rollback/delete may update the catalog while the
-            // same generation is still looping. Refresh only at a model-round
-            // boundary; the currently executing recipe keeps its definition
-            // snapshot, while the next request sees the registry update.
-            toolExposure.refreshDynamicTools()
-            val pendingTools = messages.lastOrNull()?.getTools()?.filter {
-                it.canResumeExecution
-            } ?: emptyList()
-            // Composite tools (notably Recipe) can reach a nested approval
-            // while their outer call is already executing. Persisted pending
-            // state must stop the loop before another model request, just as
-            // a model-produced approval does.
-            val waitingTools = messages.lastOrNull()?.getTools()?.filter { it.isPending }.orEmpty()
-            if (waitingTools.isNotEmpty()) {
-                terminal = GenerationTerminal.WaitingUser
-                brokeEarly = true
-                break
-            }
-            toolExposure.exposeToolNames(pendingTools.map { it.toolName })
-            val hasResumableTools = pendingTools.isNotEmpty()
-            val loopBudgetPrompt = AgentLoopBudgetPrompt.build(stepIndex = stepIndex, maxSteps = maxSteps)
-            val shouldHideToolsForBudget = AgentLoopBudgetPrompt.shouldHideTools(
-                stepIndex = stepIndex,
-                maxSteps = maxSteps,
-                hasResumableTools = hasResumableTools,
-            )
-            val toolsInternal = buildList {
-                Log.i(TAG, "generateInternal: build tools")
-                addAll(
-                    if (shouldHideToolsForBudget) {
-                        emptyList()
-                    } else {
-                        toolExposure.toolsForStep()
-                    }
-                )
-            }
-            val speculativeRunner = if (settings.agentRuntime.speculativeToolExecution.enabled && settings.streamOutput) {
-                SpeculativeToolRunner(
-                    scope = this,
-                    dispatcher = toolDispatcher,
-                    maxConcurrentTools = settings.agentRuntime.speculativeToolExecution.maxConcurrentTools,
-                    invocationContext = invocationContext,
-                    capabilityPermissions = capabilityState,
-                    permissionContext = permissionContext,
-                )
-            } else {
-                null
-            }
-
-            val toolsToProcess: List<UIMessagePart.Tool>
-
-            // Skip generation if we have approved/denied tool calls to handle
-            if (pendingTools.isEmpty()) {
-                var streamingVisualBaselineReady = false
-                generateInternal(
-                    settings = settings,
-                    messages = messages,
-                    onUpdateMessages = { update ->
-                        messages = update.messages.transforms(
-                            transformers = outputTransformers,
-                            context = context,
-                            model = model,
-                            settings = settings
-                        )
-                        val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
-                        val visualMessages = if (update.isStreamingTail && streamingVisualBaselineReady) {
-                            messages.visualTransformsStreamingTail(
-                                transformers = outputTransformers,
-                                context = context,
-                                model = model,
-                                settings = settings
-                            )
-                        } else {
-                            streamingVisualBaselineReady = true
-                            messages.visualTransforms(
-                                transformers = outputTransformers,
-                                context = context,
-                                model = model,
-                                settings = settings
-                            )
-                        }
-                        if (BuildConfig.DEBUG) {
-                            val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000.0
-                            Log.d(
-                                PERF_TAG,
-                                "streamFlush kind=${if (update.isStreamingTail) "tail" else "full"} " +
-                                    "messages=${visualMessages.size} elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
-                            )
-                        }
-                        emit(
-                            GenerationChunk.Messages(
-                                messages = visualMessages,
-                                update = update.withMessages(visualMessages),
-                            )
-                        )
-                    },
-                    transformers = inputTransformers,
-                    model = model,
-                    providerImpl = providerImpl,
-                    provider = provider,
-                    tools = toolsInternal,
-                    memories = memories ?: emptyList(),
-                    stream = settings.streamOutput,
-                    processingStatus = processingStatus,
-                    conversation = conversation,
-                    speculativeRunner = speculativeRunner,
-                    loopBudgetPrompt = loopBudgetPrompt,
-                    responsesResume = responsesResume,
-                )
-                val finalizedTurn = messages.visualTransforms(
-                    transformers = outputTransformers,
-                    context = context,
-                    model = model,
-                    settings = settings
-                ).onGenerationFinish(
-                    transformers = outputTransformers,
-                    context = context,
-                    model = model,
-                    settings = settings
-                )
-                val completedAssistant = finalizedTurn.last().copy(
-                    finishedAt = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()),
-                )
-                messages = finalizedTurn.dropLast(1) + completedAssistant
-                emit(GenerationChunk.Messages(messages))
-
-                val awaitingExecution = completedAssistant.getTools().filterNot { it.isExecuted }
-                if (awaitingExecution.isEmpty()) {
-                    brokeEarly = true
-                    break
-                }
-
-                // P1-02 write-ahead: validate + digest + persist PREPARED before
-                // approval is shown. Idempotent per (runId, toolCallId) — a
-                // resumed approval round reuses the same effect.
-                val preparedEffects: Map<String, String> = if (durablePath) {
-                    val messageId = messages.lastOrNull()?.id?.toString()
-                    awaitingExecution.associate { tool ->
-                        val toolDef = toolsInternal.find { it.name == tool.toolName }
-                        val effect = toolEffectLedger.prepare(
-                            runId = runId,
-                            turnId = stepIndex,
-                            toolCallId = tool.toolCallId,
-                            toolName = tool.toolName,
-                            input = tool.input,
-                            effectClass = toolDef?.effectClass() ?: ToolEffectClass.NON_IDEMPOTENT_WRITE,
-                            messagePersistenceCursor = messageId,
-                        )
-                        tool.toolCallId to effect.effectId
-                    }
-                } else {
-                    emptyMap()
-                }
-
-                // Check for tools that need approval
-                var hasPendingApproval = false
-                val updatedTools = awaitingExecution.map { tool ->
-                    val toolDef = toolsInternal.find { it.name == tool.toolName }
-                    val decision = toolDispatcher.resolveDecision(
-                        toolDef = toolDef,
-                        tool = tool,
-                        autoApproveTools = autoApproveTools,
-                        autoApproveHighRiskTools = autoApproveHighRiskTools,
-                        autoApprovedToolNames = autoApprovedToolNames,
-                        invocationContext = invocationContext,
-                        capabilityPermissions = capabilityState,
-                        permissionContext = permissionContext,
-                    )
-                    val ledgerMetadata = preparedEffects[tool.toolCallId]?.let { effectId ->
-                        kotlinx.serialization.json.buildJsonObject {
-                            put("effect_id", effectId)
-                            put("run_id", runId)
-                        }
-                    } ?: kotlinx.serialization.json.JsonObject(emptyMap())
-                    when {
-                        // Tool needs approval and state is Auto -> set to Pending
-                        decision.action == app.amber.feature.runtime.PermissionDecisionAction.ASK -> {
-                            hasPendingApproval = true
-                            tool.copy(
-                                approvalState = ToolApprovalState.Pending,
-                                metadata = mergeToolMetadata(tool.metadata, decision.trace.toJson(), ledgerMetadata),
-                            )
-                        }
-                        // State is Pending -> keep waiting
-                        tool.approvalState is ToolApprovalState.Pending -> {
-                            hasPendingApproval = true
-                            tool
-                        }
-
-                        else -> if (ledgerMetadata.isEmpty()) {
-                            tool
-                        } else {
-                            tool.copy(metadata = mergeToolMetadata(tool.metadata, null, ledgerMetadata))
-                        }
-                    }
-                }
-
-                if (updatedTools != awaitingExecution) {
-                    val decisionsByCallId = updatedTools.associateBy(UIMessagePart.Tool::toolCallId)
-                    val assistantTurn = messages.last()
-                    val approvalSnapshot = assistantTurn.copy(
-                        parts = assistantTurn.parts.map { part ->
-                            if (part is UIMessagePart.Tool) decisionsByCallId[part.toolCallId] ?: part else part
-                        },
-                    )
-                    messages = messages.dropLast(1) + approvalSnapshot
-                    emit(GenerationChunk.Messages(messages))
-                }
-
-                if (hasPendingApproval) {
-                    Log.i(TAG, "run paused for tool approval")
-                    terminal = GenerationTerminal.WaitingUser
-                    brokeEarly = true
-                    break
-                }
-
-                toolsToProcess = updatedTools
-            } else {
-                Log.i(TAG, "run resuming ${pendingTools.size} decided tool calls")
-                toolsToProcess = pendingTools
-            }
-
-            // Handle tools (execute approved tools, handle denied tools)
-            val executedTools = toolDispatcher.executeBatch(
-                tools = toolsToProcess,
-                toolDefinitions = toolsInternal.associateBy { it.name },
-                autoApproveTools = autoApproveTools,
-                autoApproveHighRiskTools = autoApproveHighRiskTools,
-                autoApprovedToolNames = autoApprovedToolNames,
-                invocationContext = invocationContext,
-                prefetchedTools = speculativeRunner?.reusableResults(toolsToProcess).orEmpty(),
-                retrySetting = settings.agentRuntime.generationRetry,
-                ledgerContext = if (durablePath) {
-                    ToolLedgerContext(
-                        runId = runId!!,
-                        turnId = stepIndex,
-                        ledger = toolEffectLedger!!,
-                        messagePersistenceCursor = messages.lastOrNull()?.id?.toString(),
-                    )
-                } else {
-                    null
-                },
-                capabilityPermissions = capabilityState,
-                approvalHistory = if (capabilityState != null) capabilityPermissionStore else null,
-                permissionContext = permissionContext,
-            )
-
-            if (executedTools.isEmpty()) {
-                // No results to add (all tools were pending)
-                terminal = GenerationTerminal.WaitingUser
-                brokeEarly = true
-                break
-            }
-            toolExposure.observeExecutedTools(executedTools)
-
-            val resultsByCallId = executedTools.associateBy(UIMessagePart.Tool::toolCallId)
-            val currentAssistant = messages.last()
-            val mergedAssistant = currentAssistant.copy(
-                parts = currentAssistant.parts.map { part ->
-                    if (part is UIMessagePart.Tool) resultsByCallId[part.toolCallId] ?: part else part
-                },
-            )
-            messages = messages.dropLast(1) + mergedAssistant
-            val visibleToolResults = messages.transforms(
-                transformers = outputTransformers,
-                context = context,
-                model = model,
-                settings = settings,
-            )
-            emit(GenerationChunk.Messages(visibleToolResults))
-
-            val steerMessages = consumeSteerMessages()
-            if (steerMessages.isNotEmpty()) {
-                messages = messages + steerMessages
-                emit(GenerationChunk.Messages(messages))
-            }
-        }
-
-        // The loop ran out of step budget without breaking: the model still
-        // had work in flight — STEP_LIMIT, never COMPLETED.
-        if (!brokeEarly && terminal == null) {
-            terminal = GenerationTerminal.StepLimit
-        }
-        if (terminal != null) {
-            runCatching { onTerminal?.invoke(terminal) }
-                .onFailure { error -> Log.w(TAG, "onTerminal failed", error) }
-        }
-
-        }
-    }.flowOn(Dispatchers.IO)
-
-    private suspend fun generateInternal(
-        settings: Settings,
-        messages: List<UIMessage>,
-        onUpdateMessages: suspend (GenerationUpdate) -> Unit,
-        transformers: List<MessageTransformer>,
-        model: Model,
-        providerImpl: TextModelGateway<ProviderSetting>,
-        provider: ProviderSetting,
-        tools: List<Tool>,
-        memories: List<AssistantMemory>,
-        stream: Boolean,
-        processingStatus: MutableStateFlow<String?> = MutableStateFlow(null),
-        conversation: Conversation? = null,
-        speculativeRunner: SpeculativeToolRunner? = null,
-        loopBudgetPrompt: String = "",
-        responsesResume: app.amber.ai.provider.ResponsesResumeRequest? = null,
-    ) {
+        var messages: List<UIMessage> = request.messages
         val sessionDefaults = settings.resolveSessionDefaults(model)
         val memoryContextPrompt = memoryRecallStore.buildPrompt(settings, messages)
         val systemParts = buildSystemPromptParts(
@@ -549,8 +183,60 @@ class ChatRunCoordinator(
         val internalMessages = prepareInternalMessages()
         val canUseVisionFallback = model.inputModalities.contains(Modality.IMAGE) && internalMessages.hasImageParts()
 
+        // Step 5 — per-wire-request audit snapshots. `wireAttempt` indexes the
+        // wire calls of THIS generateRound invocation: 0 for the first, +1 per
+        // retry/fallback re-issue (provider-level retries re-enter the block
+        // and keep counting — the number is the honest issuance index).
+        var wireAttempt = 0
+
+        // Last non-null finish_reason seen anywhere in this round (across all
+        // chunks of all stream/complete attempts — the most recent wire truth
+        // wins). Scoped to the round, so it starts fresh every invocation.
+        var lastFinishReason: String? = null
+
+        // Durable audit gate — the honest condition is the run's durable path
+        // being ON, not merely "a writer was threaded in": the durable path
+        // (runId + onTerminal + ledger + capability flags) is what guarantees
+        // the run actually has a persisted audit trail to receive the
+        // snapshot. This gate therefore matches the kernel's tool-lifecycle
+        // gate exactly; no durable path ⇒ no snapshots, by design. A snapshot
+        // failure must never break generation, so the emission is guarded.
+        suspend fun commitRequestSnapshot(
+            attempt: Int,
+            kind: String,
+            fit: TokenFitResult,
+            params: TextGenerationParams,
+        ) {
+            if (!request.durablePath || request.events == null || request.runId == null || request.stepIndex < 0) {
+                return
+            }
+            runCatching {
+                request.events.commit(
+                    buildRequestSnapshot(
+                        json = json,
+                        stepIndex = request.stepIndex,
+                        attempt = attempt,
+                        kind = kind,
+                        model = model,
+                        providerSettingId = provider.id.toString(),
+                        fitMessages = fit.messages,
+                        tools = params.tools,
+                        systemParts = systemParts,
+                        estimatedTokens = fit.receipt.estimatedAfter,
+                    ),
+                )
+            }.onFailure { error ->
+                // CancellationException must escape: the writers deliberately
+                // rethrow it (PersistingEventWriter precedent) — swallowing it
+                // here would hide the user's stop and let the loop continue
+                // into the very wire request this snapshot was audited for.
+                if (error is CancellationException) throw error
+                Log.w(TAG, "Request snapshot commit failed; generation continues", error)
+            }
+        }
+
         val baseMessages: List<UIMessage> = messages
-        var messages: List<UIMessage> = baseMessages
+        messages = baseMessages
         val params = TextGenerationParams(
             model = model,
             temperature = settings.temperature,
@@ -596,6 +282,8 @@ class ChatRunCoordinator(
                     streamParams: TextGenerationParams,
                     guardReasoningOnly: Boolean,
                     widgetRequirement: GenerativeUiWidgetRequirement,
+                    attempt: Int,
+                    kind: String,
                 ) {
                     // P1-04: final token budget hard fit — the single fit at
                     // the provider serialization boundary, after every
@@ -610,6 +298,14 @@ class ChatRunCoordinator(
                         maxTokens = streamParams.maxTokens,
                         json = json,
                         conversationId = conversation?.id?.toString(),
+                    )
+                    // Step 5: audit what the wire is about to receive — after
+                    // the final fit, before the provider call.
+                    commitRequestSnapshot(
+                        attempt = attempt,
+                        kind = kind,
+                        fit = fit,
+                        params = streamParams,
                     )
                     val accumulator = MessageStreamAccumulator(baseMessages, model)
                     var lastFlushAt = 0L
@@ -631,6 +327,7 @@ class ChatRunCoordinator(
                             .filterIsInstance<UIMessagePart.Reasoning>()
                             .sumOf { it.reasoning.length }
                         accumulator.append(chunk)
+                        chunk.lastFinishReason()?.let { lastFinishReason = it }
                         val now = System.currentTimeMillis()
                         if (lastFlushAt == 0L || now - lastFlushAt >= STREAM_UI_FLUSH_INTERVAL_MS) {
                             messages = accumulator.snapshot()
@@ -672,6 +369,8 @@ class ChatRunCoordinator(
                         streamParams = params,
                         guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
                         widgetRequirement = generativeUiWidgetRequirement,
+                        attempt = wireAttempt++,
+                        kind = "primary",
                     )
                 } catch (error: Throwable) {
                     if (
@@ -698,6 +397,8 @@ class ChatRunCoordinator(
                             streamParams = params.copy(tools = emptyList()),
                             guardReasoningOnly = false,
                             widgetRequirement = GenerativeUiWidgetRequirement.None,
+                            attempt = wireAttempt++,
+                            kind = "generative_ui_repair",
                         )
                         // Only force-inject the local fallback widget when the retry
                         // ALSO produced no meaningful visible text. Previously we
@@ -730,6 +431,8 @@ class ChatRunCoordinator(
                         streamParams = params,
                         guardReasoningOnly = shouldGuardGenerativeUiReasoningOnly,
                         widgetRequirement = generativeUiWidgetRequirement,
+                        attempt = wireAttempt++,
+                        kind = "vision_fallback",
                     )
                 }
             }
@@ -755,6 +458,8 @@ class ChatRunCoordinator(
                 suspend fun generateWith(
                     providerMessages: List<UIMessage>,
                     generateParams: TextGenerationParams = params,
+                    attempt: Int,
+                    kind: String,
                 ): MessageChunk {
                     // P1-04: final token budget hard fit at the serialization
                     // boundary (see streamWith for the policy).
@@ -767,19 +472,37 @@ class ChatRunCoordinator(
                         json = json,
                         conversationId = conversation?.id?.toString(),
                     )
-                    return providerImpl.complete(
+                    // Step 5: audit what the wire is about to receive — after
+                    // the final fit, before the provider call.
+                    commitRequestSnapshot(
+                        attempt = attempt,
+                        kind = kind,
+                        fit = fit,
+                        params = generateParams,
+                    )
+                    val chunk = providerImpl.complete(
                         providerSetting = provider,
                         messages = fit.messages,
                         params = generateParams,
                     )
+                    chunk.lastFinishReason()?.let { lastFinishReason = it }
+                    return chunk
                 }
 
                 val chunk = try {
-                    generateWith(internalMessages)
+                    generateWith(
+                        providerMessages = internalMessages,
+                        attempt = wireAttempt++,
+                        kind = "primary",
+                    )
                 } catch (error: Throwable) {
                     if (!canUseVisionFallback || !shouldFallbackToVisionRecognition(error)) throw error
                     processingStatus.value = "正在改用视觉识别模型读取图片..."
-                    generateWith(prepareInternalMessages(forceImageToText = true))
+                    generateWith(
+                        providerMessages = prepareInternalMessages(forceImageToText = true),
+                        attempt = wireAttempt++,
+                        kind = "vision_fallback",
+                    )
                 }
                 messages = baseMessages.handleMessageChunk(chunk = chunk, model = model)
                 chunk.usage?.let { usage ->
@@ -808,6 +531,8 @@ class ChatRunCoordinator(
                             previousIssue = widgetIssue,
                         ),
                         generateParams = params.copy(tools = emptyList()),
+                        attempt = wireAttempt++,
+                        kind = "generative_ui_repair",
                     )
                     messages = baseMessages.handleMessageChunk(chunk = retryChunk, model = model)
                     retryChunk.usage?.let { usage ->
@@ -835,13 +560,14 @@ class ChatRunCoordinator(
                 onUpdateMessages(GenerationUpdate.full(messages))
             }
         }
+        return GenerationRoundOutcome(outputLimitReached = finishReasonTruncatesOutput(lastFinishReason))
     }
 
     private suspend fun buildSystemPromptParts(
-        settings: Settings,
-        model: Model,
+        settings: app.amber.core.settings.Settings,
+        model: app.amber.ai.provider.Model,
         messages: List<UIMessage>,
-        tools: List<Tool>,
+        tools: List<app.amber.ai.core.Tool>,
         memoryContextPrompt: String,
         loopBudgetPrompt: String,
     ): List<UIMessagePart> {
@@ -1052,7 +778,7 @@ class ChatRunCoordinator(
 
     private fun List<UIMessage>.withLocalGenerativeUiFallbackWidget(
         baseMessages: List<UIMessage>,
-        model: Model,
+        model: app.amber.ai.provider.Model,
         requirement: GenerativeUiWidgetRequirement = GenerativeUiWidgetRequirement.None,
     ): List<UIMessage> {
         val labels = fallbackWidgetLabels(baseMessages)
@@ -1222,22 +948,4 @@ class ChatRunCoordinator(
             "base64"
         ).any { it in message }
     }
-
-    /**
-     * Merges existing tool metadata with the permission trace and the ledger
-     * binding (effect_id / run_id). Ledger keys win — the effect binding is
-     * authoritative for the approval card.
-     */
-    private fun mergeToolMetadata(
-        existing: JsonObject?,
-        permissionTrace: JsonObject?,
-        ledger: JsonObject,
-    ): JsonObject {
-        val merged = LinkedHashMap<String, kotlinx.serialization.json.JsonElement>()
-        existing?.forEach { (key, value) -> merged[key] = value }
-        if (permissionTrace != null) merged["permission_trace"] = permissionTrace
-        ledger.forEach { (key, value) -> merged[key] = value }
-        return JsonObject(merged)
-    }
-
 }

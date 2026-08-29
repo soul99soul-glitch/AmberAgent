@@ -5,10 +5,8 @@ import app.amber.core.agent.runtime.AgentEventRecord
 import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunSnapshot
-import app.amber.core.agent.runtime.AgentRunStatus
+import app.amber.core.agent.runtime.RunStatus
 import app.amber.feature.chat.api.ChatEventPayload
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ConversationAccess
@@ -23,17 +21,6 @@ class ChatEventProjector(
     private val conversationAccess: ConversationAccess,
     private val json: Json,
 ) {
-    fun observeProjection(runId: AgentRunId): Flow<ProjectionState> {
-        return eventStore.observeRun(runId).map { snapshot ->
-            ProjectionState(
-                runId = runId,
-                status = snapshot.status.name.lowercase(),
-                startedAt = snapshot.startedAt,
-                finishedAt = snapshot.finishedAt,
-            )
-        }
-    }
-
     suspend fun projectFinalized(
         conversationId: Uuid,
         event: ChatEventPayload.AssistantMessageFinalized,
@@ -63,13 +50,15 @@ class ChatEventProjector(
     suspend fun commitEvent(
         runId: AgentRunId,
         event: ChatEventPayload,
-        seq: Long,
     ) {
         val record = AgentEventRecord(
-            eventId = "${runId.value}_$seq",
+            // Unique-per-process eventId: the seq is DB-allocated below, so a
+            // process restart + same-runId resume can never recycle an id
+            // and hit the idempotent-append IGNORE (silent event loss).
+            eventId = "${runId.value}_${Uuid.random()}",
             runId = runId.value,
             parentRunId = null,
-            seq = seq,
+            seq = 0L,
             type = event::class.simpleName ?: "unknown",
             payloadType = event::class.qualifiedName ?: "unknown",
             payload = when (event) {
@@ -81,6 +70,10 @@ class ChatEventProjector(
                     json.encodeToString(ChatEventPayload.UserMessageAccepted.serializer(), event)
                 is ChatEventPayload.StreamCheckpoint ->
                     json.encodeToString(ChatEventPayload.StreamCheckpoint.serializer(), event)
+                // Step 5: audit-only record — persisted like other Finals, but
+                // it carries NO conversation projection side effects.
+                is ChatEventPayload.RequestSnapshot ->
+                    json.encodeToString(ChatEventPayload.RequestSnapshot.serializer(), event)
                 is ChatEventPayload.AssistantTextDelta -> ""
             },
             payloadSchemaVersion = 1,
@@ -90,7 +83,7 @@ class ChatEventProjector(
             ts = System.currentTimeMillis(),
         )
         if (record.isFinal) {
-            eventStore.appendEvent(record)
+            eventStore.appendEventAllocatingSeq(record)
         }
     }
 
@@ -104,6 +97,14 @@ class ChatEventProjector(
     suspend fun replayUnfinished() {
         val unfinished = eventStore.listUnfinishedRuns()
         for (run in unfinished) {
+            // Only actively-executing runs are crash victims. Pause states
+            // (WAITING_USER / WAITING_EXTERNAL / RESUMABLE / OUTCOME_UNKNOWN)
+            // survive a process restart by design — they resume under the
+            // same runId, so marking them interrupted would wedge their
+            // write-once terminal transitions. Legacy rows never persisted
+            // pauses (their recorder only wrote RUNNING), so this gate keeps
+            // the pre-protocol behavior for them.
+            if (run.status != RunStatus.CREATED && run.status != RunStatus.RUNNING) continue
             Log.i(TAG, "Marking unfinished run ${run.runId} as interrupted")
             val runId = AgentRunId(run.runId)
             eventStore.markInterrupted(
@@ -151,10 +152,3 @@ class ChatEventProjector(
                 }
     }
 }
-
-data class ProjectionState(
-    val runId: AgentRunId,
-    val status: String,
-    val startedAt: Long,
-    val finishedAt: Long?,
-)

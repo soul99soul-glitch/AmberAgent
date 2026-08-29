@@ -12,7 +12,6 @@ import androidx.work.WorkerParameters
 import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
 import app.amber.agent.RouteActivity
-import app.amber.core.ai.Generator
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.ai.provider.Model
 import app.amber.core.settings.findModelById

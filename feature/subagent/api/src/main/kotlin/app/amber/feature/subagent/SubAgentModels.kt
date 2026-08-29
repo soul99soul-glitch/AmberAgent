@@ -179,7 +179,7 @@ data class SubAgentResult(
     @SerialName("recommended_next_steps")
     val recommendedNextSteps: List<String> = emptyList(),
     val error: String = "",
-)
+) : app.amber.core.agent.runtime.AgentArtifact
 
 @Serializable
 data class SubAgentRun(

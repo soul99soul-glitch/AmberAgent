@@ -6,21 +6,65 @@ import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.agent.runtime.AgentRunRecord
 import app.amber.core.agent.runtime.AgentRunSnapshot
-import app.amber.core.agent.runtime.AgentRunStatus
+import app.amber.core.agent.runtime.RunStatus
+import app.amber.core.agent.runtime.RunStatusTransitions
+import app.amber.core.agent.runtime.RunTransitionResult
 import app.amber.core.agent.runtime.TraceSpanRecord
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
 
 class RoomAgentEventStore(
     private val dao: AgentRuntimeDao,
+    private val now: () -> Long = System::currentTimeMillis,
 ) : AgentEventStore {
 
     override suspend fun appendRun(run: AgentRunRecord) {
-        dao.insertRun(run.toEntity().let { it.copy(status = it.status.lowercase()) })
+        // insertRun is IGNORE-on-conflict: create-only by design.
+        dao.insertRun(run.toEntity())
     }
 
     override suspend fun appendEvent(event: AgentEventRecord) {
         dao.insertEvent(event.toEntity())
+    }
+
+    override suspend fun appendEventAllocatingSeq(event: AgentEventRecord): AgentEventRecord {
+        val seq = dao.appendEventAllocatingSeq(event.toEntity())
+        return event.copy(seq = seq)
+    }
+
+    override suspend fun transitionRun(
+        runId: AgentRunId,
+        expected: Set<RunStatus>,
+        to: RunStatus,
+        reason: String?,
+    ): RunTransitionResult {
+        val current = dao.getRun(runId.value) ?: return RunTransitionResult.UnknownRun(to)
+        // Fail-closed: a persisted state we cannot parse is never overwritten.
+        val from = RunStatus.parse(current.status)
+            ?: return RunTransitionResult.Rejected(current = null, to = to, illegal = false)
+        if (!RunStatusTransitions.canTransition(from, to)) {
+            return RunTransitionResult.Rejected(current = from, to = to, illegal = true)
+        }
+        if (expected.isNotEmpty() && from !in expected) {
+            return RunTransitionResult.Rejected(current = from, to = to, illegal = false)
+        }
+        if (from == to) return RunTransitionResult.Applied(from, to) // idempotent no-op
+        val updated = dao.transitionStatus(
+            runId = runId.value,
+            expectedStatus = current.status,
+            to = to.wireName,
+            reason = reason,
+            setFinished = to.isTerminal,
+            now = now(),
+        )
+        if (updated == 1) return RunTransitionResult.Applied(from, to)
+        // Lost the race: report the winning state instead of pretending.
+        val winner = dao.getRun(runId.value) ?: return RunTransitionResult.UnknownRun(to)
+        return RunTransitionResult.Rejected(
+            current = RunStatus.parse(winner.status),
+            to = to,
+            illegal = false,
+        )
     }
 
     override suspend fun appendSpan(span: TraceSpanRecord) {
@@ -37,11 +81,14 @@ class RoomAgentEventStore(
         dao.deleteEventsByType(runId.value, type)
     }
 
+    override suspend fun deleteEventsOfTypeOlderThan(type: String, cutoffMs: Long): Int =
+        dao.deleteEventsOfTypeOlderThan(type, cutoffMs)
+
     override suspend fun listUnfinishedRuns(): List<AgentRunRecord> =
         dao.listUnfinished().map { it.toRecord() }
 
     override suspend fun markInterrupted(runId: AgentRunId, reason: String) {
-        dao.markInterrupted(runId.value, reason, System.currentTimeMillis())
+        dao.markInterrupted(runId.value, reason, now())
     }
 }
 
@@ -54,7 +101,7 @@ private fun AgentRunRecord.toEntity() = AgentRunEntity(
     messageNodeId = messageNodeId,
     producesMessageId = producesMessageId,
     assistantId = assistantId,
-    status = status.lowercase(),
+    status = status.wireName,
     inputDigest = inputDigest,
     inputSnapshotRef = inputSnapshotRef,
     inputSchemaVersion = inputSchemaVersion,
@@ -72,7 +119,7 @@ private fun AgentRunEntity.toRecord() = AgentRunRecord(
     messageNodeId = messageNodeId,
     producesMessageId = producesMessageId,
     assistantId = assistantId,
-    status = status,
+    status = RunStatus.parse(status) ?: RunStatus.INTERRUPTED,
     inputDigest = inputDigest,
     inputSnapshotRef = inputSnapshotRef,
     inputSchemaVersion = inputSchemaVersion,
@@ -81,18 +128,19 @@ private fun AgentRunEntity.toRecord() = AgentRunRecord(
     interruptedReason = interruptedReason,
 )
 
-private fun AgentRunEntity.toSnapshot() = AgentRunSnapshot(
-    runId = AgentRunId(runId),
-    parentRunId = parentRunId?.let { AgentRunId(it) },
-    descriptorId = AgentDescriptorId(agentDescriptorId),
-    status = try {
-        AgentRunStatus.valueOf(status.uppercase())
-    } catch (_: IllegalArgumentException) {
-        AgentRunStatus.INTERRUPTED
-    },
-    startedAt = startedAt,
-    finishedAt = finishedAt,
-)
+private fun AgentRunEntity.toSnapshot(): AgentRunSnapshot? {
+    // Fail-closed: an unparseable persisted state yields no snapshot rather
+    // than a fabricated one.
+    val parsed = RunStatus.parse(status) ?: return null
+    return AgentRunSnapshot(
+        runId = AgentRunId(runId),
+        parentRunId = parentRunId?.let { AgentRunId(it) },
+        descriptorId = AgentDescriptorId(agentDescriptorId),
+        status = parsed,
+        startedAt = startedAt,
+        finishedAt = finishedAt,
+    )
+}
 
 private fun AgentEventEntity.toRecord() = AgentEventRecord(
     eventId = eventId,

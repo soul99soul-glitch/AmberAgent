@@ -9,7 +9,8 @@ import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
 import app.amber.core.ai.GenerationTerminal
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findModelById
@@ -29,6 +30,9 @@ interface SubAgentRunner {
      * tool effect 仍使用统一 ledger"). [consumeSteerMessages] drains messages
      * delivered to a running thread (send_message mid-run). [previousAnswer]
      * seeds a followup turn with the thread's last final answer.
+     *
+     * Step 3: [events] is the run scope's protocol event writer; the kernel
+     * emits ToolPrepared/Started/Finished into it on the durable path.
      */
     suspend fun run(
         settings: Settings,
@@ -41,11 +45,23 @@ interface SubAgentRunner {
         onTerminal: (suspend (GenerationTerminal) -> Unit)? = null,
         consumeSteerMessages: suspend () -> List<UIMessage> = { emptyList() },
         previousAnswer: String = "",
+        events: app.amber.core.agent.runtime.AgentEventWriter? = null,
+        /**
+         * Step 6: the parent run's sandbox policy. The child session runs on
+         * [ExecutionPolicy.narrow] of this and the payload's optional child
+         * policy — each dimension intersects, so a child can never widen the
+         * parent's sandbox. Default stays permissive (v1: no producer narrows
+         * yet).
+         */
+        parentPolicy: app.amber.feature.runtime.ExecutionPolicy =
+            app.amber.feature.runtime.ExecutionPolicy.permissive(),
+        /** Optional narrowing carried by the sub-agent turn payload. */
+        childPolicy: app.amber.feature.runtime.ExecutionPolicy? = null,
     ): SubAgentResult
 }
 
 class GenerationSubAgentRunner(
-    private val generator: Generator,
+    private val kernel: RunKernel,
 ) : SubAgentRunner {
     override suspend fun run(
         settings: Settings,
@@ -58,7 +74,16 @@ class GenerationSubAgentRunner(
         onTerminal: (suspend (GenerationTerminal) -> Unit)?,
         consumeSteerMessages: suspend () -> List<UIMessage>,
         previousAnswer: String,
+        events: app.amber.core.agent.runtime.AgentEventWriter?,
+        parentPolicy: app.amber.feature.runtime.ExecutionPolicy,
+        childPolicy: app.amber.feature.runtime.ExecutionPolicy?,
     ): SubAgentResult {
+        // Step 6: the child runs on the intersection of the parent run's
+        // sandbox and the payload's optional narrowing — never wider than the
+        // parent. A permissive parent passes the child policy through as-is.
+        val sessionPolicy = parentPolicy.narrow(
+            childPolicy ?: app.amber.feature.runtime.ExecutionPolicy.permissive()
+        )
         val isolatedSettings = settings.toIsolatedSubAgentSettings().copy(
             systemPrompt = definition.systemPrompt,
             temperature = definition.temperature ?: settings.temperature,
@@ -77,8 +102,9 @@ class GenerationSubAgentRunner(
         var generationError: Throwable? = null
 
         try {
-            generator.generateText(
-                settings = isolatedSettings,
+            kernel.run(
+                GenerationRunSession(
+                    settings = isolatedSettings,
                 model = model,
                 messages = messages,
                 memories = emptyList(),
@@ -92,6 +118,9 @@ class GenerationSubAgentRunner(
                 consumeSteerMessages = consumeSteerMessages,
                 runId = runId,
                 onTerminal = onTerminal,
+                toolLifecycleEvents = events,
+                executionPolicy = sessionPolicy,
+                ),
             ).collect { chunk ->
                 if (chunk is GenerationChunk.Messages) {
                     latest = chunk.messages
@@ -151,8 +180,9 @@ class GenerationSubAgentRunner(
                 """.trimIndent()
             )
             try {
-                generator.generateText(
-                    settings = isolatedSettings,
+                kernel.run(
+                    GenerationRunSession(
+                        settings = isolatedSettings,
                     model = model,
                     messages = latest,
                     memories = emptyList(),
@@ -166,6 +196,9 @@ class GenerationSubAgentRunner(
                     consumeSteerMessages = consumeSteerMessages,
                     runId = runId,
                     onTerminal = onTerminal,
+                    toolLifecycleEvents = events,
+                    executionPolicy = sessionPolicy,
+                    ),
                 ).collect { chunk ->
                     if (chunk is GenerationChunk.Messages) {
                         latest = chunk.messages

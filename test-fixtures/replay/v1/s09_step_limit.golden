@@ -1,0 +1,11 @@
+# amber-replay-golden schema=v1 scenario=s09_step_limit
+run_started
+tool_prepared tool=golden_lookup_a
+tool_started tool=golden_lookup_a
+tool_finished tool=golden_lookup_a status=finished
+tool_prepared tool=golden_lookup_a
+tool_started tool=golden_lookup_a
+tool_finished tool=golden_lookup_a status=finished
+tool_prepared tool=golden_lookup_a
+tool_finished tool=golden_lookup_a status=denied
+run_terminal status=step_limit

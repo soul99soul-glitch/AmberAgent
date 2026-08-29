@@ -5,8 +5,8 @@ import app.amber.ai.provider.providers.ClaudeProvider
 import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.OpenAIProvider
 import app.amber.ai.provider.providers.openai.StoredResponseApi
-import app.amber.core.ai.Generator
-import app.amber.core.ai.ChatRunCoordinator
+import app.amber.core.ai.RunKernel
+import app.amber.core.ai.DefaultRunKernel
 import app.amber.core.agent.runtime.AgentEventStore
 import app.amber.core.agent.runtime.AgentRegistry
 import app.amber.core.agent.runtime.AgentRunner
@@ -35,7 +35,7 @@ import kotlin.test.assertTrue
 
 /**
  * Verifies that constructor-injected API interfaces have Koin aliases for
- * their concrete owners. A missing `Generator` alias previously caused chat
+ * their concrete owners. A missing `Generator` (now `RunKernel`) alias previously caused chat
  * startup to throw `NoDefinitionFoundException`.
  * Bindings use `single<Interface> { get<Impl>() }`; this test asserts the
  * alias exists for every interface listed in [requiredAliases].
@@ -75,7 +75,7 @@ class KoinModulesVerifyTest {
      * Each must be aliased so consumers resolving by interface type work.
      */
     private val requiredAliases: List<KClass<*>> = listOf(
-        Generator::class,
+        RunKernel::class,
         ConversationAccess::class,
         ChatSessionResolver::class,
         AgentEventStore::class,
@@ -92,7 +92,7 @@ class KoinModulesVerifyTest {
         GoogleProvider::class,
         ClaudeProvider::class,
         ProviderCatalog::class,
-        ChatRunCoordinator::class,
+        DefaultRunKernel::class,
     )
 
     @OptIn(KoinInternalApi::class)

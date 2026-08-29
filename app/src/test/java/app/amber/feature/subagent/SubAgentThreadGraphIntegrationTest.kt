@@ -2,11 +2,22 @@ package app.amber.feature.subagent
 
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.room.Room
 import app.amber.agent.data.files.CasTestFixtures
 import app.amber.ai.core.Tool
+import app.amber.ai.provider.Model
+import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.agent.runtime.AgentEventWriter
+import app.amber.core.agent.runtime.impl.InMemoryAgentRegistry
+import app.amber.core.agent.runtime.impl.InProcessAgentRunner
+import app.amber.core.agent.store.AgentRuntimeDatabase
+import app.amber.core.agent.store.RoomAgentEventStore
+import app.amber.core.ai.GenerationChunk
+import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.GenerationTerminal
+import app.amber.core.ai.RunKernel
 import app.amber.core.infra.AppScope
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
@@ -21,8 +32,10 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -45,8 +58,9 @@ import org.junit.Test
 
 /**
  * Integration tests through the real production chain (SubAgentManager +
- * Room thread graph store + capability flags), with a scripted fake
- * [SubAgentRunner] standing in for the LLM generation:
+ * kernel AgentRunner/payload mailbox + Room thread graph store + capability
+ * flags), with a scripted fake [SubAgentRunner] standing in for the LLM
+ * generation:
  *
  *  - persisted ThreadNode/Result readable after a cold-start restart;
  *  - cold-start recovery of waiting / cancelled / completed threads;
@@ -97,20 +111,49 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         Dispatchers.resetMain()
     }
 
+    private var lastPayloads: SubAgentTurnPayloads? = null
+
+    /**
+     * Production chain per "process": manager + in-memory kernel (registry
+     * with the turn agent backed by the scripted fake, runner over a real
+     * Room event store). A fresh instance simulates a cold start — its
+     * runner/payloads are empty, exactly like a restarted process.
+     */
     private fun manager(
         runner: SubAgentRunner = fakeRunner,
         flags: CapabilityFlags? = threadGraphFlags,
-    ) = SubAgentManager(
-        context = context,
-        appScope = appScope,
-        settingsStore = settingsStore,
-        json = Json,
-        runner = runner,
-        agentTaskStore = AgentTaskStore(context, Json),
-        sessionAccessGrantStore = SessionAccessGrantStore(),
-        threadGraphStore = RoomThreadGraphStore(database.threadGraphDao()),
-        capabilityFlags = flags,
-    )
+    ): SubAgentManager {
+        val payloads = SubAgentTurnPayloads()
+        lastPayloads = payloads
+        val registry = InMemoryAgentRegistry().apply {
+            register(
+                descriptor = SubAgentTurnDescriptor.value,
+                inputClass = SubAgentTurnInput::class,
+                inputSerializer = SubAgentTurnInput.serializer(),
+                artifactSerializer = SubAgentResult.serializer(),
+                factory = { SubAgentTurnAgent(runner, payloads) },
+            )
+        }
+        val runtimeDb = Room.inMemoryDatabaseBuilder(context, AgentRuntimeDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val agentRunner = InProcessAgentRunner(
+            registry = registry,
+            eventStore = RoomAgentEventStore(runtimeDb.agentRuntimeDao()),
+        )
+        return SubAgentManager(
+            context = context,
+            appScope = appScope,
+            settingsStore = settingsStore,
+            json = Json,
+            agentTaskStore = AgentTaskStore(context, Json),
+            sessionAccessGrantStore = SessionAccessGrantStore(),
+            agentRunner = agentRunner,
+            turnPayloads = payloads,
+            threadGraphStore = RoomThreadGraphStore(database.threadGraphDao()),
+            capabilityFlags = flags,
+        )
+    }
 
     private fun startInput(objective: String) = buildJsonObject {
         put("subagent_id", "explorer")
@@ -137,9 +180,15 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
     )
 
     private fun awaitLive(threadId: String) {
+        val payloads = lastPayloads ?: error("manager() not called before awaitLive")
         val deadline = System.currentTimeMillis() + 5_000
         while (System.currentTimeMillis() < deadline) {
-            if (fakeRunner.calls.any { it.threadId == threadId }) return
+            // Map the thread to its in-flight turn run id, then check the
+            // fake saw that turn (calls record the per-turn kernel run id).
+            val turnRunIds = payloads.snapshot()
+                .filterValues { it.threadId == threadId }
+                .keys
+            if (fakeRunner.calls.any { it.runId != null && it.runId in turnRunIds }) return
             Thread.sleep(20)
         }
         error("runner never started for thread $threadId")
@@ -337,6 +386,13 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         assertEquals("completed", payloadStatus(second.read(threadId)))
         // The followup generation was seeded with the thread's previous answer.
         assertEquals("fake answer: Interrupt test", fakeRunner.calls.last().previousAnswer)
+        // Each turn runs under a FRESH per-turn run id — the threadId is the
+        // durable thread identity and is never reused as a kernel run id, so
+        // a followup cannot re-open a write-once terminal run row.
+        val turnRunIds = fakeRunner.calls.mapNotNull { it.runId }
+        assertEquals(2, turnRunIds.size)
+        assertEquals(2, turnRunIds.toSet().size)
+        assertTrue(threadId !in turnRunIds)
     }
 
     @Test
@@ -510,11 +566,14 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         awaitLive(threadId)
 
         val call = fakeRunner.calls.single()
-        // runId + onTerminal are exactly the two conditions the generation coordinator
-        // requires to activate its durable path for this child run, so child
-        // tool effects are recorded in the unified ledger under the child
-        // runId.
-        assertEquals(threadId, call.runId)
+        // runId + onTerminal are exactly the two conditions the generation kernel
+        // requires to activate its durable path for this child turn, so child
+        // tool effects are recorded in the unified ledger under the per-turn
+        // run id (fresh per generation — never the reused threadId, which
+        // would violate write-once terminal transitions on followups).
+        assertNotNull(call.runId)
+        assertTrue(call.runId!!.isNotBlank())
+        assertTrue(call.runId != threadId)
         assertNotNull(call.onTerminal)
 
         // Approval pause: WaitingUser keeps the thread (node APPROVAL_REQUIRED,
@@ -529,6 +588,126 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         fakeRunner.gate!!.complete(SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "done"))
         awaitTerminal(manager, threadId)
         assertEquals("timed_out", payloadStatus(manager.read(threadId)))
+    }
+
+    // ── P1-7: the parent run's policy reaches the child session ──────────
+
+    /**
+     * Full production wiring under test: manager.start → launchTurn payload →
+     * kernel AgentRunner → SubAgentTurnAgent → GenerationSubAgentRunner →
+     * kernel session. The narrowed parent policy must arrive as the child
+     * session policy (the child payload carries no narrowing in v1, so
+     * narrow(permissive) is the parent verbatim — never wider).
+     */
+    @Test
+    fun startNarrowsTheChildSessionThroughTheRealWiring() = runBlocking {
+        configureChatModel()
+        val parentPolicy = app.amber.feature.runtime.ExecutionPolicy(
+            allowedPathRoots = listOf("/workspace"),
+            allowShell = false,
+        )
+        val kernel = SessionCapturingKernel()
+        val manager = manager(runner = GenerationSubAgentRunner(kernel))
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Policy wiring test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+            parentPolicy = parentPolicy,
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, threadId)
+
+        // The report-tool reminder may run the kernel twice; every child
+        // session must carry exactly the parent policy.
+        assertTrue(kernel.sessions.isNotEmpty())
+        assertTrue(kernel.sessions.all { it.executionPolicy == parentPolicy })
+        assertEquals("completed", payloadStatus(manager.read(threadId)))
+    }
+
+    @Test
+    fun startWithoutParentPolicyKeepsThePermissiveChildSession() = runBlocking {
+        // v1 default unchanged: a producer that cannot know the parent policy
+        // (null) leaves the child session permissive.
+        configureChatModel()
+        val kernel = SessionCapturingKernel()
+        val manager = manager(runner = GenerationSubAgentRunner(kernel))
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Permissive wiring test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, threadId)
+
+        assertTrue(kernel.sessions.isNotEmpty())
+        assertTrue(kernel.sessions.all {
+            it.executionPolicy == app.amber.feature.runtime.ExecutionPolicy.permissive()
+        })
+    }
+
+    @Test
+    fun followupForwardsTheParentPolicyToTheNewTurn() = runBlocking {
+        configureChatModel()
+        val parentPolicy = app.amber.feature.runtime.ExecutionPolicy(allowShell = false)
+        val kernel = SessionCapturingKernel()
+        val manager = manager(runner = GenerationSubAgentRunner(kernel))
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Followup policy test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+            parentPolicy = parentPolicy,
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, threadId)
+
+        val followup = manager.followup(
+            parentConversationId = conversationId,
+            threadId = threadId,
+            input = buildJsonObject {
+                put("task", buildJsonObject { put("objective", "Continue under the same sandbox") })
+            },
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+            parentPolicy = parentPolicy,
+        )
+        assertTrue(payloadStatus(followup) in setOf("running", "completed"))
+        awaitTerminal(manager, threadId)
+
+        // Both turns (start + followup) ran under the parent policy.
+        assertTrue(kernel.sessions.size >= 2)
+        assertTrue(kernel.sessions.all { it.executionPolicy == parentPolicy })
+    }
+
+    /** Give the settings store a chat model so the real runner can resolve one. */
+    private suspend fun configureChatModel() {
+        val model = Model(modelId = "test-model", displayName = "Test Model")
+        settingsStore.update { settings ->
+            settings.copy(
+                chatModelId = model.id,
+                providers = listOf(
+                    ProviderSetting.OpenAI(
+                        name = "Test Provider",
+                        apiKey = "test-key",
+                        baseUrl = "https://example.test/v1",
+                        models = listOf(model),
+                    )
+                ),
+            )
+        }
+    }
+
+    /** Records every generation session the runner asks the kernel to run. */
+    private inner class SessionCapturingKernel : RunKernel {
+        // The turn runs on a runner thread; assertions read from the test thread.
+        val sessions = CopyOnWriteArrayList<GenerationRunSession>()
+
+        override fun run(session: GenerationRunSession): Flow<GenerationChunk> = flow {
+            sessions += session
+            emit(GenerationChunk.Messages(session.messages + UIMessage.assistant("done")))
+        }
     }
 
     // ── flag off: legacy behavior unchanged ───────────────────────────────
@@ -560,10 +739,12 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
 /** Scripted [SubAgentRunner] fake: completes instantly or blocks on a gate. */
 class FakeSubAgentRunner : SubAgentRunner {
     data class CapturedCall(
-        val threadId: String,
+        /** Per-turn kernel run id (null when the thread graph is off). */
         val runId: String?,
         val onTerminal: (suspend (GenerationTerminal) -> Unit)?,
         val previousAnswer: String,
+        /** Step 3: the run scope's protocol event writer passed through. */
+        val events: AgentEventWriter?,
     )
 
     val calls = CopyOnWriteArrayList<CapturedCall>()
@@ -582,12 +763,15 @@ class FakeSubAgentRunner : SubAgentRunner {
         onTerminal: (suspend (GenerationTerminal) -> Unit)?,
         consumeSteerMessages: suspend () -> List<UIMessage>,
         previousAnswer: String,
+        events: AgentEventWriter?,
+        parentPolicy: app.amber.feature.runtime.ExecutionPolicy,
+        childPolicy: app.amber.feature.runtime.ExecutionPolicy?,
     ): SubAgentResult {
         calls += CapturedCall(
-            threadId = runId.orEmpty(),
             runId = runId,
             onTerminal = onTerminal,
             previousAnswer = previousAnswer,
+            events = events,
         )
         liveText.value = "fake answer: ${task.objective}"
         val g = gate

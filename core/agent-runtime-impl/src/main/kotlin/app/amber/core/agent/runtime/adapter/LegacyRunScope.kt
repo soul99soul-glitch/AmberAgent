@@ -40,12 +40,13 @@ class LegacyRunScope(
     override val parentRunId: AgentRunId? = null,
     override val conversationId: ConversationId? = null,
     override val messageNodeId: MessageNodeId? = null,
+    // No-op by default (legacy behavior); the runtime's scope factory passes a
+    // persisting writer for the run kinds that write the event stream.
+    override val events: AgentEventWriter = NoOpEventWriter,
 ) : RunScope {
 
     override val coroutineContext: CoroutineContext
         get() = kotlin.coroutines.EmptyCoroutineContext
-
-    override val events: AgentEventWriter = NoOpEventWriter
     override val tools: ToolSession = NoOpToolSession
     override val llm: LlmSession = NoOpLlmSession
     override val tracing: TraceRecorder = NoOpTraceRecorder

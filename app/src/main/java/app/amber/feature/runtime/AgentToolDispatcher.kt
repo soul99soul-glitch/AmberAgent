@@ -20,6 +20,8 @@ import kotlinx.serialization.json.put
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.agent.runtime.AgentEventWriter
+import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.feature.runtime.toAgentToolFailurePayload
 import app.amber.core.ai.GenerationFailureClassifier
 import app.amber.core.ai.GenerationRetrySetting
@@ -29,6 +31,9 @@ import app.amber.feature.tools.effectClass
 import app.amber.feature.tools.invocationPolicy
 
 private const val TAG = "AgentToolDispatcher"
+
+/** Ledger/event errorCategory for sandbox denials (distinct from approval_denied). */
+const val POLICY_DENIED_EFFECT_CATEGORY = "policy_denied"
 
 /** Metadata binding a pending composite resume to its original checkpoint. */
 const val TOOL_RESUME_PROVENANCE_METADATA_KEY = "__amber_recipe_resume_provenance"
@@ -46,7 +51,19 @@ data class ToolLedgerContext(
     val turnId: Int,
     val ledger: ToolEffectLedger,
     val messagePersistenceCursor: String? = null,
-)
+    /**
+     * Step 3 protocol event sink: every ledger transition below also emits a
+     * [ToolLifecycleEvent] carrying the same effectId, so the run's event
+     * stream and the write-ahead ledger describe the same execution. Null
+     * keeps the run event-silent. Writers must be fail-safe (the production
+     * writers are); an event failure must never break tool execution.
+     */
+    val events: AgentEventWriter? = null,
+) {
+    suspend fun emitLifecycle(event: ToolLifecycleEvent) {
+        events?.commit(event)
+    }
+}
 
 /**
  * A composite tool reached a nested human-approval checkpoint before it
@@ -98,6 +115,7 @@ class AgentToolDispatcher(
         capabilityPermissions: CapabilityPermissionState? = null,
         approvalHistory: CapabilityPermissionStore? = null,
         permissionContext: CapabilityPermissionContext? = null,
+        executionPolicy: ExecutionPolicy = ExecutionPolicy.permissive(),
     ): List<UIMessagePart.Tool> {
         val reused = tools.mapNotNull { tool ->
             prefetchedTools[tool.toolCallId]?.takeIf { prefetched ->
@@ -123,6 +141,7 @@ class AgentToolDispatcher(
                             capabilityPermissions = capabilityPermissions,
                             approvalHistory = approvalHistory,
                             permissionContext = permissionContext,
+                            executionPolicy = executionPolicy,
                         )
                     }
                 }.awaitAll().filterNotNull()
@@ -142,6 +161,7 @@ class AgentToolDispatcher(
                     capabilityPermissions = capabilityPermissions,
                     approvalHistory = approvalHistory,
                     permissionContext = permissionContext,
+                    executionPolicy = executionPolicy,
                 )?.let { executed += it }
             }
             executed
@@ -165,6 +185,7 @@ class AgentToolDispatcher(
         capabilityPermissions: CapabilityPermissionState? = null,
         approvalHistory: CapabilityPermissionStore? = null,
         permissionContext: CapabilityPermissionContext? = null,
+        executionPolicy: ExecutionPolicy = ExecutionPolicy.permissive(),
     ): UIMessagePart.Tool? {
         val decision = resolveDecision(
             toolDef = toolDef,
@@ -201,6 +222,16 @@ class AgentToolDispatcher(
                 ledgerContext?.let { ctx ->
                     ctx.ledger.getByToolCallId(tool.toolCallId)?.let { effect ->
                         ctx.ledger.finish(effect.effectId, listOf(UIMessagePart.Text(answer)))
+                        // Answered settles the effect without an execution
+                        // (PREPARED → FINISHED) — no Started event by design.
+                        ctx.emitLifecycle(
+                            ToolLifecycleEvent.Finished(
+                                effectId = effect.effectId,
+                                toolCallId = tool.toolCallId,
+                                toolName = tool.toolName,
+                                status = ToolLifecycleEvent.Finished.Status.FINISHED,
+                            ),
+                        )
                     }
                 }
                 tracedTool.copy(output = listOf(UIMessagePart.Text(answer)))
@@ -224,7 +255,12 @@ class AgentToolDispatcher(
                         )
                     )
                 )
-            } else executeWithHooks(
+            } else executionPolicyDenied(
+                tool = tracedTool,
+                executionPolicy = executionPolicy,
+                ledgerContext = ledgerContext,
+                decision = decision,
+            ) ?: executeWithHooks(
                 tool = tracedTool,
                 toolDef = toolDef,
                 decision = decision,
@@ -236,11 +272,63 @@ class AgentToolDispatcher(
         }
     }
 
-    private suspend fun recordDeniedEffect(ledgerContext: ToolLedgerContext?, tool: UIMessagePart.Tool) {
+    /**
+     * Step 6 — separate sandbox from approval: the per-run [ExecutionPolicy]
+     * gate. Runs AFTER the approval chain and BEFORE any execution — even when
+     * approval said ALLOW — and returns the structured policy denial, or null
+     * when the call may proceed. A policy-denied tool never reaches
+     * markStarted: the denial short-circuits with the SAME shape as a user
+     * denial (ledger FAILED with no Started event + Finished(DENIED)), so the
+     * model sees the structured `policy_denied` result instead of an exception.
+     * With the default permissive policy the gate is a pure pass-through.
+     */
+    private suspend fun executionPolicyDenied(
+        tool: UIMessagePart.Tool,
+        executionPolicy: ExecutionPolicy,
+        ledgerContext: ToolLedgerContext?,
+        decision: PermissionDecision,
+    ): UIMessagePart.Tool? {
+        val reason = ExecutionPolicyGate.denialReason(
+            toolName = tool.toolName,
+            input = tool.input,
+            policy = executionPolicy,
+            json = json,
+        ) ?: return null
+        logInfo("execute: policy-denied ${tool.toolName} ${tool.toolCallId} (${reason.take(160)})")
+        recordDeniedEffect(ledgerContext, tool, errorCategory = POLICY_DENIED_EFFECT_CATEGORY)
+        return tool.copy(
+            output = listOf(
+                UIMessagePart.Text(
+                    json.encodeToString(
+                        buildJsonObject {
+                            put("status", "policy_denied")
+                            put("message", reason)
+                            put("permission_trace", decision.trace.toJson())
+                        }
+                    )
+                )
+            ),
+        )
+    }
+
+    private suspend fun recordDeniedEffect(
+        ledgerContext: ToolLedgerContext?,
+        tool: UIMessagePart.Tool,
+        errorCategory: String = "approval_denied",
+    ) {
         if (ledgerContext == null) return
         ledgerContext.ledger.getByToolCallId(tool.toolCallId)?.let { effect ->
             if (effect.status != ToolEffectStatus.FAILED) {
-                ledgerContext.ledger.fail(effect.effectId, "approval_denied")
+                ledgerContext.ledger.fail(effect.effectId, errorCategory)
+                ledgerContext.emitLifecycle(
+                    ToolLifecycleEvent.Finished(
+                        effectId = effect.effectId,
+                        toolCallId = tool.toolCallId,
+                        toolName = tool.toolName,
+                        status = ToolLifecycleEvent.Finished.Status.DENIED,
+                        errorCategory = errorCategory,
+                    ),
+                )
             }
         }
     }
@@ -304,6 +392,14 @@ class AgentToolDispatcher(
                     ledgerContext?.let { ctx ->
                         ctx.ledger.getByToolCallId(tool.toolCallId)?.let { effect ->
                             ctx.ledger.finish(effect.effectId, result.output)
+                            ctx.emitLifecycle(
+                                ToolLifecycleEvent.Finished(
+                                    effectId = effect.effectId,
+                                    toolCallId = tool.toolCallId,
+                                    toolName = tool.toolName,
+                                    status = ToolLifecycleEvent.Finished.Status.FINISHED,
+                                ),
+                            )
                         }
                     }
                 }
@@ -330,8 +426,19 @@ class AgentToolDispatcher(
                 )
             }
             if (toolDef?.ledgerManaged == false) {
-                ledgerContext?.ledger?.getByToolCallId(tool.toolCallId)?.let { effect ->
-                    ledgerContext.ledger.fail(effect.effectId, error.errorCategory())
+                ledgerContext?.let { ctx ->
+                    ctx.ledger.getByToolCallId(tool.toolCallId)?.let { effect ->
+                        ctx.ledger.fail(effect.effectId, error.errorCategory())
+                        ctx.emitLifecycle(
+                            ToolLifecycleEvent.Finished(
+                                effectId = effect.effectId,
+                                toolCallId = tool.toolCallId,
+                                toolName = tool.toolName,
+                                status = ToolLifecycleEvent.Finished.Status.FAILED,
+                                errorCategory = error.errorCategory(),
+                            ),
+                        )
+                    }
                 }
             }
             logError("execute failed for ${tool.toolName}", error)
@@ -393,7 +500,8 @@ class AgentToolDispatcher(
         // Block first: an existing OUTCOME_UNKNOWN / abandoned effect must not
         // be re-prepared (prepare() would mint a fresh PREPARED effect that
         // bypasses the block).
-        ctx.ledger.getByToolCallId(tool.toolCallId)?.let { existing ->
+        val preExistingEffect = ctx.ledger.getByToolCallId(tool.toolCallId)
+        preExistingEffect?.let { existing ->
             when (existing.status) {
                 ToolEffectStatus.OUTCOME_UNKNOWN -> {
                     logInfo("execute: blocking ${tool.toolName} ${existing.effectId} (outcome unknown)")
@@ -442,6 +550,22 @@ class AgentToolDispatcher(
             effectClass = toolDef.effectClass(),
             messagePersistenceCursor = ctx.messagePersistenceCursor,
         )
+        if (preExistingEffect == null) {
+            // No kernel write-ahead announced this effect (nested recipe
+            // steps, direct dispatches): emit the Prepared the kernel would
+            // have emitted, so every durable execution still leaves the full
+            // lifecycle trail. Kernel-driven tools already have their Prepared
+            // (the pre-existing PREPARED row proves it) — never double-emit.
+            ctx.emitLifecycle(
+                ToolLifecycleEvent.Prepared(
+                    effectId = effect.effectId,
+                    toolCallId = effect.toolCallId,
+                    toolName = effect.toolName,
+                    effectClass = effect.effectClass.name,
+                    argsDigest = effect.argsDigest,
+                ),
+            )
+        }
         // P2-01: a user-approved call may only execute when the approval still
         // matches the args about to be executed. If the model re-issued the
         // call with different parameters after the user approved (same
@@ -450,14 +574,41 @@ class AgentToolDispatcher(
         // re-resolve per call and never carry a stale binding.
         staleApprovalResult(tool, runId = ctx.runId, approvalHistory, effectId = effect.effectId)
             ?.let { return it }
-        ctx.ledger.markStarted(effect.effectId, approvalDigest(ctx.runId, tool.toolCallId, effect.argsDigest))
+        val boundApprovalDigest = approvalDigest(ctx.runId, tool.toolCallId, effect.argsDigest)
+        ctx.ledger.markStarted(effect.effectId, boundApprovalDigest)
+        ctx.emitLifecycle(
+            ToolLifecycleEvent.Started(
+                effectId = effect.effectId,
+                toolCallId = tool.toolCallId,
+                toolName = tool.toolName,
+                approvalDigest = boundApprovalDigest,
+            ),
+        )
         return try {
             val executed = execute()
             ctx.ledger.finish(effect.effectId, executed.output)
+            ctx.emitLifecycle(
+                ToolLifecycleEvent.Finished(
+                    effectId = effect.effectId,
+                    toolCallId = tool.toolCallId,
+                    toolName = tool.toolName,
+                    status = ToolLifecycleEvent.Finished.Status.FINISHED,
+                ),
+            )
             executed
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
-            ctx.ledger.fail(effect.effectId, error.errorCategory())
+            val category = error.errorCategory()
+            ctx.ledger.fail(effect.effectId, category)
+            ctx.emitLifecycle(
+                ToolLifecycleEvent.Finished(
+                    effectId = effect.effectId,
+                    toolCallId = tool.toolCallId,
+                    toolName = tool.toolName,
+                    status = ToolLifecycleEvent.Finished.Status.FAILED,
+                    errorCategory = category,
+                ),
+            )
             throw error
         }
     }

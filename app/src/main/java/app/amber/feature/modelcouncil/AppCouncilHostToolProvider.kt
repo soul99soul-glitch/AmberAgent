@@ -30,7 +30,7 @@ import kotlin.uuid.Uuid
  * [ProviderCatalog.streamText] + [MessageStreamAccumulator] +
  * [AgentToolDispatcher.executeBatch] + the read-only tool factories.
  *
- * Kept deliberately minimal next to [app.amber.core.ai.ChatRunCoordinator] — no
+ * Kept deliberately minimal next to the run kernel ([app.amber.core.ai.DefaultRunKernel]) — no
  * speculative execution, transformers, or approval UI. It serves a single host
  * turn with a bounded number of tool round-trips, and is the ONLY place in the
  * council that exposes tools. `ask_user` is surfaced (not executed) so the room
@@ -38,10 +38,50 @@ import kotlin.uuid.Uuid
  *
  * The tool set is read-only and explicitly allowlisted here ([HOST_TOOL_NAMES]),
  * so all calls are auto-approved — no per-call permission gate.
+ *
+ * ## Kernel layers this in-process loop does NOT have
+ *
+ * This loop is not an agent run and deliberately sits outside
+ * [app.amber.core.ai.DefaultRunKernel]. The missing layers, each of which the
+ * kernel loop provides:
+ *
+ * - **Run identity / event stream**: no runId, no [app.amber.core.agent.runtime.AgentEventWriter]
+ *   — nothing observes or audits the host's tool rounds.
+ * - **Write-ahead ledger**: [AgentToolDispatcher.executeBatch] is called
+ *   without `ledgerContext`, so no effect is PREPARED/STARTED/FINISHED anywhere.
+ * - **Approval gate**: `autoApproveTools = true` with the full allowlist —
+ *   there is no Pending state and no user decision point.
+ * - **Per-run sandbox policy**: [executionPolicy] stays
+ *   [app.amber.feature.runtime.ExecutionPolicy.permissive]
+ *   because this provider is a DI singleton built at app start, where no
+ *   per-run policy exists to capture (see the constructor KDoc).
+ * - **Recovery semantics**: no run-terminal row, no resume, no reconcile — an
+ *   interrupted host turn is simply gone.
+ * - **Budget prompt and loop guards**: no [app.amber.feature.runtime.AgentLoopBudgetPrompt],
+ *   no output-limit truncation guard, and no duplicate-tool-call guard — the
+ *   bounded round budget below is the only loop protection.
+ *
+ * The one-line rationale: the room's state machine plus this host's bounded
+ * (~maxToolRounds) in-process loop is not an agent-run shape; moving it into
+ * the kernel would be a different architecture decision, not a cleanup.
  */
 class AppCouncilHostToolProvider(
     private val providerCatalog: ProviderCatalog,
     private val toolDispatcher: AgentToolDispatcher,
+    /**
+     * Step 6: the sandbox policy captured for this provider's host turns.
+     * Stays at the permissive default for a structural v1 reason: this
+     * provider is a DI singleton built at app start, where no per-run policy
+     * exists yet to capture — there is no run-scoped production source for a
+     * narrowed policy. The allowlist is defense in detail, NOT a sandbox: it
+     * only limits which tools the host turn may call, and does not constrain
+     * `scrape_web`'s outbound network fetches (an allowedDomains policy would
+     * not apply inside a chat-run-driven host turn). Tightening the council
+     * host for real means making it session-scoped so it can receive the
+     * run's ExecutionPolicy.
+     */
+    private val executionPolicy: app.amber.feature.runtime.ExecutionPolicy =
+        app.amber.feature.runtime.ExecutionPolicy.permissive(),
     ) : CouncilHostToolProvider {
 
     override fun isAvailable(settings: Settings): Boolean =
@@ -64,14 +104,19 @@ class AppCouncilHostToolProvider(
             ?: return HostToolOutcome.Done("", listOf("Provider not found for host model."))
         val providerImpl = providerCatalog.text(provider)
 
-        // The "relatively strong" host tool set: web search + page scrape + time.
-        // ask_user is included so the host CAN ask; it is intercepted, not run.
+        // The "relatively strong" host tool set: web search + page scrape +
+        // time (`get_time_info`). Every executed tool must be an explicit
+        // HOST_TOOL_NAMES member — the search set and the time tool are
+        // filtered through the same membership check; ask_user is included so
+        // the host CAN ask, but it is intercepted, not run, and lives outside
+        // the allowlist on purpose.
         val tools: List<Tool> = buildList {
             addAll(
                 createSearchTools(settings, includeWebViewFallbackGuidance = false)
                     .filter { it.name in HOST_TOOL_NAMES }
             )
-            add(createTimeTool())
+            val timeTool = createTimeTool()
+            if (timeTool.name in HOST_TOOL_NAMES) add(timeTool)
             add(createAskUserTool())
         }
         val toolDefs = tools.associateBy { it.name }
@@ -157,6 +202,7 @@ class AppCouncilHostToolProvider(
                     toolDefinitions = toolDefs,
                     autoApproveTools = true,
                     autoApprovedToolNames = toolDefs.keys.toSet(),
+                    executionPolicy = executionPolicy,
                 )
             }.getOrElse { error ->
                 if (error is CancellationException) throw error
@@ -187,8 +233,12 @@ class AppCouncilHostToolProvider(
     }
 
     companion object {
-        /** Read-only, broadly-useful tools the host may use. */
-        val HOST_TOOL_NAMES = setOf("search_web", "scrape_web", "time")
+        /**
+         * Read-only, broadly-useful tools the host may use — real factory
+         * tool names (`createTimeTool` registers `get_time_info`), so the
+         * allowlist matches what executeBatch will actually be asked to run.
+         */
+        val HOST_TOOL_NAMES = setOf("search_web", "scrape_web", "get_time_info")
         const val ASK_USER_TOOL_NAME = "ask_user"
     }
 }

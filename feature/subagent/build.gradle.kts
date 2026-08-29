@@ -26,6 +26,7 @@ dependencies {
     api(project(":core:settings"))
     api(project(":core:app-infra"))
     api(project(":core:agent-utils"))
+    api(project(":core:agent-runtime"))
     api(project(":core:ai:generation:api"))
     api(project(":feature:history"))
     api(project(":feature:runtime:api"))

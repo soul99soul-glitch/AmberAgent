@@ -7,6 +7,9 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.agent.data.files.CasTestFixtures
+import app.amber.core.agent.runtime.AgentEventPayload
+import app.amber.core.agent.runtime.AgentEventWriter
+import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.feature.runtime.AgentToolDispatcher
 import app.amber.feature.runtime.PermissionDecisionResolver
 import app.amber.feature.runtime.ToolEffect
@@ -108,6 +111,16 @@ class RecipeRuntimeTest {
         hooks = emptyList(),
     )
 
+    private class RecordingEventWriter : AgentEventWriter {
+        val committed = mutableListOf<AgentEventPayload.Final>()
+        override fun emit(transient: AgentEventPayload.Transient) {}
+        override suspend fun commit(final: AgentEventPayload.Final) {
+            committed += final
+        }
+        override suspend fun flush() {}
+        override suspend fun commitError(throwable: Throwable, recoverable: Boolean) {}
+    }
+
     private fun runContext(
         installed: List<RecipeRecord> = emptyList(),
         runId: String? = null,
@@ -116,12 +129,14 @@ class RecipeRuntimeTest {
         autoApprove: Boolean = false,
         autoApproveHighRisk: Boolean = false,
         installedProvider: (() -> List<RecipeRecord>)? = null,
+        events: AgentEventWriter? = null,
     ) = RecipeRunContext(
         installed = installed,
         dispatcher = dispatcher(),
         runId = runId,
         conversationId = conversationId,
         ledger = effectLedger,
+        events = events,
         autoApproveTools = autoApprove,
         autoApproveHighRiskTools = autoApproveHighRisk,
         autoApprovedToolNames = emptySet(),
@@ -484,6 +499,39 @@ class RecipeRuntimeTest {
         assertEquals(ToolEffectStatus.PREPARED, effect.status)
         assertTrue(fakeLedger.started.contains(effect.effectId))
         assertTrue(fakeLedger.finished.contains(effect.effectId))
+    }
+
+    @Test
+    fun `nested steps emit their tool lifecycle events into the run stream`() = runBlocking {
+        val manifest = """
+            {"schemaVersion": 1, "name": "writeonly", "version": "1.0.0",
+             "steps": [{"id": "w1", "tool": "prim_write", "args": {"x": 1}}]}
+        """.trimIndent()
+        install(manifest)
+        val runner = RecipeRunner(json)
+        val definition = definitionOf("writeonly")!!
+        val fakeLedger = FakeToolEffectLedger()
+        val events = RecordingEventWriter()
+        val context = runContext(
+            installed = registry.installed(),
+            runId = "run-events",
+            effectLedger = fakeLedger,
+            autoApprove = true,
+            autoApproveHighRisk = true,
+            events = events,
+        )
+
+        val executed = runner.run(definition, JsonObject(emptyMap()), context) { primitives() }
+
+        assertEquals("ok", executed["status"]!!.jsonPrimitive.content)
+        val effect = fakeLedger.prepared.single()
+        // Nested steps self-prepare inside the dispatcher — the kernel never
+        // sees them — so the Prepared must come from the dispatcher itself,
+        // aligned with the ledger effect by effectId/toolCallId.
+        val emitted = events.committed.filterIsInstance<ToolLifecycleEvent>()
+        assertEquals(listOf("Prepared", "Started", "Finished"), emitted.map { it::class.simpleName })
+        assertTrue(emitted.all { it.effectId == effect.effectId })
+        assertTrue(emitted.all { it.toolCallId == effect.toolCallId })
     }
 
     @Test

@@ -13,7 +13,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import app.amber.feature.deepread.api.DeepReadDescriptor
+import app.amber.feature.deepread.api.DeepReadInput
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.get
 import java.io.IOException
@@ -82,34 +85,51 @@ class DeepReadWorker(
         ttlDays: Int,
     ): Result {
         return try {
-            val manager = get<DeepReadAgentRunManager>()
-            val output = when (route) {
-                DeepReadWorkerRoute.All -> manager.run(
+            // Deep read runs through the agent kernel: the runner owns the
+            // run record / terminal CAS; the handler (DeepReadAgentAdapter)
+            // drives the legacy stage orchestration inside.
+            val runner = get<app.amber.core.agent.runtime.AgentRunner>()
+            val input = when (route) {
+                DeepReadWorkerRoute.All -> DeepReadInput(
+                    url = sourceUrl.orEmpty(),
                     topicId = topicId,
-                    topicTitle = title,
+                    title = title,
                     force = effectiveDeepReadForce(force, runAttemptCount),
-                    seedUrl = sourceUrl,
                     deferMissingStages = false,
                     propagateFailuresWithPartial = true,
                 )
 
-                is DeepReadWorkerRoute.Section -> manager.runSection(
+                is DeepReadWorkerRoute.Section -> DeepReadInput(
+                    url = sourceUrl.orEmpty(),
                     topicId = topicId,
-                    topicTitle = title,
-                    stage = route.stage,
-                    seedUrl = sourceUrl,
+                    title = title,
+                    stages = listOf(route.stage.name),
                     propagateFailuresWithPartial = true,
                 )
 
                 is DeepReadWorkerRoute.Invalid -> return Result.failure()
             }
-                .getOrThrow()
-                .withInferredSectionStates()
+            val handle = runner.launch(DeepReadDescriptor.ID, input).getOrThrow()
+            val snapshot = try {
+                runner.observe(handle.runId).first { it.status.isTerminal }
+            } catch (cancel: CancellationException) {
+                // WorkManager stopped this worker: propagate the cancel into
+                // the kernel run so the generation actually stops.
+                runner.cancel(handle.runId)
+                throw cancel
+            }
+            if (snapshot.status != app.amber.core.agent.runtime.RunStatus.COMPLETED) {
+                throw snapshot.error
+                    ?: IllegalStateException("deep read run ended ${snapshot.status}")
+            }
+            val artifact = snapshot.artifact as? app.amber.feature.deepread.api.DeepReadArtifact
             notifier.notifyCompleted(
                 topicId = topicId,
                 title = title,
                 sourceUrl = sourceUrl,
-                complete = output.isComplete(),
+                complete = artifact != null &&
+                    artifact.generationComplete &&
+                    artifact.sectionCount == DeepReadGenerationStage.entries.size,
             )
             Result.success()
         } catch (cancel: CancellationException) {

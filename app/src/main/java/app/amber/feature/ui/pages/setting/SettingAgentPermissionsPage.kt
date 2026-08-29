@@ -29,6 +29,8 @@ import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Zap
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.core.settings.Capability
+import app.amber.core.settings.CapabilityFlags
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
@@ -37,6 +39,8 @@ import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
+import kotlinx.coroutines.flow.map
+import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
 @Composable
@@ -45,6 +49,12 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
     val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     var showHighRiskAutoApproveDialog by remember { mutableStateOf(false) }
+    // Capability 权限页入口仅在 capability_permissions flag 开启时可见
+    // （与入口文案的声明一致；Debug 页负责开关该 flag）。
+    val capabilityFlags: CapabilityFlags = koinInject()
+    val capabilityPermissionsEnabled by remember(capabilityFlags) {
+        capabilityFlags.flow.map { Capability.CapabilityPermissions in it.enabled }
+    }.collectAsStateWithLifecycle(initialValue = false)
 
     if (showHighRiskAutoApproveDialog) {
         AlertDialog(
@@ -103,12 +113,14 @@ fun SettingAgentPermissionsPage(vm: SettingVM = koinViewModel()) {
                         supportingContent = { Text(stringResource(R.string.setting_page_system_access_desc)) },
                         headlineContent = { Text(stringResource(R.string.setting_page_system_access)) },
                     )
-                    item(
-                        onClick = { navController.navigate(Screen.SettingCapabilityPermissions) },
-                        leadingContent = { Icon(Lucide.Layers, null) },
-                        supportingContent = { Text("按能力分组管理 disabled/ask/auto 策略，查看最近审批记录（需在 Debug 页开启 capability_permissions）") },
-                        headlineContent = { Text("Capability 权限") },
-                    )
+                    if (capabilityPermissionsEnabled) {
+                        item(
+                            onClick = { navController.navigate(Screen.SettingCapabilityPermissions) },
+                            leadingContent = { Icon(Lucide.Layers, null) },
+                            supportingContent = { Text("按能力分组管理 disabled/ask/auto 策略，查看最近审批记录（需在 Debug 页开启 capability_permissions）") },
+                            headlineContent = { Text("Capability 权限") },
+                        )
+                    }
                 }
             }
 

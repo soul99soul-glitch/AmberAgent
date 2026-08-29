@@ -148,6 +148,7 @@ class RunRecoveryServiceResumeTest : DurableRuntimeTestBase() {
         gateway: StoredResponseGateway? = null,
         flags: CapabilityFlags? = null,
         resumeStore: ResponseResumeStore? = null,
+        eventStore: app.amber.core.agent.runtime.AgentEventStore? = null,
     ) = RunRecoveryService(
         ledger = ledger,
         runTerminalStore = runTerminalStore,
@@ -156,7 +157,47 @@ class RunRecoveryServiceResumeTest : DurableRuntimeTestBase() {
         storedResponseGateway = gateway,
         capabilityFlags = flags,
         resumeStore = resumeStore,
+        agentEventStore = eventStore,
     )
+
+    /** Seed a protocol run row and walk it legally to [status]. */
+    private suspend fun seedAgentRun(
+        store: app.amber.core.agent.runtime.InMemoryAgentEventStore,
+        runId: String,
+        status: app.amber.core.agent.runtime.RunStatus,
+    ) {
+        store.appendRun(
+            app.amber.core.agent.runtime.AgentRunRecord(
+                runId = runId,
+                parentRunId = null,
+                agentDescriptorId = "chat_turn",
+                agentVersion = "1.0.0",
+                conversationId = null,
+                messageNodeId = null,
+                producesMessageId = null,
+                assistantId = null,
+                status = app.amber.core.agent.runtime.RunStatus.CREATED,
+                inputDigest = "digest",
+                inputSnapshotRef = null,
+                inputSchemaVersion = 1,
+                startedAt = System.currentTimeMillis(),
+                finishedAt = null,
+                interruptedReason = null,
+            ),
+        )
+        store.transitionRun(
+            app.amber.core.agent.runtime.AgentRunId(runId),
+            emptySet(),
+            app.amber.core.agent.runtime.RunStatus.RUNNING,
+        )
+        if (status != app.amber.core.agent.runtime.RunStatus.RUNNING) {
+            store.transitionRun(
+                app.amber.core.agent.runtime.AgentRunId(runId),
+                emptySet(),
+                status,
+            )
+        }
+    }
 
     private fun conversationWithPartial(
         conversationId: Uuid,
@@ -246,6 +287,167 @@ class RunRecoveryServiceResumeTest : DurableRuntimeTestBase() {
         assertNull(run.finishedAtMs)
         assertEquals(7L, resumeStore.load("run_1")!!.sequence)
         assertNull(api.requestedCursor) // no event fetch for an in-progress response
+    }
+
+    @Test
+    fun completedStoredResponseAlsoSettlesTheProtocolRunRow() = runBlocking {
+        val conversationId = Uuid.random()
+        runTerminalStore.begin("run_1", conversationId.toString(), null)
+        val resumeStore = RoomResponseResumeStore(dao = database.runResumeDao())
+        resumeStore.save("run_1", "resp_1", 3, "provider_1")
+        val repo = conversationRepository()
+        repo.insertConversation(conversationWithPartial(conversationId, partialText = "abc"))
+        val eventStore = app.amber.core.agent.runtime.InMemoryAgentEventStore()
+        seedAgentRun(eventStore, "run_1", app.amber.core.agent.runtime.RunStatus.RUNNING)
+
+        val api = FakeStoredResponseApi().apply {
+            status = StoredResponseStatus(StoredResponseState.COMPLETED, "resp_1")
+            missingEvents = listOf(4L to "def")
+            finalText = "abcdef"
+        }
+        val gateway = FakeStoredResponseGateway().apply {
+            session = StoredResponseGateway.StoredResponseSession(
+                cursor = ResponseCursor("resp_1", 3, "provider_1"),
+                providerSetting = openAiSetting(),
+                api = api,
+            )
+        }
+
+        recoveryService(
+            gateway = gateway,
+            flags = capabilityFlags(true),
+            resumeStore = resumeStore,
+            eventStore = eventStore,
+        ).recover()
+
+        // Step 3-4 convergence: without the mirrored CAS the protocol row
+        // would later be stomped INTERRUPTED by replayUnfinished while
+        // run_terminal says COMPLETED.
+        assertEquals(RunTerminalState.COMPLETED, runTerminalStore.get("run_1")!!.state)
+        assertEquals(
+            app.amber.core.agent.runtime.RunStatus.COMPLETED,
+            eventStore.runs["run_1"]!!.status,
+        )
+    }
+
+    @Test
+    fun inProgressStoredResponseParksTheProtocolRunRowResumable() = runBlocking {
+        val conversationId = Uuid.random()
+        runTerminalStore.begin("run_1", conversationId.toString(), null)
+        val resumeStore = RoomResponseResumeStore(dao = database.runResumeDao())
+        resumeStore.save("run_1", "resp_1", 7, "provider_1")
+        val repo = conversationRepository()
+        repo.insertConversation(conversationWithPartial(conversationId, partialText = "abc"))
+        val eventStore = app.amber.core.agent.runtime.InMemoryAgentEventStore()
+        seedAgentRun(eventStore, "run_1", app.amber.core.agent.runtime.RunStatus.RUNNING)
+
+        val api = FakeStoredResponseApi() // IN_PROGRESS by default
+        val gateway = FakeStoredResponseGateway().apply {
+            session = StoredResponseGateway.StoredResponseSession(
+                cursor = ResponseCursor("resp_1", 7, "provider_1"),
+                providerSetting = openAiSetting(),
+                api = api,
+            )
+        }
+
+        recoveryService(
+            gateway = gateway,
+            flags = capabilityFlags(true),
+            resumeStore = resumeStore,
+            eventStore = eventStore,
+        ).recover()
+
+        // replayUnfinished skips pause states, so recovery itself must park
+        // the protocol row RESUMABLE — otherwise it would be marked
+        // INTERRUPTED while run_terminal keeps the run resumable.
+        assertEquals(RunTerminalState.RESUMABLE, runTerminalStore.get("run_1")!!.state)
+        assertEquals(
+            app.amber.core.agent.runtime.RunStatus.RESUMABLE,
+            eventStore.runs["run_1"]!!.status,
+        )
+    }
+
+    @Test
+    fun completedStoredResponseSettlesAPausedProtocolRunRow() = runBlocking {
+        // Checker path A: cold start 1 parked the protocol row RESUMABLE via
+        // server_in_progress, the process died again before the user resumed,
+        // and cold start 2 now sees the server response COMPLETED. No pause
+        // state transitions straight to COMPLETED, so recovery must unpark to
+        // RUNNING before settling — a direct CAS would be rejected illegal
+        // and the row would sit in `resumable` forever.
+        val conversationId = Uuid.random()
+        runTerminalStore.begin("run_1", conversationId.toString(), null)
+        runTerminalStore.pause("run_1", RunTerminalState.RESUMABLE, PauseReason.PROCESS_RESTART)
+        val resumeStore = RoomResponseResumeStore(dao = database.runResumeDao())
+        resumeStore.save("run_1", "resp_1", 3, "provider_1")
+        val repo = conversationRepository()
+        repo.insertConversation(conversationWithPartial(conversationId, partialText = "abc"))
+        val eventStore = app.amber.core.agent.runtime.InMemoryAgentEventStore()
+        seedAgentRun(eventStore, "run_1", app.amber.core.agent.runtime.RunStatus.RESUMABLE)
+
+        val api = FakeStoredResponseApi().apply {
+            status = StoredResponseStatus(StoredResponseState.COMPLETED, "resp_1")
+            missingEvents = listOf(4L to "def")
+            finalText = "abcdef"
+        }
+        val gateway = FakeStoredResponseGateway().apply {
+            session = StoredResponseGateway.StoredResponseSession(
+                cursor = ResponseCursor("resp_1", 3, "provider_1"),
+                providerSetting = openAiSetting(),
+                api = api,
+            )
+        }
+
+        recoveryService(
+            gateway = gateway,
+            flags = capabilityFlags(true),
+            resumeStore = resumeStore,
+            eventStore = eventStore,
+        ).recover()
+
+        assertEquals(RunTerminalState.COMPLETED, runTerminalStore.get("run_1")!!.state)
+        assertEquals(
+            app.amber.core.agent.runtime.RunStatus.COMPLETED,
+            eventStore.runs["run_1"]!!.status,
+        )
+    }
+
+    @Test
+    fun inProgressStoredResponseUnparksAWaitingUserProtocolRow() = runBlocking {
+        // A crash between the two approval-park writes can leave the protocol
+        // row WAITING_USER while run_terminal is still RUNNING. Pause ->
+        // RESUMABLE is not a legal direct transition, so recovery must unpark
+        // first or the row would stay diverged from run_terminal.
+        val conversationId = Uuid.random()
+        runTerminalStore.begin("run_1", conversationId.toString(), null)
+        val resumeStore = RoomResponseResumeStore(dao = database.runResumeDao())
+        resumeStore.save("run_1", "resp_1", 7, "provider_1")
+        val repo = conversationRepository()
+        repo.insertConversation(conversationWithPartial(conversationId, partialText = "abc"))
+        val eventStore = app.amber.core.agent.runtime.InMemoryAgentEventStore()
+        seedAgentRun(eventStore, "run_1", app.amber.core.agent.runtime.RunStatus.WAITING_USER)
+
+        val api = FakeStoredResponseApi() // IN_PROGRESS by default
+        val gateway = FakeStoredResponseGateway().apply {
+            session = StoredResponseGateway.StoredResponseSession(
+                cursor = ResponseCursor("resp_1", 7, "provider_1"),
+                providerSetting = openAiSetting(),
+                api = api,
+            )
+        }
+
+        recoveryService(
+            gateway = gateway,
+            flags = capabilityFlags(true),
+            resumeStore = resumeStore,
+            eventStore = eventStore,
+        ).recover()
+
+        assertEquals(RunTerminalState.RESUMABLE, runTerminalStore.get("run_1")!!.state)
+        assertEquals(
+            app.amber.core.agent.runtime.RunStatus.RESUMABLE,
+            eventStore.runs["run_1"]!!.status,
+        )
     }
 
     @Test

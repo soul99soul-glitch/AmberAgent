@@ -1,0 +1,8 @@
+# amber-replay-golden schema=v1 scenario=s08_steer_mid_stream
+run_started
+tool_prepared tool=golden_lookup_a
+tool_started tool=golden_lookup_a
+tool_finished tool=golden_lookup_a status=finished
+steer_injected count=1
+assistant_message
+run_terminal status=completed

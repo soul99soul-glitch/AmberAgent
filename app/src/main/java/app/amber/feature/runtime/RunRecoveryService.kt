@@ -8,6 +8,10 @@ import app.amber.ai.ui.MessageStreamAccumulator
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.model.MessageNode
+import app.amber.core.agent.runtime.AgentEventStore
+import app.amber.core.agent.runtime.AgentRunId
+import app.amber.core.agent.runtime.RunStatus
+import app.amber.core.agent.runtime.RunTransitionResult
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
@@ -67,6 +71,12 @@ class RunRecoveryService(
     private val storedResponseGateway: StoredResponseGateway? = null,
     private val capabilityFlags: CapabilityFlags? = null,
     private val resumeStore: ResponseResumeStore? = null,
+    // Step 3-4 dual-write convergence: when recovery settles a run_terminal
+    // row it also moves the protocol run row to the same state, so the two
+    // stores cannot diverge (e.g. stored-response COMPLETED while agent_run
+    // would later be marked INTERRUPTED). Null keeps the pre-Step-3 single-
+    // write behavior for tests that exercise the ledger rules in isolation.
+    private val agentEventStore: AgentEventStore? = null,
 ) {
     /** P6-01: run states whose stored server response may still be live. */
     private val RESUME_RESOLVABLE_STATES = setOf(
@@ -74,6 +84,32 @@ class RunRecoveryService(
         RunTerminalState.WAITING_EXTERNAL,
         RunTerminalState.RESUMABLE,
     )
+
+    /**
+     * Best-effort protocol-side mirror of a recovery settle: CAS the
+     * agent_run row from [expected] to [to]. Never throws, never blocks the
+     * run_terminal settle — a rejection means another writer already moved
+     * the row (which is the convergence this aims for anyway).
+     */
+    private suspend fun casEventStoreStatus(
+        runId: String,
+        expected: Set<RunStatus>,
+        to: RunStatus,
+        reason: String,
+    ) {
+        val store = agentEventStore ?: return
+        runCatching {
+            store.transitionRun(AgentRunId(runId), expected, to, reason)
+        }.onSuccess { result ->
+            // An illegal rejection is a code bug (caller targeted a state the
+            // transition table forbids), not a lost race — never swallow it.
+            if (result is RunTransitionResult.Rejected && result.illegal) {
+                Log.w(TAG, "recover: ILLEGAL event-store transition ${result.current} -> $to for $runId")
+            }
+        }.onFailure { error ->
+            Log.w(TAG, "recover: event-store transition to $to failed for $runId", error)
+        }
+    }
 
     suspend fun recover() {
         // M1 retention: terminal effects older than 7 days are never needed
@@ -83,6 +119,20 @@ class RunRecoveryService(
             .onFailure { error ->
                 Log.w(TAG, "recover: terminal effect cleanup failed", error)
             }
+        // Step 5 retention: RequestSnapshot rows age on the SAME 7-day cutoff
+        // — one ~8KB audit payload per wire call is not replay state, so
+        // letting them accumulate forever would bloat agent_event. Best-
+        // effort, same as the ledger prune.
+        agentEventStore?.let { store ->
+            runCatching {
+                store.deleteEventsOfTypeOlderThan(
+                    type = app.amber.feature.chat.api.ChatEventPayload.RequestSnapshot.TYPE,
+                    cutoffMs = System.currentTimeMillis() - TERMINAL_EFFECT_RETENTION_MS,
+                )
+            }.onFailure { error ->
+                Log.w(TAG, "recover: request snapshot cleanup failed", error)
+            }
+        }
         for (run in runTerminalStore.unfinished()) {
             runCatching {
                 // P6-01: resolve stored server responses before the Phase 1
@@ -112,6 +162,20 @@ class RunRecoveryService(
                                 PauseReason.OUTCOME_UNKNOWN,
                             )
                         }
+                        if (escalated || run.state == RunTerminalState.OUTCOME_UNKNOWN) {
+                            // Dual-write convergence (Step 3): the event-store
+                            // run row shows the same pause. The re-assert also
+                            // converges legacy rows whose escalation predates
+                            // the protocol (run_terminal OUTCOME_UNKNOWN while
+                            // agent_run still RUNNING/WAITING_USER — otherwise
+                            // replayUnfinished would stomp them INTERRUPTED).
+                            casEventStoreStatus(
+                                run.runId,
+                                RunStatus.LIVE_STATES,
+                                RunStatus.OUTCOME_UNKNOWN,
+                                reason = "ledger_escalation",
+                            )
+                        }
                         replayFinishedResults(run.runId, run.conversationId)
                     }
 
@@ -136,11 +200,30 @@ class RunRecoveryService(
                                 RunTerminalState.OUTCOME_UNKNOWN,
                                 PauseReason.OUTCOME_UNKNOWN,
                             )
+                            casEventStoreStatus(
+                                run.runId,
+                                RunStatus.LIVE_STATES,
+                                RunStatus.OUTCOME_UNKNOWN,
+                                reason = "ledger_escalation",
+                            )
                         } else {
                             runTerminalStore.finish(
                                 run.runId,
                                 RunTerminalState.INTERRUPTED,
                                 PauseReason.PROCESS_RESTART,
+                            )
+                            // agent_run CREATED/RUNNING rows are settled by
+                            // ChatEventProjector.replayUnfinished (running
+                            // right after this), which also projects the last
+                            // stream checkpoint — do NOT transition those here.
+                            // Pause-state rows (e.g. RESUMABLE from a resolved
+                            // stored response) are skipped by replayUnfinished
+                            // by design, so this store settles them directly.
+                            casEventStoreStatus(
+                                run.runId,
+                                RunStatus.PAUSE_STATES,
+                                RunStatus.INTERRUPTED,
+                                reason = "process_restart",
                             )
                         }
                         replayFinishedResults(run.runId, run.conversationId)
@@ -211,6 +294,15 @@ class RunRecoveryService(
                 runCatching { resumeStore?.clear(run.runId) }
                     .onFailure { error -> Log.w(TAG, "resolveStoredResponse: cursor clear failed", error) }
                 runTerminalStore.finish(run.runId, RunTerminalState.COMPLETED, null)
+                // Dual-write convergence (Step 3): without this, the protocol
+                // row would later be stomped INTERRUPTED by replayUnfinished
+                // while run_terminal says COMPLETED. The row may be parked
+                // (RESUMABLE from an earlier server_in_progress park, or
+                // WAITING_USER/WAITING_EXTERNAL from an approval stop) and no
+                // pause state transitions straight to COMPLETED — unpark to
+                // RUNNING first, then settle.
+                casEventStoreStatus(run.runId, RunStatus.PAUSE_STATES, RunStatus.RUNNING, "server_resume")
+                casEventStoreStatus(run.runId, RunStatus.LIVE_STATES, RunStatus.COMPLETED, "server_completed")
                 // Effects may still be unsettled (crash mid tool dispatch).
                 reconcileStartedEffects(run.runId)
                 replayFinishedResults(run.runId, run.conversationId)
@@ -220,6 +312,7 @@ class RunRecoveryService(
                 runCatching { resumeStore?.clear(run.runId) }
                     .onFailure { error -> Log.w(TAG, "resolveStoredResponse: cursor clear failed", error) }
                 runTerminalStore.finish(run.runId, RunTerminalState.CANCELLED, PauseReason.USER_STOP)
+                casEventStoreStatus(run.runId, RunStatus.LIVE_STATES, RunStatus.CANCELLED, "server_cancelled")
                 reconcileStartedEffects(run.runId)
             }
 
@@ -227,6 +320,7 @@ class RunRecoveryService(
                 runCatching { resumeStore?.clear(run.runId) }
                     .onFailure { error -> Log.w(TAG, "resolveStoredResponse: cursor clear failed", error) }
                 runTerminalStore.finish(run.runId, RunTerminalState.FAILED, null)
+                casEventStoreStatus(run.runId, RunStatus.LIVE_STATES, RunStatus.FAILED, "server_failed")
                 reconcileStartedEffects(run.runId)
             }
 
@@ -234,6 +328,14 @@ class RunRecoveryService(
                 // Not terminal: the same runId stays resumable with the
                 // cursor, so the in-process resume path continues the stream.
                 runTerminalStore.pause(run.runId, RunTerminalState.RESUMABLE, PauseReason.PROCESS_RESTART)
+                // Pause-state rows are skipped by replayUnfinished, so the
+                // protocol row must be parked here or it would be marked
+                // INTERRUPTED while run_terminal keeps the run resumable. The
+                // row may already be parked (e.g. WAITING_USER from a partial
+                // approval-park write) — pause -> RESUMABLE is not a legal
+                // direct transition, so unpark to RUNNING first.
+                casEventStoreStatus(run.runId, RunStatus.PAUSE_STATES, RunStatus.RUNNING, "server_resume")
+                casEventStoreStatus(run.runId, RunStatus.LIVE_STATES, RunStatus.RESUMABLE, "server_in_progress")
             }
         }
         return true

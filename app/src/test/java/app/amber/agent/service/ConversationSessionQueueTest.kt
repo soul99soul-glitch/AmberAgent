@@ -83,7 +83,7 @@ class ConversationSessionQueueTest {
             listOf("steer", "followup", "attachment"),
             session.pendingUserMessages.value.map { it.id },
         )
-        // 队列非空本身不会启动生成（launchPendingMessageLoop 只由显式
+        // 队列非空本身不会启动生成（kernel 调度只由显式
         // resumePendingQueue / 新消息发送触发）。
         assertFalse(session.isGenerating)
     }

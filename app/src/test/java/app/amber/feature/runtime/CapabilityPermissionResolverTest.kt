@@ -121,6 +121,61 @@ class CapabilityPermissionResolverTest {
         assertEquals(PermissionDecisionAction.ALLOW, decision)
     }
 
+    // ---- P1-5 设备能力：floor == 工具自身 risk，flag ON 无审批行为变化 ----
+    // 三个工具各代表一种曾因 floor 超过工具自身 risk 而改变的判定，共享
+    // flag-ON harness，在一个用例内逐块 pin 住。
+
+    @Test
+    fun flagOnKeepsLegacyApprovalBehaviorWhenFloorMatchesToolOwnRisk() {
+        // screen_screenshot 自身 Sensitive；floor 曾为 High，flag ON 时被抬成
+        // High 导致普通自动审批下 ALLOW 变 ASK。floor 不许超过工具自身 risk，
+        // flag ON（无任何持久化授权记录）判定必须与 capability=null 旧路径一致。
+        val legacy = resolver.resolve(
+            toolDef = tool("screen_screenshot", needsApproval = true),
+            tool = toolCall("screen_screenshot"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+            capabilityPermissions = null,
+        )
+        val flagged = resolver.resolve(
+            toolDef = tool("screen_screenshot", needsApproval = true),
+            tool = toolCall("screen_screenshot"),
+            autoApproveTools = true,
+            autoApproveHighRiskTools = false,
+            capabilityPermissions = state(),
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, legacy.action)
+        assertEquals(PermissionDecisionAction.ALLOW, flagged.action)
+        assertEquals(legacy.source, flagged.source)
+
+        // audio_record_once 自身 Normal；floor 曾为 High，同 run 已批准后的
+        // run_trust 复用因 risk==High 被跳过。floor 校正后复用必须仍生效。
+        val runTrust = resolver.resolve(
+            toolDef = tool("audio_record_once", needsApproval = true, allowsAutoApproval = false),
+            tool = toolCall("audio_record_once"),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+            autoApprovedToolNames = setOf("audio_record_once"),
+            capabilityPermissions = state(),
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, runTrust.action)
+        assertEquals("run_trust", runTrust.source)
+
+        // clipboard_tool 自身 Normal；floor 曾为 Sensitive，把子代理上下文的
+        // requiresSubAgentApproval 翻成 true 导致 ALLOW 变 ASK。floor 校正后
+        // 必须仍走只读快速通道，不新增 ASK。
+        val subAgentRead = resolver.resolve(
+            toolDef = tool("clipboard_tool"),
+            tool = toolCall("clipboard_tool", input = """{"action":"read"}"""),
+            autoApproveTools = false,
+            autoApproveHighRiskTools = false,
+            invocationContext = ToolInvocationContext.SubAgent,
+            capabilityPermissions = state(),
+        )
+        assertEquals(PermissionDecisionAction.ALLOW, subAgentRead.action)
+        assertEquals("policy", subAgentRead.source)
+    }
+
     // ---- capability AUTO is bounded by the risk floor ----
 
     @Test

@@ -34,7 +34,6 @@ val chatModule = module {
             settingsStore = get(),
             conversationRepo = get(),
             memoryRepository = get(),
-            generator = get(),
             templateTransformer = get(),
             providerCatalog = get(),
             googleProvider = get(),

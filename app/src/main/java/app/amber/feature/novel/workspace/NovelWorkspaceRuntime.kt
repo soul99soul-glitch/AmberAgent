@@ -5,7 +5,8 @@ import app.amber.ai.provider.Model
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationChunk
-import app.amber.core.ai.Generator
+import app.amber.core.ai.GenerationRunSession
+import app.amber.core.ai.RunKernel
 import app.amber.core.settings.Settings
 import app.amber.feature.novelworkspace.NovelWorkspaceCommit
 import app.amber.feature.novelworkspace.NovelWorkspaceContextAssembler
@@ -36,7 +37,7 @@ import kotlinx.coroutines.flow.flow
  * workspace primitives. Free writes land during the turn; canon writes are buffered
  * and surface as a single author-gated proposal when the turn ends.
  */
-class NovelWorkspaceRuntime(private val generator: Generator) {
+class NovelWorkspaceRuntime(private val kernel: RunKernel) {
 
     sealed interface TurnEvent {
         data class Delta(val text: String) : TurnEvent
@@ -73,7 +74,18 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
     private val _pendingProposals = MutableStateFlow<List<NovelWorkspaceWriteProposal>>(emptyList())
     val pendingProposals: StateFlow<List<NovelWorkspaceWriteProposal>> = _pendingProposals.asStateFlow()
 
-    fun runTurn(request: TurnRequest): Flow<TurnEvent> = flow {
+    /**
+     * Run one workspace turn. [runId] / [events] thread the run scope's
+     * identity and protocol event writer (Step 3) so the kernel can emit the
+     * durable audit trail — tool lifecycle events and, on the durable path,
+     * request snapshots. Emission stays gated by the kernel's durable-path
+     * check; null (bare callers) keeps the loop silent.
+     */
+    fun runTurn(
+        request: TurnRequest,
+        runId: String? = null,
+        events: app.amber.core.agent.runtime.AgentEventWriter? = null,
+    ): Flow<TurnEvent> = flow {
         val store = NovelWorkspaceStore(request.projectDirectory)
         val ownerAtStart = NovelWorkspaceGhostwriteJobs.activeFor(
             request.projectDirectory,
@@ -126,8 +138,9 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
                 }
                 add(UIMessage.user(request.userText))
             }
-            generator.generateText(
-                settings = request.settings,
+            kernel.run(
+                GenerationRunSession(
+                    settings = request.settings,
                 model = request.model,
                 messages = messages,
                 tools = session.tools(),
@@ -135,6 +148,15 @@ class NovelWorkspaceRuntime(private val generator: Generator) {
                 // The workspace write tool has its own strict path and author gates.
                 // Trust only this named tool; do not enable blanket auto-approval.
                 autoApprovedToolNames = setOf("novel_workspace_write"),
+                // Step 5: thread the run scope's identity and event writer the
+                // same way SubAgentRunner does; the kernel's durable-path gate
+                // decides whether anything is emitted.
+                runId = runId,
+                toolLifecycleEvents = events,
+                // Step 6: v1 default codifies no new restriction; narrowing
+                // arrives via sub-agent payloads.
+                executionPolicy = app.amber.feature.runtime.ExecutionPolicy.permissive(),
+                ),
             ).collect { chunk ->
                 val messages = (chunk as? GenerationChunk.Messages)?.messages ?: return@collect
                 val assistantText = assistantTextOf(messages)

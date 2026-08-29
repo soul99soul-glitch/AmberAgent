@@ -6,7 +6,6 @@ import kotlinx.serialization.json.put
 import app.amber.ai.provider.Model
 import app.amber.core.settings.GenerativeUiSetting
 import app.amber.core.ai.generative.GuizangHtmlDeckValidator
-import app.amber.core.model.AssistantMemory
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.utils.JsonInstantPretty
 import app.amber.core.utils.toLocalDate
@@ -137,47 +136,6 @@ private fun buildGenerativeUiModelGuidance(model: Model?): String {
         }
     }
 }
-
-internal fun buildMemoryPrompt(
-    title: String,
-    description: String,
-    memories: List<AssistantMemory>,
-) =
-    buildString {
-        if (memories.isEmpty()) return@buildString
-        appendLine()
-        append("**")
-        append(title)
-        append("**")
-        appendLine()
-        append(description)
-        appendLine()
-        val json = buildJsonArray {
-            memories.forEach { memory ->
-                add(buildJsonObject {
-                    put("id", memory.id)
-                    put("content", memory.content)
-                })
-            }
-        }
-        append(JsonInstantPretty.encodeToString(json))
-        appendLine()
-    }
-
-
-internal fun buildShortTermMemoryPrompt(memories: List<AssistantMemory>) =
-    buildMemoryPrompt(
-        title = "Short-Term Memories",
-        description = "These are concise recent task summaries. Use them for continuity, but prefer the current conversation when there is conflict.",
-        memories = memories,
-    )
-
-internal fun buildLongTermMemoryPrompt(memories: List<AssistantMemory>) =
-    buildMemoryPrompt(
-        title = "Long-Term Memories",
-        description = "These are stable preferences, recurring interests, plans, and facts distilled for use across future conversations.",
-        memories = memories,
-    )
 
 internal suspend fun buildRecentChatsPrompt(conversationRepo: ConversationRepository): String {
     val recentConversations = conversationRepo.getRecentConversations(limit = 10)

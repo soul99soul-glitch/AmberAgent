@@ -289,7 +289,7 @@ private fun toolHasFailure(content: JsonElement?, output: List<UIMessagePart>): 
         return !error.isNullOrBlank() ||
             (exitCode != null && exitCode != 0) ||
             failed ||
-            status in setOf("failed", "error", "denied", "timed_out", "interrupted")
+            status in setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
     }
     return output.filterIsInstance<UIMessagePart.Text>().any { part ->
         part.text.contains("\"error\"", ignoreCase = true) ||
