@@ -15,6 +15,7 @@ import {
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
+import { router } from '@kit.ArkUI';
 
 @Component
 struct BoardMetricRow {
@@ -62,6 +63,8 @@ struct BoardHotItemRow {
   @Prop title: string = '';
   @Prop heat: string = '';
   @Prop isLast: boolean = false;
+  // 条目点击 → 深度阅读文章页(热榜条目 url 兼作 topicId 与 run seedUrl)
+  onRowClick: () => void = (): void => {};
   @State private pressed: boolean = false;
 
   build(): void {
@@ -101,6 +104,7 @@ struct BoardHotItemRow {
         if (event.type === TouchType.Down) this.pressed = true;
         else if (event.type === TouchType.Up || event.type === TouchType.Cancel) this.pressed = false;
       })
+      .onClick((): void => { this.onRowClick(); })
       if (!this.isLast) {
         PaperSeparator()
       }
@@ -163,6 +167,15 @@ struct BoardPage {
         });
       }
     }).catch((): void => { /* 统计失败保持 0,不阻塞热榜 */ });
+  }
+
+  // 热榜条目 → 深度阅读文章页(topicId = 条目 url,run seedUrl 同源直抓)
+  private openArticle(item: HotItem): void {
+    const params: Record<string, string> = {};
+    params['topicId'] = item.url;
+    params['title'] = item.title;
+    params['sourceUrl'] = item.url;
+    router.pushUrl({ url: 'pages/DeepReadArticlePage', params: params });
   }
 
   private loadHotlist(): void {
@@ -267,6 +280,7 @@ struct BoardPage {
                       title: item.title,
                       heat: item.heat,
                       isLast: index === Math.min(sec.items.length, 5) - 1,
+                      onRowClick: (): void => { this.openArticle(item); },
                     })
                   }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
                 }

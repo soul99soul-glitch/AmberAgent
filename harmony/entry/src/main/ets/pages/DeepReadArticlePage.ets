@@ -39,6 +39,7 @@ const GENERATION_STEP_COUNT: number = 6;
 interface ArticleParams {
   topicId: string;
   title: string;
+  sourceUrl?: string;
 }
 
 @Entry
@@ -47,6 +48,8 @@ struct DeepReadArticlePage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State topicId: string = '';
   @State title: string = '';
+  // 种子链接(热榜条目 url;run 的 seedUrl — 来源收集直接抓该页而非仅按标题搜索)
+  private sourceUrl: string = '';
   @State output: DeepReadOutput | null = null;
   @State running: boolean = true;
   @State errorMsg: string = '';
@@ -75,6 +78,7 @@ struct DeepReadArticlePage {
     const params: ArticleParams = rawParams as ArticleParams;
     this.topicId = params.topicId ?? '';
     this.title = params.title ?? '';
+    this.sourceUrl = params.sourceUrl ?? '';
     if (this.topicId.length === 0 || this.title.length === 0) {
       this.errorMsg = '文章参数缺失';
       this.running = false;
@@ -130,7 +134,8 @@ struct DeepReadArticlePage {
     this.cancelled = false;
     this.errorMsg = '';
     this.currentStage = force ? this.progressLabel('收集来源', 1) : this.phaseLabel(cached?.output ?? null);
-    const result: RunResult = await this.scheduler.run(this.topicId, this.title, { force });
+    const result: RunResult = await this.scheduler.run(this.topicId, this.title,
+      { force, seedUrl: this.sourceUrl.length > 0 ? this.sourceUrl : null });
     if (!this.pageAlive || token !== this.pageToken) return;
     if (result.output !== null) this.applyOutput(result.output, token);
     if (!result.ok) {

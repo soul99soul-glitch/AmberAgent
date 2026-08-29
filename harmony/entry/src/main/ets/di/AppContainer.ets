@@ -261,7 +261,9 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
       _label: string,
       signal?: import('@amber/deepread-domain').AbortSignalLike,
       tools?: ToolDefinition[],
-    ): Promise<UIMessage[]> => container.aiClient.generateText({
+    ): Promise<UIMessage[]> => {
+      hilog.info(DOMAIN, TAG, 'collectRun call: msgs=%{public}d tools=%{public}d', messages.length, tools?.length ?? 0);
+      return container.aiClient.generateText({
       model,
       messages,
       tools: tools?.map(toolToModelTool),
@@ -270,7 +272,18 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
       autoApproveHighRiskTools: true,
       autoApprovedToolNames: tools?.map((tool: ToolDefinition): string => tool.name),
       signal,
+    }).then((out: UIMessage[]): UIMessage[] => {
+      // 诊断:模型响应形态(文本/工具调用占比)— "未按约定调用分段写入工具"排查
+      let kinds: string = '';
+      for (const m of out) {
+        for (const p of m.parts) {
+          kinds += p.kind + ',';
+        }
+      }
+      hilog.info(DOMAIN, TAG, 'collectRun done: msgs=%{public}d parts=[%{public}s]', out.length, kinds);
+      return out;
     });
+    };
     const runManager: RunManagerDeps = {
       prefetcher: container.prefetcher,
       aiClient: container.aiClient,

@@ -54,7 +54,8 @@ class OhosHttpClient implements HttpClient {
       header: req.headers,
       expectDataType: http.HttpDataType.STRING,
       connectTimeout: 15000,
-      readTimeout: 20000,
+      // LLM 非流式响应(文章规划等)首包常超 20s — 与流式读超时对齐 120s
+      readTimeout: 120000,
       usingCache: false,
     };
     if (req.body !== undefined && req.body !== null &&
@@ -114,8 +115,10 @@ class OhosHttpClient implements HttpClient {
         })
         .catch((e: Error): void => {
           if (settled) return;
-          hilog.error(DOMAIN, TAG, 'fetch FAILED: %{public}s', safeUrl);
-          fail(new Error(`${safeUrl} fetch failed: ${String(e)}`));
+          const errText: string = e !== null && e !== undefined && e.message !== undefined
+            ? `${e.message}` : JSON.stringify(e);
+          hilog.error(DOMAIN, TAG, 'fetch FAILED: %{public}s err=%{public}s', safeUrl, errText);
+          fail(new Error(`${safeUrl} fetch failed: ${errText}`));
         });
     });
   }
