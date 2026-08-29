@@ -137,6 +137,8 @@ import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { DotLoading } from '../components/ui/DotLoading.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
+import { WebMountHost, getWebMountSession } from '../platform_impl/WebMountSession.ets';
+import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
 import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
@@ -1180,6 +1182,7 @@ struct ChatPage {
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
       this.enableGenerationNotification = setting.enableNotificationOnMessageGeneration;
+      this.loadWebMountGlobalToggles();
       this.autoCloseThinking = setting.autoCloseThinking;
     });
     // MiniApp:设置页改 enabled 后返回,刷新快照(transform enabled 门;
@@ -1298,6 +1301,11 @@ struct ChatPage {
     this.checkpointRegenerateNodeId = '';
     this.initialJumpSuppressedUntilUserScroll = false;
     this.lastRawSnapshot = [];
+    // WebMount 会话宿主:首次 open 时按需挂载(避免常驻隐藏 Web)
+    getWebMountSession().bindHooks({
+      onMountNeeded: (): void => { this.webmountHostVisible = true; },
+    });
+    this.loadWebMountGlobalToggles();
     // 空状态问候名(读 KV user_nickname, 缺省空)
     getChatKvStore().get('user_nickname').then((n: string | null): void => {
       if (this.pageAlive) this.greetName = n === null ? '' : n;
@@ -1391,6 +1399,7 @@ struct ChatPage {
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
       this.enableGenerationNotification = setting.enableNotificationOnMessageGeneration;
+      this.loadWebMountGlobalToggles();
       this.autoCloseThinking = setting.autoCloseThinking;
       if (!this.enableAutoScroll) this.followMode = 'idle';
     });
@@ -2219,6 +2228,11 @@ struct ChatPage {
   // 生成完成通知(Android ChatService.kt:1396-1401 三条件:成功收尾 + 应用后台 + 开关开;
   //   成功条件由调用位置保证 — 仅正常完成路径到达,catch/中断路径提前 return)
   private enableGenerationNotification: boolean = false;
+  // WebMount 全局开关(LocalTools.kt:161 语义:globalEnabled || 助手勾选;
+  //   KV 键与 SettingExperimentalWebMountPage 约定)
+  private webmountGlobalEnabled: boolean = false;
+  private webmountEvalEnabled: boolean = false;
+  @State webmountHostVisible: boolean = false;
   private maybeGenerationDoneNotification(rt: ChatRuntime): void {
     if (!this.enableGenerationNotification) return;
     const backgrounded: boolean = AppStorage.get<boolean>('appBackgrounded') ?? false;
@@ -2229,6 +2243,16 @@ struct ChatPage {
     const last: UIMessage | null = msgs.length > 0 ? msgs[msgs.length - 1] : null;
     const contentText: string = last === null ? '' : toText(last).slice(0, 50).trim();
     notifyGenerationDone(rt.assistant.name, contentText);
+  }
+
+  // WebMount 全局开关快照(设置页 KV;发送前同步读会打断注册表构造,故预载)
+  private loadWebMountGlobalToggles(): void {
+    getChatKvStore().get('webmount_global_enabled').then((raw: string | null): void => {
+      if (this.pageAlive) this.webmountGlobalEnabled = raw === 'true';
+    }).catch((): void => {});
+    getChatKvStore().get('webmount_eval_enabled').then((raw: string | null): void => {
+      if (this.pageAlive) this.webmountEvalEnabled = raw === 'true';
+    }).catch((): void => {});
   }
 
   // D-085d:记忆抽取(ChatService.kt:1494-1499 — 生成完成且无 pending/未执行
@@ -3358,6 +3382,12 @@ struct ChatPage {
             deflateRaw: createDeflateRawPort(),
             newXmlParser: createEntryXmlPull,
           })
+          : []),
+        // WebMount 工具组(LocalTools.kt:161-166 语义:全局开关 || 助手勾选;
+        //   wm_eval 另有独立 eval 门;宿主按需挂载,工具闭包全局单会话)
+        ...((this.webmountGlobalEnabled || localOpts.indexOf('webmount') >= 0)
+          ? createWebMountTools(getWebMountSession(),
+            this.webmountEvalEnabled || localOpts.indexOf('webmount_eval') >= 0)
           : []),
         // D-123:skills 工具组(ChatService.kt:2239-2246 — createSkillTools 五/六件,
         //   位置 = localTools 之后/MCP 管理之前);enabledSkills/allSkills =
@@ -4687,6 +4717,8 @@ struct ChatPage {
 
   build() {
     Stack() {
+    // WebMount 会话宿主(移出可视区的真实尺寸 Web;按需挂载)
+    WebMountHost({ visible: this.webmountHostVisible })
     Column() {
       // 1:1 原型:头部悬浮层(默认全透明,scrollTop>4 玻璃化+浮出发丝线),
       //   消息区 paddingTop 补偿头部高度

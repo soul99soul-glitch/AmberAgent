@@ -91,7 +91,7 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
     option: 'webmount', title: 'WebMount 浏览器工具',
     desc: '允许 Agent 操控隐藏 WebView:打开网址、提取 DOM、点击、输入、滚动、截图。' +
       '默认关闭。任意 JS 执行 (wm_eval) 由下方独立开关单独控制。',
-    unavailable: true,
+    unavailable: false,
   },
   {
     option: 'webmount_eval', title: 'WebMount:任意 JS (wm_eval)',
@@ -99,7 +99,7 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
       '(可读取 cookie / sessionStorage / localStorage,以及同源带凭据请求)。' +
       '每次调用仍需要人工逐次确认,不可自动批准 —— 但开启此项会把工具放入 catalog。' +
       '需要 WebMount 开关也打开。默认关闭。',
-    unavailable: true,
+    unavailable: false,
   },
 ];
 
