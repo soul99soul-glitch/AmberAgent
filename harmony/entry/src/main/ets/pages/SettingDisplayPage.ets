@@ -46,8 +46,6 @@ struct SettingDisplayPage {
       codeBlockAutoWrap: patch.codeBlockAutoWrap ?? this.setting.codeBlockAutoWrap,
       codeBlockAutoCollapse: patch.codeBlockAutoCollapse ?? this.setting.codeBlockAutoCollapse,
       showLineNumbers: patch.showLineNumbers ?? this.setting.showLineNumbers,
-      ttsOnlyReadQuoted: patch.ttsOnlyReadQuoted ?? this.setting.ttsOnlyReadQuoted,
-      autoPlayTTSAfterGeneration: patch.autoPlayTTSAfterGeneration ?? this.setting.autoPlayTTSAfterGeneration,
       pasteLongTextAsFile: patch.pasteLongTextAsFile ?? this.setting.pasteLongTextAsFile,
       pasteLongTextThreshold: patch.pasteLongTextThreshold ?? this.setting.pasteLongTextThreshold,
       sendOnEnter: patch.sendOnEnter ?? this.setting.sendOnEnter,

@@ -65,3 +65,8 @@ KV schema + CRUD；后续接 Chat 输入快捷面板。
 
 ## 本轮执行
 F1 重定向 + F2 SearchPage 真搜索 + F4 MemoryPage 真数据 + F5 QuickMessages 落盘 + F6 Assistant 假字段 + V1/V2/V4 视觉速效。F3/F7/F8 与 V3/V5-V9 列下阶段。
+
+## 2026-08-29 更新
+- TTS/Office Pro 相关功能已按用户决定整体移除(设置入口/页面/朗读按钮/本地工具选项/Display 字段);终端运行环境经 HiSH 调研裁定保留。
+- 完成度缺口全量盘点与分阶段完善计划见 `2026-08-29-harmony-completion-plan.md`(P0 卫生 → P5 基建)。
+- P0 已执行:本地工具页 7 个无实体平台工具(javascript_engine/terminal/system_access/webview/icloud/webmount/webmount_eval)诚实禁用+「未实装」标注;AppContainer 过时 mock 注释与 MockAiClient 死代码清除;ChatPage D-085d 过时偏差注释修正。

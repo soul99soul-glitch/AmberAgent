@@ -1,9 +1,7 @@
-import { hilog } from '@kit.PerformanceAnalysisKit';
 // MemoryStore — 记忆记录 JSON 文件存储(D-085b,读路径 + touch)
 // Android 基准:MemoryRepository.kt(Room)→ 本文件以 JSON 文件持久化;
 //   DAO 无 ORDER BY → 数组序即插入序;id 自增语义留待写路径切片(addMemory 等)。
-//   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。
-import { Context } from '@kit.AbilityKit';
+//   查询/更新语义纯函数在 HAR(filterActiveMemoryRecords/touchMemoryRecords)。import { Context } from '@kit.AbilityKit';
 import { fileIo } from '@kit.CoreFileKit';
 import {
   createMemoryDreamPlanStore, memoryDreamPlanSummaryText,
@@ -26,6 +24,7 @@ import {
   upsertMemoryRecord,
 } from '@amber/chat-domain';
 import { writeTextFileAtomic, quarantineIfStillInvalid } from './AtomicJsonFile.ets';
+import { publishBasicNotification, cancelNotification } from './NotificationNotifier.ets';
 
 const MEMORY_FOLDER: string = 'memory';
 const MEMORY_FILE: string = 'memory_records.json';
@@ -416,9 +415,6 @@ export const getMemoryLibraryOps = (): MemoryLibraryOps => ({
 
 // ===== D-085g:dream plan JSON 持久化 + Store/Notifier =====
 
-const DOMAIN: number = 0x0001;
-const TAG: string = 'Chat.MemoryStore';
-
 const DREAM_PLANS_FILE: string = 'memory_dream_plans.json';
 
 // MemoryDreamPlanDAO 查询语义的 JSON 数组等价:
@@ -539,28 +535,24 @@ const dreamPlanDao: MemoryDreamPlanDaoPort = {
 export const getMemoryDreamPlanStore = (): MemoryDreamPlanStore =>
   createMemoryDreamPlanStore(dreamPlanDao);
 
-// MemoryDreamReviewNotifier 真实适配:与 deepread NotificationNotifier 同策略 —
-//   notificationManager 在 API 26 SDK 有模块冲突(TODO 接真实通知),
-//   当前 hilog 输出(文案逐字,行为非空)。
+// MemoryDreamReviewNotifier 真实适配:notificationManager 发布(与 deepread
+//   NotificationNotifier 同策略;文案逐字,同 DREAM_NOTIFICATION_ID 覆盖更新)。
 class MemoryDreamNotifierImpl implements MemoryDreamReviewNotifier {
   notifyRunning(): void {
-    hilog.info(DOMAIN, TAG, '[dream notifyRunning] %{public}s / %{public}s',
-      DREAM_NOTIFY_RUNNING_TITLE, DREAM_NOTIFY_RUNNING_TEXT);
+    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_RUNNING_TITLE, DREAM_NOTIFY_RUNNING_TEXT);
   }
 
   notifyPendingReview(plan: MemoryDreamPlan): void {
-    hilog.info(DOMAIN, TAG, '[dream notifyPendingReview] %{public}s / %{public}s',
-      DREAM_NOTIFY_PENDING_TITLE, memoryDreamPlanSummaryText(plan));
+    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_PENDING_TITLE, memoryDreamPlanSummaryText(plan));
   }
 
   notifyFailed(message: string): void {
-    // contentText=take(120) / bigText=take(500)(MemoryDreamNotifier.kt:64-65)
-    hilog.warn(DOMAIN, TAG, '[dream notifyFailed] %{public}s / %{public}s',
-      DREAM_NOTIFY_FAILED_TITLE, message.slice(0, 120));
+    // contentText=take(120)(MemoryDreamNotifier.kt:64-65)
+    publishBasicNotification(DREAM_NOTIFICATION_ID, DREAM_NOTIFY_FAILED_TITLE, message.slice(0, 120));
   }
 
   cancel(): void {
-    hilog.info(DOMAIN, TAG, '[dream cancel] id=%{public}d', DREAM_NOTIFICATION_ID);
+    cancelNotification(DREAM_NOTIFICATION_ID);
   }
 }
 

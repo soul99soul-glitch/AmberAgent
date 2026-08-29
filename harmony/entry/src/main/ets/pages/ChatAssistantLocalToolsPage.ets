@@ -9,10 +9,11 @@
 //   - workspace/terminal/screen 三项 zh 缺失(values-zh 无该键)→ 按 Android
 //     zh 回退行为取 values/strings.xml:998-1003 en 逐字
 //   - detail tab(AssistantDetailPage tab 之一)→ 独立页,入口在助手行 '工具'
-//   - 平台专属工具(terminal/screen/system_access/webview/icloud/webmount 系)
-//     在 harmony 无实现,开关仅落 localTools 配置(Android 同为纯配置面;
-//     工具实体缺失时目录自然不含)
-import { ACCENT,BG,INK,INK3,LINE,SURFACE,GUTTER,RADIUS,BODY,BODY2,META } from '../design/tokens.ets';
+//   - 平台专属工具(javascript_engine/terminal/system_access/webview/icloud/
+//     webmount 系)在 harmony 无工具实体(ChatPage 注册表仅 4 门:time_info/
+//     ask_user/workspace_files/clipboard)→ 开关标记 unavailable 禁用,
+//     防"设置保存了却不生效"(F1 诚实原则);工具落地后移除标记即可
+import { ACCENT,BG,INK,INK3,INK4,LINE,SURFACE,GUTTER,RADIUS,BODY,BODY2,META,TINY } from '../design/tokens.ets';
 import { PageTitleBar } from '../components/PageTemplate.ets';
 import { router } from '@kit.ArkUI';
 import {
@@ -30,6 +31,8 @@ interface LocalToolRow {
   option: LocalToolOption;
   title: string;
   desc: string;
+  // 鸿蒙无工具实体的平台工具:开关禁用 + 未实装标注(落地后删标记)
+  unavailable: boolean;
 }
 
 // 行序 = AssistantLocalToolPage.kt item 声明序(:95-277)
@@ -37,51 +40,58 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
   {
     option: 'javascript_engine', title: 'JavaScript 引擎',
     desc: '使用 QuickJS 引擎执行 JavaScript 代码，进行计算和脚本处理',
+    unavailable: true,
   },
   {
     option: 'time_info', title: '时间信息',
     desc: '从设备获取当前日期、星期、时间和时区信息',
+    unavailable: false,
   },
   {
     option: 'clipboard', title: '剪贴板',
     desc: '读取或写入设备剪贴板中的纯文本',
-  },
-  {
-    option: 'tts', title: '文字转语音',
-    desc: '让AI使用设备TTS引擎为您朗读文本',
+    unavailable: false,
   },
   {
     option: 'ask_user', title: '询问用户',
     desc: '允许 AI 向你提问以获得更多信息',
+    unavailable: false,
   },
   {
     option: 'workspace_files', title: 'Workspace file tools',
     desc: 'List, read, write, edit, search, and move files in the user-authorized workspace.',
+    unavailable: false,
   },
   {
     option: 'terminal', title: 'Terminal tools',
     desc: 'Run commands and persistent terminal sessions in the AmberAgent runtime workspace.',
+    unavailable: true,
   },
   {
     option: 'screen_automation', title: 'Screen automation tools',
     desc: 'Use approved low-level screen actions and VLM task orchestration.',
+    unavailable: true,
   },
   {
     option: 'system_access', title: '系统权限工具',
     desc: '允许 Agent 使用经授权的短信、通讯录、日历、媒体、定位、通知和应用工具。',
+    unavailable: true,
   },
   {
     option: 'webview', title: 'WebView 预览工具',
     desc: '允许 Agent 在实时操作预览中打开网页 URL。',
+    unavailable: true,
   },
   {
     option: 'icloud_drive', title: 'iCloud Drive 工具',
     desc: '允许 Agent 使用实验性的 iCloud WebMount 读取配置好的 Obsidian 或 iCloud Drive 文件。',
+    unavailable: true,
   },
   {
     option: 'webmount', title: 'WebMount 浏览器工具',
     desc: '允许 Agent 操控隐藏 WebView:打开网址、提取 DOM、点击、输入、滚动、截图。' +
       '默认关闭。任意 JS 执行 (wm_eval) 由下方独立开关单独控制。',
+    unavailable: true,
   },
   {
     option: 'webmount_eval', title: 'WebMount:任意 JS (wm_eval)',
@@ -89,6 +99,7 @@ const LOCAL_TOOL_ROWS: LocalToolRow[] = [
       '(可读取 cookie / sessionStorage / localStorage,以及同源带凭据请求)。' +
       '每次调用仍需要人工逐次确认,不可自动批准 —— 但开启此项会把工具放入 catalog。' +
       '需要 WebMount 开关也打开。默认关闭。',
+    unavailable: true,
   },
 ];
 
@@ -172,6 +183,10 @@ struct ChatAssistantLocalToolsPage {
                   Text(row.desc)
                     .fontSize(META).fontColor(INK3).margin({ top: 3 })
                     .maxLines(2).textOverflow({ overflow: TextOverflow.Ellipsis })
+                  if (row.unavailable) {
+                    Text('鸿蒙版未实装')
+                      .fontSize(TINY).fontColor(INK4).margin({ top: 3 })
+                  }
                 }
                 .alignItems(HorizontalAlign.Start).layoutWeight(1)
                 .margin({ right: 12 })
@@ -180,8 +195,10 @@ struct ChatAssistantLocalToolsPage {
                   isOn: this.hasTool(row.option),
                 })
                   .selectedColor(ACCENT)
-                  // :273 — wm_eval 开关 enabled = WebMount 已开
-                  .enabled(row.option !== 'webmount_eval' || this.hasTool('webmount'))
+                  // :273 — wm_eval 开关 enabled = WebMount 已开;unavailable 行整体禁用
+                  .enabled(!row.unavailable &&
+                    (row.option !== 'webmount_eval' || this.hasTool('webmount')))
+                  .opacity(row.unavailable ? 0.4 : 1)
                   .onChange((v: boolean): void => {
                     this.toggleLocalTool(row.option, v);
                   })

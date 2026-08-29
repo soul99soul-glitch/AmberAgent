@@ -1,8 +1,9 @@
 // ChatMessageActions — 消息操作按钮组件(1:1 原型 turn-actions)
 //
-// 原型基准:icon 按钮(copy/retry/tts)17px、ink-3、gap 18、actbtn padding 2;
+// 原型基准:icon 按钮(copy/retry)17px、ink-3、gap 18、actbtn padding 2;
 //   鸿蒙保留 fork/edit 入口(能力差异登记),同样图标化:
 //   copy=square_on_square / fork=share / edit=square_and_pencil / retry=arrow_clockwise
+//   (原型 tts 朗读随语音服务下线一并移除)
 import { INK3, BG } from '../design/tokens.ets';
 import { Icon } from './ui/Icon.ets';
 
@@ -15,7 +16,6 @@ export struct ChatMessageActions {
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
   onCopy: () => void = (): void => {};
-  onSpeak: () => void = (): void => {};
   onFavorite: () => void = (): void => {};
 
   build(): void {
@@ -60,13 +60,6 @@ export struct ChatMessageActions {
           .onClick((): void => this.onRegenerate())
       }
       if (!this.isUser) {
-        // 1:1 原型 turn-actions:speaker 朗读(系统 TTS 真引擎)
-        Row() { Icon({ name: 'speaker', iconSize: 17, color: INK3 }) }
-          .width(44).height(44)
-          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-          .margin({ left: 4 })
-          .accessibilityText('朗读消息')
-          .onClick((): void => this.onSpeak())
         // 收藏(真实 FavoriteStore 落盘)
         Row() { Icon({ name: 'star', iconSize: 17, color: INK3 }) }
           .width(44).height(44)

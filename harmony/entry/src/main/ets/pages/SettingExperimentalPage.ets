@@ -1,5 +1,6 @@
 // SettingExperimentalPage — 实验性功能入口页(G7 重构)
-// 对齐 Android: SettingExperimental → 子代理/Council/WebMount/OfficePro/TodayBoard
+// 对齐 Android: SettingExperimental → 子代理/Council/WebMount/TodayBoard
+// (Office Pro 随语音/办公集成下线移除,2026-08-29)
 import { router } from '@kit.ArkUI';
 import { BG } from '../design/tokens.ets';
 import { PageTitleBar, SectionHeader, NavRow, PageSpacer } from '../components/PageTemplate.ets';
@@ -32,8 +33,6 @@ struct SettingExperimentalPage {
             onRowClick: (): void => { this.go('pages/SettingDeepReadPage'); } })
 
           SectionHeader({ label: '内容' })
-          NavRow({ label: 'Office Pro', valueText: 'Alpha', iconName: 'doc',
-            onRowClick: (): void => { this.go('pages/SettingExperimentalOfficeProPage'); } })
           NavRow({ label: 'DeepRead 模板', iconName: 'book', isLast: true,
             onRowClick: (): void => { this.go('pages/DeepReadTemplateSettingsPage'); } })
 

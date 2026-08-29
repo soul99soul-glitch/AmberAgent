@@ -23,8 +23,6 @@ export interface DisplaySetting {
   codeBlockAutoWrap: boolean;
   codeBlockAutoCollapse: boolean;
   showLineNumbers: boolean;
-  ttsOnlyReadQuoted: boolean;
-  autoPlayTTSAfterGeneration: boolean;
   pasteLongTextAsFile: boolean;
   pasteLongTextThreshold: number;
   sendOnEnter: boolean;
@@ -62,8 +60,6 @@ export const makeDisplaySetting = (opts: Partial<DisplaySetting> = {}): DisplayS
   codeBlockAutoWrap: opts.codeBlockAutoWrap ?? false,
   codeBlockAutoCollapse: opts.codeBlockAutoCollapse ?? false,
   showLineNumbers: opts.showLineNumbers ?? false,
-  ttsOnlyReadQuoted: opts.ttsOnlyReadQuoted ?? false,
-  autoPlayTTSAfterGeneration: opts.autoPlayTTSAfterGeneration ?? false,
   pasteLongTextAsFile: opts.pasteLongTextAsFile ?? false,
   pasteLongTextThreshold: opts.pasteLongTextThreshold ?? 1000,
   sendOnEnter: opts.sendOnEnter ?? false,

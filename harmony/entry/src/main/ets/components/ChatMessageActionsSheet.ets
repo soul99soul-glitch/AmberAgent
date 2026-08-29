@@ -28,7 +28,6 @@ export struct ChatMessageActionsSheet {
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
   onFork: () => void = (): void => {};
-  onSpeak: () => void = (): void => {};
   onShare: () => void = (): void => {};
   onDelete: () => void = (): void => {};
   onDismiss: () => void = (): void => {};
@@ -54,13 +53,6 @@ export struct ChatMessageActionsSheet {
           this.actionRow('edit', '编辑消息', false, (): void => {
             this.onDismiss();
             this.onEdit();
-          })
-          this.rowDivider()
-        }
-        if (this.canSpeak()) {
-          this.actionRow('speaker', '朗读消息', false, (): void => {
-            this.onDismiss();
-            this.onSpeak();
           })
           this.rowDivider()
         }
@@ -110,10 +102,6 @@ export struct ChatMessageActionsSheet {
   // 行触发逻辑:先关 sheet 再回调(Android onDismissRequest() 在前)
   private canRegenerate(): boolean {
     return this.isLastAssistant || this.isUser;
-  }
-
-  private canSpeak(): boolean {
-    return !this.isUser;
   }
 
   private timeText(): string {

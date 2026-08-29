@@ -1,59 +1,74 @@
 {
-    "app": {
-        "products": [
-            {
-                "name": "default",
-                "compatibleSdkVersion": "5.0.0(12)",
-                "runtimeOS": "HarmonyOS",
-                "targetSdkVersion": "5.0.0(12)",
-            }
-        ],
-        "buildModeSet": [
-            {
-                "name": "debug"
-            },
-            {
-                "name": "release"
-            }
-        ],
-        "signingConfigs": []
+  app: {
+    products: [
+      {
+        name: 'default',
+        compatibleSdkVersion: '5.0.0(12)',
+        runtimeOS: 'HarmonyOS',
+        targetSdkVersion: '5.0.0(12)',
+        signingConfig: 'default',
+      },
+    ],
+    buildModeSet: [
+      {
+        name: 'debug',
+      },
+      {
+        name: 'release',
+      },
+    ],
+    signingConfigs: [
+      {
+        name: 'default',
+        type: 'HarmonyOS',
+        material: {
+          certpath: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.cer',
+          keyAlias: 'debugKey',
+          keyPassword: '00000019a4b6f50b5b49b488093f28bde0a442473d84b73a2d4d9f857261dd61669581ef232fcb9528',
+          profile: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.p7b',
+          signAlg: 'SHA256withECDSA',
+          storeFile: '/Users/arquiel/.ohos/config/default_harmony_5ZNrrDPsh8bhZDvNg1eA2lRJ1vXsCP9onQ66dnpr1o=.p12',
+          storePassword: '00000019a4b6f50b5b49b488093f28bde0a442473d84b73a2d4d9f857261dd61669581ef232fcb9528',
+        },
+      },
+    ],
+  },
+  modules: [
+    {
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
+        {
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+      ],
     },
-    "modules": [
+    {
+      name: 'deepread',
+      srcPath: './deepread',
+      targets: [
         {
-            "name": "entry",
-            "srcPath": "./entry",
-            "targets": [
-                {
-                    "name": "default",
-                    "applyToProducts": [
-                        "default"
-                    ]
-                }
-            ]
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
         },
+      ],
+    },
+    {
+      name: 'chat',
+      srcPath: './chat',
+      targets: [
         {
-            "name": "deepread",
-            "srcPath": "./deepread",
-            "targets": [
-                {
-                    "name": "default",
-                    "applyToProducts": [
-                        "default"
-                    ]
-                }
-            ]
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
         },
-        {
-            "name": "chat",
-            "srcPath": "./chat",
-            "targets": [
-                {
-                    "name": "default",
-                    "applyToProducts": [
-                        "default"
-                    ]
-                }
-            ]
-        }
-    ]
+      ],
+    },
+  ],
 }

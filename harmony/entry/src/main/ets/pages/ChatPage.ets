@@ -133,8 +133,8 @@ import { MarkdownText } from '../components/MarkdownText.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
 import { DotLoading } from '../components/ui/DotLoading.ets';
-import { speakText } from '../platform_impl/TtsEngine.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
+import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
 import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
 import { ChatMessageTools } from '../components/ChatMessageTools.ets';
 import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
@@ -307,7 +307,6 @@ struct MessageRow {
   onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
   onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void = (_id: string, _t: UIMessagePartTool[]): void => {};
   onCopy: () => void = (): void => {};
-  onSpeak: (text: string) => void = (_t: string): void => {};
   onFavorite: (text: string) => void = (_t: string): void => {};
   onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
   // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage
@@ -344,7 +343,7 @@ struct MessageRow {
     return this.streaming && p.finishedAt === null;
   }
 
-  // 朗读文本:text part 拼接 + 去 **/`(TTS 友好)
+  // 纯文本:text part 拼接 + 去 **/`(收藏等用途)
   private plainText(): string {
     let s: string = '';
     for (const p of this.message.parts) {
@@ -709,7 +708,6 @@ struct MessageRow {
         onFork: (): void => this.onFork(),
         onEdit: (): void => this.onEdit(),
         onRegenerate: (): void => this.onRegenerate(),
-        onSpeak: (): void => { this.onSpeak(this.plainText()); },
         onFavorite: (): void => { this.onFavorite(this.plainText()); },
         onSwitch: (idx: number): void => { this.onSwitch(idx); },
       })
@@ -1177,6 +1175,7 @@ struct ChatPage {
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
+      this.enableGenerationNotification = setting.enableNotificationOnMessageGeneration;
       this.autoCloseThinking = setting.autoCloseThinking;
     });
     // MiniApp:设置页改 enabled 后返回,刷新快照(transform enabled 门;
@@ -1387,6 +1386,7 @@ struct ChatPage {
       this.userAvatar = setting.userAvatar;
       this.enableAutoScroll = setting.enableAutoScroll;
       this.showMessageJumper = setting.showMessageJumper;
+      this.enableGenerationNotification = setting.enableNotificationOnMessageGeneration;
       this.autoCloseThinking = setting.autoCloseThinking;
       if (!this.enableAutoScroll) this.followMode = 'idle';
     });
@@ -2183,6 +2183,7 @@ struct ChatPage {
           this.maybeAutoTitle(this.conversation as Conversation);
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
+          this.maybeGenerationDoneNotification(holder.rt);
         }
         this.drainPendingQueue();
       })
@@ -2211,10 +2212,24 @@ struct ChatPage {
       });
   }
 
+  // 生成完成通知(Android ChatService.kt:1396-1401 三条件:成功收尾 + 应用后台 + 开关开;
+  //   成功条件由调用位置保证 — 仅正常完成路径到达,catch/中断路径提前 return)
+  private enableGenerationNotification: boolean = false;
+  private maybeGenerationDoneNotification(rt: ChatRuntime): void {
+    if (!this.enableGenerationNotification) return;
+    const backgrounded: boolean = AppStorage.get<boolean>('appBackgrounded') ?? false;
+    if (!backgrounded) return;
+    const conv: Conversation | null = this.conversation;
+    if (conv === null) return;
+    const msgs: UIMessage[] = currentMessages(conv);
+    const last: UIMessage | null = msgs.length > 0 ? msgs[msgs.length - 1] : null;
+    const contentText: string = last === null ? '' : toText(last).slice(0, 50).trim();
+    notifyGenerationDone(rt.assistant.name, contentText);
+  }
+
   // D-085d:记忆抽取(ChatService.kt:1494-1499 — 生成完成且无 pending/未执行
   //   工具时 appScope.launch 非阻塞抽取);门/去抖/配额/事件在 HAR 编排逐字;
-  //   偏差:worker 模型 = chat 模型(任务模型设置未移植,D-025 同类登记);
-  //   locale = systemLanguage()(Locale.getDefault().displayName 无直接等价)
+  //   偏差:locale = systemLanguage()(Locale.getDefault().displayName 无直接等价)
   private maybeMemoryExtraction(conv: Conversation, rt: ChatRuntime): void {
     if (conversationHasPendingOrUnexecutedTools(conv)) return;
     const ops = getMemoryExtractionStoreOps();
@@ -3011,10 +3026,6 @@ struct ChatPage {
     if (this.actionsSheetRow !== null) this.forkAt(this.actionsSheetRow);
   }
 
-  private speakActionsSheetMessage(): void {
-    if (this.actionsSheetRow !== null) speakText(toText(this.actionsSheetRow.message));
-  }
-
   private shareActionsSheetMessage(): void {
     if (this.actionsSheetRow !== null) this.shareMessage(this.actionsSheetRow.message);
   }
@@ -3782,6 +3793,7 @@ struct ChatPage {
           this.maybeAutoTitle(this.conversation as Conversation);
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
+          this.maybeGenerationDoneNotification(holder.rt);
         }
         this.drainPendingQueue();
       })
@@ -4297,6 +4309,7 @@ struct ChatPage {
           this.maybeAutoTitle(this.conversation as Conversation);
           this.maybeSuggestions(this.conversation as Conversation, holder.rt);
           this.maybeMemoryExtraction(this.conversation as Conversation, holder.rt);
+          this.maybeGenerationDoneNotification(holder.rt);
         }
         // D-048:出队下一条(Android 循环:成功 → dequeueNext)
         this.drainPendingQueue();
@@ -4447,7 +4460,6 @@ struct ChatPage {
         onEdit: (): void => { this.editActionsSheetMessage(); },
         onRegenerate: (): void => { this.regenerateActionsSheetMessage(); },
         onFork: (): void => { this.forkActionsSheetMessage(); },
-        onSpeak: (): void => { this.speakActionsSheetMessage(); },
         onShare: (): void => { this.shareActionsSheetMessage(); },
         onDelete: (): void => { this.deleteActionsSheetMessage(); },
         onDismiss: (): void => { this.closeActionsSheet(); },
@@ -4660,7 +4672,6 @@ struct ChatPage {
                 this.openSubAgentSheet(rid, tools);
               },
               onCopy: (): void => { this.openCopySheet(row.message); },
-              onSpeak: (t: string): void => { speakText(t); },
               onFavorite: (t: string): void => { this.favoriteText(t); },
               onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
               onTextGrow: (): void => { this.followStreamingUpdate(); },

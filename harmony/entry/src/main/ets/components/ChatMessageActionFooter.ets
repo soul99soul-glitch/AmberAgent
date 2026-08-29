@@ -33,7 +33,6 @@ export struct ChatMessageActionFooter {
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
-  onSpeak: () => void = (): void => {};
   onFavorite: () => void = (): void => {};
   onSwitch: (index: number) => void = (_i: number): void => {};
 
@@ -64,7 +63,6 @@ export struct ChatMessageActionFooter {
               onFork: (): void => this.onFork(),
               onEdit: (): void => this.onEdit(),
               onRegenerate: (): void => this.onRegenerate(),
-              onSpeak: (): void => this.onSpeak(),
               onFavorite: (): void => this.onFavorite(),
             })
           }

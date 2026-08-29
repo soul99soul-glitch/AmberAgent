@@ -1,8 +1,8 @@
 // AppContainer — 依赖注入容器(ArkTS 兼容版)
 // 组装 deepread 逻辑层与平台实现。
-// 当前:用内存 mock 替代真实 @kit 平台实现(它们需逐个修 ArkTS 编译,留 TODO)。
-// 真实 LLM 调用需配 API key 后由 OpenAiCompatibleAiClient 接入。
-// 通知调度(Phase 7)用 @kit.NotificationKit 接入。
+// 平台实现均已真实接线(RcpHttpClient/RdbRepository/PreferencesStorage/
+// OpenAiCompatibleAiClient/SearchRegistry/FileStore 等);配 API key 即可用。
+// 通知当前为 hilog 降级实现(接真实 notificationManager 见完善计划 Phase 1)。
 
 import type {
   RunManagerDeps, AiClient, UIMessage, Tool, ToolDefinition,
@@ -90,26 +90,6 @@ import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.Container';
-
-// generateText 参数 interface(ArkTS 不允许对象字面量类型)
-interface GenTextParams {
-  model: string;
-  messages: UIMessage[];
-  tools?: Tool[];
-  maxSteps?: number;
-  autoApproveTools?: boolean;
-  autoApproveHighRiskTools?: boolean;
-  autoApprovedToolNames?: string[];
-  stream?: boolean;
-}
-
-// mock AiClient:无 API key 时返回空 → deepread 走 fallbackPlan + writeFallbackSection
-// TODO(phase6): 替换为 createOpenAiCompatibleAiClient(需修 ArkTS 编译后)
-class MockAiClient implements AiClient {
-  async generateText(_params: GenTextParams): Promise<UIMessage[]> {
-    return [];
-  }
-}
 
 // Phase 7:通知调度(对照设计 §6.7 / §8.8)
 // TODO(notification): notificationManager 的 ContentType/NotificationContent 类型

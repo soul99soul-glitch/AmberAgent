@@ -6,6 +6,7 @@
 import { UIAbility, AbilityConstant, Want, Configuration, ConfigurationConstant } from '@kit.AbilityKit';
 import { window, display } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { notificationManager } from '@kit.NotificationKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '../di/AppContainer.ets';
 import { loadDisplaySetting } from '@amber/chat-domain';
@@ -145,6 +146,10 @@ export default class EntryAbility extends UIAbility {
           hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
         } else {
           hilog.info(DOMAIN, TAG, 'loadContent success');
+          // 通知授权申请(API 10+;窗口就绪后调用才弹窗;首次一次,之后静默)
+          notificationManager.requestEnableNotification(this.context).catch((): void => {
+            hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
+          });
         }
       });
     };

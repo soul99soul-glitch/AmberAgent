@@ -96,10 +96,8 @@ struct SettingPage {
             onRowClick: (): void => { this.go('pages/ChatTaskModelsPage'); } })
           NavRow({ label: '提示词', desc: '快捷消息与提示词模板', iconName: 'doc',
             onRowClick: (): void => { this.go('pages/ChatPromptsPage'); } })
-          NavRow({ label: '搜索服务', desc: '设置搜索服务', iconName: 'search',
+          NavRow({ label: '搜索服务', desc: '设置搜索服务', iconName: 'search', isLast: true,
             onRowClick: (): void => { this.go('pages/ChatSearchSettingsPage'); } })
-          NavRow({ label: '语音服务', desc: 'TTS 语音合成服务', iconName: 'speaker', isLast: true,
-            onRowClick: (): void => { this.go('pages/SettingTTSProviderPage'); } })
 
           // ── 数据设置(youhua 数据设置)──
           SectionHeader({ label: '数据设置' })

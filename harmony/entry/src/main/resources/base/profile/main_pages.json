@@ -58,7 +58,6 @@
     "pages/SettingDeepReadPage",
     "pages/SettingDisplayPage",
     "pages/SettingExperimentalModelCouncilPageFull",
-    "pages/SettingExperimentalOfficeProPage",
     "pages/SettingExperimentalPage",
     "pages/SettingExperimentalSubAgentPageFull",
     "pages/SettingExperimentalWebMountPage",
@@ -73,8 +72,6 @@
     "pages/SettingSlidesFontPage",
     "pages/SettingSubAgentPage",
     "pages/SettingSystemAccessPage",
-    "pages/SettingTTSPage",
-    "pages/SettingTTSProviderPage",
     "pages/SkillDetailPage",
     "pages/SkillsPage"
   ]
