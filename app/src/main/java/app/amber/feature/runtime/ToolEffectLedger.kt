@@ -42,6 +42,25 @@ enum class ToolEffectStatus {
     RECONCILED,
 }
 
+/**
+ * Fail-closed protocol violation (P1): a ledger row is already bound to the
+ * (runId, toolCallId) with a DIFFERENT toolName or args digest. [prepare]
+ * refuses to reuse the old binding and refuses to mint a sibling row — the
+ * caller must turn this into a structured failure output for the call, never
+ * execute it.
+ */
+class ToolEffectProtocolMismatchException(
+    val toolCallId: String,
+    val boundToolName: String,
+    val boundArgsDigest: String,
+    val requestedToolName: String,
+    val requestedArgsDigest: String,
+) : IllegalStateException(
+    "Tool effect protocol mismatch for callId=$toolCallId: " +
+        "row bound to $boundToolName/${boundArgsDigest.take(8)}…, " +
+        "prepare requested $requestedToolName/${requestedArgsDigest.take(8)}…",
+)
+
 data class ToolEffect(
     val effectId: String,
     val runId: String?,
@@ -99,6 +118,10 @@ data class ToolEffect(
  * FINISHED effect with the same args is returned as-is (never a second
  * row) — a re-emitted call is the duplicate guard's decision, not a new
  * execution.
+ *
+ * Reuse is bound to the row's toolName AND argsDigest: a prepare whose
+ * toolName or args differ from the bound row throws
+ * [ToolEffectProtocolMismatchException] (fail-closed — no reuse, no new row).
  */
 interface ToolEffectLedger {
     suspend fun prepare(
@@ -187,20 +210,33 @@ class RoomToolEffectLedger(
     ): ToolEffect {
         val argsDigest = argsDigest(input)
         val rows = dao.getByToolCallId(toolCallId)
-        // Same run, already FINISHED with the same args (the model re-emitted
-        // a call whose execution is already on the ledger): return the
-        // finished effect instead of minting a second PREPARED row. The
+        // Protocol-mismatch fail-closed check: any row already bound to this
+        // (runId, toolCallId) with a DIFFERENT toolName or args digest means
+        // the provider re-emitted a callId with different contents. Never
+        // reuse the old binding and never mint a sibling row — two effects
+        // for one call would make the approval binding and the duplicate
+        // guard ambiguous. The kernel answers the call with a structured
+        // failure output instead of executing it.
+        rows.firstOrNull {
+            it.runId == runId && (it.toolName != toolName || it.argsDigest != argsDigest)
+        }?.let { throw protocolMismatch(runId, toolCallId, toolName, argsDigest, it) }
+        // Same run, already FINISHED with the same tool + args (the model
+        // re-emitted a call whose execution is already on the ledger): return
+        // the finished effect instead of minting a second PREPARED row. The
         // digest match is what the duplicate-tool-call guard keys on, so the
         // re-emission is skipped by signature and the effect is never
         // re-executed; markStarted also refuses to rewrite a FINISHED row.
         rows.firstOrNull {
             it.runId == runId &&
                 it.status == ToolEffectStatus.FINISHED.name &&
+                it.toolName == toolName &&
                 it.argsDigest == argsDigest
         }?.let { return ToolEffect.from(it) }
         // Same run: the previous prepare (approval round) is reused.
         rows.filter { it.isReusable() }
-            .firstOrNull { it.runId == runId }
+            .firstOrNull {
+                it.runId == runId && it.toolName == toolName && it.argsDigest == argsDigest
+            }
             ?.let { return ToolEffect.from(it) }
         // Same conversation, earlier run (crash then resume with a new runId):
         // rebind the effect to the current run instead of duplicating it.
@@ -208,9 +244,13 @@ class RoomToolEffectLedger(
         if (conversationId != null) {
             val sameConversation = dao.listByConversation(conversationId)
                 .filter { it.toolCallId == toolCallId && it.isReusable() }
-                .firstOrNull()
-            if (sameConversation != null) {
-                val rebound = sameConversation.copy(
+            // A reusable row bound to different contents is the same protocol
+            // violation as above: a crash resume must not execute new args
+            // against the old approval binding.
+            sameConversation.firstOrNull { it.toolName != toolName || it.argsDigest != argsDigest }
+                ?.let { throw protocolMismatch(runId, toolCallId, toolName, argsDigest, it) }
+            sameConversation.firstOrNull()?.let {
+                val rebound = it.copy(
                     runId = runId,
                     turnId = turnId,
                     messagePersistenceCursor = messagePersistenceCursor,
@@ -243,6 +283,20 @@ class RoomToolEffectLedger(
         dao.upsert(entity)
         return ToolEffect.from(entity)
     }
+
+    private fun protocolMismatch(
+        runId: String,
+        toolCallId: String,
+        toolName: String,
+        argsDigest: String,
+        row: ToolEffectEntity,
+    ) = ToolEffectProtocolMismatchException(
+        toolCallId = toolCallId,
+        boundToolName = row.toolName,
+        boundArgsDigest = row.argsDigest,
+        requestedToolName = toolName,
+        requestedArgsDigest = argsDigest,
+    )
 
     override suspend fun get(effectId: String): ToolEffect? =
         dao.getByEffectId(effectId)?.let(ToolEffect::from)

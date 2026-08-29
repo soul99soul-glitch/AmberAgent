@@ -1,6 +1,7 @@
 package app.amber.feature.runtime
 
 import app.amber.core.ai.GenerationTerminal
+import app.amber.agent.data.db.entity.RunTerminalEntity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -49,6 +50,89 @@ class RunTerminalStoreTest : DurableRuntimeTestBase() {
         runTerminalStore.finish("run_1", RunTerminalState.COMPLETED)
         run = runTerminalStore.get("run_1")!!
         assertEquals(RunTerminalState.STEP_LIMIT, run.state)
+    }
+
+    @Test
+    fun outputLimitAndGuardStoppedAreTerminalAndNeverMapToCompleted() = runBlocking {
+        runTerminalStore.begin("run_output", "conv_1", null)
+        runTerminalStore.finish("run_output", RunTerminalState.OUTPUT_LIMIT, PauseReason.OUTPUT_LIMIT_REACHED)
+        val outputRun = runTerminalStore.get("run_output")!!
+        assertEquals(RunTerminalState.OUTPUT_LIMIT, outputRun.state)
+        assertTrue(outputRun.state.isTerminal)
+        assertEquals(PauseReason.OUTPUT_LIMIT_REACHED, outputRun.pauseReason)
+        // A late COMPLETED must never overwrite OUTPUT_LIMIT.
+        runTerminalStore.finish("run_output", RunTerminalState.COMPLETED)
+        assertEquals(RunTerminalState.OUTPUT_LIMIT, runTerminalStore.get("run_output")!!.state)
+
+        runTerminalStore.begin("run_guard", "conv_2", null)
+        runTerminalStore.finish("run_guard", RunTerminalState.GUARD_STOPPED, PauseReason.DUPLICATE_TOOL_CALL)
+        val guardRun = runTerminalStore.get("run_guard")!!
+        assertEquals(RunTerminalState.GUARD_STOPPED, guardRun.state)
+        assertTrue(guardRun.state.isTerminal)
+        assertEquals(PauseReason.DUPLICATE_TOOL_CALL, guardRun.pauseReason)
+        runTerminalStore.finish("run_guard", RunTerminalState.COMPLETED)
+        assertEquals(RunTerminalState.GUARD_STOPPED, runTerminalStore.get("run_guard")!!.state)
+
+        // Terminal runs are invisible to recovery's unfinished scan.
+        assertEquals(emptyList<String>(), runTerminalStore.unfinished().map { it.runId })
+    }
+
+    @Test
+    fun daoFinishIfLiveRefusesCompletedOverAnomalousOpenLimitRows() = runBlocking {
+        // Defensive-depth pin at the DAO level. The store API always stamps
+        // finished_at_ms on a terminal finish, so for store-written rows the
+        // write-once guard alone already blocks any overwrite; the state
+        // clause in finishIfLive only bites on an anomalous row — a limit
+        // terminal whose finished_at_ms is still NULL. Inject exactly that
+        // shape and require the COMPLETED refusal to come from the state
+        // clause as well (mirrors the STEP_LIMIT store contract for
+        // OUTPUT_LIMIT / GUARD_STOPPED).
+        val dao = database.runTerminalDao()
+        fun anomaly(runId: String, state: RunTerminalState, reason: PauseReason) = RunTerminalEntity(
+            runId = runId,
+            conversationId = "conv_1",
+            assistantId = null,
+            state = state.name,
+            pauseReason = reason.name,
+            startedAtMs = 1_000L,
+            updatedAtMs = 1_000L,
+            finishedAtMs = null,
+        )
+        dao.insertIgnore(anomaly("run_anom_output", RunTerminalState.OUTPUT_LIMIT, PauseReason.OUTPUT_LIMIT_REACHED))
+        dao.insertIgnore(anomaly("run_anom_guard", RunTerminalState.GUARD_STOPPED, PauseReason.DUPLICATE_TOOL_CALL))
+
+        assertEquals(0, dao.finishIfLive("run_anom_output", RunTerminalState.COMPLETED.name, null, 2_000L))
+        assertEquals(0, dao.finishIfLive("run_anom_guard", RunTerminalState.COMPLETED.name, null, 2_000L))
+
+        val untouched = dao.getByRunId("run_anom_output")!!
+        assertEquals(RunTerminalState.OUTPUT_LIMIT, runCatching { RunTerminalState.valueOf(untouched.state) }.getOrDefault(RunTerminalState.INTERRUPTED))
+        assertNull(untouched.finishedAtMs)
+        assertEquals(1_000L, untouched.updatedAtMs)
+
+        // Positive control: the state clause must not block a plain live row.
+        dao.insertIgnore(anomaly("run_live", RunTerminalState.RUNNING, PauseReason.USER_STOP).copy(pauseReason = null))
+        assertEquals(1, dao.finishIfLive("run_live", RunTerminalState.COMPLETED.name, null, 2_000L))
+        assertEquals(
+            RunTerminalState.COMPLETED,
+            runCatching { RunTerminalState.valueOf(dao.getByRunId("run_live")!!.state) }.getOrDefault(RunTerminalState.INTERRUPTED),
+        )
+    }
+
+    @Test
+    fun terminalForFlowEndMapsNewKernelTerminals() {
+        // A truncation settles OUTPUT_LIMIT, never COMPLETED.
+        assertEquals(
+            RunTerminalState.OUTPUT_LIMIT to PauseReason.OUTPUT_LIMIT_REACHED,
+            terminalForFlowEnd(flowCause = null, reportedPause = GenerationTerminal.OutputLimit),
+        )
+        // A guard stop settles GUARD_STOPPED with its reason.
+        assertEquals(
+            RunTerminalState.GUARD_STOPPED to PauseReason.DUPLICATE_TOOL_CALL,
+            terminalForFlowEnd(
+                flowCause = null,
+                reportedPause = GenerationTerminal.GuardStopped("duplicate_tool_call"),
+            ),
+        )
     }
 
     @Test

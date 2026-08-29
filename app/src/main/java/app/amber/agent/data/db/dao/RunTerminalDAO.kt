@@ -71,14 +71,14 @@ interface RunTerminalDAO {
 
     /**
      * CAS finish of a live row. Guards mirror the store contract:
-     * finished_at_ms must be NULL (write-once) and a STEP_LIMIT row must never
-     * be mapped to COMPLETED.
+     * finished_at_ms must be NULL (write-once) and a STEP_LIMIT /
+     * OUTPUT_LIMIT / GUARD_STOPPED row must never be mapped to COMPLETED.
      */
     @Query(
         "UPDATE run_terminal SET state = :state, pause_reason = :reason, " +
             "updated_at_ms = :nowMs, finished_at_ms = :nowMs " +
             "WHERE run_id = :runId AND finished_at_ms IS NULL " +
-            "AND NOT (state = 'STEP_LIMIT' AND :state = 'COMPLETED')"
+            "AND NOT (state IN ('STEP_LIMIT', 'OUTPUT_LIMIT', 'GUARD_STOPPED') AND :state = 'COMPLETED')"
     )
     suspend fun finishIfLive(
         runId: String,

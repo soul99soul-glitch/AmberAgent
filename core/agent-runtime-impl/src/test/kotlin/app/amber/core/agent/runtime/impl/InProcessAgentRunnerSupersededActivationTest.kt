@@ -239,7 +239,8 @@ class InProcessAgentRunnerSupersededActivationTest {
         assertEquals(RunStatus.WAITING_USER, delegate.runs.getValue(runId.value).status)
 
         // Relaunch under the same runId while activation 1 is unwinding.
-        // The synchronous epoch bump happens here, before activation 1's
+        // The relaunch's resume CAS lands and ownership (the epoch) transfers
+        // here, inside the per-runId terminal mutex — before activation 1's
         // post-handler code runs again.
         runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
         advanceUntilIdle()
@@ -385,17 +386,20 @@ class InProcessAgentRunnerSupersededActivationTest {
         advanceUntilIdle()
         assertTrue("stale terminal CAS entered the store", store.staleTerminalEntered.isCompleted)
 
-        // Relaunch under the same runId: the synchronous epoch bump happens
-        // here, INSIDE the stale activation's critical section. The new
-        // activation's resume CAS must mutex-queue behind it, so the row is
-        // still WAITING_USER when the stale CAS resumes.
+        // Relaunch under the same runId: the new activation's resume CAS
+        // mutex-queues behind the stale critical section, so the row is
+        // still WAITING_USER when the stale CAS resumes, and ownership (the
+        // epoch) has not transferred yet.
         runner.launch(descriptor.id, FakeInput("v"), requestedRunId = runId).getOrThrow()
         advanceUntilIdle()
         assertEquals(RunStatus.WAITING_USER, delegate.runs.getValue(runId.value).status)
 
         // Release the stale CAS: it re-evaluates against the still-WAITING_USER
-        // row and is REJECTED; its post-CAS epoch recheck then fails, so it
-        // publishes nothing — no stale COMPLETED, no rejection-sync WAITING_USER.
+        // row and is REJECTED — the write-once terminal row is never poisoned.
+        // Ownership has not transferred yet, so the stale activation's
+        // post-CAS recheck still passes and it publishes the persisted pause
+        // (the truthful rejection-sync) — a transient state the live
+        // activation's reset below overwrites when its own resume applies.
         store.releaseStaleTerminal.complete(Unit)
         advanceUntilIdle()
 
@@ -407,11 +411,11 @@ class InProcessAgentRunnerSupersededActivationTest {
         assertEquals(RunStatus.WAITING_USER, stale.current)
         // ...and only afterwards did the live activation's resume CAS land.
         assertEquals(RunStatus.RUNNING, delegate.runs.getValue(runId.value).status)
-        // The snapshot never observed the stale terminal or the stale
-        // rejection-sync state. (A second RUNNING emission is legitimate:
-        // the relaunch resets the flow for the new activation.)
-        assertEquals(setOf(RunStatus.RUNNING), observed.toSet())
-        assertTrue("no pause ever published", observed.none { it.isPause })
+        // The stale activation never published a TERMINAL state: the only
+        // thing it may publish is the persisted truth of its own rejection.
+        // (Conflation may hide the transient pause/RUNNING values from the
+        // collector; whatever it observed stays non-terminal.)
+        assertTrue("no terminal published before the live activation's own", observed.none { it.isTerminal })
 
         // Activation 2 finishes: exactly one Applied COMPLETED, from RUNNING —
         // the live activation's own write.

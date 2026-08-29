@@ -16,7 +16,8 @@ const val RUN_TERMINAL_SCHEMA_VERSION = 1
  *
  * WAITING_USER / WAITING_EXTERNAL / RESUMABLE / OUTCOME_UNKNOWN are pauses —
  * not completions and not failures. Only [RunTerminalState.isTerminal] states
- * end a run. STEP_LIMIT is terminal and must never be mapped to COMPLETED.
+ * end a run. STEP_LIMIT / OUTPUT_LIMIT / GUARD_STOPPED are terminal and must
+ * never be mapped to COMPLETED.
  */
 enum class RunTerminalState {
     RUNNING,
@@ -27,6 +28,8 @@ enum class RunTerminalState {
     CANCELLED,
     FAILED,
     STEP_LIMIT,
+    OUTPUT_LIMIT,
+    GUARD_STOPPED,
     OUTCOME_UNKNOWN,
     INTERRUPTED,
     ;
@@ -39,6 +42,8 @@ enum class RunTerminalState {
             CANCELLED,
             FAILED,
             STEP_LIMIT,
+            OUTPUT_LIMIT,
+            GUARD_STOPPED,
             INTERRUPTED,
         )
     }
@@ -63,6 +68,12 @@ enum class PauseReason {
 
     /** The tool loop exhausted its step budget. */
     STEP_LIMIT_EXHAUSTED,
+
+    /** The reply was cut off by the provider output limit. */
+    OUTPUT_LIMIT_REACHED,
+
+    /** The duplicate-tool-call guard stopped the loop. */
+    DUPLICATE_TOOL_CALL,
 }
 
 data class RunTerminal(
@@ -165,8 +176,9 @@ class RoomRunTerminalStore(
             runCatching { Log.w(TAG, "finish: refusing non-terminal state $state for $runId") }
             return
         }
-        // Conditional UPDATE: write-once and the STEP_LIMIT→COMPLETED refusal
-        // are enforced by the WHERE clause, not by a read-check-write race.
+        // Conditional UPDATE: write-once and the STEP_LIMIT / OUTPUT_LIMIT /
+        // GUARD_STOPPED→COMPLETED refusal are enforced by the WHERE clause,
+        // not by a read-check-write race.
         val updated = dao.finishIfLive(
             runId = runId,
             state = state.name,
@@ -174,7 +186,7 @@ class RoomRunTerminalStore(
             nowMs = now(),
         )
         if (updated == 0) {
-            runCatching { Log.w(TAG, "finish: run $runId not finishable to $state (already terminal or STEP_LIMIT), skipped") }
+            runCatching { Log.w(TAG, "finish: run $runId not finishable to $state (already terminal or a limit/guard terminal), skipped") }
         }
     }
 
@@ -195,6 +207,8 @@ class RoomRunTerminalStore(
  * Pure decision: which terminal state to persist when a generation flow ends.
  * COMPLETED is only chosen when the flow ended cleanly without reporting a
  * pause — the caller must persist the conversation first, then call this.
+ * STEP_LIMIT / OUTPUT_LIMIT / GUARD_STOPPED are terminal and never map to
+ * COMPLETED.
  */
 fun terminalForFlowEnd(
     flowCause: Throwable?,
@@ -204,5 +218,7 @@ fun terminalForFlowEnd(
     flowCause != null -> RunTerminalState.FAILED to null
     reportedPause is GenerationTerminal.WaitingUser -> RunTerminalState.WAITING_USER to PauseReason.TOOL_APPROVAL
     reportedPause is GenerationTerminal.StepLimit -> RunTerminalState.STEP_LIMIT to PauseReason.STEP_LIMIT_EXHAUSTED
+    reportedPause is GenerationTerminal.OutputLimit -> RunTerminalState.OUTPUT_LIMIT to PauseReason.OUTPUT_LIMIT_REACHED
+    reportedPause is GenerationTerminal.GuardStopped -> RunTerminalState.GUARD_STOPPED to PauseReason.DUPLICATE_TOOL_CALL
     else -> RunTerminalState.COMPLETED to null
 }

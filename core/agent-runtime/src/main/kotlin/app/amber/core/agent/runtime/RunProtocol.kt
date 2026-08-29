@@ -10,8 +10,8 @@ package app.amber.core.agent.runtime
  * Vocabulary mirrors the app-level typed terminal store
  * (`RunTerminalState`): WAITING_USER / WAITING_EXTERNAL / RESUMABLE /
  * OUTCOME_UNKNOWN are pauses — not completions and not failures. Only
- * [RunStatus.isTerminal] states end a run. STEP_LIMIT is terminal and must
- * never be mapped to COMPLETED.
+ * [RunStatus.isTerminal] states end a run. STEP_LIMIT / OUTPUT_LIMIT /
+ * GUARD_STOPPED are terminal and must never be mapped to COMPLETED.
  */
 enum class RunStatus {
     /** The run record exists but no step has executed yet. */
@@ -43,6 +43,14 @@ enum class RunStatus {
 
     /** The tool loop exhausted its step budget without a final answer. */
     STEP_LIMIT,
+
+    /** The reply was cut off by the provider output limit (half-emitted
+     * tool calls stay unexecuted). */
+    OUTPUT_LIMIT,
+
+    /** A loop guard stopped the run (duplicate tool-call signature reached
+     * its stop occurrence). */
+    GUARD_STOPPED,
     ;
 
     /** Pauses keep the run resumable; they never appear in [TERMINAL_STATES]. */
@@ -67,6 +75,8 @@ enum class RunStatus {
             CANCELLED,
             INTERRUPTED,
             STEP_LIMIT,
+            OUTPUT_LIMIT,
+            GUARD_STOPPED,
         )
 
         /** Non-terminal states: the legal CAS guard for "any live run". */
@@ -115,6 +125,8 @@ object RunStatusTransitions {
             RunStatus.CANCELLED,
             RunStatus.INTERRUPTED,
             RunStatus.STEP_LIMIT,
+            RunStatus.OUTPUT_LIMIT,
+            RunStatus.GUARD_STOPPED,
         ),
         // Approval answered / ask_user answered -> the loop re-enters RUNNING.
         // OUTCOME_UNKNOWN: cold-start recovery may discover, while the run is

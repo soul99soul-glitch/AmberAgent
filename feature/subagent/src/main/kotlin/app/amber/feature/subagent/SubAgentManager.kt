@@ -684,8 +684,8 @@ class SubAgentManager(
      * P4-02 child onTerminal: only the pause is handled here (terminal states
      * are persisted by [finish] once the runner returns). WAITING_USER =
      * approval pause — the thread stays, its node becomes APPROVAL_REQUIRED so
-     * the pause survives a restart. STEP_LIMIT marks the run so [finish] maps
-     * it to TIMED_OUT instead of COMPLETED.
+     * the pause survives a restart. STEP_LIMIT / OUTPUT_LIMIT / GUARD_STOPPED
+     * mark the run so [finish] maps it to TIMED_OUT instead of COMPLETED.
      */
     private suspend fun handleChildTerminal(runtimeRun: RuntimeRun, terminal: GenerationTerminal) {
         when (terminal) {
@@ -695,6 +695,10 @@ class SubAgentManager(
                 }
             }
             GenerationTerminal.StepLimit -> runtimeRun.stepLimited = true
+            // Kernel guards, not completions: a truncated or duplicate-stopped
+            // child must never be published as COMPLETED either.
+            GenerationTerminal.OutputLimit -> runtimeRun.stepLimited = true
+            is GenerationTerminal.GuardStopped -> runtimeRun.stepLimited = true
         }
     }
 

@@ -287,7 +287,7 @@ class DefaultRunKernelTest {
     }
 
     @Test
-    fun `truncated reply with a tool call executes nothing and settles without a terminal`() = runTest {
+    fun `truncated reply with a tool call executes nothing and settles as OutputLimit`() = runTest {
         val executions = AtomicInteger(0)
         val readOnly = Tool(
             name = "read_thing",
@@ -313,10 +313,11 @@ class DefaultRunKernelTest {
 
         // The half-emitted tool call must never execute and never park the
         // loop at the approval gate; the guard note rides the plain-text
-        // channel and the caller settles the run (no terminal reported).
+        // channel and the run settles as OUTPUT_LIMIT — a truncation is not a
+        // completion the caller could map to COMPLETED.
         assertEquals(0, executions.get())
         assertEquals(1, engine.requests.size)
-        assertTrue(terminals.isEmpty())
+        assertEquals(listOf(GenerationTerminal.OutputLimit), terminals)
         val last = lastMessages(chunks).last()
         val tool = last.getTools().single()
         assertTrue("the truncated call stays unexecuted", !tool.isExecuted)
@@ -339,7 +340,7 @@ class DefaultRunKernelTest {
             ),
         ).toList()
 
-        assertTrue(terminals.isEmpty())
+        assertEquals(listOf(GenerationTerminal.OutputLimit), terminals)
         val parts = lastMessages(chunks).last().parts
         assertEquals("写到一半的回答", (parts.first() as UIMessagePart.Text).text)
         assertEquals("模型回复达到输出上限，请重试。", (parts.last() as UIMessagePart.Text).text)
@@ -374,11 +375,16 @@ class DefaultRunKernelTest {
         ).toList()
 
         // Round 1: executes. Round 2: skipped (occurrence 2), loop continues.
-        // Round 3: stopped (occurrence 3) with the guard note, no terminal —
-        // the tool body only ever ran once.
+        // Round 3: stopped (occurrence 3) with the guard note; the stop is a
+        // real terminal (GUARD_STOPPED), not a silent completion. The tool
+        // body only ever ran once.
         assertEquals("only the first emission ever executed", 1, executions.get())
         assertEquals(3, engine.requests.size)
-        assertTrue("stop is not a park and not a step limit", terminals.isEmpty())
+        assertEquals(
+            "the guard stop reports its terminal, never a silent COMPLETED",
+            listOf(GenerationTerminal.GuardStopped("duplicate_tool_call")),
+            terminals,
+        )
 
         val roundThreeTool = engine.requests[2].messages.last().getTools().single()
         assertEquals("call_2", roundThreeTool.toolCallId)
@@ -452,6 +458,127 @@ class DefaultRunKernelTest {
         assertTrue(skippedOutput.contains("\"occurrence\":2"))
 
         assertEquals("完成", (lastMessages(chunks).last().parts.last() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun `a third same-signature call inside one batch executes nothing and stops the run`() = runTest {
+        val executions = AtomicInteger(0)
+        val readOnly = Tool(
+            name = "read_thing",
+            description = "read-only lookup",
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("tool-result"))
+            },
+        )
+        // ONE assistant message carrying three same-signature calls: the
+        // first executes, the second is skipped as the in-batch twin, and the
+        // third must STOP the run (occurrence 3) — not skip forever.
+        val engine = FakeRoundEngine(
+            listOf(
+                { _: List<UIMessage> ->
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(toolCallId = "call_1", toolName = "read_thing", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_2", toolName = "read_thing", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_3", toolName = "read_thing", input = "{}"),
+                        ),
+                    )
+                },
+            ),
+        )
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("一直查")),
+                tools = listOf(readOnly),
+                terminals = terminals,
+            ),
+        ).toList()
+
+        assertEquals("only the first in-batch emission ever executed", 1, executions.get())
+        assertEquals("the run stopped before any further model round", 1, engine.requests.size)
+        assertEquals(
+            listOf(GenerationTerminal.GuardStopped("duplicate_tool_call")),
+            terminals,
+        )
+
+        val lastTools = lastMessages(chunks).last().getTools()
+        assertEquals(3, lastTools.size)
+        val executed = lastTools.single { it.toolCallId == "call_1" }
+        assertEquals("tool-result", executed.output.filterIsInstance<UIMessagePart.Text>().single().text)
+        // The in-batch twin never reached executeBatch; its structured skip
+        // output is merged with the batch results before the stop lands.
+        val skipped = lastTools.single { it.toolCallId == "call_2" }
+        val skippedOutput = skipped.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(skippedOutput.contains("\"status\":\"skipped\""))
+        assertTrue(skippedOutput.contains("\"occurrence\":2"))
+        assertTrue(!skipped.output.any { p -> p is UIMessagePart.Text && p.text == "tool-result" })
+        val stopped = lastTools.single { it.toolCallId == "call_3" }
+        val stoppedOutput = stopped.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(stoppedOutput.contains("\"status\":\"skipped\""))
+        assertTrue(stoppedOutput.contains("\"occurrence\":3"))
+        val note = lastMessages(chunks).last().parts.filterIsInstance<UIMessagePart.Text>().last()
+        assertEquals("检测到重复的工具调用，已停止本轮以避免死循环。", note.text)
+    }
+
+    @Test
+    fun `an in-batch twin after an already counted execution is the third occurrence and stops`() = runTest {
+        val executions = AtomicInteger(0)
+        val readOnly = Tool(
+            name = "read_thing",
+            description = "read-only lookup",
+            execute = {
+                executions.incrementAndGet()
+                listOf(UIMessagePart.Text("tool-result"))
+            },
+        )
+        // Round 1: call_1 executes (run-level count 1). Round 2: ONE message
+        // with two more same-signature calls — occurrence 2 (skip) then
+        // occurrence 3 (stop), so a repeated batch cannot dodge the guard by
+        // pairing a fresh twin with its skip.
+        val engine = FakeRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "read_thing") },
+                { _: List<UIMessage> ->
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(toolCallId = "call_2", toolName = "read_thing", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_3", toolName = "read_thing", input = "{}"),
+                        ),
+                    )
+                },
+            ),
+        )
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        val chunks = kernel(engine).run(
+            session(
+                messages = listOf(UIMessage.user("一直查")),
+                tools = listOf(readOnly),
+                terminals = terminals,
+            ),
+        ).toList()
+
+        assertEquals(1, executions.get())
+        assertEquals(2, engine.requests.size)
+        assertEquals(
+            listOf(GenerationTerminal.GuardStopped("duplicate_tool_call")),
+            terminals,
+        )
+        val lastTools = lastMessages(chunks).last().getTools()
+        val secondCall = lastTools.single { it.toolCallId == "call_2" }
+        val skippedOutput = secondCall.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(
+            "the occurrence-2 twin carries the skip reminder, never a result",
+            skippedOutput.contains("\"occurrence\":2") && !secondCall.output.any { p -> p is UIMessagePart.Text && p.text == "tool-result" },
+        )
+        val thirdCall = lastTools.single { it.toolCallId == "call_3" }
+        val stoppedOutput = thirdCall.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(stoppedOutput.contains("\"occurrence\":3"))
     }
 
     @Test

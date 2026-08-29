@@ -30,6 +30,7 @@ import app.amber.feature.runtime.CapabilityPermissionStore
 import app.amber.feature.runtime.SpeculativeToolRunner
 import app.amber.feature.runtime.ToolEffect
 import app.amber.feature.runtime.ToolEffectLedger
+import app.amber.feature.runtime.ToolEffectProtocolMismatchException
 import app.amber.feature.runtime.ToolEffectStatus
 import app.amber.feature.runtime.ToolLedgerContext
 import app.amber.feature.runtime.argsDigest
@@ -48,10 +49,14 @@ private const val TAG = "RunKernel"
 private const val PERF_TAG = "AmberChatPerf"
 
 // Guard notes appended to the assistant turn when a kernel guard stops the
-// loop. Both ride the plain-text channel: the caller settles the run as
-// COMPLETED (terminal stays null) and persists the note with the messages.
+// loop. Both ride the plain-text channel; the run settles terminal
+// (OUTPUT_LIMIT / GUARD_STOPPED via [GenerationTerminal]) — never COMPLETED —
+// and the note persists with the messages.
 private const val OUTPUT_LIMIT_NOTICE = "模型回复达到输出上限，请重试。"
 private const val DUPLICATE_TOOL_CALL_NOTICE = "检测到重复的工具调用，已停止本轮以避免死循环。"
+
+/** Wire reason carried by [GenerationTerminal.GuardStopped]. */
+private const val DUPLICATE_TOOL_CALL_GUARD_REASON = "duplicate_tool_call"
 
 /** Failure-class tool-output statuses — mirrors the UI failure classifier (ChatMessageTools.toolHasFailure). */
 private val FAILURE_TOOL_STATUSES = setOf("failed", "error", "denied", "timed_out", "interrupted", "policy_denied")
@@ -215,6 +220,14 @@ class DefaultRunKernel(
 
             val toolsToProcess: List<UIMessagePart.Tool>
 
+            // Durable-path batch bookkeeping, populated only by the fresh-batch
+            // branch below: the prepared write-ahead effects keyed by
+            // toolCallId (approval metadata + guard-reject terminalization),
+            // and the calls whose prepare() hit a protocol mismatch
+            // (fail-closed — answered with a structured error, never executed).
+            var preparedEffects: Map<String, ToolEffect> = emptyMap()
+            var protocolFailures: List<UIMessagePart.Tool> = emptyList()
+
             // Skip generation if we have approved/denied tool calls to handle
             if (pendingTools.isEmpty()) {
                 var streamingVisualBaselineReady = false
@@ -304,7 +317,8 @@ class DefaultRunKernel(
                 // executing them would act on truncated args. Stop before any
                 // tool bookkeeping: no prepare, no approval gate, the calls
                 // stay unexecuted. The guard note rides the plain-text channel
-                // and the run settles as COMPLETED (terminal stays null).
+                // and the run settles as OUTPUT_LIMIT — a truncation is not a
+                // completion.
                 if (roundOutcome.outputLimitReached) {
                     val truncatedAssistant = messages.last().copy(
                         parts = messages.last().parts + UIMessagePart.Text(OUTPUT_LIMIT_NOTICE),
@@ -312,6 +326,7 @@ class DefaultRunKernel(
                     messages = messages.dropLast(1) + truncatedAssistant
                     emit(GenerationChunk.Messages(messages))
                     Log.i(TAG, "output limit reached; skipping the tool batch and finishing the run")
+                    terminal = GenerationTerminal.OutputLimit
                     brokeEarly = true
                     break
                 }
@@ -324,24 +339,41 @@ class DefaultRunKernel(
 
                 // P1-02 write-ahead: validate + digest + persist PREPARED before
                 // approval is shown. Idempotent per (runId, toolCallId) — a
-                // resumed approval round reuses the same effect.
-                val preparedEffects: Map<String, app.amber.feature.runtime.ToolEffect> = if (durablePath) {
+                // resumed approval round reuses the same effect. A prepare that
+                // hits a protocol mismatch (the callId is already bound to a
+                // different tool or args) fails closed: the call is collected
+                // into [protocolFailures] with a structured error instead of
+                // executing against the old binding.
+                if (durablePath) {
                     val messageId = messages.lastOrNull()?.id?.toString()
-                    awaitingExecution.associate { tool ->
+                    val effects = LinkedHashMap<String, ToolEffect>()
+                    val failures = mutableListOf<UIMessagePart.Tool>()
+                    for (tool in awaitingExecution) {
                         val toolDef = toolsInternal.find { it.name == tool.toolName }
-                        val effect = toolEffectLedger.prepare(
-                            runId = runId,
-                            turnId = stepIndex,
-                            toolCallId = tool.toolCallId,
-                            toolName = tool.toolName,
-                            input = tool.input,
-                            effectClass = toolDef?.effectClass() ?: ToolEffectClass.NON_IDEMPOTENT_WRITE,
-                            messagePersistenceCursor = messageId,
-                        )
-                        tool.toolCallId to effect
+                        try {
+                            val effect = toolEffectLedger.prepare(
+                                runId = runId,
+                                turnId = stepIndex,
+                                toolCallId = tool.toolCallId,
+                                toolName = tool.toolName,
+                                input = tool.input,
+                                effectClass = toolDef?.effectClass() ?: ToolEffectClass.NON_IDEMPOTENT_WRITE,
+                                messagePersistenceCursor = messageId,
+                            )
+                            effects[tool.toolCallId] = effect
+                        } catch (e: ToolEffectProtocolMismatchException) {
+                            Log.w(
+                                TAG,
+                                "tool effect protocol mismatch for ${tool.toolCallId}; failing the call closed",
+                                e,
+                            )
+                            failures += tool.copy(
+                                output = listOf(UIMessagePart.Text(protocolMismatchOutput())),
+                            )
+                        }
                     }
-                } else {
-                    emptyMap()
+                    preparedEffects = effects
+                    protocolFailures = failures
                 }
                 // Step 3: the tool lifecycle enters the protocol event stream
                 // here, aligned with the ledger by effectId. Prepared fires
@@ -362,9 +394,31 @@ class DefaultRunKernel(
                     }
                 }
 
-                // Check for tools that need approval
+                // Protocol-mismatched calls are settled immediately: their
+                // structured error output joins the assistant turn now, so it
+                // is in the conversation whichever way the batch ends (an
+                // approval park must not swallow it). They are also carried in
+                // [protocolFailures] into the batch results below, which keeps
+                // the loop alive for a follow-up model round.
+                if (protocolFailures.isNotEmpty()) {
+                    val failedByCallId = protocolFailures.associateBy(UIMessagePart.Tool::toolCallId)
+                    val settledAssistant = messages.last().copy(
+                        parts = messages.last().parts.map { part ->
+                            if (part is UIMessagePart.Tool) failedByCallId[part.toolCallId] ?: part else part
+                        },
+                    )
+                    messages = messages.dropLast(1) + settledAssistant
+                    emit(GenerationChunk.Messages(messages))
+                }
+
+                // Check for tools that need approval. Protocol-mismatched
+                // calls are already settled (structured error, merged with the
+                // batch results below) — they never reach the approval gate.
+                val mismatchedCallIds = protocolFailures.map(UIMessagePart.Tool::toolCallId).toSet()
                 var hasPendingApproval = false
-                val updatedTools = awaitingExecution.map { tool ->
+                val updatedTools = awaitingExecution
+                    .filterNot { it.toolCallId in mismatchedCallIds }
+                    .map { tool ->
                     val toolDef = toolsInternal.find { it.name == tool.toolName }
                     val decision = toolDispatcher.resolveDecision(
                         toolDef = toolDef,
@@ -437,26 +491,44 @@ class DefaultRunKernel(
             // tool result, 3rd stops the loop entirely.
             val classification = classifyDuplicates(toolsToProcess, executedSignatures)
             val stoppingTool = classification.stopping
-            if (stoppingTool != null) {
-                val currentAssistant = messages.last()
-                val stoppedAssistant = currentAssistant.copy(
-                    parts = currentAssistant.parts.map { part ->
-                        if (part is UIMessagePart.Tool && part.toolCallId == stoppingTool.toolCallId) {
-                            stoppingTool
-                        } else {
-                            part
-                        }
-                    } + UIMessagePart.Text(DUPLICATE_TOOL_CALL_NOTICE),
+            // Durable path: terminalize the write-ahead effects of the calls
+            // the guard rejects. Skipped/stopped calls never reach the
+            // dispatcher, so their PREPARED rows would otherwise never see
+            // another transition (retention only sweeps terminal rows;
+            // recovery deliberately leaves PREPARED alone for approval
+            // parks). FAILED is terminal, retention-collectible, and never
+            // counted by the FINISHED-only guard rebuild.
+            if (durablePath) {
+                failGuardRejectedEffects(
+                    ledger = toolEffectLedger!!,
+                    runId = runId!!,
+                    preparedEffects = preparedEffects,
+                    tools = classification.skipped,
+                    errorCategory = "duplicate_skipped",
                 )
-                messages = messages.dropLast(1) + stoppedAssistant
-                emit(GenerationChunk.Messages(messages))
-                Log.i(TAG, "duplicate tool call stopped the run (${stoppingTool.toolName} ${stoppingTool.toolCallId})")
-                brokeEarly = true
-                break
+                if (stoppingTool != null) {
+                    failGuardRejectedEffects(
+                        ledger = toolEffectLedger,
+                        runId = runId,
+                        preparedEffects = preparedEffects,
+                        tools = listOf(stoppingTool),
+                        errorCategory = "duplicate_stopped",
+                    )
+                }
             }
+            // NOTE: the guard stop itself (guard note + GuardStopped terminal)
+            // lands AFTER the batch below has settled, so the first occurrence
+            // of the stopping signature executes and its result persists.
 
-            // Handle tools (execute approved tools, handle denied tools)
-            val executedTools = classification.skipped + toolDispatcher.executeBatch(
+            // Handle tools (execute approved tools, handle denied tools).
+            // Protocol-mismatched calls ride the same result channel as
+            // guard-skipped ones: pre-settled outputs merged into the
+            // assistant turn below, failure-class so the guard never counts
+            // them, and the loop continues so the model can react. The batch
+            // dispatches EVEN when the guard found a stopping call — the
+            // first occurrence of the stopping signature is a legitimate
+            // call ("本批首个执行"); the stop lands after its result settled.
+            val executedTools = protocolFailures + classification.skipped + toolDispatcher.executeBatch(
                 tools = classification.toExecute,
                 toolDefinitions = toolsInternal.associateBy { it.name },
                 autoApproveTools = autoApproveTools,
@@ -482,6 +554,65 @@ class DefaultRunKernel(
                 executionPolicy = executionPolicy,
             )
 
+            if (executedTools.isNotEmpty()) {
+                toolExposure.observeExecutedTools(executedTools)
+
+                // Feed the duplicate guard table: every settled non-failure
+                // result counts as one occurrence — including guard-skipped
+                // duplicates (their structured "skipped" output is not
+                // failure-class), so the signature table sees execute AND
+                // skip as occurrences and the stop gate fires on the third
+                // occurrence even when the second was never executed. The
+                // same toolCallId re-running (approval resume, ledger reuse)
+                // is the same emission, never a second count; failure-class
+                // outputs (same standard as the UI failure classifier) and
+                // user/policy denials don't count either, so a failed or
+                // denied call may retry with identical args.
+                for (tool in executedTools) {
+                    if (tool.toolCallId in countedToolCallIds) continue
+                    if (tool.output.isEmpty() || toolOutputIsFailure(tool.output)) continue
+                    countedToolCallIds += tool.toolCallId
+                    executedSignatures.merge(tool.toolName to argsDigest(tool.input), 1, Int::plus)
+                }
+
+                val resultsByCallId = executedTools.associateBy(UIMessagePart.Tool::toolCallId)
+                val currentAssistant = messages.last()
+                val mergedAssistant = currentAssistant.copy(
+                    parts = currentAssistant.parts.map { part ->
+                        if (part is UIMessagePart.Tool) resultsByCallId[part.toolCallId] ?: part else part
+                    },
+                )
+                messages = messages.dropLast(1) + mergedAssistant
+                val visibleToolResults = messages.transforms(
+                    transformers = outputTransformers,
+                    context = context,
+                    model = model,
+                    settings = settings,
+                )
+                emit(GenerationChunk.Messages(visibleToolResults))
+            }
+
+            // The guard stop, settled after the batch: the loop ends with the
+            // guard note and its own terminal — never a silent completion.
+            if (stoppingTool != null) {
+                val currentAssistant = messages.last()
+                val stoppedAssistant = currentAssistant.copy(
+                    parts = currentAssistant.parts.map { part ->
+                        if (part is UIMessagePart.Tool && part.toolCallId == stoppingTool.toolCallId) {
+                            stoppingTool
+                        } else {
+                            part
+                        }
+                    } + UIMessagePart.Text(DUPLICATE_TOOL_CALL_NOTICE),
+                )
+                messages = messages.dropLast(1) + stoppedAssistant
+                emit(GenerationChunk.Messages(messages))
+                Log.i(TAG, "duplicate tool call stopped the run (${stoppingTool.toolName} ${stoppingTool.toolCallId})")
+                terminal = GenerationTerminal.GuardStopped(DUPLICATE_TOOL_CALL_GUARD_REASON)
+                brokeEarly = true
+                break
+            }
+
             if (executedTools.isEmpty()) {
                 // 当前不可达：带审批的批次已在上面 hasPendingApproval 处 break；
                 // 恢复路径只含可恢复（可立即执行）的工具；被拒工具也会带上
@@ -492,36 +623,6 @@ class DefaultRunKernel(
                 brokeEarly = true
                 break
             }
-            toolExposure.observeExecutedTools(executedTools)
-
-            // Feed the duplicate guard table: only successful executions of
-            // NEW emissions count. The same toolCallId re-running (approval
-            // resume, ledger reuse) is the same emission, never a second
-            // count; failure-class outputs (same standard as the UI failure
-            // classifier) and user/policy denials don't count either, so a
-            // failed or rejected call may retry with identical args.
-            for (tool in executedTools) {
-                if (tool.toolCallId in countedToolCallIds) continue
-                if (tool.output.isEmpty() || toolOutputIsFailure(tool.output)) continue
-                countedToolCallIds += tool.toolCallId
-                executedSignatures.merge(tool.toolName to argsDigest(tool.input), 1, Int::plus)
-            }
-
-            val resultsByCallId = executedTools.associateBy(UIMessagePart.Tool::toolCallId)
-            val currentAssistant = messages.last()
-            val mergedAssistant = currentAssistant.copy(
-                parts = currentAssistant.parts.map { part ->
-                    if (part is UIMessagePart.Tool) resultsByCallId[part.toolCallId] ?: part else part
-                },
-            )
-            messages = messages.dropLast(1) + mergedAssistant
-            val visibleToolResults = messages.transforms(
-                transformers = outputTransformers,
-                context = context,
-                model = model,
-                settings = settings,
-            )
-            emit(GenerationChunk.Messages(visibleToolResults))
 
             val steerMessages = consumeSteerMessages()
             if (steerMessages.isNotEmpty()) {
@@ -562,14 +663,23 @@ class DefaultRunKernel(
 
     /**
      * Classifies one step's tool calls against the duplicate-signature table,
-     * in batch order. Within the batch, a LOCAL seen set sends the first
-     * occurrence of a signature to [Duplicates.toExecute] and every later
-     * same-batch twin to [Duplicates.skipped] — the cross-step table cannot
-     * catch these, because it only updates after executeBatch. Across steps,
-     * a signature counted once skips its next call with a structured reminder
-     * ([Duplicates.skipped]), and a signature counted twice makes the call
-     * [Duplicates.stopping] and ends the scan — the loop breaks right after,
-     * so later calls of the same step stay untouched.
+     * in batch order. The occurrence of each call is its run-level count
+     * (counted occurrences of the same signature this run — settled
+     * executions AND guard-skipped repeats alike, since a skip is itself an
+     * occurrence) plus the same-batch twins already seen, plus one:
+     * occurrence 1 goes to [Duplicates.toExecute], occurrence 2 to
+     * [Duplicates.skipped] with a structured reminder, and occurrence >= 3
+     * makes the call [Duplicates.stopping] and ends the scan — the loop
+     * breaks right after, so later calls of the same step stay untouched.
+     *
+     * The batch-local counter (this step only — never merged into
+     * [executedSignatures]) exists because the signature table is fed AFTER
+     * executeBatch: two same-signature calls inside one assistant message
+     * would both read a null count here and both execute — non-idempotent
+     * side effects would run twice. Counting per-occurrence (not just
+     * seen/not-seen) makes the third same-signature call inside ONE batch a
+     * stop, the same as the third across steps: first executes, second is
+     * skipped, third stops the run.
      *
      * There is deliberately NO per-toolCallId exemption anymore: a counted
      * callId re-entering the guard is routed through the signature table like
@@ -593,42 +703,42 @@ class DefaultRunKernel(
         val toExecute = mutableListOf<UIMessagePart.Tool>()
         val skipped = mutableListOf<UIMessagePart.Tool>()
         var stopping: UIMessagePart.Tool? = null
-        // Batch-local dedup memory (this step only — never merged into
-        // [executedSignatures]): the signature table is fed AFTER executeBatch,
-        // so two same-signature calls inside one assistant message would both
-        // read a null count here and both execute — non-idempotent side
-        // effects would run twice. The first occurrence in the batch runs;
-        // every later one is skipped as a same-batch duplicate.
-        val batchSeenSignatures = mutableSetOf<Pair<String, String>>()
+        val batchSeenCounts = mutableMapOf<Pair<String, String>, Int>()
         for (tool in tools) {
             val signature = tool.toolName to argsDigest(tool.input)
+            val batchSeen = batchSeenCounts[signature] ?: 0
+            val occurrence = (executedSignatures[signature] ?: 0) + batchSeen + 1
             when {
-                // Same-batch twin: its first occurrence is executing in this
-                // very batch, so this one never reaches executeBatch.
-                signature in batchSeenSignatures -> skipped += tool.copy(
-                    output = listOf(
-                        UIMessagePart.Text(
-                            duplicateSkipOutput(
-                                occurrence = 2,
-                                message = "同一批工具调用中已出现相同参数的调用，本次同批重复调用被跳过；请基于首个调用的结果继续，不要再次调用。",
+                occurrence == 1 -> {
+                    batchSeenCounts[signature] = batchSeen + 1
+                    toExecute += tool
+                }
+                // Second occurrence: a same-batch twin of a call executing in
+                // this very batch, or the cross-step repeat of an already
+                // counted execution — either way it never reaches
+                // executeBatch.
+                occurrence == 2 -> {
+                    batchSeenCounts[signature] = batchSeen + 1
+                    skipped += tool.copy(
+                        output = listOf(
+                            UIMessagePart.Text(
+                                duplicateSkipOutput(
+                                    occurrence = 2,
+                                    message = if (batchSeen > 0) {
+                                        "同一批工具调用中已出现相同参数的调用，本次同批重复调用被跳过；请基于首个调用的结果继续，不要再次调用。"
+                                    } else {
+                                        "该工具已用相同参数成功执行过，本次重复调用被跳过；请基于已有结果继续，不要再次调用。"
+                                    },
+                                ),
                             ),
                         ),
-                    ),
-                )
-                else -> when (executedSignatures[signature]) {
-                    null -> {
-                        batchSeenSignatures += signature
-                        toExecute += tool
-                    }
-                    1 -> skipped += tool.copy(
-                        output = listOf(UIMessagePart.Text(duplicateSkipOutput(occurrence = 2))),
                     )
-                    else -> {
-                        stopping = tool.copy(
-                            output = listOf(UIMessagePart.Text(duplicateSkipOutput(occurrence = 3))),
-                        )
-                        break
-                    }
+                }
+                else -> {
+                    stopping = tool.copy(
+                        output = listOf(UIMessagePart.Text(duplicateSkipOutput(occurrence = occurrence))),
+                    )
+                    break
                 }
             }
         }
@@ -651,6 +761,54 @@ class DefaultRunKernel(
         put("occurrence", occurrence)
         put("message", message)
     }.toString()
+
+    /**
+     * Structured output attached to a call whose write-ahead prepare hit a
+     * ledger protocol mismatch (the toolCallId is already bound to a
+     * different tool or args). "error" is failure-class: the call is never
+     * executed and never counted by the duplicate guard.
+     */
+    private fun protocolMismatchOutput(): String = buildJsonObject {
+        put("status", "error")
+        put("reason", "tool_effect_protocol_mismatch")
+        put(
+            "message",
+            "此 tool_call_id 已绑定过不同的工具或参数，本次调用被拒绝且未执行；请改用新的 tool_call_id 重新发起调用。",
+        )
+    }.toString()
+
+    /**
+     * Terminalizes the write-ahead effects of guard-rejected calls (skipped
+     * and stopped duplicates, durable path only). Those calls never reach the
+     * dispatcher, so without this their PREPARED rows would never transition
+     * again: retention only sweeps terminal rows and recovery deliberately
+     * leaves PREPARED alone ("re-enters approval/execution" — true for
+     * approval parks, which break BEFORE classification, not for guard
+     * rejects). Only PREPARED rows are failed — a FINISHED row that prepare
+     * reused (the finished re-emission shape) stays untouched — and FAILED is
+     * never counted by the FINISHED-only guard rebuild, so a failed skip does
+     * not escalate future repeats. The resume path has no preparedEffects
+     * entry (its prepare happened in a previous run() invocation), so the
+     * lookup falls back to the ledger row bound to this runId.
+     */
+    private suspend fun failGuardRejectedEffects(
+        ledger: ToolEffectLedger,
+        runId: String,
+        preparedEffects: Map<String, ToolEffect>,
+        tools: List<UIMessagePart.Tool>,
+        errorCategory: String,
+    ) {
+        for (tool in tools) {
+            val effect = (preparedEffects[tool.toolCallId]
+                ?: ledger.getByToolCallId(tool.toolCallId)?.takeIf { it.runId == runId })
+                ?.takeIf { it.status == ToolEffectStatus.PREPARED }
+                ?: continue
+            runCatching { ledger.fail(effect.effectId, errorCategory) }
+                .onFailure { error ->
+                    Log.w(TAG, "guard-reject effect terminalization failed for ${effect.effectId}", error)
+                }
+        }
+    }
 
     /**
      * Whether a tool's structured output is failure-class — the SAME standard

@@ -317,6 +317,163 @@ class DefaultRunKernelDurableTest : DurableRuntimeTestBase() {
         assertEquals("写完了", finalAnswer.text)
     }
 
+    @Test
+    fun `a guard-skipped duplicate's PREPARED effect is failed, not left orphaned`() = runBlocking {
+        val executions = AtomicInteger(0)
+        val readOnly = readOnlyTool(executions)
+        val runId = "run_orphan_prepared"
+        val flags = durableFlags()
+
+        // Run 1: call_1 executes → FINISHED in the ledger.
+        val engine1 = ScriptedRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "file_read", input = """{"q":"a"}""") },
+                { textAssistant("完成") },
+            ),
+        )
+        durableKernel(engine1, flags).run(
+            session(listOf(UIMessage.user("查一下")), listOf(readOnly), runId),
+        ).toList()
+        assertEquals(1, executions.get())
+
+        // Run 2: the same signature re-emitted under a new callId. The
+        // write-ahead prepare runs BEFORE the guard classifies, so call_2
+        // mints a PREPARED row the skipped call can never use — it must be
+        // terminalized (FAILED), not left lingering forever.
+        val engine2 = ScriptedRoundEngine(
+            listOf(
+                { toolCallAssistant("call_2", "file_read", input = """{"q":"a"}""") },
+                { textAssistant("完成") },
+            ),
+        )
+        durableKernel(engine2, flags).run(
+            session(listOf(UIMessage.user("再查一次")), listOf(readOnly), runId),
+        ).toList()
+
+        val call2 = ledger.getByToolCallId("call_2")!!
+        assertEquals(ToolEffectStatus.FAILED, call2.status)
+        assertEquals("duplicate_skipped", call2.errorCategory)
+        assertTrue(
+            "no PREPARED row lingers in the run",
+            ledger.listByRun(runId).none { it.status == ToolEffectStatus.PREPARED },
+        )
+
+        // Run 3: the FAILED row must not count in the guard rebuild — the
+        // next repeat is still the SECOND occurrence (skip), never escalated
+        // to a stop by the terminalized skip.
+        val engine3 = ScriptedRoundEngine(
+            listOf(
+                { toolCallAssistant("call_3", "file_read", input = """{"q":"a"}""") },
+                { textAssistant("完成") },
+            ),
+        )
+        durableKernel(engine3, flags).run(
+            session(listOf(UIMessage.user("还查一次")), listOf(readOnly), runId),
+        ).toList()
+        assertEquals("only the run-1 execution ever ran", 1, executions.get())
+        val roundThreeTool = engine3.requests[1].messages.last().getTools().single()
+        val skippedOutput = roundThreeTool.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(skippedOutput.contains("\"occurrence\":2"))
+    }
+
+    @Test
+    fun `a same-batch third duplicate stops the run and terminalizes the rejected effects`() = runBlocking {
+        val executions = AtomicInteger(0)
+        val readOnly = readOnlyTool(executions)
+        val runId = "run_batch_triple"
+        val flags = durableFlags()
+        val terminals = mutableListOf<GenerationTerminal>()
+
+        // ONE assistant message carrying three same-signature calls: prepare
+        // runs for all three, then the guard stops at the third occurrence.
+        val engine = ScriptedRoundEngine(
+            listOf(
+                { _: List<UIMessage> ->
+                    UIMessage(
+                        role = MessageRole.ASSISTANT,
+                        parts = listOf(
+                            UIMessagePart.Tool(toolCallId = "call_1", toolName = "file_read", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_2", toolName = "file_read", input = "{}"),
+                            UIMessagePart.Tool(toolCallId = "call_3", toolName = "file_read", input = "{}"),
+                        ),
+                    )
+                },
+            ),
+        )
+        durableKernel(engine, flags).run(
+            GenerationRunSession(
+                settings = Settings(),
+                model = Model(),
+                messages = listOf(UIMessage.user("一直查")),
+                tools = listOf(readOnly),
+                runId = runId,
+                onTerminal = { terminals += it },
+            ),
+        ).toList()
+
+        assertEquals("only the first in-batch emission executed", 1, executions.get())
+        assertEquals(
+            listOf(GenerationTerminal.GuardStopped("duplicate_tool_call")),
+            terminals,
+        )
+        val byCall = ledger.listByRun(runId).associateBy { it.toolCallId }
+        assertEquals(ToolEffectStatus.FINISHED, byCall.getValue("call_1").status)
+        assertEquals(ToolEffectStatus.FAILED, byCall.getValue("call_2").status)
+        assertEquals("duplicate_skipped", byCall.getValue("call_2").errorCategory)
+        // The stopping call's effect is terminalized with its own category.
+        assertEquals(ToolEffectStatus.FAILED, byCall.getValue("call_3").status)
+        assertEquals("duplicate_stopped", byCall.getValue("call_3").errorCategory)
+    }
+
+    @Test
+    fun `same toolCallId with different args fails closed instead of binding the old effect`() = runBlocking {
+        val executions = AtomicInteger(0)
+        val readOnly = readOnlyTool(executions)
+        val runId = "run_protocol_mismatch"
+        val flags = durableFlags()
+
+        // Run 1: call_1 with args A executes → FINISHED.
+        val engine1 = ScriptedRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "file_read", input = """{"q":"a"}""") },
+                { textAssistant("完成") },
+            ),
+        )
+        durableKernel(engine1, flags).run(
+            session(listOf(UIMessage.user("查一下")), listOf(readOnly), runId),
+        ).toList()
+        assertEquals(1, executions.get())
+        assertEquals(1, ledger.listByRun(runId).size)
+
+        // Run 2 (same runId): the model re-emits call_1 with DIFFERENT args —
+        // a protocol violation. The call must not execute, no new effect row
+        // may bind the callId, and the model must receive a structured error.
+        val engine2 = ScriptedRoundEngine(
+            listOf(
+                { toolCallAssistant("call_1", "file_read", input = """{"q":"b"}""") },
+                { textAssistant("知道了") },
+            ),
+        )
+        val run2Chunks = durableKernel(engine2, flags).run(
+            session(listOf(UIMessage.user("换个参数查")), listOf(readOnly), runId),
+        ).toList()
+
+        assertEquals("the mismatched call never executed", 1, executions.get())
+        assertEquals("no sibling row minted for the callId", 1, ledger.listByRun(runId).size)
+        assertEquals(ToolEffectStatus.FINISHED, ledger.getByToolCallId("call_1")!!.status)
+        assertEquals("the loop stayed alive for the model's next round", 2, engine2.requests.size)
+        val roundTwoTool = engine2.requests[1].messages.last().getTools().single()
+        assertTrue(roundTwoTool.isExecuted)
+        val errorOutput = roundTwoTool.output.filterIsInstance<UIMessagePart.Text>().single().text
+        assertTrue(errorOutput.contains("\"status\":\"error\""))
+        assertTrue(errorOutput.contains("tool_effect_protocol_mismatch"))
+        assertEquals(
+            "知道了",
+            (run2Chunks.last() as GenerationChunk.Messages).messages.last()
+                .parts.filterIsInstance<UIMessagePart.Text>().single().text,
+        )
+    }
+
     // ---- helpers ----
 
     private fun toolCallAssistant(

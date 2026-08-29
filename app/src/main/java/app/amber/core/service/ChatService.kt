@@ -1303,6 +1303,44 @@ class ChatService(
                         }
                         refreshOutcomeUnknown()
                     }
+
+                    app.amber.core.ai.GenerationTerminal.OutputLimit -> {
+                        // OUTPUT_LIMIT is terminal and never maps to COMPLETED.
+                        runCatching {
+                            runTerminalStore!!.finish(
+                                runId,
+                                RunTerminalState.OUTPUT_LIMIT,
+                                PauseReason.OUTPUT_LIMIT_REACHED,
+                            )
+                        }
+                        runCatching {
+                            agentEventStore?.transitionRun(
+                                app.amber.core.agent.runtime.AgentRunId(runId),
+                                app.amber.core.agent.runtime.RunStatus.LIVE_STATES,
+                                app.amber.core.agent.runtime.RunStatus.OUTPUT_LIMIT,
+                            )
+                        }
+                        refreshOutcomeUnknown()
+                    }
+
+                    is app.amber.core.ai.GenerationTerminal.GuardStopped -> {
+                        // GUARD_STOPPED is terminal and never maps to COMPLETED.
+                        runCatching {
+                            runTerminalStore!!.finish(
+                                runId,
+                                RunTerminalState.GUARD_STOPPED,
+                                PauseReason.DUPLICATE_TOOL_CALL,
+                            )
+                        }
+                        runCatching {
+                            agentEventStore?.transitionRun(
+                                app.amber.core.agent.runtime.AgentRunId(runId),
+                                app.amber.core.agent.runtime.RunStatus.LIVE_STATES,
+                                app.amber.core.agent.runtime.RunStatus.GUARD_STOPPED,
+                            )
+                        }
+                        refreshOutcomeUnknown()
+                    }
                 }
             },
             onStreamingMessages = { runId, messages ->
@@ -1324,7 +1362,9 @@ class ChatService(
                     if (durable) {
                         val existing = runTerminalStore?.get(runId)
                         val parked = existing?.state == RunTerminalState.WAITING_USER ||
-                            existing?.state == RunTerminalState.STEP_LIMIT
+                            existing?.state == RunTerminalState.STEP_LIMIT ||
+                            existing?.state == RunTerminalState.OUTPUT_LIMIT ||
+                            existing?.state == RunTerminalState.GUARD_STOPPED
                         if (existing != null) {
                             if (parked) {
                                 terminalPublish = existing.state

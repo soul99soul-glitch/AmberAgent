@@ -26,6 +26,21 @@ sealed interface GenerationTerminal {
      * STEP_LIMIT must never be mapped to COMPLETED.
      */
     data object StepLimit : GenerationTerminal
+
+    /**
+     * The reply was cut off by the provider output limit — possibly carrying
+     * a half-emitted tool call whose args never completed. OUTPUT_LIMIT is
+     * terminal and must never be mapped to COMPLETED.
+     */
+    data object OutputLimit : GenerationTerminal
+
+    /**
+     * A loop guard stopped the run (currently: the duplicate-tool-call guard
+     * reached its stop occurrence). [reason] names the guard in wire form
+     * (e.g. "duplicate_tool_call"). GUARD_STOPPED is terminal and must never
+     * be mapped to COMPLETED.
+     */
+    data class GuardStopped(val reason: String) : GenerationTerminal
 }
 
 @Serializable

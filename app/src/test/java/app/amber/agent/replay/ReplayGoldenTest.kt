@@ -976,6 +976,22 @@ class ReplayGoldenTest : DurableRuntimeTestBase() {
                         RunStatus.STEP_LIMIT,
                     )
                 }
+                GenerationTerminal.OutputLimit -> {
+                    runTerminalStore.finish(runId, RunTerminalState.OUTPUT_LIMIT, PauseReason.OUTPUT_LIMIT_REACHED)
+                    store.transitionRun(
+                        AgentRunId(runId),
+                        RunStatus.LIVE_STATES,
+                        RunStatus.OUTPUT_LIMIT,
+                    )
+                }
+                is GenerationTerminal.GuardStopped -> {
+                    runTerminalStore.finish(runId, RunTerminalState.GUARD_STOPPED, PauseReason.DUPLICATE_TOOL_CALL)
+                    store.transitionRun(
+                        AgentRunId(runId),
+                        RunStatus.LIVE_STATES,
+                        RunStatus.GUARD_STOPPED,
+                    )
+                }
             }
         }
 

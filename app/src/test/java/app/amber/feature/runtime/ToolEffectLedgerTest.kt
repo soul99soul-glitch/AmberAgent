@@ -6,6 +6,7 @@ import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.feature.tools.ToolEffectClass
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
+import kotlin.test.assertFailsWith
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -152,20 +153,87 @@ class ToolEffectLedgerTest : DurableRuntimeTestBase() {
         assertEquals(ToolEffectStatus.FINISHED, reprepared.status)
         assertEquals("no orphan row next to the FINISHED effect", 1, ledger.listByRun("run_1").size)
         assertEquals(1, ledger.listByToolCallId("call_1").size)
+    }
 
-        // Control: the same callId with DIFFERENT args still mints a fresh
-        // row (the guard would not skip it, so it must stay executable).
-        val differentArgs = ledger.prepare(
-            runId = "run_1",
+    @Test
+    fun prepareWithDifferentArgsForSameRunCallIdFailsClosed() = runBlocking {
+        val first = prepare()
+        ledger.markStarted(first.effectId, approvalDigest("run_1", "call_1", first.argsDigest))
+        ledger.finish(first.effectId, listOf(UIMessagePart.Text("""{"status":"ok"}""")))
+
+        // The model re-emits the SAME callId with DIFFERENT args — a protocol
+        // violation. Fail-closed: no reuse of the old binding and no sibling
+        // row (two effects for one call would make the approval binding and
+        // the duplicate guard ambiguous).
+        val exception = assertFailsWith<ToolEffectProtocolMismatchException> {
+            ledger.prepare(
+                runId = "run_1",
+                turnId = 0,
+                toolCallId = "call_1",
+                toolName = "post_message",
+                input = """{"text":"changed"}""",
+                effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE,
+            )
+        }
+        assertEquals("call_1", exception.toolCallId)
+        assertEquals(first.argsDigest, exception.boundArgsDigest)
+        assertEquals("the ledger is unchanged — one row, still FINISHED", 1, ledger.listByRun("run_1").size)
+        assertEquals(ToolEffectStatus.FINISHED, ledger.getByToolCallId("call_1")!!.status)
+    }
+
+    @Test
+    fun prepareWithDifferentToolNameForSameRunCallIdFailsClosed() = runBlocking {
+        val first = prepare()
+
+        val exception = assertFailsWith<ToolEffectProtocolMismatchException> {
+            ledger.prepare(
+                runId = "run_1",
+                turnId = 0,
+                toolCallId = "call_1",
+                toolName = "other_tool",
+                input = """{"text":"hello"}""",
+                effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE,
+            )
+        }
+        assertEquals("post_message", exception.boundToolName)
+        assertEquals("other_tool", exception.requestedToolName)
+        assertEquals("no row was minted for the mismatched call", 1, ledger.listByRun("run_1").size)
+        assertEquals(ToolEffectStatus.PREPARED, ledger.get(first.effectId)!!.status)
+    }
+
+    @Test
+    fun prepareRebindRejectsMismatchedReusableRowAcrossRuns() = runBlocking {
+        runTerminalStore.begin("run_old", "conv_1", null)
+        val first = prepare(runId = "run_old")
+
+        // Crash + resume with a new runId; the model re-emits the callId with
+        // different args. The reusable old row must never be rebound to new
+        // contents (the old approval binding would silently authorize them).
+        runTerminalStore.begin("run_new", "conv_1", null)
+        assertFailsWith<ToolEffectProtocolMismatchException> {
+            ledger.prepare(
+                runId = "run_new",
+                turnId = 0,
+                toolCallId = "call_1",
+                toolName = "post_message",
+                input = """{"text":"changed"}""",
+                effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE,
+            )
+        }
+        assertEquals("run_old", ledger.getByToolCallId("call_1")!!.runId)
+
+        // Same callId with the SAME args still rebinds (crash-resume reuse).
+        val rebound = ledger.prepare(
+            runId = "run_new",
             turnId = 0,
             toolCallId = "call_1",
             toolName = "post_message",
-            input = """{"text":"changed"}""",
+            input = """{"text":"hello"}""",
             effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE,
         )
-        assertNotEquals(first.effectId, differentArgs.effectId)
-        assertEquals(ToolEffectStatus.PREPARED, differentArgs.status)
-        assertEquals(2, ledger.listByRun("run_1").size)
+        assertEquals(first.effectId, rebound.effectId)
+        assertEquals("run_new", rebound.runId)
+        assertEquals(1, ledger.listByRun("run_new").size)
     }
 
     @Test

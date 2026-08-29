@@ -35,9 +35,20 @@ class RunStatusTransitionsTest : FunSpec({
             RunStatus.CANCELLED,
             RunStatus.INTERRUPTED,
             RunStatus.STEP_LIMIT,
+            RunStatus.OUTPUT_LIMIT,
+            RunStatus.GUARD_STOPPED,
         )
         for (to in targets) {
             RunStatusTransitions.canTransition(RunStatus.RUNNING, to) shouldBe true
+        }
+    }
+
+    test("pauses never reach OUTPUT_LIMIT or GUARD_STOPPED directly") {
+        // The new terminals are settled from the live loop exactly like
+        // STEP_LIMIT — never from a parked run.
+        for (pause in RunStatus.PAUSE_STATES) {
+            RunStatusTransitions.canTransition(pause, RunStatus.OUTPUT_LIMIT) shouldBe false
+            RunStatusTransitions.canTransition(pause, RunStatus.GUARD_STOPPED) shouldBe false
         }
     }
 

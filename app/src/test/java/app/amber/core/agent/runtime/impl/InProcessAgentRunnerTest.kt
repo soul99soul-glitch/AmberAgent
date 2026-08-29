@@ -307,10 +307,17 @@ class InProcessAgentRunnerTest {
 
         // Resume under the SAME runId (paused-run resume shape): the StateFlow
         // instance must be reused — flatMapLatest observers keep their
-        // subscription — and reset to RUNNING for the new attempt.
-        runner.launch(AgentDescriptorId("fake"), FakeInput("b"), requestedRunId = runId).getOrThrow()
+        // subscription — and reset to RUNNING for the new attempt. The reset
+        // lands at gate approval (the resume CAS), not synchronously in
+        // launch(): an activation the gate stands down must never touch the
+        // live state.
+        runner.launch(AgentDescriptorId("fake"), FakeInput("b"), requestedRunId = runId)
 
         assertSame(flow, runner.observe(runId))
+        repeat(40) {
+            if (flow.value.status == RunStatus.RUNNING) return@repeat
+            delay(50)
+        }
         assertEquals(RunStatus.RUNNING, flow.value.status)
         assertNull(flow.value.finishedAt)
 
