@@ -4,12 +4,101 @@
 import {
   MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS, MAX_MATERIAL_CHARS,
   makeNovelProject, makeNovelChapter, makeNovelMaterial,
+  makeNovelChapterVersion, makeNovelBranch,
 } from './models.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
-  NovelMaterialKind, NovelCollectionTarget,
+  NovelMaterialKind, NovelCollectionTarget, NovelChapterVersionKind, NovelBranch,
+  NovelChapterVersion,
 } from './models.ts';
 import { invalidInput, notFound, alreadyCollected } from './error.ts';
+
+// ===== N1:分支 / 版本 / 撤销 / 废弃(Android Branch/Version/Checkpoint 语义)=====
+
+// 章节版本快照:保存/覆盖章节前先存一版(kind 标来源)
+export const saveChapterVersion = (
+  project: NovelProject, chapterId: string, kind: NovelChapterVersionKind, now: number,
+): NovelMutation<NovelChapterVersion> => {
+  const idx: number = project.chapters.findIndex(c => c.id === chapterId);
+  if (idx < 0) throw notFound('chapter', chapterId);
+  const c: NovelChapter = project.chapters[idx];
+  const version: NovelChapterVersionLike = makeNovelChapterVersion(chapterId, kind, c.title, c.content, now);
+  return {
+    project: { ...project, chapterVersions: [...project.chapterVersions, version], updatedAt: now },
+    value: version,
+  };
+};
+
+// 章节版本恢复:恢复即再存一版当前内容(不丢历史)
+export const restoreChapterVersion = (
+  project: NovelProject, versionId: string, now: number,
+): NovelMutation<NovelChapter> => {
+  const v = project.chapterVersions.find(x => x.id === versionId);
+  if (v === undefined) throw notFound('chapter_version', versionId);
+  const idx: number = project.chapters.findIndex(c => c.id === v.chapterId);
+  if (idx < 0) throw notFound('chapter', v.chapterId);
+  const current: NovelChapter = project.chapters[idx];
+  const backup: NovelChapterVersionLike = makeNovelChapterVersion(v.chapterId, 'manual', current.title, current.content, now);
+  const restored: NovelChapter = { ...current, title: v.title, content: v.content, updatedAt: now };
+  const chapters: NovelChapter[] = project.chapters.slice();
+  chapters[idx] = restored;
+  return {
+    project: { ...project, chapters: chapters, chapterVersions: [...project.chapterVersions, backup], updatedAt: now },
+    value: restored,
+  };
+};
+
+// 章节废弃/恢复标记
+export const setChapterDiscarded = (
+  project: NovelProject, chapterId: string, discarded: boolean, now: number,
+): NovelMutation<NovelChapter> => {
+  const idx: number = project.chapters.findIndex(c => c.id === chapterId);
+  if (idx < 0) throw notFound('chapter', chapterId);
+  const updated: NovelChapter = { ...project.chapters[idx], discarded: discarded, updatedAt: now };
+  const chapters: NovelChapter[] = project.chapters.slice();
+  chapters[idx] = updated;
+  return { project: { ...project, chapters: chapters, updatedAt: now }, value: updated };
+};
+
+// 分支:fork 当前主分支(继承章节视图;鸿蒙轻量实现 = 分支记录本身)
+export const forkBranch = (
+  project: NovelProject, name: string, now: number,
+): NovelMutation<NovelBranch> => {
+  const clean: string = name.trim();
+  if (clean.length === 0) throw invalidInput('分支名称不能为空');
+  const main: NovelBranch | undefined = project.branches.find(b => b.isMain && b.lifecycle === 'active');
+  const branch: NovelBranch = makeNovelBranch(clean, false,
+    main !== undefined ? main.forkFromChapterId : null, now);
+  return { project: { ...project, branches: [...project.branches, branch], updatedAt: now }, value: branch };
+};
+
+// 切换活跃分支标记(轻量实现:isMain 移动;完整分支隔离待后续)
+export const selectBranch = (
+  project: NovelProject, branchId: string, now: number,
+): NovelMutation<NovelBranch> => {
+  const b: NovelBranch | undefined = project.branches.find(x => x.id === branchId && x.lifecycle === 'active');
+  if (b === undefined) throw notFound('branch', branchId);
+  const branches: NovelBranch[] = project.branches.map(
+    (x: NovelBranch): NovelBranch => ({ ...x, isMain: x.id === branchId }));
+  return { project: { ...project, branches: branches, updatedAt: now }, value: b };
+};
+
+// 重命名分支
+export const renameBranch = (
+  project: NovelProject, branchId: string, name: string, now: number,
+): NovelMutation<NovelBranch> => {
+  const clean: string = name.trim();
+  if (clean.length === 0) throw invalidInput('分支名称不能为空');
+  const idx: number = project.branches.findIndex(x => x.id === branchId);
+  if (idx < 0) throw notFound('branch', branchId);
+  const renamed: NovelBranch = { ...project.branches[idx], name: clean.slice(0, MAX_PROJECT_NAME_CHARS) };
+  const branches: NovelBranch[] = project.branches.slice();
+  branches[idx] = renamed;
+  return { project: { ...project, branches: branches, updatedAt: now }, value: renamed };
+};
+
+// makeNovelChapterVersion 返回类型别名(ArkTS 不用 structural typing)
+type NovelChapterVersionLike = ReturnType<typeof makeNovelChapterVersion>;
 
 export interface NovelMutation<T> {
   project: NovelProject;

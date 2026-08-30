@@ -3,13 +3,14 @@
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
+import { pasteboard } from '@kit.BasicServicesKit';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-} from '@amber/deepread-domain';
+  NovelRunKind } from '@amber/deepread-domain';
 
 const GREEN: string = '#43A047';
 
@@ -109,6 +110,19 @@ const unsub: (() => void) | null = this.currentUnsub;
     }
   }
 
+  // N1:导出 Markdown(标题+全文各章,复制到剪贴板;系统分享面板后续接)
+  private exportMarkdown(): void {
+    if (this.project === null) return;
+    const p: NovelProject = this.project;
+    let md: string = `# ${p.name}\n\n`;
+    for (const c of p.chapters.filter((c: NovelChapter): boolean => !c.discarded)) {
+      md += `## ${c.title}\n\n${c.content}\n\n`;
+    }
+    pasteboard.getSystemPasteboard().setDataSync(
+      pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, md));
+    promptAction.showToast({ message: `已导出 ${p.chapters.length} 章到剪贴板`, duration: 1600 });
+  }
+
   // ===== 聊天 =====
   assistantLabel(m: NovelMessage): string {
     if (m.interrupted) return 'Amber · 已停止（内容已保留）';
@@ -116,7 +130,7 @@ const unsub: (() => void) | null = this.currentUnsub;
     return m.granularity === 'continuation' ? 'Amber · 续写' : 'Amber · 整章';
   }
 
-  send(): void {
+  send(runKindOverride: NovelRunKind | null = null): void {
     const text: string = this.draft.trim();
     if (text.length === 0 || this.activeRunId.length > 0 || this.project === null) return;
     const mode: NovelChatMode = this.composeMode === 'discuss' ? 'discuss' : 'write';
@@ -639,6 +653,8 @@ const unsub: (() => void) | null = this.currentUnsub;
             .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
+          Text('导出').fontSize(14).fontColor(ACCENT).margin({ left: 10 })
+            .onClick((): void => { this.exportMarkdown(); })
         }
         .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .backgroundColor(BG)

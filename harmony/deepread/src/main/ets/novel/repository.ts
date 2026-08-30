@@ -18,6 +18,8 @@ export interface NovelProjectRepository {
   createProject(project: NovelProject): Promise<NovelProject>;
   updateProject(id: string, transform: (p: NovelProject) => NovelProject): Promise<NovelProject>;
   deleteProject(id: string): Promise<void>;
+  // N1:删除进入回收(改名入 DELETED_DIR);restorePrevious 恢复最近一次删除
+  restorePrevious(): Promise<NovelProject | null>;
 }
 
 const validate = (p: NovelProject): NovelProject => {
@@ -26,8 +28,11 @@ const validate = (p: NovelProject): NovelProject => {
   return p;
 };
 
+const DELETED_DIR: string = 'novel_deleted';
+
 export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRepository => {
   const projectPath = (id: string): string => joinPath(PROJECTS_DIR, id + SUFFIX);
+  const deletedPath = (id: string): string => joinPath(DELETED_DIR, id + SUFFIX);
 
   // 按项目串行化 update(读-改-写):并发更新(后台建议刷新 vs 用户编辑)
   // 会基于同一旧快照互相覆盖,丢一条更新
@@ -92,12 +97,44 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         const current: NovelProject = decode(raw);
         const next: NovelProject = transform(current);
         if (next.id !== id) throw invalidInput('项目 id 不可变更');
-        await write(id, next);
-        return next;
+        // N1:revision 乐观锁域 — 每次落库自增(Android commitProject 语义)
+        const committed: NovelProject = { ...next, revision: next.revision + 1 };
+        await write(id, committed);
+        return committed;
       }),
 
     async deleteProject(id: string): Promise<void> {
+      // N1:软删 — 移入回收目录,restorePrevious 可恢复
+      const raw: string | null = await fileStore.readText(projectPath(id));
+      if (raw === null) return;
+      await fileStore.writeText(deletedPath(id), raw);
       await fileStore.delete(projectPath(id));
+    },
+
+    async restorePrevious(): Promise<NovelProject | null> {
+      const names: string[] = await fileStore.list(DELETED_DIR);
+      let best: NovelProject | null = null;
+      let bestAt: number = -1;
+      for (let i = 0; i < names.length; i++) {
+        const name: string = names[i];
+        if (!name.endsWith(SUFFIX)) continue;
+        const raw: string | null = await fileStore.readText(joinPath(DELETED_DIR, name));
+        if (raw === null) continue;
+        try {
+          const p: NovelProject = decode(raw);
+          if (p.updatedAt > bestAt) {
+            best = p;
+            bestAt = p.updatedAt;
+          }
+        } catch {
+          // 跳过不可读
+        }
+      }
+      if (best === null) return null;
+      const restored: NovelProject = { ...best, revision: best.revision + 1 };
+      await write(restored.id, restored);
+      await fileStore.delete(deletedPath(restored.id));
+      return restored;
     },
   };
 };

@@ -6,6 +6,7 @@
 import {
   makeNovelMessage, novelId,
 } from './models.ts';
+import type { NovelRunKind } from './prompt_catalog.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
@@ -234,6 +235,7 @@ export class NovelCreation {
   generate(
     projectId: string, userText: string, mode: NovelChatMode,
     granularity: NovelGenerationGranularity | null = null,
+    runKind: NovelRunKind | null = null,
   ): NovelRun {
     const runId: string = novelId();
     const emitter: Emitter<NovelRunEvent> = createEmitter<NovelRunEvent>();
@@ -252,7 +254,7 @@ export class NovelCreation {
       doneResolve: doneResolve, donePromise: donePromise,
     };
     this.projectRuns.set(projectId, live);
-    void this.runGeneration(live, emitter, userText, mode, granularity);
+    void this.runGeneration(live, emitter, userText, mode, granularity, runKind);
     return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
   }
 
@@ -267,6 +269,7 @@ export class NovelCreation {
   private async runGeneration(
     live: LiveRun, emitter: Emitter<NovelRunEvent>, userText: string,
     mode: NovelChatMode, granularity: NovelGenerationGranularity | null,
+    runKind: NovelRunKind | null = null,
   ): Promise<void> {
     const projectId: string = live.projectId;
     try {
@@ -277,7 +280,7 @@ export class NovelCreation {
       const project: NovelProject = await this.repository.loadProject(projectId);
       const gran: NovelGenerationGranularity | null =
         mode === 'write' ? (granularity ?? project.lastGenerationGranularity) : null;
-      const sysPrompt: string = systemPrompt(project, mode, gran);
+      const sysPrompt: string = systemPrompt(project, mode, gran, runKind);
 
       await this.modelRunning.validate(project.modelId);
       emitter.emit({ kind: 'started' });

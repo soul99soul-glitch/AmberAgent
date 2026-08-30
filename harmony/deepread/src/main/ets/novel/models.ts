@@ -41,6 +41,31 @@ export interface NovelChapter {
   content: string;
   createdAt: number;
   updatedAt: number;
+  // N1:章节废弃标记(Android setChapterDiscarded);false = 正常
+  discarded: boolean;
+}
+
+// 章节版本历史(Android NovelChapterVersionKind:manual/polish/regenerate/collection)
+export type NovelChapterVersionKind = 'manual' | 'polish' | 'regenerate' | 'collection';
+
+export interface NovelChapterVersion {
+  id: string;
+  chapterId: string;
+  kind: NovelChapterVersionKind;
+  title: string;
+  content: string;
+  createdAt: number;
+}
+
+// 分支(Android NovelBranchLifecycle:active/deleted;fork 继承 head 状态)
+export interface NovelBranch {
+  id: string;
+  name: string;
+  lifecycle: 'active' | 'deleted';
+  isMain: boolean;
+  // 分支起点:fork 来源章节 id(initial = 空分支)
+  forkFromChapterId: string | null;
+  createdAt: number;
 }
 
 export interface NovelMaterial {
@@ -76,6 +101,10 @@ export interface NovelProject {
   modelId: string | null;
   lastGenerationGranularity: NovelGenerationGranularity;
   materialSuggestions: NovelMaterialSuggestion[];
+  // N1:分支与章节版本(Android Branch/Checkpoint 语义的轻量等价)
+  branches: NovelBranch[];
+  chapterVersions: NovelChapterVersion[];
+  revision: number;
 }
 
 // ===== id 生成 =====
@@ -107,6 +136,9 @@ export const makeNovelProject = (init: NovelProjectInit): NovelProject => {
     modelId: init.modelId !== undefined ? init.modelId : null,
     lastGenerationGranularity: 'whole_chapter',
     materialSuggestions: [],
+    branches: [],
+    chapterVersions: [],
+    revision: 0,
   };
   return p;
 };
@@ -150,9 +182,34 @@ export const makeNovelChapter = (init: NovelChapterInit): NovelChapter => {
     content: init.content,
     createdAt: init.now,
     updatedAt: init.now,
+    discarded: false,
   };
   return c;
 };
+
+// N1:章节版本(mutation 用)
+export const makeNovelChapterVersion = (
+  chapterId: string, kind: NovelChapterVersionKind, title: string, content: string, now: number,
+): NovelChapterVersion => ({
+  id: novelId(),
+  chapterId: chapterId,
+  kind: kind,
+  title: title,
+  content: content,
+  createdAt: now,
+});
+
+// N1:分支
+export const makeNovelBranch = (
+  name: string, isMain: boolean, forkFromChapterId: string | null, now: number,
+): NovelBranch => ({
+  id: novelId(),
+  name: name,
+  lifecycle: 'active',
+  isMain: isMain,
+  forkFromChapterId: forkFromChapterId,
+  createdAt: now,
+});
 
 export interface NovelMaterialInit {
   id?: string;

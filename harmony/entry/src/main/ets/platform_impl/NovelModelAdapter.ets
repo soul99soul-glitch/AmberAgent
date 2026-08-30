@@ -5,24 +5,26 @@
 import type {
   HttpClient, HttpRequest, HttpResponse, ModelRegistry, ModelConfig,
   NovelModelRunning, NovelModelRequest, NovelModelEvent, NovelModelStream, AbortSignalLike,
-  OpenAiTextStreamSink, DecodeChunk,
 } from '@amber/deepread-domain';
-import { createOpenAiTextStream } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { util } from '@kit.ArkTS';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.NovelModel';
 
-// ArkTS 应用层无全局 TextDecoder,用 @kit.ArkTS 的 util.TextDecoder 注入到纯逻辑层
-const arktsDecode: DecodeChunk = (chunk: ArrayBuffer): string => {
-  const td: util.TextDecoder = util.TextDecoder.create('utf-8');
-  return td.decodeToString(new Uint8Array(chunk));
-};
-
 interface OpenAiMessage {
   role: string;
   content: string;
+}
+
+// 非流式响应形态(chat/completions stream:false)
+interface NonStreamMessage {
+  content?: string | null;
+}
+interface NonStreamChoice {
+  message?: NonStreamMessage;
+}
+interface NonStreamResp {
+  choices?: NonStreamChoice[];
 }
 
 // 每次运行的中止信号
@@ -44,7 +46,7 @@ interface RunHandle {
   signal: NovelCancelSignal;
 }
 
-class StreamNovelModelAdapter implements NovelModelRunning {
+class NonStreamNovelModelAdapter implements NovelModelRunning {
   private http: HttpClient;
   private registry: ModelRegistry;
   private runs: Map<string, RunHandle> = new Map();
@@ -115,7 +117,9 @@ class StreamNovelModelAdapter implements NovelModelRunning {
       for (let i = 0; i < messages.length; i++) {
         parts.push(`{"role":"${messages[i].role}","content":${JSON.stringify(messages[i].content)}}`);
       }
-      let body: string = `{"model":${JSON.stringify(model.model)},"messages":[${parts.join(',')}],"stream":true`;
+      // N1:fetchStream 在 HarmonyOS 7.0.102 NetStack 层静默挂死(深读 P8 实证),
+      // 小说生成统一走非流式;事件端口不变(delta 不再逐字,一次性 replace)。
+      let body: string = `{"model":${JSON.stringify(model.model)},"messages":[${parts.join(',')}],"stream":false`;
       if (request.maxOutputTokens !== null) {
         body += `,"max_tokens":${request.maxOutputTokens}`;
       }
@@ -131,29 +135,27 @@ class StreamNovelModelAdapter implements NovelModelRunning {
         body: body,
       };
 
-      hilog.info(DOMAIN, TAG, 'novel generate start model=%{public}s', model.model);
-      const sink: OpenAiTextStreamSink = createOpenAiTextStream(
-        (deltaText: string, _reasoningText: string): void => {
-          if (deltaText.length > 0) emit({ kind: 'delta', text: deltaText });
-        },
-        undefined,
-        arktsDecode,
-      );
-
-      const resp: HttpResponse = await this.http.fetchStream(httpReq, {
-        onChunk: (chunk: ArrayBuffer, end: boolean): void => {
-          sink.feed(chunk);
-          if (end) sink.flush();
-        },
-        signal: handle.signal,
-      });
-
-      // fetchStream 已 resolve 说明流正常结束(dataEnd 已到)。此时即便 signal
-      // 在此刻被 abort(极窄窗口),内容也已完整,按 completed 处理,避免误标 interrupted。
-      if (resp.status !== 200 && resp.status !== 0) {
-        emit({ kind: 'failed', message: `HTTP ${resp.status}` });
+      hilog.info(DOMAIN, TAG, 'novel generate start (non-stream) model=%{public}s', model.model);
+      const resp: HttpResponse = await this.http.fetch(httpReq, { signal: handle.signal });
+      if (handle.signal.aborted) {
+        emit({ kind: 'failed', message: 'cancelled' });
         return;
       }
+      if (resp.status < 200 || resp.status >= 300) {
+        emit({ kind: 'failed', message: `HTTP ${resp.status}: ${resp.body.substring(0, 160)}` });
+        return;
+      }
+      const parsed: NonStreamResp = JSON.parse(resp.body) as NonStreamResp;
+      const content: string = parsed.choices !== undefined && parsed.choices.length > 0
+        && parsed.choices[0].message !== undefined
+        && parsed.choices[0].message.content !== null
+        ? parsed.choices[0].message.content as string : '';
+      if (content.length === 0) {
+        emit({ kind: 'failed', message: '模型返回空内容' });
+        return;
+      }
+      emit({ kind: 'delta', text: content });
+      emit({ kind: 'replace', text: content });
       emit({ kind: 'completed' });
     } catch (e) {
       // fetchStream reject(被 abort 触发 destroy / 网络/HTTP 错误)走这里
@@ -166,5 +168,5 @@ class StreamNovelModelAdapter implements NovelModelRunning {
 }
 
 export const createNovelModelAdapter = (http: HttpClient, registry: ModelRegistry): NovelModelRunning => {
-  return new StreamNovelModelAdapter(http, registry);
+  return new NonStreamNovelModelAdapter(http, registry);
 };
