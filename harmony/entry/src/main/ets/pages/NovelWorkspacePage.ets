@@ -404,10 +404,10 @@ const unsub: (() => void) | null = this.currentUnsub;
     Row() {
       Blank()
       Text('归档讨论').fontSize(12).fontColor(INK3)
-        .padding({ left: 12, right: 16, top: 6, bottom: 6 })
+        .padding({ left: 12, right: 20, top: 6, bottom: 6 })
         .onClick((): void => { this.archiveDiscussion(); })
     }
-    .width('100%')
+    .width('100%').padding({ top: 8 })
     Column() {
       // 消息列表
       List({ space: 0 }) {
@@ -476,7 +476,8 @@ const unsub: (() => void) | null = this.currentUnsub;
           onClearInput: (): void => { this.draft = ''; },
         })
       }
-      .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 12 })
+      .width('100%').padding({ left: 16, right: 16, top: 8,
+        bottom: 12 + (AppStorage.get<number>('navBarHeight') ?? 0) })
       .border({ width: { top: 0.5 }, color: { top: LINE } })
     }
     }
@@ -773,7 +774,6 @@ const unsub: (() => void) | null = this.currentUnsub;
         }
       }
       .width('100%').height('100%').backgroundColor(BG)
-      .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
 
       // 收录对话框
       if (this.collectMessageId.length > 0) {
@@ -797,6 +797,7 @@ const unsub: (() => void) | null = this.currentUnsub;
       }
     }
     .width('100%').height('100%')
+    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder
