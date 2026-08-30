@@ -61,3 +61,28 @@
 - 模板 Agent 生成/工作台(小说模板非重点,继承深读 P8 模式后置)
 - iOS Swift 序列化兼容层(NovelSwiftCompatibleJson,鸿蒙无历史包袱)
 - injection 多模式枚举(先落单一 budget 模式,多模式待实际需求)
+
+
+---
+
+## 执行记录(2026-08-30 当日完成)
+
+N1/N2/N3 全部落地,3 提交:00e6e5a19(N1)/ c180ddf12(N2)/ 5ea9b8437(N3)。
+
+- N1:模型适配器非流式(NetStack 挂死规避)、6 种 Run + PromptCatalog、
+  分支/版本/废弃 mutations、revision 乐观锁 + restorePrevious、导出 Markdown
+- N2:单章重生成/单章润色(哨兵协议)/版本历史 sheet/章节废弃/操作菜单
+- N3:归档蒸馏(接 analyzeChapterSuggestions)/恢复删除入口/收录资格助手
+
+审查修复(部分):@Builder 函数参数推 any → 字符串 action 分发;多次 import
+重复/双逗号;menuRow 嵌套 lambda 替换失败 → 手工核对逐处修正。
+
+验证:deepread 641(+5)/ chat 2012 单测全绿;全仓 lint EXIT=0(0 error,
+warn 125 ≤ 基线 126);真机安装运行正常。生成 UI 终验待用户手动
+(uitest inputText 在 TextArea 不注入,自动化受限)。
+
+## 明确不做(执行确认)
+
+- 模板 Agent 生成/工作台(后置)
+- iOS Swift 序列化兼容层(无历史包袱)
+- injection 多模式枚举(单一 budget 模式已够)
