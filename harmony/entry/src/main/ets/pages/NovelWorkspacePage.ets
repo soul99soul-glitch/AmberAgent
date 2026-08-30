@@ -3,6 +3,7 @@
 import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
+import { ChatInput } from '../components/ChatInput.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { getNovelCreation } from '../di/AppContainer.ets';
@@ -399,6 +400,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   // ===== 页签内容 =====
   @Builder
   chatPane(): void {
+    Column() {
     Row() {
       Blank()
       Text('归档讨论').fontSize(12).fontColor(INK3)
@@ -455,35 +457,31 @@ const unsub: (() => void) | null = this.currentUnsub;
         Text(this.errorMsg).fontSize(12).fontColor('#E53935').padding({ left: 16, right: 16, bottom: 6 })
       }
 
-      // 输入器
+      // 输入器(复用聊天页 ChatInput;上方保留模式切换)
       Column() {
         Row() {
           this.modeChip('讨论', 'discuss')
           this.modeChip('续写', 'continue')
           this.modeChip('整章', 'whole_chapter')
           Blank()
-          if (this.activeRunId.length > 0) {
-            Text('停止').fontSize(13).fontColor('#E53935')
-              .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-              .onClick(() => { this.interrupt(); })
-          } else {
-            Text('发送').fontSize(13).fontColor('#FFFFFF')
-              .padding({ left: 18, right: 18, top: 8, bottom: 8 }).borderRadius(16)
-              .backgroundColor(this.draft.trim().length > 0 ? ACCENT : INK4)
-              .onClick(() => { this.send(); })
-          }
         }
-        .width('100%').margin({ bottom: 8 })
+        .width('100%').margin({ bottom: 4 })
 
-        TextArea({ text: this.draft, placeholder: this.composerPlaceholder() })
-          .height(72).fontSize(14).fontColor(INK).placeholderColor(INK4)
-          .backgroundColor(SURFACE2).borderRadius(10).padding(12)
-          .onChange((v: string) => { this.draft = v; })
+        ChatInput({
+          text: this.draft,
+          sending: this.activeRunId.length > 0,
+          onTextChange: (v: string): void => { this.draft = v; },
+          onSend: (): void => { this.send(); },
+          onStop: (): void => { this.interrupt(); },
+          onClearInput: (): void => { this.draft = ''; },
+        })
       }
       .width('100%').padding({ left: 16, right: 16, top: 8, bottom: 12 })
       .border({ width: { top: 0.5 }, color: { top: LINE } })
     }
-    .width('100%').height('100%')
+    }
+    .layoutWeight(1)
+    .width('100%')
   }
 
   composerPlaceholder(): string {
