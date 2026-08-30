@@ -2,16 +2,19 @@
 
 ## Goal
 
-按 `docs/plans/2026-08-30-harmony-novel-product-completion-plan.md` 连续完成 C0-C7，
-复用 Chat 的消息、流、工具和呈现深模块，补齐职责模型、候选审稿、持久代笔和后台恢复。
+按 `docs/plans/2026-08-30-harmony-novel-product-completion-plan.md` 连续完成 C0-C8，
+复用 Chat 的消息、流、工具和呈现深模块，以 `amber.novel.workspace` v1 文件正史为唯一数据源，
+补齐分支/CAS、工作台、持久代笔、润色和后台恢复。
 
 ## Success Criteria
 
 - Chat 与 Novel 共用消息行、Timeline、Markdown/reasoning/tool/ask-user 呈现。
 - Novel 交互生成复用 Chat provider/tool loop/accumulator/stop，不再走独立 provider。
-- creation/stateSync/review 可分别选模型并持久化。
-- plan→candidate→review→rewrite→atomic commit→next plan 可恢复且 exactly-once。
-- 后台代笔、进度/失败/完成通知和项目深链真机闭环。
+- 项目 CRUD、ZIP 往返和当前分支 TXT/Markdown/EPUB 导出可真实使用。
+- 文件树 + ledger + branch head/tree CAS 是唯一正史，proposal/undo/unresolved/plot stale 闭环。
+- writing/review 模型策略持久化，讨论/写正文、工具、ask-user 和审批共用 Chat 链路。
+- plan→private candidate→joint review→rewrite→atomic commit→next plan 可恢复且 exactly-once。
+- durable 代笔/润色互斥，后台、通知和项目/job 深链真机闭环。
 - 每 Phase 经逻辑/调用链 review 与 UI review，证据问题修复后两域测试、lint、构建、安装、截图通过并独立提交。
 
 ## Current Context
@@ -33,24 +36,26 @@
 
 - NetStack 在目标设备的 SSE 回调存在挂死历史；用受控 SSE 资格门验证，禁止假流式。
 - ChatPage 当前为大文件；先机械提取并让 Chat 自用，避免行为与 UI 漂移。
-- 项目仓库现有 revision/写入非 CAS/非原子；提交层必须在代笔前补齐并做崩溃矩阵。
+- 项目仓库现有单 JSON revision/写入非 CAS/非原子；C3 必须迁入单一文件工作区，C4 再开放
+  ledger/CAS mutation，禁止平行数据源。
 - WorkScheduler 执行窗口有限；真实暂停/恢复替代伪完成，不创建重复后台生成链。
 
 ## Approval Required
 
 用户已明确授权持续实现、每 Phase 使用 subagent review、构建、安装、真机验证和按 Phase 提交。
-删除旧生产代码仅在 C7 确认零 caller 后按明确文件清单执行；不做其他破坏性操作。
+删除旧生产代码仅在 C8 确认零 caller 后按明确文件清单执行；不做其他破坏性操作。
 
 ## Work Packets
 
 - C0：计划/基线/characterization。
 - C1：共享消息行与 Timeline。
 - C2：共享交互运行时与真流式资格门。
-- C3：持久 transcript、真实工具、职责模型。
-- C4：合同/候选/审稿/CAS 原子提交/真实分支版本。
-- C5：完整持久代笔流水线。
-- C6：WorkScheduler 无头后台、通知与深链。
-- C7：旧链清退与全产品真机终验。
+- C3：工作区 v1、路径安全、项目 CRUD、ZIP 和书籍导出。
+- C4：ledger/head/tree CAS、真实分支、受控写入、undo/unresolved/plot stale。
+- C5：三视图工作台、持久 transcript、真实工具、职责模型和审批收录。
+- C6：durable ghostwrite、联合审核、owner/CAS、计划轮换和恢复。
+- C7：durable polish 互斥、上下文、WorkScheduler、通知与深链。
+- C8：旧链清退与全产品真机终验。
 
 ## Integration Policy
 

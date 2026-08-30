@@ -15,6 +15,8 @@
 
 - If a review finding has no production caller, reproduction, test, log, or screenshot evidence,
   record and reject it instead of adding speculative fallback.
+- If an implementation would create a second Novel data source, stop that slice and migrate the existing
+  `NovelProjectRepository` production caller to the workspace-backed path instead.
 - If API 12 compatibility is uncertain, pause that code slice only, query official docs, then continue.
 - If target-device streaming is buffered/unavailable, report the transport state honestly and fix the
   shared Chat transport seam; never add a Novel-only parser or typewriter simulation.
@@ -34,5 +36,5 @@ Workers must cite file/line and distinguish confirmed defects from optional impr
 ## Completion Audit
 
 For each Phase write `results/C<n>-integration.md` with accepted/rejected findings, fixes,
-tests/lint/build/install/screenshots and commit SHA. C7 final report must map every original user gap
+tests/lint/build/install/screenshots and commit SHA. C8 final report must map every original user gap
 to a production call chain and runtime proof.

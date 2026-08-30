@@ -141,89 +141,144 @@ NovelWorkspacePage
 
 验收：Novel 可见 reasoning/text/tool 增量；stop 真正 abort；非流整包立即完整显示且不冒充流式。
 
-## Phase C3 — 持久会话、真实工具与职责模型
+## 生产链冻结（C3 起）
+
+```text
+NovelProjectsPage / NovelWorkspacePage
+  -> NovelWorkspaceService                 # 唯一页面业务入口
+  -> NovelWorkspaceOwner + expected CAS    # branch/head/tree/owner 权威
+  -> NovelWorkspaceStore                   # staged install + atomic file/ledger
+  -> NovelBatchExecutor                    # 只消费同一 durable job/checkpoint
+  -> WorkSchedulerExtensionAbility         # 平台唤醒，不复制业务状态机
+```
+
+- 现有 `NovelProjectRepository` 保留为页面兼容门面，但 C3 后只读写
+  `amber.novel.workspace` v1；旧单文件 schema 仅作一次性迁移输入，禁止平行保留第二套生产数据源。
+- `manifest.yaml/project.md/setting/inbox/drafts/branches` 是可交换工作区；commit、undo、session、
+  unresolved、job、receipt 和 active branch 只在宿主私有 `.amber/`。
+- 文件树、append-only ledger 与 active branch checkout 共同构成正史；UI 文案、内存 Map、
+  provider transcript 都不是事实源。
+- C3-C7 的所有 mutation 从一开始就携带 branch/head/tree/owner 语义；Phase 只逐步开放能力，
+  不再更换存储模型或另造 orchestrator。
+
+## Phase C3 — 工作区 v1、项目交换与书籍导出
 
 交付：
 
-- Novel transcript 持久化完整 `UIMessage.parts`；legacy schema dual-read、single-write。
-- 新讨论使用真实 Novel 工具目录和完整 JSON Schema；`ask_user`、approve、deny、answer
-  保存 pending/resolved 状态并从同一 run/tool call 续跑。
-- 项目级 `creation / stateSync / review` 模型策略及全局默认；工作区模型选择复用 Chat
-  现有模型菜单/解析，不另建 registry。
-- 工作区提供三个带职责标签的模型入口/摘要，分别显示“继承小说默认”或固定的
-  provider/model；单模型 `TopModelMenu` 作为选择控件复用，而不是把三职责压成一个入口。
-  固定模型失效时在对应职责行原位报错并提供重选；退出重进后的 UI 与 run receipt 一致。
-- 显式固定模型失效 fail closed 并提示重选；不得静默换模型。
-- reasoning/tool/approval transcript 与小说正文存储分离。
-- 所有 mutating Novel tool 以稳定 `toolCallId/commandId` 作为幂等键；domain 在项目事务中
-  持久化 command receipt 与输出。工具副作用成功但 transcript output 尚未保存时，恢复必须
-  返回已有 receipt，禁止再次创建素材、章节、分支或提交。
+- 定义并验证 `amber.novel.workspace` v1：`manifest.yaml`、`project.md`、`setting/`、
+  `inbox/`、`drafts/`、`branches/<slug>/...` 与宿主私有 `.amber/`。
+- 章节文件以 ASCII 三位序号命名（如 `031-title.md`），排序和导出不受系统 locale 数字影响。
+- 单一 `NovelWorkspaceStore` 支持创建、打开、重命名、删除和旧 schema 一次迁移；现有项目入口
+  迁入该 store，dual-read 只服务迁移，后续 single-write 工作区。
+- 所有工具/ZIP 路径拒绝绝对路径、反斜杠、`.`、`..`、空 segment、隐藏目录和 root 越界；
+  `.amber/` 仅宿主可访问。
+- ZIP 导入先做格式、entry 数、单项/累计压缩与展开大小、路径、重复路径校验，再解到 sibling
+  staging；完整校验通过后一次 rename 安装为新项目，任何失败清理 staging 且现有项目不变。
+- ZIP 导出只包含可交换树，不包含 `.amber/`；TXT/Markdown/EPUB 只渲染当前 branch 正文，
+  EPUB 必须是可打开的确定性归档。
+- 项目列表、创建空白项目、重命名、删除全部读取真实工作区；删除失败不得让项目显示为成功删除。
+- append-only ledger/head/tree/initial checkout 的最小骨架随项目创建/导入建立；C4 再开放 mutation。
 
-验收：退出重进后 pending 卡、回答和工具结果不丢；三职责可选不同模型并在 receipt 中固定。
+验收：路径逃逸、大小/数量限制、重复 entry、导入中断、旧项目迁移、CRUD、ZIP 往返和三种
+书籍导出均有定点测试；真机创建/重命名/导入/导出后，重启应用仍由同一工作区展示。
 
-## Phase C4 — 候选、合同、审稿与原子提交
-
-交付：
-
-- 结构化章节合同：目标、must happen、must not happen、可见事实、验收条件、digest。
-- durable prose/polish candidate：base revision/head、plan ID/digest、来源版本、状态和 hash。
-- review 使用独立职责模型，产出严格结构化 verdict/issues/rewrite brief/state delta/next plan。
-- 候选/审稿 UI 状态矩阵：待审、合格、需改写、冲突、审稿 issues、rewrite 前后差异、
-  已提交；所有状态来自 durable artifact，不由页面推测。
-- 不合格候选最多按明确 issue 定向重写；严重冲突暂停等待用户，禁止无限自愈。
-- review 后的 state sync 和 next-plan completion 都是 commit 前阶段；若 review 未提供合格
-  state delta/next plan，则先调用对应职责模型补齐，任何一项失败都停在 pre-commit，不提前
-  写正史。`NovelProjectCommitPort` 提供 expected revision CAS、同目录 temp+rename、
-  command/commit receipt；正文、版本、剧情状态与计划轮换一次原子提交。
-- 修正现有分支/版本假闭环：按前述作用域把章节、消息、素材/事实、合同/计划、候选/
-  review/state delta、版本/head、workflow/receipt 全部纳入 branch state；手动编辑、重生成、
-  润色和收录均产生可恢复版本。
-
-验收：任意 revision 漂移都不覆盖用户正文；commit 重放 exactly-once；候选未采纳前正史字节不变。
-
-## Phase C5 — 完整代笔流水线
+## Phase C4 — 分支正史、受控写入与一致性
 
 交付：
 
-- `NovelWorkflowRun` 持久阶段：planning、writing、reviewing、rewriting、state_syncing、
-  planning_next、committing、waiting_user、paused、failed、completed。state sync/next plan
-  必须先完成并 checkpoint，`committing` 才把全部 mutation 一次写入正史。
-- 单章与 1-N 章批次：计划确认 → 候选 → 审稿 → 定向重写 → 原子收录 →
-  状态同步 → 下一章。
-- 支持逐章人工确认与自动代笔两种明确模式；审稿报告和重写差异可见。
-- 统一阶段卡展示当前章节、planning/writing/reviewing/rewriting/committing/state_sync/
-  planning_next、暂停、等待用户、失败可重试及恢复点；退出重进恢复同一张卡。
-- stop/pause/resume/retry/cancel；每个 phase checkpoint，进程死亡后只恢复一次。
-- workflow domain 在 C5 自身实现原子 run claim、attempt generation、owner lease 和 execution
-  token；同一 project/branch/run 同时只有一个 owner，旧 attempt 永久失去写权限。C6 的
-  WorkScheduler 只消费该协议，不再创建第二套后台所有权状态机。
-- 现有单章/批量润色迁入同一 candidate/review/adopt 流水线，移除内存 Map 作为真相源。
+- append-only commit ledger 记录 parent、branch、tree digest、mutation、receipt；checkout/head/tree
+  校验互相一致，所有写提交都要求 expected branch/head/tree CAS。
+- 从当前 head 创建分支和切换分支；章节、设定、plan/plot、伏笔、决定、unresolved、undo 和
+  active session 全部来自目标分支，不回落项目级数组。
+- 收录新章节、追加最后一章、手动编辑、单章重写、审核收录、润色、还原、创建分支都形成
+  可追踪 commit，并在窄提交链中更新文件、ledger、head/tree、undo 与 receipt。
+- 正文/剧情/branch metadata 等受保护写入只接受宿主 commit 或 durable proposal；批准/拒绝
+  幂等，Agent 不得绕过。`setting/`、`inbox/`、`drafts/`、branch `setting/plan` 受控自由写。
+- Agent 文件工具仅开放 list/read/grep/status 和上述受控 write；manifest、project、branch
+  metadata、`.amber/` 永远由宿主管理。
+- 编辑中间章后，该章及后续章节标记 unresolved；用户可重写后续或显式解决。plot digest 与
+  branch tree 不一致时标记 plot stale，阻止依赖旧剧情状态的危险提交并提供显式同步入口。
+- 一层 undo 还原文件树并产生新 commit，不删除历史 ledger；重放相同 command/receipt
+  exactly-once，revision/head/tree 漂移 fail closed。
 
-验收：在每个阶段后模拟进程终止，重开只继续未完成阶段；已提交章节不重复，失败可定位可重试。
+验收：branch head/tree CAS、分支切换、proposal approve/deny/replay、manual edit、undo、
+unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖用户正文。
 
-## Phase C6 — 无头后台、通知与深链
+## Phase C5 — 小说工作台、持久对话与职责模型
 
 交付：
 
-- 按官方文档接 `WorkSchedulerExtensionAbility`（API 12 基线内）与无头 Novel workflow。
-- job、execution token、owner lease、进度/失败/完成 receipt 持久化；旧 worker 失去写权限。
-- 前台/后台使用同一 workflow，不在 Extension 中复制生成逻辑。
-- 进度、失败、完成通知；点击带 projectId/runId 深链进入对应工作区和阶段卡。
-- 后台 UI 明确区分排队、运行、等待系统窗口、已暂停、失败、完成；通知深链必须落到
-  与页面相同的 durable 阶段卡，不能只打开小说列表或创建瞬态 toast。
-- 系统窗口不足时准确暂停并等待下次调度/用户继续，不伪报完成。
+- 工作区固定“创作 / 正文 / 设定”三视图并显示/切换 active branch；所有列表、状态卡和
+  禁用原因只读取 C3/C4 durable state。
+- 创作输入明确区分“讨论”和“写正文”：讨论用于规划/设定，写正文只产 durable candidate；
+  草稿可收录新章节或追加最后一章，未经用户确认不得进入正史。
+- Novel transcript 保存完整 canonical `UIMessage.parts`；legacy dual-read、single-write。
+  reasoning/tool/approval 与正文文件分离，退出重进仍能恢复 pending/resolved 卡。
+- 使用真实 Novel 工具目录和完整 JSON Schema；`ask_user`、approve、deny、answer 从同一
+  run/tool call 续跑。mutating tool 以 `toolCallId/commandId` 持久 receipt 并 exactly-once。
+- 项目级 writing/review 模型策略：写作可跟随全局，审核可跟随写作；需要状态同步时使用
+  明确的内部职责策略。模型选择复用 Chat 菜单/解析，固定模型失效原位 fail closed，不静默替换。
+- 正文视图支持目录、阅读、手改、单章重写、undo、主动一致性检查；设定视图支持合法设定
+  文件、未解决/已解决伏笔、已确认决定和 plan/future/preferences 编辑。
+- 复用 C1/C2 的 reasoning、tool、停止、真实流、实时 Markdown 与跟底；窄屏、长文案、
+  44vp 点击区及 loading/empty/error/disabled/dark 状态真机复核。
 
-验收：离页、锁屏、进程回收、重新打开均不重复提交；通知点击准确恢复项目。
+验收：真机从项目列表进入三视图，与 Agent 讨论、回答 ask-user、看到真实流式思考/Markdown，
+生成候选并审批收录；退出重进 transcript、模型策略、branch 与 proposal 状态一致。
 
-## Phase C7 — 产品终验与旧链清退
+## Phase C6 — Durable ghostwrite 代笔闭环
+
+交付：
+
+- 1-10 章，默认 5；启动前必须存在 `plan/this-chapter.md`，原子冻结 plan 正文、plan ID/digest、
+  branch、head、tree 和唯一 owner token，运行期间禁止修改绑定计划。
+- durable stage 至少覆盖 writing、reviewing、rewriting 1/2、committing、planning，以及
+  paused、waiting_user、failed、cancelled、completed；页面重开/冷启动只恢复同一 job。
+- 写作只落 job-private candidate，绑定 job/branch/chapter/plan ID+digest，不写正史、普通 draft
+  或 proposal；健康章节严格为一次写作 + 一次只读联合审核。
+- 联合审核返回结构化 verdict/issues/rewrite instructions/state delta/next plan，严格校验
+  candidate/chapter/plan 关联。只有缺失必写、违反禁写或可定位连续性硬伤才 blocking。
+- rewriteRequired 携明确 issue 定向重写，同一 plan ID/digest 最多两次；第三次停止并展示原因。
+- 通过后在 owner token + expected branch/head/tree CAS 下，原子提交章节、受限状态增量、
+  旧计划消费、下一计划、ledger、undo、receipt/progress。候选在 commit 前不改变正史字节。
+- 非最终章优先使用 review next plan，缺失时最多一次只读规划；最终章删除当前计划且不规划。
+- progress 只统计绑定 job receipt 且 commit 仍在 branch ancestry 的章节；先持久化 commit/receipt，
+  pause/cancel 只影响下一章。
+- 支持 pause/resume/retry/cancel；claim/attempt/owner lease 使旧 execution、错误分支和 CAS
+  冲突在写正史前拒绝。部分写失败由 ledger/receipt 恢复，绝不重复收录。
+
+验收：计划冻结、候选隔离、审核关联、blocking 分类、两次重写上限、计划轮换/最终章、旧 owner、
+原子收录、暂停/冷恢复及 5/10 章连续运行全部有测试和真实 provider 证据。
+
+## Phase C7 — Durable 润色、后台执行、通知与深链
+
+交付：
+
+- 批量润色选择已有章节起止范围，复用 candidate/review/commit/CAS/owner/checkpoint 协议；
+  同一 project/branch 的 ghostwrite 与 polish 通过 durable claim 互斥。
+- 润色支持 pause/resume/retry/cancel/冷恢复；现有内存 Map 不再作为状态源。
+- 上下文按开关注入当前剧情、伏笔、角色/关系邻域、已确认决定；限制总体积并保存来源边界。
+  plot stale 或中间章 unresolved 时同时向模型和用户显示明确警告。
+- 查阅官方文档后接 `WorkSchedulerExtensionAbility`（API 12 基线内）与无头 executor；后台只
+  claim/驱动同一 durable job，不复制生成/提交状态机。
+- 进度、失败、完成通知携 projectId/branchId/jobId 深链，点击准确进入工作区 durable 阶段卡。
+  排队、运行、等待系统窗口、暂停、失败、完成均来自持久 stage，不用 toast 模拟。
+- 系统执行窗口不足时持久暂停点并等待下次调度/用户继续，不伪报完成；旧 worker 永久失去写权。
+
+验收：代笔/润色互斥、润色部分失败、pause/resume/cold recovery、后台唤醒、进程回收、通知深链
+有测试与真机证据；任何路径均不重复提交。
+
+## Phase C8 — 产品终验与旧链清退
 
 交付：
 
 - 删除已无生产 caller 的 `NonStreamNovelModelAdapter`、字符串 delta/replace 事件、
   legacy fenced ask-user 新写路径和 Novel 私有 Markdown/滚动轮子；删除另列清单后精准执行。
-- 修正文档、parity backlog、能力矩阵和实际测试数字。
+- 删除旧单文件 Novel 生产写路径、内存 batch 真相源和并行入口；迁移 reader 仅在仍有真实旧数据
+  需要时保留，并记录退出条件。修正文档、parity backlog、能力矩阵和实际测试数字。
 - 真机覆盖：Quick Start、讨论工具、ask-user、真实流式、思考卡、整章候选、审稿、
-  定向重写、采纳、版本/分支、批量代笔、停止/恢复、后台、通知深链。
+  定向重写、采纳、版本/分支、设定编辑、ZIP 导入导出、TXT/Markdown/EPUB 打开、批量代笔、
+  批量润色、停止/恢复、杀进程恢复、后台、通知深链。
 - 8k-12k 中文混合 Markdown：自动跟底、上滑暂停、回底恢复、终态无跳变；用视频/
   帧证据验证滚动，截图验证布局/暗色/间距；AX/布局边界验证主要交互最小 44vp 命中区。
 - 暗色状态矩阵覆盖 reasoning、tool/ask、候选、审稿、进度、失败和后台恢复；Novel 新 UI
@@ -240,4 +295,4 @@ NovelWorkspacePage
 → 任意离页/停止/崩溃不丢状态、不重复提交
 ```
 
-只有上述链路、两域回归、lint、签名构建和真机证据全部成立，才可把 Harmony 小说标为“产品完整”。
+只有上述链路、工作区/两域回归、lint、签名构建和真机证据全部成立，才可把 Harmony 小说标为“产品完整”。

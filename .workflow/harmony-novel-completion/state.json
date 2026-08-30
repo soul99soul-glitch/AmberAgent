@@ -6,7 +6,7 @@
   "approval": {
     "required": true,
     "granted": true,
-    "notes": "User explicitly authorized sustained C0-C7 execution, phase reviews, builds, device installs, fixes, and phase commits."
+    "notes": "User explicitly authorized sustained C0-C8 execution, phase reviews, builds, device installs, fixes, and phase commits."
   },
   "packets": [
     {"id":"C0","status":"complete"},
@@ -16,7 +16,8 @@
     {"id":"C4","status":"pending"},
     {"id":"C5","status":"pending"},
     {"id":"C6","status":"pending"},
-    {"id":"C7","status":"pending"}
+    {"id":"C7","status":"pending"},
+    {"id":"C8","status":"pending"}
   ],
   "verification": {
     "status": "not_started",
