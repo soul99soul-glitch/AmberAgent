@@ -66,7 +66,7 @@ struct SettingPage {
         Column() {
           // ── 通用设置(youhua 通用设置)──
           SectionHeader({ label: '通用设置' })
-          NavRow({ label: '颜色模式', desc: this.appearanceValue, chipText: this.appearanceValue, iconName: 'palette',
+          NavRow({ label: '颜色模式', desc: '浅色、深色或跟随系统', chipText: this.appearanceValue, iconName: 'palette',
             onRowClick: (): void => { this.go('pages/SettingAppearancePage'); } })
           NavRow({ label: '显示设置', desc: '管理显示设置', iconName: 'gear', isLast: true,
             onRowClick: (): void => { this.go('pages/SettingDisplayPage'); } })

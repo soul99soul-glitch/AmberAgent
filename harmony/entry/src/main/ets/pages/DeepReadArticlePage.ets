@@ -27,7 +27,7 @@ import { getDeepReadScheduler, getRepository, getChatKvStore } from '../di/AppCo
 import { renderEditorialSlantHtml, DEEPREAD_TEMPLATE_EDITORIAL_SLANT } from '../platform_impl/DeepReadTemplate.ets';
 import { webview } from '@kit.ArkWeb';
 import {
-  BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, ACCENT, ACCENT_LIGHT,
+  BG, INK, INK2, INK3, INK4, SURFACE, SURFACE2, LINE, LINE2, ACCENT, ACCENT_LIGHT,
   BODY, BODY2, META, LABEL, TITLE, ERROR,
 } from '../design/tokens.ets';
 
@@ -679,9 +679,9 @@ struct DeepReadArticlePage {
         ForEach(o.timeline, (ev: TimelineEvent): void => {
           Row() {
             Stack() {
-              Column().width(1).height(54).backgroundColor(LINE)
+              Column().width(1).height(54).backgroundColor(LINE2)
               Circle({ width: ev.isHighlight ? 10 : 6, height: ev.isHighlight ? 10 : 6 })
-                .fill(ev.isHighlight ? ACCENT : LINE)
+                .fill(ev.isHighlight ? ACCENT : LINE2)
                 .margin({ top: 7 })
             }
             .width(18)

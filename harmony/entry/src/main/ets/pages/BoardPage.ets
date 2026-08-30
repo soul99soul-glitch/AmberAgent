@@ -184,7 +184,9 @@ struct BoardPage {
               Text(`${tp.sourceCount} 源`)
                 .fontSize(TEXT_STYLES.meta.size).fontColor(ACCENT)
                 .fontWeight(FontWeight.Medium)
-              Text(' · ').fontSize(TEXT_STYLES.meta.size).fontColor(INK4)
+              if (tp.sources.length > 0 && tp.sources[0].heat.length > 0) {
+                Text(' · ').fontSize(TEXT_STYLES.meta.size).fontColor(INK4)
+              }
             }
             if (tp.sources.length > 0 && tp.sources[0].heat.length > 0) {
               Text(tp.sources[0].heat).fontSize(TEXT_STYLES.meta.size).fontColor(INK4)

@@ -472,8 +472,8 @@ struct ChatListPage {
               .letterSpacing(-0.5)
               .fontFamily(FONT_MONO_BOLD)
               .fontColor(INK)
-            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 12, cursorHeight: 23 })
-              .margin({ left: 3 })
+            BlinkingCursor({ color: this.accentColorStore, cursorWidth: 9, cursorHeight: 20 })
+              .margin({ left: 4, bottom: 2 })
           }
           .alignItems(VerticalAlign.Center)
 
