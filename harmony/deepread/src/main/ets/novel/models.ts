@@ -1,8 +1,11 @@
 // novel/models — 小说创作数据模型(移植自 codex/novel-under-7000 model/NovelModels.kt)
-// 扁平模型(schemaVersion=3):项目内嵌 messages/chapters/materials/materialSuggestions/settingProposals。
+// 扁平模型(schemaVersion=4):项目内嵌分支快照所需的领域状态。
 // 枚举用小写字符串联合(本地存储,无需与 Android 线格式一致)。ArkTS 安全。
 
-export const NOVEL_SCHEMA_VERSION = 3;
+import type { UIMessage } from '../agent/message.ts';
+import { makeUIMessage } from '../agent/message.ts';
+
+export const NOVEL_SCHEMA_VERSION = 4;
 
 // 校验上限(照搬 Android NovelMutations.kt)
 export const MAX_PROJECT_NAME_CHARS = 200;
@@ -18,6 +21,49 @@ export type NovelMaterialKind = 'world' | 'character' | 'outline' | 'requirement
 export type NovelSuggestionStatus = 'pending' | 'accepted' | 'rejected';
 export type NovelSettingProposalStatus = 'pending' | 'accepted' | 'rejected';
 
+// 固定模型必须同时携带 provider，避免旧 modelId 在迁移时被错误路由到任意 provider。
+export type NovelModelTarget =
+  | { kind: 'global' }
+  | { kind: 'fixed'; providerId: string; modelId: string };
+
+export interface NovelModelPolicy {
+  writing: NovelModelTarget;
+  // null 表示跟随 writing，不是跟随应用默认值。
+  review: NovelModelTarget | null;
+  stateSync: NovelModelTarget | null;
+}
+
+export type NovelSettingFilePath =
+  | 'plan/this-chapter.md'
+  | 'plan/future.md'
+  | 'setting/preferences.md';
+
+export type NovelForeshadowStatus = 'open' | 'resolved';
+
+export interface NovelForeshadow {
+  id: string;
+  title: string;
+  content: string;
+  status: NovelForeshadowStatus;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
+export interface NovelConfirmedDecision {
+  id: string;
+  title: string;
+  content: string;
+  confirmedAt: number;
+}
+
+export interface NovelBranchSettings {
+  thisChapterPlan: string;
+  futurePlan: string;
+  preferences: string;
+  foreshadows: NovelForeshadow[];
+  confirmedDecisions: NovelConfirmedDecision[];
+}
+
 // 收录目标(运行时参数,不持久化)
 export type NovelCollectionTarget =
   | { kind: 'append'; chapterId: string }
@@ -29,7 +75,10 @@ export interface NovelMessage {
   id: string;
   role: NovelMessageRole;
   mode: NovelChatMode;
-  content: string;
+  // 唯一持久化消息负载。包含 reasoning、tool output/approval、annotation、usage 等全部 UI 事实。
+  uiMessage: UIMessage;
+  // 仅为尚未迁移完的调用方提供的派生读取值；工厂创建时为不可枚举字段，绝不作为持久化格式。
+  readonly content: string;
   collectedChapterId: string | null;
   createdAt: number;
   granularity: NovelGenerationGranularity | null;
@@ -110,13 +159,17 @@ export interface NovelProject {
   materials: NovelMaterial[];
   createdAt: number;
   updatedAt: number;
-  modelId: string | null;
+  modelPolicy: NovelModelPolicy;
+  // 兼容旧调用方的派生值；仅 fixed writing 返回 modelId，永不持久化。
+  readonly modelId: string | null;
   lastGenerationGranularity: NovelGenerationGranularity;
   materialSuggestions: NovelMaterialSuggestion[];
   settingProposals: NovelSettingProposal[];
   // N1:分支与章节版本(Android Branch/Checkpoint 语义的轻量等价)
   branches: NovelBranch[];
   chapterVersions: NovelChapterVersion[];
+  // 当前 checkout 分支的设定目录；切换分支时从目标快照恢复。
+  branchSettings: NovelBranchSettings;
   revision: number;
 }
 
@@ -134,10 +187,44 @@ export interface NovelProjectInit {
   name: string;
   now: number;
   modelId?: string | null;
+  modelPolicy?: NovelModelPolicy;
 }
 
+export const globalNovelModelTarget = (): NovelModelTarget => ({ kind: 'global' });
+
+export const defaultNovelModelPolicy = (): NovelModelPolicy => ({
+  writing: globalNovelModelTarget(),
+  review: null,
+  stateSync: null,
+});
+
+export const emptyNovelBranchSettings = (): NovelBranchSettings => ({
+  thisChapterPlan: '',
+  futurePlan: '',
+  preferences: '',
+  foreshadows: [],
+  confirmedDecisions: [],
+});
+
+const legacyModelId = (policy: NovelModelPolicy): string | null =>
+  policy.writing.kind === 'fixed' ? policy.writing.modelId : null;
+
+const uiMessageText = (message: UIMessage): string => message.parts
+  .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+  .map((part): string => part.text)
+  .join('\n');
+
+export const withNovelProjectCompatibility = (project: Omit<NovelProject, 'modelId'>): NovelProject => {
+  Object.defineProperty(project, 'modelId', {
+    configurable: true,
+    enumerable: false,
+    get: (): string | null => legacyModelId(project.modelPolicy),
+  });
+  return project as NovelProject;
+};
+
 export const makeNovelProject = (init: NovelProjectInit): NovelProject => {
-  const p: NovelProject = {
+  const p: Omit<NovelProject, 'modelId'> = {
     schemaVersion: NOVEL_SCHEMA_VERSION,
     id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
     name: init.name,
@@ -146,22 +233,26 @@ export const makeNovelProject = (init: NovelProjectInit): NovelProject => {
     materials: [],
     createdAt: init.now,
     updatedAt: init.now,
-    modelId: init.modelId !== undefined ? init.modelId : null,
+    // 旧 modelId 无法安全推出 provider，故只作为迁移输入，不升级为 fixed target。
+    modelPolicy: init.modelPolicy ?? defaultNovelModelPolicy(),
     lastGenerationGranularity: 'whole_chapter',
     materialSuggestions: [],
     settingProposals: [],
     branches: [],
     chapterVersions: [],
+    branchSettings: emptyNovelBranchSettings(),
     revision: 0,
   };
-  return p;
+  return withNovelProjectCompatibility(p);
 };
 
 export interface NovelMessageInit {
   id?: string;
   role: NovelMessageRole;
   mode: NovelChatMode;
-  content: string;
+  // content 仅兼容旧 producer；新调用必须传 uiMessage。
+  content?: string;
+  uiMessage?: UIMessage;
   createdAt: number;
   granularity?: NovelGenerationGranularity | null;
   collectedChapterId?: string | null;
@@ -169,17 +260,28 @@ export interface NovelMessageInit {
 }
 
 export const makeNovelMessage = (init: NovelMessageInit): NovelMessage => {
-  const m: NovelMessage = {
+  const uiMessage: UIMessage = init.uiMessage === undefined
+    ? makeUIMessage(init.role, [{ type: 'text', text: init.content ?? '', metadata: null }], {
+      id: init.id,
+      createdAt: new Date(init.createdAt).toISOString(),
+    })
+    : init.uiMessage;
+  const m: Omit<NovelMessage, 'content'> = {
     id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
     role: init.role,
     mode: init.mode,
-    content: init.content,
+    uiMessage,
     collectedChapterId: init.collectedChapterId !== undefined ? init.collectedChapterId : null,
     createdAt: init.createdAt,
     granularity: init.granularity !== undefined ? init.granularity : null,
     interrupted: init.interrupted ?? false,
   };
-  return m;
+  Object.defineProperty(m, 'content', {
+    configurable: true,
+    enumerable: false,
+    get: (): string => uiMessageText(m.uiMessage),
+  });
+  return m as NovelMessage;
 };
 
 export interface NovelChapterInit {

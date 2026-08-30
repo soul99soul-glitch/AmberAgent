@@ -76,6 +76,8 @@ export type {
   NovelInteractiveRuntimeConfig, NovelInteractiveAdapterDeps,
 } from './chat/novel_interactive_adapter.ts';
 export { createNovelInteractiveAdapter } from './chat/novel_interactive_adapter.ts';
+export type { NovelWorkspaceToolPort } from './chat/novel_workspace_tools.ts';
+export { createNovelWorkspaceTools } from './chat/novel_workspace_tools.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
 export { deleteMessage } from './chat/delete_message.ts';
 export { editMessage } from './chat/edit_message.ts';

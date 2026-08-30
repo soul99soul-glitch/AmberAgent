@@ -10,7 +10,7 @@ import type {
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
-  NovelProjectRepository,
+  NovelProjectRepository, NovelModelTarget,
 } from '@amber/deepread-domain';
 import {
   isInterruptedPhase, createScheduler, createSourcePrefetcher,
@@ -44,6 +44,7 @@ import type {
   SubAgentAssistantResolution, SubAgentGenerationPort,
   AgentPromptSettingsPort, NovelInteractiveRuntimeConfig,
 } from '@amber/chat-domain';
+import type { NovelWorkspaceToolPort } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
   makeProviderSettingOpenAI, createOpenAIChatApi, createClaudeChatApi, createGoogleChatApi,
@@ -60,6 +61,7 @@ import {
   makeChatModel,
   SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
   SubAgentTools,
+  createAskUserTool, createNovelWorkspaceTools,
 } from '@amber/chat-domain';
 import { findModelByIdInProviders } from '../platform_impl/OcrSupport.ets';
 import { createChatKvStore } from '../platform_impl/ChatKvStore.ets';
@@ -1039,6 +1041,58 @@ const resolveConfiguredTaskChatModel = async (
   return null;
 };
 
+// 小说固定模型必须精确匹配已持久化的 provider.id + ProviderModel.id。
+// 这里故意不委托任务模型解析链：后者的全局 Chat fallback 适合辅助任务，
+// 但会破坏 Novel fixed policy 的 fail-closed 语义。
+const resolveConfiguredProviderChatModel = async (
+  providerId: string, modelId: string,
+): Promise<ChatProviderChoice | null> => {
+  const providers = await loadProviders(getChatKvStore());
+  if (providers === null) return null;
+  for (const provider of providers) {
+    if (provider.id !== providerId) continue;
+    if (!hasUsableAuth(provider)) return null;
+    for (const model of provider.models) {
+      if (model.id === modelId && model.type === 'chat') {
+        return makeProviderChoice(provider, model);
+      }
+    }
+    return null;
+  }
+  return null;
+};
+
+export interface NovelModelOption {
+  providerId: string;
+  // ProviderModel.id；固定策略只保存这个配置 UUID，不保存模型 API 名。
+  modelId: string;
+  label: string;
+  providerLabel: string;
+  available: boolean;
+}
+
+// C5 项目策略 picker 的唯一 provider/model 事实源。不可用模型仍返回，
+// 以便固定选择失效后 UI 能原位呈现并引导用户修复，而不是静默替换。
+export const loadNovelModelOptions = async (): Promise<NovelModelOption[]> => {
+  const providers = await loadProviders(getChatKvStore());
+  if (providers === null) return [];
+  const options: NovelModelOption[] = [];
+  for (const provider of providers) {
+    const available: boolean = hasUsableAuth(provider);
+    for (const model of provider.models) {
+      if (model.type !== 'chat') continue;
+      options.push({
+        providerId: provider.id,
+        modelId: model.id,
+        label: model.displayName.trim().length > 0 ? model.displayName : model.modelId,
+        providerLabel: provider.name,
+        available,
+      });
+    }
+  }
+  return options;
+};
+
 // resolveTaskChatModel(PreferencesStore.kt:479-481)—
 //   findModelById(modelId) ?: getCurrentChatModel(= resolveChatProviderChoice)
 export const resolveTaskChatModelChoice = async (
@@ -1135,7 +1189,7 @@ export const buildProviderApi = (
 };
 
 export const resolveChatRuntime = async (
-  assistantId?: string, exactModelId?: string,
+  assistantId?: string, exactModelId?: string, exactProviderId?: string,
 ): Promise<ChatRuntime | null> => {
   // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
   const assistants: Assistant[] = await getChatAssistants();
@@ -1150,8 +1204,10 @@ export const resolveChatRuntime = async (
   }
   // Novel/任务显式指定模型时必须精确解析，不得静默改用默认聊天模型。
   // 普通 Chat 仍维持 Assistant.chatModelId → 全局选择的既有顺序。
-  const choice = exactModelId !== undefined && exactModelId.length > 0
-    ? await resolveConfiguredTaskChatModel(exactModelId)
+  const choice = exactProviderId !== undefined
+    ? await resolveConfiguredProviderChatModel(exactProviderId, exactModelId ?? '')
+    : exactModelId !== undefined && exactModelId.length > 0
+      ? await resolveConfiguredTaskChatModel(exactModelId)
     : await resolveChatProviderChoice(assistant);
   if (choice === null) return null;
   const chosen: ProviderSetting = choice.provider;
@@ -1196,75 +1252,79 @@ export const resolveChatRuntime = async (
   };
 };
 
-// C2:Novel 与 Chat 共用生成深模块。优先使用统一 Chat Provider；尚未迁移的设备
-// 可把 legacy ModelConfig 只转换为 Chat provider/params，仍走同一 SSE parser、
-// MessageStreamAccumulator、retry/abort 与 output transformer，不回退旧 Novel HTTP 轮子。
-const resolveNovelInteractiveRuntime = async (
-  modelId: string | null,
-): Promise<NovelInteractiveRuntimeConfig | null> => {
-  const explicitModelId: string | null = modelId !== null && modelId.length > 0 ? modelId : null;
-  const chatRuntime: ChatRuntime | null = explicitModelId === null
-    ? await resolveChatRuntime()
-    : await resolveChatRuntime(undefined, explicitModelId);
-  if (chatRuntime !== null) {
+const novelWorkspaceToolPort = (projectId: string): NovelWorkspaceToolPort => ({
+  list: async (input) => {
+    const result = await getNovelCreation().workspaceList(projectId, input.path ?? '');
+    return { root: result.root, entries: result.entries };
+  },
+  read: async (input) => {
+    const result = await getNovelCreation().workspaceRead(projectId, input.path);
+    return { path: result.path, content: result.content };
+  },
+  grep: async (input) => {
+    const result = await getNovelCreation().workspaceGrep(
+      projectId, input.query, input.path ?? '', input.max_results ?? 50);
     return {
-      assistant: chatRuntime.assistant,
-      provider: asChatStreamProvider(
-        chatRuntime.api, (): TextGenerationParams => chatRuntime.params),
-      retrySetting: makeGenerationRetrySetting({}),
+      query: result.query,
+      // JsonObject 的索引签名不能被 ArkTS class/interface 实现；保留与 grep
+      // CLI 相同的 path:line:text 事实格式，避免把未类型化对象绕过严格检查。
+      matches: result.matches.map((match): string => `${match.path}:${match.line}:${match.text}`),
     };
-  }
+  },
+  status: async () => {
+    const status = await getNovelCreation().workspaceStatus(projectId);
+    return {
+      active_branch_id: status.activeBranchId,
+      active_branch_name: status.activeBranchName,
+      head: status.cas.head,
+      tree_digest: status.cas.treeDigest,
+      can_undo: status.canUndo,
+      unresolved_from_ordinal: status.unresolvedFromOrdinal,
+      plot_stale: status.plotStale,
+      pending_proposal_count: status.pendingProposalCount,
+    };
+  },
+  write: async (input) => {
+    const proposal = await getNovelCreation().workspaceWriteResult(
+      projectId, input.proposal_id, input.patches);
+    return {
+      proposal_id: proposal.proposalId,
+      status: proposal.status,
+      branch_id: proposal.expectedCas.branchId,
+      patch_count: proposal.patches.length,
+    };
+  },
+});
 
-  const registry: ModelRegistry = getModelRegistry();
-  let config: ModelConfig | null = explicitModelId !== null
-    ? await registry.get(explicitModelId) : null;
-  if (config === null && explicitModelId === null) {
-    const configs: ModelConfig[] = await registry.list();
-    config = configs.length > 0 ? configs[0] : null;
-  }
-  if (config === null || config.apiKey.length === 0 || config.model.length === 0) return null;
+const novelRuntimeConfig = (
+  runtime: ChatRuntime, projectId: string,
+): NovelInteractiveRuntimeConfig => ({
+  assistant: runtime.assistant,
+  provider: asChatStreamProvider(runtime.api, (): TextGenerationParams => runtime.params),
+  tools: [...createNovelWorkspaceTools(novelWorkspaceToolPort(projectId)), createAskUserTool()],
+  // 工具循环每一步都带实际暴露工具集，其他 Chat 参数保持同一 selected model 快照。
+  makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider =>
+    asChatStreamProvider(runtime.api, (): TextGenerationParams => makeTextGenerationParams({
+      model: runtime.params.model,
+      temperature: runtime.params.temperature,
+      topP: runtime.params.topP,
+      maxTokens: runtime.params.maxTokens,
+      tools: definitions,
+      reasoningLevel: runtime.params.reasoningLevel,
+      customBody: runtime.params.customBody,
+    })),
+  toolPromptModel: runtime.params.model,
+  retrySetting: makeGenerationRetrySetting({}),
+});
 
-  const apiKey: string = config.apiKey;
-  const baseUrl: string = config.baseUrl.replace(/\/+$/, '');
-  const setting = makeProviderSettingOpenAI({
-    id: `legacy-novel:${config.id}`,
-    enabled: true,
-    name: config.label.length > 0 ? config.label : '小说模型',
-    baseUrl,
-    chatCompletionsPath: baseUrl.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions',
-    authMode: 'api_key',
-    brand: 'generic',
-  });
-  const api: OpenAIChatApi = createOpenAIChatApi({
-    http: getAppContainer().httpClient,
-    setting,
-    headers: (): Record<string, string> => {
-      const headers: Record<string, string> = {};
-      headers['Authorization'] = `Bearer ${apiKey}`;
-      return headers;
-    },
-    encodeImage: encodeImageForChat,
-  });
-  const params: TextGenerationParams = makeTextGenerationParams({
-    model: makeChatModel({
-      modelId: config.model,
-      displayName: config.label.length > 0 ? config.label : config.model,
-      abilities: [],
-      inputModalities: ['text'],
-      outputModalities: ['text'],
-    }),
-    maxTokens: null,
-    reasoningLevel: 'auto',
-  });
-  return {
-    assistant: makeAssistant({
-      id: `legacy-novel:${config.id}`,
-      name: config.label.length > 0 ? config.label : '小说模型',
-      systemPrompt: '',
-      streamOutput: true,
-      localTools: [],
-    }),
-    provider: asChatStreamProvider(api, (): TextGenerationParams => params),
-    retrySetting: makeGenerationRetrySetting({}),
-  };
+// C5:Novel 与 Chat 共用生成深模块。global 复用现有 Chat 选择；fixed 只接受
+// 指定 provider/model UUID 的精确命中。两种固定失败都返回 null，调用端原位 fail closed。
+// 旧 ModelRegistry 不再参与 Novel 的模型解析，防止固定选择被 legacy/global 静默替换。
+const resolveNovelInteractiveRuntime = async (
+  modelTarget: NovelModelTarget, projectId: string,
+): Promise<NovelInteractiveRuntimeConfig | null> => {
+  const runtime: ChatRuntime | null = modelTarget.kind === 'global'
+    ? await resolveChatRuntime()
+    : await resolveChatRuntime(undefined, modelTarget.modelId, modelTarget.providerId);
+  return runtime === null ? null : novelRuntimeConfig(runtime, projectId);
 };

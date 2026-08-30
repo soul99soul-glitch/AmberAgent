@@ -3,10 +3,15 @@
 
 import type { FileStore } from '../platform/files.ts';
 import { joinPath } from '../platform/files.ts';
-import { NOVEL_SCHEMA_VERSION, novelId } from './models.ts';
-import type {
-  NovelBranch, NovelChapter, NovelMaterial, NovelMaterialKind, NovelProject, NovelSettingProposal,
+import {
+  NOVEL_SCHEMA_VERSION, novelId, defaultNovelModelPolicy, emptyNovelBranchSettings,
+  makeNovelMessage, makeNovelProject, withNovelProjectCompatibility,
 } from './models.ts';
+import type {
+  NovelBranch, NovelBranchSettings, NovelChapter, NovelMaterial, NovelMaterialKind, NovelMessage,
+  NovelModelPolicy, NovelProject, NovelSettingProposal,
+} from './models.ts';
+import type { UIMessage } from '../agent/message.ts';
 import { notFound, invalidInput } from './error.ts';
 import {
   NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION, chapterFileName,
@@ -44,7 +49,8 @@ export type NovelWorkspaceMutationKind =
   | 'material_edit' | 'material_delete' | 'collect' | 'suggestion_refresh'
   | 'proposal_resolve' | 'generation_commit' | 'polish_adopt' | 'chapter_discard'
   | 'version_restore' | 'discussion_archive' | 'interrupt_commit' | 'create_branch'
-  | 'undo' | 'plot_sync' | 'unresolved_resolve';
+  | 'undo' | 'plot_sync' | 'unresolved_resolve' | 'transcript_checkpoint'
+  | 'branch_settings_change';
 
 export interface NovelWorkspaceCas {
   branchId: string;
@@ -95,8 +101,18 @@ export interface NovelProjectRepository {
   bookExportInput(id: string): Promise<NovelBookExportInput>;
 }
 
-interface PersistedNovelProject extends Omit<NovelProject, 'settingProposals'> {
+interface PersistedNovelMessage extends Omit<NovelMessage, 'content' | 'uiMessage'> {
+  content?: string;
+  uiMessage?: UIMessage;
+}
+
+interface PersistedNovelProject extends Omit<NovelProject,
+  'settingProposals' | 'messages' | 'modelId' | 'modelPolicy' | 'branchSettings'> {
   settingProposals?: NovelSettingProposal[];
+  messages: PersistedNovelMessage[];
+  modelId?: string | null;
+  modelPolicy?: NovelModelPolicy;
+  branchSettings?: NovelBranchSettings;
 }
 
 interface WorkspaceChapterRecord extends Omit<NovelChapter, 'content'> {
@@ -107,13 +123,15 @@ interface WorkspaceMaterialRecord extends Omit<NovelMaterial, 'content'> {
   path: string;
 }
 
-interface WorkspaceProjectMeta extends Omit<NovelProject, 'chapters' | 'materials'> {}
+interface WorkspaceProjectMeta extends Omit<NovelProject,
+  'chapters' | 'materials' | 'modelId' | 'branchSettings'> {}
 
 interface WorkspaceProjectState {
   stateVersion: number;
   project: WorkspaceProjectMeta;
   chapters: WorkspaceChapterRecord[];
   materials: WorkspaceMaterialRecord[];
+  branchSettings: NovelBranchSettings;
 }
 
 interface WorkspaceCheckout {
@@ -166,31 +184,62 @@ interface SnapshotFile {
 }
 
 export const migrateNovelProject = (stored: PersistedNovelProject): NovelProject => {
-  if (stored.schemaVersion === 2) {
-    return {
-      ...stored,
-      schemaVersion: NOVEL_SCHEMA_VERSION,
-      settingProposals: [],
-    };
+  if (stored.schemaVersion !== 2 && stored.schemaVersion !== 3 && stored.schemaVersion !== NOVEL_SCHEMA_VERSION) {
+    throw invalidInput('项目版本不受支持');
   }
-  return stored as NovelProject;
+  const messages: NovelMessage[] = stored.messages.map((message: PersistedNovelMessage): NovelMessage =>
+    makeNovelMessage({
+      id: message.id,
+      role: message.role,
+      mode: message.mode,
+      content: message.content,
+      uiMessage: message.uiMessage,
+      collectedChapterId: message.collectedChapterId,
+      createdAt: message.createdAt,
+      granularity: message.granularity,
+      interrupted: message.interrupted,
+    }));
+  const project = makeNovelProject({
+    id: stored.id,
+    name: stored.name,
+    now: stored.createdAt,
+    // v2/v3 的 modelId 没有 provider，不能推断为 fixed 路由。
+    modelPolicy: stored.schemaVersion === NOVEL_SCHEMA_VERSION && stored.modelPolicy !== undefined
+      ? stored.modelPolicy : defaultNovelModelPolicy(),
+  });
+  return withNovelProjectCompatibility({
+    ...project,
+    schemaVersion: NOVEL_SCHEMA_VERSION,
+    messages,
+    chapters: stored.chapters,
+    materials: stored.materials,
+    createdAt: stored.createdAt,
+    updatedAt: stored.updatedAt,
+    lastGenerationGranularity: stored.lastGenerationGranularity,
+    materialSuggestions: stored.materialSuggestions,
+    settingProposals: stored.settingProposals ?? [],
+    branches: stored.branches,
+    chapterVersions: stored.chapterVersions,
+    branchSettings: stored.branchSettings ?? emptyNovelBranchSettings(),
+    revision: stored.revision,
+  });
 };
 
 const validateProject = (project: NovelProject): NovelProject => {
-  if (project.schemaVersion !== NOVEL_SCHEMA_VERSION) throw invalidInput('项目版本不受支持');
-  if (project.id.trim().length === 0 || project.name.trim().length === 0) {
+  const normalized: NovelProject = migrateNovelProject(project as PersistedNovelProject);
+  if (normalized.id.trim().length === 0 || normalized.name.trim().length === 0) {
     throw invalidInput('项目名称或 id 无效');
   }
   serializeNovelWorkspaceManifest({
     format: NOVEL_WORKSPACE_FORMAT,
     version: NOVEL_WORKSPACE_VERSION,
-    projectId: project.id,
-    title: project.name,
+    projectId: normalized.id,
+    title: normalized.name,
     activeBranch: 'main',
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
+    createdAt: normalized.createdAt,
+    updatedAt: normalized.updatedAt,
   });
-  return project;
+  return normalized;
 };
 
 const mainBranch = (project: NovelProject): NovelBranch => {
@@ -388,6 +437,16 @@ const materialPath = (material: NovelMaterial): string =>
 const branchMaterialPath = (branchId: string, material: NovelMaterial): string =>
   `branches/${branchId}/setting/${material.kind}/${material.id}.md`;
 
+const branchSettingPaths = (branchId: string): Record<
+  'thisChapterPlan' | 'futurePlan' | 'preferences' | 'catalog', string
+> => ({
+  thisChapterPlan: `branches/${branchId}/plan/this-chapter.md`,
+  futurePlan: `branches/${branchId}/plan/future.md`,
+  preferences: `branches/${branchId}/setting/preferences.md`,
+  // Host-generated structured catalog. The three Markdown paths above remain the only editable setting files.
+  catalog: `branches/${branchId}/setting/catalog.json`,
+});
+
 const chapterOrdinal = (chapter: NovelChapter, fallback: number): number => {
   const match: RegExpMatchArray | null = chapter.id.match(/^chapter-(\d{3})(?:-|$)/);
   if (match === null) return fallback;
@@ -420,6 +479,19 @@ const buildSnapshotFiles = (
   if (plotContent !== null) {
     files.push({ path: `branches/${branch.id}/plan/plot.md`, content: plotContent });
   }
+  const settingsPaths = branchSettingPaths(branch.id);
+  files.push(
+    { path: settingsPaths.thisChapterPlan, content: project.branchSettings.thisChapterPlan },
+    { path: settingsPaths.futurePlan, content: project.branchSettings.futurePlan },
+    { path: settingsPaths.preferences, content: project.branchSettings.preferences },
+    {
+      path: settingsPaths.catalog,
+      content: JSON.stringify({
+        foreshadows: project.branchSettings.foreshadows,
+        confirmedDecisions: project.branchSettings.confirmedDecisions,
+      }),
+    },
+  );
   const chapterRecords: WorkspaceChapterRecord[] = [];
   for (let i: number = 0; i < project.chapters.length; i++) {
     const chapter: NovelChapter = project.chapters[i];
@@ -461,7 +533,7 @@ const buildSnapshotFiles = (
       messages: project.messages,
       createdAt: project.createdAt,
       updatedAt: project.updatedAt,
-      modelId: project.modelId,
+      modelPolicy: project.modelPolicy,
       lastGenerationGranularity: project.lastGenerationGranularity,
       materialSuggestions: project.materialSuggestions,
       settingProposals: project.settingProposals,
@@ -471,6 +543,7 @@ const buildSnapshotFiles = (
     },
     chapters: chapterRecords,
     materials: materialRecords,
+    branchSettings: project.branchSettings,
   };
   const stateRaw: string = JSON.stringify(state);
   if (stateRaw.length > MAX_PROJECT_BYTES) throw invalidInput('项目过大');
@@ -491,9 +564,11 @@ const branchStateMatchesCommit = (
 ): boolean => JSON.stringify(current.chapters) === JSON.stringify(committed.chapters) &&
   JSON.stringify(current.materials) === JSON.stringify(committed.materials) &&
   JSON.stringify(current.project.messages) === JSON.stringify(committed.project.messages) &&
+  JSON.stringify(current.project.modelPolicy) === JSON.stringify(committed.project.modelPolicy) &&
   JSON.stringify(current.project.materialSuggestions) === JSON.stringify(committed.project.materialSuggestions) &&
   JSON.stringify(current.project.settingProposals) === JSON.stringify(committed.project.settingProposals) &&
   JSON.stringify(current.project.chapterVersions) === JSON.stringify(committed.project.chapterVersions) &&
+  JSON.stringify(current.branchSettings) === JSON.stringify(committed.branchSettings) &&
   current.project.revision === committed.project.revision;
 
 const decodeLegacy = (raw: string): NovelProject => {
@@ -536,7 +611,12 @@ const projectFromStoredState = async (
       createdAt: record.createdAt, updatedAt: record.updatedAt,
     });
   }
-  return validateProject({ ...state.project, chapters, materials });
+  return validateProject({
+    ...state.project,
+    chapters,
+    materials,
+    branchSettings: state.branchSettings ?? emptyNovelBranchSettings(),
+  } as NovelProject);
 };
 
 const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject> => {
@@ -548,6 +628,7 @@ const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject>
   if (state.stateVersion !== WORKSPACE_STATE_VERSION || state.project.id !== manifest.projectId) {
     throw invalidInput('小说工作区状态与 manifest 不一致');
   }
+  const requiresWriteMigration: boolean = state.project.schemaVersion !== NOVEL_SCHEMA_VERSION;
   const chapters: NovelChapter[] = [];
   for (let i: number = 0; i < state.chapters.length; i++) {
     const record: WorkspaceChapterRecord = state.chapters[i];
@@ -577,7 +658,16 @@ const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject>
       updatedAt: record.updatedAt,
     });
   }
-  const project: NovelProject = validateProject({ ...state.project, name: manifest.title, chapters, materials });
+  const project: NovelProject = validateProject({
+    ...state.project,
+    name: manifest.title,
+    chapters,
+    materials,
+    branchSettings: state.branchSettings ?? emptyNovelBranchSettings(),
+  } as NovelProject);
+  // v2/v3 工作区在下一次 installSnapshot 前没有 v4 的 branch setting 文件与摘要；
+  // 先只读恢复 canonical project，再由 loadProjectInternal 原子单写升级。
+  if (requiresWriteMigration) return project;
   const checkoutRaw: string | null = await fileStore.readText(joinPath(root, CHECKOUT_FILE));
   const ledgerRaw: string | null = await fileStore.readText(joinPath(root, LEDGER_FILE));
   if (checkoutRaw === null || ledgerRaw === null) throw invalidInput('小说工作区历史不完整');
@@ -631,6 +721,17 @@ const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject>
     throw invalidInput('head snapshot 无效');
   }
   return project;
+};
+
+const workspaceNeedsSchemaMigration = async (fileStore: FileStore, root: string): Promise<boolean> => {
+  const raw: string | null = await fileStore.readText(joinPath(root, STATE_FILE));
+  if (raw === null) return false;
+  try {
+    const state: WorkspaceProjectState = JSON.parse(raw) as WorkspaceProjectState;
+    return state.project.schemaVersion !== NOVEL_SCHEMA_VERSION;
+  } catch {
+    return false;
+  }
 };
 
 const walkWorkspaceFiles = async (
@@ -1019,7 +1120,13 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
 
   const loadProjectInternal = async (id: string): Promise<NovelProject> => {
     await recoverProject(id);
-    if (await fileStore.exists(projectRoot(id))) return await loadAt(fileStore, projectRoot(id));
+    if (await fileStore.exists(projectRoot(id))) {
+      const root: string = projectRoot(id);
+      const project: NovelProject = await loadAt(fileStore, root);
+      return await workspaceNeedsSchemaMigration(fileStore, root)
+        ? await installSnapshot(project, 'schema_migration')
+        : project;
+    }
     const migrated: NovelProject | null = await migrateLegacyIfPresent(id);
     if (migrated !== null) return migrated;
     throw notFound('project', id);
@@ -1081,7 +1188,8 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
       : followingUnresolvedOrdinal(changedIndex, next.chapters.length);
     const stale: boolean = changedIndex === null ? branch.plotStale : true;
     return await installSnapshot(
-      next, kind, [], checkout.branchId, commandId, unresolved, stale, true,
+      next, kind, [], checkout.branchId, commandId, unresolved, stale,
+      kind !== 'transcript_checkpoint',
       changedIndex === null ? null : changedIndex + 1,
     );
   };
@@ -1105,7 +1213,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         const id: string = names[i];
         if (id.startsWith('.') || !await fileStore.isDirectory(projectRoot(id))) continue;
         try {
-          projects.push(await loadAt(fileStore, projectRoot(id)));
+          projects.push(await loadProjectInternal(id));
           seen.add(id);
         } catch {
           // 损坏项目不伪装为可用项目；loadProject 会给出显式错误。
@@ -1230,7 +1338,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
       const target: NovelProject = {
         ...targetStored,
         name: current.name,
-        modelId: current.modelId,
+        modelPolicy: current.modelPolicy,
         lastGenerationGranularity: current.lastGenerationGranularity,
         branches: current.branches,
         updatedAt: current.updatedAt,
@@ -1554,19 +1662,12 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
       const chapters: NovelChapter[] = chaptersWithOrdinal.map(
         (item): NovelChapter => item.chapter,
       );
-      const project: NovelProject = {
-        schemaVersion: NOVEL_SCHEMA_VERSION,
-        id,
-        name: manifest.title,
-        messages: [],
+      const base: NovelProject = makeNovelProject({ id, name: manifest.title, now: manifest.createdAt });
+      const project: NovelProject = withNovelProjectCompatibility({
+        ...base,
         chapters,
         materials,
-        createdAt: manifest.createdAt,
         updatedAt: manifest.updatedAt,
-        modelId: null,
-        lastGenerationGranularity: 'whole_chapter',
-        materialSuggestions: [],
-        settingProposals: [],
         branches: [{
           id: manifest.activeBranch,
           name: manifest.activeBranch === 'main' ? '主线' : manifest.activeBranch,
@@ -1575,9 +1676,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
           forkFromChapterId: null,
           createdAt: manifest.createdAt,
         }],
-        chapterVersions: [],
-        revision: 0,
-      };
+      });
       return await installSnapshot(project, 'workspace_import', input.files);
     },
 

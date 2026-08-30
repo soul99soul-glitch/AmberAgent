@@ -9,7 +9,7 @@ import {
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelMaterialKind, NovelCollectionTarget, NovelChapterVersionKind, NovelBranch,
-  NovelChapterVersion, NovelSettingProposal,
+  NovelChapterVersion, NovelSettingProposal, NovelModelPolicy, NovelBranchSettings,
 } from './models.ts';
 import type { NovelSettingProposalDraft } from './discussion_structured.ts';
 import { invalidInput, notFound, alreadyCollected } from './error.ts';
@@ -131,11 +131,19 @@ export const renameProject = (project: NovelProject, name: string, now: number):
   updatedAt: now,
 });
 
-export const setProjectModel = (
-  project: NovelProject, modelId: string | null, now: number,
+export const setProjectModelPolicy = (
+  project: NovelProject, modelPolicy: NovelModelPolicy, now: number,
 ): NovelProject => ({
   ...project,
-  modelId: modelId,
+  modelPolicy: modelPolicy,
+  updatedAt: now,
+});
+
+export const setProjectBranchSettings = (
+  project: NovelProject, branchSettings: NovelBranchSettings, now: number,
+): NovelProject => ({
+  ...project,
+  branchSettings: branchSettings,
   updatedAt: now,
 });
 

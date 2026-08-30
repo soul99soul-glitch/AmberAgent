@@ -116,7 +116,15 @@ test('loadProject migrates existing v2 project without losing real project data'
   const fs = createMemoryFileStore();
   const repo = createFileNovelRepository(fs);
   const current = makeNovelProject({ id: 'cultivation', name: '修仙日常', now: NOW });
-  const legacy: Record<string, unknown> = { ...current, schemaVersion: 2 };
+  const legacy: Record<string, unknown> = {
+    ...current,
+    schemaVersion: 2,
+    modelId: 'orphaned-model-id',
+    messages: [{
+      id: 'legacy-message', role: 'assistant', mode: 'write', content: '旧正文',
+      collectedChapterId: null, createdAt: NOW, granularity: null, interrupted: false,
+    }],
+  };
   delete legacy.settingProposals;
   await fs.writeText(
     'amberagent/novel-creation/projects/cultivation.novel.json',
@@ -124,9 +132,11 @@ test('loadProject migrates existing v2 project without losing real project data'
   );
 
   const loaded = await repo.loadProject('cultivation');
-  assert.equal(loaded.schemaVersion, 3);
+  assert.equal(loaded.schemaVersion, 4);
   assert.equal(loaded.name, '修仙日常');
-  assert.deepEqual(loaded.messages, current.messages);
+  assert.equal(loaded.messages[0].content, '旧正文');
+  assert.equal(loaded.messages[0].uiMessage.parts[0].type, 'text');
+  assert.equal(loaded.modelPolicy.writing.kind, 'global');
   assert.deepEqual(loaded.chapters, current.chapters);
   assert.deepEqual(loaded.materials, current.materials);
   assert.deepEqual(loaded.settingProposals, []);
@@ -135,8 +145,12 @@ test('loadProject migrates existing v2 project without losing real project data'
     'amberagent/novel-creation/projects/cultivation.novel.json'), false);
 
   const updated = await repo.updateProject('cultivation', project => ({ ...project, updatedAt: NOW + 1 }));
-  assert.equal(updated.schemaVersion, 3);
+  assert.equal(updated.schemaVersion, 4);
   assert.equal(updated.revision, 1);
+  const stateRaw = await fs.readText('amberagent/novel-workspace/cultivation/.amber/project-state.json');
+  assert.equal((stateRaw ?? '').includes('"content":"旧正文"'), false);
+  const storedState = JSON.parse(stateRaw ?? '{}') as { project?: { modelId?: string | null } };
+  assert.equal(storedState.project?.modelId, undefined);
 });
 
 test('workspace recovery restores backup after process dies between directory renames', async () => {

@@ -9,6 +9,17 @@ import { makeNovelProject, makeNovelChapter, makeNovelMaterial } from '../main/e
 
 const NOW = 1_000_000;
 
+const request = (userPrompt: string = 'u'): NovelModelRequest => ({
+  runId: 'r1',
+  projectId: 'p1',
+  systemPrompt: 's',
+  maxOutputTokens: null,
+  modelTarget: { kind: 'global' },
+  history: [],
+  operation: { kind: 'turn', userPrompt },
+  checkpoint: async (): Promise<void> => {},
+});
+
 // mock 模型:把预设事件异步推给订阅者
 const scriptedModel = (events: NovelModelEvent[]): NovelModelRunning => ({
   async validate(): Promise<void> {},
@@ -98,9 +109,7 @@ test('collectModelText: concatenates deltas until completed', async () => {
     { kind: 'delta', text: 'lo' },
     { kind: 'completed' },
   ]);
-  const text = await collectModelText(model, {
-    runId: 'r1', systemPrompt: 's', userPrompt: 'u', maxOutputTokens: null, modelId: null,
-  }, 1000);
+  const text = await collectModelText(model, request(), 1000);
   assert.equal(text, 'Hello');
 });
 
@@ -110,17 +119,13 @@ test('collectModelText: replace resets buffer', async () => {
     { kind: 'replace', text: 'XYZ' },
     { kind: 'completed' },
   ]);
-  const text = await collectModelText(model, {
-    runId: 'r1', systemPrompt: 's', userPrompt: 'u', maxOutputTokens: null, modelId: null,
-  }, 1000);
+  const text = await collectModelText(model, request(), 1000);
   assert.equal(text, 'XYZ');
 });
 
 test('collectModelText: failed rejects', async () => {
   const model = scriptedModel([{ kind: 'failed', message: 'boom' }]);
-  await assert.rejects(collectModelText(model, {
-    runId: 'r1', systemPrompt: 's', userPrompt: 'u', maxOutputTokens: null, modelId: null,
-  }, 1000));
+  await assert.rejects(collectModelText(model, request(), 1000));
 });
 
 test('analyzeChapterSuggestions: parses model JSON into suggestions', async () => {
@@ -130,7 +135,8 @@ test('analyzeChapterSuggestions: parses model JSON into suggestions', async () =
   ]);
   const project = makeNovelProject({ name: 'p', now: NOW });
   const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
-  const out = await analyzeChapterSuggestions(model, project, chapter, null, NOW, 1000);
+  const out = await analyzeChapterSuggestions(
+    model, project, chapter, { kind: 'global' }, NOW, 1000);
   assert.equal(out.length, 1);
   assert.equal(out[0].title, '主角');
 });
@@ -139,6 +145,7 @@ test('analyzeChapterSuggestions: model failure → empty (no throw)', async () =
   const model = scriptedModel([{ kind: 'failed', message: 'down' }]);
   const project = makeNovelProject({ name: 'p', now: NOW });
   const chapter = makeNovelChapter({ title: '第一章', content: '正文', now: NOW });
-  const out = await analyzeChapterSuggestions(model, project, chapter, null, NOW, 1000);
+  const out = await analyzeChapterSuggestions(
+    model, project, chapter, { kind: 'global' }, NOW, 1000);
   assert.deepEqual(out, []);
 });

@@ -110,11 +110,14 @@ export type {
   NovelSuggestionStatus, NovelSettingProposalStatus, NovelCollectionTarget, NovelMessage, NovelChapter, NovelMaterial,
   NovelMaterialSuggestion, NovelProject, NovelProjectInit, NovelMessageInit, NovelChapterInit,
   NovelMaterialInit, NovelSuggestionInit, NovelSettingProposal, NovelSettingProposalInit,
-  NovelChapterVersion, NovelChapterVersionKind, NovelBranch } from './novel/models.ts';
+  NovelChapterVersion, NovelChapterVersionKind, NovelBranch, NovelModelTarget, NovelModelPolicy,
+  NovelSettingFilePath, NovelForeshadowStatus, NovelForeshadow, NovelConfirmedDecision,
+  NovelBranchSettings } from './novel/models.ts';
 export {
   NOVEL_SCHEMA_VERSION, MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS,
   MAX_MATERIAL_CHARS, MATERIAL_KIND_LABELS, novelId, makeNovelProject, makeNovelMessage,
   makeNovelChapter, makeNovelMaterial, makeNovelSuggestion, makeNovelSettingProposal,
+  globalNovelModelTarget, defaultNovelModelPolicy, emptyNovelBranchSettings,
 } from './novel/models.ts';
 export type { NovelErrorCode } from './novel/error.ts';
 export {
@@ -122,13 +125,18 @@ export {
   providerError, outputTooLarge,
 } from './novel/error.ts';
 export {
-  createProject, renameProject, setProjectModel, appendMessage, saveChapter, deleteChapter,
+  createProject, renameProject, setProjectModelPolicy, setProjectBranchSettings,
+  appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
   addSettingProposals, resolveSettingProposal,
 } from './novel/mutations.ts';
 export type { NovelMutation } from './novel/mutations.ts';
+export { novelMessageUi, novelMessageText } from './novel/transcript.ts';
 export { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS, MAX_SYSTEM_CHARS } from './novel/context_builder.ts';
-export type { NovelModelRequest, NovelModelEvent, NovelModelStream, NovelModelRunning } from './novel/model_running.ts';
+export type {
+  NovelToolContinuationVerdict, NovelModelOperation, NovelModelRequest,
+  NovelModelEvent, NovelModelStream, NovelModelRunning,
+} from './novel/model_running.ts';
 export {
   SUGGESTION_SYSTEM_PROMPT, buildSuggestionUserPrompt, mapSuggestionKind, parseSuggestions,
   collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
@@ -184,6 +192,8 @@ export {
 export type {
   NovelRunEvent, NovelRun, NovelCollectionResult, NovelSuggestionRefreshResult, NovelCreationDeps,
   NovelBatchPolishResultStatus, NovelBatchPolishResult, NovelBatchPolishEvent, NovelBatchPolishRun,
+  NovelConsistencyIssue, NovelConsistencyReport, NovelWorkspaceListResult,
+  NovelWorkspaceReadResult, NovelWorkspaceGrepMatch, NovelWorkspaceGrepResult,
 } from './novel/creation.ts';
 export { NovelCreation, createNovelCreation } from './novel/creation.ts';
 

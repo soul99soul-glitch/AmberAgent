@@ -3,9 +3,10 @@
 
 import { MATERIAL_KIND_LABELS, makeNovelSuggestion } from './models.ts';
 import type {
-  NovelProject, NovelChapter, NovelMaterialKind, NovelMaterialSuggestion,
+  NovelProject, NovelChapter, NovelMaterialKind, NovelMaterialSuggestion, NovelModelTarget,
 } from './models.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent } from './model_running.ts';
+import { latestAssistantText } from '../agent/message.ts';
 
 export const MAX_SUGGESTIONS = 12;
 const SUGGESTION_MAX_OUTPUT_TOKENS = 4_096;
@@ -113,6 +114,8 @@ export const collectModelText = (
         buffer += evt.text;
       } else if (evt.kind === 'replace') {
         buffer = evt.text;
+      } else if (evt.kind === 'snapshot') {
+        buffer = latestAssistantText(evt.messages);
       } else if (evt.kind === 'completed') {
         settled = true;
         clearTimeout(timer);
@@ -123,6 +126,11 @@ export const collectModelText = (
         clearTimeout(timer);
         unsub();
         reject(new Error(evt.message));
+      } else if (evt.kind === 'waiting_user') {
+        settled = true;
+        clearTimeout(timer);
+        unsub();
+        reject(new Error('state-sync 模型请求了用户交互'));
       }
       // activity / status:忽略
     });
@@ -140,16 +148,19 @@ export const analyzeChapterSuggestions = async (
   modelRunning: NovelModelRunning,
   project: NovelProject,
   chapter: NovelChapter,
-  modelId: string | null,
+  modelTarget: NovelModelTarget,
   now: number,
   timeoutMs: number = SUGGESTION_TIMEOUT_MS,
 ): Promise<NovelMaterialSuggestion[]> => {
   const request: NovelModelRequest = {
     runId: newSuggestionRunId(),
+    projectId: project.id,
     systemPrompt: SUGGESTION_SYSTEM_PROMPT,
-    userPrompt: buildSuggestionUserPrompt(project, chapter),
     maxOutputTokens: SUGGESTION_MAX_OUTPUT_TOKENS,
-    modelId: modelId,
+    modelTarget,
+    history: [],
+    operation: { kind: 'turn', userPrompt: buildSuggestionUserPrompt(project, chapter) },
+    checkpoint: async (): Promise<void> => {},
   };
   try {
     const fullText: string = await collectModelText(modelRunning, request, timeoutMs);

@@ -8,10 +8,30 @@ import type {
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
-import { makeAssistantMessage } from '../main/ets/agent/message.ts';
+import { makeAssistantMessage, makeUserMessage } from '../main/ets/agent/message.ts';
+import type { UIMessage } from '../main/ets/agent/message.ts';
 
 const NOW = 1_000_000;
 const delay = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
+
+const publishCanonicalTurn = async (
+  request: NovelModelRequest, text: string, subscribers: Set<(event: NovelModelEvent) => void>,
+): Promise<void> => {
+  if (request.operation.kind !== 'turn') throw new Error('test model expected turn');
+  const user: UIMessage = makeUserMessage(request.operation.userPrompt);
+  const withUser: UIMessage[] = request.history.concat([user]);
+  await request.checkpoint(withUser);
+  subscribers.forEach(cb => { cb({ kind: 'delta', text }); });
+  const messages: UIMessage[] = withUser.concat([makeAssistantMessage(text)]);
+  await request.checkpoint(messages);
+  subscribers.forEach(cb => {
+    cb({
+      kind: 'snapshot', messages, generationActive: false,
+      textDeltasLive: true, transport: 'live',
+    });
+  });
+  subscribers.forEach(cb => { cb({ kind: 'completed' }); });
+};
 
 // 收集 run 事件直到终结(started 除外),返回全部事件
 const runToTerminal = (run: NovelRun): Promise<NovelRunEvent[]> => {
@@ -41,13 +61,12 @@ const smartModel = (): NovelModelRunning => ({
   async validate(): Promise<void> {},
   start(req: NovelModelRequest) {
     const subs = new Set<(e: NovelModelEvent) => void>();
-    setTimeout(() => {
+    setTimeout((): void => {
       const isSuggestion: boolean = req.systemPrompt.includes('资料整理助手');
       const text: string = isSuggestion
         ? '{"suggestions":[{"kind":"character","title":"主角","content":"勇敢"}]}'
         : '这是正文';
-      subs.forEach(cb => { cb({ kind: 'delta', text: text }); });
-      subs.forEach(cb => { cb({ kind: 'completed' }); });
+      void publishCanonicalTurn(req, text, subs);
     }, 0);
     return {
       subscribe(cb: (e: NovelModelEvent) => void): () => void {
@@ -62,12 +81,19 @@ const smartModel = (): NovelModelRunning => ({
 // 可控模型:挂起直到外部 emit / cancel
 const controllableModel = (): {
   model: NovelModelRunning;
-  emit: (e: NovelModelEvent) => void;
+  emit: (e: NovelModelEvent) => Promise<void>;
 } => {
   const subs = new Set<(e: NovelModelEvent) => void>();
+  let request: NovelModelRequest | null = null;
+  let baseMessages: UIMessage[] = [];
   const model: NovelModelRunning = {
     async validate(): Promise<void> {},
-    start(_req: NovelModelRequest) {
+    start(req: NovelModelRequest) {
+      request = req;
+      if (req.operation.kind === 'turn') {
+        baseMessages = req.history.concat([makeUserMessage(req.operation.userPrompt)]);
+        void req.checkpoint(baseMessages);
+      }
       return {
         subscribe(cb: (e: NovelModelEvent) => void): () => void {
           subs.add(cb);
@@ -81,7 +107,15 @@ const controllableModel = (): {
   };
   return {
     model: model,
-    emit: (e: NovelModelEvent): void => { subs.forEach(cb => { cb(e); }); },
+    emit: async (e: NovelModelEvent): Promise<void> => {
+      let event: NovelModelEvent = e;
+      if (e.kind === 'snapshot' && request !== null) {
+        const messages: UIMessage[] = baseMessages.concat(e.messages);
+        await request.checkpoint(messages);
+        event = { ...e, messages };
+      }
+      subs.forEach(cb => { cb(event); });
+    },
   };
 };
 
@@ -103,10 +137,13 @@ test('create + open roundtrip', async () => {
 test('generate write: streams, persists user+assistant, sets granularity', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('小说');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'global' }, review: null, stateSync: { kind: 'global' },
+  });
   const run = creation.generate(p.id, '写第一章', 'write', 'whole_chapter');
   const events = await runToTerminal(run);
   assert.ok(events.some(e => e.kind === 'started'));
-  assert.ok(events.some(e => e.kind === 'delta'));
+  assert.ok(events.some(e => e.kind === 'snapshot'));
   const completed = events.find(e => e.kind === 'completed');
   assert.ok(completed !== undefined);
 
@@ -124,21 +161,21 @@ test('generate write: canonical snapshots replace partial and persist the final 
   const project = await creation.create('小说');
   const terminal = runToTerminal(creation.generate(project.id, '写一段', 'write', 'continuation'));
   await delay(10);
-  ctl.emit({
+  await ctl.emit({
     kind: 'snapshot',
     messages: [makeAssistantMessage('第一帧')],
     generationActive: true,
     textDeltasLive: true,
     transport: 'live',
   });
-  ctl.emit({
+  await ctl.emit({
     kind: 'snapshot',
     messages: [makeAssistantMessage('第一帧继续')],
     generationActive: false,
     textDeltasLive: false,
     transport: 'live',
   });
-  ctl.emit({ kind: 'completed' });
+  await ctl.emit({ kind: 'completed' });
   const events = await terminal;
   assert.equal(events.filter(event => event.kind === 'snapshot').length, 2);
 
@@ -149,6 +186,9 @@ test('generate write: canonical snapshots replace partial and persist the final 
 test('generate discuss: granularity stays null on message', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('小说');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'global' }, review: null, stateSync: { kind: 'global' },
+  });
   const run = creation.generate(p.id, '聊聊主角', 'discuss');
   await runToTerminal(run);
   const reloaded = await creation.open(p.id);
@@ -196,7 +236,7 @@ test('interrupt: keeps partial and persists interrupted message', async () => {
   const run = creation.generate(p.id, '写一段', 'write', 'continuation');
   const eventsP = runToTerminal(run);
   await delay(10);
-  ctl.emit({ kind: 'delta', text: 'partial' });
+  await ctl.emit({ kind: 'delta', text: 'partial' });
   await delay(5);
   creation.interrupt(run.id);
   const events = await eventsP;
@@ -214,6 +254,9 @@ test('interrupt: keeps partial and persists interrupted message', async () => {
 test('collectMessage: saves chapter and produces a suggestion (async)', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('小说');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'global' }, review: null, stateSync: { kind: 'global' },
+  });
   await runToTerminal(creation.generate(p.id, '写第一章', 'write', 'whole_chapter'));
   const after = await creation.open(p.id);
   const assistant = after.messages.find(m => m.role === 'assistant');
@@ -241,6 +284,9 @@ test('collectMessage: saves chapter and produces a suggestion (async)', async ()
 test('resolveMaterialSuggestion accept: creates material', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('小说');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'global' }, review: null, stateSync: { kind: 'global' },
+  });
   await runToTerminal(creation.generate(p.id, '写', 'write'));
   const after = await creation.open(p.id);
   const assistant = after.messages.find(m => m.role === 'assistant');
@@ -277,11 +323,15 @@ test('chapter and material CRUD via creation', async () => {
   assert.equal(emptied.materials.length, 0);
 });
 
-test('rename and setModel', async () => {
+test('rename and setModelPolicy', async () => {
   const creation = makeCreation(smartModel());
   const p = await creation.create('原');
   await creation.rename(p.id, '新名');
-  await creation.setModel(p.id, 'modelX');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'fixed', providerId: 'providerX', modelId: 'modelX' },
+    review: null,
+    stateSync: null,
+  });
   const reloaded = await creation.open(p.id);
   assert.equal(reloaded.name, '新名');
   assert.equal(reloaded.modelId, 'modelX');
@@ -325,7 +375,7 @@ test('regression: interrupt with partial persists both user and interrupted assi
   const run = creation.generate(p.id, '写一段', 'write', 'continuation');
   const eventsP = runToTerminal(run);
   await delay(10);
-  ctl.emit({ kind: 'delta', text: '部分正文' });
+  await ctl.emit({ kind: 'delta', text: '部分正文' });
   await delay(5);
   creation.interrupt(run.id);
   await eventsP;
@@ -362,14 +412,12 @@ test('regression: collectMessage does not block on suggestion analysis', async (
       const subs = new Set<(e: NovelModelEvent) => void>();
       const isSuggestion: boolean = req.systemPrompt.includes('资料整理助手');
       if (isSuggestion) {
-        setTimeout(() => {
-          subs.forEach(cb => { cb({ kind: 'delta', text: '{"suggestions":[]}' }); });
-          subs.forEach(cb => { cb({ kind: 'completed' }); });
+        setTimeout((): void => {
+          void publishCanonicalTurn(req, '{"suggestions":[]}', subs);
         }, 100);
       } else {
-        setTimeout(() => {
-          subs.forEach(cb => { cb({ kind: 'delta', text: '正文' }); });
-          subs.forEach(cb => { cb({ kind: 'completed' }); });
+        setTimeout((): void => {
+          void publishCanonicalTurn(req, '正文', subs);
         }, 0);
       }
       return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
@@ -378,6 +426,9 @@ test('regression: collectMessage does not block on suggestion analysis', async (
   };
   const creation = makeCreation(slowSuggestionModel);
   const p = await creation.create('小说');
+  await creation.setModelPolicy(p.id, {
+    writing: { kind: 'global' }, review: null, stateSync: { kind: 'global' },
+  });
   await runToTerminal(creation.generate(p.id, '写', 'write'));
   const after = await creation.open(p.id);
   const assistant = after.messages.find(m => m.role === 'assistant')!;
@@ -393,16 +444,15 @@ test('regression: collectMessage does not block on suggestion analysis', async (
   assert.equal(reloaded.chapters.length, 1);
 });
 
-test('discussion setting proposals persist atomically with user and assistant', async () => {
+test('legacy fenced setting proposals stay transcript-only and do not bypass workspace tools', async () => {
   const proposalModel: NovelModelRunning = {
     async validate(): Promise<void> {},
-    start(): { subscribe: (cb: (event: NovelModelEvent) => void) => () => void } {
+    start(request: NovelModelRequest): { subscribe: (cb: (event: NovelModelEvent) => void) => () => void } {
       const subs = new Set<(event: NovelModelEvent) => void>();
-      setTimeout(() => {
+      setTimeout((): void => {
         const text = '建议保留。\n```setting_proposals\n'
           + '{"proposals":[{"kind":"world","title":"灵脉","content":"贯穿大陆"}]}\n```';
-        subs.forEach(cb => { cb({ kind: 'delta', text: text }); });
-        subs.forEach(cb => { cb({ kind: 'completed' }); });
+        void publishCanonicalTurn(request, text, subs);
       }, 0);
       return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
     },
@@ -414,16 +464,8 @@ test('discussion setting proposals persist atomically with user and assistant', 
 
   const persisted = await creation.open(project.id);
   assert.equal(persisted.messages.length, 2);
-  assert.equal(persisted.settingProposals.length, 1);
-  assert.equal(persisted.settingProposals[0].sourceMessageId, persisted.messages[1].id);
+  assert.equal(persisted.settingProposals.length, 0);
   assert.ok(persisted.messages[1].content.includes('```setting_proposals'));
-
-  const material = await creation.resolveSettingProposal(
-    project.id, persisted.settingProposals[0].id, true);
-  assert.equal(material?.title, '灵脉');
-  const resolved = await creation.open(project.id);
-  assert.equal(resolved.settingProposals[0].status, 'accepted');
-  assert.equal(resolved.materials.length, 1);
 });
 
 test('batch polish runs chapters serially and returns assistant message ids', async () => {
@@ -433,14 +475,14 @@ test('batch polish runs chapters serially and returns assistant message ids', as
   const serialModel: NovelModelRunning = {
     async validate(): Promise<void> {},
     start(request: NovelModelRequest) {
-      starts.push(request.userPrompt);
+      starts.push(request.operation.kind === 'turn' ? request.operation.userPrompt : 'continuation');
       active += 1;
       maxActive = Math.max(maxActive, active);
       const subs = new Set<(event: NovelModelEvent) => void>();
-      setTimeout(() => {
-        subs.forEach(cb => { cb({ kind: 'delta', text: `润色${starts.length}` }); });
+      setTimeout((): void => {
+        const text: string = `润色${starts.length}`;
         active -= 1;
-        subs.forEach(cb => { cb({ kind: 'completed' }); });
+        void publishCanonicalTurn(request, text, subs);
       }, 5);
       return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
     },

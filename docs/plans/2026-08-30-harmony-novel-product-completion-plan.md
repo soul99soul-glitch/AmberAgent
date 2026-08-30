@@ -239,6 +239,22 @@ unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖�
 验收：真机从项目列表进入三视图，与 Agent 讨论、回答 ask-user、看到真实流式思考/Markdown，
 生成候选并审批收录；退出重进 transcript、模型策略、branch 与 proposal 状态一致。
 
+### C5 执行记录（2026-08-31）
+
+- Novel transcript 升级为 canonical `UIMessage.parts` single-write，旧 v2/v3 仅迁移读取；reasoning、tool、
+  approval、usage 与正文候选分离持久化，pending/resolved tool 重进可恢复。
+- Novel 直接复用 Chat 的 `InteractiveTurnRuntime`、tool loop、approval/ask continuation、消息行与 Markdown
+  renderer；五个 workspace tools 使用完整 JSON Schema，`ask_user` 和批准/拒绝/回答均沿同一 toolCallId 续跑。
+- 受保护 write 在裁决 checkpoint 后才创建/解决 C4 durable proposal；非法 patch 在真实执行边界拒绝，
+  approved/denied 崩溃窗口由 transcript + deterministic receipt 恢复，相反终态 fail closed。
+- 项目级 writing/review/state-sync 职责策略已持久化；fixed provider/model 精确解析，失效绑定原位可见且
+  禁止静默回退。设定页接入当前分支计划、偏好、伏笔、决定与资料库入口。
+- 真机项目 `4` 验证“创作 / 正文 / 设定”三视图、模型职责不可用态、窄屏纵向滚动、44vp 点击区、
+  动态主题文字与计划保存就近反馈；截图 `/tmp/c5-create-fixed.jpeg`、`/tmp/c5-settings-final.jpeg`、
+  `/tmp/c5-plan-feedback-pass.jpeg`。
+- 验证：DeepRead 与 Chat 全域测试均退出 0，C5 聚焦 DeepRead 77/77、Chat 14/14；ArkTS lint
+  0 defects；AGC 签名构建、指定真机覆盖安装、逻辑 review 与 UI review 全部通过。
+
 ## Phase C6 — Durable ghostwrite 代笔闭环
 
 交付：

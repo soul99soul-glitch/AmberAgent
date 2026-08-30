@@ -20,7 +20,7 @@ const assistantWrite = (content: string, over: Partial<ReturnType<typeof makeNov
 test('createProject: trims name and sets schema', () => {
   const p = createProject('  我的小说  ', NOW);
   assert.equal(p.name, '我的小说');
-  assert.equal(p.schemaVersion, 3);
+  assert.equal(p.schemaVersion, 4);
 });
 
 test('createProject: blank name throws NovelError', () => {

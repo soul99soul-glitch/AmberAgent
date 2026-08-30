@@ -1,32 +1,42 @@
 // NovelWorkspacePage — 小说工作区:三页签(聊天写作 / 章节正文 / 活资料)
 // 单文件承载三个 pane(@Builder)与对话框(Stack 叠层),状态集中于本页 @State。
-import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } from '../design/tokens.ets';
+import {
+  ACCENT, ACCENT_INK, BG, ERROR, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2,
+} from '../design/tokens.ets';
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import {
   AgentMessageRow, NO_AGENT_MESSAGE_ROW_CAPABILITIES,
 } from '../components/AgentMessageRow.ets';
+import type { AgentMessageRowHostCapabilities } from '../components/AgentMessageRow.ets';
 import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
-import { NovelDiscussionAskCard } from '../components/NovelDiscussionAskCard.ets';
 import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard.ets';
 import {
   NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
 } from '../components/NovelBatchPolishSheet.ets';
 import { NovelBranchSheet } from '../components/NovelBranchSheet.ets';
+import {
+  NovelSettingsPane, NovelModelOptionView,
+} from '../components/NovelSettingsPane.ets';
 import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
-import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
+import {
+  getNovelCreation, getNovelWorkspaceService, loadNovelModelOptions,
+} from '../di/AppContainer.ets';
+import type { NovelModelOption } from '../di/AppContainer.ets';
 import type { NovelBookExportBundle } from '../platform_impl/NovelWorkspaceService.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-  NovelRunKind, NovelRun, NovelChapterVersion, NovelChapterVersionKind,
-  parseDiscussionAsk, stripDiscussionAskFence, stripSettingProposalsFence, formatDiscussionAnswersFromToolPayload,
-  NovelDiscussionAskParsed, NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
-  NovelWorkspaceStatus, StreamTransportState, UIMessage, UIMessageAnnotation, makeUIMessage,
+  NovelRunKind, NovelRun, NovelRunEvent, NovelChapterVersion, NovelChapterVersionKind,
+  stripDiscussionAskFence, stripSettingProposalsFence,
+  NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
+  NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
+  UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
+  NovelModelPolicy, NovelBranchSettings, NovelConsistencyReport,
 } from '@amber/deepread-domain';
 import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
@@ -35,6 +45,24 @@ import {
 import type { FollowMode } from '@amber/chat-domain';
 
 const GREEN: string = '#43A047';
+
+const NOVEL_AGENT_MESSAGE_CAPABILITIES: AgentMessageRowHostCapabilities = {
+  copy: false,
+  fork: false,
+  branchSwitch: false,
+  edit: false,
+  regenerate: false,
+  favorite: false,
+  openActions: false,
+  approveTool: true,
+  denyTool: true,
+  answerTool: true,
+  openToolPreview: false,
+  openSubAgentRun: false,
+  runMiniApp: false,
+  modifyMiniApp: false,
+  openMiniAppList: false,
+};
 
 type ComposeMode = 'discuss' | 'continue' | 'whole_chapter';
 type MaterialFilter = 'all' | NovelMaterialKind;
@@ -75,7 +103,10 @@ struct NovelWorkspacePage {
   @State workspaceStatus: NovelWorkspaceStatus | null = null;
   @State branchSheetOpen: boolean = false;
   @State tab: number = 0;
+  @State settingsSection: number = 0;
   @State errorMsg: string = '';
+  @State consistencyMessage: string = '';
+  @State modelOptions: NovelModelOptionView[] = [];
   @State busy: boolean = false;
   // 聊天
   @State draft: string = '';
@@ -90,6 +121,7 @@ struct NovelWorkspacePage {
   @State generationStatus: string = '';
   @State activeRunId: string = '';
   @State activeRunCreatedAt: number = 0;
+  @State activeHistoryCount: number = 0;
   // N3:讨论归档蒸馏(取当前讨论模式中未收录的 assistant 消息)
   async archiveDiscussion(): Promise<void> {
     if (this.project === null || this.activeRunId.length > 0) return;
@@ -152,6 +184,7 @@ struct NovelWorkspacePage {
   private reloadToken: number = 0;
   private initialScrollArmed: boolean = false;
   private userTouchActive: boolean = false;
+  private recoveryAttemptedToolCalls: Set<string> = new Set();
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -159,6 +192,7 @@ struct NovelWorkspacePage {
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
     this.reload();
+    this.loadProjectModelOptions();
   }
 
   aboutToDisappear(): void {
@@ -197,11 +231,99 @@ struct NovelWorkspacePage {
         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
         // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
         this.initialScrollArmed = true;
+        this.scheduleRecoverableTool(project);
       }
     } catch (e) {
       if (this.pageAlive && token === this.reloadToken) {
         this.errorMsg = `项目无法打开：${String(e)}`;
       }
+    }
+  }
+
+  private scheduleRecoverableTool(project: NovelProject): void {
+    for (let i: number = project.messages.length - 1; i >= 0; i--) {
+      const parts: UIMessagePart[] = novelMessageUi(project.messages[i]).parts;
+      for (let p: number = parts.length - 1; p >= 0; p--) {
+        const part: UIMessagePart = parts[p];
+        if (part.type !== 'tool' || part.output.length > 0 ||
+          this.recoveryAttemptedToolCalls.has(part.toolCallId)) continue;
+        let verdict: NovelToolContinuationVerdict | null = null;
+        if (part.approvalState.type === 'approved') verdict = { kind: 'approved' };
+        else if (part.approvalState.type === 'answered') {
+          verdict = { kind: 'answered', answer: part.approvalState.answer };
+        } else if (part.approvalState.type === 'denied') {
+          verdict = { kind: 'denied', reason: part.approvalState.reason };
+        }
+        if (verdict === null) continue;
+        this.recoveryAttemptedToolCalls.add(part.toolCallId);
+        const toolCallId: string = part.toolCallId;
+        setTimeout((): void => {
+          if (this.pageAlive && !this.hasBlockingNovelRun()) {
+            this.continueNovelTool(toolCallId, verdict as NovelToolContinuationVerdict);
+          }
+        }, 0);
+        return;
+      }
+    }
+  }
+
+  private async loadProjectModelOptions(): Promise<void> {
+    try {
+      const options: NovelModelOption[] = await loadNovelModelOptions();
+      if (!this.pageAlive) return;
+      this.modelOptions = options.map((option: NovelModelOption): NovelModelOptionView => ({
+        providerId: option.providerId,
+        modelId: option.modelId,
+        label: option.label,
+        providerLabel: option.providerLabel,
+        available: option.available,
+      }));
+    } catch (error) {
+      if (this.pageAlive) this.errorMsg = `模型列表加载失败：${String(error)}`;
+    }
+  }
+
+  private async saveNovelModelPolicy(policy: NovelModelPolicy): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().setModelPolicy(this.projectId, policy);
+      this.errorMsg = '';
+      await this.reload();
+    } catch (error) {
+      this.showWorkspaceOperationError('保存模型职责失败', error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async saveNovelBranchSettings(settings: NovelBranchSettings): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().setBranchSettings(this.projectId, settings);
+      this.errorMsg = '';
+      await this.reload();
+    } catch (error) {
+      this.showWorkspaceOperationError('保存分支设定失败', error);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async runConsistencyCheck(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const report: NovelConsistencyReport = await getNovelCreation().checkConsistency(this.projectId);
+      this.consistencyMessage = report.ok
+        ? '当前分支正文、剧情与提案状态一致。'
+        : report.issues.map(issue => issue.message).join(' ');
+      this.errorMsg = '';
+    } catch (error) {
+      this.showWorkspaceOperationError('一致性检查失败', error);
+    } finally {
+      this.busy = false;
     }
   }
 
@@ -374,27 +496,8 @@ struct NovelWorkspacePage {
     return new Date(epochMillis).toISOString();
   }
 
-  private displayedNovelContent(message: NovelMessage): string {
-    if (message.mode !== 'discuss') return message.content;
-    return stripSettingProposalsFence(stripDiscussionAskFence(message.content));
-  }
-
   private projectMessageUi(message: NovelMessage): UIMessage {
-    const annotations: UIMessageAnnotation[] = message.interrupted
-      ? [{ type: 'generation_interrupted', reason: '用户停止生成' }]
-      : [];
-    const createdAt: string = this.messageTimestamp(message.createdAt);
-    return makeUIMessage(message.role, [{
-      type: 'text',
-      text: this.displayedNovelContent(message),
-      metadata: null,
-    }], {
-      id: message.id,
-      annotations,
-      createdAt,
-      finishedAt: createdAt,
-      modelId: this.project?.modelId ?? null,
-    });
+    return novelMessageUi(message);
   }
 
   private pendingUserUi(): UIMessage {
@@ -468,9 +571,16 @@ struct NovelWorkspacePage {
     this.scheduleNovelScrollToBottom();
   }
 
-  send(runKindOverride: NovelRunKind | null = null): void {
+  async send(runKindOverride: NovelRunKind | null = null): Promise<void> {
     const text: string = this.draft.trim();
     if (text.length === 0 || this.hasBlockingNovelRun() || this.project === null) return;
+    try {
+      await getNovelCreation().validateWritingModel(this.projectId);
+    } catch (error) {
+      this.errorMsg = `模型不可用：${String(error)}`;
+      return;
+    }
+    if (this.hasBlockingNovelRun() || this.project === null || this.draft.trim() !== text) return;
     const mode: NovelChatMode = this.composeMode === 'discuss' ? 'discuss' : 'write';
     let gran: NovelGenerationGranularity | null = null;
     if (this.composeMode === 'continue') gran = 'continuation';
@@ -486,6 +596,7 @@ struct NovelWorkspacePage {
     this.activeTextDeltasLive = false;
     this.activeTransport = 'unavailable';
     this.activeFrameSeen = false;
+    this.activeHistoryCount = this.project.messages.length;
     this.generationStatus = '正在连接模型并组织正文…';
     this.errorMsg = '';
 
@@ -497,12 +608,13 @@ struct NovelWorkspacePage {
       if (e.kind === 'status') {
         if (e.text.length > 0) this.generationStatus = e.text;
       } else if (e.kind === 'snapshot') {
-        this.activeMessages = e.messages.slice();
+        this.activeMessages = e.messages.slice(this.activeHistoryCount);
         this.activeTextDeltasLive = e.textDeltasLive;
         this.activeTransport = e.transport;
         this.activeFrameSeen = true;
         this.followNovelStreamingUpdate();
-      } else if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
+      } else if (e.kind === 'completed' || e.kind === 'waiting_user' ||
+        e.kind === 'interrupted' || e.kind === 'failed') {
         this.finishNovelGenerationFollow();
         this.activeRunId = '';
         this.activeRunCreatedAt = 0;
@@ -511,6 +623,7 @@ struct NovelWorkspacePage {
         this.activeTextDeltasLive = false;
         this.activeTransport = 'unavailable';
         this.activeFrameSeen = false;
+        this.activeHistoryCount = 0;
         this.generationStatus = '';
         if (e.kind === 'failed') this.errorMsg = e.message;
         this.currentUnsub = null;
@@ -533,35 +646,44 @@ struct NovelWorkspacePage {
     this.collectTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
   }
 
-  private discussionAskFor(message: NovelMessage): NovelDiscussionAskParsed | null {
-    if (message.role !== 'assistant' || message.mode !== 'discuss') return null;
-    return parseDiscussionAsk(message.content);
-  }
-
-  // 一旦结构化提问之后已经出现用户讨论消息，该卡不再显示，避免旧问题重复提交。
-  private shouldShowDiscussionAsk(messageId: string): boolean {
-    const p: NovelProject | null = this.project;
-    if (p === null) return false;
-    const index: number = p.messages.findIndex((message: NovelMessage): boolean => message.id === messageId);
-    if (index < 0) return false;
-    for (let cursor: number = index + 1; cursor < p.messages.length; cursor++) {
-      const next: NovelMessage = p.messages[cursor];
-      if (next.role === 'user' && next.mode === 'discuss') return false;
-    }
-    return true;
-  }
-
-  private discussionAskInputFor(message: NovelMessage): string {
-    const ask: NovelDiscussionAskParsed | null = this.discussionAskFor(message);
-    return ask !== null ? ask.toolInput : '';
-  }
-
-  private submitDiscussionAsk(source: NovelMessage, payload: string): void {
-    const ask: NovelDiscussionAskParsed | null = this.discussionAskFor(source);
-    if (ask === null || this.hasBlockingNovelRun()) return;
-    this.draft = formatDiscussionAnswersFromToolPayload(payload, ask.questions);
-    this.composeMode = 'discuss';
-    this.send('discussion');
+  private continueNovelTool(toolCallId: string, verdict: NovelToolContinuationVerdict): void {
+    if (this.hasBlockingNovelRun()) return;
+    this.activeMessages = [];
+    this.activeHistoryCount = this.project?.messages.length ?? 0;
+    this.activeTextDeltasLive = false;
+    this.activeTransport = 'unavailable';
+    this.activeFrameSeen = false;
+    this.generationStatus = '正在继续同一轮任务…';
+    this.errorMsg = '';
+    const run: NovelRun = getNovelCreation().continueTool(this.projectId, toolCallId, verdict);
+    this.activeRunId = run.id;
+    this.activeRunCreatedAt = Date.now();
+    this.beginNovelGenerationFollow();
+    this.currentUnsub = run.subscribe((event: NovelRunEvent): void => {
+      if (event.kind === 'status') {
+        if (event.text.length > 0) this.generationStatus = event.text;
+      } else if (event.kind === 'snapshot') {
+        this.activeMessages = event.messages.slice(this.activeHistoryCount);
+        this.activeTextDeltasLive = event.textDeltasLive;
+        this.activeTransport = event.transport;
+        this.activeFrameSeen = true;
+        this.followNovelStreamingUpdate();
+      } else if (event.kind === 'completed' || event.kind === 'waiting_user' ||
+        event.kind === 'interrupted' || event.kind === 'failed') {
+        this.finishNovelGenerationFollow();
+        this.activeRunId = '';
+        this.activeRunCreatedAt = 0;
+        this.activeMessages = [];
+        this.activeHistoryCount = 0;
+        this.activeTextDeltasLive = false;
+        this.activeTransport = 'unavailable';
+        this.activeFrameSeen = false;
+        this.generationStatus = '';
+        if (event.kind === 'failed') this.errorMsg = event.message;
+        this.currentUnsub = null;
+        this.reload();
+      }
+    });
   }
 
   async doCollect(target: NovelCollectionTarget): Promise<void> {
@@ -905,16 +1027,8 @@ struct NovelWorkspacePage {
 
   @Builder
   novelMessageFooter(message: NovelMessage): void {
-    if (!this.hasBlockingNovelRun() && this.shouldShowDiscussionAsk(message.id) &&
-      this.discussionAskInputFor(message).length > 0) {
-      NovelDiscussionAskCard({
-        input: this.discussionAskInputFor(message),
-        askId: message.id,
-        onSubmit: (payload: string): void => { this.submitDiscussionAsk(message, payload); },
-      })
-    }
     if (message.mode === 'write' && message.collectedChapterId === null &&
-      message.content.trim().length > 0) {
+      novelMessageText(message).trim().length > 0) {
       Row() {
         Text(message.interrupted ? '收进章节（部分）' : '收进章节')
           .fontSize(12)
@@ -960,10 +1074,19 @@ struct NovelWorkspacePage {
         ListItem() {
           AgentMessageRow({
             message: this.projectMessageUi(message),
-            capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+            capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
             hostHeader: (): void => { this.novelMessageHeader(message); },
             hostFooter: (): void => { this.novelMessageFooter(message); },
             streaming: false,
+            onApproveTool: (toolCallId: string): void => {
+              this.continueNovelTool(toolCallId, { kind: 'approved' });
+            },
+            onDenyTool: (toolCallId: string): void => {
+              this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' });
+            },
+            onAnswerTool: (toolCallId: string, answer: string): void => {
+              this.continueNovelTool(toolCallId, { kind: 'answered', answer });
+            },
           })
         }
       }, (message: NovelMessage): string => message.id)
@@ -980,7 +1103,7 @@ struct NovelWorkspacePage {
         }
       }, (proposal: NovelSettingProposal): string => proposal.id)
     }
-    if (this.pendingUserText.length > 0) {
+    if (this.pendingUserText.length > 0 && this.activeMessages.length === 0) {
       ListItem() {
         AgentMessageRow({
           message: this.pendingUserUi(),
@@ -1001,13 +1124,22 @@ struct NovelWorkspacePage {
           ListItem() {
             AgentMessageRow({
               message,
-              capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+              capabilities: NOVEL_AGENT_MESSAGE_CAPABILITIES,
               hostHeader: (): void => { this.activeRunHeader(index === 0); },
               hostFooter: (): void => { this.emptyAgentRowSlot(); },
               streaming: true,
               textDeltasLive: this.activeTextDeltasLive,
               isLastAssistant: index === this.activeMessages.length - 1,
               onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
+              onApproveTool: (toolCallId: string): void => {
+                this.continueNovelTool(toolCallId, { kind: 'approved' });
+              },
+              onDenyTool: (toolCallId: string): void => {
+                this.continueNovelTool(toolCallId, { kind: 'denied', reason: '用户拒绝了这次操作' });
+              },
+              onAnswerTool: (toolCallId: string, answer: string): void => {
+                this.continueNovelTool(toolCallId, { kind: 'answered', answer });
+              },
             })
           }
         }, (message: UIMessage): string => message.id)
@@ -1095,10 +1227,6 @@ struct NovelWorkspacePage {
       .layoutWeight(1)
       .clip(true)
 
-      if (this.errorMsg.length > 0) {
-        Text(this.errorMsg).fontSize(12).fontColor('#E53935').padding({ left: 16, right: 16, bottom: 6 })
-      }
-
       // 输入器(复用聊天页 ChatInput;上方保留模式切换)
       Column() {
         Row() {
@@ -1161,7 +1289,7 @@ struct NovelWorkspacePage {
   modeChip(label: string, mode: ComposeMode): void {
     Text(label)
       .fontSize(13).padding({ left: 14, right: 14, top: 8, bottom: 8 }).borderRadius(16)
-      .fontColor(this.composeMode === mode ? '#FFFFFF' : INK2)
+      .fontColor(this.composeMode === mode ? ACCENT_INK : INK2)
       .backgroundColor(this.composeMode === mode ? ACCENT : SURFACE2)
       .margin({ right: 8 })
       .opacity(this.hasBlockingNovelRun() ? 0.5 : 1)
@@ -1187,13 +1315,6 @@ struct NovelWorkspacePage {
         Text(this.assistantLabel(m)).fontSize(12).fontColor(INK3).margin({ bottom: 6 })
         Text(m.mode === 'discuss' ? stripSettingProposalsFence(stripDiscussionAskFence(m.content)) : m.content)
           .fontSize(14).fontColor(INK).lineHeight(24)
-        if (!this.hasBlockingNovelRun() && this.shouldShowDiscussionAsk(m.id) && this.discussionAskInputFor(m).length > 0) {
-          NovelDiscussionAskCard({
-            input: this.discussionAskInputFor(m),
-            askId: m.id,
-            onSubmit: (payload: string): void => { this.submitDiscussionAsk(m, payload); },
-          })
-        }
         if (m.mode === 'write' && m.collectedChapterId === null && m.content.trim().length > 0) {
           // write 模式且有正文即可收录(含 interrupted 的部分内容)
           Text(m.interrupted ? '收进章节（部分）' : '收进章节').fontSize(12).fontColor(ACCENT)
@@ -1218,15 +1339,31 @@ struct NovelWorkspacePage {
         Row() {
           Text('章节目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
           Blank()
-          Text('批量润色').fontSize(12).fontColor(INK3).margin({ right: 16 })
+          Text('一致性').fontSize(12).fontColor(INK3)
+            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .opacity(this.busy ? 0.5 : 1)
+            .onClick((): void => { this.runConsistencyCheck(); })
+          Text('撤销').fontSize(12).fontColor(this.workspaceStatus?.canUndo ? INK3 : INK4)
+            .constraintSize({ minWidth: 44 }).height(44)
+            .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
+            .onClick((): void => { if (this.workspaceStatus?.canUndo) this.undoWorkspace(); })
+          Text('批量润色').fontSize(12).fontColor(INK3)
+            .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
             .opacity(this.batchPolishRunning ? 0.5 : 1)
             .onClick((): void => {
               if (!this.batchPolishRunning) this.batchPolishOpen = true;
             })
-          Text('新建章节').fontSize(12).fontColor(ACCENT)
+          Text('新建').fontSize(12).fontColor(ACCENT)
+            .constraintSize({ minWidth: 44 }).height(44)
+            .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
             .onClick(() => { this.openNewChapter(); })
         }
         .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 10 })
+
+        if (this.consistencyMessage.length > 0) {
+          Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
+            .width('100%').padding({ left: 20, right: 20, bottom: 10 })
+        }
 
         if (this.project !== null && this.project.chapters.length === 0) {
           Text('还没有章节。新建第一章，或在聊天写作中把 Amber 的正文收进章节。')
@@ -1309,7 +1446,7 @@ struct NovelWorkspacePage {
   }
 
   @Builder
-  materialPane(): void {
+  materialLibraryPane(): void {
     Column() {
       Row() {
         Text('活资料').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
@@ -1357,7 +1494,7 @@ struct NovelWorkspacePage {
             ForEach(KIND_FILTERS, (f: MaterialFilter) => {
               Text(filterLabel(f))
                 .fontSize(12).padding({ left: 12, right: 12, top: 6, bottom: 6 }).borderRadius(14)
-                .fontColor(this.matFilter === f ? '#FFFFFF' : INK2)
+                .fontColor(this.matFilter === f ? ACCENT_INK : INK2)
                 .backgroundColor(this.matFilter === f ? ACCENT : SURFACE2)
                 .margin({ right: 8 })
                 .onClick(() => { this.matFilter = f; })
@@ -1407,6 +1544,48 @@ struct NovelWorkspacePage {
     .width('100%').height('100%')
   }
 
+  @Builder
+  settingsPane(): void {
+    Column() {
+      Row() {
+        this.settingsSectionChip('工作区设定', 0)
+        this.settingsSectionChip('资料库', 1)
+      }
+      .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 6 })
+      if (this.settingsSection === 0 && this.project !== null) {
+        NovelSettingsPane({
+          project: this.project,
+          modelOptions: this.modelOptions,
+          busy: this.busy,
+          onSaveModelPolicy: (policy: NovelModelPolicy): void => {
+            this.saveNovelModelPolicy(policy);
+          },
+          onSaveBranchSettings: (settings: NovelBranchSettings): void => {
+            this.saveNovelBranchSettings(settings);
+          },
+          onNewMaterial: (): void => {
+            this.settingsSection = 1;
+            this.openNewMaterial();
+          },
+        })
+      } else {
+        this.materialLibraryPane()
+      }
+    }
+    .width('100%').height('100%')
+  }
+
+  @Builder
+  settingsSectionChip(label: string, section: number): void {
+    Text(label).fontSize(13).fontColor(this.settingsSection === section ? ACCENT : INK3)
+      .layoutWeight(1).height(44).textAlign(TextAlign.Center)
+      .backgroundColor(this.settingsSection === section ? SURFACE : SURFACE2)
+      .borderRadius(12)
+      .border({ width: 1, color: this.settingsSection === section ? ACCENT : LINE })
+      .margin({ left: 4, right: 4 })
+      .onClick((): void => { this.settingsSection = section; })
+  }
+
   filteredMaterials(): NovelMaterial[] {
     const p: NovelProject | null = this.project;
     if (p === null) return [];
@@ -1444,11 +1623,16 @@ struct NovelWorkspacePage {
 
         // 页签
         Row() {
-          this.tabChip('聊天写作', 0)
-          this.tabChip('章节正文', 1)
-          this.tabChip('活资料', 2)
+          this.tabChip('创作', 0)
+          this.tabChip('正文', 1)
+          this.tabChip('设定', 2)
         }
         .width('100%').padding({ left: 16, right: 16, top: 4, bottom: 8 })
+
+        if (this.errorMsg.length > 0) {
+          Text(this.errorMsg).fontSize(12).fontColor(ERROR).lineHeight(18)
+            .width('100%').padding({ left: 20, right: 20, bottom: 8 })
+        }
 
         if (this.project === null) {
           Column() {
@@ -1460,7 +1644,7 @@ struct NovelWorkspacePage {
         } else if (this.tab === 1) {
           this.chapterPane()
         } else {
-          this.materialPane()
+          this.settingsPane()
         }
       }
       .width('100%').height('100%').backgroundColor(BG)
@@ -1525,8 +1709,8 @@ struct NovelWorkspacePage {
   tabChip(label: string, idx: number): void {
     Text(label)
       .fontSize(13).layoutWeight(1).textAlign(TextAlign.Center)
-      .padding({ top: 9, bottom: 9 }).borderRadius(18)
-      .fontColor(this.tab === idx ? '#FFFFFF' : INK2)
+      .height(44).borderRadius(22)
+      .fontColor(this.tab === idx ? ACCENT_INK : INK2)
       .backgroundColor(this.tab === idx ? ACCENT : SURFACE2)
       .margin({ left: 4, right: 4 })
       .onClick(() => { this.tab = idx; })
@@ -1604,7 +1788,7 @@ struct NovelWorkspacePage {
           ForEach(KIND_FILTERS.filter(f => f !== 'all'), (f: MaterialFilter) => {
             Text(filterLabel(f))
               .fontSize(12).padding({ left: 10, right: 10, top: 6, bottom: 6 }).borderRadius(14)
-              .fontColor(this.materialKind === f ? '#FFFFFF' : INK2)
+              .fontColor(this.materialKind === f ? ACCENT_INK : INK2)
               .backgroundColor(this.materialKind === f ? ACCENT : SURFACE2)
               .margin({ right: 6 })
               .onClick(() => { this.materialKind = f as NovelMaterialKind; })

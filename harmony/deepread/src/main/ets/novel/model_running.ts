@@ -2,13 +2,33 @@
 // entry 用流式 OpenAI 兼容客户端实现(NovelModelAdapter.ets),复用 fetchStream + createOpenAiTextStream。
 
 import type { StreamTransportState, UIMessage } from '../agent/message.ts';
+import type { NovelModelTarget } from './models.ts';
+
+export type NovelToolContinuationVerdict =
+  | { kind: 'approved' }
+  | { kind: 'denied'; reason: string }
+  | { kind: 'answered'; answer: string };
+
+export type NovelModelOperation =
+  | { kind: 'turn'; userPrompt: string }
+  | {
+    kind: 'tool_continuation';
+    toolCallId: string;
+    verdict: NovelToolContinuationVerdict;
+  };
 
 export interface NovelModelRequest {
   runId: string;
+  projectId: string;
   systemPrompt: string;
-  userPrompt: string;
   maxOutputTokens: number | null;
-  modelId: string | null;   // null = 跟随默认模型
+  modelTarget: NovelModelTarget;
+  // Novel transcript 的 canonical 完整历史；adapter 不再从纯文本重建消息。
+  history: UIMessage[];
+  operation: NovelModelOperation;
+  // 每次 conversation store save 都必须等待此 port，保证 user/pending/tool output/终态
+  // 已持久化后才推进下一步。
+  checkpoint: (messages: UIMessage[]) => Promise<void>;
 }
 
 export type NovelModelEvent =
@@ -20,6 +40,7 @@ export type NovelModelEvent =
   }
   | { kind: 'delta'; text: string }
   | { kind: 'replace'; text: string }
+  | { kind: 'waiting_user' }
   | { kind: 'completed' }
   | { kind: 'failed'; message: string };
 
@@ -29,7 +50,7 @@ export interface NovelModelStream {
 
 export interface NovelModelRunning {
   // 预校验模型可解析;不可用则抛错(fail fast,不落库)
-  validate(modelId: string | null): Promise<void>;
+  validate(modelTarget: NovelModelTarget, projectId: string): Promise<void>;
   // 启动一次生成;事件经 subscribe 推送(调用方须同步订阅,避免漏早期事件)
   start(request: NovelModelRequest): NovelModelStream;
   cancel(runId: string): void;

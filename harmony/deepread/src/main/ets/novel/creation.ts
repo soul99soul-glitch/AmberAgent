@@ -10,9 +10,11 @@ import type { NovelRunKind } from './prompt_catalog.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget, NovelChapterVersion,
+  NovelModelPolicy, NovelBranchSettings,
 } from './models.ts';
 import {
-  createProject, renameProject, setProjectModel, appendMessage, saveChapter, deleteChapter,
+  createProject, renameProject, setProjectModelPolicy, setProjectBranchSettings,
+  appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
   addSettingProposals, resolveSettingProposal as resolveSettingProposalMutation, saveChapterVersion,
 } from './mutations.ts';
@@ -22,14 +24,20 @@ import {
 import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builder.ts';
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModelStream } from './model_running.ts';
+import type { NovelToolContinuationVerdict } from './model_running.ts';
 import type {
   NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceStatus,
 } from './repository.ts';
 import { parseSettingProposals } from './discussion_structured.ts';
 import type { NovelSettingProposalDraft, NovelSettingProposalsParsed } from './discussion_structured.ts';
 import { latestAssistantText } from '../agent/message.ts';
-import type { StreamTransportState, UIMessage } from '../agent/message.ts';
+import type {
+  StreamTransportState, UIMessage, UIMessagePart, UIMessagePartTool,
+} from '../agent/message.ts';
 import type { DurableWorkspaceProposal, WorkspaceProposalPatch } from './workspace_history.ts';
+import { novelMessageText, novelMessageUi } from './transcript.ts';
+import { decodeNovelWorkspaceUtf8 } from './workspace_exchange.ts';
+import type { NovelWorkspaceArchiveFile } from './workspace_exchange.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
@@ -41,6 +49,7 @@ export type NovelRunEvent =
   }
   | { kind: 'delta'; text: string }
   | { kind: 'replace'; text: string }
+  | { kind: 'waiting_user' }
   | { kind: 'completed'; message: NovelMessage }
   | { kind: 'interrupted'; partial: string }
   | { kind: 'failed'; message: string };
@@ -60,6 +69,38 @@ export interface NovelSuggestionRefreshResult {
   suggestions: NovelMaterialSuggestion[];
   count: number;
   warning: string | null;
+}
+
+export interface NovelConsistencyIssue {
+  kind: 'plot_stale' | 'unresolved' | 'pending_proposal';
+  message: string;
+}
+
+export interface NovelConsistencyReport {
+  ok: boolean;
+  activeBranchId: string;
+  issues: NovelConsistencyIssue[];
+}
+
+export interface NovelWorkspaceListResult {
+  root: string;
+  entries: string[];
+}
+
+export interface NovelWorkspaceReadResult {
+  path: string;
+  content: string;
+}
+
+export interface NovelWorkspaceGrepMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface NovelWorkspaceGrepResult {
+  query: string;
+  matches: NovelWorkspaceGrepMatch[];
 }
 
 export type NovelBatchPolishResultStatus = 'succeeded' | 'failed' | 'cancelled';
@@ -102,7 +143,58 @@ interface Emitter<T> {
 
 const isTerminal = <T>(v: T): boolean => {
   const k: string = (v as { kind?: string }).kind ?? '';
-  return k === 'completed' || k === 'interrupted' || k === 'failed' || k === 'cancelled';
+  return k === 'completed' || k === 'waiting_user' || k === 'interrupted' ||
+    k === 'failed' || k === 'cancelled';
+};
+
+interface CollectedModelResult {
+  terminal: 'completed' | 'waiting_user';
+  messages: UIMessage[];
+  text: string;
+}
+
+interface RawWorkspaceWritePatch {
+  operation?: unknown;
+  path?: unknown;
+  content?: unknown;
+}
+
+interface RawWorkspaceWriteInput {
+  proposal_id?: unknown;
+  patches?: RawWorkspaceWritePatch[];
+}
+
+const uiMessageEpoch = (message: UIMessage, fallback: number): number => {
+  const parsed: number = Date.parse(message.createdAt);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const transcriptFromUi = (
+  project: NovelProject, messages: UIMessage[], mode: NovelChatMode,
+  granularity: NovelGenerationGranularity | null, now: number,
+): NovelMessage[] => {
+  const existing: Map<string, NovelMessage> = new Map();
+  project.messages.forEach((message: NovelMessage): void => {
+    existing.set(novelMessageUi(message).id, message);
+  });
+  const next: NovelMessage[] = [];
+  messages.forEach((uiMessage: UIMessage): void => {
+    if (uiMessage.role !== 'user' && uiMessage.role !== 'assistant') return;
+    const prior: NovelMessage | undefined = existing.get(uiMessage.id);
+    const interrupted: boolean = uiMessage.annotations.some(
+      (annotation): boolean => annotation.type === 'generation_interrupted');
+    next.push(makeNovelMessage({
+      id: prior?.id ?? uiMessage.id,
+      role: uiMessage.role,
+      mode: prior?.mode ?? mode,
+      uiMessage,
+      createdAt: prior?.createdAt ?? uiMessageEpoch(uiMessage, now),
+      granularity: prior?.granularity ?? (uiMessage.role === 'assistant' ? granularity : null),
+      collectedChapterId: prior?.collectedChapterId ?? null,
+      interrupted: prior?.interrupted ?? interrupted,
+    }));
+  });
+  return next;
 };
 
 const createEmitter = <T>(): Emitter<T> => {
@@ -162,8 +254,10 @@ export class NovelCreation {
     return this.repository.listProjects();
   }
 
-  open(projectId: string): Promise<NovelProject> {
-    return this.repository.loadProject(projectId);
+  async open(projectId: string): Promise<NovelProject> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    const repaired: boolean = await this.reconcileDeniedWorkspaceTools(projectId, project);
+    return repaired ? await this.repository.loadProject(projectId) : project;
   }
 
   workspaceStatus(projectId: string): Promise<NovelWorkspaceStatus> {
@@ -208,9 +302,95 @@ export class NovelCreation {
   }
 
   resolveWorkspaceProposal(
-    projectId: string, proposalId: string, accept: boolean,
+    projectId: string, proposalId: string, accept: boolean, commandId: string = novelId(),
   ): Promise<DurableWorkspaceProposal> {
-    return this.repository.resolveProposal(projectId, proposalId, accept, novelId(), this.nowMs());
+    return this.repository.resolveProposal(projectId, proposalId, accept, commandId, this.nowMs());
+  }
+
+  async checkConsistency(projectId: string): Promise<NovelConsistencyReport> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const issues: NovelConsistencyIssue[] = [];
+    if (status.plotStale) {
+      issues.push({ kind: 'plot_stale', message: '剧情摘要落后于当前正文，请先同步剧情。' });
+    }
+    if (status.unresolvedFromOrdinal !== null) {
+      issues.push({
+        kind: 'unresolved',
+        message: `第 ${status.unresolvedFromOrdinal} 章起的后续影响尚未确认。`,
+      });
+    }
+    if (status.pendingProposalCount > 0) {
+      issues.push({
+        kind: 'pending_proposal',
+        message: `仍有 ${status.pendingProposalCount} 个待确认提案。`,
+      });
+    }
+    return { ok: issues.length === 0, activeBranchId: status.activeBranchId, issues };
+  }
+
+  async workspaceList(projectId: string, path: string = ''): Promise<NovelWorkspaceListResult> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const root: string = this.workspaceToolPath(path, status.activeBranchId, true);
+    const files: NovelWorkspaceArchiveFile[] = await this.repository.workspaceFiles(projectId);
+    const entries: string[] = files.map((file: NovelWorkspaceArchiveFile): string => file.path)
+      .filter((candidate: string): boolean => candidate === root ||
+        candidate.startsWith(root.endsWith('/') ? root : `${root}/`))
+      .sort();
+    return { root, entries };
+  }
+
+  async workspaceRead(projectId: string, path: string): Promise<NovelWorkspaceReadResult> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const checked: string = this.workspaceToolPath(path, status.activeBranchId, false);
+    const files: NovelWorkspaceArchiveFile[] = await this.repository.workspaceFiles(projectId);
+    const file: NovelWorkspaceArchiveFile | undefined = files.find(
+      (candidate: NovelWorkspaceArchiveFile): boolean => candidate.path === checked);
+    if (file === undefined) throw notFound('workspace_file', checked);
+    return { path: checked, content: decodeNovelWorkspaceUtf8(file.bytes) };
+  }
+
+  async workspaceGrep(
+    projectId: string, query: string, path: string = '', maxResults: number = 50,
+  ): Promise<NovelWorkspaceGrepResult> {
+    const needle: string = query.trim();
+    if (needle.length === 0) throw invalidInput('搜索内容不能为空');
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const root: string = this.workspaceToolPath(path, status.activeBranchId, true);
+    const limit: number = Math.max(1, Math.min(200, Math.floor(maxResults)));
+    const files: NovelWorkspaceArchiveFile[] = await this.repository.workspaceFiles(projectId);
+    const matches: NovelWorkspaceGrepMatch[] = [];
+    for (let i: number = 0; i < files.length && matches.length < limit; i++) {
+      const file: NovelWorkspaceArchiveFile = files[i];
+      if (file.path !== root && !file.path.startsWith(root.endsWith('/') ? root : `${root}/`)) continue;
+      const lines: string[] = decodeNovelWorkspaceUtf8(file.bytes).split('\n');
+      for (let line: number = 0; line < lines.length && matches.length < limit; line++) {
+        if (lines[line].indexOf(needle) >= 0) {
+          matches.push({ path: file.path, line: line + 1, text: lines[line] });
+        }
+      }
+    }
+    return { query: needle, matches };
+  }
+
+  async workspaceWriteResult(
+    projectId: string, proposalId: string, patches: WorkspaceProposalPatch[],
+  ): Promise<DurableWorkspaceProposal> {
+    const normalized: WorkspaceProposalPatch[] = await this.normalizeWorkspaceProposalPatches(
+      projectId, patches as RawWorkspaceWritePatch[]);
+    let proposals: DurableWorkspaceProposal[] = await this.repository.workspaceProposals(projectId);
+    let existing: DurableWorkspaceProposal | undefined = proposals.find(
+      (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId);
+    if (existing === undefined) {
+      await this.createWorkspaceProposal(projectId, normalized, proposalId);
+      proposals = await this.repository.workspaceProposals(projectId);
+      existing = proposals.find(
+        (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId);
+    }
+    if (existing === undefined || JSON.stringify(existing.patches) !== JSON.stringify(normalized)) {
+      throw invalidInput('write proposal patches 已变化');
+    }
+    return await this.resolveWorkspaceProposal(
+      projectId, proposalId, true, `novel:${projectId}:proposal:${proposalId}:approve`);
   }
 
   async create(name: string): Promise<NovelProject> {
@@ -222,8 +402,20 @@ export class NovelCreation {
     return this.commitMutation(projectId, 'rename', p => renameProject(p, name, this.nowMs()));
   }
 
-  setModel(projectId: string, modelId: string | null): Promise<NovelProject> {
-    return this.commitMutation(projectId, 'model_change', p => setProjectModel(p, modelId, this.nowMs()));
+  setModelPolicy(projectId: string, modelPolicy: NovelModelPolicy): Promise<NovelProject> {
+    return this.commitMutation(
+      projectId, 'model_change', p => setProjectModelPolicy(p, modelPolicy, this.nowMs()));
+  }
+
+  setBranchSettings(projectId: string, branchSettings: NovelBranchSettings): Promise<NovelProject> {
+    return this.commitMutation(
+      projectId, 'branch_settings_change',
+      p => setProjectBranchSettings(p, branchSettings, this.nowMs()));
+  }
+
+  async validateWritingModel(projectId: string): Promise<void> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    await this.modelRunning.validate(project.modelPolicy.writing, projectId);
   }
 
   async delete(projectId: string): Promise<void> {
@@ -287,6 +479,14 @@ export class NovelCreation {
     });
     if (box.value === null) throw new Error('collectMessage: 更新未返回章节');
     const ch: NovelChapter = box.value;
+    const refreshed: NovelProject = await this.repository.loadProject(projectId);
+    if (refreshed.modelPolicy.stateSync === null) {
+      return {
+        chapter: ch,
+        suggestionCount: 0,
+        suggestionWarning: '未配置内部职责模型，已跳过资料同步',
+      };
+    }
     // 后台分析建议,失败不影响收录(UI 可稍后 reanalyze)
     void this.refreshMaterialSuggestions(projectId, ch.id).catch((): void => { /* 静默 */ });
     return { chapter: ch, suggestionCount: 0, suggestionWarning: null };
@@ -298,9 +498,11 @@ export class NovelCreation {
     const project: NovelProject = await this.repository.loadProject(projectId);
     const chapter: NovelChapter | undefined = project.chapters.find(c => c.id === chapterId);
     if (chapter === undefined) throw notFound('chapter', chapterId);
+    if (project.modelPolicy.stateSync === null) throw invalidInput('请先配置内部职责模型');
     const now: number = this.nowMs();
     const suggestions: NovelMaterialSuggestion[] =
-      await analyzeChapterSuggestions(this.modelRunning, project, chapter, project.modelId, now);
+      await analyzeChapterSuggestions(
+        this.modelRunning, project, chapter, project.modelPolicy.stateSync, now);
     // analyzeChapterSuggestions 内部已容错(失败返回空数组),这里再判一次并落库
     await this.commitMutation(
       projectId, 'suggestion_refresh', p => replacePendingSuggestions(p, chapterId, suggestions, now));
@@ -359,6 +561,26 @@ export class NovelCreation {
     };
     this.projectRuns.set(projectId, live);
     void this.runGeneration(live, emitter, userText, mode, granularity, runKind);
+    return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+  }
+
+  continueTool(
+    projectId: string, toolCallId: string, verdict: NovelToolContinuationVerdict,
+  ): NovelRun {
+    const runId: string = novelId();
+    const emitter: Emitter<NovelRunEvent> = createEmitter<NovelRunEvent>();
+    if (this.projectRuns.has(projectId)) {
+      const busyMsg: string = projectBusy(projectId).message;
+      setTimeout((): void => { emitter.emit({ kind: 'failed', message: busyMsg }); }, 0);
+      return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+    }
+    let doneResolve: () => void = (): void => {};
+    const donePromise: Promise<void> = new Promise<void>(res => { doneResolve = res; });
+    const live: LiveRun = {
+      runId, projectId, partial: '', interrupted: false, doneResolve, donePromise,
+    };
+    this.projectRuns.set(projectId, live);
+    void this.runToolContinuation(live, emitter, toolCallId, verdict);
     return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
   }
 
@@ -474,8 +696,9 @@ export class NovelCreation {
     const mergedContent: string = msgs.map((m: NovelMessage): string => m.content).join('\n\n');
     const pseudo: NovelChapter =
       makeNovelChapter({ title: mergedTitle, content: mergedContent, now: this.nowMs() });
+    if (project.modelPolicy.stateSync === null) throw invalidInput('请先配置内部职责模型');
     const suggestions: NovelMaterialSuggestion[] = await analyzeChapterSuggestions(
-      this.modelRunning, project, pseudo, project.modelId, this.nowMs());
+      this.modelRunning, project, pseudo, project.modelPolicy.stateSync, this.nowMs());
     const updated: NovelProject = await this.commitMutation(
       projectId, 'discussion_archive', (p: NovelProject): NovelProject => {
       const next: NovelMaterialSuggestion[] = [...p.materialSuggestions];
@@ -513,12 +736,48 @@ export class NovelCreation {
     return this.open(projectId);
   }
 
+  private workspaceToolPath(path: string, activeBranchId: string, directory: boolean): string {
+    const clean: string = path.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+    if (clean.startsWith('/') || clean.split('/').some((part: string): boolean => part === '..')) {
+      throw invalidInput('工作区路径无效');
+    }
+    const branchRoot: string = `branches/${activeBranchId}/`;
+    if (clean.length === 0) return branchRoot;
+    const checked: string = clean.startsWith('branches/') ? clean : branchRoot + clean;
+    if (!checked.startsWith(branchRoot) || checked.indexOf('/.amber/') >= 0) {
+      throw invalidInput('工具只能访问当前分支可见文件');
+    }
+    if (!directory && checked.endsWith('/')) throw invalidInput('读取路径必须指向文件');
+    return checked;
+  }
+
+  private findTool(project: NovelProject, toolCallId: string): UIMessagePartTool | null {
+    for (let i: number = 0; i < project.messages.length; i++) {
+      const parts = novelMessageUi(project.messages[i]).parts;
+      for (let p: number = 0; p < parts.length; p++) {
+        const part: UIMessagePart = parts[p];
+        if (part.type === 'tool' && part.toolCallId === toolCallId) return part;
+      }
+    }
+    return null;
+  }
+
+  private modelTargetFor(
+    project: NovelProject, runKind: NovelRunKind | null,
+  ): NovelProject['modelPolicy']['writing'] {
+    if (runKind === 'polish' && project.modelPolicy.review !== null) {
+      return project.modelPolicy.review;
+    }
+    return project.modelPolicy.writing;
+  }
+
   private async commitMutation(
     projectId: string, kind: NovelWorkspaceMutationKind,
     transform: (project: NovelProject) => NovelProject,
+    commandId: string = novelId(),
   ): Promise<NovelProject> {
     const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
-    return await this.repository.commitProject(projectId, status.cas, novelId(), kind, transform);
+    return await this.repository.commitProject(projectId, status.cas, commandId, kind, transform);
   }
 
   // ===== 内部 =====
@@ -537,36 +796,47 @@ export class NovelCreation {
       const gran: NovelGenerationGranularity | null =
         mode === 'write' ? (granularity ?? project.lastGenerationGranularity) : null;
       const sysPrompt: string = systemPrompt(project, mode, gran, runKind);
-
-      await this.modelRunning.validate(project.modelId);
+      const modelTarget = this.modelTargetFor(project, runKind);
+      await this.modelRunning.validate(modelTarget, projectId);
       emitter.emit({ kind: 'started' });
-
+      let checkpointIndex: number = 0;
       const request: NovelModelRequest = {
-        runId: live.runId, systemPrompt: sysPrompt, userPrompt: trimmed,
-        maxOutputTokens: null, modelId: project.modelId,
+        runId: live.runId,
+        projectId,
+        systemPrompt: sysPrompt,
+        maxOutputTokens: null,
+        modelTarget,
+        history: project.messages.map(novelMessageUi),
+        operation: { kind: 'turn', userPrompt: trimmed },
+        checkpoint: async (messages: UIMessage[]): Promise<void> => {
+          checkpointIndex += 1;
+          const now: number = this.nowMs();
+          await this.commitMutation(projectId, 'transcript_checkpoint', (current: NovelProject): NovelProject => ({
+            ...current,
+            messages: transcriptFromUi(current, messages, mode, gran, now),
+            lastGenerationGranularity: gran ?? current.lastGenerationGranularity,
+            updatedAt: now,
+          }), `novel:${live.runId}:transcript:${checkpointIndex}`);
+        },
       };
-      const fullText: string = await this.collectWithEvents(live, emitter, request);
-
-      if (fullText.trim().length === 0) throw providerError('模型没有返回内容');
-
-      const now: number = this.nowMs();
-      const userMsg: NovelMessage = makeNovelMessage({ role: 'user', mode: mode, content: trimmed, createdAt: now });
-      const assistantMsg: NovelMessage = makeNovelMessage({
-        role: 'assistant', mode: mode, content: fullText, createdAt: now, granularity: gran,
-      });
-      const proposalBlock: NovelSettingProposalsParsed | null =
-        mode === 'discuss' ? parseSettingProposals(fullText) : null;
-      const proposalDrafts: NovelSettingProposalDraft[] = proposalBlock?.proposals ?? [];
-      await this.commitMutation(projectId, 'generation_commit', p => {
-        let np: NovelProject = appendMessage(p, userMsg, now);
-        np = appendMessage(np, assistantMsg, now);
-        np = addSettingProposals(np, assistantMsg.id, proposalDrafts, now);
-        if (gran !== null) np = { ...np, lastGenerationGranularity: gran };
-        return np;
-      });
-      emitter.emit({ kind: 'completed', message: assistantMsg });
+      const result: CollectedModelResult = await this.collectWithEvents(live, emitter, request);
+      if (result.terminal === 'waiting_user') {
+        emitter.emit({ kind: 'waiting_user' });
+        return;
+      }
+      const newMessages: UIMessage[] = result.messages.slice(project.messages.length);
+      if (latestAssistantText(newMessages).trim().length === 0) {
+        throw providerError('模型没有返回内容');
+      }
+      const saved: NovelProject = await this.repository.loadProject(projectId);
+      const last: NovelMessage | undefined = saved.messages.slice().reverse().find(
+        (message: NovelMessage): boolean => message.role === 'assistant' &&
+          newMessages.some((ui: UIMessage): boolean => ui.id === novelMessageUi(message).id));
+      if (last === undefined) throw providerError('模型结果未完成持久化');
+      emitter.emit({ kind: 'completed', message: last });
     } catch (e) {
       if (live.interrupted) {
+        // Adapter 的 checkpoint 已保存 canonical partial；这里只标记当前助手消息为 interrupted。
         await this.persistInterrupted(live, userText, mode, granularity);
         emitter.emit({ kind: 'interrupted', partial: live.partial });
       } else {
@@ -579,12 +849,198 @@ export class NovelCreation {
     }
   }
 
+  private async runToolContinuation(
+    live: LiveRun, emitter: Emitter<NovelRunEvent>, toolCallId: string,
+    verdict: NovelToolContinuationVerdict,
+  ): Promise<void> {
+    const projectId: string = live.projectId;
+    try {
+      const project: NovelProject = await this.repository.loadProject(projectId);
+      const tool: UIMessagePartTool | null = this.findTool(project, toolCallId);
+      if (tool === null) throw notFound('tool_call', toolCallId);
+      const source: NovelMessage | undefined = project.messages.find(
+        (message: NovelMessage): boolean => novelMessageUi(message).parts.some(
+          (part): boolean => part.type === 'tool' && part.toolCallId === toolCallId));
+      if (source === undefined) throw notFound('tool_message', toolCallId);
+      const modelTarget = project.modelPolicy.writing;
+      await this.modelRunning.validate(modelTarget, projectId);
+      if (tool.toolName === 'novel_workspace_write') {
+        await this.prepareWorkspaceWriteTool(projectId, tool, verdict);
+      }
+      emitter.emit({ kind: 'started' });
+      let checkpointIndex: number = 0;
+      const granularity: NovelGenerationGranularity | null = source.granularity;
+      const request: NovelModelRequest = {
+        runId: live.runId,
+        projectId,
+        systemPrompt: systemPrompt(project, source.mode, granularity, null),
+        maxOutputTokens: null,
+        modelTarget,
+        history: project.messages.map(novelMessageUi),
+        operation: { kind: 'tool_continuation', toolCallId, verdict },
+        checkpoint: async (messages: UIMessage[]): Promise<void> => {
+          checkpointIndex += 1;
+          const now: number = this.nowMs();
+          await this.commitMutation(projectId, 'transcript_checkpoint', (current: NovelProject): NovelProject => ({
+            ...current,
+            messages: transcriptFromUi(current, messages, source.mode, granularity, now),
+            updatedAt: now,
+          }), `novel:${live.runId}:transcript:${checkpointIndex}`);
+        },
+      };
+      const result: CollectedModelResult = await this.collectWithEvents(live, emitter, request);
+      if (tool.toolName === 'novel_workspace_write' && verdict.kind === 'denied') {
+        await this.resolvePreparedWorkspaceWrite(projectId, tool, false);
+      }
+      if (result.terminal === 'waiting_user') {
+        emitter.emit({ kind: 'waiting_user' });
+        return;
+      }
+      const saved: NovelProject = await this.repository.loadProject(projectId);
+      const last: NovelMessage | undefined = saved.messages.slice().reverse().find(
+        (message: NovelMessage): boolean => message.role === 'assistant' &&
+          novelMessageText(message).trim().length > 0);
+      if (last === undefined) throw providerError('模型没有返回内容');
+      emitter.emit({ kind: 'completed', message: last });
+    } catch (error) {
+      const message: string = isNovelError(error) ? error.message : String(error);
+      emitter.emit({ kind: 'failed', message });
+    } finally {
+      this.projectRuns.delete(projectId);
+      live.doneResolve();
+    }
+  }
+
+  private async prepareWorkspaceWriteTool(
+    projectId: string, tool: UIMessagePartTool,
+    verdict: NovelToolContinuationVerdict,
+  ): Promise<void> {
+    if (verdict.kind === 'answered') throw invalidInput('write 工具不接受回答');
+    let raw: RawWorkspaceWriteInput;
+    try {
+      raw = JSON.parse(tool.input) as typeof raw;
+    } catch {
+      throw invalidInput('write 工具参数不是有效 JSON');
+    }
+    const proposalId: string = typeof raw.proposal_id === 'string' ? raw.proposal_id.trim() : '';
+    if (proposalId.length === 0 || !Array.isArray(raw.patches) || raw.patches.length === 0) {
+      throw invalidInput('write 工具缺少 proposal_id 或 patches');
+    }
+    const patches: WorkspaceProposalPatch[] = await this.normalizeWorkspaceProposalPatches(
+      projectId, raw.patches);
+    const proposals: DurableWorkspaceProposal[] = await this.repository.workspaceProposals(projectId);
+    const existing: DurableWorkspaceProposal | undefined = proposals.find(
+      (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId);
+    if (existing !== undefined) {
+      const expected: string = JSON.stringify(patches);
+      if (JSON.stringify(existing.patches) !== expected) {
+        throw invalidInput(`proposal id 已用于其他 patches: ${proposalId}`);
+      }
+      if ((existing.status === 'accepted' && verdict.kind === 'denied') ||
+        (existing.status === 'rejected' && verdict.kind === 'approved')) {
+        throw invalidInput(`proposal 已按相反决定结案: ${proposalId}`);
+      }
+    }
+  }
+
+  private async normalizeWorkspaceProposalPatches(
+    projectId: string, rawPatches: RawWorkspaceWritePatch[],
+  ): Promise<WorkspaceProposalPatch[]> {
+    if (!Array.isArray(rawPatches) || rawPatches.length === 0) {
+      throw invalidInput('write 工具缺少 patches');
+    }
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return rawPatches.map((patch: RawWorkspaceWritePatch): WorkspaceProposalPatch => {
+      if (patch.operation !== 'write' && patch.operation !== 'delete') {
+        throw invalidInput('write patch operation 必须是 write 或 delete');
+      }
+      if (typeof patch.path !== 'string' || patch.path.trim().length === 0) {
+        throw invalidInput('write patch path 必须是非空字符串');
+      }
+      if (patch.operation === 'write' && typeof patch.content !== 'string') {
+        throw invalidInput('write patch content 必须是字符串');
+      }
+      if (patch.operation === 'delete' && patch.content !== null) {
+        throw invalidInput('delete patch content 必须是 null');
+      }
+      return {
+        operation: patch.operation,
+        path: this.workspaceToolPath(patch.path, status.activeBranchId, false),
+        content: patch.operation === 'delete' ? null : patch.content as string,
+      };
+    });
+  }
+
+  private proposalIdFromTool(tool: UIMessagePartTool): string | null {
+    try {
+      const raw = JSON.parse(tool.input) as { proposal_id?: unknown };
+      return typeof raw.proposal_id === 'string' && raw.proposal_id.trim().length > 0
+        ? raw.proposal_id.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async resolvePreparedWorkspaceWrite(
+    projectId: string, tool: UIMessagePartTool, accept: boolean,
+  ): Promise<void> {
+    let raw: RawWorkspaceWriteInput;
+    try {
+      raw = JSON.parse(tool.input) as RawWorkspaceWriteInput;
+    } catch {
+      throw invalidInput('write 工具参数不是有效 JSON');
+    }
+    const proposalId: string = typeof raw.proposal_id === 'string' ? raw.proposal_id.trim() : '';
+    if (proposalId.length === 0 || !Array.isArray(raw.patches)) {
+      throw invalidInput('write 工具缺少 proposal_id 或 patches');
+    }
+    const patches: WorkspaceProposalPatch[] = await this.normalizeWorkspaceProposalPatches(
+      projectId, raw.patches);
+    const proposals: DurableWorkspaceProposal[] = await this.repository.workspaceProposals(projectId);
+    if (!proposals.some(
+      (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId)) {
+      await this.createWorkspaceProposal(projectId, patches, proposalId);
+    }
+    await this.resolveWorkspaceProposal(
+      projectId, proposalId, accept,
+      `novel:${projectId}:proposal:${proposalId}:${accept ? 'approve' : 'deny'}`);
+  }
+
+  private async reconcileDeniedWorkspaceTools(
+    projectId: string, project: NovelProject,
+  ): Promise<boolean> {
+    const proposals: DurableWorkspaceProposal[] = await this.repository.workspaceProposals(projectId);
+    const existing: Map<string, DurableWorkspaceProposal> = new Map(proposals.map(
+      (proposal: DurableWorkspaceProposal): [string, DurableWorkspaceProposal] =>
+        [proposal.proposalId, proposal]));
+    let changed: boolean = false;
+    for (let i: number = 0; i < project.messages.length; i++) {
+      const parts: UIMessagePart[] = novelMessageUi(project.messages[i]).parts;
+      for (let p: number = 0; p < parts.length; p++) {
+        const part: UIMessagePart = parts[p];
+        if (part.type !== 'tool' || part.toolName !== 'novel_workspace_write' ||
+          part.approvalState.type !== 'denied') continue;
+        const proposalId: string | null = this.proposalIdFromTool(part);
+        if (proposalId === null) continue;
+        const proposal: DurableWorkspaceProposal | undefined = existing.get(proposalId);
+        if (proposal?.status === 'rejected') continue;
+        if (proposal?.status === 'accepted') {
+          throw invalidInput(`proposal 已按相反决定结案: ${proposalId}`);
+        }
+        await this.resolvePreparedWorkspaceWrite(projectId, part, false);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
   private waitForNovelRun(run: NovelRun): Promise<NovelRunEvent> {
     return new Promise<NovelRunEvent>((resolve: (event: NovelRunEvent) => void): void => {
       let unsub: () => void = (): void => {};
       let settled: boolean = false;
       unsub = run.subscribe((event: NovelRunEvent): void => {
-        if (event.kind !== 'completed' && event.kind !== 'interrupted' && event.kind !== 'failed') return;
+        if (event.kind !== 'completed' && event.kind !== 'waiting_user' &&
+          event.kind !== 'interrupted' && event.kind !== 'failed') return;
         settled = true;
         unsub();
         resolve(event);
@@ -667,9 +1123,10 @@ export class NovelCreation {
   // 订阅模型事件,镜像到 emitter 并累积 partial;completed 返回全文,failed/超时/超限 拒绝。
   private collectWithEvents(
     live: LiveRun, emitter: Emitter<NovelRunEvent>, request: NovelModelRequest,
-  ): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
+  ): Promise<CollectedModelResult> {
+    return new Promise<CollectedModelResult>((resolve, reject) => {
       let buffer: string = '';
+      let messages: UIMessage[] = request.history.slice();
       let settled: boolean = false;
       let idleTimer: ReturnType<typeof setTimeout>;
 
@@ -719,6 +1176,7 @@ export class NovelCreation {
           }
           buffer = snapshotText;
           live.partial = snapshotText;
+          messages = evt.messages.slice();
           emitter.emit({
             kind: 'snapshot',
             messages: evt.messages.slice(),
@@ -750,7 +1208,9 @@ export class NovelCreation {
           live.partial = buffer;
           emitter.emit({ kind: 'replace', text: evt.text });
         } else if (evt.kind === 'completed') {
-          finish(() => { resolve(buffer); });
+          finish(() => { resolve({ terminal: 'completed', messages, text: buffer }); });
+        } else if (evt.kind === 'waiting_user') {
+          finish(() => { resolve({ terminal: 'waiting_user', messages, text: buffer }); });
         } else if (evt.kind === 'failed') {
           finish(() => { reject(providerError(evt.message)); });
         }
@@ -768,8 +1228,8 @@ export class NovelCreation {
     });
   }
 
-  // 中断时尽力保存 partial + 用户消息。即使 partial 为空,也保留 user 消息
-  // (用户已发送的输入不应丢失);partial 为空时不写 interrupted 助手占位消息。
+  // 中断时 checkpoint 通常已保存 user/partial；这里只给当前 partial 加终止标记。
+  // 若 provider 在首个 checkpoint 前就失败，才补最小 user/partial，避免重复消息。
   private async persistInterrupted(
     live: LiveRun, userText: string, mode: NovelChatMode,
     granularity: NovelGenerationGranularity | null,
@@ -779,21 +1239,48 @@ export class NovelCreation {
     if (partial.trim().length === 0 && trimmed.length === 0) return;
     try {
       const now: number = this.nowMs();
-      await this.commitMutation(live.projectId, 'interrupt_commit', p => {
+      await this.commitMutation(live.projectId, 'transcript_checkpoint', p => {
         const gran: NovelGenerationGranularity | null =
           mode === 'write' ? (granularity ?? p.lastGenerationGranularity) : null;
-        let np: NovelProject = p;
-        if (trimmed.length > 0) {
-          np = appendMessage(np, makeNovelMessage({ role: 'user', mode: mode, content: trimmed, createdAt: now }), now);
+        let messages: NovelMessage[] = p.messages.slice();
+        const hasUser: boolean = messages.some(
+          (message: NovelMessage): boolean => message.role === 'user' &&
+            novelMessageText(message).trim() === trimmed);
+        if (!hasUser && trimmed.length > 0) {
+          messages = messages.concat([
+            makeNovelMessage({ role: 'user', mode, content: trimmed, createdAt: now }),
+          ]);
         }
-        // 有 partial 才写 interrupted 助手消息;否则只保留 user 输入
         if (partial.trim().length > 0) {
-          np = appendMessage(np, makeNovelMessage({
-            role: 'assistant', mode: mode, content: partial, createdAt: now, granularity: gran, interrupted: true,
-          }), now);
+          let marked: boolean = false;
+          for (let i: number = messages.length - 1; i >= 0; i--) {
+            const message: NovelMessage = messages[i];
+            if (message.role !== 'assistant' || novelMessageText(message) !== partial) continue;
+            const ui: UIMessage = novelMessageUi(message);
+            const annotated: UIMessage = {
+              ...ui,
+              annotations: ui.annotations.concat([
+                { type: 'generation_interrupted', reason: '用户停止生成' },
+              ]),
+              finishedAt: new Date(now).toISOString(),
+            };
+            messages[i] = makeNovelMessage({
+              id: message.id, role: message.role, mode: message.mode, uiMessage: annotated,
+              createdAt: message.createdAt, granularity: message.granularity,
+              collectedChapterId: message.collectedChapterId, interrupted: true,
+            });
+            marked = true;
+            break;
+          }
+          if (!marked) {
+            messages = messages.concat([makeNovelMessage({
+              role: 'assistant', mode, content: partial, createdAt: now,
+              granularity: gran, interrupted: true,
+            })]);
+          }
         }
-        return np;
-      });
+        return { ...p, messages, updatedAt: now };
+      }, `novel:${live.runId}:interrupt`);
     } catch {
       // 尽力而为,失败忽略(项目可能已被删除)
     }

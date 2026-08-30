@@ -1,7 +1,7 @@
 // Entry 边界：只注入 Harmony AbortController；provider/model/auth 解析由 AppContainer
 // 通过 resolveRuntime 回调提供，避免 Adapter ↔ AppContainer 初始化环。
 
-import type { NovelModelRunning, StreamTransportState } from '@amber/deepread-domain';
+import type { NovelModelRunning, NovelModelTarget, StreamTransportState } from '@amber/deepread-domain';
 import type { NovelInteractiveRuntimeConfig } from '@amber/chat-domain';
 import { createNovelInteractiveAdapter } from '@amber/chat-domain';
 import { createEntryAbortController } from './EntryAbortController.ets';
@@ -11,7 +11,9 @@ const DOMAIN: number = 0x0001;
 const TAG: string = 'Novel.Transport';
 
 export const createEntryNovelChatRunAdapter = (
-  resolveRuntime: (modelId: string | null) => Promise<NovelInteractiveRuntimeConfig | null>,
+  resolveRuntime: (
+    modelTarget: NovelModelTarget, projectId: string,
+  ) => Promise<NovelInteractiveRuntimeConfig | null>,
 ): NovelModelRunning => createNovelInteractiveAdapter({
   resolveRuntime,
   createAbortController: createEntryAbortController,
