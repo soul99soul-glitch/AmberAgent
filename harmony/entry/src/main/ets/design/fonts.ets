@@ -6,6 +6,7 @@
 // 运行时的变量轴/合成加粗语义。配合令牌使用时 fontWeight 应与 family 一致。
 
 import { font } from '@kit.ArkUI';
+import type { Font } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0x0001;
@@ -26,9 +27,13 @@ export const FONT_SERIF: string = 'NotoSerifSC';              // 阅读衬面(Re
 const LEGACY_JB: string = FONT_MONO;
 const LEGACY_JB_BOLD: string = FONT_MONO_BOLD;
 
-function registerFamily(familyName: string, familySrc: Resource): void {
+function registerFamily(familyName: string, familySrc: Resource, host: Font | null): void {
   try {
-    font.registerFont({ familyName: familyName, familySrc: familySrc });
+    if (host !== null) {
+      host.registerFont({ familyName: familyName, familySrc: familySrc });
+    } else {
+      font.registerFont({ familyName: familyName, familySrc: familySrc });
+    }
   } catch (e) {
     hilog.warn(DOMAIN, TAG, 'registerFont %{public}s failed: %{public}s',
       familyName, String(e));
@@ -37,14 +42,25 @@ function registerFamily(familyName: string, familySrc: Resource): void {
 
 /** 启动时调用一次(EntryAbility.onCreate)。 */
 export function registerAmberFonts(): void {
-  registerFamily(FONT_SANS, $rawfile('fonts/AmberSans.ttf'));
-  registerFamily(FONT_SANS_MEDIUM, $rawfile('fonts/AmberSans-Medium.ttf'));
-  registerFamily(FONT_SANS_SEMIBOLD, $rawfile('fonts/AmberSans-SemiBold.ttf'));
-  registerFamily(FONT_SANS_BOLD, $rawfile('fonts/AmberSans-Bold.ttf'));
-  registerFamily(FONT_MONO_SEMIBOLD, $rawfile('fonts/JetBrainsMono-SemiBold.ttf'));
-  registerFamily(FONT_MONO_MEDIUM, $rawfile('fonts/JetBrainsMono-Medium.ttf'));
-  registerFamily(FONT_SERIF, $rawfile('fonts/NotoSerifSC.otf'));
+  registerAll(null);
+}
+
+// 实测(2026-08-30,SGT-AL10/HarmonyOS 7):onCreate 里走全局 font.registerFont 不生效,
+// 字体全部静默回退系统字体;经主窗口 UIContext.getFont() 注册后才真正生效。
+// EntryAbility.onWindowStageCreate 拿到主窗口后必须再调一次。
+export function registerAmberFontsFor(host: Font): void {
+  registerAll(host);
+}
+
+function registerAll(host: Font | null): void {
+  registerFamily(FONT_SANS, $rawfile('fonts/AmberSans.ttf'), host);
+  registerFamily(FONT_SANS_MEDIUM, $rawfile('fonts/AmberSans-Medium.ttf'), host);
+  registerFamily(FONT_SANS_SEMIBOLD, $rawfile('fonts/AmberSans-SemiBold.ttf'), host);
+  registerFamily(FONT_SANS_BOLD, $rawfile('fonts/AmberSans-Bold.ttf'), host);
+  registerFamily(FONT_MONO_SEMIBOLD, $rawfile('fonts/JetBrainsMono-SemiBold.ttf'), host);
+  registerFamily(FONT_MONO_MEDIUM, $rawfile('fonts/JetBrainsMono-Medium.ttf'), host);
+  registerFamily(FONT_SERIF, $rawfile('fonts/NotoSerifSC.otf'), host);
   // 存量名(JetBrainsMono Regular/Bold 静态档)
-  registerFamily(LEGACY_JB, $rawfile('fonts/JetBrainsMono-Regular.ttf'));
-  registerFamily(LEGACY_JB_BOLD, $rawfile('fonts/JetBrainsMono-Bold.ttf'));
+  registerFamily(LEGACY_JB, $rawfile('fonts/JetBrainsMono-Regular.ttf'), host);
+  registerFamily(LEGACY_JB_BOLD, $rawfile('fonts/JetBrainsMono-Bold.ttf'), host);
 }

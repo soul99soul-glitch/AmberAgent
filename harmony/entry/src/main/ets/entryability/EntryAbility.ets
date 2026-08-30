@@ -12,7 +12,7 @@ import { getSkillManager, rescheduleCronTasksOnStartup, getChatKvStore } from '.
 import { loadDisplaySetting } from '@amber/chat-domain';
 import type { DisplaySetting } from '@amber/chat-domain';
 import { ACCENT, applyTheme, setAccentColor, BG } from '../design/tokens.ets';
-import { registerAmberFonts } from '../design/fonts.ets';
+import { registerAmberFonts, registerAmberFontsFor } from '../design/fonts.ets';
 
 const DOMAIN: number = 0x0001;
 const TAG: string = 'DeepRead.EntryAbility';
@@ -107,6 +107,8 @@ export default class EntryAbility extends UIAbility {
     try {
       const win: window.Window = windowStage.getMainWindowSync();
       themeWindow = win;
+      // 字体走 UIContext 注册(全局 font.registerFont 本机实测不生效,见 design/fonts.ets)
+      registerAmberFontsFor(win.getUIContext().getFont());
       // 先读 avoid area(全屏前), 再全屏; 全屏后 TYPE_SYSTEM 可能返回 0
       const avoidBefore: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       win.setWindowLayoutFullScreen(true);
