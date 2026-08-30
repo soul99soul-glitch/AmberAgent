@@ -1623,7 +1623,7 @@
   <string name="miniapp_webview_debug_description">デバッグ時のみ有効にし、システムの WebView デバッグツールでミニアプリを検査できます</string>
   <string name="miniapp_webview_debug_title">WebView デバッグ</string>
   <string name="novel_append_to_last_chapter">最終章に追加</string>
-  <string name="novel_auto_review_note">レビューモデルを設定すると、代筆完了後に自動レビューします</string>
+  <string name="novel_auto_review_note">代筆した各章は合同レビューを受けます。レビューモデル未指定時は執筆モデルに従います</string>
   <string name="novel_batch_failed">%1$sバッチに失敗 · %2$d / %3$d章完了</string>
   <string name="novel_batch_in_use">このブランチは代筆バッチが使用中</string>
   <string name="novel_batch_paused">%1$s一時停止中 %2$d / %3$d章</string>
@@ -1695,8 +1695,8 @@
   <string name="novel_generating">生成中…</string>
   <string name="novel_ghostwrite">代筆</string>
   <string name="novel_ghostwrite_badge">GHOSTWRITE</string>
-  <string name="novel_ghostwrite_progress_note">1章につき1コミット。いつでも一時停止でき、失敗時もコミットから書き直さず再開できます。</string>
-  <string name="novel_ghostwrite_target_desc">連続して執筆する章数を選択します。各章を生成して自動的に収録します。</string>
+  <string name="novel_ghostwrite_progress_note">各章は「候補 → 合同レビュー → 1回のアトミック収録」で進みます。いつでも一時停止でき、永続化した進捗から再開できます。</string>
+  <string name="novel_ghostwrite_target_desc">処理する章数を選択します。各章は候補生成、合同レビュー、1回のアトミック収録を経ます。</string>
   <string name="novel_import">インポート</string>
   <string name="novel_import_file_empty">インポートファイルが空です</string>
   <string name="novel_import_file_read_failed">インポートファイルを読み取れません：%1$s</string>
@@ -3299,4 +3299,11 @@
   <string name="skills_page_import_missing_skill_md">ディレクトリに SKILL.md が見つかりません</string>
   <string name="skills_page_import_unknown_error">不明なエラー</string>
   <string name="webmount_missing_cookies">%1$s にはログインが必要です。不足している Cookie: %2$s。WebMount 設定から先にログインしてください。</string>
+  <string name="novel_batch_stage">%1$d章 · %2$s</string>
+  <string name="novel_batch_stage_writing">執筆中</string>
+  <string name="novel_batch_stage_reviewing">合同レビュー中</string>
+  <string name="novel_batch_stage_rewriting">指定リライト %1$d/2</string>
+  <string name="novel_batch_stage_committing">原子収録中</string>
+  <string name="novel_batch_stage_planning">次章を計画中</string>
+  <string name="novel_batch_stage_polish">推敲中</string>
 </resources>

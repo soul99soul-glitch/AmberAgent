@@ -64,6 +64,7 @@ val novelModule = module {
             ghostwriteController = get(),
             turnLauncher = get(),
             kernel = get(),
+            context = androidContext(),
         )
     }
 }

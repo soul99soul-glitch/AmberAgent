@@ -1623,7 +1623,7 @@
   <string name="miniapp_webview_debug_description">Только для отладки: разрешает системным средствам отладки WebView проверять мини-приложения</string>
   <string name="miniapp_webview_debug_title">Отладка WebView</string>
   <string name="novel_append_to_last_chapter">Добавить в последнюю главу</string>
-  <string name="novel_auto_review_note">После настройки модели проверки завершённая партия ghostwrite проверяется автоматически</string>
+  <string name="novel_auto_review_note">Каждая глава, созданная ИИ, проходит совместную проверку; без отдельной модели проверки используется модель письма</string>
   <string name="novel_batch_failed">Партия %1$s завершилась с ошибкой · готово %2$d из %3$d глав</string>
   <string name="novel_batch_in_use">Эта ветка занята партией ghostwrite</string>
   <string name="novel_batch_paused">%1$s приостановлено: %2$d из %3$d глав</string>
@@ -1695,8 +1695,8 @@
   <string name="novel_generating">Создание…</string>
   <string name="novel_ghostwrite">Ghostwrite</string>
   <string name="novel_ghostwrite_badge">GHOSTWRITE</string>
-  <string name="novel_ghostwrite_progress_note">Один коммит на главу; можно в любой момент приостановить и после сбоя продолжить с коммита без переписывания.</string>
-  <string name="novel_ghostwrite_target_desc">Выберите число глав для последовательного написания; каждая глава создаётся и добавляется автоматически.</string>
+  <string name="novel_ghostwrite_progress_note">Каждая глава проходит путь «кандидат → совместная проверка → одно атомарное добавление»; можно приостановить и продолжить с сохранённого коммита.</string>
+  <string name="novel_ghostwrite_target_desc">Выберите число обрабатываемых глав; каждая глава проходит этапы кандидата, совместной проверки и одного атомарного добавления.</string>
   <string name="novel_import">Импорт</string>
   <string name="novel_import_file_empty">Файл импорта пуст</string>
   <string name="novel_import_file_read_failed">Не удалось прочитать файл импорта: %1$s</string>
@@ -3299,4 +3299,11 @@
   <string name="skills_page_import_missing_skill_md">В каталоге не найден SKILL.md</string>
   <string name="skills_page_import_unknown_error">Неизвестная ошибка</string>
   <string name="webmount_missing_cookies">Для %1$s требуется вход. Отсутствующие cookie: %2$s. Сначала войдите в настройках WebMount.</string>
+  <string name="novel_batch_stage">Глава %1$d · %2$s</string>
+  <string name="novel_batch_stage_writing">Написание</string>
+  <string name="novel_batch_stage_reviewing">Совместная проверка</string>
+  <string name="novel_batch_stage_rewriting">Целевая переработка %1$d/2</string>
+  <string name="novel_batch_stage_committing">Атомарное добавление</string>
+  <string name="novel_batch_stage_planning">Планирование следующей главы</string>
+  <string name="novel_batch_stage_polish">Редактура</string>
 </resources>

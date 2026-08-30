@@ -44,4 +44,42 @@ class NovelWorkspacePromptsTest {
         assertTrue(prompt.contains("第 24 章"))
         assertTrue(prompt.contains("汴京"))
     }
+
+    @Test
+    fun `polish chapter prompt embeds body, ordinal, path, preference and fact-freeze rules`() {
+        val prompt = NovelWorkspacePrompts.polishChapter(
+            chapterOrdinal = 5,
+            chapterPath = "branches/主线/chapters/005-夜泊.md",
+            chapterBody = "夜色沉沉，赵大伏在辕门外。",
+            writingPreference = "文风冷峻克制；单章 2000-3000 字。",
+        )
+        assertTrue(prompt.contains(NovelWorkspacePrompts.WORKSPACE_DISCIPLINE))
+        assertTrue(prompt.contains("第 5 章"))
+        assertTrue(prompt.contains("branches/主线/chapters/005-夜泊.md"))
+        assertTrue(prompt.contains("夜色沉沉，赵大伏在辕门外。"))
+        assertTrue(prompt.contains("文风冷峻克制；单章 2000-3000 字。"))
+        // Fact-freeze instructions are the contract of the mode.
+        assertTrue(prompt.contains("情节事实"))
+        assertTrue(prompt.contains("时间线"))
+        assertTrue(prompt.contains("完全一致"))
+        assertTrue(prompt.contains("±20%"))
+        // Whole chapter is written back to the same locked path; nothing else may be touched.
+        assertTrue(prompt.contains("写回 branches/主线/chapters/005-夜泊.md"))
+        assertTrue(prompt.contains("novel_workspace_write"))
+        // The host owns the plot pointer: the model must not touch plot files.
+        assertTrue(prompt.contains("plot/"))
+    }
+
+    @Test
+    fun `polish chapter prompt tolerates blank preference and empty body`() {
+        val prompt = NovelWorkspacePrompts.polishChapter(
+            chapterOrdinal = 2,
+            chapterPath = "branches/主线/chapters/002-启程.md",
+            chapterBody = "",
+            writingPreference = "",
+        )
+        assertTrue(prompt.contains("（空章节）"))
+        assertTrue(!prompt.contains("setting/writing）"))
+    }
+
 }

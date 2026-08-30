@@ -1636,7 +1636,7 @@ What would you like to talk about today?</string>
   <string name="miniapp_webview_debug_description">Debug only; allow system WebView debugging tools to inspect mini apps</string>
   <string name="miniapp_webview_debug_title">WebView debugging</string>
   <string name="novel_append_to_last_chapter">Append to last chapter</string>
-  <string name="novel_auto_review_note">Once a review model is configured, the completed ghostwrite batch is reviewed automatically</string>
+  <string name="novel_auto_review_note">Every ghostwritten chapter gets a joint review; when no review model is set, it follows the writing model</string>
   <string name="novel_batch_failed">%1$s batch failed · %2$d / %3$d chapters completed</string>
   <string name="novel_batch_in_use">This branch is occupied by a ghostwrite batch</string>
   <string name="novel_batch_paused">%1$s paused %2$d / %3$d chapters</string>
@@ -1708,8 +1708,8 @@ What would you like to talk about today?</string>
   <string name="novel_generating">Generating…</string>
   <string name="novel_ghostwrite">Ghostwrite</string>
   <string name="novel_ghostwrite_badge">GHOSTWRITE</string>
-  <string name="novel_ghostwrite_progress_note">One commit per chapter; pause anytime and resume from the commit without rewriting after a failure.</string>
-  <string name="novel_ghostwrite_target_desc">Choose how many chapters to write in sequence; each chapter is generated and collected automatically.</string>
+  <string name="novel_ghostwrite_progress_note">Each chapter follows candidate → joint review → one atomic collection; pause anytime and resume from the durable commit.</string>
+  <string name="novel_ghostwrite_target_desc">Choose how many chapters to process; each chapter goes through candidate, joint review, and one atomic collection.</string>
   <string name="novel_import">Import</string>
   <string name="novel_import_file_empty">The import file is empty</string>
   <string name="novel_import_file_read_failed">Unable to read the import file: %1$s</string>
@@ -3312,4 +3312,11 @@ My task:</string>
   <string name="skills_page_import_missing_skill_md">SKILL.md was not found in the directory</string>
   <string name="skills_page_import_unknown_error">Unknown error</string>
   <string name="webmount_missing_cookies">%1$s requires sign-in; missing cookie(s): %2$s. Sign in first from WebMount settings.</string>
+  <string name="novel_batch_stage">Chapter %1$d · %2$s</string>
+  <string name="novel_batch_stage_writing">Writing</string>
+  <string name="novel_batch_stage_reviewing">Joint review</string>
+  <string name="novel_batch_stage_rewriting">Targeted rewrite %1$d/2</string>
+  <string name="novel_batch_stage_committing">Atomic collection</string>
+  <string name="novel_batch_stage_planning">Planning next chapter</string>
+  <string name="novel_batch_stage_polish">Polishing</string>
 </resources>

@@ -141,12 +141,37 @@ class NovelWorkspaceExchangeTest {
         }
     }
 
+    /**
+     * 残留半成品目录可重装（J5 pin）：上次 install 中途被杀（写入中途的 .tmp、部分书
+     * 文件、manifest 尚未落盘）留下的目标，重试安装时清空重建而不是永久卡在
+     * 「not empty」——迁移重入 / 重复导入的失败不再累积。
+     */
     @Test
-    fun `installer refuses a non-empty target`() {
-        val occupied = tempFolder.newFolder("occupied")
-        occupied.resolve("stray.md").writeText("x")
+    fun `installer rebuilds an incomplete leftover target`() {
+        val leftover = tempFolder.newFolder("leftover")
+        // 半成品：上一次写入中途的临时文件 + 一本没写完的书（无 manifest.yaml）。
+        leftover.resolve("novel-workspace-xyz.tmp").writeText("half written")
+        leftover.resolve("project.md").writeText("partial")
+
+        val result = NovelWorkspaceInstaller.install(bookFiles(), leftover)
+
+        // 清空重建：半成品消失，书完整落盘，账本一枚初始提交。
+        assertTrue(!leftover.resolve("novel-workspace-xyz.tmp").exists())
+        assertTrue(leftover.resolve("branches/主线/chapters/001-山呼.md").exists())
+        val ledger = NovelWorkspaceLedger.load(leftover)
+        assertEquals(1, ledger.commits.size)
+        assertEquals(result.initialCommitId, ledger.head)
+    }
+
+    /** 完整目标（已有 manifest = 已安装过的书）保持既有短路，绝不覆盖。 */
+    @Test
+    fun `installer refuses a target that already holds an installed book`() {
+        val installed = tempFolder.newFolder("installed")
+        assertTrue(
+            NovelWorkspaceInstaller.install(bookFiles(), installed).projectDirectory.exists(),
+        )
         try {
-            NovelWorkspaceInstaller.install(bookFiles(), occupied)
+            NovelWorkspaceInstaller.install(bookFiles(), installed)
             fail("expected non-empty rejection")
         } catch (expected: NovelWorkspaceFormatError) {
             // ok

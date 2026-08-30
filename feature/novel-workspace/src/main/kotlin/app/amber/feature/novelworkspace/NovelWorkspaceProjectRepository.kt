@@ -35,7 +35,10 @@ class NovelWorkspaceProjectRepository(private val rootDirectory: File) {
             throw NovelWorkspaceIoError("Cannot create workspace root: $rootDirectory")
         }
         val directory = projectDirectory(projectId)
-        if (directory.exists()) {
+        // 只拒绝完整目标（已有 manifest = 已安装过的书）。上次 install 中途被杀留下的
+        // 半成品目录（无 manifest）放行，由 installer 清空重建——否则迁移重入每次都
+        // 撞「already exists」，失败永久累积。
+        if (directory.exists() && NovelWorkspaceStore(directory).exists()) {
             throw NovelWorkspaceIoError("Workspace project already exists: $projectId")
         }
         return NovelWorkspaceInstaller.install(files, directory, now = now)

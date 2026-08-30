@@ -258,7 +258,7 @@ class NovelWorkspaceConsistencyTest {
 
         // No commits -> not stale.
         NovelWorkspaceLedger.save(NovelWorkspaceLedgerStore(), store.rootDirectory)
-        assertFalse(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
+        assertFalse(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
 
         // Chapter + plot in the same commit -> not stale.
         val together = mapOf(ch1 to "h1", plot to "p1")
@@ -266,7 +266,7 @@ class NovelWorkspaceConsistencyTest {
             NovelWorkspaceLedgerStore(head = "C1", commits = listOf(commit("C1", null, together, "2026-08-19T00:00:00Z"))),
             store.rootDirectory,
         )
-        assertFalse(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
+        assertFalse(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
 
         // A later commit touches only a chapter -> stale.
         val chapterOnly = together + ("branches/主线/chapters/002-入汴.md" to "h2")
@@ -280,7 +280,7 @@ class NovelWorkspaceConsistencyTest {
             ),
             store.rootDirectory,
         )
-        assertTrue(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
+        assertTrue(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
 
         // A commit updating plot afterwards -> cleared.
         val plotCaughtUp = chapterOnly + (plot to "p2")
@@ -295,7 +295,7 @@ class NovelWorkspaceConsistencyTest {
             ),
             store.rootDirectory,
         )
-        assertFalse(NovelWorkspaceLedger.isPlotStale(NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
+        assertFalse(NovelWorkspaceLedger.isPlotStale(store, NovelWorkspaceLedger.load(store.rootDirectory), "主线"))
     }
 
     @Test

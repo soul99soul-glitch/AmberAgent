@@ -1623,7 +1623,7 @@
   <string name="miniapp_webview_debug_description">僅供偵錯時啟用，允許透過系統 WebView 偵錯工具檢查小應用</string>
   <string name="miniapp_webview_debug_title">WebView 偵錯</string>
   <string name="novel_append_to_last_chapter">追加到末章</string>
-  <string name="novel_auto_review_note">設定審稿模型後，代筆完成會自動審稿</string>
+  <string name="novel_auto_review_note">每個代筆章節都會經過聯合審核；未指定審稿模型時，跟隨寫作模型</string>
   <string name="novel_batch_failed">批次失敗 · 已%1$s %2$d / %3$d 章</string>
   <string name="novel_batch_in_use">目前分支由代筆批次佔用</string>
   <string name="novel_batch_paused">%1$s已暫停 %2$d / %3$d 章</string>
@@ -1695,8 +1695,8 @@
   <string name="novel_generating">產生中…</string>
   <string name="novel_ghostwrite">代筆</string>
   <string name="novel_ghostwrite_badge">GHOSTWRITE</string>
-  <string name="novel_ghostwrite_progress_note">每章一筆 commit，可隨時暫停；失敗後按 commit 繼續，不會重寫。</string>
-  <string name="novel_ghostwrite_target_desc">選擇要連寫的章數，逐章產生並自動收錄。</string>
+  <string name="novel_ghostwrite_progress_note">每章按「候選 → 聯合審核 → 單筆原子收錄」推進；可隨時暫停，並從持久化進度繼續。</string>
+  <string name="novel_ghostwrite_target_desc">選擇要連續處理的章數；每章依序經過候選、聯合審核和單筆原子收錄。</string>
   <string name="novel_import">匯入</string>
   <string name="novel_import_file_empty">匯入檔案為空</string>
   <string name="novel_import_file_read_failed">無法讀取匯入檔案：%1$s</string>
@@ -3299,4 +3299,11 @@
   <string name="skills_page_import_missing_skill_md">目錄中找不到 SKILL.md</string>
   <string name="skills_page_import_unknown_error">未知錯誤</string>
   <string name="webmount_missing_cookies">%1$s 需要登入；缺少 Cookie：%2$s。請先在 WebMount 設定中登入。</string>
+  <string name="novel_batch_stage">第 %1$d 章 · %2$s</string>
+  <string name="novel_batch_stage_writing">寫作中</string>
+  <string name="novel_batch_stage_reviewing">聯合審核中</string>
+  <string name="novel_batch_stage_rewriting">定向重寫 %1$d/2</string>
+  <string name="novel_batch_stage_committing">原子收錄中</string>
+  <string name="novel_batch_stage_planning">規劃下一章</string>
+  <string name="novel_batch_stage_polish">潤色中</string>
 </resources>
