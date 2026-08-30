@@ -515,6 +515,7 @@ struct DeepReadArticlePage {
                 .fontSize(30 * this.fontScale).fontColor(INK)
                 .fontFamily(FONT_SERIF)
                 .lineHeight(42 * this.fontScale).maxLines(3)
+                .width('100%')
                 .margin({ top: 14 })
               Row() {
                 Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
@@ -624,7 +625,8 @@ struct DeepReadArticlePage {
               .margin({ top: 24, bottom: 40 })
               .onClick((): void => { this.showRegenerateDialog = true; })
             }
-            .width('100%').padding({ left: 28, right: 28, top: 2, bottom: 11 })
+            .width('100%').alignItems(HorizontalAlign.Start)
+            .padding({ left: 28, right: 28, top: 2, bottom: 11 })
           }
         .align(Alignment.TopStart)
           .layoutWeight(1)
@@ -677,13 +679,13 @@ struct DeepReadArticlePage {
         ForEach(o.timeline, (ev: TimelineEvent): void => {
           Row() {
             Stack() {
-              Column().width(1).height('100%').backgroundColor(LINE)
+              Column().width(1).height(54).backgroundColor(LINE)
               Circle({ width: ev.isHighlight ? 10 : 6, height: ev.isHighlight ? 10 : 6 })
                 .fill(ev.isHighlight ? ACCENT : LINE)
                 .margin({ top: 7 })
             }
             .width(18)
-            .height('100%')
+            .height(54)
             .alignContent(Alignment.Top)
             Column() {
               Text(ev.date)
