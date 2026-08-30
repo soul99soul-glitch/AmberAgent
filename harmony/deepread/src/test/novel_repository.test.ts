@@ -2,18 +2,36 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
-import { makeNovelProject } from '../main/ets/novel/models.ts';
+import { makeNovelChapter, makeNovelMaterial, makeNovelProject } from '../main/ets/novel/models.ts';
 import { isNovelError } from '../main/ets/novel/error.ts';
+import type { NovelWorkspaceValidatedImport } from '../main/ets/novel/workspace_exchange.ts';
+import { NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION } from '../main/ets/novel/workspace_contract.ts';
 
 const NOW = 1_000_000;
 
 test('createProject then loadProject roundtrip', async () => {
-  const repo = createFileNovelRepository(createMemoryFileStore());
-  const p = makeNovelProject({ id: 'p1', name: '小说A', now: NOW });
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  const p = {
+    ...makeNovelProject({ id: 'p1', name: '小说A', now: NOW }),
+    chapters: [makeNovelChapter({ id: 'c1', title: '开端', content: '山门初见。', now: NOW })],
+    materials: [makeNovelMaterial({
+      id: 'm1', kind: 'world' as const, title: '宗门', content: '青云宗。', now: NOW,
+    })],
+  };
   await repo.createProject(p);
   const loaded = await repo.loadProject('p1');
   assert.equal(loaded.name, '小说A');
   assert.equal(loaded.id, 'p1');
+  assert.equal(loaded.chapters[0].content, '山门初见。');
+  assert.equal(loaded.materials[0].content, '青云宗。');
+  assert.equal(await fs.exists('amberagent/novel-workspace/p1/manifest.yaml'), true);
+  assert.equal(await fs.readText(
+    'amberagent/novel-workspace/p1/branches/main/chapters/001-开端.md'), '山门初见。');
+  assert.equal(await fs.readText(
+    'amberagent/novel-workspace/p1/setting/world/m1.md'), '青云宗。');
+  assert.equal(await fs.exists('amberagent/novel-workspace/p1/.amber/project-state.json'), true);
+  assert.equal(await fs.exists('amberagent/novel-workspace/p1/.amber/ledger.jsonl'), true);
 });
 
 test('loadProject missing throws notFound', async () => {
@@ -61,6 +79,19 @@ test('deleteProject removes; subsequent load throws', async () => {
   await assert.rejects(repo.loadProject('p1'));
 });
 
+test('deleteProject is serialized after an in-flight update and cannot be revived', async () => {
+  const repo = createFileNovelRepository(createMemoryFileStore());
+  await repo.createProject(makeNovelProject({ id: 'race', name: '原', now: NOW }));
+  const updating: Promise<unknown> = repo.updateProject('race', project => ({
+    ...project,
+    name: '更新中',
+    updatedAt: NOW + 1,
+  }));
+  const deleting: Promise<void> = repo.deleteProject('race');
+  await Promise.all([updating, deleting]);
+  await assert.rejects(repo.loadProject('race'));
+});
+
 test('listProjects skips unreadable/corrupt files', async () => {
   const fs = createMemoryFileStore();
   const repo = createFileNovelRepository(fs);
@@ -99,8 +130,119 @@ test('loadProject migrates existing v2 project without losing real project data'
   assert.deepEqual(loaded.chapters, current.chapters);
   assert.deepEqual(loaded.materials, current.materials);
   assert.deepEqual(loaded.settingProposals, []);
+  assert.equal(await fs.exists('amberagent/novel-workspace/cultivation/manifest.yaml'), true);
+  assert.equal(await fs.exists(
+    'amberagent/novel-creation/projects/cultivation.novel.json'), false);
 
   const updated = await repo.updateProject('cultivation', project => ({ ...project, updatedAt: NOW + 1 }));
   assert.equal(updated.schemaVersion, 3);
   assert.equal(updated.revision, 1);
+});
+
+test('workspace recovery restores backup after process dies between directory renames', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  await repo.createProject(makeNovelProject({ id: 'recover', name: '可恢复', now: NOW }));
+  await fs.rename(
+    'amberagent/novel-workspace/recover',
+    'amberagent/novel-workspace/.trash/recover',
+  );
+  await fs.writeText(
+    'amberagent/novel-workspace/.staging/recover/manifest.yaml',
+    'partial',
+  );
+
+  const loaded = await repo.loadProject('recover');
+  assert.equal(loaded.name, '可恢复');
+  assert.equal(await fs.exists('amberagent/novel-workspace/.staging/recover'), false);
+  assert.equal(await fs.exists('amberagent/novel-workspace/.trash/recover'), false);
+});
+
+test('workspace update leaves append-only ledger and changes checkout tree digest', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  await repo.createProject(makeNovelProject({ id: 'ledger', name: '台账', now: NOW }));
+  const beforeCheckout = await fs.readText(
+    'amberagent/novel-workspace/ledger/.amber/checkout.json');
+  await repo.updateProject('ledger', project => ({
+    ...project,
+    chapters: [makeNovelChapter({ id: 'c1', title: '一', content: '正文', now: NOW + 1 })],
+    updatedAt: NOW + 1,
+  }));
+  const afterCheckout = await fs.readText(
+    'amberagent/novel-workspace/ledger/.amber/checkout.json');
+  const ledger = await fs.readText('amberagent/novel-workspace/ledger/.amber/ledger.jsonl');
+  assert.notEqual(afterCheckout, beforeCheckout);
+  assert.equal((ledger ?? '').trim().split('\n').length, 2);
+});
+
+test('workspace import installs a new project, preserves non-modeled files and exports current branch', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  const encoder = new TextEncoder();
+  const imported: NovelWorkspaceValidatedImport = {
+    manifest: {
+      format: NOVEL_WORKSPACE_FORMAT,
+      version: NOVEL_WORKSPACE_VERSION,
+      projectId: 'imported',
+      title: '外来小说',
+      activeBranch: 'draft-a',
+      createdAt: NOW,
+      updatedAt: NOW + 1,
+    },
+    files: [
+      { path: 'manifest.yaml', bytes: encoder.encode('placeholder') },
+      { path: 'project.md', bytes: encoder.encode('# 外来小说\n\n这是用户维护的项目说明。\n') },
+      { path: 'branches/draft-a/chapters/031-归途.md', bytes: encoder.encode('第三十一章正文') },
+      { path: 'setting/world/realm.md', bytes: encoder.encode('境界设定') },
+      { path: 'drafts/reference.bin', bytes: new Uint8Array([0, 1, 255]) },
+    ],
+  };
+
+  const project = await repo.installWorkspace(imported);
+  assert.equal(project.id, 'imported');
+  assert.equal(project.chapters[0].title, '归途');
+  assert.equal(project.chapters[0].content, '第三十一章正文');
+  assert.equal(project.materials[0].content, '境界设定');
+  const exported = await repo.workspaceFiles(project.id);
+  assert.equal(exported.some(file => file.path.startsWith('.amber/')), false);
+  assert.equal(new TextDecoder().decode(
+    exported.find(file => file.path === 'project.md')?.bytes),
+  '# 外来小说\n\n这是用户维护的项目说明。\n');
+  assert.deepEqual(Array.from(exported.find(file => file.path === 'drafts/reference.bin')?.bytes ?? []),
+    [0, 1, 255]);
+  const book = await repo.bookExportInput(project.id);
+  assert.equal(book.chapters[0].ordinal, 31);
+
+  await repo.updateProject(project.id, current => ({ ...current, name: '改名后', updatedAt: NOW + 2 }));
+  const afterUpdate = await repo.workspaceFiles(project.id);
+  assert.equal(new TextDecoder().decode(
+    afterUpdate.find(file => file.path === 'project.md')?.bytes),
+  '# 外来小说\n\n这是用户维护的项目说明。\n');
+  assert.deepEqual(Array.from(
+    afterUpdate.find(file => file.path === 'drafts/reference.bin')?.bytes ?? []), [0, 1, 255]);
+});
+
+test('workspace import with an existing project id allocates an independent project', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  await repo.createProject(makeNovelProject({ id: 'same', name: '本地', now: NOW }));
+  const encoder = new TextEncoder();
+  const imported = await repo.installWorkspace({
+    manifest: {
+      format: NOVEL_WORKSPACE_FORMAT,
+      version: NOVEL_WORKSPACE_VERSION,
+      projectId: 'same',
+      title: '导入',
+      activeBranch: 'main',
+      createdAt: NOW,
+      updatedAt: NOW,
+    },
+    files: [
+      { path: 'manifest.yaml', bytes: encoder.encode('placeholder') },
+      { path: 'project.md', bytes: encoder.encode('# 导入') },
+    ],
+  });
+  assert.notEqual(imported.id, 'same');
+  assert.equal((await repo.loadProject('same')).name, '本地');
 });

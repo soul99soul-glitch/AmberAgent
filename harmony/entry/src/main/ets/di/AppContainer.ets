@@ -10,6 +10,7 @@ import type {
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
+  NovelProjectRepository,
 } from '@amber/deepread-domain';
 import {
   isInterruptedPhase, createScheduler, createSourcePrefetcher,
@@ -29,6 +30,9 @@ import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createEntryNovelChatRunAdapter } from '../platform_impl/NovelChatRunAdapter.ets';
 import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
+import {
+  createNovelWorkspaceService, NovelWorkspaceService,
+} from '../platform_impl/NovelWorkspaceService.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Context } from '@kit.AbilityKit';
 import type {
@@ -654,12 +658,28 @@ export const getCouncilManager = (): ModelCouncilManager | null => councilManage
 
 // ===== Novel Creation 装配 =====
 let novelCreation: NovelCreation | null = null;
+let novelProjectRepository: NovelProjectRepository | null = null;
+let novelWorkspaceService: NovelWorkspaceService | null = null;
+
+export const getNovelProjectRepository = (): NovelProjectRepository => {
+  if (novelProjectRepository === null) {
+    novelProjectRepository = createFileNovelRepository(getAppContainer().fileStore);
+  }
+  return novelProjectRepository;
+};
+
+export const getNovelWorkspaceService = (): NovelWorkspaceService => {
+  if (novelWorkspaceService === null) {
+    novelWorkspaceService = createNovelWorkspaceService(getNovelProjectRepository());
+  }
+  return novelWorkspaceService;
+};
 
 export const getNovelCreation = (): NovelCreation => {
   if (novelCreation === null) {
     const c: Container = getAppContainer();
     novelCreation = createNovelCreation({
-      repository: createFileNovelRepository(c.fileStore),
+      repository: getNovelProjectRepository(),
       modelRunning: createEntryNovelChatRunAdapter(resolveNovelInteractiveRuntime),
     });
   }

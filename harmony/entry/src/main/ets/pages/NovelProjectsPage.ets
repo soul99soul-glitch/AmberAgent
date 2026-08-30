@@ -4,8 +4,10 @@ import { FONT_SERIF, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, SectionHeader, BtnFill, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { router, promptAction } from '@kit.ArkUI';
-import { getNovelCreation } from '../di/AppContainer.ets';
+import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
 
 interface RowMenuResult {
   index: number;
@@ -22,6 +24,7 @@ struct NovelProjectsPage {
   @State nameInput: string = '';
   @State confirmDeleteId: string = '';
   @State restoring: boolean = false;
+  @State importing: boolean = false;
   @State errorMsg: string = '';
   @State pressedId: string = '';
   private pageAlive: boolean = false;
@@ -63,6 +66,7 @@ struct NovelProjectsPage {
   openNew(): void {
     this.editingId = '';
     this.nameInput = '';
+    this.errorMsg = '';
     animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
       this.nameDialogOpen = true;
     });
@@ -71,6 +75,7 @@ struct NovelProjectsPage {
   openRename(p: NovelProject): void {
     this.editingId = p.id;
     this.nameInput = p.name;
+    this.errorMsg = '';
     animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
       this.nameDialogOpen = true;
     });
@@ -122,6 +127,43 @@ struct NovelProjectsPage {
       this.errorMsg = String(e);
     } finally {
       this.restoring = false;
+    }
+  }
+
+  private readSelectedBytes(uri: string): Uint8Array {
+    const maxBytes: number = 16 * 1024 * 1024;
+    const file: fileIo.File = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
+    try {
+      const stat: fileIo.Stat = fileIo.statSync(file.fd);
+      if (stat.size > maxBytes) throw new Error('ZIP 超过 16MB 导入上限');
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      fileIo.readSync(file.fd, buffer, { offset: 0, length: stat.size });
+      return new Uint8Array(buffer);
+    } finally {
+      fileIo.closeSync(file);
+    }
+  }
+
+  private async importWorkspace(): Promise<void> {
+    if (this.importing) return;
+    const options: picker.DocumentSelectOptions = new picker.DocumentSelectOptions();
+    options.maxSelectNumber = 1;
+    options.fileSuffixFilters = ['小说工作区 ZIP|.zip'];
+    const context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+    try {
+      const uris: string[] = await documentPicker.select(options);
+      if (uris.length === 0) return;
+      this.importing = true;
+      const project: NovelProject = await getNovelWorkspaceService().importZip(
+        this.readSelectedBytes(uris[0]));
+      await this.loadProjects();
+      this.openWorkspace(project.id);
+    } catch (e) {
+      this.errorMsg = `导入失败：${String(e)}`;
+    } finally {
+      this.importing = false;
     }
   }
 
@@ -206,12 +248,30 @@ struct NovelProjectsPage {
 
         // N3:恢复最近删除的项目
         Row() {
+          Text(this.importing ? '正在导入…' : '导入工作区')
+            .fontSize(12).fontColor(this.importing ? INK4 : ACCENT)
+            .height(44).padding({ left: 20, right: 12 })
+            .textAlign(TextAlign.Center)
+            .onClick((): void => { this.importWorkspace(); })
           Blank()
-          Text('恢复删除的项目').fontSize(12).fontColor(INK3)
-            .padding({ left: 12, right: 20, top: 6, bottom: 6 })
+          Text(this.restoring ? '正在恢复…' : '恢复删除的项目')
+            .fontSize(12).fontColor(this.restoring ? INK4 : INK3)
+            .height(44).padding({ left: 12, right: 20 })
+            .textAlign(TextAlign.Center)
             .onClick((): void => { this.restoreDeleted(); })
         }
         .width('100%')
+
+        if (this.errorMsg.length > 0 && !this.nameDialogOpen) {
+          Text(this.errorMsg)
+            .fontSize(TEXT_STYLES.meta.size)
+            .fontWeight(TEXT_STYLES.meta.weight)
+            .lineHeight(TEXT_STYLES.meta.lineHeight)
+            .fontFamily(TEXT_STYLES.meta.family)
+            .fontColor(ERROR)
+            .padding({ left: 20, right: 20, bottom: 8 })
+            .width('100%')
+        }
 
         if (this.loading) {
           Column() {

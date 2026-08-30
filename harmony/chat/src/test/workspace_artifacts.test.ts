@@ -16,7 +16,7 @@ import {
   PosixWorkspaceManager,
 } from '../main/ets/chat/workspace.ts';
 import type { WorkspaceFsPort, WorkspaceFsEntry } from '../main/ets/chat/workspace.ts';
-import { readZipEntries, extractZipEntryData } from '../main/ets/chat/zip_archive.ts';
+import { readZipEntries, extractZipEntryData, readZipEntryBytes } from '../main/ets/chat/zip_archive.ts';
 import { AgentToolActivityStore } from '../main/ets/chat/tool_activity.ts';
 import type { AgentTool } from '../main/ets/chat/tool.ts';
 import type { UIMessagePart } from '../main/ets/chat/message.ts';
@@ -330,6 +330,19 @@ test('buildZipBytes:method 8 + UTF-8 名 + readZipEntries 回读', async () => {
   assert.equal(td.decode(data0), 'hello');
   const data1: Uint8Array = extractZipEntryData(zip, recs[1]);
   assert.equal(td.decode(data1), '中文内容');
+});
+
+test('buildZipBytes supports EPUB stored mimetype without forking the ZIP writer', async () => {
+  const zip: Uint8Array = await buildZipBytes([
+    { name: 'mimetype', data: te.encode('application/epub+zip'), compression: 'stored' },
+    { name: 'OEBPS/nav.xhtml', data: te.encode('<nav/>'), compression: 'deflate' },
+  ], identityDeflate, 0, 0);
+  const recs = readZipEntries(zip);
+  assert.equal(recs[0].method, 0);
+  assert.equal(recs[1].method, 8);
+  assert.equal(td.decode(await readZipEntryBytes(zip, recs[0], identityInflate)),
+    'application/epub+zip');
+  assert.equal(td.decode(await readZipEntryBytes(zip, recs[1], identityInflate)), '<nav/>');
 });
 
 // ===== xlsx =====

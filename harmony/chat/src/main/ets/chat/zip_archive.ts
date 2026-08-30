@@ -118,11 +118,11 @@ export const extractZipEntryData = (bytes: Uint8Array, rec: ZipEntryRecord): Uin
 };
 
 // 条目文本读取:stored 直取 / deflate 经 Port / 其余方法抛错(非静默)
-export const readZipEntryText = async (
+export const readZipEntryBytes = async (
   bytes: Uint8Array, rec: ZipEntryRecord, inflateRaw: InflateRawPort,
-): Promise<string> => {
+): Promise<Uint8Array> => {
   const raw: Uint8Array = extractZipEntryData(bytes, rec);
-  if (rec.method === 0) return utf8Decode(raw);
+  if (rec.method === 0) return new Uint8Array(raw);
   if (rec.method === 8) {
     if (rec.uncompressedSize > MAX_ZIP_ENTRY_OUTPUT_BYTES) {
       throw new Error(`zip entry '${rec.name}' declares oversized output`);
@@ -131,7 +131,11 @@ export const readZipEntryText = async (
     if (plain.length !== rec.uncompressedSize) {
       throw new Error(`zip entry '${rec.name}' inflate size mismatch`);
     }
-    return utf8Decode(plain);
+    return plain;
   }
   throw new Error(`unsupported compression method ${rec.method} for ${rec.name}`);
 };
+
+export const readZipEntryText = async (
+  bytes: Uint8Array, rec: ZipEntryRecord, inflateRaw: InflateRawPort,
+): Promise<string> => utf8Decode(await readZipEntryBytes(bytes, rec, inflateRaw));

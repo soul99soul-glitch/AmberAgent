@@ -165,10 +165,11 @@ export const inflateRawEntry = async (data: Uint8Array, expectedSize: number): P
   }
   const inCopy: Uint8Array = new Uint8Array(data); // subarray .buffer 偏移剥离
   const outCap: number = Math.max(expectedSize, 1);
+  const outBuffer: ArrayBuffer = new ArrayBuffer(outCap);
   const strm: zlib.ZStream = {
     nextIn: inCopy.buffer as ArrayBuffer,
     availableIn: inCopy.length,
-    nextOut: new ArrayBuffer(outCap),
+    nextOut: outBuffer,
     availableOut: outCap,
   };
   const zip = zlib.createZipSync();
@@ -178,14 +179,16 @@ export const inflateRawEntry = async (data: Uint8Array, expectedSize: number): P
   }
   try {
     const status: zlib.ReturnStatus = await zip.inflate(strm, zlib.CompressFlushMode.FINISH);
+    const current: zlib.ZStream = await zip.getZStream();
     if (status !== zlib.ReturnStatus.STREAM_END && status !== zlib.ReturnStatus.OK) {
       throw new Error(`inflate failed: ${status}`);
     }
-    if (status === zlib.ReturnStatus.OK && (strm.availableOut ?? 0) === 0) {
+    if (status === zlib.ReturnStatus.OK && (current.availableOut ?? 0) === 0) {
       throw new Error('inflate output overflow (declared size too small)');
     }
-    const total: number = strm.totalOut ?? 0;
-    return new Uint8Array((strm.nextOut as ArrayBuffer).slice(0, total));
+    // API 12 的 ZStream 入参不会回写执行后的状态，必须重新 getZStream()。
+    const total: number = current.totalOut ?? 0;
+    return new Uint8Array(outBuffer.slice(0, total));
   } finally {
     await zip.inflateEnd(strm);
   }

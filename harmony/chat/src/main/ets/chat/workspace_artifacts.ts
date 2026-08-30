@@ -366,6 +366,7 @@ const utf8Encode = (text: string): Uint8Array => {
 export interface ZipWriteEntry {
   name: string;
   data: Uint8Array;
+  compression?: 'stored' | 'deflate';
 }
 
 export const buildZipBytes = async (
@@ -381,9 +382,10 @@ export const buildZipBytes = async (
   for (const entry of entries) {
     const nameBytes: Uint8Array = utf8Encode(entry.name);
     const crc: number = crc32(entry.data);
-    const compressed: Uint8Array = await deflateRaw(entry.data);
+    const method: number = entry.compression === 'stored' ? 0 : 8;
+    const compressed: Uint8Array = method === 0 ? entry.data : await deflateRaw(entry.data);
     const local: number[] = [
-      ...u32le(0x04034b50), ...u16le(20), ...u16le(0x0800), ...u16le(8),
+      ...u32le(0x04034b50), ...u16le(20), ...u16le(0x0800), ...u16le(method),
       ...u16le(dosTime), ...u16le(dosDate), ...u32le(crc),
       ...u32le(compressed.length), ...u32le(entry.data.length),
       ...u16le(nameBytes.length), ...u16le(0),
@@ -392,7 +394,7 @@ export const buildZipBytes = async (
     chunks.push(localArr, nameBytes, compressed);
     const cd: number[] = [
       ...u32le(0x02014b50), ...u16le(20), ...u16le(20), ...u16le(0x0800),
-      ...u16le(8), ...u16le(dosTime), ...u16le(dosDate), ...u32le(crc),
+      ...u16le(method), ...u16le(dosTime), ...u16le(dosDate), ...u32le(crc),
       ...u32le(compressed.length), ...u32le(entry.data.length),
       ...u16le(nameBytes.length), ...u16le(0), ...u16le(0), ...u16le(0),
       ...u16le(0), ...u32le(0), ...u32le(offset),

@@ -14,8 +14,10 @@ import {
   NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
 } from '../components/NovelBatchPolishSheet.ets';
 import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
-import { pasteboard } from '@kit.BasicServicesKit';
-import { getNovelCreation } from '../di/AppContainer.ets';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { getNovelCreation, getNovelWorkspaceService } from '../di/AppContainer.ets';
+import type { NovelBookExportBundle } from '../platform_impl/NovelWorkspaceService.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
@@ -45,6 +47,9 @@ interface KindFilterLabels {
   outline: string;
   requirement: string;
   other: string;
+}
+interface ExportMenuResult {
+  index: number;
 }
 const KIND_FILTER_LABELS: KindFilterLabels = {
   all: '全部', world: '世界', character: '人物', outline: '大纲', requirement: '写作要求', other: '其他',
@@ -193,17 +198,89 @@ struct NovelWorkspacePage {
     }
   }
 
-  // N1:导出 Markdown(标题+全文各章,复制到剪贴板;系统分享面板后续接)
-  private exportMarkdown(): void {
-    if (this.project === null) return;
-    const p: NovelProject = this.project;
-    let md: string = `# ${p.name}\n\n`;
-    for (const c of p.chapters.filter((c: NovelChapter): boolean => !c.discarded)) {
-      md += `## ${c.title}\n\n${c.content}\n\n`;
+  private writeExportBytes(uri: string, bytes: Uint8Array): void {
+    const file: fileIo.File = fileIo.openSync(
+      uri, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+    try {
+      const exact: ArrayBuffer = (bytes.buffer as ArrayBuffer)
+        .slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      fileIo.writeSync(file.fd, exact);
+    } finally {
+      fileIo.closeSync(file);
     }
-    pasteboard.getSystemPasteboard().setDataSync(
-      pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, md));
-    promptAction.showToast({ message: `已导出 ${p.chapters.length} 章到剪贴板`, duration: 1600 });
+  }
+
+  private encodeExportText(text: string): Uint8Array {
+    const values: number[] = [];
+    for (let i: number = 0; i < text.length; i++) {
+      let cp: number = text.charCodeAt(i);
+      if (cp >= 0xd800 && cp <= 0xdbff && i + 1 < text.length) {
+        const low: number = text.charCodeAt(i + 1);
+        if (low >= 0xdc00 && low <= 0xdfff) {
+          cp = 0x10000 + ((cp - 0xd800) << 10) + (low - 0xdc00);
+          i += 1;
+        }
+      }
+      if (cp < 0x80) values.push(cp);
+      else if (cp < 0x800) values.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+      else if (cp < 0x10000) {
+        values.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+      } else {
+        values.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f),
+          0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+      }
+    }
+    return new Uint8Array(values);
+  }
+
+  private async saveExportFile(fileName: string, bytes: Uint8Array): Promise<void> {
+    const options: picker.DocumentSaveOptions = new picker.DocumentSaveOptions();
+    options.newFileNames = [fileName];
+    const context: common.UIAbilityContext =
+      this.getUIContext().getHostContext() as common.UIAbilityContext;
+    const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+    const uris: string[] = await documentPicker.save(options);
+    if (uris.length === 0) return;
+    this.writeExportBytes(uris[0], bytes);
+    promptAction.showToast({ message: `已导出 ${fileName}`, duration: 1600 });
+  }
+
+  private async exportArtifact(index: number): Promise<void> {
+    if (this.project === null || this.busy) return;
+    this.busy = true;
+    try {
+      const safeName: string = this.project.name.replace(/[\\/:*?"<>|]/g, '-');
+      if (index === 0) {
+        const zip: Uint8Array = await getNovelWorkspaceService().exportWorkspaceZip(this.projectId);
+        await this.saveExportFile(`${safeName}.amber-novel.zip`, zip);
+      } else {
+        const book: NovelBookExportBundle = await getNovelWorkspaceService().exportBook(this.projectId);
+        if (index === 1) await this.saveExportFile(`${safeName}.txt`, this.encodeExportText(book.text));
+        else if (index === 2) {
+          await this.saveExportFile(`${safeName}.md`, this.encodeExportText(book.markdown));
+        } else if (index === 3) await this.saveExportFile(`${safeName}.epub`, book.epub);
+      }
+      this.errorMsg = '';
+    } catch (e) {
+      this.errorMsg = `导出失败：${String(e)}`;
+      promptAction.showToast({ message: this.errorMsg, duration: 2400 });
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private showExportMenu(): void {
+    if (this.project === null || this.busy) return;
+    promptAction.showActionMenu({
+      buttons: [
+        { text: '工作区 ZIP', color: INK },
+        { text: '正文 TXT', color: INK },
+        { text: '正文 Markdown', color: INK },
+        { text: '正文 EPUB', color: INK },
+      ],
+    }).then((result: ExportMenuResult): void => {
+      this.exportArtifact(result.index);
+    }).catch((): void => {});
   }
 
   // ===== 聊天 =====
@@ -1268,8 +1345,9 @@ struct NovelWorkspacePage {
             .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
-          Text('导出').fontSize(14).fontColor(ACCENT).margin({ left: 10 })
-            .onClick((): void => { this.exportMarkdown(); })
+          Text('导出').fontSize(14).fontColor(this.busy ? INK4 : ACCENT)
+            .width(44).height(44).textAlign(TextAlign.Center)
+            .onClick((): void => { this.showExportMenu(); })
         }
         .width('100%').padding({ left: 14, right: 14, top: this.statusBarHeight + 2, bottom: 11 })
         .backgroundColor(BG)

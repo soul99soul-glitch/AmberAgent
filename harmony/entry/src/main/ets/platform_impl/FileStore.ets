@@ -22,7 +22,7 @@ class OhosFileStore implements FileStore {
   // 相对路径校验:拒绝绝对路径与 '.'/'..' 段 — joinPath 只折叠斜杠不消 '..',
   // 不校验时 writeText('../x') 可逃出 filesDir(模型侧路径属外部输入,防御纵深)
   private validateRelativePath(path: string): void {
-    if (path.startsWith('/') || path.startsWith('\\')) {
+    if (path.startsWith('/') || path.startsWith('\\') || path.indexOf('\\') >= 0) {
       throw new Error(`FileStore path must be relative: ${path}`);
     }
     const segs: string[] = path.split('/');
@@ -70,6 +70,35 @@ class OhosFileStore implements FileStore {
     }
   }
 
+  async readBytes(path: string): Promise<Uint8Array | null> {
+    const full: string = await this.resolve(path);
+    const ok: boolean = await fileIo.access(full);
+    if (!ok) return null;
+    const file: fileIo.File = await fileIo.open(full, fileIo.OpenMode.READ_ONLY);
+    try {
+      const stat: fileIo.Stat = await fileIo.stat(file.fd);
+      const buffer: ArrayBuffer = new ArrayBuffer(stat.size);
+      await fileIo.read(file.fd, buffer);
+      return new Uint8Array(buffer);
+    } finally {
+      await fileIo.close(file);
+    }
+  }
+
+  async writeBytes(path: string, content: Uint8Array): Promise<void> {
+    const full: string = await this.resolve(path);
+    await this.ensureParent(full);
+    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC;
+    const file: fileIo.File = await fileIo.open(full, mode);
+    try {
+      const exact: ArrayBuffer = (content.buffer as ArrayBuffer)
+        .slice(content.byteOffset, content.byteOffset + content.byteLength);
+      await fileIo.write(file.fd, exact);
+    } finally {
+      await fileIo.close(file);
+    }
+  }
+
   async appendText(path: string, content: string): Promise<void> {
     const full: string = await this.resolve(path);
     await this.ensureParent(full);
@@ -99,6 +128,40 @@ class OhosFileStore implements FileStore {
     const ok: boolean = await fileIo.access(full);
     if (!ok) return;
     await fileIo.unlink(full);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    const source: string = await this.resolve(from);
+    const target: string = await this.resolve(to);
+    await this.ensureParent(target);
+    await fileIo.rename(source, target);
+  }
+
+  async deleteTree(path: string): Promise<void> {
+    const full: string = await this.resolve(path);
+    const remove = async (target: string): Promise<void> => {
+      const ok: boolean = await fileIo.access(target);
+      if (!ok) return;
+      const stat: fileIo.Stat = await fileIo.stat(target);
+      if (stat.isDirectory()) {
+        const names: string[] = await fileIo.listFile(target);
+        for (let i: number = 0; i < names.length; i++) {
+          await remove(joinPath(target, names[i]));
+        }
+        await fileIo.rmdir(target);
+      } else {
+        await fileIo.unlink(target);
+      }
+    };
+    await remove(full);
+  }
+
+  async isDirectory(path: string): Promise<boolean> {
+    const full: string = await this.resolve(path);
+    const ok: boolean = await fileIo.access(full);
+    if (!ok) return false;
+    const stat: fileIo.Stat = await fileIo.stat(full);
+    return stat.isDirectory();
   }
 
   async mkdir(dir: string): Promise<void> {

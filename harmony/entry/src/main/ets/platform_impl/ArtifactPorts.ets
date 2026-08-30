@@ -222,10 +222,11 @@ export const createDeflateRawPort = (): DeflateRawPort =>
     const cap: number = Math.max(
       data.length + (data.length >> 12) + (data.length >> 14) +
       (data.length >> 25) + 64, 256);
+    const outBuffer: ArrayBuffer = new ArrayBuffer(cap);
     const strm: zlib.ZStream = {
       nextIn: inCopy.buffer as ArrayBuffer,
       availableIn: inCopy.length,
-      nextOut: new ArrayBuffer(cap),
+      nextOut: outBuffer,
       availableOut: cap,
     };
     const zip = zlib.createZipSync();
@@ -240,14 +241,18 @@ export const createDeflateRawPort = (): DeflateRawPort =>
     try {
       const status: zlib.ReturnStatus =
         await zip.deflate(strm, zlib.CompressFlushMode.FINISH);
+      const current: zlib.ZStream = await zip.getZStream();
       if (status !== zlib.ReturnStatus.STREAM_END && status !== zlib.ReturnStatus.OK) {
         throw new Error(`deflate failed: ${status}`);
       }
-      if (status === zlib.ReturnStatus.OK && (strm.availableOut ?? 0) === 0) {
+      if (status === zlib.ReturnStatus.OK && (current.availableOut ?? 0) === 0) {
         throw new Error('deflate output overflow (compressBound too small)');
       }
-      const total: number = strm.totalOut ?? 0;
-      return new Uint8Array((strm.nextOut as ArrayBuffer).slice(0, total));
+      // API 12 的 ZStream 入参不会回写执行后的状态，必须重新 getZStream()。
+      // 官方 FAQ 明确指出直接读取 strm.totalOut 会一直为 0；输出字节仍从
+      // 调用方持有的缓冲区读取，因为设备实现不保证 getZStream() 回传 nextOut。
+      const total: number = current.totalOut ?? 0;
+      return new Uint8Array(outBuffer.slice(0, total));
     } finally {
       await zip.deflateEnd(strm);
     }

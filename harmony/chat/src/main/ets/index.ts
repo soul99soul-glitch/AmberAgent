@@ -682,7 +682,9 @@ export type {
 } from './chat/xml_pull.ts';
 
 // ===== D-113:ZIP 读取(中央目录序)+ PptxParser 全文 =====
-export { extractZipEntryData, readZipEntries, readZipEntryText } from './chat/zip_archive.ts';
+export {
+  extractZipEntryData, readZipEntries, readZipEntryBytes, readZipEntryText,
+} from './chat/zip_archive.ts';
 export type { InflateRawPort, ZipEntryRecord } from './chat/zip_archive.ts';
 export { parsePptxFromZip, parsePptxNotesXml, parsePptxSlideXml } from './chat/pptx_parser.ts';
 

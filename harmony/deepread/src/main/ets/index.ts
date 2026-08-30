@@ -135,6 +135,25 @@ export {
 } from './novel/suggestion_engine.ts';
 export type { NovelProjectRepository } from './novel/repository.ts';
 export { createFileNovelRepository, migrateNovelProject } from './novel/repository.ts';
+export type { NovelWorkspaceManifest } from './novel/workspace_contract.ts';
+export {
+  NOVEL_WORKSPACE_FORMAT, NOVEL_WORKSPACE_VERSION, parseNovelWorkspaceManifest,
+  serializeNovelWorkspaceManifest, validateNovelWorkspacePath, chapterFileName,
+} from './novel/workspace_contract.ts';
+export type {
+  NovelWorkspaceArchiveEntry, NovelWorkspaceArchiveFile, NovelWorkspaceArchiveCodec,
+  NovelWorkspaceExchangeLimits, NovelWorkspaceValidatedImport,
+} from './novel/workspace_exchange.ts';
+export {
+  NOVEL_WORKSPACE_MANIFEST_PATH, DEFAULT_NOVEL_WORKSPACE_EXCHANGE_LIMITS,
+  decodeNovelWorkspaceUtf8, importNovelWorkspaceArchive, exportNovelWorkspaceArchive,
+} from './novel/workspace_exchange.ts';
+export type {
+  NovelBookChapterSnapshot, NovelBookExportInput, NovelBookZipCompression,
+  NovelBookZipEntry, NovelBookEpubMetadata, NovelBookEpub, NovelBookExport,
+  NovelBookZipEncoder,
+} from './novel/workspace_book_export.ts';
+export { buildNovelBookExport, encodeNovelBookEpub } from './novel/workspace_book_export.ts';
 export type {
   NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
   NovelSettingProposalDraft, NovelSettingProposalsParsed,
