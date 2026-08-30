@@ -38,6 +38,11 @@ import type { DurableWorkspaceProposal, WorkspaceProposalPatch } from './workspa
 import { novelMessageText, novelMessageUi } from './transcript.ts';
 import { decodeNovelWorkspaceUtf8 } from './workspace_exchange.ts';
 import type { NovelWorkspaceArchiveFile } from './workspace_exchange.ts';
+import type {
+  DurableGhostwriteJob, GhostwriteClaimRef, GhostwriteStage,
+} from './ghostwrite.ts';
+import { createGhostwriteRunner } from './ghostwrite_runner.ts';
+import type { GhostwriteRunner } from './ghostwrite_runner.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
@@ -133,6 +138,7 @@ export interface NovelCreationDeps {
 }
 
 const DEFAULT_IDLE_TIMEOUT_MS: number = 90_000;
+const GHOSTWRITE_LEASE_MS: number = 12 * 60 * 60 * 1000;
 
 // 事件发射器:仅缓冲终结事件(completed/interrupted/failed),供晚订阅补齐。
 // delta/status/activity 不入 buffer(一次生成可达数十万 delta,全缓冲会 OOM)。
@@ -235,16 +241,25 @@ interface LiveBatchPolishRun {
 export class NovelCreation {
   private repository: NovelProjectRepository;
   private modelRunning: NovelModelRunning;
+  private ghostwriteRunner: GhostwriteRunner;
   private nowMs: () => number;
   private idleTimeoutMs: number;
   private projectRuns: Map<string, LiveRun> = new Map();
   private batchPolishRuns: Map<string, LiveBatchPolishRun> = new Map();
   private batchPolishProjectRuns: Map<string, NovelBatchPolishRun> = new Map();
   private polishMessageChapterIds: Map<string, string> = new Map();
+  // 仅防止同一进程重复驱动；durable job/repository 始终是唯一事实源。
+  private drivingGhostwriteJobs: Set<string> = new Set();
 
   constructor(deps: NovelCreationDeps) {
     this.repository = deps.repository;
     this.modelRunning = deps.modelRunning;
+    this.ghostwriteRunner = createGhostwriteRunner({
+      repository: deps.repository,
+      modelRunning: deps.modelRunning,
+      nowMs: deps.nowMs,
+      makeId: (prefix: string): string => `${prefix}:${novelId()}`,
+    });
     this.nowMs = deps.nowMs ?? ((): number => Date.now());
     this.idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
@@ -257,11 +272,77 @@ export class NovelCreation {
   async open(projectId: string): Promise<NovelProject> {
     const project: NovelProject = await this.repository.loadProject(projectId);
     const repaired: boolean = await this.reconcileDeniedWorkspaceTools(projectId, project);
-    return repaired ? await this.repository.loadProject(projectId) : project;
+    const opened: NovelProject = repaired ? await this.repository.loadProject(projectId) : project;
+    void this.recoverGhostwriteDriver(projectId).catch((): void => {
+      // Durable job remains visible as paused/failed; open 本身不因后台接管失败而隐藏项目。
+    });
+    return opened;
   }
 
   workspaceStatus(projectId: string): Promise<NovelWorkspaceStatus> {
     return this.repository.workspaceStatus(projectId);
+  }
+
+  async ghostwriteJob(projectId: string): Promise<DurableGhostwriteJob | null> {
+    const jobs: DurableGhostwriteJob[] = await this.repository.listGhostwriteJobs(projectId);
+    jobs.sort((left: DurableGhostwriteJob, right: DurableGhostwriteJob): number =>
+      right.updatedAt - left.updatedAt);
+    const active: DurableGhostwriteJob | undefined = jobs.find(
+      (job: DurableGhostwriteJob): boolean => job.stage !== 'completed' && job.stage !== 'cancelled');
+    if (active === undefined) return null;
+    const progress = await this.repository.ghostwriteProgress(projectId, active.jobId);
+    return { ...active, progress };
+  }
+
+  async startGhostwrite(projectId: string, targetChapterCount: number): Promise<DurableGhostwriteJob> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    await this.validateGhostwriteModels(projectId, project);
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const jobId: string = novelId();
+    const job: DurableGhostwriteJob = await this.repository.startGhostwriteJob(
+      projectId, status.cas, jobId, `${jobId}:plan:${project.chapters.length + 1}`,
+      targetChapterCount, this.nowMs());
+    this.launchGhostwriteDriver(projectId, job.jobId);
+    return job;
+  }
+
+  async pauseGhostwrite(projectId: string, jobId: string): Promise<DurableGhostwriteJob> {
+    const job: DurableGhostwriteJob = await this.repository.loadGhostwriteJob(projectId, jobId);
+    const claim: GhostwriteClaimRef = await this.ensureGhostwriteClaim(projectId, job);
+    const paused: DurableGhostwriteJob =
+      await this.repository.pauseGhostwriteJob(projectId, jobId, claim, this.nowMs());
+    this.ghostwriteRunner.cancel(projectId, jobId);
+    return paused;
+  }
+
+  async resumeGhostwrite(projectId: string, jobId: string): Promise<DurableGhostwriteJob> {
+    const resumed: DurableGhostwriteJob = await this.repository.resumeGhostwriteJob(
+      projectId, jobId, this.nowMs());
+    this.launchGhostwriteDriver(projectId, jobId);
+    return resumed;
+  }
+
+  async retryGhostwrite(projectId: string, jobId: string): Promise<DurableGhostwriteJob> {
+    const retried: DurableGhostwriteJob = await this.repository.retryGhostwriteJob(
+      projectId, jobId, this.nowMs());
+    this.launchGhostwriteDriver(projectId, jobId);
+    return retried;
+  }
+
+  async cancelGhostwrite(projectId: string, jobId: string): Promise<DurableGhostwriteJob> {
+    let job: DurableGhostwriteJob = await this.repository.loadGhostwriteJob(projectId, jobId);
+    if (job.claim === null) {
+      if (job.stage === 'paused') {
+        job = await this.repository.resumeGhostwriteJob(projectId, jobId, this.nowMs());
+      } else if (job.stage === 'failed') {
+        job = await this.repository.retryGhostwriteJob(projectId, jobId, this.nowMs());
+      }
+    }
+    const claim: GhostwriteClaimRef = await this.ensureGhostwriteClaim(projectId, job);
+    const cancelled: DurableGhostwriteJob =
+      await this.repository.cancelGhostwriteJob(projectId, jobId, claim, this.nowMs());
+    this.ghostwriteRunner.cancel(projectId, jobId);
+    return cancelled;
   }
 
   async createBranch(projectId: string, name: string): Promise<NovelProject> {
@@ -1032,6 +1113,63 @@ export class NovelCreation {
       }
     }
     return changed;
+  }
+
+  async validateGhostwriteModels(projectId: string, loadedProject: NovelProject | null = null): Promise<void> {
+    const project: NovelProject = loadedProject ?? await this.repository.loadProject(projectId);
+    await this.modelRunning.validate(project.modelPolicy.writing, projectId);
+    const reviewTarget = project.modelPolicy.review ?? project.modelPolicy.writing;
+    if (JSON.stringify(reviewTarget) !== JSON.stringify(project.modelPolicy.writing)) {
+      await this.modelRunning.validate(reviewTarget, projectId);
+    }
+    if (project.modelPolicy.stateSync !== null &&
+      JSON.stringify(project.modelPolicy.stateSync) !== JSON.stringify(reviewTarget)) {
+      await this.modelRunning.validate(project.modelPolicy.stateSync, projectId);
+    }
+  }
+
+  private async ensureGhostwriteClaim(
+    projectId: string, job: DurableGhostwriteJob,
+  ): Promise<GhostwriteClaimRef> {
+    const now: number = this.nowMs();
+    if (job.claim !== null && now < job.claim.leaseUntil) {
+      return { token: job.claim.token, epoch: job.claim.epoch };
+    }
+    const claimed: DurableGhostwriteJob = await this.repository.claimGhostwriteJob(
+      projectId, job.jobId, novelId(), now, GHOSTWRITE_LEASE_MS);
+    if (claimed.claim === null) throw invalidInput('ghostwrite claim 未建立');
+    return { token: claimed.claim.token, epoch: claimed.claim.epoch };
+  }
+
+  private canDriveGhostwriteStage(stage: GhostwriteStage): boolean {
+    return stage !== 'paused' && stage !== 'waiting_user' && stage !== 'failed' &&
+      stage !== 'cancelled' && stage !== 'completed';
+  }
+
+  private launchGhostwriteDriver(projectId: string, jobId: string): void {
+    const key: string = `${projectId}:${jobId}`;
+    if (this.drivingGhostwriteJobs.has(key)) return;
+    this.drivingGhostwriteJobs.add(key);
+    const ownerToken: string = novelId();
+    void this.ghostwriteRunner.run(projectId, jobId, ownerToken, GHOSTWRITE_LEASE_MS)
+      .catch((): void => {
+        // runner 已将可归属错误写回 durable failed；owner 被暂停/取消抢占时保留新 durable 状态。
+      })
+      .finally((): void => { this.drivingGhostwriteJobs.delete(key); });
+  }
+
+  private async recoverGhostwriteDriver(projectId: string): Promise<void> {
+    const job: DurableGhostwriteJob | null = await this.ghostwriteJob(projectId);
+    if (job === null || !this.canDriveGhostwriteStage(job.stage)) return;
+    const key: string = `${projectId}:${job.jobId}`;
+    if (this.drivingGhostwriteJobs.has(key)) return;
+    const now: number = this.nowMs();
+    if (job.claim !== null && now < job.claim.leaseUntil) {
+      const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
+      await this.repository.pauseGhostwriteJob(projectId, job.jobId, staleClaim, now);
+      await this.repository.resumeGhostwriteJob(projectId, job.jobId, now);
+    }
+    this.launchGhostwriteDriver(projectId, job.jobId);
   }
 
   private waitForNovelRun(run: NovelRun): Promise<NovelRunEvent> {

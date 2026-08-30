@@ -151,7 +151,14 @@ class ChatBackedNovelModel implements NovelModelRunning {
         flushIntervalMs: 0,
         nowMs: this.deps.nowMs,
       };
-      const tools: AgentTool[] = resolved.tools ?? [];
+      const configuredTools: AgentTool[] = resolved.tools ?? [];
+      const tools: AgentTool[] = request.toolProfile === 'none'
+        ? []
+        : request.toolProfile === 'read_only'
+          ? configuredTools.filter((tool: AgentTool): boolean =>
+            tool.name === 'novel_workspace_list' || tool.name === 'novel_workspace_read' ||
+            tool.name === 'novel_workspace_grep' || tool.name === 'novel_workspace_status')
+          : configuredTools;
       const makeProviderForStep = resolved.makeProviderForStep;
       if (tools.length > 0 && makeProviderForStep === undefined) {
         throw new Error('Novel 工具已启用，但未配置逐步 Provider');

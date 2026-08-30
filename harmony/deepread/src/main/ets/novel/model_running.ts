@@ -17,12 +17,16 @@ export type NovelModelOperation =
     verdict: NovelToolContinuationVerdict;
   };
 
+export type NovelModelToolProfile = 'all' | 'read_only' | 'none';
+
 export interface NovelModelRequest {
   runId: string;
   projectId: string;
   systemPrompt: string;
   maxOutputTokens: number | null;
   modelTarget: NovelModelTarget;
+  // C6 candidate/review/planning 必须只读；普通创作 turn 默认保留完整工具目录。
+  toolProfile?: NovelModelToolProfile;
   // Novel transcript 的 canonical 完整历史；adapter 不再从纯文本重建消息。
   history: UIMessage[];
   operation: NovelModelOperation;

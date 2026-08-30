@@ -364,6 +364,42 @@ test('novel adapter: checkpoint 必须完成后才调用 provider，并保持 us
   assert.deepEqual(checkpointRoles, ['user', 'assistant']);
 });
 
+test('novel adapter: C6 read_only profile 复用同一 tool loop 但排除 workspace write', async () => {
+  const provider: ChatStreamProvider = {
+    streamText(_messages: UIMessage[], onChunk: (chunk: MessageChunk) => void): Promise<void> {
+      onChunk(chunkOf('只读完成'));
+      return Promise.resolve();
+    },
+  };
+  const execute = async (_input: JsonValue): Promise<UIMessagePart[]> => [];
+  const tools: AgentTool[] = [
+    makeAgentTool({ name: 'novel_workspace_read', description: 'read', execute }),
+    makeAgentTool({ name: 'novel_workspace_status', description: 'status', execute }),
+    makeAgentTool({ name: 'ask_user', description: 'ask', execute }),
+    makeAgentTool({
+      name: 'novel_workspace_write', description: 'write', needsApproval: true, execute,
+    }),
+  ];
+  let stepToolNames: string[] = [];
+  const adapter = createNovelInteractiveAdapter({
+    resolveRuntime: async () => ({
+      assistant: makeAssistant({}),
+      provider,
+      tools,
+      makeProviderForStep: (definitions: ChatToolDefinition[]): ChatStreamProvider => {
+        stepToolNames = definitions.map((definition: ChatToolDefinition): string => definition.name);
+        return provider;
+      },
+    }),
+    createAbortController: (): AbortControllerLike => new TestAbortController(),
+  });
+  const readOnlyRequest: NovelModelRequest = { ...request(), toolProfile: 'read_only' };
+  const events = await collectToTerminal(
+    callback => adapter.start(readOnlyRequest).subscribe(callback));
+  assert.equal(events.at(-1)?.kind, 'completed');
+  assert.deepEqual(stepToolNames, ['novel_workspace_read', 'novel_workspace_status']);
+});
+
 test('novel adapter: ask_user pending→checkpoint→同 toolCallId answer continuation→工具输出→终态', async () => {
   const script: MessageChunk[][] = [
     [toolChunkOf('ask-1', 'ask_user', JSON.stringify({

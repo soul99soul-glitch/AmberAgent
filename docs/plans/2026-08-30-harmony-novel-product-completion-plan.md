@@ -279,6 +279,25 @@ unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖�
 验收：计划冻结、候选隔离、审核关联、blocking 分类、两次重写上限、计划轮换/最终章、旧 owner、
 原子收录、暂停/冷恢复及 5/10 章连续运行全部有测试和真实 provider 证据。
 
+### C6 执行记录（2026-08-31）
+
+- 新增单一 durable ghostwrite domain/runner/repository 链：1–10 章（默认 5）、冻结计划、四类审核发现、
+  最多两次定向重写、review next plan 优先、单次只读 planner 与最终章清计划均已落地。
+- `.amber/jobs.json` 与候选/审核 checkpoint 归入既有 workspace staged install；chapter、plot、next plan、
+  ledger、undo、receipt、job cursor 在同一次 root swap 中提交。进度只投影当前 branch ancestry 内 receipt。
+- writer/reviewer/planner 精确使用 writing/review/stateSync 策略，统一复用 Chat adapter；运行 profile 只开放
+  list/read/grep/status，禁止 write 与 ask-user，不复制 provider、流、重试或工具循环。
+- `NovelCreation` 提供 start/pause/resume/retry/cancel/cold recovery；pause/cancel 先持久化终态，再通过
+  job→Chat runId 瞬时句柄中断真实 provider request，旧 claim/epoch/CAS 继续阻断竞态回写。
+- 创作页接入 durable 阶段卡、1–10 目标、冻结计划/candidate/review 详情、进度与动作；job 存在时分支、
+  设定、资料库与普通创作 mutation 入口锁定，页面离开只停止 UI 轮询，不取消 durable job。
+- 真机项目 `4` 保存本章计划后，模型门禁从计划缺失转为职责模型缺失；设备没有可用 Chat Provider/模型时
+  开始按钮正确禁用，截图 `/tmp/c6-final.jpeg`。此前错误把 global target 视为可用的假阳性已由同一
+  `NovelCreation.validateGhostwriteModels` 校验修复；未把无凭据环境冒充真实云端生成成功。
+- 验证：DeepRead 732/732、Chat 2033/2033，C6 聚焦 29/29；ArkTS lint 0 defects；AGC 签名构建、
+  指定真机覆盖安装、逻辑 review 与 UI review均通过。1/5/10 章连续 provider 编排已由受控 provider
+  回归覆盖；真实云端 provider 真机连续生成仍需设备配置可用模型后在 C8 终验复核。
+
 ## Phase C7 — Durable 润色、后台执行、通知与深链
 
 交付：

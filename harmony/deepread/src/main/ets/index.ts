@@ -181,6 +181,23 @@ export {
   refreshWorkspacePlotState, syncWorkspacePlot,
 } from './novel/workspace_history.ts';
 export type {
+  GhostwriteStage, GhostwriteFindingKind, GhostwriteFinding, FrozenPlan,
+  GhostwriteCandidate, GhostwriteReview, GhostwriteStateDelta, GhostwriteClaim,
+  GhostwriteClaimRef, GhostwriteProgress, DurableGhostwriteJob,
+  FreezeGhostwritePlanInput, MakeGhostwriteCandidateInput, MakeGhostwriteJobInput,
+} from './novel/ghostwrite.ts';
+export {
+  MIN_GHOSTWRITE_CHAPTER_COUNT, MAX_GHOSTWRITE_CHAPTER_COUNT,
+  DEFAULT_GHOSTWRITE_CHAPTER_COUNT, MAX_GHOSTWRITE_REWRITE_COUNT,
+  MIN_GHOSTWRITE_CHAPTER_ORDINAL, MAX_GHOSTWRITE_CHAPTER_ORDINAL,
+  defaultGhostwriteDigest, freezeGhostwritePlan, makeGhostwriteCandidate,
+  validateGhostwriteReview, makeGhostwriteJob, validateDurableGhostwriteJob,
+  ghostwriteReceipt, canTransitionGhostwrite, transitionGhostwriteJob,
+  withGhostwriteCandidate, applyGhostwriteReview, claimGhostwriteJob,
+  assertGhostwriteClaim, pauseGhostwriteJob, resumeGhostwriteJob,
+  projectGhostwriteProgress,
+} from './novel/ghostwrite.ts';
+export type {
   NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
   NovelSettingProposalDraft, NovelSettingProposalsParsed,
 } from './novel/discussion_structured.ts';

@@ -30,6 +30,18 @@ import {
 import type {
   DurableWorkspaceProposal, WorkspaceCommit, WorkspaceProposalPatch,
 } from './workspace_history.ts';
+import {
+  applyGhostwriteReview, assertGhostwriteClaim,
+  claimGhostwriteJob as claimGhostwriteJobDomain, freezeGhostwritePlan,
+  ghostwriteReceipt, makeGhostwriteJob, pauseGhostwriteJob as pauseGhostwriteJobDomain,
+  projectGhostwriteProgress, resumeGhostwriteJob as resumeGhostwriteJobDomain,
+  transitionGhostwriteJob, validateDurableGhostwriteJob, validateGhostwriteReview,
+  withGhostwriteCandidate,
+} from './ghostwrite.ts';
+import type {
+  DurableGhostwriteJob, GhostwriteCandidate, GhostwriteClaimRef, GhostwriteProgress,
+  GhostwriteReview, GhostwriteStage,
+} from './ghostwrite.ts';
 
 const LEGACY_PROJECTS_DIR: string = 'amberagent/novel-creation/projects';
 const LEGACY_SUFFIX: string = '.novel.json';
@@ -41,6 +53,7 @@ const STATE_FILE: string = '.amber/project-state.json';
 const LEDGER_FILE: string = '.amber/ledger.jsonl';
 const CHECKOUT_FILE: string = '.amber/checkout.json';
 const PROPOSALS_FILE: string = '.amber/proposals.json';
+const GHOSTWRITE_JOBS_FILE: string = '.amber/jobs.json';
 const MAX_PROJECT_BYTES: number = 16 * 1024 * 1024;
 const WORKSPACE_STATE_VERSION: number = 1;
 
@@ -94,6 +107,41 @@ export interface NovelProjectRepository {
   resolveProposal(
     id: string, proposalId: string, accept: boolean, commandId: string, resolvedAt: number,
   ): Promise<DurableWorkspaceProposal>;
+  listGhostwriteJobs(id: string): Promise<DurableGhostwriteJob[]>;
+  loadGhostwriteJob(id: string, jobId: string): Promise<DurableGhostwriteJob>;
+  startGhostwriteJob(
+    id: string, expected: NovelWorkspaceCas, jobId: string, planId: string,
+    targetChapterCount: number, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  claimGhostwriteJob(
+    id: string, jobId: string, token: string, now: number, leaseMs: number,
+  ): Promise<DurableGhostwriteJob>;
+  checkpointGhostwriteStage(
+    id: string, jobId: string, claim: GhostwriteClaimRef, nextStage: GhostwriteStage, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  checkpointGhostwriteCandidate(
+    id: string, jobId: string, claim: GhostwriteClaimRef,
+    candidate: GhostwriteCandidate, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  checkpointGhostwriteReview(
+    id: string, jobId: string, claim: GhostwriteClaimRef,
+    review: GhostwriteReview, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  failGhostwriteJob(
+    id: string, jobId: string, claim: GhostwriteClaimRef, reason: string, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  pauseGhostwriteJob(
+    id: string, jobId: string, claim: GhostwriteClaimRef, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  resumeGhostwriteJob(id: string, jobId: string, now: number): Promise<DurableGhostwriteJob>;
+  retryGhostwriteJob(id: string, jobId: string, now: number): Promise<DurableGhostwriteJob>;
+  cancelGhostwriteJob(
+    id: string, jobId: string, claim: GhostwriteClaimRef, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  commitGhostwriteChapter(
+    id: string, jobId: string, claim: GhostwriteClaimRef, commandId: string, now: number,
+  ): Promise<DurableGhostwriteJob>;
+  ghostwriteProgress(id: string, jobId: string): Promise<GhostwriteProgress[]>;
   deleteProject(id: string): Promise<void>;
   restorePrevious(): Promise<NovelProject | null>;
   installWorkspace(input: NovelWorkspaceValidatedImport): Promise<NovelProject>;
@@ -176,6 +224,18 @@ interface WorkspaceProposalStore {
   version: number;
   proposals: DurableWorkspaceProposal[];
   decisions: WorkspaceProposalDecision[];
+}
+
+interface WorkspaceGhostwriteJobStore {
+  version: number;
+  jobs: DurableGhostwriteJob[];
+}
+
+interface LoadedGhostwriteJob {
+  store: WorkspaceGhostwriteJobStore;
+  index: number;
+  job: DurableGhostwriteJob;
+  checkout: WorkspaceCheckout;
 }
 
 interface SnapshotFile {
@@ -359,6 +419,19 @@ const findReceipt = (commits: WorkspaceLedgerCommit[], receipt: string): Workspa
   return null;
 };
 
+const ancestryCommitIds = (commits: WorkspaceLedgerCommit[], head: string): Set<string> => {
+  const ancestry: Set<string> = new Set<string>();
+  let cursor: string | null = head;
+  while (cursor !== null) {
+    if (ancestry.has(cursor)) throw invalidInput('工作区 commit ancestry 存在环');
+    const commit: WorkspaceLedgerCommit | null = findCommit(commits, cursor);
+    if (commit === null) throw invalidInput(`工作区 commit ancestry 缺失: ${cursor}`);
+    ancestry.add(cursor);
+    cursor = commit.parent;
+  }
+  return ancestry;
+};
+
 const assertCas = (expected: NovelWorkspaceCas, actual: WorkspaceCheckout): void => {
   if (expected.branchId !== actual.branchId || expected.head !== actual.head ||
     expected.treeDigest !== actual.treeDigest) {
@@ -429,6 +502,45 @@ const parseProposalStore = (raw: string): WorkspaceProposalStore => {
     });
   }
   return { version: 1, proposals, decisions };
+};
+
+const emptyGhostwriteJobStore = (): WorkspaceGhostwriteJobStore => ({ version: 1, jobs: [] });
+
+const parseGhostwriteJobStore = (raw: string): WorkspaceGhostwriteJobStore => {
+  let value: WorkspaceGhostwriteJobStore;
+  try {
+    value = JSON.parse(raw) as WorkspaceGhostwriteJobStore;
+  } catch {
+    throw invalidInput('ghostwrite job store 无效');
+  }
+  if (value.version !== 1 || !Array.isArray(value.jobs)) throw invalidInput('ghostwrite job store 无效');
+  const jobs: DurableGhostwriteJob[] = [];
+  const jobIds: Set<string> = new Set<string>();
+  for (let i: number = 0; i < value.jobs.length; i++) {
+    const job: DurableGhostwriteJob = validateDurableGhostwriteJob(value.jobs[i]);
+    if (jobIds.has(job.jobId)) throw invalidInput(`ghostwrite job id 重复: ${job.jobId}`);
+    if (job.review !== null) {
+      if (job.candidate === null || job.frozenPlan === null) {
+        throw invalidInput('ghostwrite review 缺少 candidate 或 plan');
+      }
+      validateGhostwriteReview(job.review, job.candidate, job.frozenPlan);
+    }
+    const receipts: Set<string> = new Set<string>();
+    for (let j: number = 0; j < job.progress.length; j++) {
+      const progress: GhostwriteProgress = job.progress[j];
+      if (progress.branchId !== job.branchId ||
+        progress.receipt !== ghostwriteReceipt(
+          job.jobId, progress.chapterOrdinal, progress.planId, progress.planDigest, progress.candidateId,
+        ) ||
+        receipts.has(progress.receipt)) {
+        throw invalidInput('ghostwrite progress 无效');
+      }
+      receipts.add(progress.receipt);
+    }
+    jobIds.add(job.jobId);
+    jobs.push(job);
+  }
+  return { version: 1, jobs };
 };
 
 const materialPath = (material: NovelMaterial): string =>
@@ -820,7 +932,44 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     return raw === null ? emptyProposalStore() : parseProposalStore(raw);
   };
 
-  const installProposalStoreOnly = async (id: string, store: WorkspaceProposalStore): Promise<void> => {
+  const readGhostwriteJobStore = async (id: string): Promise<WorkspaceGhostwriteJobStore> => {
+    const raw: string | null = await fileStore.readText(joinPath(projectRoot(id), GHOSTWRITE_JOBS_FILE));
+    return raw === null ? emptyGhostwriteJobStore() : parseGhostwriteJobStore(raw);
+  };
+
+  const ghostwriteJobIndex = (store: WorkspaceGhostwriteJobStore, jobId: string): number => {
+    const index: number = store.jobs.findIndex(
+      (job: DurableGhostwriteJob): boolean => job.jobId === jobId);
+    if (index < 0) throw notFound('ghostwrite_job', jobId);
+    return index;
+  };
+
+  const replaceGhostwriteJob = (
+    store: WorkspaceGhostwriteJobStore, index: number, job: DurableGhostwriteJob,
+  ): WorkspaceGhostwriteJobStore => {
+    const jobs: DurableGhostwriteJob[] = store.jobs.slice();
+    jobs[index] = validateDurableGhostwriteJob(job);
+    return { version: 1, jobs };
+  };
+
+  const assertGhostwriteWorkspaceBinding = (
+    id: string, job: DurableGhostwriteJob, checkout: WorkspaceCheckout,
+  ): void => {
+    if (job.projectId !== id || job.branchId !== checkout.branchId) {
+      throw invalidInput('ghostwrite job 与当前 project/branch 不匹配');
+    }
+    assertCas(job.expectedCas, checkout);
+  };
+
+  const saveGhostwriteJobStoreOnly = async (
+    id: string, store: WorkspaceGhostwriteJobStore,
+  ): Promise<void> => {
+    await installPrivateStoreOnly(id, GHOSTWRITE_JOBS_FILE, JSON.stringify(store));
+  };
+
+  const installPrivateStoreOnly = async (
+    id: string, targetPath: string, content: string,
+  ): Promise<void> => {
     const live: string = projectRoot(id);
     const stage: string = stagingRoot(id);
     const backup: string = trashRoot(id);
@@ -828,14 +977,14 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     await fileStore.deleteTree(stage);
     for (let i: number = 0; i < files.length; i++) {
       const path: string = files[i].path;
-      if (path === PROPOSALS_FILE) continue;
+      if (path === targetPath) continue;
       if (path.startsWith('.amber/') || path.endsWith('.md') || path.endsWith('.yaml')) {
         await fileStore.writeText(joinPath(stage, path), decodeNovelWorkspaceUtf8(files[i].bytes));
       } else {
         await fileStore.writeBytes(joinPath(stage, path), files[i].bytes);
       }
     }
-    await fileStore.writeText(joinPath(stage, PROPOSALS_FILE), JSON.stringify(store));
+    await fileStore.writeText(joinPath(stage, targetPath), content);
     await fileStore.deleteTree(backup);
     await fileStore.rename(live, backup);
     try {
@@ -937,6 +1086,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     plotSyncedOverride?: string | null,
     plotContentOverride?: string | null,
     proposalStoreOverride: WorkspaceProposalStore | null = null,
+    ghostwriteJobStoreOverride: WorkspaceGhostwriteJobStore | null = null,
   ): Promise<NovelProject> => {
     const normalized: NovelProject = normalizeProject(validateProject(input));
     const activeBranchId: string = branchId ?? mainBranch(normalized).id;
@@ -987,6 +1137,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         file.path !== STATE_FILE && file.path !== LEDGER_FILE && file.path !== CHECKOUT_FILE &&
         file.path !== branchSnapshotPath(activeBranchId) &&
         !(proposalStoreOverride !== null && file.path === PROPOSALS_FILE) &&
+        !(ghostwriteJobStoreOverride !== null && file.path === GHOSTWRITE_JOBS_FILE) &&
         !(clearUndo && file.path === undoPath(activeBranchId)),
     );
     const preserved: NovelWorkspaceArchiveFile[] = preservedPublic.concat(preservedPrivate);
@@ -1080,6 +1231,9 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     if (proposalStoreOverride !== null) {
       files.push({ path: PROPOSALS_FILE, content: JSON.stringify(proposalStoreOverride) });
     }
+    if (ghostwriteJobStoreOverride !== null) {
+      files.push({ path: GHOSTWRITE_JOBS_FILE, content: JSON.stringify(ghostwriteJobStoreOverride) });
+    }
     for (let i: number = 0; i < files.length; i++) {
       await fileStore.writeText(joinPath(stage, files[i].path), files[i].content);
     }
@@ -1149,6 +1303,25 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     return parseLedger(raw);
   };
 
+  const loadBoundGhostwriteJob = async (id: string, jobId: string): Promise<LoadedGhostwriteJob> => {
+    await loadProjectInternal(id);
+    const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+    if (checkout === null) throw invalidInput('checkout 无效');
+    const store: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+    const index: number = ghostwriteJobIndex(store, jobId);
+    const job: DurableGhostwriteJob = store.jobs[index];
+    assertGhostwriteWorkspaceBinding(id, job, checkout);
+    return { store, index, job, checkout };
+  };
+
+  const loadClaimedGhostwriteJob = async (
+    id: string, jobId: string, claim: GhostwriteClaimRef, now: number,
+  ): Promise<LoadedGhostwriteJob> => {
+    const loaded: LoadedGhostwriteJob = await loadBoundGhostwriteJob(id, jobId);
+    assertGhostwriteClaim(loaded.job, claim, now);
+    return loaded;
+  };
+
   const replayProject = async (
     id: string, commits: WorkspaceLedgerCommit[], commandId: string,
   ): Promise<NovelProject | null> => {
@@ -1181,6 +1354,13 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
     const transformed: NovelProject = transform(current);
     if (transformed.id !== id) throw invalidInput('项目 id 不可变更');
+    if (transformed.branchSettings.thisChapterPlan !== current.branchSettings.thisChapterPlan) {
+      const jobStore: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+      const bound: DurableGhostwriteJob | undefined = jobStore.jobs.find(
+        (job: DurableGhostwriteJob): boolean => job.branchId === checkout.branchId &&
+          job.stage !== 'completed' && job.stage !== 'cancelled');
+      if (bound !== undefined) throw invalidInput('运行中的 ghostwrite job 已冻结本章计划');
+    }
     const next: NovelProject = { ...transformed, revision: current.revision + 1 };
     const changedIndex: number | null = chapterChangedAt(current.chapters, next.chapters);
     const unresolved: number | null = changedIndex === null
@@ -1473,7 +1653,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
           proposals: store.proposals.concat([proposal]),
           decisions: store.decisions,
         };
-        await installProposalStoreOnly(current.id, nextStore);
+        await installPrivateStoreOnly(current.id, PROPOSALS_FILE, JSON.stringify(nextStore));
         return proposal;
       }),
 
@@ -1516,7 +1696,7 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
           decisions: store.decisions.concat([decision]),
         };
         if (!accept) {
-          await installProposalStoreOnly(id, nextStore);
+          await installPrivateStoreOnly(id, PROPOSALS_FILE, JSON.stringify(nextStore));
           return resolved;
         }
         const commits: WorkspaceLedgerCommit[] = await readCommits(id);
@@ -1568,6 +1748,334 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
         );
         return resolved;
       }),
+
+    listGhostwriteJobs: (id: string): Promise<DurableGhostwriteJob[]> =>
+      withProjectLock(id, async (): Promise<DurableGhostwriteJob[]> => {
+        await loadProjectInternal(id);
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        return (await readGhostwriteJobStore(id)).jobs.filter(
+          (job: DurableGhostwriteJob): boolean => job.branchId === checkout.branchId).slice();
+      }),
+
+    loadGhostwriteJob: (id: string, jobId: string): Promise<DurableGhostwriteJob> =>
+      withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+        await loadProjectInternal(id);
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        const store: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+        const job: DurableGhostwriteJob = store.jobs[ghostwriteJobIndex(store, jobId)];
+        if (job.projectId !== id || job.branchId !== checkout.branchId) {
+          throw invalidInput('ghostwrite job 不属于当前 project/branch');
+        }
+        return job;
+      }),
+
+    startGhostwriteJob: (
+      id: string, expected: NovelWorkspaceCas, jobId: string, planId: string,
+      targetChapterCount: number, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const project: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      const branchState: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+      if (branchState.unresolvedFromOrdinal !== null || branchState.plotStale) {
+        throw invalidInput('当前分支存在 unresolved 或 plot stale，不能启动代笔');
+      }
+      const store: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+      if (store.jobs.some((job: DurableGhostwriteJob): boolean => job.jobId === jobId)) {
+        throw invalidInput(`ghostwrite job 已存在: ${jobId}`);
+      }
+      const active: DurableGhostwriteJob | undefined = store.jobs.find(
+        (job: DurableGhostwriteJob): boolean => job.branchId === checkout.branchId &&
+          job.stage !== 'completed' && job.stage !== 'cancelled');
+      if (active !== undefined) throw invalidInput('当前分支已有未结束的 ghostwrite job');
+      let maxOrdinal: number = 0;
+      for (let i: number = 0; i < project.chapters.length; i++) {
+        if (project.chapters[i].discarded) continue;
+        maxOrdinal = Math.max(maxOrdinal, chapterOrdinal(project.chapters[i], i + 1));
+      }
+      const frozenPlan = freezeGhostwritePlan({
+        planId,
+        content: project.branchSettings.thisChapterPlan,
+        expectedCas: {
+          branchId: expected.branchId,
+          head: expected.head,
+          treeDigest: expected.treeDigest,
+        },
+      });
+      const job: DurableGhostwriteJob = makeGhostwriteJob({
+        jobId,
+        projectId: id,
+        branchId: checkout.branchId,
+        now,
+        frozenPlan,
+        targetChapterCount,
+        startChapterOrdinal: maxOrdinal + 1,
+        modelPolicyAtStart: project.modelPolicy,
+      });
+      const nextStore: WorkspaceGhostwriteJobStore = {
+        version: 1,
+        jobs: store.jobs.concat([job]),
+      };
+      await saveGhostwriteJobStoreOnly(id, nextStore);
+      return job;
+    }),
+
+    claimGhostwriteJob: (
+      id: string, jobId: string, token: string, now: number, leaseMs: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadBoundGhostwriteJob(id, jobId);
+      const claimed: DurableGhostwriteJob = claimGhostwriteJobDomain(
+        loaded.job, token, now, leaseMs);
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, claimed));
+      return claimed;
+    }),
+
+    checkpointGhostwriteStage: (
+      id: string, jobId: string, claim: GhostwriteClaimRef, nextStage: GhostwriteStage, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      const next: DurableGhostwriteJob = transitionGhostwriteJob(loaded.job, nextStage, now);
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    checkpointGhostwriteCandidate: (
+      id: string, jobId: string, claim: GhostwriteClaimRef,
+      candidate: GhostwriteCandidate, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      const next: DurableGhostwriteJob = withGhostwriteCandidate(loaded.job, candidate, now);
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    checkpointGhostwriteReview: (
+      id: string, jobId: string, claim: GhostwriteClaimRef,
+      review: GhostwriteReview, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      let next: DurableGhostwriteJob;
+      if (loaded.job.stage === 'planning' && loaded.job.candidate !== null &&
+        loaded.job.frozenPlan !== null && loaded.job.review !== null) {
+        const checked: GhostwriteReview = validateGhostwriteReview(
+          review, loaded.job.candidate, loaded.job.frozenPlan);
+        if (checked.nextPlan === null) throw invalidInput('planner checkpoint 缺少下一章计划');
+        next = { ...loaded.job, stage: 'committing', review: checked, updatedAt: now };
+      } else {
+        next = applyGhostwriteReview(loaded.job, review, now);
+      }
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    failGhostwriteJob: (
+      id: string, jobId: string, claim: GhostwriteClaimRef, reason: string, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      const clean: string = reason.trim();
+      if (clean.length === 0) throw invalidInput('ghostwrite 失败原因为空');
+      const next: DurableGhostwriteJob = {
+        ...loaded.job,
+        stage: 'failed',
+        resumeStage: loaded.job.stage,
+        claim: null,
+        failure: clean,
+        updatedAt: now,
+      };
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    pauseGhostwriteJob: (
+      id: string, jobId: string, claim: GhostwriteClaimRef, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      const next: DurableGhostwriteJob = pauseGhostwriteJobDomain(loaded.job, claim, now);
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    resumeGhostwriteJob: (
+      id: string, jobId: string, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadBoundGhostwriteJob(id, jobId);
+      const next: DurableGhostwriteJob = resumeGhostwriteJobDomain(loaded.job, now);
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    retryGhostwriteJob: (
+      id: string, jobId: string, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadBoundGhostwriteJob(id, jobId);
+      if (loaded.job.stage !== 'failed') throw invalidInput('仅失败的 ghostwrite job 可重试');
+      const retryStage: GhostwriteStage = loaded.job.resumeStage === null
+        ? loaded.job.candidate === null ? 'writing' : 'reviewing'
+        : loaded.job.resumeStage;
+      if (retryStage === 'failed' || retryStage === 'cancelled' || retryStage === 'completed' ||
+        retryStage === 'paused' || retryStage === 'waiting_user') {
+        throw invalidInput('ghostwrite retry stage 无效');
+      }
+      const next: DurableGhostwriteJob = {
+        ...loaded.job,
+        stage: retryStage,
+        resumeStage: null,
+        claim: null,
+        failure: null,
+        updatedAt: now,
+      };
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    cancelGhostwriteJob: (
+      id: string, jobId: string, claim: GhostwriteClaimRef, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      const loaded: LoadedGhostwriteJob = await loadClaimedGhostwriteJob(id, jobId, claim, now);
+      const next: DurableGhostwriteJob = {
+        ...loaded.job,
+        stage: 'cancelled',
+        resumeStage: null,
+        claim: null,
+        updatedAt: now,
+      };
+      await saveGhostwriteJobStoreOnly(id, replaceGhostwriteJob(loaded.store, loaded.index, next));
+      return next;
+    }),
+
+    commitGhostwriteChapter: (
+      id: string, jobId: string, claim: GhostwriteClaimRef, commandId: string, now: number,
+    ): Promise<DurableGhostwriteJob> => withProjectLock(id, async (): Promise<DurableGhostwriteJob> => {
+      assertCommandId(commandId);
+      const store: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+      const index: number = ghostwriteJobIndex(store, jobId);
+      const storedJob: DurableGhostwriteJob = store.jobs[index];
+      if (storedJob.progress.some(
+        (entry: GhostwriteProgress): boolean => entry.receipt === commandId)) return storedJob;
+      const project: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertGhostwriteWorkspaceBinding(id, storedJob, checkout);
+      assertGhostwriteClaim(storedJob, claim, now);
+      if (storedJob.stage !== 'committing' || storedJob.candidate === null ||
+        storedJob.review === null || storedJob.frozenPlan === null) {
+        throw invalidInput('ghostwrite job 尚未到可提交阶段');
+      }
+      const candidate: GhostwriteCandidate = storedJob.candidate;
+      const review: GhostwriteReview = validateGhostwriteReview(
+        storedJob.review, candidate, storedJob.frozenPlan);
+      if (review.blocking || review.rewriteRequired) throw invalidInput('ghostwrite review 尚未通过');
+      const receipt: string = ghostwriteReceipt(
+        storedJob.jobId, candidate.chapterOrdinal, candidate.planId,
+        candidate.planDigest, candidate.candidateId,
+      );
+      if (commandId !== receipt) throw invalidInput('ghostwrite commit receipt 与候选不匹配');
+      if (candidate.chapterOrdinal !== storedJob.currentChapterOrdinal) {
+        throw invalidInput('ghostwrite candidate ordinal 与 job cursor 不匹配');
+      }
+      if (project.branchSettings.thisChapterPlan.trim() !== storedJob.frozenPlan.content) {
+        throw invalidInput('ghostwrite 冻结计划已变化');
+      }
+      for (let i: number = 0; i < project.chapters.length; i++) {
+        if (!project.chapters[i].discarded &&
+          chapterOrdinal(project.chapters[i], i + 1) === candidate.chapterOrdinal) {
+          throw invalidInput(`ghostwrite 目标章节已存在: ${candidate.chapterOrdinal}`);
+        }
+      }
+      const finalChapter: boolean = storedJob.currentChapterOrdinal === storedJob.endChapterOrdinal;
+      if (!finalChapter && review.nextPlan === null) {
+        throw invalidInput('非最终 ghostwrite 章节缺少下一章计划');
+      }
+      const chapter: NovelChapter = {
+        id: `chapter-${candidate.chapterOrdinal.toString().padStart(3, '0')}-ghostwrite-${jobId}`,
+        title: candidate.title,
+        content: candidate.content,
+        createdAt: now,
+        updatedAt: now,
+        discarded: false,
+      };
+      const nextPlanContent: string = finalChapter ? '' : (review.nextPlan ?? '').trim();
+      const nextProject: NovelProject = withNovelProjectCompatibility({
+        ...project,
+        chapters: project.chapters.concat([chapter]),
+        branchSettings: {
+          ...project.branchSettings,
+          thisChapterPlan: nextPlanContent,
+        },
+        revision: project.revision + 1,
+        updatedAt: Math.max(project.updatedAt, now),
+      });
+      const plotContent: string = `${review.stateDelta.plotState.trim()}\n\n` +
+        `## 本章要点\n${review.stateDelta.chapterHighlight.trim()}\n`;
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const prepared = buildSnapshotFiles(nextProject, checkout.branchId, plotContent);
+      const treeDigest: string = snapshotTreeDigest(prepared.files);
+      const commitId: string = `c${commits.length}-${treeDigest}`;
+      const nextCas: NovelWorkspaceCas = {
+        branchId: checkout.branchId,
+        head: commitId,
+        treeDigest,
+      };
+      const progress: GhostwriteProgress = {
+        chapterOrdinal: candidate.chapterOrdinal,
+        planId: candidate.planId,
+        planDigest: candidate.planDigest,
+        candidateId: candidate.candidateId,
+        receipt,
+        commitId,
+        branchId: checkout.branchId,
+      };
+      const nextFrozenPlan = finalChapter ? null : freezeGhostwritePlan({
+        planId: `${storedJob.jobId}:plan:${storedJob.currentChapterOrdinal + 1}`,
+        content: nextPlanContent,
+        expectedCas: nextCas,
+      });
+      const nextJob: DurableGhostwriteJob = validateDurableGhostwriteJob({
+        ...storedJob,
+        stage: finalChapter ? 'completed' : 'planning',
+        resumeStage: null,
+        expectedCas: nextCas,
+        frozenPlan: nextFrozenPlan,
+        candidate: null,
+        review: null,
+        rewriteCount: 0,
+        currentChapterOrdinal: finalChapter
+          ? storedJob.currentChapterOrdinal : storedJob.currentChapterOrdinal + 1,
+        claim: finalChapter ? null : storedJob.claim,
+        progress: storedJob.progress.concat([progress]),
+        failure: null,
+        updatedAt: now,
+      });
+      const nextStore: WorkspaceGhostwriteJobStore = replaceGhostwriteJob(store, index, nextJob);
+      const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+      await installSnapshot(
+        nextProject, 'generation_commit', [], checkout.branchId, receipt,
+        branch.unresolvedFromOrdinal, false, true, candidate.chapterOrdinal,
+        false, false, undefined, plotContent, null, nextStore,
+      );
+      const installedCheckout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (installedCheckout === null || installedCheckout.head !== commitId ||
+        installedCheckout.treeDigest !== treeDigest) {
+        throw invalidInput('ghostwrite 原子提交 checkout 校验失败');
+      }
+      return nextJob;
+    }),
+
+    ghostwriteProgress: (
+      id: string, jobId: string,
+    ): Promise<GhostwriteProgress[]> => withProjectLock(id, async (): Promise<GhostwriteProgress[]> => {
+      await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      const store: WorkspaceGhostwriteJobStore = await readGhostwriteJobStore(id);
+      const job: DurableGhostwriteJob = store.jobs[ghostwriteJobIndex(store, jobId)];
+      if (job.projectId !== id || job.branchId !== checkout.branchId) return [];
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      return projectGhostwriteProgress(job, ancestryCommitIds(commits, checkout.head));
+    }),
 
     deleteProject: (id: string): Promise<void> =>
       withProjectLock(id, async (): Promise<void> => {

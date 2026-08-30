@@ -19,6 +19,7 @@ import { NovelBranchSheet } from '../components/NovelBranchSheet.ets';
 import {
   NovelSettingsPane, NovelModelOptionView,
 } from '../components/NovelSettingsPane.ets';
+import { NovelGhostwriteCard } from '../components/NovelGhostwriteCard.ets';
 import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -36,7 +37,8 @@ import {
   NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
-  NovelModelPolicy, NovelBranchSettings, NovelConsistencyReport,
+  NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
+  DurableGhostwriteJob, GhostwriteStage,
 } from '@amber/deepread-domain';
 import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
@@ -176,6 +178,10 @@ struct NovelWorkspacePage {
   @State batchPolishResults: NovelBatchPolishSheetResult[] = [];
   private batchPolishRun: NovelBatchPolishRun | null = null;
   private batchPolishUnsub: (() => void) | null = null;
+  @State ghostwriteJob: DurableGhostwriteJob | null = null;
+  @State ghostwriteBusy: boolean = false;
+  @State ghostwriteModelAvailable: boolean = false;
+  @State ghostwriteModelIssue: string = '正在检查模型配置…';
 
   private projectId: string = '';
   private currentUnsub: (() => void) | null = null;
@@ -185,6 +191,7 @@ struct NovelWorkspacePage {
   private initialScrollArmed: boolean = false;
   private userTouchActive: boolean = false;
   private recoveryAttemptedToolCalls: Set<string> = new Set();
+  private ghostwritePollToken: number = 0;
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
@@ -199,6 +206,7 @@ struct NovelWorkspacePage {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.pageAlive = false;
     this.reloadToken++;
+    this.ghostwritePollToken++;
     if (this.activeRunId.length > 0) {
       getNovelCreation().interrupt(this.activeRunId);
     }
@@ -223,19 +231,73 @@ struct NovelWorkspacePage {
     const token: number = ++this.reloadToken;
     const projectId: string = this.projectId;
     try {
-      const project: NovelProject = await getNovelCreation().open(projectId);
-      const status: NovelWorkspaceStatus = await getNovelCreation().workspaceStatus(projectId);
+      const creation = getNovelCreation();
+      const project: NovelProject = await creation.open(projectId);
+      const status: NovelWorkspaceStatus = await creation.workspaceStatus(projectId);
+      const ghostwrite: DurableGhostwriteJob | null = await creation.ghostwriteJob(projectId);
+      let modelAvailable: boolean = true;
+      let modelIssue: string = '';
+      try {
+        await creation.validateGhostwriteModels(projectId, project);
+      } catch (error) {
+        modelAvailable = false;
+        modelIssue = error instanceof Error ? error.message : String(error);
+      }
       if (this.pageAlive && token === this.reloadToken) {
         this.project = project;
         this.workspaceStatus = status;
+        this.ghostwriteJob = ghostwrite;
+        if (ghostwrite !== null) this.settingsSection = 0;
+        this.ghostwriteModelAvailable = modelAvailable;
+        this.ghostwriteModelIssue = modelIssue;
         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
         // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
         this.initialScrollArmed = true;
         this.scheduleRecoverableTool(project);
+        this.scheduleGhostwritePoll();
       }
     } catch (e) {
       if (this.pageAlive && token === this.reloadToken) {
         this.errorMsg = `项目无法打开：${String(e)}`;
+      }
+    }
+  }
+
+  private ghostwriteStageRuns(stage: GhostwriteStage): boolean {
+    return stage !== 'paused' && stage !== 'waiting_user' && stage !== 'failed' &&
+      stage !== 'cancelled' && stage !== 'completed';
+  }
+
+  private scheduleGhostwritePoll(): void {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (job === null || !this.ghostwriteStageRuns(job.stage) || !this.pageAlive) return;
+    const token: number = ++this.ghostwritePollToken;
+    setTimeout((): void => {
+      if (!this.pageAlive || token !== this.ghostwritePollToken) return;
+      void this.pollGhostwrite(token);
+    }, 1200);
+  }
+
+  private async pollGhostwrite(token: number): Promise<void> {
+    try {
+      const previous: DurableGhostwriteJob | null = this.ghostwriteJob;
+      const next: DurableGhostwriteJob | null = await getNovelCreation().ghostwriteJob(this.projectId);
+      if (!this.pageAlive || token !== this.ghostwritePollToken) return;
+      this.ghostwriteJob = next;
+      if (next !== null) this.settingsSection = 0;
+      const previousProgress: number = previous?.progress.length ?? 0;
+      const nextProgress: number = next?.progress.length ?? 0;
+      if (previousProgress !== nextProgress || (previous !== null && next === null)) {
+        const project: NovelProject = await getNovelCreation().open(this.projectId);
+        const status: NovelWorkspaceStatus = await getNovelCreation().workspaceStatus(this.projectId);
+        if (!this.pageAlive || token !== this.ghostwritePollToken) return;
+        this.project = project;
+        this.workspaceStatus = status;
+      }
+      this.scheduleGhostwritePoll();
+    } catch (error) {
+      if (this.pageAlive && token === this.ghostwritePollToken) {
+        this.errorMsg = `代笔状态刷新失败：${String(error)}`;
       }
     }
   }
@@ -280,6 +342,106 @@ struct NovelWorkspacePage {
       }));
     } catch (error) {
       if (this.pageAlive) this.errorMsg = `模型列表加载失败：${String(error)}`;
+    }
+  }
+
+  private ghostwriteModelsReady(): boolean {
+    return this.ghostwriteModelAvailable;
+  }
+
+  private ghostwriteModelReason(): string {
+    return this.ghostwriteModelIssue.length > 0
+      ? this.ghostwriteModelIssue : '写作或审稿模型当前不可用。';
+  }
+
+  private ghostwritePlanReady(): boolean {
+    return (this.project?.branchSettings.thisChapterPlan.trim().length ?? 0) > 0;
+  }
+
+  private ghostwriteLocksWorkspace(): boolean {
+    return this.ghostwriteJob !== null;
+  }
+
+  private ghostwriteRuns(): boolean {
+    return this.ghostwriteJob !== null && this.ghostwriteStageRuns(this.ghostwriteJob.stage);
+  }
+
+  private async startGhostwrite(targetChapterCount: number): Promise<void> {
+    if (this.ghostwriteBusy || this.ghostwriteJob !== null) return;
+    this.ghostwriteBusy = true;
+    try {
+      this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount);
+      this.settingsSection = 0;
+      this.errorMsg = '';
+      this.scheduleGhostwritePoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('启动代笔失败', error);
+    } finally {
+      this.ghostwriteBusy = false;
+    }
+  }
+
+  private async pauseGhostwrite(): Promise<void> {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (this.ghostwriteBusy || job === null || !this.ghostwriteStageRuns(job.stage)) return;
+    this.ghostwriteBusy = true;
+    try {
+      this.ghostwritePollToken++;
+      this.ghostwriteJob = await getNovelCreation().pauseGhostwrite(this.projectId, job.jobId);
+      this.errorMsg = '';
+    } catch (error) {
+      this.showWorkspaceOperationError('暂停代笔失败', error);
+    } finally {
+      this.ghostwriteBusy = false;
+    }
+  }
+
+  private async resumeGhostwrite(): Promise<void> {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (this.ghostwriteBusy || job === null || job.stage !== 'paused') return;
+    this.ghostwriteBusy = true;
+    try {
+      this.ghostwriteJob = await getNovelCreation().resumeGhostwrite(this.projectId, job.jobId);
+      this.settingsSection = 0;
+      this.errorMsg = '';
+      this.scheduleGhostwritePoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('继续代笔失败', error);
+    } finally {
+      this.ghostwriteBusy = false;
+    }
+  }
+
+  private async retryGhostwrite(): Promise<void> {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (this.ghostwriteBusy || job === null || job.stage !== 'failed') return;
+    this.ghostwriteBusy = true;
+    try {
+      this.ghostwriteJob = await getNovelCreation().retryGhostwrite(this.projectId, job.jobId);
+      this.settingsSection = 0;
+      this.errorMsg = '';
+      this.scheduleGhostwritePoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('重试代笔失败', error);
+    } finally {
+      this.ghostwriteBusy = false;
+    }
+  }
+
+  private async cancelGhostwrite(): Promise<void> {
+    const job: DurableGhostwriteJob | null = this.ghostwriteJob;
+    if (this.ghostwriteBusy || job === null) return;
+    this.ghostwriteBusy = true;
+    try {
+      this.ghostwritePollToken++;
+      await getNovelCreation().cancelGhostwrite(this.projectId, job.jobId);
+      this.ghostwriteJob = null;
+      this.errorMsg = '';
+      await this.reload();
+    } catch (error) {
+      this.showWorkspaceOperationError('取消代笔失败', error);
+    } finally {
+      this.ghostwriteBusy = false;
     }
   }
 
@@ -637,7 +799,7 @@ struct NovelWorkspacePage {
   }
 
   private hasBlockingNovelRun(): boolean {
-    return this.activeRunId.length > 0 || this.batchPolishRunning;
+    return this.activeRunId.length > 0 || this.batchPolishRunning || this.ghostwriteLocksWorkspace();
   }
 
   openCollect(messageId: string): void {
@@ -1173,6 +1335,25 @@ struct NovelWorkspacePage {
         .onClick((): void => { this.archiveDiscussion(); })
     }
     .width('100%').padding({ top: 8 })
+    if (this.project !== null) {
+      NovelGhostwriteCard({
+        job: this.ghostwriteJob,
+        planReady: this.ghostwritePlanReady(),
+        modelReady: this.ghostwriteModelsReady(),
+        planDisabledReason: '请先在设定中保存本章计划。',
+        modelDisabledReason: this.ghostwriteModelReason(),
+        busy: this.ghostwriteBusy,
+        onStart: (targetChapterCount: number): void => { this.startGhostwrite(targetChapterCount); },
+        onPause: (): void => { this.pauseGhostwrite(); },
+        onResume: (): void => { this.resumeGhostwrite(); },
+        onRetry: (): void => { this.retryGhostwrite(); },
+        onCancel: (): void => { this.cancelGhostwrite(); },
+      })
+      .constraintSize({ maxHeight: this.ghostwriteJob === null ? 348 : 404 })
+      .margin({ left: 16, right: 16, bottom: 8 })
+      .borderRadius(14)
+      .clip(true)
+    }
     Column() {
       if (this.project !== null && this.project.messages.length === 0 && this.activeRunId.length === 0) {
         Column() {
@@ -1239,11 +1420,13 @@ struct NovelWorkspacePage {
 
         ChatInput({
           text: this.draft,
-          sending: this.hasBlockingNovelRun(),
+          sending: this.activeRunId.length > 0 || this.batchPolishRunning || this.ghostwriteRuns(),
+          disabled: this.ghostwriteLocksWorkspace() && !this.ghostwriteRuns(),
           onTextChange: (v: string): void => { this.draft = v; },
           onSend: (): void => { this.send(); },
           onStop: (): void => {
             if (this.batchPolishRunning) this.cancelBatchPolish();
+            else if (this.ghostwriteRuns()) this.pauseGhostwrite();
             else this.interrupt();
           },
           onClearInput: (): void => { this.draft = ''; },
@@ -1556,7 +1739,7 @@ struct NovelWorkspacePage {
         NovelSettingsPane({
           project: this.project,
           modelOptions: this.modelOptions,
-          busy: this.busy,
+          busy: this.busy || this.ghostwriteLocksWorkspace(),
           onSaveModelPolicy: (policy: NovelModelPolicy): void => {
             this.saveNovelModelPolicy(policy);
           },
@@ -1577,13 +1760,18 @@ struct NovelWorkspacePage {
 
   @Builder
   settingsSectionChip(label: string, section: number): void {
-    Text(label).fontSize(13).fontColor(this.settingsSection === section ? ACCENT : INK3)
+    Text(label).fontSize(13)
+      .fontColor(section === 1 && this.ghostwriteLocksWorkspace()
+        ? INK4 : (this.settingsSection === section ? ACCENT : INK3))
       .layoutWeight(1).height(44).textAlign(TextAlign.Center)
       .backgroundColor(this.settingsSection === section ? SURFACE : SURFACE2)
       .borderRadius(12)
       .border({ width: 1, color: this.settingsSection === section ? ACCENT : LINE })
       .margin({ left: 4, right: 4 })
-      .onClick((): void => { this.settingsSection = section; })
+      .opacity(section === 1 && this.ghostwriteLocksWorkspace() ? 0.55 : 1)
+      .onClick((): void => {
+        if (section !== 1 || !this.ghostwriteLocksWorkspace()) this.settingsSection = section;
+      })
   }
 
   filteredMaterials(): NovelMaterial[] {
@@ -1605,12 +1793,14 @@ struct NovelWorkspacePage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.workspaceStatus !== null) {
             Text(`${this.workspaceStatus.activeBranchName} ▾`)
-              .fontSize(12).fontColor(this.busy ? INK4 : ACCENT)
+              .fontSize(12).fontColor(this.busy || this.ghostwriteLocksWorkspace() ? INK4 : ACCENT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .constraintSize({ minWidth: 44, maxWidth: 104 })
               .height(44).textAlign(TextAlign.Center)
               .padding({ left: 8, right: 8 })
-              .onClick((): void => { if (!this.busy) this.branchSheetOpen = true; })
+              .onClick((): void => {
+                if (!this.busy && !this.ghostwriteLocksWorkspace()) this.branchSheetOpen = true;
+              })
               .accessibilityText(`当前分支 ${this.workspaceStatus.activeBranchName}，打开分支面板`)
           }
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
@@ -1674,7 +1864,7 @@ struct NovelWorkspacePage {
           visible: this.branchSheetOpen,
           activeBranchId: this.workspaceStatus.activeBranchId,
           branches: this.workspaceStatus.branches,
-          busy: this.busy,
+          busy: this.busy || this.ghostwriteLocksWorkspace(),
           canUndo: this.workspaceStatus.canUndo,
           unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
           plotStale: this.workspaceStatus.plotStale,

@@ -79,20 +79,21 @@ const toolModel = (
           subscribers.forEach(callback => callback({ kind: 'waiting_user' }));
           return;
         }
-        const verdict = request.operation.verdict.kind;
+        const continuation = request.operation;
+        const verdict = continuation.verdict.kind;
         let updated: UIMessage[] = replaceTool(
-          request.history, request.operation.toolCallId, verdict);
+          request.history, continuation.toolCallId, verdict);
         if (verdict === 'approved') {
           // 真实 adapter 先 checkpoint approved/no-output，再由 dispatcher 调 tool port。
           updated = updated.map((message: UIMessage): UIMessage => ({
             ...message,
             parts: message.parts.map((part: UIMessagePart): UIMessagePart =>
-              part.type === 'tool' && part.toolCallId === request.operation.toolCallId
+              part.type === 'tool' && part.toolCallId === continuation.toolCallId
                 ? { ...part, output: [] } : part),
           }));
           await request.checkpoint(updated);
           await executeApproved();
-          updated = replaceTool(request.history, request.operation.toolCallId, verdict);
+          updated = replaceTool(request.history, continuation.toolCallId, verdict);
         }
         const messages: UIMessage[] = updated.concat([makeAssistantMessage('已处理写入决定。')]);
         await request.checkpoint(messages);

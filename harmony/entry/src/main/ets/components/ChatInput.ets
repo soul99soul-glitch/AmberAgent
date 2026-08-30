@@ -27,6 +27,7 @@ export struct ChatInput {
   @StorageProp('accentColor') accentColorStore: string = ACCENT;
   @Prop text: string = '';
   @Prop sending: boolean = false;
+  @Prop disabled: boolean = false;
   @Prop editing: boolean = false;
   @Prop hasImages: boolean = false;
   @Prop subAgentEnabled: boolean = false;
@@ -62,7 +63,7 @@ export struct ChatInput {
   // 斜杠命令可见:text 以 / 开头且非编辑态
   private isSlashVisible(): boolean {
     // 支持半角 / 和全角 ／(中文输入法兼容,Android ChatInputComposers.kt:765-771)
-    return !this.editing &&
+    return !this.disabled && !this.editing &&
       (this.text.startsWith('/') || this.text.startsWith('／')) &&
       this.text.indexOf(' ') < 0;
   }
@@ -194,7 +195,8 @@ export struct ChatInput {
             .maxLines(this.attachExpanded ? 1 : 4)
             .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
             .lineHeight(lineHeightForSize(BODY))
-            .onChange((v: string): void => { this.onTextChange(v); })
+            .enabled(!this.disabled)
+            .onChange((v: string): void => { if (!this.disabled) this.onTextChange(v); })
         }
         .layoutWeight(1)
         .constraintSize({ minHeight: 44, maxHeight: this.attachExpanded ? 44 : 111 })
@@ -217,7 +219,7 @@ export struct ChatInput {
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })
           .onTouch((e: TouchEvent): void => { this.pressTouch(false, e); })
-          .onClick((): void => { this.onStop(); })
+          .onClick((): void => { if (!this.disabled) this.onStop(); })
           .accessibilityText('停止生成')
         } else {
           Row() {
@@ -238,10 +240,10 @@ export struct ChatInput {
             GestureGroup(
               GestureMode.Exclusive,
               LongPressGesture().onAction((): void => {
-                if (this.canSend()) this.onSendWithoutAnswer();
+                if (!this.disabled && this.canSend()) this.onSendWithoutAnswer();
               }),
               TapGesture().onAction((): void => {
-                if (this.canSend()) this.onSend();
+                if (!this.disabled && this.canSend()) this.onSend();
               }),
             )
           )
@@ -249,6 +251,8 @@ export struct ChatInput {
         }
         }
         .width('100%')
+        .enabled(!this.disabled)
+        .opacity(this.disabled ? 0.55 : 1)
         .padding({ left: 20, right: 20, top: 10, bottom: 14 })
         .alignItems(VerticalAlign.Center)
 
@@ -264,7 +268,7 @@ export struct ChatInput {
   }
 
   private canSend(): boolean {
-    return this.text.trim().length > 0 || this.hasImages;
+    return !this.disabled && (this.text.trim().length > 0 || this.hasImages);
   }
 
   // accent 35% 透明阴影色(发送键可发态浮起)
