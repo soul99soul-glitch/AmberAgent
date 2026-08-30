@@ -22,11 +22,14 @@ import {
 import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builder.ts';
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModelStream } from './model_running.ts';
-import type { NovelProjectRepository } from './repository.ts';
+import type {
+  NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceStatus,
+} from './repository.ts';
 import { parseSettingProposals } from './discussion_structured.ts';
 import type { NovelSettingProposalDraft, NovelSettingProposalsParsed } from './discussion_structured.ts';
 import { latestAssistantText } from '../agent/message.ts';
 import type { StreamTransportState, UIMessage } from '../agent/message.ts';
+import type { DurableWorkspaceProposal, WorkspaceProposalPatch } from './workspace_history.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
@@ -163,17 +166,64 @@ export class NovelCreation {
     return this.repository.loadProject(projectId);
   }
 
+  workspaceStatus(projectId: string): Promise<NovelWorkspaceStatus> {
+    return this.repository.workspaceStatus(projectId);
+  }
+
+  async createBranch(projectId: string, name: string): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.createBranch(projectId, name, status.cas, novelId());
+  }
+
+  async switchBranch(projectId: string, branchId: string): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.switchBranch(projectId, branchId, status.cas);
+  }
+
+  async undoLast(projectId: string): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.undo(projectId, status.cas, novelId());
+  }
+
+  async syncPlot(projectId: string): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.syncPlot(projectId, status.cas, novelId());
+  }
+
+  async resolveUnresolved(projectId: string): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.resolveUnresolved(projectId, status.cas, novelId());
+  }
+
+  workspaceProposals(projectId: string): Promise<DurableWorkspaceProposal[]> {
+    return this.repository.workspaceProposals(projectId);
+  }
+
+  async createWorkspaceProposal(
+    projectId: string, patches: WorkspaceProposalPatch[], proposalId: string = novelId(),
+  ): Promise<DurableWorkspaceProposal> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.createProposal(
+      projectId, status.cas, proposalId, patches, this.nowMs());
+  }
+
+  resolveWorkspaceProposal(
+    projectId: string, proposalId: string, accept: boolean,
+  ): Promise<DurableWorkspaceProposal> {
+    return this.repository.resolveProposal(projectId, proposalId, accept, novelId(), this.nowMs());
+  }
+
   async create(name: string): Promise<NovelProject> {
     const project: NovelProject = createProject(name, this.nowMs());
     return await this.repository.createProject(project);
   }
 
   rename(projectId: string, name: string): Promise<NovelProject> {
-    return this.repository.updateProject(projectId, p => renameProject(p, name, this.nowMs()));
+    return this.commitMutation(projectId, 'rename', p => renameProject(p, name, this.nowMs()));
   }
 
   setModel(projectId: string, modelId: string | null): Promise<NovelProject> {
-    return this.repository.updateProject(projectId, p => setProjectModel(p, modelId, this.nowMs()));
+    return this.commitMutation(projectId, 'model_change', p => setProjectModel(p, modelId, this.nowMs()));
   }
 
   async delete(projectId: string): Promise<void> {
@@ -191,7 +241,7 @@ export class NovelCreation {
   ): Promise<NovelChapter> {
     // holder 对象:闭包内赋值会使 TS 对裸 let 的控制流收窄失效(tsc TS2352)
     const box: { value: NovelChapter | null } = { value: null };
-    await this.repository.updateProject(projectId, p => {
+    await this.commitMutation(projectId, 'manual_edit', p => {
       const m = saveChapter(p, chapterId, title, content, this.nowMs());
       box.value = m.value;
       return m.project;
@@ -201,7 +251,8 @@ export class NovelCreation {
   }
 
   deleteChapter(projectId: string, chapterId: string): Promise<NovelProject> {
-    return this.repository.updateProject(projectId, p => deleteChapter(p, chapterId, this.nowMs()));
+    return this.commitMutation(projectId, 'chapter_delete',
+      p => deleteChapter(p, chapterId, this.nowMs()));
   }
 
   async upsertMaterial(
@@ -209,7 +260,7 @@ export class NovelCreation {
     title: string, content: string, enabled: boolean,
   ): Promise<NovelMaterial> {
     const box: { value: NovelMaterial | null } = { value: null };
-    await this.repository.updateProject(projectId, p => {
+    await this.commitMutation(projectId, 'material_edit', p => {
       const m = upsertMaterial(p, materialId, kind, title, content, enabled, this.nowMs());
       box.value = m.value;
       return m.project;
@@ -219,7 +270,8 @@ export class NovelCreation {
   }
 
   deleteMaterial(projectId: string, materialId: string): Promise<NovelProject> {
-    return this.repository.updateProject(projectId, p => deleteMaterial(p, materialId, this.nowMs()));
+    return this.commitMutation(projectId, 'material_delete',
+      p => deleteMaterial(p, materialId, this.nowMs()));
   }
 
   // 收录助手回复进章节,并在后台分析素材建议(不阻塞收录返回)。
@@ -228,7 +280,7 @@ export class NovelCreation {
     projectId: string, messageId: string, target: NovelCollectionTarget,
   ): Promise<NovelCollectionResult> {
     const box: { value: NovelChapter | null } = { value: null };
-    await this.repository.updateProject(projectId, p => {
+    await this.commitMutation(projectId, 'collect', p => {
       const m = collect(p, messageId, target, this.nowMs());
       box.value = m.value;
       return m.project;
@@ -250,8 +302,8 @@ export class NovelCreation {
     const suggestions: NovelMaterialSuggestion[] =
       await analyzeChapterSuggestions(this.modelRunning, project, chapter, project.modelId, now);
     // analyzeChapterSuggestions 内部已容错(失败返回空数组),这里再判一次并落库
-    await this.repository.updateProject(
-      projectId, p => replacePendingSuggestions(p, chapterId, suggestions, now));
+    await this.commitMutation(
+      projectId, 'suggestion_refresh', p => replacePendingSuggestions(p, chapterId, suggestions, now));
     // 建议 0 条 + analyze 内部失败 → 提示用户可重试(analyze 把失败也归为空数组,无法区分;
     // 这里仅在确无新建议时给中性提示)
     const warning: string | null =
@@ -263,7 +315,7 @@ export class NovelCreation {
     projectId: string, suggestionId: string, accept: boolean,
   ): Promise<NovelMaterial | null> {
     let material: NovelMaterial | null = null;
-    await this.repository.updateProject(projectId, p => {
+    await this.commitMutation(projectId, 'proposal_resolve', p => {
       const m = resolveSuggestion(p, suggestionId, accept, this.nowMs());
       material = m.value;
       return m.project;
@@ -275,7 +327,7 @@ export class NovelCreation {
     projectId: string, proposalId: string, accept: boolean,
   ): Promise<NovelMaterial | null> {
     let material: NovelMaterial | null = null;
-    await this.repository.updateProject(projectId, (project: NovelProject): NovelProject => {
+    await this.commitMutation(projectId, 'proposal_resolve', (project: NovelProject): NovelProject => {
       const mutation = resolveSettingProposalMutation(project, proposalId, accept, this.nowMs());
       material = mutation.value;
       return mutation.project;
@@ -365,7 +417,7 @@ export class NovelCreation {
       throw invalidInput('润色结果与目标章节不匹配');
     }
     const box: { value: NovelChapter | null } = { value: null };
-    await this.repository.updateProject(projectId, (project: NovelProject): NovelProject => {
+    await this.commitMutation(projectId, 'polish_adopt', (project: NovelProject): NovelProject => {
       const now: number = this.nowMs();
       const versioned: NovelProject = saveChapterVersion(project, chapterId, 'polish', now).project;
       const adopted = collect(versioned, messageId, { kind: 'replace', chapterId: chapterId }, now);
@@ -384,7 +436,7 @@ export class NovelCreation {
 
   // N2:章节废弃标记
   async setChapterDiscarded(projectId: string, chapterId: string, discarded: boolean): Promise<NovelProject> {
-    return this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+    return this.commitMutation(projectId, 'chapter_discard', (p: NovelProject): NovelProject => {
       const idx: number = p.chapters.findIndex(c => c.id === chapterId);
       if (idx < 0) return p;
       const chapters: NovelChapter[] = p.chapters.slice();
@@ -396,7 +448,7 @@ export class NovelCreation {
   // N2:恢复章节版本(restoreChapterVersion mutation:备份当前→回写)
   async restoreChapterVersion(projectId: string, versionId: string): Promise<NovelProject> {
     const now: number = Date.now();
-    return this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+    return this.commitMutation(projectId, 'version_restore', (p: NovelProject): NovelProject => {
       const v: NovelChapterVersion | undefined = p.chapterVersions.find(x => x.id === versionId);
       if (v === undefined) return p;
       const idx: number = p.chapters.findIndex(c => c.id === v.chapterId);
@@ -424,13 +476,14 @@ export class NovelCreation {
       makeNovelChapter({ title: mergedTitle, content: mergedContent, now: this.nowMs() });
     const suggestions: NovelMaterialSuggestion[] = await analyzeChapterSuggestions(
       this.modelRunning, project, pseudo, project.modelId, this.nowMs());
-    const updated: NovelProject = await this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+    const updated: NovelProject = await this.commitMutation(
+      projectId, 'discussion_archive', (p: NovelProject): NovelProject => {
       const next: NovelMaterialSuggestion[] = [...p.materialSuggestions];
       for (const sg of suggestions) {
         if (!next.some((x: NovelMaterialSuggestion): boolean => x.title === sg.title)) next.push(sg);
       }
       return { ...p, materialSuggestions: next, updatedAt: Date.now() };
-    });
+      });
     return { suggestions: suggestions, count: suggestions.length, warning: null };
   }
 
@@ -458,6 +511,14 @@ export class NovelCreation {
 
   private async findProjectAsync(projectId: string): Promise<NovelProject> {
     return this.open(projectId);
+  }
+
+  private async commitMutation(
+    projectId: string, kind: NovelWorkspaceMutationKind,
+    transform: (project: NovelProject) => NovelProject,
+  ): Promise<NovelProject> {
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    return await this.repository.commitProject(projectId, status.cas, novelId(), kind, transform);
   }
 
   // ===== 内部 =====
@@ -496,7 +557,7 @@ export class NovelCreation {
       const proposalBlock: NovelSettingProposalsParsed | null =
         mode === 'discuss' ? parseSettingProposals(fullText) : null;
       const proposalDrafts: NovelSettingProposalDraft[] = proposalBlock?.proposals ?? [];
-      await this.repository.updateProject(projectId, p => {
+      await this.commitMutation(projectId, 'generation_commit', p => {
         let np: NovelProject = appendMessage(p, userMsg, now);
         np = appendMessage(np, assistantMsg, now);
         np = addSettingProposals(np, assistantMsg.id, proposalDrafts, now);
@@ -718,7 +779,7 @@ export class NovelCreation {
     if (partial.trim().length === 0 && trimmed.length === 0) return;
     try {
       const now: number = this.nowMs();
-      await this.repository.updateProject(live.projectId, p => {
+      await this.commitMutation(live.projectId, 'interrupt_commit', p => {
         const gran: NovelGenerationGranularity | null =
           mode === 'write' ? (granularity ?? p.lastGenerationGranularity) : null;
         let np: NovelProject = p;

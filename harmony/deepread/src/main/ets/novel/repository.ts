@@ -18,6 +18,13 @@ import type {
   NovelWorkspaceArchiveFile, NovelWorkspaceValidatedImport,
 } from './workspace_exchange.ts';
 import type { NovelBookChapterSnapshot, NovelBookExportInput } from './workspace_book_export.ts';
+import {
+  parseWorkspaceCommit, resolveDurableWorkspaceProposal, validateDurableWorkspaceProposal,
+  validateWorkspaceReceiptLedger,
+} from './workspace_history.ts';
+import type {
+  DurableWorkspaceProposal, WorkspaceCommit, WorkspaceProposalPatch,
+} from './workspace_history.ts';
 
 const LEGACY_PROJECTS_DIR: string = 'amberagent/novel-creation/projects';
 const LEGACY_SUFFIX: string = '.novel.json';
@@ -28,14 +35,59 @@ const DELETED_ROOT: string = joinPath(ROOT, '.deleted');
 const STATE_FILE: string = '.amber/project-state.json';
 const LEDGER_FILE: string = '.amber/ledger.jsonl';
 const CHECKOUT_FILE: string = '.amber/checkout.json';
+const PROPOSALS_FILE: string = '.amber/proposals.json';
 const MAX_PROJECT_BYTES: number = 16 * 1024 * 1024;
 const WORKSPACE_STATE_VERSION: number = 1;
+
+export type NovelWorkspaceMutationKind =
+  | 'compat_update' | 'rename' | 'model_change' | 'manual_edit' | 'chapter_delete'
+  | 'material_edit' | 'material_delete' | 'collect' | 'suggestion_refresh'
+  | 'proposal_resolve' | 'generation_commit' | 'polish_adopt' | 'chapter_discard'
+  | 'version_restore' | 'discussion_archive' | 'interrupt_commit' | 'create_branch'
+  | 'undo' | 'plot_sync' | 'unresolved_resolve';
+
+export interface NovelWorkspaceCas {
+  branchId: string;
+  head: string;
+  treeDigest: string;
+}
+
+export interface NovelWorkspaceStatus {
+  cas: NovelWorkspaceCas;
+  activeBranchId: string;
+  activeBranchName: string;
+  branches: NovelBranch[];
+  canUndo: boolean;
+  unresolvedFromOrdinal: number | null;
+  plotStale: boolean;
+  pendingProposalCount: number;
+}
 
 export interface NovelProjectRepository {
   listProjects(): Promise<NovelProject[]>;
   loadProject(id: string): Promise<NovelProject>;
   createProject(project: NovelProject): Promise<NovelProject>;
   updateProject(id: string, transform: (p: NovelProject) => NovelProject): Promise<NovelProject>;
+  workspaceStatus(id: string): Promise<NovelWorkspaceStatus>;
+  commitProject(
+    id: string, expected: NovelWorkspaceCas, commandId: string, kind: NovelWorkspaceMutationKind,
+    transform: (p: NovelProject) => NovelProject,
+  ): Promise<NovelProject>;
+  createBranch(
+    id: string, name: string, expected: NovelWorkspaceCas, commandId: string,
+  ): Promise<NovelProject>;
+  switchBranch(id: string, branchId: string, expected: NovelWorkspaceCas): Promise<NovelProject>;
+  undo(id: string, expected: NovelWorkspaceCas, commandId: string): Promise<NovelProject>;
+  syncPlot(id: string, expected: NovelWorkspaceCas, commandId: string): Promise<NovelProject>;
+  resolveUnresolved(id: string, expected: NovelWorkspaceCas, commandId: string): Promise<NovelProject>;
+  workspaceProposals(id: string): Promise<DurableWorkspaceProposal[]>;
+  createProposal(
+    id: string, expected: NovelWorkspaceCas, proposalId: string,
+    patches: WorkspaceProposalPatch[], createdAt: number,
+  ): Promise<DurableWorkspaceProposal>;
+  resolveProposal(
+    id: string, proposalId: string, accept: boolean, commandId: string, resolvedAt: number,
+  ): Promise<DurableWorkspaceProposal>;
   deleteProject(id: string): Promise<void>;
   restorePrevious(): Promise<NovelProject | null>;
   installWorkspace(input: NovelWorkspaceValidatedImport): Promise<NovelProject>;
@@ -68,6 +120,44 @@ interface WorkspaceCheckout {
   branchId: string;
   head: string;
   treeDigest: string;
+}
+
+type WorkspaceLedgerCommit = WorkspaceCommit;
+
+interface WorkspaceBranchSnapshot {
+  branchId: string;
+  state: WorkspaceProjectState;
+  unresolvedFromOrdinal: number | null;
+  plotStale: boolean;
+  plotSourceTreeDigest: string;
+  plotSyncedTreeDigest: string | null;
+  plotContent: string | null;
+}
+
+interface WorkspaceCommitSnapshot {
+  project: NovelProject;
+  unresolvedFromOrdinal: number | null;
+  plotStale: boolean;
+  plotSourceTreeDigest: string;
+  plotSyncedTreeDigest: string | null;
+  plotContent: string | null;
+}
+
+interface WorkspaceUndoRecord {
+  branchId: string;
+  snapshot: WorkspaceCommitSnapshot;
+}
+
+interface WorkspaceProposalDecision {
+  commandId: string;
+  proposalId: string;
+  accept: boolean;
+}
+
+interface WorkspaceProposalStore {
+  version: number;
+  proposals: DurableWorkspaceProposal[];
+  decisions: WorkspaceProposalDecision[];
 }
 
 interface SnapshotFile {
@@ -128,6 +218,9 @@ const stagingRoot = (id: string): string => joinPath(STAGING_ROOT, id);
 const trashRoot = (id: string): string => joinPath(TRASH_ROOT, id);
 const deletedRoot = (id: string): string => joinPath(DELETED_ROOT, id);
 const legacyPath = (id: string): string => joinPath(LEGACY_PROJECTS_DIR, id + LEGACY_SUFFIX);
+const branchSnapshotPath = (branchId: string): string => `.amber/branches/${branchId}.json`;
+const commitSnapshotPath = (head: string): string => `.amber/commits/${head}.json`;
+const undoPath = (branchId: string): string => `.amber/undo/${branchId}.json`;
 
 const encodeUtf8 = (text: string): Uint8Array => {
   const out: number[] = [];
@@ -172,8 +265,128 @@ const stableDigest = (files: NovelWorkspaceArchiveFile[]): string => {
   return a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0');
 };
 
+const parseLedger = (raw: string): WorkspaceLedgerCommit[] => {
+  const lines: string[] = raw.split('\n').filter((line: string): boolean => line.trim().length > 0);
+  const commits: WorkspaceLedgerCommit[] = [];
+  for (let i: number = 0; i < lines.length; i++) {
+    try {
+      commits.push(parseWorkspaceCommit(lines[i]));
+    } catch {
+      throw invalidInput('工作区台账损坏');
+    }
+  }
+  if (commits.length === 0) throw invalidInput('工作区台账为空');
+  let checked: WorkspaceLedgerCommit[];
+  try {
+    checked = validateWorkspaceReceiptLedger(commits);
+  } catch {
+    throw invalidInput('工作区台账损坏');
+  }
+  const commitIds: Set<string> = new Set<string>();
+  for (let i: number = 0; i < checked.length; i++) {
+    const commit: WorkspaceLedgerCommit = checked[i];
+    if (commitIds.has(commit.commitId)) throw invalidInput('工作区台账 commit 重复');
+    if (i === 0) {
+      if (commit.parent !== null) throw invalidInput('工作区台账初始 parent 无效');
+    } else if (commit.parent === null || !commitIds.has(commit.parent)) {
+      throw invalidInput('工作区台账 parent 链损坏');
+    }
+    commitIds.add(commit.commitId);
+  }
+  return checked;
+};
+
+const findCommit = (commits: WorkspaceLedgerCommit[], head: string): WorkspaceLedgerCommit | null => {
+  for (let i: number = commits.length - 1; i >= 0; i--) {
+    if (commits[i].commitId === head) return commits[i];
+  }
+  return null;
+};
+
+const findReceipt = (commits: WorkspaceLedgerCommit[], receipt: string): WorkspaceLedgerCommit | null => {
+  for (let i: number = commits.length - 1; i >= 0; i--) {
+    if (commits[i].receipt === receipt) return commits[i];
+  }
+  return null;
+};
+
+const assertCas = (expected: NovelWorkspaceCas, actual: WorkspaceCheckout): void => {
+  if (expected.branchId !== actual.branchId || expected.head !== actual.head ||
+    expected.treeDigest !== actual.treeDigest) {
+    throw invalidInput('工作区已变化，拒绝覆盖');
+  }
+};
+
+const assertCommandId = (commandId: string): void => {
+  if (commandId.trim().length === 0 || commandId.length > 256 || commandId.indexOf('\n') >= 0) {
+    throw invalidInput('commandId 无效');
+  }
+};
+
+const chapterChangedAt = (before: NovelChapter[], after: NovelChapter[]): number | null => {
+  const count: number = Math.max(before.length, after.length);
+  for (let i: number = 0; i < count; i++) {
+    const left: NovelChapter | undefined = before[i];
+    const right: NovelChapter | undefined = after[i];
+    if (left === undefined || right === undefined || left.id !== right.id || left.title !== right.title ||
+      left.content !== right.content || left.discarded !== right.discarded) return i;
+  }
+  return null;
+};
+
+const followingUnresolvedOrdinal = (changedIndex: number | null, chapterCount: number): number | null => {
+  if (changedIndex === null) return null;
+  const following: number = changedIndex + 2;
+  return following <= chapterCount ? following : null;
+};
+
+const emptyProposalStore = (): WorkspaceProposalStore => ({
+  version: 1,
+  proposals: [],
+  decisions: [],
+});
+
+const parseProposalStore = (raw: string): WorkspaceProposalStore => {
+  let value: WorkspaceProposalStore;
+  try {
+    value = JSON.parse(raw) as WorkspaceProposalStore;
+  } catch {
+    throw invalidInput('durable proposal store 无效');
+  }
+  if (value.version !== 1 || !Array.isArray(value.proposals) || !Array.isArray(value.decisions)) {
+    throw invalidInput('durable proposal store 无效');
+  }
+  const proposals: DurableWorkspaceProposal[] = [];
+  const proposalIds: Set<string> = new Set<string>();
+  for (let i: number = 0; i < value.proposals.length; i++) {
+    const proposal: DurableWorkspaceProposal = validateDurableWorkspaceProposal(value.proposals[i]);
+    if (proposalIds.has(proposal.proposalId)) throw invalidInput(`proposal id 重复: ${proposal.proposalId}`);
+    proposalIds.add(proposal.proposalId);
+    proposals.push(proposal);
+  }
+  const decisions: WorkspaceProposalDecision[] = [];
+  const commandIds: Set<string> = new Set<string>();
+  for (let i: number = 0; i < value.decisions.length; i++) {
+    const decision: WorkspaceProposalDecision = value.decisions[i];
+    assertCommandId(decision.commandId);
+    if (decision.proposalId.trim().length === 0 || commandIds.has(decision.commandId)) {
+      throw invalidInput('proposal decision store 无效');
+    }
+    commandIds.add(decision.commandId);
+    decisions.push({
+      commandId: decision.commandId,
+      proposalId: decision.proposalId,
+      accept: decision.accept,
+    });
+  }
+  return { version: 1, proposals, decisions };
+};
+
 const materialPath = (material: NovelMaterial): string =>
   `setting/${material.kind}/${material.id}.md`;
+
+const branchMaterialPath = (branchId: string, material: NovelMaterial): string =>
+  `branches/${branchId}/setting/${material.kind}/${material.id}.md`;
 
 const chapterOrdinal = (chapter: NovelChapter, fallback: number): number => {
   const match: RegExpMatchArray | null = chapter.id.match(/^chapter-(\d{3})(?:-|$)/);
@@ -182,9 +395,15 @@ const chapterOrdinal = (chapter: NovelChapter, fallback: number): number => {
   return parsed >= 1 && parsed <= 999 ? parsed : fallback;
 };
 
-const buildSnapshotFiles = (input: NovelProject): { project: NovelProject; files: SnapshotFile[] } => {
+const buildSnapshotFiles = (
+  input: NovelProject, activeBranchId: string | null = null, plotContent: string | null = null,
+): { project: NovelProject; state: WorkspaceProjectState; files: SnapshotFile[] } => {
   const project: NovelProject = normalizeProject(validateProject(input));
-  const branch: NovelBranch = mainBranch(project);
+  const branch: NovelBranch | undefined = activeBranchId === null
+    ? mainBranch(project)
+    : project.branches.find((item: NovelBranch): boolean =>
+      item.id === activeBranchId && item.lifecycle === 'active');
+  if (branch === undefined) throw invalidInput(`分支不存在: ${activeBranchId ?? ''}`);
   const manifest: NovelWorkspaceManifest = {
     format: NOVEL_WORKSPACE_FORMAT,
     version: NOVEL_WORKSPACE_VERSION,
@@ -198,6 +417,9 @@ const buildSnapshotFiles = (input: NovelProject): { project: NovelProject; files
     { path: 'manifest.yaml', content: serializeNovelWorkspaceManifest(manifest) },
     { path: 'project.md', content: `# ${project.name}\n` },
   ];
+  if (plotContent !== null) {
+    files.push({ path: `branches/${branch.id}/plan/plot.md`, content: plotContent });
+  }
   const chapterRecords: WorkspaceChapterRecord[] = [];
   for (let i: number = 0; i < project.chapters.length; i++) {
     const chapter: NovelChapter = project.chapters[i];
@@ -217,7 +439,7 @@ const buildSnapshotFiles = (input: NovelProject): { project: NovelProject; files
   const materialRecords: WorkspaceMaterialRecord[] = [];
   for (let i: number = 0; i < project.materials.length; i++) {
     const material: NovelMaterial = project.materials[i];
-    const relative: string = materialPath(material);
+    const relative: string = branchMaterialPath(branch.id, material);
     materialRecords.push({
       id: material.id,
       kind: material.kind,
@@ -228,6 +450,7 @@ const buildSnapshotFiles = (input: NovelProject): { project: NovelProject; files
       path: relative,
     });
     files.push({ path: relative, content: material.content });
+    files.push({ path: materialPath(material), content: material.content });
   }
   const state: WorkspaceProjectState = {
     stateVersion: WORKSPACE_STATE_VERSION,
@@ -252,8 +475,26 @@ const buildSnapshotFiles = (input: NovelProject): { project: NovelProject; files
   const stateRaw: string = JSON.stringify(state);
   if (stateRaw.length > MAX_PROJECT_BYTES) throw invalidInput('项目过大');
   files.push({ path: STATE_FILE, content: stateRaw });
-  return { project, files };
+  return { project, state, files };
 };
+
+const snapshotTreeDigest = (files: SnapshotFile[]): string => stableDigest(files
+  .filter((file: SnapshotFile): boolean =>
+    !file.path.startsWith('.amber/') && file.path !== 'manifest.yaml' && file.path !== 'project.md')
+  .map((file: SnapshotFile): NovelWorkspaceArchiveFile => ({
+    path: file.path,
+    bytes: encodeUtf8(file.content),
+  })));
+
+const branchStateMatchesCommit = (
+  current: WorkspaceProjectState, committed: WorkspaceProjectState,
+): boolean => JSON.stringify(current.chapters) === JSON.stringify(committed.chapters) &&
+  JSON.stringify(current.materials) === JSON.stringify(committed.materials) &&
+  JSON.stringify(current.project.messages) === JSON.stringify(committed.project.messages) &&
+  JSON.stringify(current.project.materialSuggestions) === JSON.stringify(committed.project.materialSuggestions) &&
+  JSON.stringify(current.project.settingProposals) === JSON.stringify(committed.project.settingProposals) &&
+  JSON.stringify(current.project.chapterVersions) === JSON.stringify(committed.project.chapterVersions) &&
+  current.project.revision === committed.project.revision;
 
 const decodeLegacy = (raw: string): NovelProject => {
   const stored: PersistedNovelProject = JSON.parse(raw) as PersistedNovelProject;
@@ -270,6 +511,32 @@ const readCheckout = async (fileStore: FileStore, root: string): Promise<Workspa
   } catch {
     return null;
   }
+};
+
+const projectFromStoredState = async (
+  fileStore: FileStore, root: string, state: WorkspaceProjectState,
+): Promise<NovelProject> => {
+  const chapters: NovelChapter[] = [];
+  for (let i: number = 0; i < state.chapters.length; i++) {
+    const record: WorkspaceChapterRecord = state.chapters[i];
+    const content: string | null = await fileStore.readText(joinPath(root, record.path));
+    if (content === null) throw invalidInput(`章节文件缺失: ${record.path}`);
+    chapters.push({
+      id: record.id, title: record.title, content,
+      createdAt: record.createdAt, updatedAt: record.updatedAt, discarded: record.discarded,
+    });
+  }
+  const materials: NovelMaterial[] = [];
+  for (let i: number = 0; i < state.materials.length; i++) {
+    const record: WorkspaceMaterialRecord = state.materials[i];
+    const content: string | null = await fileStore.readText(joinPath(root, record.path));
+    if (content === null) throw invalidInput(`设定文件缺失: ${record.path}`);
+    materials.push({
+      id: record.id, kind: record.kind, title: record.title, content, enabled: record.enabled,
+      createdAt: record.createdAt, updatedAt: record.updatedAt,
+    });
+  }
+  return validateProject({ ...state.project, chapters, materials });
 };
 
 const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject> => {
@@ -310,7 +577,60 @@ const loadAt = async (fileStore: FileStore, root: string): Promise<NovelProject>
       updatedAt: record.updatedAt,
     });
   }
-  return validateProject({ ...state.project, name: manifest.title, chapters, materials });
+  const project: NovelProject = validateProject({ ...state.project, name: manifest.title, chapters, materials });
+  const checkoutRaw: string | null = await fileStore.readText(joinPath(root, CHECKOUT_FILE));
+  const ledgerRaw: string | null = await fileStore.readText(joinPath(root, LEDGER_FILE));
+  if (checkoutRaw === null || ledgerRaw === null) throw invalidInput('小说工作区历史不完整');
+  const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, root);
+  if (checkout === null || checkout.branchId !== manifest.activeBranch) {
+    throw invalidInput('checkout 与 manifest 不一致');
+  }
+  const commits: WorkspaceLedgerCommit[] = parseLedger(ledgerRaw);
+  const headCommit: WorkspaceLedgerCommit | null = findCommit(commits, checkout.head);
+  if (headCommit === null || headCommit.branchId !== checkout.branchId ||
+    headCommit.treeDigest !== checkout.treeDigest) {
+    throw invalidInput('checkout/head/tree 不一致');
+  }
+  const branchRaw: string | null = await fileStore.readText(joinPath(root, branchSnapshotPath(checkout.branchId)));
+  if (branchRaw === null) throw invalidInput('active branch state 缺失');
+  let branchSnapshot: WorkspaceBranchSnapshot;
+  try {
+    branchSnapshot = JSON.parse(branchRaw) as WorkspaceBranchSnapshot;
+  } catch {
+    throw invalidInput('active branch state 无效');
+  }
+  if (branchSnapshot.branchId !== checkout.branchId ||
+    JSON.stringify(branchSnapshot.state) !== JSON.stringify(state)) {
+    throw invalidInput('active branch state 与 checkout 不一致');
+  }
+  if (branchSnapshot.plotSourceTreeDigest !== checkout.treeDigest ||
+    branchSnapshot.plotStale !==
+      (branchSnapshot.plotSyncedTreeDigest !== branchSnapshot.plotSourceTreeDigest)) {
+    throw invalidInput('plot digest 与 branch tree 不一致');
+  }
+  const built = buildSnapshotFiles(project, checkout.branchId, branchSnapshot.plotContent);
+  if (snapshotTreeDigest(built.files) !== checkout.treeDigest) {
+    throw invalidInput('正文树与台账不一致');
+  }
+  const commitRaw: string | null = await fileStore.readText(joinPath(root, commitSnapshotPath(checkout.head)));
+  if (commitRaw === null) throw invalidInput('head snapshot 缺失');
+  try {
+    const commitSnapshot: WorkspaceCommitSnapshot = JSON.parse(commitRaw) as WorkspaceCommitSnapshot;
+    const normalizedCommitState: WorkspaceProjectState = buildSnapshotFiles(
+      commitSnapshot.project, checkout.branchId).state;
+    if (!branchStateMatchesCommit(state, normalizedCommitState) ||
+      commitSnapshot.unresolvedFromOrdinal !== branchSnapshot.unresolvedFromOrdinal ||
+      commitSnapshot.plotStale !== branchSnapshot.plotStale ||
+      commitSnapshot.plotSourceTreeDigest !== branchSnapshot.plotSourceTreeDigest ||
+      commitSnapshot.plotSyncedTreeDigest !== branchSnapshot.plotSyncedTreeDigest ||
+      commitSnapshot.plotContent !== branchSnapshot.plotContent) {
+      throw invalidInput('branch state 与 head 不一致');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.indexOf('branch state') >= 0) throw error;
+    throw invalidInput('head snapshot 无效');
+  }
+  return project;
 };
 
 const walkWorkspaceFiles = async (
@@ -342,7 +662,10 @@ const priorManagedPaths = async (fileStore: FileStore, root: string): Promise<Se
   try {
     const state: WorkspaceProjectState = JSON.parse(raw) as WorkspaceProjectState;
     state.chapters.forEach((record: WorkspaceChapterRecord): void => { managed.add(record.path); });
-    state.materials.forEach((record: WorkspaceMaterialRecord): void => { managed.add(record.path); });
+    state.materials.forEach((record: WorkspaceMaterialRecord): void => {
+      managed.add(record.path);
+      managed.add(`setting/${record.kind}/${record.id}.md`);
+    });
   } catch {
     // 损坏 state 由 loadAt 显式失败；这里不猜测额外 managed 文件。
   }
@@ -391,25 +714,181 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     }
   };
 
+  const readProposalStore = async (id: string): Promise<WorkspaceProposalStore> => {
+    const raw: string | null = await fileStore.readText(joinPath(projectRoot(id), PROPOSALS_FILE));
+    return raw === null ? emptyProposalStore() : parseProposalStore(raw);
+  };
+
+  const installProposalStoreOnly = async (id: string, store: WorkspaceProposalStore): Promise<void> => {
+    const live: string = projectRoot(id);
+    const stage: string = stagingRoot(id);
+    const backup: string = trashRoot(id);
+    const files: NovelWorkspaceArchiveFile[] = await walkWorkspaceFiles(fileStore, live);
+    await fileStore.deleteTree(stage);
+    for (let i: number = 0; i < files.length; i++) {
+      const path: string = files[i].path;
+      if (path === PROPOSALS_FILE) continue;
+      if (path.startsWith('.amber/') || path.endsWith('.md') || path.endsWith('.yaml')) {
+        await fileStore.writeText(joinPath(stage, path), decodeNovelWorkspaceUtf8(files[i].bytes));
+      } else {
+        await fileStore.writeBytes(joinPath(stage, path), files[i].bytes);
+      }
+    }
+    await fileStore.writeText(joinPath(stage, PROPOSALS_FILE), JSON.stringify(store));
+    await fileStore.deleteTree(backup);
+    await fileStore.rename(live, backup);
+    try {
+      await fileStore.rename(stage, live);
+    } catch (error) {
+      if (!await fileStore.exists(live) && await fileStore.exists(backup)) {
+        await fileStore.rename(backup, live);
+      }
+      throw error;
+    }
+    await fileStore.deleteTree(backup);
+  };
+
+  const validateProposalTargets = (
+    proposal: DurableWorkspaceProposal, branch: WorkspaceBranchSnapshot,
+  ): void => {
+    const plotPath: string = `branches/${branch.branchId}/plan/plot.md`;
+    const chapterPaths: Set<string> = new Set<string>();
+    for (let i: number = 0; i < branch.state.chapters.length; i++) {
+      chapterPaths.add(branch.state.chapters[i].path);
+    }
+    for (let i: number = 0; i < proposal.patches.length; i++) {
+      const path: string = proposal.patches[i].path;
+      if (path !== plotPath && !chapterPaths.has(path)) {
+        throw invalidInput(`proposal 仅可修改已有章节或 plot: ${path}`);
+      }
+    }
+  };
+
+  const materializeCheckout = async (
+    id: string, currentState: WorkspaceProjectState, target: NovelProject,
+    targetSnapshot: WorkspaceBranchSnapshot, checkout: WorkspaceCheckout,
+  ): Promise<void> => {
+    const live: string = projectRoot(id);
+    const stage: string = stagingRoot(id);
+    const backup: string = trashRoot(id);
+    const allFiles: NovelWorkspaceArchiveFile[] = await walkWorkspaceFiles(fileStore, live);
+    await fileStore.deleteTree(stage);
+    for (let i: number = 0; i < allFiles.length; i++) {
+      const path: string = allFiles[i].path;
+      if (path.startsWith('.amber/') || path.endsWith('.md') || path.endsWith('.yaml')) {
+        await fileStore.writeText(joinPath(stage, path), decodeNovelWorkspaceUtf8(allFiles[i].bytes));
+      } else {
+        await fileStore.writeBytes(joinPath(stage, path), allFiles[i].bytes);
+      }
+    }
+    for (let i: number = 0; i < currentState.materials.length; i++) {
+      const material: WorkspaceMaterialRecord = currentState.materials[i];
+      await fileStore.delete(joinPath(stage, `setting/${material.kind}/${material.id}.md`));
+    }
+    const built = buildSnapshotFiles(target, checkout.branchId, targetSnapshot.plotContent);
+    if (snapshotTreeDigest(built.files) !== checkout.treeDigest) {
+      throw invalidInput('目标分支 head/tree 不一致');
+    }
+    const targetState: WorkspaceProjectState = built.state;
+    const durableTarget: WorkspaceBranchSnapshot = {
+      ...targetSnapshot,
+      state: targetState,
+      plotSourceTreeDigest: checkout.treeDigest,
+    };
+    const writes: SnapshotFile[] = built.files.filter(
+      (file: SnapshotFile): boolean => file.path !== 'project.md').concat([
+      { path: 'manifest.yaml', content: serializeNovelWorkspaceManifest({
+        format: NOVEL_WORKSPACE_FORMAT,
+        version: NOVEL_WORKSPACE_VERSION,
+        projectId: target.id,
+        title: target.name,
+        activeBranch: checkout.branchId,
+        createdAt: target.createdAt,
+        updatedAt: target.updatedAt,
+      }) },
+      { path: STATE_FILE, content: JSON.stringify(targetState) },
+      { path: CHECKOUT_FILE, content: JSON.stringify(checkout) },
+      { path: branchSnapshotPath(checkout.branchId), content: JSON.stringify(durableTarget) },
+    ]);
+    for (let i: number = 0; i < writes.length; i++) {
+      await fileStore.writeText(joinPath(stage, writes[i].path), writes[i].content);
+    }
+    await fileStore.deleteTree(backup);
+    await fileStore.rename(live, backup);
+    try {
+      await fileStore.rename(stage, live);
+    } catch (error) {
+      if (!await fileStore.exists(live) && await fileStore.exists(backup)) {
+        await fileStore.rename(backup, live);
+      }
+      throw error;
+    }
+    await fileStore.deleteTree(backup);
+  };
+
   const installSnapshot = async (
-    input: NovelProject, action: string, importedFiles: NovelWorkspaceArchiveFile[] = [],
+    input: NovelProject, mutation: string, importedFiles: NovelWorkspaceArchiveFile[] = [],
+    branchId: string | null = null, receipt: string | null = null,
+    unresolvedFromOrdinal: number | null = null, plotStale: boolean = false,
+    makeUndo: boolean = false, changedChapterOrdinal: number | null = null,
+    preservePriorBranch: boolean = false,
+    clearUndo: boolean = false,
+    plotSyncedOverride?: string | null,
+    plotContentOverride?: string | null,
+    proposalStoreOverride: WorkspaceProposalStore | null = null,
   ): Promise<NovelProject> => {
-    const built = buildSnapshotFiles(input);
+    const normalized: NovelProject = normalizeProject(validateProject(input));
+    const activeBranchId: string = branchId ?? mainBranch(normalized).id;
+    let built = buildSnapshotFiles(normalized, activeBranchId);
     const project: NovelProject = built.project;
     const live: string = projectRoot(project.id);
     const stage: string = stagingRoot(project.id);
     const backup: string = trashRoot(project.id);
     await recoverProject(project.id);
     const liveExists: boolean = await fileStore.exists(live);
-    const priorLedger: string = liveExists
-      ? (await fileStore.readText(joinPath(live, LEDGER_FILE)) ?? '')
-      : '';
+    const priorLedgerRaw: string = liveExists
+      ? (await fileStore.readText(joinPath(live, LEDGER_FILE)) ?? '') : '';
+    const priorCommits: WorkspaceLedgerCommit[] = liveExists ? parseLedger(priorLedgerRaw) : [];
     const priorCheckout: WorkspaceCheckout | null = liveExists
       ? await readCheckout(fileStore, live)
       : null;
-    const preserved: NovelWorkspaceArchiveFile[] = liveExists
+    let priorActiveSnapshot: WorkspaceBranchSnapshot | null = null;
+    if (liveExists && priorCheckout !== null) {
+      const priorBranchRaw: string | null = await fileStore.readText(
+        joinPath(live, branchSnapshotPath(priorCheckout.branchId)));
+      if (priorBranchRaw !== null) {
+        priorActiveSnapshot = JSON.parse(priorBranchRaw) as WorkspaceBranchSnapshot;
+      }
+    }
+    const plotContent: string | null = plotContentOverride !== undefined
+      ? plotContentOverride
+      : priorActiveSnapshot === null ? null : priorActiveSnapshot.plotContent;
+    built = buildSnapshotFiles(normalized, activeBranchId, plotContent);
+    let preservedPublic: NovelWorkspaceArchiveFile[] = liveExists
       ? await passthroughFilesAt(fileStore, live)
       : importedFiles;
+    if (plotContentOverride !== undefined) {
+      const plotPath: string = `branches/${activeBranchId}/plan/plot.md`;
+      preservedPublic = preservedPublic.filter(
+        (file: NovelWorkspaceArchiveFile): boolean => file.path !== plotPath);
+    }
+    const allPrior: NovelWorkspaceArchiveFile[] = liveExists
+      ? await walkWorkspaceFiles(fileStore, live) : [];
+    if (preservePriorBranch && priorCheckout !== null) {
+      const prefix: string = `branches/${priorCheckout.branchId}/`;
+      const priorBranchFiles: NovelWorkspaceArchiveFile[] = allPrior.filter(
+        (file: NovelWorkspaceArchiveFile): boolean => file.path.startsWith(prefix),
+      );
+      preservedPublic = preservedPublic.concat(priorBranchFiles);
+    }
+    const preservedPrivate: NovelWorkspaceArchiveFile[] = allPrior.filter(
+      (file: NovelWorkspaceArchiveFile): boolean => file.path.startsWith('.amber/') &&
+        file.path !== STATE_FILE && file.path !== LEDGER_FILE && file.path !== CHECKOUT_FILE &&
+        file.path !== branchSnapshotPath(activeBranchId) &&
+        !(proposalStoreOverride !== null && file.path === PROPOSALS_FILE) &&
+        !(clearUndo && file.path === undoPath(activeBranchId)),
+    );
+    const preserved: NovelWorkspaceArchiveFile[] = preservedPublic.concat(preservedPrivate);
     await fileStore.deleteTree(stage);
     let preservedProjectMd: NovelWorkspaceArchiveFile | null = null;
     for (let i: number = 0; i < preserved.length; i++) {
@@ -423,41 +902,94 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     const generatedPaths: Set<string> = new Set<string>();
     generatedFiles.forEach((file: SnapshotFile): void => { generatedPaths.add(file.path); });
     const passthrough: NovelWorkspaceArchiveFile[] = preserved.filter(
-      (file: NovelWorkspaceArchiveFile): boolean =>
-        !file.path.startsWith('.amber/') && !generatedPaths.has(file.path),
+      (file: NovelWorkspaceArchiveFile): boolean => !generatedPaths.has(file.path),
     );
-    const visible: NovelWorkspaceArchiveFile[] = generatedFiles
-      .filter((file: SnapshotFile): boolean => !file.path.startsWith('.amber/'))
-      .map((file: SnapshotFile): NovelWorkspaceArchiveFile => ({
-        path: file.path,
-        bytes: encodeUtf8(file.content),
-      }));
-    visible.push(...passthrough);
-    const treeDigest: string = stableDigest(visible);
-    const head: string = `c${project.revision}-${treeDigest}`;
-    const commit = {
+    const treeDigest: string = snapshotTreeDigest(generatedFiles);
+    const head: string = `c${priorCommits.length}-${treeDigest}`;
+    const commandReceipt: string = receipt ?? `${mutation}:${project.id}:${priorCommits.length}`;
+    const commit: WorkspaceLedgerCommit = {
       version: 1,
       commitId: head,
       parent: priorCheckout === null ? null : priorCheckout.head,
-      branchId: mainBranch(project).id,
+      branchId: activeBranchId,
       treeDigest,
-      action,
+      mutation,
+      receipt: commandReceipt,
+      changedPaths: generatedFiles.filter((file: SnapshotFile): boolean =>
+        !file.path.startsWith('.amber/') && file.path !== 'manifest.yaml' && file.path !== 'project.md')
+        .map((file: SnapshotFile): string => file.path),
+      changedChapterOrdinal,
       createdAt: project.updatedAt,
     };
+    if (commit.changedPaths.length === 0) {
+      commit.changedPaths = [`branches/${activeBranchId}/plan/state.md`];
+    }
+    const commits: WorkspaceLedgerCommit[] = priorCommits.concat([commit]);
     const checkout: WorkspaceCheckout = {
-      branchId: mainBranch(project).id,
+      branchId: activeBranchId,
       head,
       treeDigest,
     };
+    const plotSyncedTreeDigest: string | null = plotSyncedOverride !== undefined
+      ? plotSyncedOverride
+      : plotStale && priorActiveSnapshot !== null
+        ? priorActiveSnapshot.plotSyncedTreeDigest
+        : treeDigest;
+    const branchSnapshot: WorkspaceBranchSnapshot = {
+      branchId: activeBranchId,
+      state: built.state,
+      unresolvedFromOrdinal,
+      plotStale: plotSyncedTreeDigest !== treeDigest,
+      plotSourceTreeDigest: treeDigest,
+      plotSyncedTreeDigest,
+      plotContent,
+    };
+    const commitSnapshot: WorkspaceCommitSnapshot = {
+      project,
+      unresolvedFromOrdinal,
+      plotStale: branchSnapshot.plotStale,
+      plotSourceTreeDigest: treeDigest,
+      plotSyncedTreeDigest: branchSnapshot.plotSyncedTreeDigest,
+      plotContent,
+    };
     const files: SnapshotFile[] = generatedFiles.concat([
-      { path: LEDGER_FILE, content: priorLedger + JSON.stringify(commit) + '\n' },
+      { path: LEDGER_FILE, content: commits.map(
+        (item: WorkspaceLedgerCommit): string => JSON.stringify(item)).join('\n') + '\n' },
       { path: CHECKOUT_FILE, content: JSON.stringify(checkout) },
+      { path: branchSnapshotPath(activeBranchId), content: JSON.stringify(branchSnapshot) },
+      { path: commitSnapshotPath(head), content: JSON.stringify(commitSnapshot) },
     ]);
+    if (makeUndo && liveExists && priorCheckout !== null) {
+      const priorProject: NovelProject = await loadAt(fileStore, live);
+      if (priorActiveSnapshot === null) throw invalidInput('active branch state 缺失');
+      const priorBranch: WorkspaceBranchSnapshot = priorActiveSnapshot;
+      const undo: WorkspaceUndoRecord = {
+        branchId: priorCheckout.branchId,
+        snapshot: {
+          project: priorProject,
+          unresolvedFromOrdinal: priorBranch.unresolvedFromOrdinal,
+          plotStale: priorBranch.plotStale,
+          plotSourceTreeDigest: priorBranch.plotSourceTreeDigest,
+          plotSyncedTreeDigest: priorBranch.plotSyncedTreeDigest,
+          plotContent: priorBranch.plotContent,
+        },
+      };
+      files.push({ path: undoPath(activeBranchId), content: JSON.stringify(undo) });
+    }
+    if (proposalStoreOverride !== null) {
+      files.push({ path: PROPOSALS_FILE, content: JSON.stringify(proposalStoreOverride) });
+    }
     for (let i: number = 0; i < files.length; i++) {
       await fileStore.writeText(joinPath(stage, files[i].path), files[i].content);
     }
     for (let i: number = 0; i < passthrough.length; i++) {
-      await fileStore.writeBytes(joinPath(stage, passthrough[i].path), passthrough[i].bytes);
+      if (passthrough[i].path.startsWith('.amber/') || passthrough[i].path.endsWith('.md') ||
+        passthrough[i].path.endsWith('.yaml')) {
+        await fileStore.writeText(
+          joinPath(stage, passthrough[i].path), decodeNovelWorkspaceUtf8(passthrough[i].bytes));
+      } else {
+        await fileStore.writeBytes(joinPath(stage, passthrough[i].path), passthrough[i].bytes);
+      }
     }
     if (!liveExists) {
       await fileStore.rename(stage, live);
@@ -491,6 +1023,76 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     const migrated: NovelProject | null = await migrateLegacyIfPresent(id);
     if (migrated !== null) return migrated;
     throw notFound('project', id);
+  };
+
+  const readActiveBranchSnapshot = async (id: string, branchId: string): Promise<WorkspaceBranchSnapshot> => {
+    const path: string = joinPath(projectRoot(id), branchSnapshotPath(branchId));
+    const raw: string | null = await fileStore.readText(path);
+    if (raw === null) throw invalidInput(`active branch state 缺失: ${path}`);
+    try {
+      return JSON.parse(raw) as WorkspaceBranchSnapshot;
+    } catch {
+      throw invalidInput('active branch state 无效');
+    }
+  };
+
+  const readCommits = async (id: string): Promise<WorkspaceLedgerCommit[]> => {
+    const raw: string | null = await fileStore.readText(joinPath(projectRoot(id), LEDGER_FILE));
+    if (raw === null) throw notFound('project', id);
+    return parseLedger(raw);
+  };
+
+  const replayProject = async (
+    id: string, commits: WorkspaceLedgerCommit[], commandId: string,
+  ): Promise<NovelProject | null> => {
+    const replay: WorkspaceLedgerCommit | null = findReceipt(commits, commandId);
+    if (replay === null) return null;
+    const raw: string | null = await fileStore.readText(
+      joinPath(projectRoot(id), commitSnapshotPath(replay.commitId)));
+    if (raw === null) throw invalidInput('receipt snapshot 缺失');
+    try {
+      const snapshot: WorkspaceCommitSnapshot = JSON.parse(raw) as WorkspaceCommitSnapshot;
+      return validateProject(snapshot.project);
+    } catch {
+      throw invalidInput('receipt snapshot 无效');
+    }
+  };
+
+  const commitLocked = async (
+    id: string, expected: NovelWorkspaceCas, commandId: string, kind: NovelWorkspaceMutationKind,
+    transform: (p: NovelProject) => NovelProject,
+  ): Promise<NovelProject> => {
+    assertCommandId(commandId);
+    await recoverProject(id);
+    const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+    const replay: NovelProject | null = await replayProject(id, commits, commandId);
+    if (replay !== null) return replay;
+    const current: NovelProject = await loadProjectInternal(id);
+    const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+    if (checkout === null) throw invalidInput('checkout 无效');
+    assertCas(expected, checkout);
+    const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+    const transformed: NovelProject = transform(current);
+    if (transformed.id !== id) throw invalidInput('项目 id 不可变更');
+    const next: NovelProject = { ...transformed, revision: current.revision + 1 };
+    const changedIndex: number | null = chapterChangedAt(current.chapters, next.chapters);
+    const unresolved: number | null = changedIndex === null
+      ? branch.unresolvedFromOrdinal
+      : followingUnresolvedOrdinal(changedIndex, next.chapters.length);
+    const stale: boolean = changedIndex === null ? branch.plotStale : true;
+    return await installSnapshot(
+      next, kind, [], checkout.branchId, commandId, unresolved, stale, true,
+      changedIndex === null ? null : changedIndex + 1,
+    );
+  };
+
+  const latestBranchCommit = (
+    commits: WorkspaceLedgerCommit[], branchId: string,
+  ): WorkspaceLedgerCommit | null => {
+    for (let i: number = commits.length - 1; i >= 0; i--) {
+      if (commits[i].branchId === branchId) return commits[i];
+    }
+    return null;
   };
 
   const repository: NovelProjectRepository = {
@@ -541,11 +1143,322 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
 
     updateProject: (id: string, transform: (p: NovelProject) => NovelProject): Promise<NovelProject> =>
       withProjectLock(id, async (): Promise<NovelProject> => {
+        await loadProjectInternal(id);
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        return await commitLocked(id, checkout, novelId(), 'compat_update', transform);
+      }),
+
+    workspaceStatus: (id: string): Promise<NovelWorkspaceStatus> =>
+      withProjectLock(id, async (): Promise<NovelWorkspaceStatus> => {
+        const project: NovelProject = await loadProjectInternal(id);
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        const branchState: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+        const active: NovelBranch | undefined = project.branches.find(
+          (branch: NovelBranch): boolean => branch.id === checkout.branchId && branch.lifecycle === 'active');
+        if (active === undefined) throw invalidInput('active branch 不存在');
+        const proposalStore: WorkspaceProposalStore = await readProposalStore(id);
+        return {
+          cas: checkout,
+          activeBranchId: active.id,
+          activeBranchName: active.name,
+          branches: project.branches.filter(
+            (branch: NovelBranch): boolean => branch.lifecycle === 'active'),
+          canUndo: await fileStore.exists(joinPath(projectRoot(id), undoPath(active.id))),
+          unresolvedFromOrdinal: branchState.unresolvedFromOrdinal,
+          plotStale: branchState.plotSourceTreeDigest !== branchState.plotSyncedTreeDigest,
+          pendingProposalCount: project.settingProposals.filter(
+            (proposal: NovelSettingProposal): boolean => proposal.status === 'pending').length +
+            proposalStore.proposals.filter(
+              (proposal: DurableWorkspaceProposal): boolean => proposal.status === 'pending').length,
+        };
+      }),
+
+    commitProject: (
+      id: string, expected: NovelWorkspaceCas, commandId: string, kind: NovelWorkspaceMutationKind,
+      transform: (p: NovelProject) => NovelProject,
+    ): Promise<NovelProject> => withProjectLock(
+      id, async (): Promise<NovelProject> => await commitLocked(id, expected, commandId, kind, transform)),
+
+    createBranch: (
+      id: string, name: string, expected: NovelWorkspaceCas, commandId: string,
+    ): Promise<NovelProject> => withProjectLock(id, async (): Promise<NovelProject> => {
+      assertCommandId(commandId);
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const replay: NovelProject | null = await replayProject(id, commits, commandId);
+      if (replay !== null) return replay;
+      const current: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      const clean: string = name.trim();
+      if (clean.length === 0) throw invalidInput('分支名不能为空');
+      const currentState: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+      const branch: NovelBranch = {
+        id: novelId(), name: clean, lifecycle: 'active', isMain: false,
+        forkFromChapterId: current.chapters.length === 0
+          ? null : current.chapters[current.chapters.length - 1].id,
+        createdAt: Date.now(),
+      };
+      const fork: NovelProject = {
+        ...current,
+        branches: current.branches.concat([branch]),
+        revision: current.revision + 1,
+        updatedAt: Date.now(),
+      };
+      return await installSnapshot(
+        fork, 'create_branch', [], branch.id, commandId,
+        currentState.unresolvedFromOrdinal, currentState.plotStale, false, null, true,
+      );
+    }),
+
+    switchBranch: (
+      id: string, targetBranchId: string, expected: NovelWorkspaceCas,
+    ): Promise<NovelProject> => withProjectLock(id, async (): Promise<NovelProject> => {
+      const current: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      if (targetBranchId === checkout.branchId) return current;
+      const targetBranch: NovelBranch | undefined = current.branches.find(
+        (branch: NovelBranch): boolean => branch.id === targetBranchId && branch.lifecycle === 'active');
+      if (targetBranch === undefined) throw invalidInput(`分支不存在: ${targetBranchId}`);
+      const targetSnapshot: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, targetBranchId);
+      const targetStored: NovelProject = await projectFromStoredState(
+        fileStore, projectRoot(id), targetSnapshot.state);
+      const target: NovelProject = {
+        ...targetStored,
+        name: current.name,
+        modelId: current.modelId,
+        lastGenerationGranularity: current.lastGenerationGranularity,
+        branches: current.branches,
+        updatedAt: current.updatedAt,
+      };
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const targetHead: WorkspaceLedgerCommit | null = latestBranchCommit(commits, targetBranchId);
+      if (targetHead === null || snapshotTreeDigest(
+        buildSnapshotFiles(target, targetBranchId, targetSnapshot.plotContent).files) !==
+        targetHead.treeDigest) {
+        throw invalidInput('目标分支 head/tree 不一致');
+      }
+      const targetCheckout: WorkspaceCheckout = {
+        branchId: targetBranchId,
+        head: targetHead.commitId,
+        treeDigest: targetHead.treeDigest,
+      };
+      const currentState: WorkspaceProjectState = buildSnapshotFiles(current, checkout.branchId).state;
+      await materializeCheckout(id, currentState, target, targetSnapshot, targetCheckout);
+      return target;
+    }),
+
+    undo: (
+      id: string, expected: NovelWorkspaceCas, commandId: string,
+    ): Promise<NovelProject> => withProjectLock(id, async (): Promise<NovelProject> => {
+      assertCommandId(commandId);
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const replay: NovelProject | null = await replayProject(id, commits, commandId);
+      if (replay !== null) return replay;
+      const current: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      const raw: string | null = await fileStore.readText(joinPath(projectRoot(id), undoPath(checkout.branchId)));
+      if (raw === null) throw invalidInput('没有可撤销的提交');
+      let undo: WorkspaceUndoRecord;
+      try {
+        undo = JSON.parse(raw) as WorkspaceUndoRecord;
+      } catch {
+        throw invalidInput('undo snapshot 无效');
+      }
+      if (undo.branchId !== checkout.branchId) throw invalidInput('undo snapshot 分支不一致');
+      const restored: NovelProject = {
+        ...undo.snapshot.project,
+        branches: current.branches,
+        revision: current.revision + 1,
+        updatedAt: Date.now(),
+      };
+      return await installSnapshot(
+        restored, 'undo', [], checkout.branchId, commandId,
+        undo.snapshot.unresolvedFromOrdinal, undo.snapshot.plotStale, false, null, false, true,
+        undo.snapshot.plotSyncedTreeDigest, undo.snapshot.plotContent,
+      );
+    }),
+
+    syncPlot: (
+      id: string, expected: NovelWorkspaceCas, commandId: string,
+    ): Promise<NovelProject> => withProjectLock(id, async (): Promise<NovelProject> => {
+      assertCommandId(commandId);
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const replay: NovelProject | null = await replayProject(id, commits, commandId);
+      if (replay !== null) return replay;
+      const current: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+      const next: NovelProject = { ...current, revision: current.revision + 1, updatedAt: Date.now() };
+      return await installSnapshot(
+        next, 'plot_sync', [], checkout.branchId, commandId,
+        branch.unresolvedFromOrdinal, false, true,
+      );
+    }),
+
+    resolveUnresolved: (
+      id: string, expected: NovelWorkspaceCas, commandId: string,
+    ): Promise<NovelProject> => withProjectLock(id, async (): Promise<NovelProject> => {
+      assertCommandId(commandId);
+      const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+      const replay: NovelProject | null = await replayProject(id, commits, commandId);
+      if (replay !== null) return replay;
+      const current: NovelProject = await loadProjectInternal(id);
+      const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+      if (checkout === null) throw invalidInput('checkout 无效');
+      assertCas(expected, checkout);
+      const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+      const next: NovelProject = { ...current, revision: current.revision + 1, updatedAt: Date.now() };
+      return await installSnapshot(
+        next, 'unresolved_resolve', [], checkout.branchId, commandId, null, branch.plotStale, true,
+      );
+    }),
+
+    workspaceProposals: (id: string): Promise<DurableWorkspaceProposal[]> =>
+      withProjectLock(id, async (): Promise<DurableWorkspaceProposal[]> => {
+        await loadProjectInternal(id);
+        return (await readProposalStore(id)).proposals.slice();
+      }),
+
+    createProposal: (
+      id: string, expected: NovelWorkspaceCas, proposalId: string,
+      patches: WorkspaceProposalPatch[], createdAt: number,
+    ): Promise<DurableWorkspaceProposal> => withProjectLock(
+      id, async (): Promise<DurableWorkspaceProposal> => {
         const current: NovelProject = await loadProjectInternal(id);
-        const next: NovelProject = transform(current);
-        if (next.id !== id) throw invalidInput('项目 id 不可变更');
-        const committed: NovelProject = { ...next, revision: current.revision + 1 };
-        return await installSnapshot(committed, 'compat_update');
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        assertCas(expected, checkout);
+        const proposal: DurableWorkspaceProposal = validateDurableWorkspaceProposal({
+          proposalId,
+          status: 'pending',
+          expectedCas: {
+            branchId: expected.branchId,
+            head: expected.head,
+            treeDigest: expected.treeDigest,
+          },
+          patches,
+          createdAt,
+          resolvedAt: null,
+        });
+        const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+        validateProposalTargets(proposal, branch);
+        const store: WorkspaceProposalStore = await readProposalStore(id);
+        const existing: DurableWorkspaceProposal | undefined = store.proposals.find(
+          (item: DurableWorkspaceProposal): boolean => item.proposalId === proposal.proposalId);
+        if (existing !== undefined) {
+          if (JSON.stringify(existing) !== JSON.stringify(proposal)) {
+            throw invalidInput(`proposal id 已存在: ${proposal.proposalId}`);
+          }
+          return existing;
+        }
+        const nextStore: WorkspaceProposalStore = {
+          version: 1,
+          proposals: store.proposals.concat([proposal]),
+          decisions: store.decisions,
+        };
+        await installProposalStoreOnly(current.id, nextStore);
+        return proposal;
+      }),
+
+    resolveProposal: (
+      id: string, proposalId: string, accept: boolean, commandId: string, resolvedAt: number,
+    ): Promise<DurableWorkspaceProposal> => withProjectLock(
+      id, async (): Promise<DurableWorkspaceProposal> => {
+        assertCommandId(commandId);
+        const store: WorkspaceProposalStore = await readProposalStore(id);
+        const commandDecision: WorkspaceProposalDecision | undefined = store.decisions.find(
+          (decision: WorkspaceProposalDecision): boolean => decision.commandId === commandId);
+        if (commandDecision !== undefined) {
+          if (commandDecision.proposalId !== proposalId || commandDecision.accept !== accept) {
+            throw invalidInput('proposal decision command 已用于其他决定');
+          }
+          const replay: DurableWorkspaceProposal | undefined = store.proposals.find(
+            (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId);
+          if (replay === undefined) throw invalidInput('proposal decision 缺少 proposal');
+          return replay;
+        }
+        const proposalIndex: number = store.proposals.findIndex(
+          (proposal: DurableWorkspaceProposal): boolean => proposal.proposalId === proposalId);
+        if (proposalIndex < 0) throw notFound('proposal', proposalId);
+        const proposal: DurableWorkspaceProposal = store.proposals[proposalIndex];
+        if (proposal.status !== 'pending') return proposal;
+        const current: NovelProject = await loadProjectInternal(id);
+        const checkout: WorkspaceCheckout | null = await readCheckout(fileStore, projectRoot(id));
+        if (checkout === null) throw invalidInput('checkout 无效');
+        assertCas(proposal.expectedCas, checkout);
+        const branch: WorkspaceBranchSnapshot = await readActiveBranchSnapshot(id, checkout.branchId);
+        validateProposalTargets(proposal, branch);
+        const resolved: DurableWorkspaceProposal = resolveDurableWorkspaceProposal(
+          proposal, accept, resolvedAt).proposal;
+        const proposals: DurableWorkspaceProposal[] = store.proposals.slice();
+        proposals[proposalIndex] = resolved;
+        const decision: WorkspaceProposalDecision = { commandId, proposalId, accept };
+        const nextStore: WorkspaceProposalStore = {
+          version: 1,
+          proposals,
+          decisions: store.decisions.concat([decision]),
+        };
+        if (!accept) {
+          await installProposalStoreOnly(id, nextStore);
+          return resolved;
+        }
+        const commits: WorkspaceLedgerCommit[] = await readCommits(id);
+        if (findReceipt(commits, commandId) !== null) {
+          throw invalidInput('proposal decision command 与既有 receipt 冲突');
+        }
+        let chapters: NovelChapter[] = current.chapters.slice();
+        let plotContent: string | null = branch.plotContent;
+        let changedIndex: number | null = null;
+        for (let i: number = 0; i < proposal.patches.length; i++) {
+          const patch: WorkspaceProposalPatch = proposal.patches[i];
+          const plotPath: string = `branches/${checkout.branchId}/plan/plot.md`;
+          if (patch.path === plotPath) {
+            plotContent = patch.operation === 'write' ? patch.content : null;
+            continue;
+          }
+          const recordIndex: number = branch.state.chapters.findIndex(
+            (record: WorkspaceChapterRecord): boolean => record.path === patch.path);
+          if (recordIndex < 0) throw invalidInput(`proposal 章节路径不存在: ${patch.path}`);
+          const chapterId: string = branch.state.chapters[recordIndex].id;
+          const projectIndex: number = chapters.findIndex(
+            (chapter: NovelChapter): boolean => chapter.id === chapterId);
+          if (projectIndex < 0) throw invalidInput(`proposal 章节不存在: ${chapterId}`);
+          changedIndex = changedIndex === null ? projectIndex : Math.min(changedIndex, projectIndex);
+          if (patch.operation === 'delete') {
+            chapters.splice(projectIndex, 1);
+          } else {
+            chapters[projectIndex] = {
+              ...chapters[projectIndex],
+              content: patch.content ?? '',
+              updatedAt: resolvedAt,
+            };
+          }
+        }
+        const next: NovelProject = {
+          ...current,
+          chapters,
+          revision: current.revision + 1,
+          updatedAt: Math.max(current.updatedAt, resolvedAt),
+        };
+        const unresolved: number | null = changedIndex === null
+          ? branch.unresolvedFromOrdinal
+          : followingUnresolvedOrdinal(changedIndex, chapters.length);
+        const stale: boolean = changedIndex === null ? false : true;
+        await installSnapshot(
+          next, 'proposal_resolve', [], checkout.branchId, commandId,
+          unresolved, stale, true, changedIndex === null ? null : changedIndex + 1,
+          false, false, undefined, plotContent, nextStore,
+        );
+        return resolved;
       }),
 
     deleteProject: (id: string): Promise<void> =>

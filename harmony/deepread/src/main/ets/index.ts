@@ -133,7 +133,9 @@ export {
   SUGGESTION_SYSTEM_PROMPT, buildSuggestionUserPrompt, mapSuggestionKind, parseSuggestions,
   collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from './novel/suggestion_engine.ts';
-export type { NovelProjectRepository } from './novel/repository.ts';
+export type {
+  NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceCas, NovelWorkspaceStatus,
+} from './novel/repository.ts';
 export { createFileNovelRepository, migrateNovelProject } from './novel/repository.ts';
 export type { NovelWorkspaceManifest } from './novel/workspace_contract.ts';
 export {
@@ -154,6 +156,22 @@ export type {
   NovelBookZipEncoder,
 } from './novel/workspace_book_export.ts';
 export { buildNovelBookExport, encodeNovelBookEpub } from './novel/workspace_book_export.ts';
+export type {
+  WorkspaceCas, WorkspaceCommit, WorkspaceBranchMetadata, WorkspaceProposalStatus,
+  WorkspaceProposalPatchOperation, WorkspaceProposalPatch, DurableWorkspaceProposal,
+  WorkspaceUndoSnapshot, WorkspacePlotState, WorkspaceProposalResolution,
+  WorkspaceReceiptReplay,
+} from './novel/workspace_history.ts';
+export {
+  WORKSPACE_HISTORY_VERSION, validateWorkspaceCas, parseWorkspaceCas,
+  assertWorkspaceCasMatch, validateWorkspaceCommit, parseWorkspaceCommit,
+  classifyReceiptReplay, validateWorkspaceReceiptLedger, validateWorkspaceBranchMetadata,
+  parseWorkspaceBranchMetadata, validateWorkspaceProposalPatch,
+  validateDurableWorkspaceProposal, parseDurableWorkspaceProposal,
+  resolveDurableWorkspaceProposal, validateWorkspaceUndoSnapshot,
+  parseWorkspaceUndoSnapshot, unresolvedFromOrdinal, isWorkspacePlotStale,
+  refreshWorkspacePlotState, syncWorkspacePlot,
+} from './novel/workspace_history.ts';
 export type {
   NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
   NovelSettingProposalDraft, NovelSettingProposalsParsed,

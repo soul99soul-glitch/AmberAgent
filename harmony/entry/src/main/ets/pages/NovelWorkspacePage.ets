@@ -13,6 +13,7 @@ import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard
 import {
   NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
 } from '../components/NovelBatchPolishSheet.ets';
+import { NovelBranchSheet } from '../components/NovelBranchSheet.ets';
 import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -25,7 +26,7 @@ import {
   NovelRunKind, NovelRun, NovelChapterVersion, NovelChapterVersionKind,
   parseDiscussionAsk, stripDiscussionAskFence, stripSettingProposalsFence, formatDiscussionAnswersFromToolPayload,
   NovelDiscussionAskParsed, NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
-  StreamTransportState, UIMessage, UIMessageAnnotation, makeUIMessage,
+  NovelWorkspaceStatus, StreamTransportState, UIMessage, UIMessageAnnotation, makeUIMessage,
 } from '@amber/deepread-domain';
 import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
@@ -71,6 +72,8 @@ const filterLabel = (f: MaterialFilter): string => {
 struct NovelWorkspacePage {
   @StorageProp('statusBarHeight') statusBarHeight: number = 44;
   @State project: NovelProject | null = null;
+  @State workspaceStatus: NovelWorkspaceStatus | null = null;
+  @State branchSheetOpen: boolean = false;
   @State tab: number = 0;
   @State errorMsg: string = '';
   @State busy: boolean = false;
@@ -187,15 +190,92 @@ struct NovelWorkspacePage {
     const projectId: string = this.projectId;
     try {
       const project: NovelProject = await getNovelCreation().open(projectId);
+      const status: NovelWorkspaceStatus = await getNovelCreation().workspaceStatus(projectId);
       if (this.pageAlive && token === this.reloadToken) {
         this.project = project;
+        this.workspaceStatus = status;
         // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
         // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
         this.initialScrollArmed = true;
       }
     } catch (e) {
-      if (this.pageAlive && token === this.reloadToken) this.errorMsg = '项目无法打开';
+      if (this.pageAlive && token === this.reloadToken) {
+        this.errorMsg = `项目无法打开：${String(e)}`;
+      }
     }
+  }
+
+  private async createWorkspaceBranch(name: string): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().createBranch(this.projectId, name);
+      this.branchSheetOpen = false;
+      await this.reload();
+    } catch (e) {
+      this.showWorkspaceOperationError('创建分支失败', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async selectWorkspaceBranch(branchId: string): Promise<void> {
+    if (this.busy || branchId === this.workspaceStatus?.activeBranchId) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().switchBranch(this.projectId, branchId);
+      this.selectedChapterId = '';
+      this.branchSheetOpen = false;
+      await this.reload();
+    } catch (e) {
+      this.showWorkspaceOperationError('切换分支失败', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async undoWorkspace(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().undoLast(this.projectId);
+      await this.reload();
+    } catch (e) {
+      this.showWorkspaceOperationError('撤销失败', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async syncWorkspacePlot(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().syncPlot(this.projectId);
+      await this.reload();
+    } catch (e) {
+      this.showWorkspaceOperationError('同步剧情失败', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async resolveWorkspaceUnresolved(): Promise<void> {
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      await getNovelCreation().resolveUnresolved(this.projectId);
+      await this.reload();
+    } catch (e) {
+      this.showWorkspaceOperationError('标记后续影响失败', e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private showWorkspaceOperationError(action: string, error: Object): void {
+    this.errorMsg = `${action}：${String(error)}`;
+    promptAction.showToast({ message: this.errorMsg, duration: 2400 });
   }
 
   private writeExportBytes(uri: string, bytes: Uint8Array): void {
@@ -1344,6 +1424,16 @@ struct NovelWorkspacePage {
             .fontSize(20).fontWeight(FontWeight.Bold).fontColor(INK)
             .fontFamily(FONT_SERIF).margin({ left: 12 }).layoutWeight(1)
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.workspaceStatus !== null) {
+            Text(`${this.workspaceStatus.activeBranchName} ▾`)
+              .fontSize(12).fontColor(this.busy ? INK4 : ACCENT)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ minWidth: 44, maxWidth: 104 })
+              .height(44).textAlign(TextAlign.Center)
+              .padding({ left: 8, right: 8 })
+              .onClick((): void => { if (!this.busy) this.branchSheetOpen = true; })
+              .accessibilityText(`当前分支 ${this.workspaceStatus.activeBranchName}，打开分支面板`)
+          }
           if (this.busy) LoadingProgress().width(16).height(16).color(ACCENT)
           Text('导出').fontSize(14).fontColor(this.busy ? INK4 : ACCENT)
             .width(44).height(44).textAlign(TextAlign.Center)
@@ -1394,6 +1484,23 @@ struct NovelWorkspacePage {
       // N2:版本历史 sheet
       if (this.versionsOpen) {
         this.versionsSheetOverlay()
+      }
+      if (this.branchSheetOpen && this.workspaceStatus !== null) {
+        NovelBranchSheet({
+          visible: this.branchSheetOpen,
+          activeBranchId: this.workspaceStatus.activeBranchId,
+          branches: this.workspaceStatus.branches,
+          busy: this.busy,
+          canUndo: this.workspaceStatus.canUndo,
+          unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
+          plotStale: this.workspaceStatus.plotStale,
+          onClose: (): void => { this.branchSheetOpen = false; },
+          onCreate: (name: string): void => { this.createWorkspaceBranch(name); },
+          onSelect: (branchId: string): void => { this.selectWorkspaceBranch(branchId); },
+          onUndo: (): void => { this.undoWorkspace(); },
+          onSyncPlot: (): void => { this.syncWorkspacePlot(); },
+          onResolveUnresolved: (): void => { this.resolveWorkspaceUnresolved(); },
+        })
       }
       if (this.batchPolishOpen) {
         NovelBatchPolishSheet({

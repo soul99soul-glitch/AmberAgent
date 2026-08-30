@@ -204,6 +204,19 @@ NovelProjectsPage / NovelWorkspacePage
 验收：branch head/tree CAS、分支切换、proposal approve/deny/replay、manual edit、undo、
 unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖用户正文。
 
+### C4 执行记录（2026-08-31）
+
+- 正史已由可见树、严格 ledger、checkout、branch snapshot 与 commit snapshot 共同校验；所有
+  `NovelCreation` 生产 mutation 经 fresh CAS + receipt 提交，断链、重复或正文漂移 fail closed。
+- fork/switch 已是真实隔离 branch state；durable proposal、one-level append-only undo、unresolved、
+  plot digest stale/sync 均持久化并有聚焦测试。
+- durable proposal 已接入 `NovelCreation` production service seam；C5 的 Agent tool/审批卡直接复用，
+  不再创建平行接口。
+- 真机完成主线 → 创建分支 `2` → 自动切换 → 切回主线；重装签名包后状态仍在。分支面板经 review
+  补齐整体滚动、键盘态、按条目收缩和可见错误反馈。
+- 验证：DeepRead 697/697、Chat 2022/2022、聚焦 30/30；ArkTS lint 0 defects；AGC build、安装、
+  逻辑 review 与 UI review 全部通过。
+
 ## Phase C5 — 小说工作台、持久对话与职责模型
 
 交付：

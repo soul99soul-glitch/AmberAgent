@@ -13,8 +13,8 @@
     {"id":"C1","status":"complete"},
     {"id":"C2","status":"complete"},
     {"id":"C3","status":"complete"},
-    {"id":"C4","status":"in_progress"},
-    {"id":"C5","status":"pending"},
+    {"id":"C4","status":"complete"},
+    {"id":"C5","status":"in_progress"},
     {"id":"C6","status":"pending"},
     {"id":"C7","status":"pending"},
     {"id":"C8","status":"pending"}
