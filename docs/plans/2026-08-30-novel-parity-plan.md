@@ -65,7 +65,7 @@
 ## 明确不做(登记)
 
 - 模板 Agent 生成/工作台(小说模板非重点,继承深读 P8 模式后置)
-- iOS Swift 序列化兼容层(NovelSwiftCompatibleJson,鸿蒙无历史包袱)
+- iOS Swift 序列化兼容层（无需兼容 Swift 包格式；Harmony 自身仍需读取 v2/v3 与 C3 前私有存储）
 - injection 多模式枚举(先落单一 budget 模式,多模式待实际需求)
 
 
@@ -102,5 +102,5 @@ warn 125 ≤ 基线 126);真机安装运行正常。生成 UI 终验待用户手
 ## 明确不做(执行确认)
 
 - 模板 Agent 生成/工作台(后置)
-- iOS Swift 序列化兼容层(无历史包袱)
+- iOS Swift 序列化兼容层（无需兼容 Swift 包格式；Harmony 自身迁移输入继续保留）
 - injection 多模式枚举(单一 budget 模式已够)

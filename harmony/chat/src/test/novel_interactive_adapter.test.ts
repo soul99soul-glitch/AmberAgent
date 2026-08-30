@@ -141,7 +141,8 @@ test('novel adapter: Chat 累加快照 A→AB，实时上报 canonical snapshot 
   assert.ok(finalSnapshot?.kind === 'snapshot');
   assert.equal(latestAssistantText(finalSnapshot.messages), 'AB');
   assert.equal(finalSnapshot.transport, 'live');
-  assert.equal(events.some(event => event.kind === 'delta' || event.kind === 'replace'), false);
+  const eventKinds: string[] = events.map(event => String(event.kind));
+  assert.equal(eventKinds.includes('delta') || eventKinds.includes('replace'), false);
   assert.equal(events.at(-1)?.kind, 'completed');
 });
 

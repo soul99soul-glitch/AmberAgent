@@ -62,6 +62,7 @@ export struct SlashCommandPanel {
                 .layoutWeight(1).margin({ left: 8 })
               }
               .width('100%')
+              .constraintSize({ minHeight: 44 })
               .padding({ left: 12, right: 12, top: 8, bottom: 8 })
               .onClick((): void => { this.onSelect(cmd); })
               if (i < this.commands.length - 1 && this.commands[i + 1].group === cmd.group) {

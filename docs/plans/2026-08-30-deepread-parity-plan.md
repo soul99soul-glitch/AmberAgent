@@ -4,7 +4,8 @@
 模板子系统 1301 行 / 生成链 Worker+Notifier+Scheduler+Prefetcher+Aggregator)vs 鸿蒙逐文件对照。
 执行纪律:每 Phase 结束跑审查清单(逻辑闭环/调用链/UI 细节),精准修复,不过度防御;构建+lint+单测全绿才过。
 
-总约束(全程):域层(chat/deepread)改动必须过 631+2012 单测;验证回路 lint→build→真机截图;
+总约束(全程):域层(chat/deepread)改动必须过两域当次全量单测（数量随功能增加，以命令输出为准）;
+验证回路 lint→build→真机截图;
 诚实 UI(F1 原则);新 API 先 `devecocli docs search`,API 12 以上 canIUse;V1 状态装饰器。
 
 ---
@@ -18,7 +19,7 @@
    递增/收尾 94/补漏 96/完成 100 + label),供 UI 胶囊与通知共用
 4. 单测:快照映射表逐态断言 + expired 边界(23h/25h)
 
-验收:deepread 631+新增单测全绿;tsc clean。UI 不动。
+验收:deepread 当次全量单测与新增单测全绿;tsc clean。UI 不动。
 
 ## P2 — 热榜体验包
 

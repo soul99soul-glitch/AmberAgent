@@ -59,6 +59,7 @@ import type {
 } from './polish.ts';
 
 const LEGACY_PROJECTS_DIR: string = 'amberagent/novel-creation/projects';
+const LEGACY_DELETED_DIR: string = 'novel_deleted';
 const LEGACY_SUFFIX: string = '.novel.json';
 const ROOT: string = 'amberagent/novel-workspace';
 const STAGING_ROOT: string = joinPath(ROOT, '.staging');
@@ -2536,18 +2537,52 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
       const names: string[] = await fileStore.list(DELETED_ROOT);
       let best: NovelProject | null = null;
       let bestId: string = '';
+      let bestLegacyFile: string = '';
       for (let i: number = 0; i < names.length; i++) {
         try {
           const project: NovelProject = await loadAt(fileStore, deletedRoot(names[i]));
           if (best === null || project.updatedAt > best.updatedAt) {
             best = project;
             bestId = names[i];
+            bestLegacyFile = '';
           }
         } catch {
           // 跳过损坏的回收项，不删除证据。
         }
       }
+      const legacyNames: string[] = await fileStore.list(LEGACY_DELETED_DIR);
+      for (let i: number = 0; i < legacyNames.length; i++) {
+        if (!legacyNames[i].endsWith(LEGACY_SUFFIX)) continue;
+        const path: string = joinPath(LEGACY_DELETED_DIR, legacyNames[i]);
+        try {
+          const raw: string | null = await fileStore.readText(path);
+          if (raw === null) continue;
+          const project: NovelProject = decodeLegacy(raw);
+          if (best === null || project.updatedAt > best.updatedAt) {
+            best = project;
+            bestId = '';
+            bestLegacyFile = path;
+          }
+        } catch {
+          // 旧版损坏 JSON 必须保留，便于人工取证或修复。
+        }
+      }
       if (best === null) return null;
+      if (bestLegacyFile.length > 0) {
+        const selectedId: string = best.id;
+        const selectedFile: string = bestLegacyFile;
+        return await withProjectLock(selectedId, async (): Promise<NovelProject> => {
+          const raw: string | null = await fileStore.readText(selectedFile);
+          if (raw === null) throw invalidInput('待恢复项目已不存在');
+          const selected: NovelProject = decodeLegacy(raw);
+          if (selected.id !== selectedId) throw invalidInput('待恢复项目已变更');
+          await recoverProject(selectedId);
+          if (await fileStore.exists(projectRoot(selectedId))) throw invalidInput('同 id 项目已存在');
+          const restored: NovelProject = await installSnapshot(selected, 'legacy_restore');
+          await fileStore.delete(selectedFile);
+          return restored;
+        });
+      }
       return await withProjectLock(best.id, async (): Promise<NovelProject> => {
         if (await fileStore.exists(projectRoot(best.id))) throw invalidInput('同 id 项目已存在');
         if (!await fileStore.exists(deletedRoot(bestId))) throw invalidInput('待恢复项目已不存在');

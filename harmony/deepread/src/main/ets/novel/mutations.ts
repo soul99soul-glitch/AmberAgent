@@ -4,14 +4,13 @@
 import {
   MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS, MAX_MATERIAL_CHARS,
   makeNovelProject, makeNovelChapter, makeNovelMaterial,
-  makeNovelChapterVersion, makeNovelBranch, makeNovelSettingProposal,
+  makeNovelChapterVersion, makeNovelBranch,
 } from './models.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelMaterialKind, NovelCollectionTarget, NovelChapterVersionKind, NovelBranch,
   NovelChapterVersion, NovelSettingProposal, NovelModelPolicy, NovelBranchSettings,
 } from './models.ts';
-import type { NovelSettingProposalDraft } from './discussion_structured.ts';
 import { invalidInput, notFound, alreadyCollected } from './error.ts';
 
 // ===== N1:分支 / 版本 / 撤销 / 废弃(Android Branch/Version/Checkpoint 语义)=====
@@ -308,22 +307,6 @@ export const resolveSuggestion = (
     project: { ...project, materials: materials, materialSuggestions: suggestions, updatedAt: now },
     value: material,
   };
-};
-
-// 讨论回复里的结构化设定提案。sourceMessageId 指向同事务落库的 assistant 消息。
-export const addSettingProposals = (
-  project: NovelProject, sourceMessageId: string, drafts: NovelSettingProposalDraft[], now: number,
-): NovelProject => {
-  if (drafts.length === 0) return project;
-  const proposals: NovelSettingProposal[] = drafts.map(
-    (draft: NovelSettingProposalDraft): NovelSettingProposal => makeNovelSettingProposal({
-      sourceMessageId: sourceMessageId,
-      kind: draft.kind,
-      title: draft.title,
-      content: draft.content,
-      now: now,
-    }));
-  return { ...project, settingProposals: [...project.settingProposals, ...proposals], updatedAt: now };
 };
 
 // 采纳按 kind+normalizeTitle upsert 活资料；拒绝只结案，不改变 materials。

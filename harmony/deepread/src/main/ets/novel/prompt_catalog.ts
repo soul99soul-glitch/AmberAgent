@@ -31,15 +31,11 @@ ${INK_GUIDE}
 
 const DISCUSSION_SYSTEM: string = `你是小说创作的讨论伙伴。与作者讨论设定、人物、情节走向;
 给出具体、可操作的建议而不是空泛评价。作者可能随时把你说的设定采用为正式设定。
-先输出给作者阅读的自然正文。需要作者补充会实质影响建议的信息时,可在正文后附最多一个 ask_user fenced JSON,每次只问 1-2 题:
-\`\`\`ask_user
-{"questions":[{"id":"q1","question":"问题","options":["选项A","选项B"],"selection_type":"single|multi|text"}]}
-\`\`\`
-只有当你提出具体、可独立采纳的设定变更时,才可在正文后再附最多一个 setting_proposals fenced JSON:
-\`\`\`setting_proposals
-{"proposals":[{"kind":"world|character|outline|requirement|other","title":"设定标题","content":"采用后应保存的完整设定"}]}
-\`\`\`
-setting_proposals 只是待确认提案,必须由作者明确采纳后才会写入正式资料;不要把普通建议或空泛想法包装成提案。
+先输出给作者阅读的自然正文。需要作者补充会实质影响建议的信息时,调用 ask_user 工具,每次只问 1-2 题。
+只有当你提出具体、可独立采纳的工作区变更时,才调用 novel_workspace_write 工具提交待确认提案;
+proposal_id 对同一变更保持稳定,patches 必须包含拟写入的完整内容。工具调用只会暂存提案,
+必须由作者明确批准后才会写入工作区;不要把普通建议或空泛想法包装成提案。
+不要输出 fenced JSON 协议块,必须使用原生工具调用。
 ${INK_GUIDE}`;
 
 const PROSE_CONTINUATION_SYSTEM: string = `你是小说续写引擎。紧接现有正文续写一个自然片段:

@@ -30,6 +30,9 @@ export struct ChatInput {
   @Prop disabled: boolean = false;
   @Prop editing: boolean = false;
   @Prop hasImages: boolean = false;
+  @Prop placeholder: string = '输入消息…';
+  @Prop showAttachments: boolean = true;
+  @Prop showCoreSlashCommands: boolean = true;
   @Prop subAgentEnabled: boolean = false;
   @Prop subAgentMode: string = 'roster';
   // G2-S4:动态 skill 斜杠命令(由 ChatPage 从 SkillManager 装配)
@@ -64,14 +67,21 @@ export struct ChatInput {
   private isSlashVisible(): boolean {
     // 支持半角 / 和全角 ／(中文输入法兼容,Android ChatInputComposers.kt:765-771)
     return !this.disabled && !this.editing &&
+      this.allSlashCommands().length > 0 &&
       (this.text.startsWith('/') || this.text.startsWith('／')) &&
       this.text.indexOf(' ') < 0;
   }
 
+  private allSlashCommands(): SlashCommand[] {
+    const commands: SlashCommand[] = buildSlashCommands(
+      this.subAgentEnabled, this.subAgentMode, this.skillCommands, this.quickMessages);
+    if (this.showCoreSlashCommands) return commands;
+    return commands.filter((cmd: SlashCommand): boolean => !cmd.id.startsWith('core.'));
+  }
+
   // 过滤匹配当前输入的命令(输入 /c → 匹配 clear/compact)
   private getSlashCommands(): SlashCommand[] {
-    const all: SlashCommand[] = buildSlashCommands(
-      this.subAgentEnabled, this.subAgentMode, this.skillCommands, this.quickMessages);
+    const all: SlashCommand[] = this.allSlashCommands();
     if (!this.isSlashVisible()) return [];
     // 去掉前导 / 或 ／ 得到查询
     const query: string = this.text.substring(1).toLowerCase();
@@ -115,7 +125,7 @@ export struct ChatInput {
           Text('编辑中').fontSize(LABEL).fontFamily(FONT_MONO).fontColor(INK4)
         }
         .width('100%')
-        .padding({ left: 20, right: 20, top: 4, bottom: 4 })
+        .height(44).padding({ left: 20, right: 20 })
         .onClick((): void => { this.onCancelEdit(); })
       }
 
@@ -125,65 +135,67 @@ export struct ChatInput {
         Row() {
         // Attach capsule:rest 44 纯圆;展开时动作组以宽度+透明度推入(220ms),
         //   组件常驻(不做 if 增删),避免宽度跳变无动效、收起无动画。
-        Row() {
+        if (this.showAttachments) {
           Row() {
-            Icon({ name: 'plus', iconSize: 20, color: INK2 })
-              .rotate({ angle: this.attachExpanded ? 45 : 0 })
-              .animation({ duration: 220, curve: Curve.EaseOut })
+            Row() {
+              Icon({ name: 'plus', iconSize: 20, color: INK2 })
+                .rotate({ angle: this.attachExpanded ? 45 : 0 })
+                .animation({ duration: 220, curve: Curve.EaseOut })
+            }
+            .width(44).height(44)
+            .borderRadius(999)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .onClick((): void => { this.attachExpanded = !this.attachExpanded; })
+            .accessibilityText('添加附件')
+
+            Row({ space: 2 }) {
+              Row() {
+                Icon({ name: 'hi_camera', iconSize: 23, color: INK2 })
+              }
+              .width(44).height(44).borderRadius(999)
+              .justifyContent(FlexAlign.Center)
+              .onClick((): void => { this.attachExpanded = false; this.onTakePhoto(); })
+              .accessibilityText('拍照')
+
+              Row() {
+                Icon({ name: 'hi_photos', iconSize: 23, color: INK2 })
+              }
+              .width(44).height(44).borderRadius(999)
+              .justifyContent(FlexAlign.Center)
+              .onClick((): void => { this.attachExpanded = false; this.onPickImage(); })
+              .accessibilityText('选择图片')
+
+              Row() {
+                Icon({ name: 'hi_files', iconSize: 23, color: INK2 })
+              }
+              .width(44).height(44).borderRadius(999)
+              .justifyContent(FlexAlign.Center)
+              .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
+              .accessibilityText('选择文件')
+            }
+            .width(this.attachExpanded ? 136 : 0)
+            .opacity(this.attachExpanded ? 1 : 0)
+            .clip(true)
+            .alignItems(VerticalAlign.Center)
+            .animation({ duration: 220, curve: Curve.EaseOut })
           }
-          .width(40).height(40)
+          .height(44)
+          .padding({ left: 2, right: 2 })
           .borderRadius(999)
-          .justifyContent(FlexAlign.Center)
+          .backgroundColor(SURFACE)
+          .border({ width: 1, color: LINE })
           .alignItems(VerticalAlign.Center)
-          .onClick((): void => { this.attachExpanded = !this.attachExpanded; })
-          .accessibilityText('添加附件')
-
-          Row({ space: 2 }) {
-            Row() {
-              Icon({ name: 'hi_camera', iconSize: 23, color: INK2 })
-            }
-            .width(40).height(40).borderRadius(999)
-            .justifyContent(FlexAlign.Center)
-            .onClick((): void => { this.attachExpanded = false; this.onTakePhoto(); })
-            .accessibilityText('拍照')
-
-            Row() {
-              Icon({ name: 'hi_photos', iconSize: 23, color: INK2 })
-            }
-            .width(40).height(40).borderRadius(999)
-            .justifyContent(FlexAlign.Center)
-            .onClick((): void => { this.attachExpanded = false; this.onPickImage(); })
-            .accessibilityText('选择图片')
-
-            Row() {
-              Icon({ name: 'hi_files', iconSize: 23, color: INK2 })
-            }
-            .width(40).height(40).borderRadius(999)
-            .justifyContent(FlexAlign.Center)
-            .onClick((): void => { this.attachExpanded = false; this.onPickFile(); })
-            .accessibilityText('选择文件')
-          }
-          .width(this.attachExpanded ? 124 : 0)
-          .opacity(this.attachExpanded ? 1 : 0)
-          .clip(true)
-          .alignItems(VerticalAlign.Center)
-          .animation({ duration: 220, curve: Curve.EaseOut })
+          .opacity(this.sending ? 0.4 : 1)
+          .scale({ x: this.attachScale, y: this.attachScale })
+          .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
+          .margin({ right: 8 })
         }
-        .height(44)
-        .padding({ left: 2, right: 2 })
-        .borderRadius(999)
-        .backgroundColor(SURFACE)
-        .border({ width: 1, color: LINE })
-        .alignItems(VerticalAlign.Center)
-        .opacity(this.sending ? 0.4 : 1)
-        .scale({ x: this.attachScale, y: this.attachScale })
-        .onTouch((e: TouchEvent): void => { this.pressTouch(true, e); })
-        .margin({ right: 8 })
 
         // Center pill:flex 1, radius 26, min-height 48, bg SURFACE2, border 1px LINE
         Row() {
           TextArea({ text: this.text,
-            placeholder: this.editing ? '编辑消息,发送将重发…' : '输入消息…' })
+            placeholder: this.editing ? '编辑消息,发送将重发…' : this.placeholder })
             .layoutWeight(1)
             .fontSize(BODY).fontColor(INK)
             .fontFamily(FONT_SANS)

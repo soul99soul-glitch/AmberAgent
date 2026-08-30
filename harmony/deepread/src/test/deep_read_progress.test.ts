@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deepReadProgressSnapshot, isCacheEntryExpired } from '../main/ets/platform/deep_read_progress.ts';
 import { makeEmptyDeepReadOutput } from '../main/ets/domain/models.ts';
+import type { DeepReadOutput } from '../main/ets/domain/models.ts';
 import type { DeepReadCacheEntry } from '../main/ets/platform/repository.ts';
 
 const entry = (overrides: Partial<DeepReadCacheEntry>): DeepReadCacheEntry => ({

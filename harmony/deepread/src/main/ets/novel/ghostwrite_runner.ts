@@ -400,10 +400,6 @@ class DefaultGhostwriteRunner implements GhostwriteRunner {
         if (settled) return;
         if (event.kind === 'snapshot') {
           latestText = latestAssistantText(event.messages);
-        } else if (event.kind === 'delta') {
-          latestText += event.text;
-        } else if (event.kind === 'replace') {
-          latestText = event.text;
         } else if (event.kind === 'waiting_user') {
           finish((): void => { resolve({ kind: 'waiting_user', text: latestText }); });
         } else if (event.kind === 'failed') {

@@ -1,4 +1,6 @@
-# AmberAgent 鸿蒙迁移 — 状态快照
+# AmberAgent 鸿蒙迁移 — 历史状态快照（2026-07-30，已停止维护）
+# 当前状态以 docs/plans/2026-08-29-harmony-completion-plan.md、
+# docs/plans/2026-08-30-harmony-novel-product-completion-plan.md 与对应 workflow results 为准。
 # 每次工作循环开始时重读本文件；循环结束时更新。
 # 治理体系:本文件(进度) + DECISION_LOG.md(决策) + PARITY_DEBT.md(等价偏差)
 #        + docs/harmony-capability-matrix.md(能力归属,仓库原生)

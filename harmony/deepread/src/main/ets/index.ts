@@ -128,7 +128,7 @@ export {
   createProject, renameProject, setProjectModelPolicy, setProjectBranchSettings,
   appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
-  addSettingProposals, resolveSettingProposal,
+  resolveSettingProposal,
 } from './novel/mutations.ts';
 export type { NovelMutation } from './novel/mutations.ts';
 export { novelMessageUi, novelMessageText } from './novel/transcript.ts';
@@ -212,18 +212,9 @@ export {
   commitPolishChapter, projectPolishProgress,
 } from './novel/polish.ts';
 export type {
-  NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
-  NovelSettingProposalDraft, NovelSettingProposalsParsed,
-} from './novel/discussion_structured.ts';
-export {
-  MAX_SETTING_PROPOSALS, parseDiscussionAsk, stripDiscussionAskFence,
-  encodeDiscussionToolInput, formatDiscussionAnswers, formatDiscussionAnswersFromToolPayload,
-  parseSettingProposals, stripSettingProposalsFence,
-} from './novel/discussion_structured.ts';
-export type {
-  NovelRunEvent, NovelRun, NovelCollectionResult, NovelSuggestionRefreshResult, NovelCreationDeps,
+  NovelRunEvent, NovelRun, NovelActiveRun, NovelCollectionResult,
+  NovelSuggestionRefreshResult, NovelCreationDeps,
   NovelPolishEffects,
-  NovelBatchPolishResultStatus, NovelBatchPolishResult, NovelBatchPolishEvent, NovelBatchPolishRun,
   NovelConsistencyIssue, NovelConsistencyReport, NovelWorkspaceListResult,
   NovelWorkspaceReadResult, NovelWorkspaceGrepMatch, NovelWorkspaceGrepResult,
 } from './novel/creation.ts';

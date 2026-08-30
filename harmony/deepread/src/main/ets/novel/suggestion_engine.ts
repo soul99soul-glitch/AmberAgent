@@ -89,7 +89,8 @@ export const parseSuggestions = (
   return out;
 };
 
-// 跑一次模型调用,累积 delta/replace 成全文;completed 解决,failed/超时 拒绝。
+// 跑一次模型调用,从 canonical snapshot 取最新 assistant 全文;
+// completed 解决,failed/超时 拒绝。
 export const collectModelText = (
   modelRunning: NovelModelRunning,
   request: NovelModelRequest,
@@ -110,11 +111,7 @@ export const collectModelText = (
     const stream = modelRunning.start(request);
     unsub = stream.subscribe((evt: NovelModelEvent): void => {
       if (settled) return;
-      if (evt.kind === 'delta') {
-        buffer += evt.text;
-      } else if (evt.kind === 'replace') {
-        buffer = evt.text;
-      } else if (evt.kind === 'snapshot') {
+      if (evt.kind === 'snapshot') {
         buffer = latestAssistantText(evt.messages);
       } else if (evt.kind === 'completed') {
         settled = true;
@@ -132,7 +129,7 @@ export const collectModelText = (
         unsub();
         reject(new Error('state-sync 模型请求了用户交互'));
       }
-      // activity / status:忽略
+      // status:忽略
     });
   });
 };

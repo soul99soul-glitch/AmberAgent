@@ -3,16 +3,31 @@ import { strict as assert } from 'node:assert';
 import {
   createProject, renameProject, saveChapter, deleteChapter, upsertMaterial, deleteMaterial,
   collect, replacePendingSuggestions, resolveSuggestion, normalizeTitle, appendMessage,
-  addSettingProposals, resolveSettingProposal,
+  resolveSettingProposal,
 } from '../main/ets/novel/mutations.ts';
 import {
   makeNovelProject, makeNovelMessage, makeNovelSuggestion,
 } from '../main/ets/novel/models.ts';
-import type { NovelProject, NovelCollectionTarget } from '../main/ets/novel/models.ts';
+import type {
+  NovelProject, NovelCollectionTarget, NovelSettingProposal,
+} from '../main/ets/novel/models.ts';
 import { isNovelError } from '../main/ets/novel/error.ts';
 
 const NOW = 1_000_000;
 const base = (): NovelProject => makeNovelProject({ name: '测试小说', now: NOW });
+
+const historicalSettingProposal = (
+  kind: NovelSettingProposal['kind'], title: string, content: string,
+): NovelSettingProposal => ({
+  id: 'legacy-setting-proposal-1',
+  sourceMessageId: 'assistant-1',
+  kind: kind,
+  title: title,
+  content: content,
+  status: 'pending',
+  createdAt: NOW,
+  resolvedAt: null,
+});
 
 const assistantWrite = (content: string, over: Partial<ReturnType<typeof makeNovelMessage>> = {}) =>
   makeNovelMessage({ role: 'assistant', mode: 'write', content: content, createdAt: NOW, ...over });
@@ -202,11 +217,12 @@ test('resolveSuggestion reject: no material, status rejected', () => {
   assert.equal(res.project.materialSuggestions.find(s => s.id === sug.id)?.status, 'rejected');
 });
 
-test('setting proposals persist and accept upserts material by kind+normalized title', () => {
+test('historical setting proposal accepts and upserts material by kind+normalized title', () => {
   let project = upsertMaterial(base(), null, 'character', '主 角', '旧设定', true, NOW).project;
-  project = addSettingProposals(project, 'assistant-1', [{
-    kind: 'character', title: ' 主角 ', content: '新设定',
-  }], NOW + 1);
+  project = {
+    ...project,
+    settingProposals: [historicalSettingProposal('character', ' 主角 ', '新设定')],
+  };
   assert.equal(project.settingProposals.length, 1);
   assert.equal(project.settingProposals[0].sourceMessageId, 'assistant-1');
   assert.equal(project.settingProposals[0].status, 'pending');
@@ -218,10 +234,11 @@ test('setting proposals persist and accept upserts material by kind+normalized t
   assert.equal(resolved.project.settingProposals[0].resolvedAt, NOW + 2);
 });
 
-test('reject setting proposal only resolves proposal', () => {
-  let project = addSettingProposals(base(), 'assistant-1', [{
-    kind: 'world', title: '灵脉', content: '贯穿大陆',
-  }], NOW);
+test('reject historical setting proposal only resolves proposal', () => {
+  const project: NovelProject = {
+    ...base(),
+    settingProposals: [historicalSettingProposal('world', '灵脉', '贯穿大陆')],
+  };
   const resolved = resolveSettingProposal(project, project.settingProposals[0].id, false, NOW + 1);
   assert.equal(resolved.value, null);
   assert.equal(resolved.project.materials.length, 0);

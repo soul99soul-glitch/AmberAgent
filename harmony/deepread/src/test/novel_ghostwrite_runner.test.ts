@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type {
   NovelModelEvent, NovelModelRequest, NovelModelRunning, NovelModelStream,
 } from '../main/ets/novel/model_running.ts';
+import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 import type { NovelModelTarget, NovelModelPolicy } from '../main/ets/novel/models.ts';
 import type {
   DurableGhostwriteJob, FrozenPlan, GhostwriteCandidate, GhostwriteClaimRef,
@@ -214,7 +215,10 @@ class FakeModel implements NovelModelRunning {
           if (response === 'waiting_user') {
             callback({ kind: 'waiting_user' });
           } else {
-            callback({ kind: 'delta', text: response });
+            callback({
+              kind: 'snapshot', messages: [makeAssistantMessage(response)], generationActive: false,
+              textDeltasLive: false, transport: 'unavailable',
+            });
             callback({ kind: 'completed' });
           }
         }, 0);

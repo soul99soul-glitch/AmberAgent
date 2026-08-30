@@ -22,13 +22,15 @@ test('PromptCatalog: 6 种 RunKind 均有非空模板', () => {
   }
 });
 
-test('discussion prompt declares ask_user and setting_proposals fenced protocols', () => {
+test('discussion prompt requires native ask_user and novel_workspace_write tools', () => {
   const discussion = novelPromptTemplate('discussion').systemText;
-  assert.ok(discussion.includes('```ask_user'));
-  assert.ok(discussion.includes('selection_type'));
-  assert.ok(discussion.includes('```setting_proposals'));
-  assert.ok(discussion.includes('proposals'));
-  assert.ok(discussion.includes('明确采纳'));
+  assert.ok(discussion.includes('ask_user 工具'));
+  assert.ok(discussion.includes('novel_workspace_write 工具'));
+  assert.ok(discussion.includes('proposal_id'));
+  assert.ok(discussion.includes('明确批准'));
+  assert.ok(!discussion.includes('```ask_user'));
+  assert.ok(!discussion.includes('```setting_proposals'));
+  assert.ok(!discussion.includes('setting_proposals'));
 });
 
 test('润色哨兵: 剥离/检测', () => {

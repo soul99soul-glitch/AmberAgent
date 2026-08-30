@@ -1,5 +1,5 @@
 // NovelSettingProposalCard — 小说讨论产生的设定提案，确认后才写入项目设定。
-import { ACCENT, INK, INK2, INK3, LINE, SURFACE } from '../design/tokens.ets';
+import { ACCENT, ACCENT_INK, INK, INK2, INK3, LINE, SURFACE, SURFACE2 } from '../design/tokens.ets';
 
 @Component
 export struct NovelSettingProposalCard {
@@ -13,7 +13,7 @@ export struct NovelSettingProposalCard {
       Row() {
         Text(this.kindLabel).fontSize(11).fontColor(ACCENT)
           .padding({ left: 8, right: 8, top: 3, bottom: 3 }).borderRadius(8)
-          .backgroundColor('#FFF5F0')
+          .backgroundColor(SURFACE2)
         Text(this.title.length > 0 ? this.title : '待确认设定')
           .fontSize(14).fontColor(INK).fontWeight(FontWeight.Medium)
           .margin({ left: 8 }).layoutWeight(1)
@@ -25,10 +25,14 @@ export struct NovelSettingProposalCard {
       }
       Row() {
         Blank()
-        Text('忽略').fontSize(13).fontColor(INK3).padding({ left: 12, right: 12, top: 7, bottom: 7 })
+        Text('忽略').fontSize(13).fontColor(INK3)
+          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
+          .padding({ left: 12, right: 12 })
           .onClick((): void => { this.onResolve(false); })
-        Text('采用').fontSize(13).fontColor('#FFFFFF').padding({ left: 15, right: 15, top: 7, bottom: 7 })
-          .backgroundColor(ACCENT).borderRadius(14).margin({ left: 8 })
+        Text('采用').fontSize(13).fontColor(ACCENT_INK)
+          .constraintSize({ minWidth: 44 }).height(44).textAlign(TextAlign.Center)
+          .padding({ left: 15, right: 15 })
+          .backgroundColor(ACCENT).borderRadius(22).margin({ left: 8 })
           .onClick((): void => { this.onResolve(true); })
       }
       .width('100%').margin({ top: 12 })

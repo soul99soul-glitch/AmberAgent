@@ -2,7 +2,7 @@
   "title": "Harmony Novel Completion",
   "slug": "harmony-novel-completion",
   "created_at": "2026-08-30T11:38:29+00:00",
-  "status": "in_progress",
+  "status": "complete",
   "approval": {
     "required": true,
     "granted": true,
@@ -17,10 +17,20 @@
     {"id":"C5","status":"complete"},
     {"id":"C6","status":"complete"},
     {"id":"C7","status":"complete"},
-    {"id":"C8","status":"in_progress"}
+    {"id":"C8","status":"complete"}
   ],
   "verification": {
-    "status": "not_started",
-    "checks": []
+    "status": "complete_with_external_acceptance_gate",
+    "checks": [
+      "deepread 767/767",
+      "chat 2033/2033",
+      "deepread/chat tsc clean",
+      "ArkTS lint no defects",
+      "AGC signed build successful",
+      "device 5MT0225B12013017 install successful",
+      "C8 logic gate PASS",
+      "C8 UI/detail gate PASS",
+      "live-provider manual acceptance requires device provider configuration"
+    ]
   }
 }

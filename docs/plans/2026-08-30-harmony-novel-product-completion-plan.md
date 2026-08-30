@@ -360,3 +360,20 @@ unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖�
 ```
 
 只有上述链路、工作区/两域回归、lint、签名构建和真机证据全部成立，才可把 Harmony 小说标为“产品完整”。
+
+### C8 执行记录（2026-08-31）
+
+- 清退旧 `NovelModelAdapter`、fenced discussion parser/card、内存 batch polish 真相源、字符串
+  `delta/replace/activity` 事件和 Novel 私有 Text renderer；生产链只保留 Chat-backed canonical snapshot。
+- `NovelCreation.activeRun` 与单帧 replay 支持交互 run 离页重连；页面按启动 historyCount 切尾，终态
+  统一清理。Quick Start 接既有 `quick_start` run，讨论改用原生 `ask_user/novel_workspace_write`。
+- `restorePrevious` 补 C3 前 `novel_deleted/*.novel.json` 迁移，同新回收站择新，独占锁内复读，成功安装
+  后删除，损坏/冲突源保留。
+- ChatInput 通过默认兼容 capability props 隐藏 Novel 无实现附件/core slash，并消费三模式 placeholder；
+  滚动 token、44vp、主题令牌和暗色硬编码收口。
+- 真机截图发现并修复代笔卡 + 空态挤掉输入器：空态移入共享 Timeline，Quick Start/模式/输入器最终同屏。
+- 验证：DeepRead 767/767、Chat 2033/2033，双域 TypeScript clean，ArkTS lint 0 defects，AGC 签名
+  构建与指定真机覆盖安装成功；最终截图 `/tmp/c8-workspace-accepted.jpeg`。Logic gate PASS；UI/detail
+  gate 首轮阻断的代笔按钮 clip 与主题硬编码修复后最终 PASS。
+- 当前设备无可用 Chat Provider/模型，未把云端真实回合伪报为真机成功；完整 provider/tool/durable
+  调用链由受控回归覆盖，人工云端 acceptance 仍需外部模型配置。

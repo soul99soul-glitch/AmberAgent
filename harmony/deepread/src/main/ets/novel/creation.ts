@@ -16,20 +16,18 @@ import {
   createProject, renameProject, setProjectModelPolicy, setProjectBranchSettings,
   appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
-  addSettingProposals, resolveSettingProposal as resolveSettingProposalMutation, saveChapterVersion,
+  resolveSettingProposal as resolveSettingProposalMutation,
 } from './mutations.ts';
 import {
   invalidInput, notFound, projectBusy, providerError, outputTooLarge, isNovelError,
 } from './error.ts';
 import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builder.ts';
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
-import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModelStream } from './model_running.ts';
+import type { NovelModelRunning, NovelModelRequest, NovelModelEvent, NovelModelStream } from './model_running.ts';
 import type { NovelToolContinuationVerdict } from './model_running.ts';
 import type {
   NovelProjectRepository, NovelWorkspaceMutationKind, NovelWorkspaceStatus,
 } from './repository.ts';
-import { parseSettingProposals } from './discussion_structured.ts';
-import type { NovelSettingProposalDraft, NovelSettingProposalsParsed } from './discussion_structured.ts';
 import { latestAssistantText } from '../agent/message.ts';
 import type {
   StreamTransportState, UIMessage, UIMessagePart, UIMessagePartTool,
@@ -55,8 +53,6 @@ export type NovelRunEvent =
     kind: 'snapshot'; messages: UIMessage[]; generationActive: boolean;
     textDeltasLive: boolean; transport: StreamTransportState;
   }
-  | { kind: 'delta'; text: string }
-  | { kind: 'replace'; text: string }
   | { kind: 'waiting_user' }
   | { kind: 'completed'; message: NovelMessage }
   | { kind: 'interrupted'; partial: string }
@@ -65,6 +61,13 @@ export type NovelRunEvent =
 export interface NovelRun {
   id: string;
   subscribe(cb: (event: NovelRunEvent) => void): () => void;
+}
+
+export interface NovelActiveRun {
+  run: NovelRun;
+  historyCount: number;
+  userText: string;
+  startedAt: number;
 }
 
 export interface NovelCollectionResult {
@@ -111,27 +114,6 @@ export interface NovelWorkspaceGrepResult {
   matches: NovelWorkspaceGrepMatch[];
 }
 
-export type NovelBatchPolishResultStatus = 'succeeded' | 'failed' | 'cancelled';
-
-export interface NovelBatchPolishResult {
-  chapterId: string;
-  status: NovelBatchPolishResultStatus;
-  messageId: string | null;
-  error: string | null;
-}
-
-export type NovelBatchPolishEvent =
-  | { kind: 'progress'; completed: number; total: number; chapterId: string }
-  | { kind: 'result'; result: NovelBatchPolishResult }
-  | { kind: 'completed'; results: NovelBatchPolishResult[] }
-  | { kind: 'cancelled'; results: NovelBatchPolishResult[] };
-
-export interface NovelBatchPolishRun {
-  id: string;
-  subscribe(cb: (event: NovelBatchPolishEvent) => void): () => void;
-  cancel(): void;
-}
-
 // ===== 依赖 =====
 export interface NovelCreationDeps {
   repository: NovelProjectRepository;
@@ -151,8 +133,8 @@ const DEFAULT_IDLE_TIMEOUT_MS: number = 90_000;
 const GHOSTWRITE_LEASE_MS: number = 12 * 60 * 60 * 1000;
 const POLISH_LEASE_MS: number = 12 * 60 * 60 * 1000;
 
-// 事件发射器:仅缓冲终结事件(completed/interrupted/failed),供晚订阅补齐。
-// delta/status/activity 不入 buffer(一次生成可达数十万 delta,全缓冲会 OOM)。
+// 事件发射器:保留最近一帧 snapshot 与无订阅者时的终结事件，供页面离开后重连。
+// 只保留一帧，避免生成过程按事件数线性增长。
 interface Emitter<T> {
   emit(v: T): void;
   subscribe(cb: (v: T) => void): () => void;
@@ -217,8 +199,11 @@ const transcriptFromUi = (
 const createEmitter = <T>(): Emitter<T> => {
   const subs = new Set<(v: T) => void>();
   const terminal: T[] = [];
+  let latestLive: T | null = null;
   return {
     emit(v: T): void {
+      const kind: string = (v as { kind?: string }).kind ?? '';
+      if (!isTerminal(v) && (kind === 'snapshot' || latestLive === null)) latestLive = v;
       if (subs.size > 0) {
         subs.forEach(cb => { cb(v); });
       } else if (isTerminal(v)) {
@@ -226,6 +211,7 @@ const createEmitter = <T>(): Emitter<T> => {
       }
     },
     subscribe(cb: (v: T) => void): () => void {
+      if (latestLive !== null) cb(latestLive);
       for (let i = 0; i < terminal.length; i++) cb(terminal[i]);
       subs.add(cb);
       return () => { subs.delete(cb); };
@@ -236,17 +222,14 @@ const createEmitter = <T>(): Emitter<T> => {
 interface LiveRun {
   runId: string;
   projectId: string;
+  handle: NovelRun;
+  historyCount: number;
+  userText: string;
+  startedAt: number;
   partial: string;
   interrupted: boolean;
   doneResolve: () => void;
   donePromise: Promise<void>;
-}
-
-interface LiveBatchPolishRun {
-  runId: string;
-  projectId: string;
-  cancelled: boolean;
-  currentRunId: string | null;
 }
 
 export class NovelCreation {
@@ -258,9 +241,6 @@ export class NovelCreation {
   private nowMs: () => number;
   private idleTimeoutMs: number;
   private projectRuns: Map<string, LiveRun> = new Map();
-  private batchPolishRuns: Map<string, LiveBatchPolishRun> = new Map();
-  private batchPolishProjectRuns: Map<string, NovelBatchPolishRun> = new Map();
-  private polishMessageChapterIds: Map<string, string> = new Map();
   // 仅防止同一进程重复驱动；durable job/repository 始终是唯一事实源。
   private drivingGhostwriteJobs: Set<string> = new Set();
   private drivingPolishJobs: Set<string> = new Set();
@@ -749,23 +729,39 @@ export class NovelCreation {
   ): NovelRun {
     const runId: string = novelId();
     const emitter: Emitter<NovelRunEvent> = createEmitter<NovelRunEvent>();
+    const handle: NovelRun = {
+      id: runId,
+      subscribe: (cb): () => void => emitter.subscribe(cb),
+    };
 
     if (this.projectRuns.has(projectId)) {
       const busyMsg: string = projectBusy(projectId).message;
       // 延迟发射,确保调用方先订阅
       setTimeout(() => { emitter.emit({ kind: 'failed', message: busyMsg }); }, 0);
-      return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+      return handle;
     }
 
     let doneResolve: () => void = (): void => {};
     const donePromise: Promise<void> = new Promise<void>(res => { doneResolve = res; });
     const live: LiveRun = {
-      runId: runId, projectId: projectId, partial: '', interrupted: false,
+      runId: runId, projectId: projectId, handle, historyCount: 0,
+      userText, startedAt: this.nowMs(), partial: '', interrupted: false,
       doneResolve: doneResolve, donePromise: donePromise,
     };
     this.projectRuns.set(projectId, live);
     void this.runGeneration(live, emitter, userText, mode, granularity, runKind);
-    return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+    return handle;
+  }
+
+  activeRun(projectId: string): NovelActiveRun | null {
+    const live: LiveRun | undefined = this.projectRuns.get(projectId);
+    if (live === undefined) return null;
+    return {
+      run: live.handle,
+      historyCount: live.historyCount,
+      userText: live.userText,
+      startedAt: live.startedAt,
+    };
   }
 
   continueTool(
@@ -773,19 +769,24 @@ export class NovelCreation {
   ): NovelRun {
     const runId: string = novelId();
     const emitter: Emitter<NovelRunEvent> = createEmitter<NovelRunEvent>();
+    const handle: NovelRun = {
+      id: runId,
+      subscribe: (cb): () => void => emitter.subscribe(cb),
+    };
     if (this.projectRuns.has(projectId)) {
       const busyMsg: string = projectBusy(projectId).message;
       setTimeout((): void => { emitter.emit({ kind: 'failed', message: busyMsg }); }, 0);
-      return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+      return handle;
     }
     let doneResolve: () => void = (): void => {};
     const donePromise: Promise<void> = new Promise<void>(res => { doneResolve = res; });
     const live: LiveRun = {
-      runId, projectId, partial: '', interrupted: false, doneResolve, donePromise,
+      runId, projectId, handle, historyCount: 0, userText: '', startedAt: this.nowMs(),
+      partial: '', interrupted: false, doneResolve, donePromise,
     };
     this.projectRuns.set(projectId, live);
     void this.runToolContinuation(live, emitter, toolCallId, verdict);
-    return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
+    return handle;
   }
 
   // N2:单章重新生成(whole_chapter regeneration 模板;校验章节存在)
@@ -804,55 +805,6 @@ export class NovelCreation {
     if (chapter === null) throw notFound('chapter', chapterId);
     const userText: string = `请润色章节「${chapter.title}」,输出润色后的完整章节全文。\n\n${chapter.content}`;
     return this.generate(projectId, userText, 'write', 'whole_chapter', 'polish');
-  }
-
-  startBatchPolish(projectId: string, chapterIds: string[]): NovelBatchPolishRun {
-    const existing: NovelBatchPolishRun | undefined = this.batchPolishProjectRuns.get(projectId);
-    if (existing !== undefined) return existing;
-    const runId: string = novelId();
-    const emitter: Emitter<NovelBatchPolishEvent> = createEmitter<NovelBatchPolishEvent>();
-    const live: LiveBatchPolishRun = {
-      runId: runId,
-      projectId: projectId,
-      cancelled: false,
-      currentRunId: null,
-    };
-    const publicRun: NovelBatchPolishRun = {
-      id: runId,
-      subscribe: (cb: (event: NovelBatchPolishEvent) => void): (() => void) => emitter.subscribe(cb),
-      cancel: (): void => { this.cancelBatchPolish(runId); },
-    };
-    this.batchPolishRuns.set(runId, live);
-    this.batchPolishProjectRuns.set(projectId, publicRun);
-    void this.runBatchPolish(live, chapterIds.slice(), emitter);
-    return publicRun;
-  }
-
-  cancelBatchPolish(runId: string): void {
-    const live: LiveBatchPolishRun | undefined = this.batchPolishRuns.get(runId);
-    if (live === undefined || live.cancelled) return;
-    live.cancelled = true;
-    if (live.currentRunId !== null) this.interrupt(live.currentRunId);
-  }
-
-  async adoptPolishMessage(
-    projectId: string, chapterId: string, messageId: string,
-  ): Promise<NovelChapter> {
-    const sourceChapterId: string | undefined = this.polishMessageChapterIds.get(messageId);
-    if (sourceChapterId === undefined || sourceChapterId !== chapterId) {
-      throw invalidInput('润色结果与目标章节不匹配');
-    }
-    const box: { value: NovelChapter | null } = { value: null };
-    await this.commitMutation(projectId, 'polish_adopt', (project: NovelProject): NovelProject => {
-      const now: number = this.nowMs();
-      const versioned: NovelProject = saveChapterVersion(project, chapterId, 'polish', now).project;
-      const adopted = collect(versioned, messageId, { kind: 'replace', chapterId: chapterId }, now);
-      box.value = adopted.value;
-      return adopted.project;
-    });
-    if (box.value === null) throw new Error('adoptPolishMessage: 更新未返回章节');
-    this.polishMessageChapterIds.delete(messageId);
-    return box.value;
   }
 
   // N2:快速开始(空项目kick)
@@ -917,16 +869,6 @@ export class NovelCreation {
   // N3:恢复最近删除的项目;无删除记录返回 null
   async restorePreviousProject(): Promise<NovelProject | null> {
     return this.repository.restorePrevious();
-  }
-
-  // N3:收录资格(页面禁用/提示):已收录 / 空文案 / 非本次运行头
-  collectBlockReasonFor(project: NovelProject, messageId: string): string {
-    const m: NovelMessage | undefined = project.messages.find(x => x.id === messageId);
-    if (m === undefined) return '消息不存在';
-    if (m.collectedChapterId !== null) return '该消息已收录';
-    if (m.content.trim().length === 0) return '没有可收录的正文';
-    if (m.interrupted && m.content.trim().length < 50) return '内容过短(中断且不足 50 字)';
-    return '';
   }
 
   interrupt(runId: string): void {
@@ -997,6 +939,7 @@ export class NovelCreation {
       if (trimmed.length > MAX_USER_CHARS) throw invalidInput(`输入超过 ${MAX_USER_CHARS} 字`);
 
       const project: NovelProject = await this.repository.loadProject(projectId);
+      live.historyCount = project.messages.length;
       const gran: NovelGenerationGranularity | null =
         mode === 'write' ? (granularity ?? project.lastGenerationGranularity) : null;
       const sysPrompt: string = systemPrompt(project, mode, gran, runKind);
@@ -1060,6 +1003,7 @@ export class NovelCreation {
     const projectId: string = live.projectId;
     try {
       const project: NovelProject = await this.repository.loadProject(projectId);
+      live.historyCount = project.messages.length;
       const tool: UIMessagePartTool | null = this.findTool(project, toolCallId);
       if (tool === null) throw notFound('tool_call', toolCallId);
       const source: NovelMessage | undefined = project.messages.find(
@@ -1357,92 +1301,6 @@ export class NovelCreation {
     else await this.polishEffects.cancel(job);
   }
 
-  private waitForNovelRun(run: NovelRun): Promise<NovelRunEvent> {
-    return new Promise<NovelRunEvent>((resolve: (event: NovelRunEvent) => void): void => {
-      let unsub: () => void = (): void => {};
-      let settled: boolean = false;
-      unsub = run.subscribe((event: NovelRunEvent): void => {
-        if (event.kind !== 'completed' && event.kind !== 'waiting_user' &&
-          event.kind !== 'interrupted' && event.kind !== 'failed') return;
-        settled = true;
-        unsub();
-        resolve(event);
-      });
-      if (settled) unsub();
-    });
-  }
-
-  private async runBatchPolish(
-    live: LiveBatchPolishRun, chapterIds: string[], emitter: Emitter<NovelBatchPolishEvent>,
-  ): Promise<void> {
-    const results: NovelBatchPolishResult[] = [];
-    try {
-      for (let i = 0; i < chapterIds.length; i++) {
-        if (live.cancelled) break;
-        const chapterId: string = chapterIds[i];
-        emitter.emit({ kind: 'progress', completed: results.length, total: chapterIds.length, chapterId: chapterId });
-        let result: NovelBatchPolishResult;
-        try {
-          const run: NovelRun = await this.polishChapter(live.projectId, chapterId);
-          live.currentRunId = run.id;
-          if (live.cancelled) this.interrupt(run.id);
-          const terminal: NovelRunEvent = await this.waitForNovelRun(run);
-          if (terminal.kind === 'completed') {
-            this.polishMessageChapterIds.set(terminal.message.id, chapterId);
-            result = {
-              chapterId: chapterId,
-              status: 'succeeded',
-              messageId: terminal.message.id,
-              error: null,
-            };
-          } else if (live.cancelled || terminal.kind === 'interrupted') {
-            result = {
-              chapterId: chapterId,
-              status: live.cancelled ? 'cancelled' : 'failed',
-              messageId: null,
-              error: live.cancelled ? '批量润色已取消' : '润色已中断',
-            };
-          } else if (terminal.kind === 'failed') {
-            result = {
-              chapterId: chapterId,
-              status: 'failed',
-              messageId: null,
-              error: terminal.message,
-            };
-          } else {
-            result = {
-              chapterId: chapterId,
-              status: 'failed',
-              messageId: null,
-              error: '润色运行异常结束',
-            };
-          }
-        } catch (error) {
-          result = {
-            chapterId: chapterId,
-            status: live.cancelled ? 'cancelled' : 'failed',
-            messageId: null,
-            error: live.cancelled ? '批量润色已取消' : String(error),
-          };
-        } finally {
-          live.currentRunId = null;
-        }
-        results.push(result);
-        emitter.emit({ kind: 'result', result: result });
-        if (live.cancelled) break;
-      }
-      if (live.cancelled) {
-        emitter.emit({ kind: 'cancelled', results: results.slice() });
-      } else {
-        emitter.emit({ kind: 'completed', results: results.slice() });
-      }
-    } finally {
-      this.batchPolishRuns.delete(live.runId);
-      const publicRun: NovelBatchPolishRun | undefined = this.batchPolishProjectRuns.get(live.projectId);
-      if (publicRun?.id === live.runId) this.batchPolishProjectRuns.delete(live.projectId);
-    }
-  }
-
   // 订阅模型事件,镜像到 emitter 并累积 partial;completed 返回全文,failed/超时/超限 拒绝。
   private collectWithEvents(
     live: LiveRun, emitter: Emitter<NovelRunEvent>, request: NovelModelRequest,
@@ -1507,29 +1365,6 @@ export class NovelCreation {
             textDeltasLive: evt.textDeltasLive,
             transport: evt.transport,
           });
-        } else if (evt.kind === 'delta') {
-          buffer += evt.text;
-          live.partial = buffer;
-          if (buffer.length > MAX_OUTPUT_CHARS) {
-            finish(() => {
-              this.modelRunning.cancel(request.runId);
-              reject(outputTooLarge(MAX_OUTPUT_CHARS));
-            });
-            return;
-          }
-          emitter.emit({ kind: 'delta', text: evt.text });
-        } else if (evt.kind === 'replace') {
-          // replace 语义 = 全文替换,同样受输出上限约束(超限取消并拒绝)
-          if (evt.text.length > MAX_OUTPUT_CHARS) {
-            finish(() => {
-              this.modelRunning.cancel(request.runId);
-              reject(outputTooLarge(MAX_OUTPUT_CHARS));
-            });
-            return;
-          }
-          buffer = evt.text;
-          live.partial = buffer;
-          emitter.emit({ kind: 'replace', text: evt.text });
         } else if (evt.kind === 'completed') {
           finish(() => { resolve({ terminal: 'completed', messages, text: buffer }); });
         } else if (evt.kind === 'waiting_user') {
@@ -1537,7 +1372,6 @@ export class NovelCreation {
         } else if (evt.kind === 'failed') {
           finish(() => { reject(providerError(evt.message)); });
         }
-        // activity:忽略
         });
         if (settled) {
           // subscribe 同步回放终结事件(合法行为):赋值真实退订后立即调用,

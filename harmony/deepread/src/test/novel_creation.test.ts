@@ -2,9 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createNovelCreation } from '../main/ets/novel/creation.ts';
 import type { NovelCreation } from '../main/ets/novel/creation.ts';
-import type {
-  NovelRunEvent, NovelRun, NovelBatchPolishEvent, NovelBatchPolishRun,
-} from '../main/ets/novel/creation.ts';
+import type { NovelActiveRun, NovelRunEvent, NovelRun } from '../main/ets/novel/creation.ts';
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
@@ -21,7 +19,6 @@ const publishCanonicalTurn = async (
   const user: UIMessage = makeUserMessage(request.operation.userPrompt);
   const withUser: UIMessage[] = request.history.concat([user]);
   await request.checkpoint(withUser);
-  subscribers.forEach(cb => { cb({ kind: 'delta', text }); });
   const messages: UIMessage[] = withUser.concat([makeAssistantMessage(text)]);
   await request.checkpoint(messages);
   subscribers.forEach(cb => {
@@ -42,16 +39,6 @@ const runToTerminal = (run: NovelRun): Promise<NovelRunEvent[]> => {
       if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
         resolve(events);
       }
-    });
-  });
-};
-
-const batchToTerminal = (run: NovelBatchPolishRun): Promise<NovelBatchPolishEvent[]> => {
-  return new Promise<NovelBatchPolishEvent[]>(resolve => {
-    const events: NovelBatchPolishEvent[] = [];
-    run.subscribe((event: NovelBatchPolishEvent): void => {
-      events.push(event);
-      if (event.kind === 'completed' || event.kind === 'cancelled') resolve(events);
     });
   });
 };
@@ -229,6 +216,41 @@ test('busy: second generate on same project fails', async () => {
   creation.interrupt(run1.id); // 清理
 });
 
+test('activeRun replays the latest canonical snapshot after a page reconnects', async () => {
+  const controlled = controllableModel();
+  const creation = makeCreation(controlled.model);
+  const project = await creation.create('重连');
+  const run: NovelRun = creation.generate(project.id, '继续讨论', 'discuss');
+  const firstEvents: NovelRunEvent[] = [];
+  const firstUnsub: () => void = run.subscribe((event: NovelRunEvent): void => {
+    firstEvents.push(event);
+  });
+  await delay(5);
+  await controlled.emit({
+    kind: 'snapshot', messages: [makeAssistantMessage('重连前的实时内容')],
+    generationActive: true, textDeltasLive: true, transport: 'live',
+  });
+  firstUnsub();
+
+  const active: NovelActiveRun | null = creation.activeRun(project.id);
+  assert.equal(active?.run.id, run.id);
+  assert.equal(active?.historyCount, 0);
+  assert.equal(active?.userText, '继续讨论');
+  const reconnected: NovelRunEvent[] = [];
+  const terminal = new Promise<void>(resolve => {
+    active?.run.subscribe((event: NovelRunEvent): void => {
+      reconnected.push(event);
+      if (event.kind === 'completed') resolve();
+    });
+  });
+  assert.ok(reconnected.some((event: NovelRunEvent): boolean => event.kind === 'snapshot'));
+  await controlled.emit({ kind: 'completed' });
+  await terminal;
+  await delay(0);
+  assert.equal(creation.activeRun(project.id), null);
+  assert.ok(firstEvents.some((event: NovelRunEvent): boolean => event.kind === 'snapshot'));
+});
+
 test('interrupt: keeps partial and persists interrupted message', async () => {
   const ctl = controllableModel();
   const creation = makeCreation(ctl.model);
@@ -236,7 +258,10 @@ test('interrupt: keeps partial and persists interrupted message', async () => {
   const run = creation.generate(p.id, '写一段', 'write', 'continuation');
   const eventsP = runToTerminal(run);
   await delay(10);
-  await ctl.emit({ kind: 'delta', text: 'partial' });
+  await ctl.emit({
+    kind: 'snapshot', messages: [makeAssistantMessage('partial')], generationActive: true,
+    textDeltasLive: true, transport: 'live',
+  });
   await delay(5);
   creation.interrupt(run.id);
   const events = await eventsP;
@@ -375,7 +400,10 @@ test('regression: interrupt with partial persists both user and interrupted assi
   const run = creation.generate(p.id, '写一段', 'write', 'continuation');
   const eventsP = runToTerminal(run);
   await delay(10);
-  await ctl.emit({ kind: 'delta', text: '部分正文' });
+  await ctl.emit({
+    kind: 'snapshot', messages: [makeAssistantMessage('部分正文')], generationActive: true,
+    textDeltasLive: true, transport: 'live',
+  });
   await delay(5);
   creation.interrupt(run.id);
   await eventsP;
@@ -466,109 +494,4 @@ test('legacy fenced setting proposals stay transcript-only and do not bypass wor
   assert.equal(persisted.messages.length, 2);
   assert.equal(persisted.settingProposals.length, 0);
   assert.ok(persisted.messages[1].content.includes('```setting_proposals'));
-});
-
-test('batch polish runs chapters serially and returns assistant message ids', async () => {
-  let active = 0;
-  let maxActive = 0;
-  const starts: string[] = [];
-  const serialModel: NovelModelRunning = {
-    async validate(): Promise<void> {},
-    start(request: NovelModelRequest) {
-      starts.push(request.operation.kind === 'turn' ? request.operation.userPrompt : 'continuation');
-      active += 1;
-      maxActive = Math.max(maxActive, active);
-      const subs = new Set<(event: NovelModelEvent) => void>();
-      setTimeout((): void => {
-        const text: string = `润色${starts.length}`;
-        active -= 1;
-        void publishCanonicalTurn(request, text, subs);
-      }, 5);
-      return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
-    },
-    cancel(): void {},
-  };
-  const creation = makeCreation(serialModel);
-  const project = await creation.create('小说');
-  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
-  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
-
-  const events = await batchToTerminal(creation.startBatchPolish(project.id, [first.id, second.id]));
-  const completed = events.find(event => event.kind === 'completed');
-  assert.ok(completed?.kind === 'completed');
-  assert.equal(maxActive, 1);
-  assert.equal(starts.length, 2);
-  assert.ok(starts[0].includes('第一章'));
-  assert.ok(starts[1].includes('第二章'));
-  assert.deepEqual(completed.results.map(result => result.status), ['succeeded', 'succeeded']);
-  assert.ok(completed.results.every(result => result.messageId !== null));
-});
-
-test('batch polish cancellation interrupts current chapter and does not start the next', async () => {
-  const ctl = controllableModel();
-  const creation = makeCreation(ctl.model);
-  const project = await creation.create('小说');
-  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
-  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
-  const batch = creation.startBatchPolish(project.id, [first.id, second.id]);
-  const terminal = batchToTerminal(batch);
-  await delay(10);
-  batch.cancel();
-  const events = await terminal;
-  const cancelled = events.find(event => event.kind === 'cancelled');
-  assert.ok(cancelled?.kind === 'cancelled');
-  assert.equal(cancelled.results.length, 1);
-  assert.equal(cancelled.results[0].chapterId, first.id);
-  assert.equal(cancelled.results[0].status, 'cancelled');
-  assert.ok(!events.some(event => event.kind === 'progress' && event.chapterId === second.id));
-});
-
-test('repeated batch polish call for one project returns the active run', async () => {
-  const ctl = controllableModel();
-  const creation = makeCreation(ctl.model);
-  const project = await creation.create('小说');
-  const chapter = await creation.saveChapter(project.id, null, '第一章', '旧正文');
-  const first = creation.startBatchPolish(project.id, [chapter.id]);
-  const repeated = creation.startBatchPolish(project.id, [chapter.id]);
-  assert.equal(repeated.id, first.id);
-  const terminal = batchToTerminal(first);
-  await delay(10);
-  first.cancel();
-  await terminal;
-});
-
-test('adoptPolishMessage saves polish version, replaces chapter and marks message collected', async () => {
-  const creation = makeCreation(smartModel());
-  const project = await creation.create('小说');
-  const chapter = await creation.saveChapter(project.id, null, '第一章', '旧正文');
-  const events = await batchToTerminal(creation.startBatchPolish(project.id, [chapter.id]));
-  const completed = events.find(event => event.kind === 'completed');
-  assert.ok(completed?.kind === 'completed');
-  const messageId = completed.results[0].messageId;
-  assert.ok(messageId !== null);
-
-  const adopted = await creation.adoptPolishMessage(project.id, chapter.id, messageId);
-  assert.equal(adopted.content, '这是正文');
-  const reloaded = await creation.open(project.id);
-  assert.equal(reloaded.chapterVersions.length, 1);
-  assert.equal(reloaded.chapterVersions[0].kind, 'polish');
-  assert.equal(reloaded.chapterVersions[0].content, '旧正文');
-  assert.equal(reloaded.messages.find(message => message.id === messageId)?.collectedChapterId, chapter.id);
-});
-
-test('adoptPolishMessage rejects a polish result generated for another chapter', async () => {
-  const creation = makeCreation(smartModel());
-  const project = await creation.create('小说');
-  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
-  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
-  const events = await batchToTerminal(creation.startBatchPolish(project.id, [first.id]));
-  const completed = events.find(event => event.kind === 'completed');
-  assert.ok(completed?.kind === 'completed');
-  const messageId = completed.results[0].messageId;
-  assert.ok(messageId !== null);
-
-  await assert.rejects(creation.adoptPolishMessage(project.id, second.id, messageId));
-  const reloaded = await creation.open(project.id);
-  assert.equal(reloaded.chapters.find(chapter => chapter.id === second.id)?.content, '旧二');
-  assert.equal(reloaded.chapterVersions.length, 0);
 });

@@ -27,6 +27,7 @@ import type {
   PolishContextOptions,
   PolishStage,
 } from '../main/ets/novel/polish.ts';
+import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 
 const NOW: number = 1_700_000_000_000;
 const WRITER: NovelModelTarget = {
@@ -95,7 +96,10 @@ class FakeModel implements NovelModelRunning {
     if (request === undefined) throw new Error(`missing model request ${index}`);
     const callback = this.callbacks.get(request.runId);
     if (callback === undefined) throw new Error(`model request ${index} has no subscriber`);
-    callback({ kind: 'delta', text });
+    callback({
+      kind: 'snapshot', messages: [makeAssistantMessage(text)], generationActive: false,
+      textDeltasLive: false, transport: 'unavailable',
+    });
     callback({ kind: 'completed' });
   }
 

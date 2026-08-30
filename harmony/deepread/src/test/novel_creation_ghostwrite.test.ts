@@ -6,6 +6,7 @@ import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import type {
   NovelModelEvent, NovelModelRequest, NovelModelRunning, NovelModelStream,
 } from '../main/ets/novel/model_running.ts';
+import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 
 const waitFor = async (predicate: () => Promise<boolean>): Promise<void> => {
   for (let i: number = 0; i < 100; i++) {
@@ -53,14 +54,15 @@ test('NovelCreation 代笔门面完成写作→审稿→原子收录并清空末
       return {
         subscribe(callback: (event: NovelModelEvent) => void): () => void {
           const timer = setTimeout((): void => {
+            let response: string;
             if (request.systemPrompt.includes('小说正文写作者')) {
-              callback({ kind: 'delta', text: JSON.stringify({ title: '第一章 风起', content: '山雨欲来。' }) });
+              response = JSON.stringify({ title: '第一章 风起', content: '山雨欲来。' });
             } else {
               const input = JSON.parse(
                 request.operation.kind === 'turn' ? request.operation.userPrompt : '{}') as {
                 candidateId: string; candidateDigest: string; planId: string; planDigest: string;
               };
-              callback({ kind: 'delta', text: JSON.stringify({
+              response = JSON.stringify({
                 candidateId: input.candidateId,
                 candidateDigest: input.candidateDigest,
                 planId: input.planId,
@@ -71,8 +73,12 @@ test('NovelCreation 代笔门面完成写作→审稿→原子收录并清空末
                 rewriteInstructions: '',
                 nextPlan: null,
                 stateDelta: { plotState: '主角踏上旅途', chapterHighlight: '风雨前启程' },
-              }) });
+              });
             }
+            callback({
+              kind: 'snapshot', messages: [makeAssistantMessage(response)], generationActive: false,
+              textDeltasLive: false, transport: 'unavailable',
+            });
             callback({ kind: 'completed' });
           }, 0);
           return (): void => { clearTimeout(timer); };

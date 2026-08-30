@@ -73,7 +73,7 @@ F1 重定向 + F2 SearchPage 真搜索 + F4 MemoryPage 真数据 + F5 QuickMessa
 
 ## 2026-08-30 小说创作重新开账
 
-旧 `2026-08-30-novel-parity-plan.md` 的“N1-N3 全部落地”已由源码审计推翻；当前只确认
-“非流式整章生成 → 手动收录”真机窄闭环。Chat 共用呈现/运行时、三职责模型、真实工具
-循环、合同/候选/审稿/原子提交、持久代笔、后台恢复和通知深链重新列为未完成。
-完整阶段与验收契约见 `2026-08-30-harmony-novel-product-completion-plan.md`。
+旧 `2026-08-30-novel-parity-plan.md` 的“N1-N3 全部落地”已由源码审计推翻；小说能力随后按
+`2026-08-30-harmony-novel-product-completion-plan.md` 的 C0-C8 重新实施。C0-C7 已完成并逐阶段
+提交；C8 负责旧链清退、迁移兼容、全量回归与真机终验。最终能力结论只以该计划最新执行记录和
+`.workflow/harmony-novel-completion/final-report.md` 为准，不再沿用旧“N1-N3”结论。

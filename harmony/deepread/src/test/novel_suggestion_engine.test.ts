@@ -5,6 +5,7 @@ import {
   analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from '../main/ets/novel/suggestion_engine.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
+import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 import { makeNovelProject, makeNovelChapter, makeNovelMaterial } from '../main/ets/novel/models.ts';
 
 const NOW = 1_000_000;
@@ -103,20 +104,28 @@ test('buildSuggestionUserPrompt: includes project, materials, chapter', () => {
   assert.ok(prompt.includes('正文内容'));
 });
 
-test('collectModelText: concatenates deltas until completed', async () => {
+test('collectModelText: returns assistant text from snapshot on completed', async () => {
   const model = scriptedModel([
-    { kind: 'delta', text: 'Hel' },
-    { kind: 'delta', text: 'lo' },
+    {
+      kind: 'snapshot', messages: [makeAssistantMessage('Hello')], generationActive: true,
+      textDeltasLive: true, transport: 'live',
+    },
     { kind: 'completed' },
   ]);
   const text = await collectModelText(model, request(), 1000);
   assert.equal(text, 'Hello');
 });
 
-test('collectModelText: replace resets buffer', async () => {
+test('collectModelText: newest snapshot replaces prior assistant text', async () => {
   const model = scriptedModel([
-    { kind: 'delta', text: 'abc' },
-    { kind: 'replace', text: 'XYZ' },
+    {
+      kind: 'snapshot', messages: [makeAssistantMessage('abc')], generationActive: true,
+      textDeltasLive: true, transport: 'live',
+    },
+    {
+      kind: 'snapshot', messages: [makeAssistantMessage('XYZ')], generationActive: false,
+      textDeltasLive: true, transport: 'live',
+    },
     { kind: 'completed' },
   ]);
   const text = await collectModelText(model, request(), 1000);
@@ -130,7 +139,12 @@ test('collectModelText: failed rejects', async () => {
 
 test('analyzeChapterSuggestions: parses model JSON into suggestions', async () => {
   const model = scriptedModel([
-    { kind: 'delta', text: '{"suggestions":[{"kind":"character","title":"主角","content":"勇敢"}]}' },
+    {
+      kind: 'snapshot',
+      messages: [makeAssistantMessage(
+        '{"suggestions":[{"kind":"character","title":"主角","content":"勇敢"}]}')],
+      generationActive: false, textDeltasLive: false, transport: 'unavailable',
+    },
     { kind: 'completed' },
   ]);
   const project = makeNovelProject({ name: 'p', now: NOW });

@@ -92,6 +92,69 @@ test('deleteProject is serialized after an in-flight update and cannot be revive
   await assert.rejects(repo.loadProject('race'));
 });
 
+test('restorePrevious migrates the newest legacy deleted JSON into an active workspace', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  const legacy = {
+    ...makeNovelProject({ id: 'legacy-deleted', name: '旧版回收项目', now: NOW }),
+    updatedAt: NOW + 10,
+  };
+  await fs.writeText('novel_deleted/legacy-deleted.novel.json', JSON.stringify(legacy));
+
+  const restored = await repo.restorePrevious();
+
+  assert.equal(restored?.id, 'legacy-deleted');
+  assert.equal(restored?.name, '旧版回收项目');
+  assert.equal(await fs.exists('amberagent/novel-workspace/legacy-deleted/manifest.yaml'), true);
+  assert.equal(await fs.exists('novel_deleted/legacy-deleted.novel.json'), false);
+  assert.equal((await repo.loadProject('legacy-deleted')).updatedAt, NOW + 10);
+});
+
+test('restorePrevious chooses the newest project across workspace and legacy deleted stores', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  await repo.createProject({
+    ...makeNovelProject({ id: 'workspace-older', name: '旧工作区', now: NOW }),
+    updatedAt: NOW + 10,
+  });
+  await repo.deleteProject('workspace-older');
+  const legacy = {
+    ...makeNovelProject({ id: 'legacy-newer', name: '新 JSON', now: NOW }),
+    updatedAt: NOW + 20,
+  };
+  await fs.writeText('novel_deleted/legacy-newer.novel.json', JSON.stringify(legacy));
+
+  const restored = await repo.restorePrevious();
+
+  assert.equal(restored?.id, 'legacy-newer');
+  assert.equal(await fs.exists('novel_deleted/legacy-newer.novel.json'), false);
+  assert.equal(await fs.exists('amberagent/novel-workspace/.deleted/workspace-older'), true);
+});
+
+test('restorePrevious keeps corrupt legacy deleted JSON as evidence', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  await fs.writeText('novel_deleted/corrupt.novel.json', '{corrupt');
+
+  assert.equal(await repo.restorePrevious(), null);
+  assert.equal(await fs.readText('novel_deleted/corrupt.novel.json'), '{corrupt');
+});
+
+test('restorePrevious refuses to overwrite an active project and keeps the legacy source', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  const legacy = {
+    ...makeNovelProject({ id: 'same-id', name: '待恢复', now: NOW }),
+    updatedAt: NOW + 10,
+  };
+  await fs.writeText('novel_deleted/same-id.novel.json', JSON.stringify(legacy));
+  await repo.createProject(makeNovelProject({ id: 'same-id', name: '当前项目', now: NOW + 20 }));
+
+  await assert.rejects(repo.restorePrevious(), /同 id 项目已存在/);
+  assert.equal(await fs.exists('novel_deleted/same-id.novel.json'), true);
+  assert.equal((await repo.loadProject('same-id')).name, '当前项目');
+});
+
 test('listProjects skips unreadable/corrupt files', async () => {
   const fs = createMemoryFileStore();
   const repo = createFileNovelRepository(fs);
