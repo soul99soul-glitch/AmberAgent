@@ -79,6 +79,21 @@ struct ChatListPage {
 
   // 深链消费:置空后跳转;消费过的 topic/title 不残留
   private consumeDeepLink(): void {
+    const novelProjectId: string = AppStorage.get<string>('wantNovelProjectId') ?? '';
+    const novelBranchId: string = AppStorage.get<string>('wantNovelBranchId') ?? '';
+    const novelJobId: string = AppStorage.get<string>('wantNovelJobId') ?? '';
+    if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
+      AppStorage.setOrCreate<string>('wantNovelProjectId', '');
+      AppStorage.setOrCreate<string>('wantNovelBranchId', '');
+      AppStorage.setOrCreate<string>('wantNovelJobId', '');
+      const novelParams: Record<string, string> = {};
+      novelParams['projectId'] = novelProjectId;
+      novelParams['branchId'] = novelBranchId;
+      novelParams['jobId'] = novelJobId;
+      novelParams['tab'] = 'chapters';
+      router.pushUrl({ url: 'pages/NovelWorkspacePage', params: novelParams });
+      return;
+    }
     const wantTopicId: string = AppStorage.get<string>('wantTopicId') ?? '';
     const wantTitle: string = AppStorage.get<string>('wantTitle') ?? '';
     if (wantTopicId.length > 0) {

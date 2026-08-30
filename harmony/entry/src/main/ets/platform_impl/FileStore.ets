@@ -173,6 +173,23 @@ class OhosFileStore implements FileStore {
     }
   }
 
+  async withExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T> {
+    const full: string = await this.resolve(path);
+    await this.ensureParent(full);
+    const mode: number = fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE;
+    const file: fileIo.File = await fileIo.open(full, mode);
+    try {
+      await file.lock(true);
+      try {
+        return await op();
+      } finally {
+        file.unlock();
+      }
+    } finally {
+      await fileIo.close(file);
+    }
+  }
+
   // D-127:File.lastModified 等价 — fileIo.stat.mtime 单位为秒,×1000 归毫秒(登记)
   async mtime(path: string): Promise<number | null> {
     const full: string = await this.resolve(path);

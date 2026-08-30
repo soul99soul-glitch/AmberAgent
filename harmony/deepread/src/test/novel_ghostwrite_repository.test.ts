@@ -151,7 +151,7 @@ test('ghostwrite claim rejects double owner, old epoch and expired lease; lifecy
     'claim', 'job', claimRef(fifth), NOW + 32)).stage, 'cancelled');
 });
 
-test('ghostwrite actions fail closed on CAS or branch drift and freeze bound plan', async () => {
+test('ghostwrite actions fail closed on CAS drift, block branch changes and freeze bound plan', async () => {
   const repository = createFileNovelRepository(createMemoryFileStore());
   await repository.createProject(projectWithPlan('drift'));
   const before = await repository.workspaceStatus('drift');
@@ -172,10 +172,9 @@ test('ghostwrite actions fail closed on CAS or branch drift and freeze bound pla
   await repository.createProject(projectWithPlan('branch-drift'));
   const main = await repository.workspaceStatus('branch-drift');
   await repository.startGhostwriteJob('branch-drift', main.cas, 'branch-job', 'plan', 1, NOW + 3);
-  await repository.createBranch('branch-drift', 'fork', main.cas, 'fork-command');
-  await assert.rejects(repository.claimGhostwriteJob(
-    'branch-drift', 'branch-job', 'owner', NOW + 4, 100,
-  ), /project\/branch 不匹配/);
+  await assert.rejects(repository.createBranch(
+    'branch-drift', 'fork', main.cas, 'fork-command',
+  ), /已有未结束的小说作业/);
 });
 
 test('ghostwrite candidate and review checkpoints reject mismatched bindings', async () => {

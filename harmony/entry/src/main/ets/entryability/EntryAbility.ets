@@ -87,17 +87,31 @@ export default class EntryAbility extends UIAbility {
   }
 
   private routeFromWant(want: Want): void {
-    // 从 want.parameters 提取 topicId + title(通知点击/分享入口)
+    // 从 want.parameters 提取 DeepRead 或 Novel 的稳定 id；无效/超长参数忽略。
     const params: Record<string, object> | undefined = want.parameters as Record<string, object>;
     if (params === undefined || params === null) {
       return;
     }
     const topicId: string = validatedWantParameter(params['topicId']);
     const title: string = validatedWantParameter(params['title']);
+    const novelProjectId: string = validatedWantParameter(params['novelProjectId']);
+    const novelBranchId: string = validatedWantParameter(params['novelBranchId']);
+    const novelJobId: string = validatedWantParameter(params['novelJobId']);
+    if (novelProjectId.length > 0 && novelBranchId.length > 0 && novelJobId.length > 0) {
+      AppStorage.setOrCreate<string>('wantNovelProjectId', novelProjectId);
+      AppStorage.setOrCreate<string>('wantNovelBranchId', novelBranchId);
+      AppStorage.setOrCreate<string>('wantNovelJobId', novelJobId);
+      AppStorage.setOrCreate<string>('wantTopicId', '');
+      AppStorage.setOrCreate<string>('wantTitle', '');
+      return;
+    }
     if (topicId.length > 0) {
       AppStorage.setOrCreate<string>('wantTopicId', topicId);
       // title 无条件覆写(含空):仅在有值时写入会残留上一条通知的旧标题
       AppStorage.setOrCreate<string>('wantTitle', title);
+      AppStorage.setOrCreate<string>('wantNovelProjectId', '');
+      AppStorage.setOrCreate<string>('wantNovelBranchId', '');
+      AppStorage.setOrCreate<string>('wantNovelJobId', '');
     }
   }
 

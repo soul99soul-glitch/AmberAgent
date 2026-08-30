@@ -43,6 +43,9 @@ import type {
 } from './ghostwrite.ts';
 import { createGhostwriteRunner } from './ghostwrite_runner.ts';
 import type { GhostwriteRunner } from './ghostwrite_runner.ts';
+import type { DurablePolishJob, PolishContextOptions, PolishStage } from './polish.ts';
+import { createPolishRunner } from './polish_runner.ts';
+import type { PolishRunner } from './polish_runner.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
@@ -133,12 +136,20 @@ export interface NovelBatchPolishRun {
 export interface NovelCreationDeps {
   repository: NovelProjectRepository;
   modelRunning: NovelModelRunning;
+  polishEffects?: NovelPolishEffects;
   nowMs?: () => number;
   idleTimeoutMs?: number;
 }
 
+export interface NovelPolishEffects {
+  schedule(job: DurablePolishJob): Promise<void>;
+  cancel(job: DurablePolishJob): Promise<void>;
+  notify(job: DurablePolishJob): Promise<void>;
+}
+
 const DEFAULT_IDLE_TIMEOUT_MS: number = 90_000;
 const GHOSTWRITE_LEASE_MS: number = 12 * 60 * 60 * 1000;
+const POLISH_LEASE_MS: number = 12 * 60 * 60 * 1000;
 
 // 事件发射器:仅缓冲终结事件(completed/interrupted/failed),供晚订阅补齐。
 // delta/status/activity 不入 buffer(一次生成可达数十万 delta,全缓冲会 OOM)。
@@ -242,6 +253,8 @@ export class NovelCreation {
   private repository: NovelProjectRepository;
   private modelRunning: NovelModelRunning;
   private ghostwriteRunner: GhostwriteRunner;
+  private polishRunner: PolishRunner;
+  private polishEffects: NovelPolishEffects | null;
   private nowMs: () => number;
   private idleTimeoutMs: number;
   private projectRuns: Map<string, LiveRun> = new Map();
@@ -250,6 +263,7 @@ export class NovelCreation {
   private polishMessageChapterIds: Map<string, string> = new Map();
   // 仅防止同一进程重复驱动；durable job/repository 始终是唯一事实源。
   private drivingGhostwriteJobs: Set<string> = new Set();
+  private drivingPolishJobs: Set<string> = new Set();
 
   constructor(deps: NovelCreationDeps) {
     this.repository = deps.repository;
@@ -260,6 +274,13 @@ export class NovelCreation {
       nowMs: deps.nowMs,
       makeId: (prefix: string): string => `${prefix}:${novelId()}`,
     });
+    this.polishRunner = createPolishRunner({
+      repository: deps.repository,
+      modelRunning: deps.modelRunning,
+      nowMs: deps.nowMs,
+      makeId: (prefix: string): string => `${prefix}:${novelId()}`,
+    });
+    this.polishEffects = deps.polishEffects ?? null;
     this.nowMs = deps.nowMs ?? ((): number => Date.now());
     this.idleTimeoutMs = deps.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
@@ -275,6 +296,9 @@ export class NovelCreation {
     const opened: NovelProject = repaired ? await this.repository.loadProject(projectId) : project;
     void this.recoverGhostwriteDriver(projectId).catch((): void => {
       // Durable job remains visible as paused/failed; open 本身不因后台接管失败而隐藏项目。
+    });
+    void this.recoverPolishDriver(projectId).catch((): void => {
+      // Durable polish remains visible; foreground recovery failure must not hide the project.
     });
     return opened;
   }
@@ -343,6 +367,105 @@ export class NovelCreation {
       await this.repository.cancelGhostwriteJob(projectId, jobId, claim, this.nowMs());
     this.ghostwriteRunner.cancel(projectId, jobId);
     return cancelled;
+  }
+
+  async polishJob(projectId: string, requestedJobId: string = ''): Promise<DurablePolishJob | null> {
+    if (requestedJobId.length > 0) {
+      const requested: DurablePolishJob = await this.repository.loadPolishJob(projectId, requestedJobId);
+      const progress = await this.repository.polishProgress(projectId, requested.jobId);
+      return { ...requested, progress };
+    }
+    const jobs: DurablePolishJob[] = await this.repository.listPolishJobs(projectId);
+    jobs.sort((left: DurablePolishJob, right: DurablePolishJob): number =>
+      right.updatedAt - left.updatedAt);
+    const active: DurablePolishJob | undefined = jobs.find(
+      (job: DurablePolishJob): boolean => job.stage !== 'completed' && job.stage !== 'cancelled');
+    const selected: DurablePolishJob | undefined = active ?? jobs[0];
+    if (selected === undefined) return null;
+    const progress = await this.repository.polishProgress(projectId, selected.jobId);
+    return { ...selected, progress };
+  }
+
+  async startPolish(
+    projectId: string, fromOrdinal: number, toOrdinal: number, contextOptions: PolishContextOptions,
+  ): Promise<DurablePolishJob> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    await this.validateGhostwriteModels(projectId, project);
+    const status: NovelWorkspaceStatus = await this.repository.workspaceStatus(projectId);
+    const job: DurablePolishJob = await this.repository.startPolishJob(
+      projectId, status.cas, novelId(), fromOrdinal, toOrdinal, contextOptions, this.nowMs());
+    await this.syncPolishEffects(job, true);
+    this.launchPolishDriver(projectId, job.jobId, null);
+    return job;
+  }
+
+  async pausePolish(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
+    const claim: GhostwriteClaimRef = await this.ensurePolishClaim(projectId, job);
+    const paused: DurablePolishJob = await this.repository.pausePolishJob(
+      projectId, jobId, claim, this.nowMs());
+    this.polishRunner.cancel(projectId, jobId);
+    await this.syncPolishEffects(paused, false);
+    return paused;
+  }
+
+  async resumePolish(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const resumed: DurablePolishJob = await this.repository.resumePolishJob(
+      projectId, jobId, this.nowMs());
+    await this.syncPolishEffects(resumed, true);
+    this.launchPolishDriver(projectId, jobId, null);
+    return resumed;
+  }
+
+  async retryPolish(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const retried: DurablePolishJob = await this.repository.retryPolishJob(
+      projectId, jobId, this.nowMs());
+    await this.syncPolishEffects(retried, true);
+    this.launchPolishDriver(projectId, jobId, null);
+    return retried;
+  }
+
+  async cancelPolish(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const cancelled: DurablePolishJob = await this.repository.cancelPolishJob(
+      projectId, jobId, this.nowMs());
+    this.polishRunner.cancel(projectId, jobId);
+    await this.syncPolishEffects(cancelled, false);
+    return cancelled;
+  }
+
+  async drivePolishInBackground(
+    projectId: string, branchId: string, jobId: string, maxChapters: number = 1,
+  ): Promise<DurablePolishJob> {
+    let job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
+    if (job.branchId !== branchId) throw invalidInput('polish 后台任务分支不匹配');
+    if (job.stage === 'waiting_system') {
+      job = await this.repository.resumePolishJob(projectId, jobId, this.nowMs());
+    }
+    if (!this.canDrivePolishStage(job.stage)) {
+      await this.syncPolishEffects(job, false);
+      return job;
+    }
+    if (job.claim !== null) {
+      const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
+      job = await this.repository.pausePolishJob(projectId, jobId, staleClaim, this.nowMs());
+      this.polishRunner.cancel(projectId, jobId);
+      job = await this.repository.resumePolishJob(projectId, jobId, this.nowMs());
+    }
+    const result: DurablePolishJob = await this.polishRunner.run(
+      projectId, jobId, novelId(), POLISH_LEASE_MS, maxChapters);
+    await this.syncPolishEffects(result, result.stage === 'waiting_system');
+    return result;
+  }
+
+  async yieldPolishForSystem(projectId: string, jobId: string): Promise<DurablePolishJob> {
+    const job: DurablePolishJob = await this.repository.loadPolishJob(projectId, jobId);
+    if (!this.canDrivePolishStage(job.stage)) return job;
+    const claim: GhostwriteClaimRef = await this.ensurePolishClaim(projectId, job);
+    const waiting: DurablePolishJob = await this.repository.yieldPolishJob(
+      projectId, jobId, claim, this.nowMs());
+    this.polishRunner.cancel(projectId, jobId);
+    await this.syncPolishEffects(waiting, true);
+    return waiting;
   }
 
   async createBranch(projectId: string, name: string): Promise<NovelProject> {
@@ -1170,6 +1293,68 @@ export class NovelCreation {
       await this.repository.resumeGhostwriteJob(projectId, job.jobId, now);
     }
     this.launchGhostwriteDriver(projectId, job.jobId);
+  }
+
+  private async ensurePolishClaim(
+    projectId: string, job: DurablePolishJob,
+  ): Promise<GhostwriteClaimRef> {
+    const now: number = this.nowMs();
+    if (job.claim !== null && now < job.claim.leaseUntil) {
+      return { token: job.claim.token, epoch: job.claim.epoch };
+    }
+    const claimed: DurablePolishJob = await this.repository.claimPolishJob(
+      projectId, job.jobId, novelId(), now, POLISH_LEASE_MS);
+    if (claimed.claim === null) throw invalidInput('polish claim 未建立');
+    return { token: claimed.claim.token, epoch: claimed.claim.epoch };
+  }
+
+  private canDrivePolishStage(stage: PolishStage): boolean {
+    return stage !== 'waiting_system' && stage !== 'paused' && stage !== 'failed' &&
+      stage !== 'cancelled' && stage !== 'completed';
+  }
+
+  private launchPolishDriver(
+    projectId: string, jobId: string, maxChapters: number | null,
+  ): void {
+    const key: string = `${projectId}:${jobId}`;
+    if (this.drivingPolishJobs.has(key)) return;
+    this.drivingPolishJobs.add(key);
+    void this.polishRunner.run(projectId, jobId, novelId(), POLISH_LEASE_MS, maxChapters)
+      .then((job: DurablePolishJob): Promise<void> =>
+        this.syncPolishEffects(job, job.stage === 'waiting_system'))
+      .catch((): void => {
+        // runner owns durable failure; a stale foreground owner must not overwrite a newer state.
+      })
+      .finally((): void => { this.drivingPolishJobs.delete(key); });
+  }
+
+  private async recoverPolishDriver(projectId: string): Promise<void> {
+    const job: DurablePolishJob | null = await this.polishJob(projectId);
+    if (job === null) return;
+    if (job.stage === 'waiting_system') {
+      await this.syncPolishEffects(job, true);
+      return;
+    }
+    if (!this.canDrivePolishStage(job.stage)) {
+      await this.syncPolishEffects(job, false);
+      return;
+    }
+    const key: string = `${projectId}:${job.jobId}`;
+    if (this.drivingPolishJobs.has(key)) return;
+    const now: number = this.nowMs();
+    if (job.claim !== null && now < job.claim.leaseUntil) {
+      const staleClaim: GhostwriteClaimRef = { token: job.claim.token, epoch: job.claim.epoch };
+      await this.repository.pausePolishJob(projectId, job.jobId, staleClaim, now);
+      await this.repository.resumePolishJob(projectId, job.jobId, now);
+    }
+    this.launchPolishDriver(projectId, job.jobId, null);
+  }
+
+  private async syncPolishEffects(job: DurablePolishJob, schedule: boolean): Promise<void> {
+    if (this.polishEffects === null) return;
+    await this.polishEffects.notify(job);
+    if (schedule) await this.polishEffects.schedule(job);
+    else await this.polishEffects.cancel(job);
   }
 
   private waitForNovelRun(run: NovelRun): Promise<NovelRunEvent> {

@@ -39,6 +39,9 @@ export interface FileStore {
   isDirectory(path: string): Promise<boolean>;
   // 递归建目录
   mkdir(dir: string): Promise<void>;
+  // 对同一路径加独占文件锁后执行。生产实现用于跨进程串行化工作区 root swap；
+  // 锁文件必须位于被交换目录之外。
+  withExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T>;
   // D-127:文件最后修改时间(epoch millis,File.lastModified 等价);
   //   不存在 → null(DeepReadPlaybookRepository updatedAt/快照挑选用)
   mtime(path: string): Promise<number | null>;
@@ -52,6 +55,7 @@ class MemoryFileStore implements FileStore {
   // D-127:mtime 台账(每次写 +1;0 起单调递增)
   private mtimes: Map<string, number> = new Map();
   private writeSeq: number = 0;
+  private lockTails: Map<string, Promise<void>> = new Map<string, Promise<void>>();
 
   private norm(p: string): string {
     return joinPath(p);
@@ -196,6 +200,17 @@ class MemoryFileStore implements FileStore {
 
   async mkdir(_dir: string): Promise<void> {
     // 内存实现无显式目录,写文件时隐式存在
+  }
+
+  withExclusiveLock<T>(path: string, op: () => Promise<T>): Promise<T> {
+    const key: string = this.norm(path);
+    const previous: Promise<void> = this.lockTails.get(key) ?? Promise.resolve();
+    const run: Promise<T> = previous.catch((): void => {}).then(op);
+    const tail: Promise<void> = run.then((): void => {}, (): void => {});
+    this.lockTails.set(key, tail);
+    return run.finally((): void => {
+      if (this.lockTails.get(key) === tail) this.lockTails.delete(key);
+    });
   }
 
   // D-127:写入序号当 mtime(单调递增,测试可预期;epoch 语义由调用方自定)

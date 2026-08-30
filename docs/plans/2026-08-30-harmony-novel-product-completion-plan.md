@@ -316,6 +316,22 @@ unresolved、plot stale 和部分写恢复均有测试；任意漂移不覆盖�
 验收：代笔/润色互斥、润色部分失败、pause/resume/cold recovery、后台唤醒、进程回收、通知深链
 有测试与真机证据；任何路径均不重复提交。
 
+### C7 执行记录（2026-08-31）
+
+- 新增 durable polish domain/runner：冻结连续章节、四类上下文与模型策略，writing/review 职责复用 Chat
+  adapter 和 read-only tool profile；candidate/review 全量绑定 job/chapter/source/candidate digest，最多两次重写。
+- `.amber/jobs.json` v2 联合保存 ghostwrite/polish；同分支非终结作业互斥。审核通过后，旧版本、正文、ledger、
+  undo、receipt、checkout 与 cursor 在同一次 root swap 中提交，冷恢复和 receipt replay 不重复收录。
+- `NovelCreation` 接入 start/pause/resume/retry/cancel、cold recovery 与每次最多一章的后台推进；系统窗口结束
+  持久化 `waiting_system`，页面离开不取消作业。通知携 project/branch/job 并进入正文作业卡。
+- WorkScheduler 使用 API 9+；Entry 与独立 Extension 进程通过项目外 `.locks` 文件及 `File.lock(true)` 串行化
+  recovery、migration、checkpoint 和 root swap。双 repository 并发 claim/checkpoint/commit 回归确认唯一写入。
+- 双审修复 digest 冷篡改、跨 job 候选移植、create/switch branch 绕过、旧终态通知遮蔽新任务、运行中撤销
+  和长文本截断；Logic/UI gate 最终均 PASS。
+- 验证：C7 聚焦 41/41，DeepRead 773/773，Chat 2033/2033；ArkTS lint 0 defects；AGC 签名构建、指定
+  真机覆盖安装与配置面板截图通过。`bm dump` 确认独立 WorkScheduler 进程注册。设备无 Chat Provider 且项目
+  无章节，因此未把真机云端润色/通知回跳伪报为成功；完整后台链由受控 provider 测试覆盖。
+
 ## Phase C8 — 产品终验与旧链清退
 
 交付：

@@ -16,8 +16,8 @@
     {"id":"C4","status":"complete"},
     {"id":"C5","status":"complete"},
     {"id":"C6","status":"complete"},
-    {"id":"C7","status":"in_progress"},
-    {"id":"C8","status":"pending"}
+    {"id":"C7","status":"complete"},
+    {"id":"C8","status":"in_progress"}
   ],
   "verification": {
     "status": "not_started",

@@ -198,6 +198,20 @@ export {
   projectGhostwriteProgress,
 } from './novel/ghostwrite.ts';
 export type {
+  PolishStage, PolishContextSnapshotKind, PolishContextOptions, PolishContextSnapshotItem,
+  PolishWarningKind, PolishWarning, PolishChapterTarget, PolishCandidate, PolishReview,
+  PolishProgress, DurablePolishJob,
+} from './novel/polish.ts';
+export {
+  MAX_POLISH_CONTEXT_ITEMS, MAX_POLISH_CONTEXT_ITEM_CHARS, MAX_POLISH_CONTEXT_TOTAL_CHARS,
+  makePolishChapterTarget, makePolishContextSnapshotItem, makePolishCandidate,
+  validatePolishReview, makePolishJob, validateDurablePolishJob, currentPolishTarget,
+  polishReceipt, transitionPolishJob, withPolishCandidate, applyPolishReview,
+  claimPolishJob, assertPolishClaim, pausePolishJob, yieldPolishJobToSystem,
+  resumePolishJob, failPolishJob, retryPolishJob, cancelPolishJob,
+  commitPolishChapter, projectPolishProgress,
+} from './novel/polish.ts';
+export type {
   NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
   NovelSettingProposalDraft, NovelSettingProposalsParsed,
 } from './novel/discussion_structured.ts';
@@ -208,6 +222,7 @@ export {
 } from './novel/discussion_structured.ts';
 export type {
   NovelRunEvent, NovelRun, NovelCollectionResult, NovelSuggestionRefreshResult, NovelCreationDeps,
+  NovelPolishEffects,
   NovelBatchPolishResultStatus, NovelBatchPolishResult, NovelBatchPolishEvent, NovelBatchPolishRun,
   NovelConsistencyIssue, NovelConsistencyReport, NovelWorkspaceListResult,
   NovelWorkspaceReadResult, NovelWorkspaceGrepMatch, NovelWorkspaceGrepResult,

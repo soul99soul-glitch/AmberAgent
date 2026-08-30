@@ -29,6 +29,13 @@
         ]
       }
     ],
+    "extensionAbilities": [
+      {
+        "name": "NovelPolishWorkAbility",
+        "srcEntry": "./ets/works/NovelPolishWorkAbility.ets",
+        "type": "workScheduler"
+      }
+    ],
     // Deep Read 需要的权限 + D-129 Agent 系统能力(对照 AndroidManifest uses-permission;
     //   仅普通 user_grant 档,受限 ACL(短信/通话/媒体库/电话状态)不声明 —
     //   checkAccessTokenSync 对未声明名返回拒绝,权限状态工具如实展示 Denied)

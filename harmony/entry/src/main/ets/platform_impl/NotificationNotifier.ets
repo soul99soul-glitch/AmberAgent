@@ -30,19 +30,26 @@ export const notificationIdFor = (key: string): number => {
   return h === 0 ? 1 : h;
 };
 
-// 点击通知 → 拉起 EntryAbility(文章参数经 Want.parameters 传递受 ArkTS 对象
-// 字面量限制暂不可用;点击落地应用首页,深链参数待后续接 KV 转存)
+// 点击通知 → 拉起 EntryAbility；Want.parameters 只携带受长度校验的稳定 id，
+// EntryAbility 再写入 AppStorage，由根页消费并建立正确返回栈。
 const buildArticleWantAgent = (
   topicId: string, title: string, sourceUrl: string,
 ): Promise<object | null> => {
   const want: Want = {
     bundleName: 'app.amber.deepread',
     abilityName: 'EntryAbility',
+    parameters: {
+      topicId,
+      title,
+      sourceUrl,
+    },
   };
   const wants: Array<Want> = [want];
   const info: wantAgent.WantAgentInfo = {
     wants: wants,
+    actionType: wantAgent.OperationType.START_ABILITY,
     requestCode: 991,
+    actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG],
   };
   return new Promise<object | null>((resolve): void => {
     wantAgent.getWantAgent(info).then((wa: object): void => {
@@ -52,6 +59,41 @@ const buildArticleWantAgent = (
       resolve(null);
     });
   });
+};
+
+export const buildNovelJobWantAgent = (
+  projectId: string, branchId: string, jobId: string,
+): Promise<object | null> => {
+  const want: Want = {
+    bundleName: 'app.amber.deepread',
+    abilityName: 'EntryAbility',
+    parameters: {
+      novelProjectId: projectId,
+      novelBranchId: branchId,
+      novelJobId: jobId,
+    },
+  };
+  const info: wantAgent.WantAgentInfo = {
+    wants: [want],
+    actionType: wantAgent.OperationType.START_ABILITY,
+    requestCode: notificationIdFor(`novel-polish:${jobId}`),
+    actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG],
+  };
+  return new Promise<object | null>((resolve): void => {
+    wantAgent.getWantAgent(info).then((wa: object): void => {
+      resolve(wa);
+    }).catch((e: BusinessError): void => {
+      hilog.warn(DOMAIN, TAG, 'novel wantAgent failed: %{public}s', String(e));
+      resolve(null);
+    });
+  });
+};
+
+export const publishNovelJobNotification = async (
+  projectId: string, branchId: string, jobId: string, title: string, text: string,
+): Promise<void> => {
+  const wa: object | null = await buildNovelJobWantAgent(projectId, branchId, jobId);
+  await publishBasicNotification(notificationIdFor(`novel-polish:${jobId}`), title, text, wa);
 };
 
 export const publishBasicNotification = (

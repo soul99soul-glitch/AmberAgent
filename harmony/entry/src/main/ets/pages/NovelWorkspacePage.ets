@@ -13,8 +13,9 @@ import type { AgentMessageRowHostCapabilities } from '../components/AgentMessage
 import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
 import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard.ets';
 import {
-  NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
-} from '../components/NovelBatchPolishSheet.ets';
+  NovelPolishCreateSheet, NovelPolishCreateSheetChapter,
+} from '../components/NovelPolishCreateSheet.ets';
+import { NovelPolishJobCard } from '../components/NovelPolishJobCard.ets';
 import { NovelBranchSheet } from '../components/NovelBranchSheet.ets';
 import {
   NovelSettingsPane, NovelModelOptionView,
@@ -34,11 +35,11 @@ import {
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
   NovelRunKind, NovelRun, NovelRunEvent, NovelChapterVersion, NovelChapterVersionKind,
   stripDiscussionAskFence, stripSettingProposalsFence,
-  NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
+  NovelSettingProposal,
   NovelWorkspaceStatus, StreamTransportState, UIMessage, makeUIMessage,
   UIMessagePart, novelMessageUi, novelMessageText, NovelToolContinuationVerdict,
   NovelModelPolicy, NovelModelTarget, NovelBranchSettings, NovelConsistencyReport,
-  DurableGhostwriteJob, GhostwriteStage,
+  DurableGhostwriteJob, GhostwriteStage, DurablePolishJob, PolishContextOptions, PolishStage,
 } from '@amber/deepread-domain';
 import {
   shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
@@ -169,15 +170,9 @@ struct NovelWorkspacePage {
   @State materialTitle: string = '';
   @State materialContent: string = '';
   @State materialEnabled: boolean = true;
-  // 批量润色：所有集合型状态均用整体赋值，保证 ArkUI V1 可观察。
-  @State batchPolishOpen: boolean = false;
-  @State batchPolishRunning: boolean = false;
-  @State batchPolishCurrent: number = 0;
-  @State batchPolishTotal: number = 0;
-  @State batchPolishTitle: string = '';
-  @State batchPolishResults: NovelBatchPolishSheetResult[] = [];
-  private batchPolishRun: NovelBatchPolishRun | null = null;
-  private batchPolishUnsub: (() => void) | null = null;
+  @State polishCreateOpen: boolean = false;
+  @State polishJob: DurablePolishJob | null = null;
+  @State polishBusy: boolean = false;
   @State ghostwriteJob: DurableGhostwriteJob | null = null;
   @State ghostwriteBusy: boolean = false;
   @State ghostwriteModelAvailable: boolean = false;
@@ -192,12 +187,18 @@ struct NovelWorkspacePage {
   private userTouchActive: boolean = false;
   private recoveryAttemptedToolCalls: Set<string> = new Set();
   private ghostwritePollToken: number = 0;
+  private polishPollToken: number = 0;
+  private requestedBranchId: string = '';
+  private requestedPolishJobId: string = '';
 
   aboutToAppear(): void {
     this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.pageAlive = true;
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
+    this.requestedBranchId = params ? (params['branchId'] ?? '') : '';
+    this.requestedPolishJobId = params ? (params['jobId'] ?? '') : '';
+    if (params && params['tab'] === 'chapters') this.tab = 1;
     this.reload();
     this.loadProjectModelOptions();
   }
@@ -207,6 +208,7 @@ struct NovelWorkspacePage {
     this.pageAlive = false;
     this.reloadToken++;
     this.ghostwritePollToken++;
+    this.polishPollToken++;
     if (this.activeRunId.length > 0) {
       getNovelCreation().interrupt(this.activeRunId);
     }
@@ -214,15 +216,6 @@ struct NovelWorkspacePage {
       const unsub: (() => void) = this.currentUnsub;
       this.currentUnsub = null;
       unsub(); // 终结即退订,emitter 不再持有页面闭包
-    }
-    if (this.batchPolishRun !== null) {
-      this.batchPolishRun.cancel();
-      this.batchPolishRun = null;
-    }
-    if (this.batchPolishUnsub !== null) {
-      const unsub: (() => void) = this.batchPolishUnsub;
-      this.batchPolishUnsub = null;
-      unsub();
     }
   }
 
@@ -232,9 +225,29 @@ struct NovelWorkspacePage {
     const projectId: string = this.projectId;
     try {
       const creation = getNovelCreation();
-      const project: NovelProject = await creation.open(projectId);
-      const status: NovelWorkspaceStatus = await creation.workspaceStatus(projectId);
+      let project: NovelProject = await creation.open(projectId);
+      let status: NovelWorkspaceStatus = await creation.workspaceStatus(projectId);
+      if (this.requestedBranchId.length > 0 && status.activeBranchId !== this.requestedBranchId) {
+        await creation.switchBranch(projectId, this.requestedBranchId);
+        project = await creation.open(projectId);
+        status = await creation.workspaceStatus(projectId);
+      }
       const ghostwrite: DurableGhostwriteJob | null = await creation.ghostwriteJob(projectId);
+      let polish: DurablePolishJob | null = await creation.polishJob(
+        projectId, this.requestedPolishJobId);
+      let polishNotice: string = '';
+      if (this.requestedPolishJobId.length > 0) {
+        const current: DurablePolishJob | null = await creation.polishJob(projectId);
+        if (current !== null && current.jobId !== polish?.jobId &&
+          current.stage !== 'completed' && current.stage !== 'cancelled') {
+          polish = current;
+          this.requestedPolishJobId = '';
+          polishNotice = '通知对应任务已结束，当前分支有新的润色任务，已显示当前任务。';
+        }
+      }
+      if (polish !== null && polish.branchId !== status.activeBranchId) {
+        throw new Error('润色任务不属于当前分支。');
+      }
       let modelAvailable: boolean = true;
       let modelIssue: string = '';
       try {
@@ -247,6 +260,7 @@ struct NovelWorkspacePage {
         this.project = project;
         this.workspaceStatus = status;
         this.ghostwriteJob = ghostwrite;
+        this.polishJob = polish;
         if (ghostwrite !== null) this.settingsSection = 0;
         this.ghostwriteModelAvailable = modelAvailable;
         this.ghostwriteModelIssue = modelIssue;
@@ -255,6 +269,10 @@ struct NovelWorkspacePage {
         this.initialScrollArmed = true;
         this.scheduleRecoverableTool(project);
         this.scheduleGhostwritePoll();
+        this.schedulePolishPoll();
+        if (polishNotice.length > 0) {
+          promptAction.showToast({ message: polishNotice, duration: 2400 });
+        }
       }
     } catch (e) {
       if (this.pageAlive && token === this.reloadToken) {
@@ -298,6 +316,47 @@ struct NovelWorkspacePage {
     } catch (error) {
       if (this.pageAlive && token === this.ghostwritePollToken) {
         this.errorMsg = `代笔状态刷新失败：${String(error)}`;
+      }
+    }
+  }
+
+  private polishStageRuns(stage: PolishStage): boolean {
+    return stage !== 'waiting_system' && stage !== 'paused' && stage !== 'failed' &&
+      stage !== 'cancelled' && stage !== 'completed';
+  }
+
+  private polishRuns(): boolean {
+    return this.polishJob !== null && this.polishStageRuns(this.polishJob.stage);
+  }
+
+  private schedulePolishPoll(): void {
+    const job: DurablePolishJob | null = this.polishJob;
+    if (job === null || !this.polishStageRuns(job.stage) || !this.pageAlive) return;
+    const token: number = ++this.polishPollToken;
+    setTimeout((): void => {
+      if (!this.pageAlive || token !== this.polishPollToken) return;
+      void this.pollPolish(token);
+    }, 1200);
+  }
+
+  private async pollPolish(token: number): Promise<void> {
+    try {
+      const previous: DurablePolishJob | null = this.polishJob;
+      const next: DurablePolishJob | null = await getNovelCreation().polishJob(
+        this.projectId, this.requestedPolishJobId);
+      if (!this.pageAlive || token !== this.polishPollToken) return;
+      this.polishJob = next;
+      const previousProgress: number = previous?.progress.length ?? 0;
+      const nextProgress: number = next?.progress.length ?? 0;
+      if (previousProgress !== nextProgress || previous?.stage !== next?.stage) {
+        this.project = await getNovelCreation().open(this.projectId);
+        this.workspaceStatus = await getNovelCreation().workspaceStatus(this.projectId);
+        if (!this.pageAlive || token !== this.polishPollToken) return;
+      }
+      this.schedulePolishPoll();
+    } catch (error) {
+      if (this.pageAlive && token === this.polishPollToken) {
+        this.errorMsg = `润色状态刷新失败：${String(error)}`;
       }
     }
   }
@@ -358,8 +417,13 @@ struct NovelWorkspacePage {
     return (this.project?.branchSettings.thisChapterPlan.trim().length ?? 0) > 0;
   }
 
-  private ghostwriteLocksWorkspace(): boolean {
-    return this.ghostwriteJob !== null;
+  private polishLocksWorkspace(): boolean {
+    return this.polishJob !== null && this.polishJob.stage !== 'completed' &&
+      this.polishJob.stage !== 'cancelled';
+  }
+
+  private novelJobLocksWorkspace(): boolean {
+    return this.ghostwriteJob !== null || this.polishLocksWorkspace();
   }
 
   private ghostwriteRuns(): boolean {
@@ -367,7 +431,7 @@ struct NovelWorkspacePage {
   }
 
   private async startGhostwrite(targetChapterCount: number): Promise<void> {
-    if (this.ghostwriteBusy || this.ghostwriteJob !== null) return;
+    if (this.ghostwriteBusy || this.novelJobLocksWorkspace()) return;
     this.ghostwriteBusy = true;
     try {
       this.ghostwriteJob = await getNovelCreation().startGhostwrite(this.projectId, targetChapterCount);
@@ -519,7 +583,7 @@ struct NovelWorkspacePage {
   }
 
   private async undoWorkspace(): Promise<void> {
-    if (this.busy) return;
+    if (this.busy || this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       await getNovelCreation().undoLast(this.projectId);
@@ -799,7 +863,7 @@ struct NovelWorkspacePage {
   }
 
   private hasBlockingNovelRun(): boolean {
-    return this.activeRunId.length > 0 || this.batchPolishRunning || this.ghostwriteLocksWorkspace();
+    return this.activeRunId.length > 0 || this.novelJobLocksWorkspace();
   }
 
   openCollect(messageId: string): void {
@@ -879,7 +943,7 @@ struct NovelWorkspacePage {
 
   // ===== 章节 =====
   openNewChapter(): void {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.editingChapterId = '';
     const p: NovelProject | null = this.project;
     this.chapterTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
@@ -888,7 +952,7 @@ struct NovelWorkspacePage {
   }
 
   openEditChapter(c: NovelChapter): void {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.editingChapterId = c.id;
     this.chapterTitle = c.title;
     this.chapterContent = c.content;
@@ -955,107 +1019,102 @@ struct NovelWorkspacePage {
     }
   }
 
-  private batchSheetChapters(): NovelBatchPolishSheetChapter[] {
+  private polishSheetChapters(): NovelPolishCreateSheetChapter[] {
     const p: NovelProject | null = this.project;
     if (p === null) return [];
-    return p.chapters.map((chapter: NovelChapter): NovelBatchPolishSheetChapter => ({
+    return p.chapters.map((chapter: NovelChapter, index: number): NovelPolishCreateSheetChapter => ({
       id: chapter.id,
+      ordinal: index + 1,
       title: chapter.title,
       discarded: chapter.discarded,
     }));
   }
 
-  private chapterTitleFor(chapterId: string): string {
-    const p: NovelProject | null = this.project;
-    const chapter: NovelChapter | undefined = p?.chapters.find((item: NovelChapter): boolean => item.id === chapterId);
-    return chapter !== undefined && chapter.title.length > 0 ? chapter.title : '未命名章节';
+  private polishConflictReason(): string {
+    if (this.ghostwriteJob !== null) return '当前分支已有代笔任务，请先完成或取消。';
+    if (this.polishLocksWorkspace()) return '当前分支已有批量润色任务。';
+    if (this.activeRunId.length > 0) return '当前对话仍在生成，请先停止。';
+    return '';
   }
 
-  private startBatchPolish(chapterIds: string[]): void {
-    if (this.batchPolishRunning || chapterIds.length === 0) return;
-    this.batchPolishResults = [];
-    this.batchPolishCurrent = 0;
-    this.batchPolishTotal = chapterIds.length;
-    this.batchPolishTitle = '';
-    this.batchPolishRunning = true;
-    const run: NovelBatchPolishRun = getNovelCreation().startBatchPolish(this.projectId, chapterIds);
-    this.batchPolishRun = run;
-    this.batchPolishUnsub = run.subscribe((event: NovelBatchPolishEvent): void => {
-      this.handleBatchPolishEvent(event);
-    });
-  }
-
-  private handleBatchPolishEvent(event: NovelBatchPolishEvent): void {
-    if (event.kind === 'progress') {
-      this.batchPolishCurrent = event.completed + 1;
-      this.batchPolishTotal = event.total;
-      this.batchPolishTitle = this.chapterTitleFor(event.chapterId);
-      return;
-    }
-    if (event.kind === 'result') {
-      this.putBatchPolishResult(event.result.chapterId, event.result.status, event.result.messageId, event.result.error);
-      return;
-    }
-    this.batchPolishResults = event.results.map((result) => this.toBatchPolishSheetResult(
-      result.chapterId, result.status, result.messageId, result.error));
-    this.batchPolishRunning = false;
-    this.batchPolishRun = null;
-    if (this.batchPolishUnsub !== null) {
-      const unsub: (() => void) = this.batchPolishUnsub;
-      this.batchPolishUnsub = null;
-      unsub();
-    }
-    this.reload();
-  }
-
-  private putBatchPolishResult(
-    chapterId: string, status: 'succeeded' | 'failed' | 'cancelled', messageId: string | null, error: string | null,
-  ): void {
-    const next: NovelBatchPolishSheetResult[] = this.batchPolishResults.filter(
-      (result: NovelBatchPolishSheetResult): boolean => result.chapterId !== chapterId);
-    next.push(this.toBatchPolishSheetResult(chapterId, status, messageId, error));
-    this.batchPolishResults = next;
-  }
-
-  private toBatchPolishSheetResult(
-    chapterId: string, status: 'succeeded' | 'failed' | 'cancelled', messageId: string | null, error: string | null,
-  ): NovelBatchPolishSheetResult {
-    return {
-      chapterId: chapterId,
-      title: this.chapterTitleFor(chapterId),
-      status: status === 'succeeded' ? 'ready' : status,
-      detail: error ?? '',
-      messageId: messageId ?? '',
-    };
-  }
-
-  private cancelBatchPolish(): void {
-    if (this.batchPolishRun !== null) this.batchPolishRun.cancel();
-  }
-
-  private closeBatchPolishSheet(): void {
-    if (this.batchPolishRunning) return;
-    this.batchPolishOpen = false;
-    this.batchPolishResults = [];
-    this.batchPolishCurrent = 0;
-    this.batchPolishTotal = 0;
-    this.batchPolishTitle = '';
-  }
-
-  private async adoptBatchPolish(chapterId: string, messageId: string): Promise<void> {
-    this.busy = true;
+  private async startPolish(
+    startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
+  ): Promise<void> {
+    if (this.polishBusy || this.polishConflictReason().length > 0) return;
+    this.polishBusy = true;
     try {
-      await getNovelCreation().adoptPolishMessage(this.projectId, chapterId, messageId);
-      this.batchPolishResults = this.batchPolishResults.map((result: NovelBatchPolishSheetResult): NovelBatchPolishSheetResult =>
-        result.chapterId === chapterId ? {
-          chapterId: result.chapterId, title: result.title, status: 'adopted', detail: result.detail,
-          messageId: result.messageId,
-        } : result);
-      await this.reload();
-    } catch (e) {
-      this.errorMsg = String(e);
+      this.requestedPolishJobId = '';
+      this.polishJob = await getNovelCreation().startPolish(
+        this.projectId, startOrdinal, endOrdinal, contextOptions);
+      this.polishCreateOpen = false;
+      this.errorMsg = '';
+      this.schedulePolishPoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('启动批量润色失败', error);
     } finally {
-      this.busy = false;
+      this.polishBusy = false;
+    }
+  }
+
+  private async pausePolish(): Promise<void> {
+    const job: DurablePolishJob | null = this.polishJob;
+    if (this.polishBusy || job === null || !this.polishStageRuns(job.stage)) return;
+    this.polishBusy = true;
+    try {
+      this.polishPollToken++;
+      this.polishJob = await getNovelCreation().pausePolish(this.projectId, job.jobId);
+      this.errorMsg = '';
+    } catch (error) {
+      this.showWorkspaceOperationError('暂停批量润色失败', error);
+    } finally {
+      this.polishBusy = false;
+    }
+  }
+
+  private async resumePolish(): Promise<void> {
+    const job: DurablePolishJob | null = this.polishJob;
+    if (this.polishBusy || job === null ||
+      (job.stage !== 'paused' && job.stage !== 'waiting_system')) return;
+    this.polishBusy = true;
+    try {
+      this.polishJob = await getNovelCreation().resumePolish(this.projectId, job.jobId);
+      this.errorMsg = '';
+      this.schedulePolishPoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('继续批量润色失败', error);
+    } finally {
+      this.polishBusy = false;
+    }
+  }
+
+  private async retryPolish(): Promise<void> {
+    const job: DurablePolishJob | null = this.polishJob;
+    if (this.polishBusy || job === null || job.stage !== 'failed') return;
+    this.polishBusy = true;
+    try {
+      this.polishJob = await getNovelCreation().retryPolish(this.projectId, job.jobId);
+      this.errorMsg = '';
+      this.schedulePolishPoll();
+    } catch (error) {
+      this.showWorkspaceOperationError('重试批量润色失败', error);
+    } finally {
+      this.polishBusy = false;
+    }
+  }
+
+  private async cancelPolish(): Promise<void> {
+    const job: DurablePolishJob | null = this.polishJob;
+    if (this.polishBusy || job === null) return;
+    this.polishBusy = true;
+    try {
+      this.polishPollToken++;
+      this.polishJob = await getNovelCreation().cancelPolish(this.projectId, job.jobId);
+      this.errorMsg = '';
+      await this.reload();
+    } catch (error) {
+      this.showWorkspaceOperationError('取消批量润色失败', error);
+    } finally {
+      this.polishBusy = false;
     }
   }
 
@@ -1070,7 +1129,7 @@ struct NovelWorkspacePage {
   }
 
   async saveChapter(): Promise<void> {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       const saved: NovelChapter = await getNovelCreation().saveChapter(
@@ -1088,7 +1147,7 @@ struct NovelWorkspacePage {
   }
 
   async deleteChapter(id: string): Promise<void> {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       await getNovelCreation().deleteChapter(this.projectId, id);
@@ -1420,12 +1479,12 @@ struct NovelWorkspacePage {
 
         ChatInput({
           text: this.draft,
-          sending: this.activeRunId.length > 0 || this.batchPolishRunning || this.ghostwriteRuns(),
-          disabled: this.ghostwriteLocksWorkspace() && !this.ghostwriteRuns(),
+          sending: this.activeRunId.length > 0 || this.polishRuns() || this.ghostwriteRuns(),
+          disabled: this.novelJobLocksWorkspace() && !this.ghostwriteRuns() && !this.polishRuns(),
           onTextChange: (v: string): void => { this.draft = v; },
           onSend: (): void => { this.send(); },
           onStop: (): void => {
-            if (this.batchPolishRunning) this.cancelBatchPolish();
+            if (this.polishRuns()) this.pausePolish();
             else if (this.ghostwriteRuns()) this.pauseGhostwrite();
             else this.interrupt();
           },
@@ -1526,15 +1585,21 @@ struct NovelWorkspacePage {
             .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
             .opacity(this.busy ? 0.5 : 1)
             .onClick((): void => { this.runConsistencyCheck(); })
-          Text('撤销').fontSize(12).fontColor(this.workspaceStatus?.canUndo ? INK3 : INK4)
+          Text('撤销').fontSize(12)
+            .fontColor(this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace() ? INK3 : INK4)
             .constraintSize({ minWidth: 44 }).height(44)
             .padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .onClick((): void => { if (this.workspaceStatus?.canUndo) this.undoWorkspace(); })
+            .onClick((): void => {
+              if (this.workspaceStatus?.canUndo && !this.novelJobLocksWorkspace()) this.undoWorkspace();
+            })
           Text('批量润色').fontSize(12).fontColor(INK3)
             .height(44).padding({ left: 8, right: 8 }).textAlign(TextAlign.Center)
-            .opacity(this.batchPolishRunning ? 0.5 : 1)
+            .opacity(this.polishConflictReason().length > 0 ? 0.5 : 1)
             .onClick((): void => {
-              if (!this.batchPolishRunning) this.batchPolishOpen = true;
+              if (this.polishConflictReason().length === 0) {
+                this.requestedPolishJobId = '';
+                this.polishCreateOpen = true;
+              }
             })
           Text('新建').fontSize(12).fontColor(ACCENT)
             .constraintSize({ minWidth: 44 }).height(44)
@@ -1546,6 +1611,18 @@ struct NovelWorkspacePage {
         if (this.consistencyMessage.length > 0) {
           Text(this.consistencyMessage).fontSize(12).fontColor(INK3).lineHeight(18)
             .width('100%').padding({ left: 20, right: 20, bottom: 10 })
+        }
+
+        if (this.polishJob !== null) {
+          NovelPolishJobCard({
+            job: this.polishJob,
+            busy: this.polishBusy,
+            onPause: (): void => { this.pausePolish(); },
+            onResume: (): void => { this.resumePolish(); },
+            onRetry: (): void => { this.retryPolish(); },
+            onCancel: (): void => { this.cancelPolish(); },
+          })
+          .margin({ left: 16, right: 16, bottom: 10 })
         }
 
         if (this.project !== null && this.project.chapters.length === 0) {
@@ -1739,7 +1816,7 @@ struct NovelWorkspacePage {
         NovelSettingsPane({
           project: this.project,
           modelOptions: this.modelOptions,
-          busy: this.busy || this.ghostwriteLocksWorkspace(),
+          busy: this.busy || this.novelJobLocksWorkspace(),
           onSaveModelPolicy: (policy: NovelModelPolicy): void => {
             this.saveNovelModelPolicy(policy);
           },
@@ -1761,16 +1838,16 @@ struct NovelWorkspacePage {
   @Builder
   settingsSectionChip(label: string, section: number): void {
     Text(label).fontSize(13)
-      .fontColor(section === 1 && this.ghostwriteLocksWorkspace()
+      .fontColor(section === 1 && this.novelJobLocksWorkspace()
         ? INK4 : (this.settingsSection === section ? ACCENT : INK3))
       .layoutWeight(1).height(44).textAlign(TextAlign.Center)
       .backgroundColor(this.settingsSection === section ? SURFACE : SURFACE2)
       .borderRadius(12)
       .border({ width: 1, color: this.settingsSection === section ? ACCENT : LINE })
       .margin({ left: 4, right: 4 })
-      .opacity(section === 1 && this.ghostwriteLocksWorkspace() ? 0.55 : 1)
+      .opacity(section === 1 && this.novelJobLocksWorkspace() ? 0.55 : 1)
       .onClick((): void => {
-        if (section !== 1 || !this.ghostwriteLocksWorkspace()) this.settingsSection = section;
+        if (section !== 1 || !this.novelJobLocksWorkspace()) this.settingsSection = section;
       })
   }
 
@@ -1793,13 +1870,13 @@ struct NovelWorkspacePage {
             .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
           if (this.workspaceStatus !== null) {
             Text(`${this.workspaceStatus.activeBranchName} ▾`)
-              .fontSize(12).fontColor(this.busy || this.ghostwriteLocksWorkspace() ? INK4 : ACCENT)
+              .fontSize(12).fontColor(this.busy || this.novelJobLocksWorkspace() ? INK4 : ACCENT)
               .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
               .constraintSize({ minWidth: 44, maxWidth: 104 })
               .height(44).textAlign(TextAlign.Center)
               .padding({ left: 8, right: 8 })
               .onClick((): void => {
-                if (!this.busy && !this.ghostwriteLocksWorkspace()) this.branchSheetOpen = true;
+                if (!this.busy && !this.novelJobLocksWorkspace()) this.branchSheetOpen = true;
               })
               .accessibilityText(`当前分支 ${this.workspaceStatus.activeBranchName}，打开分支面板`)
           }
@@ -1864,7 +1941,7 @@ struct NovelWorkspacePage {
           visible: this.branchSheetOpen,
           activeBranchId: this.workspaceStatus.activeBranchId,
           branches: this.workspaceStatus.branches,
-          busy: this.busy || this.ghostwriteLocksWorkspace(),
+          busy: this.busy || this.novelJobLocksWorkspace(),
           canUndo: this.workspaceStatus.canUndo,
           unresolvedFromOrdinal: this.workspaceStatus.unresolvedFromOrdinal,
           plotStale: this.workspaceStatus.plotStale,
@@ -1876,18 +1953,19 @@ struct NovelWorkspacePage {
           onResolveUnresolved: (): void => { this.resolveWorkspaceUnresolved(); },
         })
       }
-      if (this.batchPolishOpen) {
-        NovelBatchPolishSheet({
-          chapters: this.batchSheetChapters(),
-          running: this.batchPolishRunning,
-          current: this.batchPolishCurrent,
-          total: this.batchPolishTotal,
-          currentTitle: this.batchPolishTitle,
-          results: this.batchPolishResults,
-          onStart: (chapterIds: string[]): void => { this.startBatchPolish(chapterIds); },
-          onCancel: (): void => { this.cancelBatchPolish(); },
-          onAdopt: (chapterId: string, messageId: string): void => { this.adoptBatchPolish(chapterId, messageId); },
-          onClose: (): void => { this.closeBatchPolishSheet(); },
+      if (this.polishCreateOpen) {
+        NovelPolishCreateSheet({
+          visible: this.polishCreateOpen,
+          chapters: this.polishSheetChapters(),
+          modelReady: this.ghostwriteModelsReady(),
+          modelDisabledReason: this.ghostwriteModelReason(),
+          conflictReason: this.polishConflictReason(),
+          busy: this.polishBusy,
+          bottomPadding: Math.max(this.navBarHeight, 12),
+          onStart: (
+            startOrdinal: number, endOrdinal: number, contextOptions: PolishContextOptions,
+          ): void => { this.startPolish(startOrdinal, endOrdinal, contextOptions); },
+          onClose: (): void => { if (!this.polishBusy) this.polishCreateOpen = false; },
         })
       }
     }
@@ -2053,7 +2131,7 @@ struct NovelWorkspacePage {
   private onChapterMenuAction(action: string): void {
     const id: string = this.chapterMenuId;
     this.chapterMenuId = '';
-    if (id.length === 0 || this.batchPolishRunning) return;
+    if (id.length === 0 || this.novelJobLocksWorkspace()) return;
     if (action === 'regenerate') this.regenerateChapter(id);
     else if (action === 'polish') this.polishChapter(id);
     else if (action === 'versions') this.openChapterVersions(id);
@@ -2116,7 +2194,7 @@ struct NovelWorkspacePage {
   }
 
   private async toggleDiscarded(chapterId: string, discarded: boolean): Promise<void> {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       this.project = await getNovelCreation().setChapterDiscarded(this.projectId, chapterId, discarded);
@@ -2146,7 +2224,7 @@ struct NovelWorkspacePage {
   }
 
   private async restoreVersion(versionId: string): Promise<void> {
-    if (this.batchPolishRunning) return;
+    if (this.novelJobLocksWorkspace()) return;
     this.busy = true;
     try {
       this.project = await getNovelCreation().restoreChapterVersion(this.projectId, versionId);

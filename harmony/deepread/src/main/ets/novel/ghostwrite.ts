@@ -99,6 +99,7 @@ export interface GhostwriteProgress {
 
 export interface DurableGhostwriteJob {
   version: 1;
+  kind: 'ghostwrite';
   jobId: string;
   projectId: string;
   branchId: string;
@@ -309,6 +310,7 @@ export const makeGhostwriteJob = (input: MakeGhostwriteJobInput): DurableGhostwr
   validateChapterOrdinal(endChapterOrdinal);
   return {
     version: 1,
+    kind: 'ghostwrite',
     jobId: requireId(input.jobId, 'jobId'),
     projectId: requireId(input.projectId, 'projectId'),
     branchId: requireId(input.branchId, 'branchId'),
@@ -335,6 +337,7 @@ export const makeGhostwriteJob = (input: MakeGhostwriteJobInput): DurableGhostwr
 
 export const validateDurableGhostwriteJob = (job: DurableGhostwriteJob): DurableGhostwriteJob => {
   if (job.version !== 1) throw invalidInput('ghostwrite job 版本不受支持');
+  if (job.kind !== 'ghostwrite') throw invalidInput('ghostwrite job 类型无效');
   requireId(job.jobId, 'jobId');
   requireId(job.projectId, 'projectId');
   requireId(job.branchId, 'branchId');

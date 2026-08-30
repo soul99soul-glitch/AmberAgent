@@ -10,7 +10,7 @@ import type {
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
   ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
-  NovelProjectRepository, NovelModelTarget,
+  NovelProjectRepository, NovelModelTarget, NovelPolishEffects, DurablePolishJob,
 } from '@amber/deepread-domain';
 import {
   isInterruptedPhase, createScheduler, createSourcePrefetcher,
@@ -29,6 +29,10 @@ import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
 import { createEntryNovelChatRunAdapter } from '../platform_impl/NovelChatRunAdapter.ets';
+import {
+  scheduleNovelPolishWork, cancelNovelPolishWork,
+} from '../platform_impl/NovelPolishWorkScheduler.ets';
+import { publishNovelJobNotification } from '../platform_impl/NotificationNotifier.ets';
 import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import {
   createNovelWorkspaceService, NovelWorkspaceService,
@@ -680,9 +684,43 @@ export const getNovelWorkspaceService = (): NovelWorkspaceService => {
 export const getNovelCreation = (): NovelCreation => {
   if (novelCreation === null) {
     const c: Container = getAppContainer();
+    const polishEffects: NovelPolishEffects = {
+      async schedule(job: DurablePolishJob): Promise<void> {
+        scheduleNovelPolishWork({
+          projectId: job.projectId, branchId: job.branchId, jobId: job.jobId,
+        });
+      },
+      async cancel(job: DurablePolishJob): Promise<void> {
+        cancelNovelPolishWork({
+          projectId: job.projectId, branchId: job.branchId, jobId: job.jobId,
+        });
+      },
+      async notify(job: DurablePolishJob): Promise<void> {
+        let title: string = '批量润色';
+        let text: string = `已完成 ${job.cursor}/${job.targets.length}`;
+        if (job.stage === 'completed') {
+          title = '批量润色完成';
+        } else if (job.stage === 'failed') {
+          title = '批量润色失败';
+          text = job.failure ?? text;
+        } else if (job.stage === 'cancelled') {
+          title = '批量润色已取消';
+        } else if (job.stage === 'paused') {
+          title = '批量润色已暂停';
+        } else if (job.stage === 'waiting_system') {
+          title = '批量润色等待后台调度';
+        } else if (job.cursor < job.targets.length) {
+          const target = job.targets[job.cursor];
+          text = `正在处理第 ${target.ordinal} 章 · ${job.cursor}/${job.targets.length}`;
+        }
+        await publishNovelJobNotification(
+          job.projectId, job.branchId, job.jobId, title, text.slice(0, 120));
+      },
+    };
     novelCreation = createNovelCreation({
       repository: getNovelProjectRepository(),
       modelRunning: createEntryNovelChatRunAdapter(resolveNovelInteractiveRuntime),
+      polishEffects,
     });
   }
   return novelCreation;
