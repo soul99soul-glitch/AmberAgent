@@ -170,13 +170,14 @@ struct BoardPage {
           .fontColor(isLead ? ACCENT : INK4)
           .width(isLead ? 36 : 28)
         Column() {
+          // 标题宽度交给外层 Column 的 layoutWeight;此处禁 layoutWeight(竖向 Column 里会吃满剩余高)
           Text(tp.title)
             .fontSize(isLead ? 18 : BODY2)
             .fontWeight(isLead ? 600 : FontWeight.Normal)
             .lineHeight(isLead ? 25 : TEXT_STYLES.secondary.lineHeight)
             .fontFamily(TEXT_STYLES.secondary.family)
             .fontColor(isLead ? INK : INK2)
-            .layoutWeight(1)
+            .width('100%')
             .maxLines(isLead ? 3 : 2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Row() {
@@ -354,9 +355,10 @@ struct BoardPage {
         }
         .width('100%').margin({ top: 8 })
       } else {
-        List() {
-          if (this.topics.length > 0) {
-            ListItem() {
+        // 热榜内容量小,Scroll+Column 顶对齐;List 会把单条 ListItem 拉伸到视口高(大空隙根因)
+        Scroll() {
+          Column() {
+            if (this.topics.length > 0) {
               Column() {
                 Row() {
                   Text('//')
@@ -376,9 +378,7 @@ struct BoardPage {
               }
               .width('100%')
             }
-          }
-          ForEach(this.sections, (sec: SourceSection): void => {
-            ListItem() {
+            ForEach(this.sections, (sec: SourceSection): void => {
               Column() {
                 Row() {
                   Text('//')
@@ -423,11 +423,12 @@ struct BoardPage {
                 }
               }
               .width('100%')
-            }
-          }, (sec: SourceSection): string => sec.sourceId)
+            }, (sec: SourceSection): string => sec.sourceId)
+          }
+          .width('100%')
         }
         .width('100%').layoutWeight(1).padding({ top: 8 })
-        .divider({ strokeWidth: 0, color: Color.Transparent })
+        .align(Alignment.TopStart)
       }
       PageSpacer()
       }

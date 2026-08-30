@@ -579,7 +579,7 @@ struct ChatListPage {
                 .fontFamily(FONT_SANS_SEMIBOLD)
                 .fontColor(INK)
                 .margin({ top: 18 })
-              Text('从一句问候开始，或点击右下角按钮\n发起新的对话。')
+              Text('从一句问候开始，和 Amber 聊聊\n今天想做的事。')
                 .fontSize(13.5)
                 .lineHeight(20)
                 .fontFamily(FONT_SANS)
