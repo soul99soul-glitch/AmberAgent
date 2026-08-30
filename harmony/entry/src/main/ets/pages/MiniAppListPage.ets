@@ -11,7 +11,7 @@ import { fileIo, picker } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { MiniAppRecord, MiniAppVersionRecord } from '@amber/chat-domain';
-import { ACCENT, BG, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
+import { ACCENT, ACCENT_LIGHT, BG, BODY, BODY2, INK, INK2, INK3, INK4, LINE, META, OVERLAY, SURFACE, SURFACE2, TITLE } from '../design/tokens.ets';
 import { getMiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog.ets';
@@ -306,13 +306,23 @@ struct MiniAppListPage {
   @Builder
   emptyState(): void {
     Column() {
+      // 空态图标座:accent 淡底圆座 + 应用图标
+      Row() {
+        Icon({ name: 'hi_app_archive', iconSize: 30, color: ACCENT })
+      }
+      .width(76).height(76).borderRadius(38)
+      .backgroundColor(ACCENT_LIGHT)
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
+      .margin({ bottom: 18 })
       Text('还没有保存的小应用')
         .fontSize(BODY)
-        .fontColor(INK3)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(INK2)
       Text('在聊天中让 Amber 生成小应用后会出现在这里')
         .fontSize(BODY2)
         .fontColor(INK4)
-        .margin({ top: 6 })
+        .margin({ top: 8 })
     }
     .width('100%').layoutWeight(1)
     .justifyContent(FlexAlign.Center)

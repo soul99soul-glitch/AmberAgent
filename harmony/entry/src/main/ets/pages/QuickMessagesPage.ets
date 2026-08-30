@@ -4,7 +4,7 @@ import { router } from '@kit.ArkUI';
 import { Icon } from '../components/ui/Icon.ets';
 import type { KeyValueStore } from '@amber/chat-domain';
 import { getChatKvStore } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, BODY, META, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
+import { INK, INK2, INK3, SURFACE, SURFACE2, LINE, BG, ACCENT, ACCENT_LIGHT, BODY, META, TITLE, GUTTER, RADIUS } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 const QUICK_MESSAGES_KEY: string = 'quick_messages';
@@ -209,7 +209,15 @@ struct QuickMessagesPage {
         }.width('100%').padding({ top: 48, bottom: 48 }).alignItems(HorizontalAlign.Center)
       } else if (this.items.length === 0) {
         Column() {
-          Text('还没有快捷消息').fontSize(BODY).fontColor(INK2)
+          Row() {
+            Icon({ name: 'hi_message', iconSize: 30, color: ACCENT })
+          }
+          .width(76).height(76).borderRadius(38)
+          .backgroundColor(ACCENT_LIGHT)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          Text('还没有快捷消息').fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2)
+            .margin({ top: 18 })
           Text('点右上角新建一条').fontSize(META).fontColor(INK3).margin({ top: 8 })
         }.width('100%').padding({ top: 64, bottom: 64 }).alignItems(HorizontalAlign.Center)
       } else {

@@ -6,7 +6,7 @@ import { Icon } from '../components/ui/Icon.ets';
 import type { DeepReadCacheEntry } from '@amber/deepread-domain';
 import { isCacheEntryExpired } from '@amber/deepread-domain';
 import { getRepository } from '../di/AppContainer.ets';
-import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, SIGNAL, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
+import { INK, INK2, INK3, INK4, SURFACE, LINE, BG, ACCENT, ACCENT_LIGHT, SIGNAL, BODY, META, LABEL, TITLE } from '../design/tokens.ets';
 
 const DANGER: string = 'ERROR';
 
@@ -84,9 +84,16 @@ struct DeepReadHistoryPage {
         Text('加载中…').fontSize(BODY).fontColor(INK3).padding({ top: 40 })
       } else if (this.items.length === 0) {
         Column() {
-          Text('◎').fontSize(34).fontColor(INK4)
+          // 空态图标座替换裸 glyph
+          Row() {
+            Icon({ name: 'book', iconSize: 30, color: ACCENT })
+          }
+          .width(76).height(76).borderRadius(38)
+          .backgroundColor(ACCENT_LIGHT)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
           Text(this.loadError.length > 0 ? '历史记录加载失败' : '还没有阅读历史')
-            .fontSize(BODY).fontColor(INK2).margin({ top: 12 })
+            .fontSize(BODY).fontWeight(FontWeight.Medium).fontColor(INK2).margin({ top: 18 })
           Text(this.loadError.length > 0
             ? this.loadError
             : '还没有生成过深度阅读')
