@@ -17,6 +17,7 @@ struct NovelProjectsPage {
   @State editingId: string = '';   // '' = 新建
   @State nameInput: string = '';
   @State confirmDeleteId: string = '';
+  @State restoring: boolean = false;
   @State errorMsg: string = '';
   private pageAlive: boolean = false;
   private loadToken: number = 0;
@@ -88,6 +89,25 @@ struct NovelProjectsPage {
     await this.loadProjects();
   }
 
+  // N3:恢复最近删除的项目(repository 软删恢复)
+  async restoreDeleted(): Promise<void> {
+    if (this.restoring) return;
+    this.restoring = true;
+    try {
+      const restored: NovelProject | null = await getNovelCreation().restorePreviousProject();
+      if (restored === null) {
+        this.errorMsg = '没有可恢复的删除项目';
+      } else {
+        this.errorMsg = '';
+        await this.loadProjects();
+      }
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.restoring = false;
+    }
+  }
+
   openWorkspace(projectId: string): void {
     const params: Record<string, string> = { 'projectId': projectId };
     router.pushUrl({ url: 'pages/NovelWorkspacePage', params: params });
@@ -140,6 +160,15 @@ struct NovelProjectsPage {
     Stack() {
       Column() {
         PageTitleBar({ title: '小说创作', actionText: '新建', onAction: (): void => { this.openNew(); } })
+
+        // N3:恢复最近删除的项目
+        Row() {
+          Blank()
+          Text('恢复删除的项目').fontSize(12).fontColor(INK3)
+            .padding({ left: 12, right: 20, top: 6, bottom: 6 })
+            .onClick((): void => { this.restoreDeleted(); })
+        }
+        .width('100%')
 
         if (this.loading) {
           Column() {

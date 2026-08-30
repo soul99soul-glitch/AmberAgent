@@ -56,6 +56,28 @@ struct NovelWorkspacePage {
   @State streamingText: string = '';
   @State generationStatus: string = '';
   @State activeRunId: string = '';
+  // N3:讨论归档蒸馏(取当前讨论模式中未收录的 assistant 消息)
+  async archiveDiscussion(): Promise<void> {
+    if (this.project === null || this.activeRunId.length > 0) return;
+    const discussMsgs: NovelMessage[] = this.project.messages.filter(
+      (m: NovelMessage): boolean => m.mode === 'discuss' && m.collectedChapterId === null);
+    if (discussMsgs.length === 0) {
+      promptAction.showToast({ message: '没有可归档的讨论内容', duration: 1400 });
+      return;
+    }
+    this.busy = true;
+    try {
+      const ids: string[] = discussMsgs.map((m: NovelMessage): string => m.id);
+      const r = await getNovelCreation().archiveDiscussion(this.projectId, ids);
+      promptAction.showToast({ message: `归档完成,产出 ${r.count} 条资料建议`, duration: 1800 });
+      await this.reload();
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   // N2:章节版本历史 sheet
   @State versionsChapterId: string = '';
   @State versionsOpen: boolean = false;
@@ -377,6 +399,13 @@ const unsub: (() => void) | null = this.currentUnsub;
   // ===== 页签内容 =====
   @Builder
   chatPane(): void {
+    Row() {
+      Blank()
+      Text('归档讨论').fontSize(12).fontColor(INK3)
+        .padding({ left: 12, right: 16, top: 6, bottom: 6 })
+        .onClick((): void => { this.archiveDiscussion(); })
+    }
+    .width('100%')
     Column() {
       // 消息列表
       List({ space: 0 }) {

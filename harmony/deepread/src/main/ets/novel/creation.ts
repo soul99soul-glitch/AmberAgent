@@ -4,7 +4,7 @@
 // 中断保留 partial(interrupted=true);收录先存章节再分析素材建议。纯逻辑,mock 模型可测。
 
 import {
-  makeNovelMessage, novelId, makeNovelChapterVersion,
+  makeNovelMessage, novelId, makeNovelChapterVersion, makeNovelChapter,
 } from './models.ts';
 import type { NovelRunKind } from './prompt_catalog.ts';
 import type {
@@ -307,6 +307,44 @@ export class NovelCreation {
       chapters[idx] = restored;
       return { ...p, chapters: chapters, chapterVersions: [...p.chapterVersions, backup], updatedAt: now };
     });
+  }
+
+  // N3:讨论归档蒸馏 — 把指定讨论消息(按 id 列表)交给模型蒸馏成活资料建议
+  async archiveDiscussion(projectId: string, messageIds: string[]): Promise<NovelSuggestionRefreshResult> {
+    const project: NovelProject = await this.repository.loadProject(projectId);
+    const msgs: NovelMessage[] = project.messages.filter(
+      (m: NovelMessage): boolean => messageIds.includes(m.id) && m.content.trim().length > 0);
+    if (msgs.length === 0) throw invalidInput('没有可归档的讨论内容');
+    // 蒸馏 = 拼接讨论文本伪造成一章,复用章节素材建议分析(LLM 严格 JSON 输出)
+    const mergedTitle: string = '讨论归档';
+    const mergedContent: string = msgs.map((m: NovelMessage): string => m.content).join('\n\n');
+    const pseudo: NovelChapter =
+      makeNovelChapter({ title: mergedTitle, content: mergedContent, now: this.nowMs() });
+    const suggestions: NovelMaterialSuggestion[] = await analyzeChapterSuggestions(
+      this.modelRunning, project, pseudo, project.modelId, this.nowMs());
+    const updated: NovelProject = await this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+      const next: NovelMaterialSuggestion[] = [...p.materialSuggestions];
+      for (const sg of suggestions) {
+        if (!next.some((x: NovelMaterialSuggestion): boolean => x.title === sg.title)) next.push(sg);
+      }
+      return { ...p, materialSuggestions: next, updatedAt: Date.now() };
+    });
+    return { suggestions: suggestions, count: suggestions.length, warning: null };
+  }
+
+  // N3:恢复最近删除的项目;无删除记录返回 null
+  async restorePreviousProject(): Promise<NovelProject | null> {
+    return this.repository.restorePrevious();
+  }
+
+  // N3:收录资格(页面禁用/提示):已收录 / 空文案 / 非本次运行头
+  collectBlockReasonFor(project: NovelProject, messageId: string): string {
+    const m: NovelMessage | undefined = project.messages.find(x => x.id === messageId);
+    if (m === undefined) return '消息不存在';
+    if (m.collectedChapterId !== null) return '该消息已收录';
+    if (m.content.trim().length === 0) return '没有可收录的正文';
+    if (m.interrupted && m.content.trim().length < 50) return '内容过短(中断且不足 50 字)';
+    return '';
   }
 
   interrupt(runId: string): void {
