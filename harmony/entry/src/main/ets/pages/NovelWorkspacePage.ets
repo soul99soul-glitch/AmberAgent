@@ -82,6 +82,7 @@ struct NovelWorkspacePage {
   // N2:章节版本历史 sheet
   @State versionsChapterId: string = '';
   @State versionsOpen: boolean = false;
+  @StorageProp('navBarHeight') navBarHeight: number = 0;
   @State chapterMenuId: string = '';
   @State pendingUserText: string = '';
   @State collectMessageId: string = '';
@@ -409,6 +410,16 @@ const unsub: (() => void) | null = this.currentUnsub;
     }
     .width('100%').padding({ top: 8 })
     Column() {
+      if (this.project !== null && this.project.messages.length === 0 && this.activeRunId.length === 0) {
+        Column() {
+          Text('从一个念头开始').fontSize(15).fontColor(INK2)
+          Text('讨论设定、续写当前场景，或直接生成完整章节。')
+            .fontSize(12).fontColor(INK3).margin({ top: 6 })
+            .textAlign(TextAlign.Center)
+        }
+        .alignItems(HorizontalAlign.Center)
+        .width('100%').padding({ left: 24, right: 24, top: 120, bottom: 24 })
+      }
       // 消息列表
       List({ space: 0 }) {
         if (this.project !== null) {
@@ -440,16 +451,6 @@ const unsub: (() => void) | null = this.currentUnsub;
             .alignItems(HorizontalAlign.Start)
           }
         }
-        if (this.project !== null && this.project.messages.length === 0 && this.activeRunId.length === 0) {
-          ListItem() {
-            Column() {
-              Text('从一个念头开始').fontSize(15).fontColor(INK2)
-              Text('讨论设定、续写当前场景，或直接生成完整章节。')
-                .fontSize(12).fontColor(INK3).margin({ top: 6 })
-            }
-            .width('100%').padding({ top: 40, bottom: 20 })
-          }
-        }
       }
       .layoutWeight(1).padding({ left: 16, right: 16, top: 8 })
 
@@ -476,8 +477,9 @@ const unsub: (() => void) | null = this.currentUnsub;
           onClearInput: (): void => { this.draft = ''; },
         })
       }
+      // 全屏布局下手势条悬浮(bottomRect=0 → navBarHeight=0),须自留 ≥24vp 安全区
       .width('100%').padding({ left: 16, right: 16, top: 8,
-        bottom: 12 + (AppStorage.get<number>('navBarHeight') ?? 0) })
+        bottom: 12 + Math.max(this.navBarHeight, 24) })
       .border({ width: { top: 0.5 }, color: { top: LINE } })
     }
     }
