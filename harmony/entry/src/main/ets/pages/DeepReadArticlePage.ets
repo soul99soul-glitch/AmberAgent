@@ -10,16 +10,18 @@
 //
 // 保留原有 run() 逻辑,仅增强 UI 层。
 
-import { router } from '@kit.ArkUI';
+import { router, promptAction } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 import { Icon } from '../components/ui/Icon.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type {
-  DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput, DeepReadScheduler, RunResult,
+  CorePoint, DeepReadCacheEntry, DeepReadGenerationStage, DeepReadImageAsset, DeepReadOutput,
+  DeepReadScheduler, Perspective, Quote, ReadingLink, RunResult, TimelineEvent,
 } from '@amber/deepread-domain';
 import { displayHeroImageUrl, firstFailureMessage, firstFailedStage, isComplete, isCacheEntryExpired, deepReadProgressSnapshot, STAGE_ORDER } from '@amber/deepread-domain';
 import type { DeepReadProgressSnapshot } from '@amber/deepread-domain';
 import { MarkdownText } from '../components/MarkdownText.ets';
-import { FONT_SERIF } from '../design/fonts.ets';
+import { FONT_SERIF, FONT_MONO_SEMIBOLD, FONT_SANS_MEDIUM } from '../design/fonts.ets';
 import { DeepReadConfirmationDialog } from '../components/DeepReadConfirmationDialog.ets';
 import { getDeepReadScheduler, getRepository, getChatKvStore } from '../di/AppContainer.ets';
 import { renderEditorialSlantHtml, DEEPREAD_TEMPLATE_EDITORIAL_SLANT } from '../platform_impl/DeepReadTemplate.ets';
@@ -238,53 +240,43 @@ struct DeepReadArticlePage {
     return '```json\\n' + JSON.stringify(this.output.diagram, null, 2) + '\\n```';
   }
 
-  private markdownContent(): string {
-    if (this.output === null) return '';
-    const o: DeepReadOutput = this.output;
-    const lines: string[] = [];
-    if (o.summary.trim().length > 0) lines.push('## 概览', '', o.summary.trim(), '');
-    if (o.keyEntities.length > 0) lines.push('**关键实体**：' + o.keyEntities.join('、'), '');
-    if (o.timeline !== null && o.timeline.length > 0) {
-      lines.push('## 时间轴叙事', '');
-      for (const item of o.timeline) lines.push(`- **${item.date}** ${item.event}`);
-      lines.push('');
+  // hero 右侧来源计数(Android deepReadSourceLabel)
+  private sourceCountLabel(o: DeepReadOutput): string {
+    const pool: ReadingLink[] = o.references.length > 0 ? o.references : o.extendedReading;
+    const seen: string[] = [];
+    for (const l of pool) {
+      const key: string = (l.source !== null && l.source.length > 0) ? l.source : l.url;
+      if (key.length > 0 && !seen.includes(key)) seen.push(key);
     }
-    if (o.corePoints !== null && o.corePoints.length > 0) {
-      lines.push('## 核心要点', '');
-      for (const item of o.corePoints) {
-        lines.push(`- ${item.point}`);
-        if (item.supporting !== null && item.supporting.trim().length > 0) lines.push(`  ${item.supporting}`);
-      }
-      lines.push('');
-    }
-    if (o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) {
-      lines.push('## 深度分析', '', '### 核心分歧', '', o.analysis.coreDispute.trim(), '');
-    }
-    if (o.analysis.perspectives.length > 0) {
-      lines.push('### 各方立场', '');
-      for (const item of o.analysis.perspectives) lines.push(`- **${item.holder ?? '观点'}**：${item.viewpoint}`);
-      lines.push('');
-    }
-    if (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) {
-      lines.push('### 影响分析', '', o.analysis.implications.trim(), '');
-    }
-    if (o.analysis.quotes.length > 0) {
-      lines.push('### 引述', '');
-      for (const item of o.analysis.quotes) lines.push(`> ${item.text}${item.attribution === null ? '' : ` ——${item.attribution}`}`);
-      lines.push('');
-    }
-    if (o.extendedReading.length > 0) {
-      lines.push('## 扩展阅读', '');
-      for (const item of o.extendedReading) lines.push(`- [${item.title}](${item.url})`);
-      lines.push('');
-    }
-    if (o.references.length > 0) {
-      lines.push('## 参考来源', '');
-      o.references.forEach((item, index): void => {
-        lines.push(`${index + 1}. [${item.title}](${item.url})`);
+    return seen.length > 0 ? `${seen.length} SOURCES` : 'DEEP READ';
+  }
+
+  // 核心要点标题随 topicType(Android CorePointsSection)
+  private corePointsTitle(o: DeepReadOutput): string {
+    if (o.topicType === 'product') return '功能亮点';
+    if (o.topicType === 'person') return '人物背景';
+    if (o.topicType === 'opinion') return '核心论点';
+    return '关键脉络';
+  }
+
+  private twoDigits(n: number): string {
+    return n < 10 ? '0' + n.toString() : n.toString();
+  }
+
+  private openLink(url: string): void {
+    if (url.trim().length === 0) return;
+    try {
+      const ctx: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+      ctx.startAbility({
+        action: 'ohos.want.action.viewData',
+        entities: ['entity.system.browsable'],
+        uri: url,
+      }).catch((): void => {
+        promptAction.showToast({ message: '无法打开浏览器', duration: 1400 });
       });
+    } catch (_e) {
+      promptAction.showToast({ message: '无法打开浏览器', duration: 1400 });
     }
-    return lines.join('\n');
   }
 
   private cancelGeneration(): void {
@@ -487,24 +479,48 @@ struct DeepReadArticlePage {
           .width('100%').layoutWeight(1)
         } else if (this.output !== null) {
           // DeepReadOutput 统一组装为 Markdown,复用聊天侧原生 MarkdownText
+          // DeepReadOutput 结构化杂志帧(对齐 Android DeepReadArticle 版式)
           Scroll() {
             Column() {
-              Text(this.title)
-                .fontSize(24).fontWeight(FontWeight.Bold).fontColor(INK)
-                .fontFamily(FONT_SERIF)
-                .lineHeight(34).maxLines(3)
+              // ── Hero 图(有图先出图) ──
               if (this.heroImageUrl() !== null) {
                 Image(this.heroImageUrl() as string)
                   .width('100%').height(220)
                   .objectFit(ImageFit.Cover)
                   .borderRadius(14).clip(true)
-                  .margin({ top: 14 })
+                  .margin({ top: 10 })
               }
+              // eyebrow 行:DEEP READ + N SOURCES(Android TextOnlyHero)
+              Row() {
+                Text('DEEP READ')
+                  .fontSize(11).letterSpacing(3.2)
+                  .fontFamily(FONT_MONO_SEMIBOLD)
+                  .fontColor(ACCENT)
+                Blank()
+                Text(this.sourceCountLabel(this.output))
+                  .fontSize(11).letterSpacing(2.6)
+                  .fontFamily(FONT_MONO_SEMIBOLD)
+                  .fontColor(INK4)
+              }
+              .width('100%')
+              .margin({ top: this.heroImageUrl() !== null ? 20 : 12 })
+              Column().width(126).height(1).backgroundColor(LINE).margin({ top: 16 })
+              // 主题 kicker + 衬线大标题 + 阶段
+              Text(this.output.topicType.toUpperCase())
+                .fontSize(11).letterSpacing(3)
+                .fontFamily(FONT_SANS_MEDIUM)
+                .fontColor(INK3)
+                .margin({ top: 20 })
+              Text(this.title)
+                .fontSize(30 * this.fontScale).fontColor(INK)
+                .fontFamily(FONT_SERIF)
+                .lineHeight(42 * this.fontScale).maxLines(3)
+                .margin({ top: 14 })
               Row() {
                 Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
                 Text(' ' + this.currentStage).fontSize(META).fontColor(INK3)
               }
-              .width('100%').justifyContent(FlexAlign.Center).margin({ top: 10 })
+              .width('100%').margin({ top: 10 })
               if (this.fromHistory && this.historyExpired) {
                 Text('内容已过 24 小时，可能需要重新生成')
                   .fontSize(META).fontColor(INK3)
@@ -532,7 +548,6 @@ struct DeepReadArticlePage {
                 .borderRadius(8)
                 .margin({ top: 12 })
               }
-              Column() {}.height(1).width('100%').backgroundColor(LINE).margin({ top: 16, bottom: 4 })
               if (this.partialError().length > 0) {
                 this.PartialErrorNotice(this.partialError())
               }
@@ -540,19 +555,41 @@ struct DeepReadArticlePage {
                 // 基础稿提示(Android "基础稿，可继续增强")
                 Text('基础稿，可继续增强')
                   .fontSize(META).fontColor(INK3)
-                  .width('100%').textAlign(TextAlign.Center)
+                  .width('100%')
                   .padding({ top: 8, bottom: 4 })
               }
               if (this.templateFallbackMessage().length > 0) {
                 this.TemplateFallbackNotice(this.templateFallbackMessage())
               }
-              MarkdownText({
-                content: this.markdownContent(),
-                fontSize: 16 * this.fontScale,
-                fontColor: INK,
-                readingMode: true,
-                lineHeightScale: 1.75,
-              })
+              // ── 概览(lead 段落,17pt 衬线 1.8 倍行高) ──
+              if (this.output.summary.trim().length > 0) {
+                MarkdownText({
+                  content: this.output.summary,
+                  fontSize: 17 * this.fontScale,
+                  fontColor: INK,
+                  readingMode: true,
+                  lineHeightScale: 1.8,
+                })
+                  .margin({ top: 22 })
+              }
+              // ── 关键实体 pills ──
+              if (this.output.keyEntities.length > 0) {
+                Flex({ wrap: FlexWrap.Wrap }) {
+                  ForEach(this.output.keyEntities, (e: string): void => {
+                    Text(e)
+                      .fontSize(12).fontColor(ACCENT)
+                      .padding({ left: 10, right: 10, top: 5, bottom: 5 })
+                      .backgroundColor(ACCENT_LIGHT).borderRadius(999)
+                      .margin({ right: 8, bottom: 8 })
+                  }, (e: string): string => `ke-${e}`)
+                }
+                .margin({ top: 18 })
+              }
+              this.TimelineSection(this.output)
+              this.CorePointsSection(this.output)
+              this.AnalysisSection(this.output)
+              this.ReadingSection(this.output)
+              this.ReferencesSection(this.output)
               if (this.inlineImageAssets().length > 0) {
                 ForEach(this.inlineImageAssets(), (asset: DeepReadImageAsset) => {
                   Column() {
@@ -565,7 +602,7 @@ struct DeepReadArticlePage {
                     }
                   }
                   .width('100%').margin({ top: 14 })
-                })
+                }, (asset: DeepReadImageAsset): string => `img-${asset.url}`)
               }
               if (this.output.diagram !== null) {
                 Column() {
@@ -587,7 +624,7 @@ struct DeepReadArticlePage {
               .margin({ top: 24, bottom: 40 })
               .onClick((): void => { this.showRegenerateDialog = true; })
             }
-            .width('100%').padding({ left: 20, right: 20, top: 2, bottom: 11 })
+            .width('100%').padding({ left: 28, right: 28, top: 2, bottom: 11 })
           }
         .align(Alignment.TopStart)
           .layoutWeight(1)
@@ -617,6 +654,261 @@ struct DeepReadArticlePage {
   }
 
   // G5-S1:部分错误提示(对齐 Android DeepReadPartialErrorNotice:515-548)
+
+  // ===== 杂志分节(Android DeepReadScreen.kt 对齐;SectionKicker/时间轴/要点/分析/阅读) =====
+
+  // SectionKicker:中文宽字距眉标(labelMedium + ls 3.5 + muted)
+  @Builder
+  SectionKicker(label: string): void {
+    Text(label)
+      .fontSize(11)
+      .letterSpacing(3.5)
+      .fontFamily(FONT_SANS_MEDIUM)
+      .fontColor(INK3)
+      .width('100%')
+  }
+
+  // 时间轴:竖线 + 圆点标记 + 日期/事件(Android TimelineSection/TimelineMarker)
+  @Builder
+  TimelineSection(o: DeepReadOutput): void {
+    if (o.timeline !== null && o.timeline.length > 0) {
+      Column() {
+        this.SectionKicker('时间轴')
+        ForEach(o.timeline, (ev: TimelineEvent): void => {
+          Row() {
+            Stack() {
+              Column().width(1).height('100%').backgroundColor(LINE)
+              Circle({ width: ev.isHighlight ? 10 : 6, height: ev.isHighlight ? 10 : 6 })
+                .fill(ev.isHighlight ? ACCENT : LINE)
+                .margin({ top: 7 })
+            }
+            .width(18)
+            .height('100%')
+            .alignContent(Alignment.Top)
+            Column() {
+              Text(ev.date)
+                .fontSize(META).fontFamily(FONT_SANS_MEDIUM).fontColor(INK3)
+              MarkdownText({
+                content: ev.event,
+                fontSize: 16 * this.fontScale,
+                fontColor: INK,
+                readingMode: true,
+                lineHeightScale: 1.6,
+              })
+                .margin({ top: 5 })
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 14 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .margin({ top: 20 })
+        }, (ev: TimelineEvent): string => `tl-${ev.date}-${ev.event.substring(0, 12)}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 44 })
+    }
+  }
+
+  // 核心要点:01 序号 + 衬线要点 + 支撑句(Android CorePointsSection)
+  @Builder
+  CorePointsSection(o: DeepReadOutput): void {
+    if (o.corePoints !== null && o.corePoints.length > 0) {
+      Column() {
+        this.SectionKicker(this.corePointsTitle(o))
+        ForEach(o.corePoints, (cp: CorePoint, idx: number): void => {
+          Row() {
+            Text(this.twoDigits(idx + 1))
+              .fontSize(META).letterSpacing(2)
+              .fontFamily(FONT_MONO_SEMIBOLD)
+              .fontColor(ACCENT)
+            Column() {
+              MarkdownText({
+                content: cp.point,
+                fontSize: 17 * this.fontScale,
+                fontColor: INK,
+                readingMode: true,
+                lineHeightScale: 1.55,
+              })
+              if (cp.supporting !== null && cp.supporting.trim().length > 0) {
+                MarkdownText({
+                  content: cp.supporting,
+                  fontSize: 13.5 * this.fontScale,
+                  fontColor: INK3,
+                  readingMode: true,
+                  lineHeightScale: 1.75,
+                })
+                  .margin({ top: 6 })
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 14 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .margin({ top: 18 })
+        }, (cp: CorePoint, idx: number): string => `cp-${idx}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 44 })
+    }
+  }
+
+  // 深度分析:核心分歧大字衬线 + 引述大引号 + 各方立场 + 影响(Android AnalysisSection)
+  @Builder
+  AnalysisSection(o: DeepReadOutput): void {
+    if ((o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) ||
+      o.analysis.perspectives.length > 0 ||
+      (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) ||
+      o.analysis.quotes.length > 0) {
+      Column() {
+        this.SectionKicker('深度分析')
+        if (o.analysis.coreDispute !== null && o.analysis.coreDispute.trim().length > 0) {
+          MarkdownText({
+            content: o.analysis.coreDispute,
+            fontSize: 20 * this.fontScale,
+            fontColor: INK,
+            readingMode: true,
+            lineHeightScale: 1.5,
+          })
+            .margin({ top: 16 })
+        }
+        ForEach(o.analysis.quotes.slice(0, 2), (q: Quote): void => {
+          Row() {
+            Text('\u201C')
+              .fontSize(40).fontColor(ACCENT)
+              .fontFamily(FONT_SERIF)
+              .lineHeight(44)
+              .width(30)
+            Column() {
+              Text(q.text)
+                .fontSize(16 * this.fontScale)
+                .fontColor(INK2)
+                .fontFamily(FONT_SERIF)
+                .fontStyle(FontStyle.Italic)
+                .lineHeight(28 * this.fontScale)
+              if (q.attribution !== null && q.attribution.trim().length > 0) {
+                Text('\u2014 ' + q.attribution)
+                  .fontSize(META)
+                  .fontColor(INK4)
+                  .margin({ top: 8 })
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .margin({ top: 20 })
+        }, (q: Quote, idx: number): string => `q-${idx}`)
+        ForEach(o.analysis.perspectives, (ps: Perspective): void => {
+          Column() {
+            Text(ps.holder !== null ? ps.holder : '观点')
+              .fontSize(META).fontFamily(FONT_SANS_MEDIUM).fontColor(ACCENT)
+            MarkdownText({
+              content: ps.viewpoint,
+              fontSize: 16 * this.fontScale,
+              fontColor: INK,
+              readingMode: true,
+              lineHeightScale: 1.65,
+            })
+              .margin({ top: 4 })
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .margin({ top: 14 })
+        }, (ps: Perspective, idx: number): string => `ps-${idx}`)
+        if (o.analysis.implications !== null && o.analysis.implications.trim().length > 0) {
+          MarkdownText({
+            content: o.analysis.implications,
+            fontSize: 16 * this.fontScale,
+            fontColor: INK,
+            readingMode: true,
+            lineHeightScale: 1.65,
+          })
+            .margin({ top: 20 })
+        }
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 44 })
+    }
+  }
+
+  // 扩展阅读:01 序号 + 标题 + 来源,点击打开(Android ReadingSection)
+  @Builder
+  ReadingSection(o: DeepReadOutput): void {
+    if (o.extendedReading.length > 0) {
+      Column() {
+        this.SectionKicker('扩展阅读')
+        ForEach(o.extendedReading.slice(0, 8), (l: ReadingLink, idx: number): void => {
+          Row() {
+            Text(this.twoDigits(idx + 1))
+              .fontSize(11).letterSpacing(1.5)
+              .fontFamily(FONT_MONO_SEMIBOLD)
+              .fontColor(ACCENT)
+            Column() {
+              Text(l.title)
+                .fontSize(13.5).fontColor(INK)
+                .fontFamily(FONT_SERIF)
+                .lineHeight(20)
+              if (l.source !== null && l.source.length > 0) {
+                Text(l.source)
+                  .fontSize(11).fontColor(INK4)
+                  .margin({ top: 3 })
+              }
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start)
+            .margin({ left: 10 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .padding({ top: 10, bottom: 10 })
+          .onClick((): void => { this.openLink(l.url); })
+        }, (l: ReadingLink): string => `er-${l.url}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 44 })
+    }
+  }
+
+  // 参考来源:小号编号列表
+  @Builder
+  ReferencesSection(o: DeepReadOutput): void {
+    if (o.references.length > 0) {
+      Column() {
+        this.SectionKicker('参考来源')
+        ForEach(o.references, (r: ReadingLink, idx: number): void => {
+          Row() {
+            Text(this.twoDigits(idx + 1))
+              .fontSize(11).letterSpacing(1.5)
+              .fontFamily(FONT_MONO_SEMIBOLD)
+              .fontColor(INK4)
+            Text(r.title)
+              .fontSize(META).fontColor(INK3)
+              .fontFamily(FONT_SERIF)
+              .lineHeight(18)
+              .layoutWeight(1)
+              .margin({ left: 10 })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .margin({ top: 8 })
+          .onClick((): void => { this.openLink(r.url); })
+        }, (r: ReadingLink): string => `ref-${r.url}`)
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .margin({ top: 44 })
+    }
+  }
+
   @Builder
   PartialErrorNotice(errText: string): void {
     Row() {
