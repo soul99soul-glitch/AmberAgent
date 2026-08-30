@@ -1689,7 +1689,7 @@ What would you like to talk about today?</string>
   <string name="novel_edit_chapter">Edit chapter</string>
   <string name="novel_empty_chapter">(Empty chapter)</string>
   <string name="novel_end_chapter">End chapter</string>
-  <string name="novel_export_book_description">Combine the main-line chapters of “%1$s” into a book for export</string>
+  <string name="novel_export_book_description">Combine the chapters from the current branch of “%1$s” into a book for export</string>
   <string name="novel_export_book_title">Export book</string>
   <string name="novel_export_epub">EPUB e-book</string>
   <string name="novel_export_txt">TXT text</string>
@@ -3319,4 +3319,6 @@ My task:</string>
   <string name="novel_batch_stage_committing">Atomic collection</string>
   <string name="novel_batch_stage_planning">Planning next chapter</string>
   <string name="novel_batch_stage_polish">Polishing</string>
+  <string name="novel_catalog_root_directory">Root directory</string>
+  <string name="novel_migration_failed_count">Migration failed for %1$d book(s). Original files remain on disk; check Settings for details.</string>
 </resources>

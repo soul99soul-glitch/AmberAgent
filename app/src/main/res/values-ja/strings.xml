@@ -1676,7 +1676,7 @@
   <string name="novel_edit_chapter">章を編集</string>
   <string name="novel_empty_chapter">（空の章）</string>
   <string name="novel_end_chapter">終了章</string>
-  <string name="novel_export_book_description">「%1$s」の本編の章を1冊の本にまとめてエクスポートします</string>
+  <string name="novel_export_book_description">「%1$s」の現在のブランチの章を1冊の本にまとめてエクスポートします</string>
   <string name="novel_export_book_title">書籍をエクスポート</string>
   <string name="novel_export_epub">EPUB 電子書籍</string>
   <string name="novel_export_txt">TXT テキスト</string>
@@ -3306,4 +3306,6 @@
   <string name="novel_batch_stage_committing">原子収録中</string>
   <string name="novel_batch_stage_planning">次章を計画中</string>
   <string name="novel_batch_stage_polish">推敲中</string>
+  <string name="novel_catalog_root_directory">ルートディレクトリ</string>
+  <string name="novel_migration_failed_count">%1$d冊の移行に失敗しました。元のファイルはディスクに残っています。詳細は設定で確認してください。</string>
 </resources>

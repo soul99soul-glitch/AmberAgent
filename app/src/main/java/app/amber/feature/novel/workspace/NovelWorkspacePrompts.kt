@@ -180,6 +180,124 @@ object NovelWorkspacePrompts {
     }
 
     /**
+     * Regenerate one chapter in place: the host pastes the current body, the chapter
+     * plan (if any) and the writing preference, and the model writes the full
+     * replacement back to the same chapter file. chapters/ is a protected path, so the
+     * write lands in the existing proposal gate — no new approval mechanism.
+     */
+    fun regenerateChapter(
+        chapterOrdinal: Int,
+        chapterTitle: String,
+        chapterPath: String,
+        chapterBody: String,
+        plan: String?,
+        writingPreference: String?,
+        locale: Locale = Locale.CHINESE,
+    ): String = if (isChinese(locale)) buildString {
+        appendLine(WORKSPACE_DISCIPLINE)
+        appendLine()
+        appendLine("当前是重写本章轮：请重写第 $chapterOrdinal 章「$chapterTitle」，产出整章替换稿。")
+        appendLine()
+        appendLine("## 当前章正文（$chapterPath）")
+        appendLine(chapterBody.trim().ifEmpty { "（空章节）" })
+        if (!plan.isNullOrBlank()) {
+            appendLine()
+            appendLine("## 本章计划（plan/this-chapter.md）")
+            appendLine(plan.trim())
+        }
+        if (!writingPreference.isNullOrBlank()) {
+            appendLine()
+            appendLine("## 写作偏好（setting/writing）")
+            appendLine(writingPreference.trim())
+        }
+        appendLine()
+        appendLine("步骤：")
+        appendLine("1. 对照上方注入简报（剧情状态、未回收伏笔、已确认决定）检查当前章需要改进的地方；必要时 read/grep 相邻章节保证衔接。")
+        appendLine("2. 保持本章在全书中的定位与事件结果，把重写后的完整正文用 novel_workspace_write 写回 $chapterPath（会生成审批卡，作者确认后整章替换）。")
+        appendLine("3. 只写这一个文件，不改其他章节；写完后收尾本轮。")
+    } else buildString {
+        appendLine(discipline(locale))
+        appendLine()
+        appendLine("This is a chapter rewrite turn. Rewrite chapter $chapterOrdinal (\"$chapterTitle\") as a complete replacement.")
+        appendLine()
+        appendLine("## Current chapter ($chapterPath)")
+        appendLine(chapterBody.trim().ifEmpty { "(empty chapter)" })
+        if (!plan.isNullOrBlank()) {
+            appendLine()
+            appendLine("## Chapter plan (plan/this-chapter.md)")
+            appendLine(plan.trim())
+        }
+        if (!writingPreference.isNullOrBlank()) {
+            appendLine()
+            appendLine("## Writing preferences (setting/writing)")
+            appendLine(writingPreference.trim())
+        }
+        appendLine()
+        appendLine("Steps:")
+        appendLine("1. Check the injected brief (plot state, unresolved foreshadowing, and confirmed decisions); use read/grep on nearby chapters when needed.")
+        appendLine("2. Preserve this chapter's role and event outcomes, then write the complete replacement to $chapterPath with novel_workspace_write (an approval card will be created).")
+        append("3. Write only this file; do not change other chapters. Wrap up after the write.")
+    }
+
+    /**
+     * Character proposal: the host gives the name, a one-line sketch, the existing
+     * character card paths, and the host-computed target file. setting/ is a free-write
+     * path, so the card lands directly (no approval card) with the story-graph metadata
+     * and a fixed section shape.
+     */
+    fun characterProposal(
+        characterName: String,
+        sketch: String,
+        existingCharacters: List<String>,
+        targetPath: String,
+        locale: Locale = Locale.CHINESE,
+    ): String = if (isChinese(locale)) buildString {
+        appendLine(WORKSPACE_DISCIPLINE)
+        appendLine()
+        appendLine("当前是角色提案轮：请为新角色建一张人物卡。")
+        appendLine("角色名：${characterName.trim()}")
+        appendLine("一句话设想：${sketch.trim()}")
+        if (existingCharacters.isNotEmpty()) {
+            appendLine()
+            appendLine("现有角色卡片（setting/characters/，供避免重复与定位冲突，可用 read 查看细节）：")
+            existingCharacters.forEach { appendLine("- $it") }
+        }
+        appendLine()
+        appendLine("要求：")
+        appendLine("1. 遵守上方注入简报里的已确认决定与既有角色关系，不与之矛盾；拿不准先 read/grep 核对。")
+        appendLine("2. 用 novel_workspace_write 把完整人物卡写入 $targetPath。本轮是新建节点，作为「不编造 front matter」规则的明确例外，必须包含以下 front matter：")
+        appendLine("   ---")
+        appendLine("   kind: material")
+        appendLine("   materialKind: character")
+        appendLine("   title: ${characterName.trim()}")
+        appendLine("   ---")
+        appendLine("   front matter 后按以下小节组织正文：## 身份 / ## 动机 / ## 外形 / ## 口癖 / ## 与既有角色的关系 / ## 备注")
+        append("3. 与既有角色定位重复时，在「备注」里写清差异，不要改动别人的卡片。写完文件后收尾本轮。")
+    } else buildString {
+        appendLine(discipline(locale))
+        appendLine()
+        appendLine("This is a character-proposal turn. Create a character card for a new character.")
+        appendLine("Name: ${characterName.trim()}")
+        appendLine("One-line idea: ${sketch.trim()}")
+        if (existingCharacters.isNotEmpty()) {
+            appendLine()
+            appendLine("Existing character cards (under setting/characters/; use read to avoid duplication and conflicts):")
+            existingCharacters.forEach { appendLine("- $it") }
+        }
+        appendLine()
+        appendLine("Requirements:")
+        appendLine("1. Follow confirmed decisions and existing relationships in the injected brief; use read/grep when uncertain.")
+        appendLine("2. Use novel_workspace_write to write the complete card to $targetPath. This new node is the explicit exception to the no-invented-front-matter rule; include exactly this front matter:")
+        appendLine("   ---")
+        appendLine("   kind: material")
+        appendLine("   materialKind: character")
+        appendLine("   title: ${characterName.trim()}")
+        appendLine("   ---")
+        appendLine("   After the front matter, use these sections: ## Identity / ## Motivation / ## Appearance / ## Speech / ## Relationships / ## Notes")
+        append("3. If the role duplicates an existing character, explain the difference in Notes and do not modify other cards. Wrap up after writing.")
+    }
+
+    /**
      * Batch polish (unattended): the host pastes the current chapter body plus the
      * writing preference (same setting/writing source as 重写本章), and the model writes
      * the full polished chapter back to the SAME chapter file. The turn runs on the

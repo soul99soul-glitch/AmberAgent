@@ -1676,7 +1676,7 @@
   <string name="novel_edit_chapter">編輯章節</string>
   <string name="novel_empty_chapter">（空章節）</string>
   <string name="novel_end_chapter">結束章</string>
-  <string name="novel_export_book_description">將「%1$s」主線章節合成一本書匯出</string>
+  <string name="novel_export_book_description">將「%1$s」目前分支的章節合成一本書匯出</string>
   <string name="novel_export_book_title">匯出書籍</string>
   <string name="novel_export_epub">EPUB 電子書</string>
   <string name="novel_export_txt">TXT 文字</string>
@@ -3306,4 +3306,6 @@
   <string name="novel_batch_stage_committing">原子收錄中</string>
   <string name="novel_batch_stage_planning">規劃下一章</string>
   <string name="novel_batch_stage_polish">潤色中</string>
+  <string name="novel_catalog_root_directory">根目錄</string>
+  <string name="novel_migration_failed_count">%1$d 本書遷移失敗。原始檔案仍保留在磁碟上；請在設定中查看詳情。</string>
 </resources>

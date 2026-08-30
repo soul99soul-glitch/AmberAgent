@@ -1676,7 +1676,7 @@
   <string name="novel_edit_chapter">챕터 편집</string>
   <string name="novel_empty_chapter">(빈 챕터)</string>
   <string name="novel_end_chapter">끝 챕터</string>
-  <string name="novel_export_book_description">“%1$s” 본선 챕터를 한 권의 책으로 묶어 내보냅니다</string>
+  <string name="novel_export_book_description">“%1$s” 현재 브랜치의 챕터를 한 권의 책으로 묶어 내보냅니다</string>
   <string name="novel_export_book_title">책 내보내기</string>
   <string name="novel_export_epub">EPUB 전자책</string>
   <string name="novel_export_txt">TXT 텍스트</string>
@@ -3306,4 +3306,6 @@
   <string name="novel_batch_stage_committing">원자적 수록 중</string>
   <string name="novel_batch_stage_planning">다음 장 계획 중</string>
   <string name="novel_batch_stage_polish">윤문 중</string>
+  <string name="novel_catalog_root_directory">루트 디렉터리</string>
+  <string name="novel_migration_failed_count">%1$d권을 마이그레이션하지 못했습니다. 원본 파일은 디스크에 남아 있습니다. 자세한 내용은 설정에서 확인하세요.</string>
 </resources>

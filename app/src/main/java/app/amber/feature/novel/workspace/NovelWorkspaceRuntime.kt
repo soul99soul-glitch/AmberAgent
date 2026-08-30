@@ -176,6 +176,7 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
         var canonLedgerPersisted = false
         var canonAccountingPersisted = false
         var canonRollbackHandled = false
+        var freeWritesPersisted = false
         try {
             val messages = buildList {
                 if (systemPrompt.isNotBlank()) {
@@ -231,31 +232,22 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
                         it.executionKey != request.ownerExecutionId
                 } != false
             ) {
-                rollbackUncommittedCanon(request, batch)
+                rollbackUncommittedWrites(request, batch)
                 emit(TurnEvent.Failed(request.localized(
                     chinese = "代笔已暂停或取消",
                     english = "The ghostwrite batch is paused or cancelled.",
                 )))
                 return@flow
             }
-            val proposal = if (batch.isEmpty()) {
-                // Free writes (setting/inbox/drafts) already hit disk; commit them so the
-                // ledger and worktree never drift apart.
-                if (batch.hasFreeWrites()) {
-                    val committed = if (request.ownerJobId != null) {
-                        NovelWorkspaceGhostwriteJobs.withRunningOwner(
-                            request.projectDirectory,
-                            request.ownerJobId,
-                            checkNotNull(request.ownerExecutionId),
-                        ) {
-                            commitTree(
-                                projectDirectory = request.projectDirectory,
-                                branchId = request.branchId,
-                                branchSlug = request.branchSlug,
-                                message = NovelWorkspaceLedger.Message.GENERIC,
-                            )
-                        }
-                    } else {
+            // Interactive free writes already hit disk. Commit them before any separate
+            // canon proposal so rejecting that proposal cannot leave the ledger dirty.
+            if (batch.hasFreeWrites()) {
+                val committed = if (request.ownerJobId != null) {
+                    NovelWorkspaceGhostwriteJobs.withRunningOwner(
+                        request.projectDirectory,
+                        request.ownerJobId,
+                        checkNotNull(request.ownerExecutionId),
+                    ) {
                         commitTree(
                             projectDirectory = request.projectDirectory,
                             branchId = request.branchId,
@@ -263,14 +255,25 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
                             message = NovelWorkspaceLedger.Message.GENERIC,
                         )
                     }
-                    if (committed == null) {
-                        emit(TurnEvent.Failed(request.localized(
-                            chinese = "代笔已暂停或取消",
-                            english = "The ghostwrite batch is paused or cancelled.",
-                        )))
-                        return@flow
-                    }
+                } else {
+                    commitTree(
+                        projectDirectory = request.projectDirectory,
+                        branchId = request.branchId,
+                        branchSlug = request.branchSlug,
+                        message = NovelWorkspaceLedger.Message.GENERIC,
+                    )
                 }
+                if (committed == null) {
+                    rollbackUncommittedWrites(request, batch)
+                    emit(TurnEvent.Failed(request.localized(
+                        chinese = "代笔已暂停或取消",
+                        english = "The ghostwrite batch is paused or cancelled.",
+                    )))
+                    return@flow
+                }
+                freeWritesPersisted = true
+            }
+            val proposal = if (batch.isEmpty()) {
                 null
             } else if (request.autoApproveCanon) {
                 // Apply buffered unattended writes only while this Worker still owns its
@@ -313,7 +316,7 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
                         commit
                     } catch (error: Exception) {
                         if (!canonLedgerPersisted) {
-                            rollbackUncommittedCanon(request, batch)
+                            rollbackUncommittedWrites(request, batch)
                             canonRollbackHandled = true
                         }
                         throw error
@@ -330,7 +333,7 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
                     commitBufferedCanon()
                 }
                 if (committed == null) {
-                    rollbackUncommittedCanon(request, batch)
+                    rollbackUncommittedWrites(request, batch)
                     emit(TurnEvent.Failed(request.localized(
                         chinese = "代笔已暂停或取消",
                         english = "The ghostwrite batch is paused or cancelled.",
@@ -353,9 +356,11 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
             }
             emit(TurnEvent.Completed(emittedText, proposal))
         } catch (error: CancellationException) {
-            // Same orphan risk as a failed turn: auto-approved canon writes may
-            // already be on disk with no commit. Restore, then propagate.
-            if (!canonLedgerPersisted && !canonRollbackHandled) rollbackUncommittedCanon(request, batch)
+            // Same orphan risk as a failed turn: writes may already be on disk with no
+            // commit. Restore the turn preimages, then propagate cancellation.
+            if (!canonLedgerPersisted && !freeWritesPersisted && !canonRollbackHandled) {
+                rollbackUncommittedWrites(request, batch)
+            }
             throw error
         } catch (error: Exception) {
             if (canonLedgerPersisted && !canonAccountingPersisted && request.ownerJobId != null) {
@@ -368,18 +373,20 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
                 // the batch retry the same ordinal after a checkout/undo side-effect error.
                 emit(TurnEvent.Completed(emittedText, proposal = null))
             } else {
-                if (!canonRollbackHandled) rollbackUncommittedCanon(request, batch)
+                if (!freeWritesPersisted && !canonRollbackHandled) {
+                    rollbackUncommittedWrites(request, batch)
+                }
                 emit(TurnEvent.Failed(error.message ?: request.fallbackErrorMessage))
             }
         }
     }
 
     /**
-     * A failed/cancelled unattended turn must not leave files on disk that no commit
-     * owns. Interactive free writes still land immediately; unattended ones are buffered.
+     * A failed/cancelled turn must not leave files on disk that no commit owns.
+     * Interactive free writes land immediately but remember their pre-turn content;
+     * unattended canon writes remember it when their buffered batch is applied.
      */
-    private fun rollbackUncommittedCanon(request: TurnRequest, batch: NovelWorkspaceWriteBatch) {
-        if (!request.autoApproveCanon) return
+    private fun rollbackUncommittedWrites(request: TurnRequest, batch: NovelWorkspaceWriteBatch) {
         val store = NovelWorkspaceStore(request.projectDirectory)
         for ((path, previous) in batch.previousSnapshot()) {
             if (previous == null) store.delete(path) else store.write(path, previous)
@@ -1082,6 +1089,62 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
     }
 
     /**
+     * Author manual edit of a NON-chapter file from the 设定 tab: setting cards (free
+     * paths) and foreshadowing nodes (protected plot/ paths). Only the body changes —
+     * front matter (identity, status, relations) is host-owned and re-rendered verbatim,
+     * same rule as [saveChapterEdit]. Saving commits 「手改」 (the click is the author's
+     * approval) and captures undo, so the tab keeps the 保存/撤销 conventions of the
+     * chapter editor. manifest/project/branch.md and other host-owned paths are refused.
+     */
+    fun saveFileEdit(
+        projectDirectory: File,
+        branchId: String,
+        branchSlug: String,
+        path: String,
+        body: String,
+    ): NovelWorkspaceCommit {
+        assertNoGhostwriteOwner(projectDirectory, branchSlug)
+        requirePathUnderActiveBranch(projectDirectory, path)
+        val isProtectedNonChapter = NovelWorkspacePaths.isProtectedPath(path) &&
+            path.split('/').getOrNull(2) == "plot"
+        if (!NovelWorkspacePaths.isFreeWritePath(path) && !isProtectedNonChapter) {
+            throw NovelWorkspaceIoError("该文件由宿主管理，不能编辑：$path")
+        }
+        val store = NovelWorkspaceStore(projectDirectory)
+        val unresolvedBefore = NovelWorkspaceUnresolvedStore.load(projectDirectory)
+        val previous = mapOf(path to store.read(path))
+        val existing = store.read(path)
+        val rendered = if (existing != null && existing.trim().startsWith("---")) {
+            val parsed = NovelWorkspaceMarkdown.parseFile(existing)
+            NovelWorkspaceMarkdown.render(
+                fields = parsed.fields.toList(),
+                aliases = parsed.lists["aliases"].orEmpty(),
+                body = body,
+            )
+        } else {
+            body
+        }
+        store.write(path, rendered)
+        val commit = commitTree(
+            projectDirectory = projectDirectory,
+            branchId = branchId,
+            branchSlug = branchSlug,
+            message = NovelWorkspaceLedger.Message.MANUAL_EDIT,
+        )
+        NovelWorkspaceUndo.save(
+            NovelWorkspaceUndoRecord(
+                commitId = commit.id,
+                parentCommitId = commit.parentId,
+                files = previous,
+                unresolvedBefore = unresolvedBefore,
+                branchSlug = branchSlug,
+            ),
+            projectDirectory,
+        )
+        return commit
+    }
+
+    /**
      * Commit the current tree for a branch: append commit, advance the branch head,
      * keep the global head mirroring only the previously-mirrored branch, run the
      * unresolved (middle-edit) hook, refresh the checkout, and persist the ledger.
@@ -1336,7 +1399,7 @@ class NovelWorkspaceRuntime(private val kernel: RunKernel) {
     }
 
     /**
-     * 防御层：作者手改保存的目标若带分支前缀，该前缀
+     * 防御层：作者手改保存（saveChapterEdit/saveFileEdit）的目标若带分支前缀，该前缀
      * 必须等于磁盘上的当前活跃分支（.amber/branch.json 标记，同 [NovelWorkspaceBranches.activeSlug]
      * 的解析口径）。切分支后残留的明细视图（上一分支打开的章节/设定编辑器）会把旧分支
      * 路径递进保存入口；不校验时旧分支文件被写盘、却以新分支的 branchId 推进 head 并记

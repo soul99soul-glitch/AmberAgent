@@ -21,17 +21,20 @@ import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteController
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceWriteProposal
 import app.amber.feature.novelworkspace.NovelWorkspaceBranches
+import app.amber.feature.novelworkspace.NovelWorkspaceCatalog
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJob
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteJobs
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteMode
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage
 import app.amber.feature.novelworkspace.NovelWorkspaceLedger
+import app.amber.feature.novelworkspace.NovelWorkspaceLedgerStore
 import app.amber.feature.novelworkspace.NovelWorkspaceMarkdown
 import app.amber.feature.novelworkspace.NovelWorkspacePaths
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectTitle
 import app.amber.feature.novelworkspace.NovelWorkspaceSessionMessage
 import app.amber.feature.novelworkspace.NovelWorkspaceSessions
+import app.amber.feature.novelworkspace.NovelWorkspaceSlug
 import app.amber.feature.novelworkspace.NovelWorkspaceStore
 import app.amber.feature.novelworkspace.NovelWorkspaceUnresolvedStore
 import java.io.File
@@ -79,6 +82,8 @@ data class NovelMarkdownWorkspaceUiState(
     val messages: List<NovelMarkdownMessageUi> = emptyList(),
     val chapters: List<NovelMarkdownChapterUi> = emptyList(),
     val drafts: List<NovelMarkdownDraftUi> = emptyList(),
+    /** 设定 tab：设定文件分组 + 伏笔 + 决定（每次 commit 后与切分支后刷新）。 */
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData? = null,
     val streamingText: String = "",
     val reasoningText: String = "",
     val toolActivity: String? = null,
@@ -135,6 +140,7 @@ private data class NovelGhostwriteRefresh(
     val job: NovelMarkdownGhostwriteUi?,
     val chapters: List<NovelMarkdownChapterUi>,
     val drafts: List<NovelMarkdownDraftUi>,
+    val catalog: NovelWorkspaceCatalog.NovelWorkspaceCatalogData?,
     val plotStale: Boolean,
     val unresolvedFromOrdinal: Int?,
     val canUndo: Boolean,
@@ -175,46 +181,51 @@ class NovelMarkdownWorkspaceViewModel(
 
     fun reload() {
         viewModelScope.launch {
-            runCatching {
-                if (!repository.exists(projectId)) {
-                    _state.value = _state.value.copy(loading = false, exists = false)
-                    return@launch
-                }
-                val directory = repository.projectDirectory(projectId)
-                val store = NovelWorkspaceStore(directory)
-                val ledger = NovelWorkspaceLedger.load(directory)
-                projectDirectory = directory
-                // 活跃分支：.amber/branch.json 标记优先，缺失回退 manifest.mainBranch。
-                val slug = NovelWorkspaceBranches.activeSlug(directory)
-                branchId = NovelWorkspaceLedger.branchId(store, ledger, slug)
-                branchSlug = slug
-                _state.value = _state.value.copy(
-                    loading = false,
-                    exists = true,
-                    title = NovelWorkspaceProjectTitle.read(store),
-                    branchSlug = slug,
-                    branches = NovelWorkspaceBranches.list(directory, slug),
-                    messages = loadMessages(directory),
-                    chapters = loadChapters(store),
-                    proposals = proposalsForThisProject(),
-                    drafts = loadDrafts(store),
-                    plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
-                    unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
-                        .entryFor(directory, slug)?.fromOrdinal,
-                    writingModelId = NovelWorkspaceProjectSettingsStore.load(directory).writingModelId,
-                    reviewModelId = NovelWorkspaceProjectSettingsStore.load(directory).reviewModelId,
-                    injection = NovelWorkspaceProjectSettingsStore.load(directory).injection
-                        ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
-                    canUndo = runtime.canUndo(directory, slug),
-                )
-            }.onFailure { error ->
-                _state.value = _state.value.copy(
-                    loading = false,
-                    errorMessage = error.message ?: text(R.string.error_title_operation),
-                )
-            }
-            refreshGhostwrite()
+            reloadState()
         }
+    }
+
+    private fun reloadState() {
+        runCatching {
+            if (!repository.exists(projectId)) {
+                _state.value = _state.value.copy(loading = false, exists = false)
+                return@runCatching
+            }
+            val directory = repository.projectDirectory(projectId)
+            val store = NovelWorkspaceStore(directory)
+            val ledger = NovelWorkspaceLedger.load(directory)
+            projectDirectory = directory
+            // 活跃分支：.amber/branch.json 标记优先，缺失回退 manifest.mainBranch。
+            val slug = NovelWorkspaceBranches.activeSlug(directory)
+            branchId = NovelWorkspaceLedger.branchId(store, ledger, slug)
+            branchSlug = slug
+            _state.value = _state.value.copy(
+                loading = false,
+                exists = true,
+                title = NovelWorkspaceProjectTitle.read(store),
+                branchSlug = slug,
+                branches = NovelWorkspaceBranches.list(directory, slug),
+                messages = loadMessages(directory),
+                chapters = loadChapters(store),
+                catalog = loadCatalog(directory, ledger, slug),
+                proposals = proposalsForThisProject(),
+                drafts = loadDrafts(store),
+                plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
+                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                    .entryFor(directory, slug)?.fromOrdinal,
+                writingModelId = NovelWorkspaceProjectSettingsStore.load(directory).writingModelId,
+                reviewModelId = NovelWorkspaceProjectSettingsStore.load(directory).reviewModelId,
+                injection = NovelWorkspaceProjectSettingsStore.load(directory).injection
+                    ?: app.amber.feature.novelworkspace.NovelWorkspaceInjectionFlags(),
+                canUndo = runtime.canUndo(directory, slug),
+            )
+        }.onFailure { error ->
+            _state.value = _state.value.copy(
+                loading = false,
+                errorMessage = error.message ?: text(R.string.error_title_operation),
+            )
+        }
+        refreshGhostwrite()
     }
 
     fun send(text: String): Boolean {
@@ -368,6 +379,7 @@ class NovelMarkdownWorkspaceViewModel(
                             ),
                             unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
                                 .entryFor(directory, slug)?.fromOrdinal,
+                            catalog = loadCatalog(directory, slug),
                             canUndo = runtime.canUndo(directory, slug),
                         )
                     }
@@ -423,72 +435,354 @@ class NovelMarkdownWorkspaceViewModel(
             reasoningText = "",
             toolActivity = null,
         )
-        viewModelScope.launch {
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
             var finalText = ""
-            turnLauncher.launch(
-                NovelWorkspaceRuntime.TurnRequest(
-                    projectDirectory = directory,
-                    branchId = branch,
-                    branchSlug = slug,
-                    userText = localizedPromptText(
-                        chinese = "请重写第 $fromOrdinal 章起的受影响章节，使其与前文一致。",
-                        english = "Rewrite the affected chapters from chapter $fromOrdinal so they remain consistent with the preceding story.",
-                    ),
-                    systemPrompt = NovelWorkspacePrompts.rewriteLaterChapters(
-                        fromOrdinal,
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请重写第 $fromOrdinal 章起的受影响章节，使其与前文一致。",
+                            english = "Rewrite the affected chapters from chapter $fromOrdinal so they remain consistent with the preceding story.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.rewriteLaterChapters(
+                            fromOrdinal,
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
                         locale = context.appLocale(),
                     ),
-                    settings = settings,
-                    model = model,
-                    fallbackErrorMessage = text(R.string.error_title_operation),
-                    locale = context.appLocale(),
-                ),
-                runtime,
-            ).events.collect { event ->
-                when (event) {
-                    is NovelWorkspaceRuntime.TurnEvent.Delta -> {
-                        finalText += event.text
-                        _state.value = _state.value.copy(streamingText = finalText)
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> {
+                            finalText += event.text
+                            _state.value = _state.value.copy(streamingText = finalText)
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            val store = NovelWorkspaceStore(directory)
+                            // Completed 刷新集与 send() 对齐（J1）：重写轮落盘的提案批准前后，
+                            // 剧情/设定/undo 状态都要回到磁盘真相。
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                reasoningText = "",
+                                toolActivity = null,
+                                chapters = loadChapters(store),
+                                drafts = loadDrafts(store),
+                                proposals = proposalsForThisProject(),
+                                plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    store,
+                                    NovelWorkspaceLedger.load(directory),
+                                    slug,
+                                ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                toolActivity = null,
+                                errorMessage = event.message,
+                                proposals = proposalsForThisProject(),
+                            )
+                        }
                     }
-                    is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
-                        _state.value = _state.value.copy(
-                            reasoningText = _state.value.reasoningText + event.text,
-                        )
+                }
+            } finally {
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 重写本章（Regenerate）：让模型产出整章替换稿。chapters/ 是受保护路径，模型的写入
+     * 经 novel_workspace_write 缓冲为提案，走现有审批卡（MarkdownProposalCard）确认/拒绝，
+     * 不新建审批机制；该章若处于中间章未决（unresolved）状态照常允许重写，未决门既有
+     * 语义自会处理，这里不特判。
+     */
+    fun rewriteChapter(ordinal: Int): Boolean {
+        val directory = projectDirectory ?: return false
+        val branch = branchId ?: return false
+        val slug = branchSlug ?: return false
+        if (_state.value.busy) return false
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return false
+        }
+        val chapter = _state.value.chapters.firstOrNull { it.ordinal == ordinal } ?: return false
+        val settings = settingsAggregator.settingsFlow.value
+        val model = resolveWritingModel(settings) ?: run {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
+            return false
+        }
+        val store = NovelWorkspaceStore(directory)
+        val currentBody = store.read(chapter.path)
+            ?.let { NovelWorkspaceMarkdown.parseFile(it).body }
+            .orEmpty()
+        _state.value = _state.value.copy(
+            busy = true,
+            errorMessage = null,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
+        )
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
+            var finalText = ""
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请重写第 $ordinal 章「${chapter.title}」，把整章替换稿写回 ${chapter.path}。",
+                            english = "Rewrite chapter $ordinal (\"${chapter.title}\") as a complete replacement and write it back to ${chapter.path}.",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.regenerateChapter(
+                            chapterOrdinal = ordinal,
+                            chapterTitle = chapter.title,
+                            chapterPath = chapter.path,
+                            chapterBody = currentBody,
+                            plan = pathRead(planPath()),
+                            writingPreference = readWritingPreference(),
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
+                        injection = _state.value.injection,
+                    ),
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> {
+                            finalText += event.text
+                            _state.value = _state.value.copy(streamingText = finalText)
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            val refreshed = NovelWorkspaceStore(directory)
+                            // Completed 刷新集与 send() 对齐（J1）。
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                reasoningText = "",
+                                toolActivity = null,
+                                chapters = loadChapters(refreshed),
+                                drafts = loadDrafts(refreshed),
+                                proposals = proposalsForThisProject(),
+                                plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    refreshed,
+                                    NovelWorkspaceLedger.load(directory),
+                                    slug,
+                                ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                toolActivity = null,
+                                errorMessage = event.message,
+                                proposals = proposalsForThisProject(),
+                            )
+                        }
                     }
-                    is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
-                        _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                }
+            } finally {
+                // Stop/cancel mid-turn: reset the busy chrome like send() does.
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
+                }
+            }
+        }
+        return true
+    }
+
+    /**
+     * 创作快捷动作：角色提案。人物卡写入 setting/characters/（自由写路径，novel_workspace_write
+     * 直存、无需审批）；目标文件名由宿主按现有 slug 规则净化并对既有卡片去重。
+     */
+    fun proposeCharacter(name: String, sketch: String) {
+        val trimmedName = name.trim()
+        val trimmedSketch = sketch.trim()
+        if (trimmedName.isEmpty()) return
+        val directory = projectDirectory ?: return
+        val branch = branchId ?: return
+        val slug = branchSlug ?: return
+        if (_state.value.busy) return
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return
+        }
+        val settings = settingsAggregator.settingsFlow.value
+        val model = resolveWritingModel(settings) ?: run {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_ghostwrite_error_model_missing))
+            return
+        }
+        val store = NovelWorkspaceStore(directory)
+        val charactersDir = NovelWorkspacePaths.SETTING_DIR + "/characters"
+        val existing = runCatching { store.list(charactersDir) }.getOrDefault(emptyList())
+        val leaf = NovelWorkspaceSlug.reservedPath(
+            preferred = NovelWorkspaceSlug.slug(trimmedName).ifEmpty { "character" } + ".md",
+            used = existing.map { it.substringAfterLast('/') }.toMutableSet(),
+            fallback = "character",
+        )
+        val targetPath = "$charactersDir/$leaf"
+        appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
+            id = UUID.randomUUID().toString().uppercase(),
+            role = "user",
+            kind = "userInput",
+            content = localizedPromptText(
+                chinese = "提案角色「$trimmedName」：$trimmedSketch",
+                english = "Propose character \"$trimmedName\": $trimmedSketch",
+            ),
+            createdAt = Instant.now(),
+        ))
+        _state.value = _state.value.copy(
+            busy = true,
+            errorMessage = null,
+            streamingText = "",
+            reasoningText = "",
+            toolActivity = null,
+            messages = loadMessages(directory),
+        )
+        turnJob?.cancel()
+        turnJob = viewModelScope.launch {
+            var finalText = ""
+            try {
+                turnLauncher.launch(
+                    NovelWorkspaceRuntime.TurnRequest(
+                        projectDirectory = directory,
+                        branchId = branch,
+                        branchSlug = slug,
+                        userText = localizedPromptText(
+                            chinese = "请提案新角色「$trimmedName」：$trimmedSketch",
+                            english = "Propose a new character \"$trimmedName\": $trimmedSketch",
+                        ),
+                        systemPrompt = NovelWorkspacePrompts.characterProposal(
+                            characterName = trimmedName,
+                            sketch = trimmedSketch,
+                            existingCharacters = existing,
+                            targetPath = targetPath,
+                            locale = context.appLocale(),
+                        ),
+                        settings = settings,
+                        model = model,
+                        fallbackErrorMessage = text(R.string.error_title_operation),
+                        locale = context.appLocale(),
+                        injection = _state.value.injection,
+                    ),
+                    runtime,
+                ).events.collect { event ->
+                    when (event) {
+                        is NovelWorkspaceRuntime.TurnEvent.Delta -> {
+                            finalText += event.text
+                            _state.value = _state.value.copy(streamingText = finalText)
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ReasoningDelta -> {
+                            _state.value = _state.value.copy(
+                                reasoningText = _state.value.reasoningText + event.text,
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.ToolActivity -> {
+                            _state.value = _state.value.copy(toolActivity = toolLabel(event.toolName))
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Completed -> {
+                            if (event.finalText.isNotBlank()) {
+                                appendSessionMessage(directory, branch, NovelWorkspaceSessionMessage(
+                                    id = UUID.randomUUID().toString().uppercase(),
+                                    role = "assistant",
+                                    kind = "discussion",
+                                    content = event.finalText,
+                                    createdAt = Instant.now(),
+                                ))
+                            }
+                            // Completed 刷新集与 send() 对齐（J1）：角色卡是自由写路径、
+                            // 本轮直存落盘，设定 tab/undo/剧情门必须立即反映，否则新角色
+                            // 卡要等重进页面才可见。
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                reasoningText = "",
+                                toolActivity = null,
+                                messages = loadMessages(directory),
+                                chapters = loadChapters(store),
+                                drafts = loadDrafts(store),
+                                proposals = proposalsForThisProject(),
+                                plotStale = NovelWorkspaceLedger.isPlotStale(
+                                    store,
+                                    NovelWorkspaceLedger.load(directory),
+                                    slug,
+                                ),
+                                unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
+                                    .entryFor(directory, slug)?.fromOrdinal,
+                                catalog = loadCatalog(directory, slug),
+                                canUndo = runtime.canUndo(directory, slug),
+                            )
+                        }
+                        is NovelWorkspaceRuntime.TurnEvent.Failed -> {
+                            _state.value = _state.value.copy(
+                                busy = false,
+                                streamingText = "",
+                                toolActivity = null,
+                                errorMessage = event.message,
+                                proposals = proposalsForThisProject(),
+                            )
+                        }
                     }
-                    is NovelWorkspaceRuntime.TurnEvent.Completed -> {
-                        val store = NovelWorkspaceStore(directory)
-                        // Completed 刷新集与 send() 对齐（J1）：重写轮落盘的提案批准前后，
-                        // 剧情/设定/undo 状态都要回到磁盘真相。
-                        _state.value = _state.value.copy(
-                            busy = false,
-                            streamingText = "",
-                            reasoningText = "",
-                            toolActivity = null,
-                            chapters = loadChapters(store),
-                            drafts = loadDrafts(store),
-                            proposals = proposalsForThisProject(),
-                            plotStale = NovelWorkspaceLedger.isPlotStale(
-                                store,
-                                NovelWorkspaceLedger.load(directory),
-                                slug,
-                            ),
-                            unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore
-                                .entryFor(directory, slug)?.fromOrdinal,
-                            canUndo = runtime.canUndo(directory, slug),
-                        )
-                    }
-                    is NovelWorkspaceRuntime.TurnEvent.Failed -> {
-                        _state.value = _state.value.copy(
-                            busy = false,
-                            streamingText = "",
-                            toolActivity = null,
-                            errorMessage = event.message,
-                            proposals = proposalsForThisProject(),
-                        )
-                    }
+                }
+            } finally {
+                if (_state.value.busy) {
+                    _state.value = _state.value.copy(
+                        busy = false,
+                        streamingText = "",
+                        reasoningText = "",
+                        toolActivity = null,
+                    )
                 }
             }
         }
@@ -522,6 +816,7 @@ class NovelMarkdownWorkspaceViewModel(
                     unresolvedFromOrdinal = slug?.let {
                         NovelWorkspaceUnresolvedStore.entryFor(directory, it)?.fromOrdinal
                     },
+                    catalog = slug?.let { loadCatalog(directory, it) },
                     canUndo = slug?.let { runtime.canUndo(directory, it) } ?: false,
                 )
             }.onFailure { error ->
@@ -577,6 +872,7 @@ class NovelMarkdownWorkspaceViewModel(
                 val store = NovelWorkspaceStore(directory)
                 _state.value = _state.value.copy(
                     chapters = loadChapters(store),
+                    catalog = loadCatalog(directory, slug),
                     plotStale = NovelWorkspaceLedger.isPlotStale(
                         store,
                         NovelWorkspaceLedger.load(directory),
@@ -617,6 +913,7 @@ class NovelMarkdownWorkspaceViewModel(
             _state.value = _state.value.copy(
                 chapters = loadChapters(store),
                 drafts = loadDrafts(store),
+                catalog = loadCatalog(directory, slug),
                 proposals = proposalsForThisProject(),
                 plotStale = NovelWorkspaceLedger.isPlotStale(
                     store,
@@ -649,6 +946,7 @@ class NovelMarkdownWorkspaceViewModel(
         val current = branchSlug ?: return
         if (_state.value.busy) return
         viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 withContext(Dispatchers.IO) {
                     NovelWorkspaceBranches.createBranch(
@@ -667,6 +965,8 @@ class NovelMarkdownWorkspaceViewModel(
                 throw error
             } catch (error: Exception) {
                 _state.value = _state.value.copy(errorMessage = error.message ?: text(R.string.error_title_operation))
+            } finally {
+                _state.value = _state.value.copy(busy = false)
             }
         }
     }
@@ -682,6 +982,7 @@ class NovelMarkdownWorkspaceViewModel(
             return
         }
         viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
             try {
                 withContext(Dispatchers.IO) {
                     NovelWorkspaceBranches.switchBranch(
@@ -690,34 +991,104 @@ class NovelMarkdownWorkspaceViewModel(
                         locale = context.appLocale(),
                     )
                 }
+                // 提案/草稿卡是上一分支视图的内存态：随切换整体清空，防止跨分支批准。
+                runtime.pendingProposals.value
+                    .filter { it.projectDirectory == directory }
+                    .forEach { runtime.reject(it.id) }
+                _state.value = _state.value.copy(
+                    streamingText = "",
+                    reasoningText = "",
+                    toolActivity = null,
+                    consistencyReport = null,
+                )
+                reloadState()
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                _state.value = _state.value.copy(errorMessage = error.message ?: text(R.string.error_title_operation))
-                return@launch
+                _state.value = _state.value.copy(
+                    errorMessage = error.message ?: text(R.string.error_title_operation),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
             }
-            // 提案/草稿卡是上一分支视图的内存态：随切换整体清空，防止跨分支批准。
-            runtime.pendingProposals.value
-                .filter { it.projectDirectory == directory }
-                .forEach { runtime.reject(it.id) }
-            _state.value = _state.value.copy(
-                streamingText = "",
-                reasoningText = "",
-                toolActivity = null,
-                consistencyReport = null,
-            )
-            reload()
         }
     }
 
-    /** Writing preference = the setting/writing card (first file; created on save). */
+    // ── 设定 tab：保存（走既有直写+commit+undo 惯例）─────────────────
+
+    /** 保存设定卡/伏笔节点的正文修改：宿主手改 + 「手改」commit + undo 记录。 */
+    fun saveFileEdit(path: String, body: String, onSaved: () -> Unit) {
+        commitFileEdit(path, body, onSaved)
+    }
+
+    /**
+     * 写作偏好 = setting/writing 卡（首个文件；首次保存创建）。与设定 tab 的
+     * saveFileEdit 走同一提交口径（手改 commit + undo 记录，J7）：面板行为不变
+     * （保存即落盘），但与双入口另一侧一样可撤销、进账本。批次进行中面板本就
+     * 禁用（branchOwned），runtime 的 owner gate 是第二道。
+     */
     fun saveWritingPreference(body: String, onSaved: () -> Unit) {
         val directory = projectDirectory ?: return
         val store = NovelWorkspaceStore(directory)
         val target = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
             ?: NovelWorkspacePaths.SETTING_DIR + "/writing/写作要求.md"
-        if (pathWrite(target, body)) onSaved()
+        commitFileEdit(target, body, onSaved)
     }
+
+    /** saveFileEdit / saveWritingPreference 共享的宿主手改提交路径（含刷新与 undo）。 */
+    private fun commitFileEdit(path: String, body: String, onSaved: () -> Unit) {
+        val directory = projectDirectory ?: return
+        val branch = branchId ?: return
+        val slug = branchSlug ?: return
+        if (_state.value.busy) return
+        if (hasActiveGhostwrite()) {
+            _state.value = _state.value.copy(errorMessage = text(R.string.novel_batch_in_use))
+            return
+        }
+        viewModelScope.launch {
+            _state.value = _state.value.copy(busy = true, errorMessage = null)
+            try {
+                runtime.saveFileEdit(
+                    projectDirectory = directory,
+                    branchId = branch,
+                    branchSlug = slug,
+                    path = path,
+                    body = body,
+                )
+                val store = NovelWorkspaceStore(directory)
+                _state.value = _state.value.copy(
+                    catalog = loadCatalog(directory, slug),
+                    plotStale = NovelWorkspaceLedger.isPlotStale(
+                        store,
+                        NovelWorkspaceLedger.load(directory),
+                        slug,
+                    ),
+                    unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
+                    canUndo = runtime.canUndo(directory, slug),
+                )
+                onSaved()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _state.value = _state.value.copy(
+                    errorMessage = localizedRuntimeError(error, R.string.workspace_save_failed),
+                )
+            } finally {
+                _state.value = _state.value.copy(busy = false)
+            }
+        }
+    }
+
+    private fun loadCatalog(directory: File, slug: String): NovelWorkspaceCatalog.NovelWorkspaceCatalogData =
+        loadCatalog(directory, NovelWorkspaceLedger.load(directory), slug)
+
+    private fun loadCatalog(
+        directory: File,
+        ledger: NovelWorkspaceLedgerStore,
+        slug: String,
+    ): NovelWorkspaceCatalog.NovelWorkspaceCatalogData = runCatching {
+        NovelWorkspaceCatalog.load(NovelWorkspaceStore(directory), ledger, slug)
+    }.getOrDefault(NovelWorkspaceCatalog.NovelWorkspaceCatalogData(emptyList(), emptyList(), emptyList()))
 
     fun clearError() {
         _state.value = _state.value.copy(errorMessage = null)
@@ -833,6 +1204,7 @@ class NovelMarkdownWorkspaceViewModel(
                 _state.value = _state.value.copy(
                     chapters = loadChapters(store),
                     drafts = loadDrafts(store),
+                    catalog = loadCatalog(directory, slug),
                     plotStale = NovelWorkspaceLedger.isPlotStale(
                         store,
                         NovelWorkspaceLedger.load(directory),
@@ -888,6 +1260,7 @@ class NovelMarkdownWorkspaceViewModel(
                     job = job,
                     chapters = loadChapters(store),
                     drafts = loadDrafts(store),
+                    catalog = loadCatalog(directory, ledger, slug),
                     plotStale = NovelWorkspaceLedger.isPlotStale(store, ledger, slug),
                     unresolvedFromOrdinal = NovelWorkspaceUnresolvedStore.entryFor(directory, slug)?.fromOrdinal,
                     canUndo = runtime.canUndo(directory, slug),
@@ -897,6 +1270,7 @@ class NovelMarkdownWorkspaceViewModel(
                 ghostwriteJob = refresh.job,
                 chapters = refresh.chapters,
                 drafts = refresh.drafts,
+                catalog = refresh.catalog,
                 plotStale = refresh.plotStale,
                 unresolvedFromOrdinal = refresh.unresolvedFromOrdinal,
                 canUndo = refresh.canUndo,
@@ -1272,6 +1646,9 @@ class NovelMarkdownWorkspaceViewModel(
         val first = store.list(NovelWorkspacePaths.SETTING_DIR + "/writing").firstOrNull()
         return pathRead(first) ?: ""
     }
+
+    // saveWritingPreference 已上移至设定 tab 的 saveFileEdit 旁：两入口共用 commitFileEdit
+    // （手改 commit + undo，J7 口径统一）。
 
     /** What the host will inject as constraints next turn (ghostwrite panel preview). */
     fun briefPreview(): String {

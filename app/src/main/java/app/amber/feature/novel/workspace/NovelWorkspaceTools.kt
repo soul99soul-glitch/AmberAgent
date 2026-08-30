@@ -264,6 +264,7 @@ class NovelWorkspaceToolSession(
                         batch.add(NovelWorkspaceWriteEntry(path, content, reason))
                         textResult("已暂存 $path（本轮完成后自动收录）。")
                     } else {
+                        batch.rememberPrevious(path, store.read(path))
                         store.write(path, content)
                         batch.noteFreeWrite()
                         textResult("已保存 $path")
@@ -395,7 +396,7 @@ class NovelWorkspaceWriteBatch {
     fun isEmpty(): Boolean = entries.isEmpty()
 
     /** Free writes (setting/inbox/drafts) land on disk immediately; tracked so the
-     *  runtime can still commit them at turn end instead of drifting from the ledger. */
+     *  runtime can commit them on success or restore their pre-turn content on failure. */
     fun noteFreeWrite() {
         freeWrites += 1
     }

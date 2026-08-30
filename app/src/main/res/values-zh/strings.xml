@@ -1687,7 +1687,7 @@
   <string name="novel_edit_chapter">编辑章节</string>
   <string name="novel_empty_chapter">（空章节）</string>
   <string name="novel_end_chapter">结束章</string>
-  <string name="novel_export_book_description">将「%1$s」主线章节合成一本书导出</string>
+  <string name="novel_export_book_description">将「%1$s」当前分支的章节合成一本书导出</string>
   <string name="novel_export_book_title">导出书籍</string>
   <string name="novel_export_epub">EPUB 电子书</string>
   <string name="novel_export_txt">TXT 文本</string>
@@ -3319,4 +3319,6 @@
   <string name="novel_batch_stage_committing">原子收录中</string>
   <string name="novel_batch_stage_planning">规划下一章</string>
   <string name="novel_batch_stage_polish">润色中</string>
+  <string name="novel_catalog_root_directory">根目录</string>
+  <string name="novel_migration_failed_count">%1$d 本书迁移失败。原文件仍保留在磁盘上；请在设置中查看详情。</string>
 </resources>

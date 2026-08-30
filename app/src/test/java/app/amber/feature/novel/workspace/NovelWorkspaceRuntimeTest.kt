@@ -382,12 +382,35 @@ class NovelWorkspaceRuntimeTest {
         assertEquals("1", chapter.fields["ordinal"])
         assertEquals("C-1", chapter.fields["id"])
         val ledger = NovelWorkspaceLedger.load(dir)
-        assertEquals(2, ledger.commits.size)
+        assertEquals(3, ledger.commits.size)
         assertEquals(NovelWorkspaceLedger.Message.COLLECTION, ledger.commits.last().message)
         assertEquals(headBefore, ledger.commits.last().parentId)
         assertEquals("B-1", ledger.heads.keys.single())
         assertTrue(File(dir, ".amber/checkout").exists())
         assertTrue(runtime.pendingProposals.value.isEmpty())
+    }
+
+    @Test
+    fun `failed interactive turn restores free write preimages`() = runTest {
+        val dir = installProject()
+        val runtime = NovelWorkspaceRuntime(
+            LoopingFakeKernel(
+                toolCalls = listOf(
+                    "novel_workspace_write" to buildJsonObject {
+                        put("path", "setting/characters/沈砚.md")
+                        put("content", "---\nkind: material\nmaterialKind: character\ntitle: 沈砚\n---\n新角色。")
+                    },
+                ),
+                finalText = "",
+                failAfterTools = true,
+            ),
+        )
+
+        val events = runtime.runTurn(request(dir, "提议一名新角色")).toList()
+
+        assertTrue(events.any { it is NovelWorkspaceRuntime.TurnEvent.Failed })
+        assertFalse(NovelWorkspaceStore(dir).exists("setting/characters/沈砚.md"))
+        assertEquals(1, NovelWorkspaceLedger.load(dir).commits.size)
     }
 
     @Test

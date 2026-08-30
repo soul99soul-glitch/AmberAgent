@@ -1676,7 +1676,7 @@
   <string name="novel_edit_chapter">Изменить главу</string>
   <string name="novel_empty_chapter">(Пустая глава)</string>
   <string name="novel_end_chapter">Конечная глава</string>
-  <string name="novel_export_book_description">Объединить главы основной линии «%1$s» в книгу для экспорта</string>
+  <string name="novel_export_book_description">Объединить главы текущей ветки «%1$s» в книгу для экспорта</string>
   <string name="novel_export_book_title">Экспорт книги</string>
   <string name="novel_export_epub">Электронная книга EPUB</string>
   <string name="novel_export_txt">Текст TXT</string>
@@ -3306,4 +3306,6 @@
   <string name="novel_batch_stage_committing">Атомарное добавление</string>
   <string name="novel_batch_stage_planning">Планирование следующей главы</string>
   <string name="novel_batch_stage_polish">Редактура</string>
+  <string name="novel_catalog_root_directory">Корневой каталог</string>
+  <string name="novel_migration_failed_count">Не удалось перенести книг: %1$d. Исходные файлы остались на диске; подробности см. в настройках.</string>
 </resources>

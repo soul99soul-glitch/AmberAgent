@@ -432,10 +432,45 @@ class NovelWorkspaceBranchFlowTest {
             bodyOf(NovelWorkspaceStore(dir), "branches/主线/chapters/001-山呼.md"),
         )
 
-        // 拒绝无副作用：没有任何分支 head 前进，undo 记录也未产生。
+        val fileError = runCatching {
+            runtime.saveFileEdit(
+                projectDirectory = dir,
+                branchId = checkNotNull(fork.id),
+                branchSlug = "番外线",
+                path = "branches/主线/plot/current.md",
+                body = "跨分支污染主线剧情。",
+            )
+        }.exceptionOrNull()
+        assertTrue(fileError is app.amber.feature.novelworkspace.NovelWorkspaceIoError)
+
+        // 两次拒绝都无副作用：没有任何分支 head 前进，undo 记录也未产生。
         val ledgerAfter = NovelWorkspaceLedger.load(dir)
         assertEquals(ledgerBefore.heads, ledgerAfter.heads)
         assertEquals(ledgerBefore.commits.size, ledgerAfter.commits.size)
         assertFalse(runtime.canUndo(dir, "番外线"))
+
+        val chapterViaGenericEditor = runCatching {
+            runtime.saveFileEdit(
+                projectDirectory = dir,
+                branchId = checkNotNull(fork.id),
+                branchSlug = "番外线",
+                path = "branches/番外线/chapters/001-山呼.md",
+                body = "绕过章节编辑入口。",
+            )
+        }.exceptionOrNull()
+        assertTrue(chapterViaGenericEditor is app.amber.feature.novelworkspace.NovelWorkspaceIoError)
+
+        // 当前活跃分支内的正常保存不受影响。
+        runtime.saveFileEdit(
+            projectDirectory = dir,
+            branchId = checkNotNull(fork.id),
+            branchSlug = "番外线",
+            path = "branches/番外线/plan/this-chapter.md",
+            body = "分支内的正常编辑。",
+        )
+        assertEquals(
+            "分支内的正常编辑。",
+            bodyOf(NovelWorkspaceStore(dir), "branches/番外线/plan/this-chapter.md"),
+        )
     }
 }

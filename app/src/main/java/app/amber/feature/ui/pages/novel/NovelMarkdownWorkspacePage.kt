@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -86,6 +87,7 @@ import app.amber.feature.novel.workspace.NovelWorkspaceCollectTarget
 import app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator
 import app.amber.feature.novel.workspace.NovelWorkspaceWriteProposal
 import app.amber.feature.novelworkspace.NovelWorkspaceBranches
+import app.amber.feature.novelworkspace.NovelWorkspaceCatalog
 import app.amber.feature.novelworkspace.NovelWorkspaceGhostwriteStage
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.nav.BackButton
@@ -452,6 +454,7 @@ fun NovelMarkdownWorkspacePage(
                         listOf(
                             0 to stringResource(R.string.novel_tab_creation),
                             1 to stringResource(R.string.novel_tab_manuscript),
+                            2 to stringResource(R.string.novel_tab_settings),
                         ).forEach { (index, label) ->
                             val selected = tab == index
                             Box(
@@ -470,6 +473,19 @@ fun NovelMarkdownWorkspacePage(
                                     color = if (selected) workspace.canvas else workspace.muted,
                                 )
                             }
+                        }
+                    }
+                    if (tab != 0) {
+                        state.errorMessage?.let { message ->
+                            Text(
+                                message,
+                                style = type.meta,
+                                color = workspace.red,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.clearError() }
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                            )
                         }
                     }
                     when (tab) {
@@ -491,6 +507,7 @@ fun NovelMarkdownWorkspacePage(
                             state,
                             onOpenPolish = { showPolish = true },
                         )
+                        else -> MarkdownWorkspaceCatalog(viewModel, state)
                     }
                 }
             }
@@ -578,6 +595,7 @@ fun NovelMarkdownWorkspacePage(
             branches = state.branches,
             branchLocked = state.ghostwriteJob?.status == "running" || state.ghostwriteJob?.status == "paused",
             busy = state.busy,
+            errorMessage = state.errorMessage,
             onSwitch = {
                 showBranchSheet = false
                 viewModel.switchBranch(it)
@@ -1848,6 +1866,40 @@ private fun MarkdownWorkspaceChat(
             }
         }
 
+        // 快捷动作：提案角色 —— 对话框收集角色名与一句话设想，交给模型把人物卡
+        // 写入 setting/characters/（自由写路径，直存无需审批）。
+        var showCharacterProposal by remember { mutableStateOf(false) }
+        val branchLocked = state.ghostwriteJob?.status == "running" ||
+            state.ghostwriteJob?.status == "paused" ||
+            state.ghostwriteJob?.status == "failed"
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TextButton(
+                enabled = !state.busy && !branchLocked,
+                onClick = { showCharacterProposal = true },
+            ) {
+                Text(
+                    stringResource(R.string.novel_propose_character),
+                    color = workspace.ink,
+                    style = type.meta,
+                )
+            }
+        }
+        if (showCharacterProposal) {
+            CharacterProposalDialog(
+                busy = state.busy || branchLocked,
+                onSubmit = { name, sketch ->
+                    showCharacterProposal = false
+                    viewModel.proposeCharacter(name, sketch)
+                },
+                onDismiss = { showCharacterProposal = false },
+            )
+        }
+
         // Composer mirrors the standard chat tray (Graphite §6.2): circular mode chip ·
         // 26dp-radius input pill · circular send/stop — 46dp circles, 9dp gaps, one 48dp row.
         // Graphite invariant 5: accent = selection (themeable), never a hardcoded blue.
@@ -1982,6 +2034,74 @@ private fun MarkdownWorkspaceChat(
         }
         }
     }
+}
+
+/** 提案角色对话框：角色名 + 一句话设想，提交后走 proposeCharacter 轮。 */
+@Composable
+private fun CharacterProposalDialog(
+    busy: Boolean,
+    onSubmit: (name: String, sketch: String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    var name by remember { mutableStateOf("") }
+    var sketch by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = workspace.paper,
+        title = {
+            Text(
+                stringResource(R.string.novel_propose_character),
+                fontWeight = FontWeight.SemiBold,
+                color = workspace.ink,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    enabled = !busy,
+                    singleLine = true,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.novel_character_name),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = sketch,
+                    onValueChange = { sketch = it },
+                    enabled = !busy,
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.novel_character_idea_hint),
+                            style = type.meta,
+                            color = workspace.muted,
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = !busy && name.isNotBlank(),
+                onClick = { onSubmit(name, sketch) },
+            ) {
+                Text(stringResource(R.string.novel_generate_proposal), color = workspace.ink)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel), color = workspace.muted)
+            }
+        },
+    )
 }
 
 @Composable
@@ -2144,17 +2264,32 @@ private fun MarkdownChapterEditor(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onCancel, enabled = !busy) {
-                Text(stringResource(R.string.cancel), color = workspace.muted)
+            TextButton(
+                onClick = onCancel,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(R.string.cancel),
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            Spacer(Modifier.weight(1f))
             Text(
                 stringResource(R.string.novel_edit_chapter),
                 style = type.body.copy(fontWeight = FontWeight.SemiBold),
                 color = workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(2f),
             )
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = { onSave(title, body) }, enabled = !busy && !writeLocked) {
+            TextButton(
+                onClick = { onSave(title, body) },
+                enabled = !busy && !writeLocked,
+                modifier = Modifier.weight(1f),
+            ) {
                 Text(
                     if (busy) {
                         stringResource(R.string.novel_saving)
@@ -2162,6 +2297,8 @@ private fun MarkdownChapterEditor(
                         stringResource(R.string.chat_page_save)
                     },
                     color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -2196,6 +2333,7 @@ private fun MarkdownChapterEditor(
                 cursorBrush = SolidColor(workspace.ink),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 240.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .background(workspace.paper)
                     .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
@@ -2217,14 +2355,18 @@ private fun MarkdownWorkspaceManuscript(
     var openChapter by remember { mutableStateOf<NovelMarkdownChapterUi?>(null) }
     var editingChapter by remember { mutableStateOf(false) }
     var contentTick by remember { mutableStateOf(0) }
+    // 重写本章的在途标记：仅在按钮点击时置位，busy 释放后复位（页面态，不进 VM）。
+    var rewritingOrdinal by remember { mutableStateOf<Int?>(null) }
     // 切分支后重置明细视图：openChapter 是无 key remember 的内存态，switchBranch 的
     // reload 不触及——不清会把上一分支的章节继续显示/编辑在当前分支下，保存即跨分支
     // 写入（runtime 侧另有分支前缀防御，这里是 UI 层的第一道）。
     LaunchedEffect(state.branchSlug) {
         openChapter = null
         editingChapter = false
+        rewritingOrdinal = null
         contentTick++
     }
+    LaunchedEffect(state.busy) { if (!state.busy) rewritingOrdinal = null }
     val branchLocked = state.ghostwriteJob?.status == "running" ||
         state.ghostwriteJob?.status == "paused" ||
         state.ghostwriteJob?.status == "failed"
@@ -2304,10 +2446,11 @@ private fun MarkdownWorkspaceManuscript(
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(
+        FlowRow(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            itemVerticalAlignment = Alignment.CenterVertically,
         ) {
             val activeJob = state.ghostwriteJob
             val batchOwnsBranch = activeJob?.status == "running" ||
@@ -2321,7 +2464,6 @@ private fun MarkdownWorkspaceManuscript(
                     color = workspace.muted,
                     style = type.meta,
                 )
-                Spacer(Modifier.weight(1f))
             }
             // 批量润色入口：range 对话框 + 进度都进同一张 sheet；润色批次进行中时按钮
             // 变为查看进度入口（代笔占用时禁用，两者互斥）。
@@ -2396,6 +2538,31 @@ private fun MarkdownWorkspaceManuscript(
                         style = type.meta,
                         color = workspace.muted,
                     )
+                    // 重写本章：整章替换稿走正文审批门（提案卡确认后生效）；
+                    // 中间章未决状态照常允许重写，未决门既有语义自会处理。
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(
+                            onClick = {
+                                if (viewModel.rewriteChapter(chapterItem.ordinal)) {
+                                    rewritingOrdinal = chapterItem.ordinal
+                                }
+                            },
+                            enabled = !state.busy && !branchLocked,
+                        ) {
+                            Text(
+                                if (rewritingOrdinal == chapterItem.ordinal) {
+                                    stringResource(R.string.novel_rewriting_chapter)
+                                } else {
+                                    stringResource(R.string.novel_rewrite_chapter)
+                                },
+                                color = workspace.muted,
+                                style = type.meta,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2414,6 +2581,7 @@ private fun BranchSheet(
     branches: List<NovelWorkspaceBranches.NovelWorkspaceBranchInfo>,
     branchLocked: Boolean,
     busy: Boolean,
+    errorMessage: String?,
     onSwitch: (String) -> Unit,
     onCreate: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -2466,6 +2634,9 @@ private fun BranchSheet(
                     style = type.meta,
                     color = workspace.red,
                 )
+            }
+            if (errorMessage != null) {
+                Text(errorMessage, style = type.meta, color = workspace.red)
             }
             branches.forEach { branch ->
                 val current = branch.isCurrent
@@ -2595,3 +2766,335 @@ private fun NewBranchDialog(
         },
     )
 }
+
+/**
+ * 设定 tab：设定文件区（setting/ 按目录分组，显示最近提交时间）、伏笔区（未回收/已回收，
+ * 点击进入该文件编辑）、决定区（只读）。数据来自 [NovelWorkspaceCatalog]（feature 层
+ * 纯函数），每次 commit 与切分支后由 VM 刷新。
+ */
+@Composable
+private fun MarkdownWorkspaceCatalog(
+    viewModel: NovelMarkdownWorkspaceViewModel,
+    state: NovelMarkdownWorkspaceUiState,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    val branchLocked = state.ghostwriteJob?.status == "running" ||
+        state.ghostwriteJob?.status == "paused" ||
+        state.ghostwriteJob?.status == "failed"
+    var openPath by remember { mutableStateOf<String?>(null) }
+    var openTitle by remember { mutableStateOf("") }
+    var contentTick by remember { mutableStateOf(0) }
+    // 切分支后重置设定明细视图（同正文 tab：无 key remember 的内存态属于上一分支）。
+    LaunchedEffect(state.branchSlug) {
+        openPath = null
+        openTitle = ""
+        contentTick++
+    }
+
+    val path = openPath
+    if (path != null) {
+        val body = remember(path, contentTick) { viewModel.readFileBody(path).orEmpty() }
+        WorkspaceFileEditor(
+            title = openTitle,
+            initialBody = body,
+            busy = state.busy,
+            writeLocked = branchLocked,
+            onSave = { text ->
+                viewModel.saveFileEdit(path, text) {
+                    contentTick++
+                    openPath = null
+                }
+            },
+            onCancel = { openPath = null },
+        )
+        return
+    }
+
+    val catalog = state.catalog
+    if (catalog == null ||
+        (catalog.settingGroups.isEmpty() && catalog.foreshadowing.isEmpty() && catalog.decisions.isEmpty())
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                stringResource(R.string.novel_no_setting_files),
+                style = type.secondary,
+                color = workspace.muted,
+                textAlign = TextAlign.Center,
+            )
+        }
+        return
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().navigationBarsPadding(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        if (catalog.settingGroups.isNotEmpty()) {
+            item(key = "setting-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_setting_files))
+            }
+            catalog.settingGroups.forEach { group ->
+                item(key = "setting-${group.directory}") {
+                    PanelSection(
+                        title = if (group.directory == NovelWorkspaceCatalog.ROOT_GROUP) {
+                            stringResource(R.string.novel_catalog_root_directory)
+                        } else {
+                            group.directory
+                        },
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            group.entries.forEach { entry ->
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            openTitle = entry.title
+                                            openPath = entry.path
+                                        }
+                                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            entry.title,
+                                            style = type.body,
+                                            color = workspace.ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            entry.path,
+                                            style = type.tinyTag,
+                                            color = workspace.faint,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    Text(
+                                        entry.updatedAt?.let { formatCatalogTime(it) }
+                                            ?: stringResource(R.string.novel_uncommitted),
+                                        style = type.tinyTag,
+                                        color = workspace.faint,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (catalog.foreshadowing.isNotEmpty()) {
+            item(key = "foreshadowing-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_foreshadowing))
+            }
+            val open = catalog.foreshadowing.filter { !it.resolved }
+            val resolved = catalog.foreshadowing.filter { it.resolved }
+            if (open.isNotEmpty()) {
+                item(key = "foreshadowing-open") {
+                    PanelSection(
+                        title = stringResource(R.string.novel_open_foreshadowing, open.size),
+                    ) {
+                        ForeshadowingRows(open, workspace, type) { entry ->
+                            openTitle = entry.title
+                            openPath = entry.path
+                        }
+                    }
+                }
+            }
+            if (resolved.isNotEmpty()) {
+                item(key = "foreshadowing-resolved") {
+                    PanelSection(
+                        title = stringResource(R.string.novel_resolved_foreshadowing, resolved.size),
+                    ) {
+                        ForeshadowingRows(resolved, workspace, type) { entry ->
+                            openTitle = entry.title
+                            openPath = entry.path
+                        }
+                    }
+                }
+            }
+        }
+        if (catalog.decisions.isNotEmpty()) {
+            item(key = "decision-header") {
+                CatalogSectionHeader(stringResource(R.string.novel_confirmed_decisions))
+            }
+            item(key = "decision-list") {
+                PanelSection(title = stringResource(R.string.novel_decision_records)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        catalog.decisions.forEach { decision ->
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    decision.title,
+                                    style = type.body,
+                                    color = workspace.ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    decision.path,
+                                    style = type.tinyTag,
+                                    color = workspace.faint,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CatalogSectionHeader(text: String) {
+    val type = LocalAmberType.current
+    val workspace = workspaceColors()
+    Text(
+        text,
+        style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+        color = workspace.muted,
+        modifier = Modifier.padding(start = 4.dp),
+    )
+}
+
+@Composable
+private fun ForeshadowingRows(
+    entries: List<NovelWorkspaceCatalog.NovelWorkspaceForeshadowingEntry>,
+    workspace: app.amber.feature.ui.components.ui.WorkspaceColors,
+    type: app.amber.feature.ui.theme.AmberTextStyles,
+    onOpen: (NovelWorkspaceCatalog.NovelWorkspaceForeshadowingEntry) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        entries.forEach { entry ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpen(entry) }
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        entry.title,
+                        style = type.body,
+                        color = workspace.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        entry.path,
+                        style = type.tinyTag,
+                        color = workspace.faint,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 设定/伏笔文件编辑器：正文编辑（front matter 由宿主保留），保存走宿主手改 +
+ * 「手改」commit + undo 记录，与章节编辑器同一套保存/撤销约定。
+ */
+@Composable
+private fun WorkspaceFileEditor(
+    title: String,
+    initialBody: String,
+    busy: Boolean,
+    writeLocked: Boolean,
+    onSave: (String) -> Unit,
+    onCancel: () -> Unit,
+) {
+    val workspace = workspaceColors()
+    val type = LocalAmberType.current
+    var body by remember(title, initialBody) { mutableStateOf(initialBody) }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = onCancel,
+                enabled = !busy,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    stringResource(R.string.cancel),
+                    color = workspace.muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                title,
+                style = type.body.copy(fontWeight = FontWeight.SemiBold),
+                color = workspace.ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(2f),
+            )
+            TextButton(
+                onClick = { onSave(body) },
+                enabled = !busy && !writeLocked,
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(
+                    if (busy) {
+                        stringResource(R.string.novel_saving)
+                    } else {
+                        stringResource(R.string.chat_page_save)
+                    },
+                    color = workspace.ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            BasicTextField(
+                value = body,
+                onValueChange = { body = it },
+                enabled = !busy && !writeLocked,
+                textStyle = type.body.copy(color = workspace.ink),
+                cursorBrush = SolidColor(workspace.ink),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 240.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(workspace.paper)
+                    .border(1.dp, workspace.hairline, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
+            Spacer(Modifier.size(48.dp))
+        }
+    }
+}
+
+/** 设定文件区的更新时间列（ledger 最近 commit 时间，本地时区）。 */
+private fun formatCatalogTime(instant: java.time.Instant): String =
+    java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")
+        .withZone(java.time.ZoneId.systemDefault())
+        .format(instant)
