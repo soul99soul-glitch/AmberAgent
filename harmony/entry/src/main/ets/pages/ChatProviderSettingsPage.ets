@@ -248,6 +248,7 @@ struct ChatProviderSettingsPage {
             }
             .width('100%')
             .alignItems(VerticalAlign.Center)
+            .padding({ left: 16, right: 16 })
             .margin({ top: 12, bottom: 2 })
 
             // 终端风筛选(▸ + mono 输入 + line2 底线)
@@ -279,6 +280,7 @@ struct ChatProviderSettingsPage {
               Column().width('100%').height(1).backgroundColor(LINE2)
             }
             .width('100%')
+            .padding({ left: 16, right: 16 })
             .margin({ top: 8, bottom: 2 })
 
             Row() {
