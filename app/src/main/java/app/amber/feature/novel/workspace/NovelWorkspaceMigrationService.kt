@@ -6,6 +6,7 @@ import app.amber.feature.novel.persistence.NovelProjectPersisting
 import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.novelworkspace.NovelWorkspaceSessions
 import java.time.Instant
+import kotlinx.coroutines.CancellationException
 
 /**
  * One-way bridge from the legacy JSON engine to the markdown workspace.
@@ -30,6 +31,8 @@ class NovelWorkspaceMigrationService(
         }
         val loaded = try {
             legacyRepository.loadProject(projectId)
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: Exception) {
             return Result.Rejected(error.message ?: "无法读取原项目")
         }
@@ -44,7 +47,14 @@ class NovelWorkspaceMigrationService(
         } catch (error: Exception) {
             return Result.Rejected(error.message ?: "工作区写入失败")
         }
-        NovelWorkspaceSessions.save(sessions, installed.projectDirectory)
+        try {
+            NovelWorkspaceSessions.save(sessions, installed.projectDirectory)
+        } catch (error: Exception) {
+            // install() has already made the manifest visible. Remove only this newly
+            // generated workspace copy so the untouched legacy source can retry later.
+            workspaceRepository.delete(projectId.rawValue)
+            return Result.Rejected(error.message ?: "会话记录写入失败")
+        }
         return Result.Completed(
             projectId = projectId.rawValue,
             projectName = document.project.name,
@@ -64,7 +74,14 @@ class NovelWorkspaceMigrationService(
         var skipped = 0
         var failed = 0
         for (summary in legacy) {
-            when (migrate(summary.id, now)) {
+            val result = try {
+                migrate(summary.id, now)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                Result.Rejected("迁移失败")
+            }
+            when (result) {
                 is Result.Completed -> migrated++
                 is Result.AlreadyMigrated -> skipped++
                 is Result.Rejected -> failed++

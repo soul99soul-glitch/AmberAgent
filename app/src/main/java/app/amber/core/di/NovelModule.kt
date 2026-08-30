@@ -53,6 +53,7 @@ val novelModule = module {
             workspaceRepository = get(),
             workspaceMigrationService = get(),
             legacyRepository = get(),
+            context = androidContext(),
         )
     }
 
