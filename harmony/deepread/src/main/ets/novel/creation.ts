@@ -4,13 +4,12 @@
 // 中断保留 partial(interrupted=true);收录先存章节再分析素材建议。纯逻辑,mock 模型可测。
 
 import {
-  makeNovelMessage, novelId,
+  makeNovelMessage, novelId, makeNovelChapterVersion,
 } from './models.ts';
 import type { NovelRunKind } from './prompt_catalog.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
-  NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-} from './models.ts';
+  NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget, NovelChapterVersion } from './models.ts';
 import {
   createProject, renameProject, setProjectModel, appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
@@ -258,11 +257,67 @@ export class NovelCreation {
     return { id: runId, subscribe: (cb): () => void => emitter.subscribe(cb) };
   }
 
+  // N2:单章重新生成(whole_chapter regeneration 模板;校验章节存在)
+  async regenerateChapter(projectId: string, chapterId: string): Promise<NovelRun> {
+    const project: NovelProject = await this.findProjectAsync(projectId);
+    const chapter: NovelChapter | null = project.chapters.find(c => c.id === chapterId) ?? null;
+    if (chapter === null) throw notFound('chapter', chapterId);
+    const userText: string = `请重新生成章节「${chapter.title}」。保留该章的目标情节,叙事方式重新设计。`;
+    return this.generate(projectId, userText, 'write', 'whole_chapter', 'regenerate');
+  }
+
+  // N2:单章润色(polish 模板 + 哨兵协议)
+  async polishChapter(projectId: string, chapterId: string): Promise<NovelRun> {
+    const project: NovelProject = await this.findProjectAsync(projectId);
+    const chapter: NovelChapter | null = project.chapters.find(c => c.id === chapterId) ?? null;
+    if (chapter === null) throw notFound('chapter', chapterId);
+    const userText: string = `请润色章节「${chapter.title}」,输出润色后的完整章节全文。\n\n${chapter.content}`;
+    return this.generate(projectId, userText, 'write', 'whole_chapter', 'polish');
+  }
+
+  // N2:快速开始(空项目kick)
+  async quickStart(projectId: string, idea: string): Promise<NovelRun> {
+    return this.generate(projectId, idea, 'discuss', null, 'quick_start');
+  }
+
+  // N2:章节废弃标记
+  async setChapterDiscarded(projectId: string, chapterId: string, discarded: boolean): Promise<NovelProject> {
+    return this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+      const idx: number = p.chapters.findIndex(c => c.id === chapterId);
+      if (idx < 0) return p;
+      const chapters: NovelChapter[] = p.chapters.slice();
+      chapters[idx] = { ...chapters[idx], discarded: discarded, updatedAt: Date.now() };
+      return { ...p, chapters: chapters, updatedAt: Date.now() };
+    });
+  }
+
+  // N2:恢复章节版本(restoreChapterVersion mutation:备份当前→回写)
+  async restoreChapterVersion(projectId: string, versionId: string): Promise<NovelProject> {
+    const now: number = Date.now();
+    return this.repository.updateProject(projectId, (p: NovelProject): NovelProject => {
+      const v: NovelChapterVersion | undefined = p.chapterVersions.find(x => x.id === versionId);
+      if (v === undefined) return p;
+      const idx: number = p.chapters.findIndex(c => c.id === v.chapterId);
+      if (idx < 0) return p;
+      const current: NovelChapter = p.chapters[idx];
+      const backup: NovelChapterVersion =
+        makeNovelChapterVersion(v.chapterId, 'manual', current.title, current.content, now);
+      const restored: NovelChapter = { ...current, title: v.title, content: v.content, updatedAt: now };
+      const chapters: NovelChapter[] = p.chapters.slice();
+      chapters[idx] = restored;
+      return { ...p, chapters: chapters, chapterVersions: [...p.chapterVersions, backup], updatedAt: now };
+    });
+  }
+
   interrupt(runId: string): void {
     this.projectRuns.forEach(live => {
       if (live.runId === runId) live.interrupted = true;
     });
     this.modelRunning.cancel(runId);
+  }
+
+  private async findProjectAsync(projectId: string): Promise<NovelProject> {
+    return this.open(projectId);
   }
 
   // ===== 内部 =====

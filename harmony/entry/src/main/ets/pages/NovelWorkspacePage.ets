@@ -7,10 +7,10 @@ import { router, promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
-import type {
+import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-  NovelRunKind } from '@amber/deepread-domain';
+  NovelRunKind , NovelRun, NovelChapterVersion, NovelChapterVersionKind } from '@amber/deepread-domain';
 
 const GREEN: string = '#43A047';
 
@@ -56,6 +56,10 @@ struct NovelWorkspacePage {
   @State streamingText: string = '';
   @State generationStatus: string = '';
   @State activeRunId: string = '';
+  // N2:章节版本历史 sheet
+  @State versionsChapterId: string = '';
+  @State versionsOpen: boolean = false;
+  @State chapterMenuId: string = '';
   @State pendingUserText: string = '';
   @State collectMessageId: string = '';
   @State collectTitle: string = '';
@@ -205,6 +209,64 @@ const unsub: (() => void) | null = this.currentUnsub;
     this.chapterTitle = c.title;
     this.chapterContent = c.content;
     this.chapterEditorOpen = true;
+  }
+
+  // N2:订阅章节级 Run(复用 send 的流式订阅;终态 reload)
+  private attachChapterRun(run: NovelRun, statusText: string): void {
+    this.activeRunId = run.id;
+    this.streamingText = '';
+    this.generationStatus = statusText;
+    this.errorMsg = '';
+    this.currentUnsub = run.subscribe((e): void => {
+      if (e.kind === 'status') {
+        if (e.text.length > 0) this.generationStatus = e.text;
+      } else if (e.kind === 'delta') {
+        this.streamingText += e.text;
+      } else if (e.kind === 'replace') {
+        this.streamingText = e.text;
+      } else if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
+        this.activeRunId = '';
+        this.streamingText = '';
+        this.generationStatus = '';
+        if (e.kind === 'failed') this.errorMsg = e.message;
+        this.currentUnsub = null;
+        this.reload();
+      }
+    });
+  }
+
+  // N2:单章重新生成(整章 regeneration Run)
+  async regenerateChapter(chapterId: string): Promise<void> {
+    if (this.activeRunId.length > 0) return;
+    try {
+      const creation = getNovelCreation();
+      const run: NovelRun = await creation.regenerateChapter(this.projectId, chapterId);
+      this.attachChapterRun(run, '重新生成中…');
+    } catch (e) {
+      this.errorMsg = String(e);
+    }
+  }
+
+  // N2:单章润色(polish 哨兵协议)
+  async polishChapter(chapterId: string): Promise<void> {
+    if (this.activeRunId.length > 0) return;
+    try {
+      const creation = getNovelCreation();
+      const run: NovelRun = await creation.polishChapter(this.projectId, chapterId);
+      this.attachChapterRun(run, '润色中…');
+    } catch (e) {
+      this.errorMsg = String(e);
+    }
+  }
+
+  // N2:章节版本历史
+  async openChapterVersions(chapterId: string): Promise<void> {
+    const p: NovelProject | null = await getNovelCreation().open(this.projectId);
+    if (this.pageAlive && p !== null) {
+      this.project = p;
+      this.versionsChapterId = chapterId;
+      this.versionsOpen = true;
+    }
   }
 
   async saveChapter(): Promise<void> {
@@ -471,11 +533,14 @@ const unsub: (() => void) | null = this.currentUnsub;
                     Text((idx + 1) < 10 ? '0' + (idx + 1) : '' + (idx + 1))
                       .fontSize(13).fontColor(INK4).width(30)
                     Column() {
-                      Text(c.title.length > 0 ? c.title : '未命名章节')
-                        .fontSize(15).fontColor(INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+                      Text((c.discarded ? '[已废弃] ' : '') + (c.title.length > 0 ? c.title : '未命名章节'))
+                        .fontSize(15).fontColor(c.discarded ? INK4 : INK).maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
                       Text(`${this.charCount(c.content)} 字`).fontSize(11).fontColor(INK3).margin({ top: 4 })
                     }
                     .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                    Text('⋯').fontSize(16).fontColor(INK3)
+                      .width(36).height(36).textAlign(TextAlign.Center)
+                      .onClick(() => { this.chapterMenuId = c.id; })
                     Text('›').fontSize(18).fontColor(INK4)
                   }
                   .width('100%').padding({ left: 20, right: 20, top: 14, bottom: 14 })
@@ -695,6 +760,14 @@ const unsub: (() => void) | null = this.currentUnsub;
       if (this.materialEditorOpen) {
         this.materialEditor()
       }
+      // N2:章节操作菜单
+      if (this.chapterMenuId.length > 0) {
+        this.chapterMenuOverlay()
+      }
+      // N2:版本历史 sheet
+      if (this.versionsOpen) {
+        this.versionsSheetOverlay()
+      }
     }
     .width('100%').height('100%')
   }
@@ -817,5 +890,146 @@ const unsub: (() => void) | null = this.currentUnsub;
     }
     .width('100%').height('100%').backgroundColor(OVERLAY)
     .justifyContent(FlexAlign.Center)
+  }
+
+  @Builder
+  chapterMenuOverlay(): void {
+    if (this.chapterMenuId.length > 0) {
+      Column() {
+        Blank().onClick(() => { this.chapterMenuId = ''; })
+        Column() {
+          this.menuRow('重新生成', 'regenerate')
+          this.menuRow('润色', 'polish')
+          this.menuRow('版本历史', 'versions')
+          this.menuRow('编辑', 'edit')
+          this.menuRow(this.isDiscarded(this.chapterMenuId) ? '取消废弃' : '废弃章节', 'discard')
+        }
+        .width('100%')
+        .backgroundColor(SURFACE)
+        .borderRadius({ topLeft: 20, topRight: 20 })
+        .padding({ top: 10, bottom: 16 })
+      }
+      .width('100%').height('100%')
+      .backgroundColor(OVERLAY)
+      .justifyContent(FlexAlign.End)
+    }
+  }
+
+  // action: 'regenerate' | 'polish' | 'versions' | 'edit' | 'discard'
+  @Builder
+  menuRow(label: string, action: string): void {
+    Row() {
+      Text(label).fontSize(15).fontColor(INK)
+    }
+    .width('100%')
+    .constraintSize({ minHeight: 48 })
+    .padding({ left: 22, right: 22 })
+    .onClick((): void => { this.onChapterMenuAction(action); })
+  }
+
+  private onChapterMenuAction(action: string): void {
+    const id: string = this.chapterMenuId;
+    this.chapterMenuId = '';
+    if (id.length === 0) return;
+    if (action === 'regenerate') this.regenerateChapter(id);
+    else if (action === 'polish') this.polishChapter(id);
+    else if (action === 'versions') this.openChapterVersions(id);
+    else if (action === 'edit') {
+      const c: NovelChapter | null = this.project !== null
+        ? this.project.chapters.find(x => x.id === id) ?? null : null;
+      if (c !== null) this.openEditChapter(c);
+    } else if (action === 'discard') {
+      this.toggleDiscarded(id, !this.isDiscarded(id));
+    }
+  }
+
+  @Builder
+  versionsSheetOverlay(): void {
+    if (this.versionsOpen) {
+      Column() {
+        Blank().onClick(() => { this.versionsOpen = false; })
+        Column() {
+          Text('版本历史').fontSize(17).fontWeight(FontWeight.Bold).fontColor(INK)
+            .width('100%').padding({ left: 20, right: 20, top: 16, bottom: 8 })
+          if (this.project === null || this.versionsFor(this.versionsChapterId).length === 0) {
+            Text('暂无历史版本').fontSize(13).fontColor(INK3)
+              .width('100%').padding({ left: 20, right: 20, top: 12, bottom: 20 })
+          } else {
+            List() {
+              ForEach(this.versionsFor(this.versionsChapterId), (v: NovelChapterVersion) => {
+                ListItem() {
+                  Row() {
+                    Column() {
+                      Text(this.versionKindLabel(v.kind)).fontSize(14).fontColor(INK)
+                      Text(this.versionTime(v.createdAt)).fontSize(11).fontColor(INK3).margin({ top: 2 })
+                    }
+                    .alignItems(HorizontalAlign.Start).layoutWeight(1)
+                    Text('恢复').fontSize(13).fontColor(ACCENT)
+                      .padding({ left: 12, right: 4, top: 8, bottom: 8 })
+                      .onClick((): void => { this.restoreVersion(v.id); })
+                  }
+                  .width('100%').padding({ left: 20, right: 20, top: 10, bottom: 10 })
+                }
+              }, (v: NovelChapterVersion): string => v.id)
+            }
+            .height(320)
+          }
+        }
+        .width('100%')
+        .backgroundColor(SURFACE)
+        .borderRadius({ topLeft: 20, topRight: 20 })
+        .padding({ bottom: 16 })
+      }
+      .width('100%').height('100%')
+      .backgroundColor(OVERLAY)
+      .justifyContent(FlexAlign.End)
+    }
+  }
+
+  private isDiscarded(chapterId: string): boolean {
+    if (this.project === null) return false;
+    const c: NovelChapter | null = this.project.chapters.find(x => x.id === chapterId) ?? null;
+    return c !== null && c.discarded;
+  }
+
+  private async toggleDiscarded(chapterId: string, discarded: boolean): Promise<void> {
+    this.busy = true;
+    try {
+      this.project = await getNovelCreation().setChapterDiscarded(this.projectId, chapterId, discarded);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private versionsFor(chapterId: string): NovelChapterVersion[] {
+    if (this.project === null) return [];
+    return this.project.chapterVersions.filter(v => v.chapterId === chapterId).slice().reverse();
+  }
+
+  private versionKindLabel(kind: NovelChapterVersionKind): string {
+    if (kind === 'manual') return '手动保存';
+    if (kind === 'polish') return '润色前';
+    if (kind === 'regenerate') return '重生成前';
+    return '收录';
+  }
+
+  private versionTime(ts: number): string {
+    const d: Date = new Date(ts);
+    const pad = (n: number): string => n < 10 ? `0${n}` : `${n}`;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  private async restoreVersion(versionId: string): Promise<void> {
+    this.busy = true;
+    try {
+      this.project = await getNovelCreation().restoreChapterVersion(this.projectId, versionId);
+      this.versionsOpen = false;
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
   }
 }

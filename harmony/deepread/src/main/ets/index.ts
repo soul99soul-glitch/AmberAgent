@@ -90,8 +90,7 @@ export type {
   NovelMessageRole, NovelChatMode, NovelGenerationGranularity, NovelMaterialKind,
   NovelSuggestionStatus, NovelCollectionTarget, NovelMessage, NovelChapter, NovelMaterial,
   NovelMaterialSuggestion, NovelProject, NovelProjectInit, NovelMessageInit, NovelChapterInit,
-  NovelMaterialInit, NovelSuggestionInit,
-} from './novel/models.ts';
+  NovelMaterialInit, NovelSuggestionInit, NovelChapterVersion, NovelChapterVersionKind, NovelBranch } from './novel/models.ts';
 export {
   NOVEL_SCHEMA_VERSION, MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS,
   MAX_MATERIAL_CHARS, MATERIAL_KIND_LABELS, novelId, makeNovelProject, makeNovelMessage,
