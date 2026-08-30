@@ -47,6 +47,10 @@ import type { VisionFallbackHook } from './vision_fallback.ts';
 
 export interface StreamOpts {
   signal?: AbortSignalLike;
+  onDataEnd?: () => void;
+  // 真实 accumulator seed；交互宿主据此判定本次请求新增 assistant 内容，
+  // 避免 regenerate 截断后仍拿完整旧会话作基线。
+  baselineMessages?: UIMessage[];
 }
 
 // 流式 provider:回调式 chunk 推送;resolve = 流正常结束,reject = 失败
@@ -89,6 +93,9 @@ export interface ChatTurnDeps {
   inputTransformers: MessageTransformer[];
   outputTransformers: OutputMessageTransformer[];
   provider: ChatStreamProvider;
+  // 交互宿主可在单一边界观察实际使用的 provider；tool loop 的 step provider
+  // 和视觉兜底 providerOverride 也必须经过同一包装。
+  wrapStreamProvider?: (provider: ChatStreamProvider) => ChatStreamProvider;
   store: ConversationStore;
   // 上下文组装(D-018):agentSoul 静态块前缀;contextMessageSize 截断(0=不截断)
   agentSoul?: string;
@@ -245,14 +252,17 @@ export const generateAssistantOnce = async (
   seedMessages: UIMessage[], internalMessages: UIMessage[], deps: ChatTurnDeps,
   providerOverride?: ChatStreamProvider, visionFallback?: VisionFallbackHook,
 ): Promise<UIMessage[]> => {
-  const provider: ChatStreamProvider = providerOverride ?? deps.provider;
+  const baseProvider: ChatStreamProvider = providerOverride ?? deps.provider;
+  const provider: ChatStreamProvider = deps.wrapStreamProvider !== undefined
+    ? deps.wrapStreamProvider(baseProvider) : baseProvider;
   const ctx: TransformerContext = { assistant: deps.assistant };
   // 流式 UI 刷新节流(Android STREAM_UI_FLUSH_INTERVAL_MS);0 = 每个 chunk 都刷新
   const flushIntervalMs: number = deps.flushIntervalMs ?? 50;
   const nowMs: () => number = deps.nowMs ?? ((): number => Date.now());
-  const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
-    ? { signal: deps.abortSignal }
-    : undefined;
+  const streamOpts: StreamOpts = {
+    signal: deps.abortSignal,
+    baselineMessages: seedMessages,
+  };
   // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(Android
   //   GenerationHandler.kt:255);chunk 以 message 形式进同一 accumulator
   const useNonStream: boolean = deps.assistant.streamOutput === false
@@ -270,6 +280,31 @@ export const generateAssistantOnce = async (
   let lastFlushAt: number = 0;
   const isAborted = (): boolean =>
     deps.abortSignal !== undefined && deps.abortSignal.aborted;
+  const waitForRetry = (delayMs: number): Promise<void> => {
+    const signal: AbortSignalLike | undefined = deps.abortSignal;
+    if (signal === undefined || signal.addEventListener === undefined) return sleep(delayMs);
+    if (signal.aborted) return Promise.resolve();
+    return new Promise<void>((resolve, reject): void => {
+      let settled: boolean = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener?.('abort', finish);
+        resolve();
+      };
+      signal.addEventListener?.('abort', finish);
+      if (signal.aborted) {
+        finish();
+        return;
+      }
+      sleep(delayMs).then(finish).catch((error: Error): void => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener?.('abort', finish);
+        reject(error);
+      });
+    });
+  };
   while (true) {
     // 首次尝试必跑(abort 检查在 catch 与 sleep 后 — provider 抛错时
     //   signal.aborted=true 的既有语义不回归,D-035)
@@ -344,7 +379,7 @@ export const generateAssistantOnce = async (
             .replace('%4$s', decision.reason),
         );
       }
-      await sleep(decision.delayMs);
+      await waitForRetry(decision.delayMs);
       attempt++;
       // 重试等待中点停止(含即时 sleep):不发起新尝试,失败尝试的部分输出不入列。
       if (isAborted()) {

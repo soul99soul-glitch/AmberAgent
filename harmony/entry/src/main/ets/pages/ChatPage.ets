@@ -30,6 +30,7 @@ import type {
   MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact,
   ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
   AgentToolActivityStore, SandboxActivityUiState, McpToolActivityPort, JsonValue,
+  InteractiveTurnRunResult,
 } from '@amber/chat-domain';
 import {
   currentMessages, makeConversation, newId, nowIso,
@@ -82,6 +83,7 @@ import {
   loadProviders, loadDisplaySetting, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP,
   createMiniAppPromptTransformer, createMiniAppOutputTransformer,
   makeMiniAppSetting, loadMiniAppSetting,
+  runInteractiveTurn,
 } from '@amber/chat-domain';
 import type {
   MiniAppSetting, MiniAppRecord, MiniAppRepository,
@@ -1691,56 +1693,65 @@ struct ChatPage {
         // D-055:重生成使 compact 失效(ChatService.kt:1097 'message_regenerated'),
         //   先于生成完成,避免 prepareContext 读到过期摘要
         return this.invalidateConvCompacts(conv.id, 'message_regenerated')
-          .then((): Promise<Conversation> => runRegenerateAtWithTools(conv, nodeId, {
-          assistant: rt.assistant,
-          finalTokenBudget: this.finalTokenBudgetOf(rt),
+          .then((): Promise<Conversation> => {
+            const deps: ChatTurnDeps = {
+              assistant: rt.assistant,
+              finalTokenBudget: this.finalTokenBudgetOf(rt),
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
-          agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
-          inputTransformers: this.buildInputTransformers(rt),
+              agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
+              inputTransformers: this.buildInputTransformers(rt),
           // D-071b:视觉兜底门(模型 IMAGE 模态 + 有图才兜底,GenerationHandler.kt:431)
-          modelSupportsImageInput: rt.modelSupportsImageInput,
-          outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), createMiniAppOutputTransformer({ enabled: (): boolean => this.miniAppSetting.enabled, repository: this.miniAppRepository() }), regexOutputTransformer], // ChatService.kt:179-184 序(MiniAppOutput 3 位) 依赖 this.miniAppRepository()
-          provider: asChatStreamProvider(rt.api, () => rt.params),
-          store: getChatRepository(),
-          contextMessageSize: rt.contextMessageSize,
+              modelSupportsImageInput: rt.modelSupportsImageInput,
+              outputTransformers: [thinkTagTransformer, createEntryBase64ImageTransformer(), createMiniAppOutputTransformer({ enabled: (): boolean => this.miniAppSetting.enabled, repository: this.miniAppRepository() }), regexOutputTransformer], // ChatService.kt:179-184 序(MiniAppOutput 3 位) 依赖 this.miniAppRepository()
+              provider: asChatStreamProvider(rt.api, () => rt.params),
+              store: getChatRepository(),
+              contextMessageSize: rt.contextMessageSize,
           // D-055:压缩引擎接管上下文(同 send 路径)
-          prepareContextMessages: this.buildPrepareContext(conv, rt),
+              prepareContextMessages: this.buildPrepareContext(conv, rt),
           // D-077b:recentChats 动态块(每次组装重取)
           // D-085b:记忆召回块(动态序最前,GenerationHandler.kt:727)
-          memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
-          extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
-          abortSignal: operationAbort.signal,
+              memorySystemBlocks: (): Promise<string[]> => this.loadMemorySystemBlocks(),
+              extraSystemBlocks: (): Promise<string[]> => this.loadExtraSystemBlocks(),
+              abortSignal: operationAbort.signal,
           // D-115:GenerationHandler.kt:357/475/621 — retrySetting =
           //   settings.agentRuntime.generationRetry(PreferencesStore.kt:181 持久化)
-          retrySetting: makeGenerationRetrySetting({
-            enabled: this.agentRuntime.generationRetry.enabled,
-            maxRetries: this.agentRuntime.generationRetry.maxRetries,
-          }),
+              retrySetting: makeGenerationRetrySetting({
+                enabled: this.agentRuntime.generationRetry.enabled,
+                maxRetries: this.agentRuntime.generationRetry.maxRetries,
+              }),
           // D-050:重试状态(send 路径同语义)
-          onRetryStatus: (status: string | null): void => {
-            if (this.isGenerationOperationActive(operationToken)) {
-              this.retryStatus = status ?? '';
-            }
-          },
+              onRetryStatus: (status: string | null): void => {
+                if (this.isGenerationOperationActive(operationToken)) {
+                  this.retryStatus = status ?? '';
+                }
+              },
           // D-041:流式预览 — 快照末条即活动流式消息(assistant 路径占位
           //   合并/user 路径尾部追加,均为末条);visual transforms 与 send 一致
-          onUpdate: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)
-              || msgs.length === 0 || holder.rt === null) return;
-            const ctx: TransformerContext = { assistant: holder.rt.assistant };
-            const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
-              msgs, [thinkTagTransformer, regexOutputTransformer], ctx); // MiniApp:仅 ThinkTag/Regex 实现 visualTransformTail(Android 同);MiniAppOutput 无 visual 变换,流式期恒等 → 不加
-            this.regenNodeId = nodeId;
-            this.regenTail = transformed[transformed.length - 1];
-            this.followStreamingUpdate();
-          },
+              onUpdate: (msgs: UIMessage[]): void => {
+                if (!this.isGenerationOperationActive(operationToken)
+                  || msgs.length === 0 || holder.rt === null) return;
+                const ctx: TransformerContext = { assistant: holder.rt.assistant };
+                const transformed: UIMessage[] = applyVisualTransformersStreamingTail(
+                  msgs, [thinkTagTransformer, regexOutputTransformer], ctx); // MiniApp:仅 ThinkTag/Regex 实现 visualTransformTail(Android 同);MiniAppOutput 无 visual 变换,流式期恒等 → 不加
+                this.regenNodeId = nodeId;
+                this.regenTail = transformed[transformed.length - 1];
+                this.followStreamingUpdate();
+              },
           // Phase 2:raw 快照捕获(与 send 路径同接线)
-          onRawFlushSnapshot: (msgs: UIMessage[]): void => {
-            if (!this.isGenerationOperationActive(operationToken)) return;
-            this.lastRawSnapshot = msgs;
-            this.captureStreamCheckpoint(msgs);
-          },
-        }, this.buildToolLoop(rt, conv)));
+              onRawFlushSnapshot: (msgs: UIMessage[]): void => {
+                if (!this.isGenerationOperationActive(operationToken)) return;
+                this.lastRawSnapshot = msgs;
+                this.captureStreamCheckpoint(msgs);
+              },
+            };
+            return runInteractiveTurn(
+              conv,
+              deps,
+              (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
+                runRegenerateAtWithTools(
+                  conv, nodeId, runtimeDeps, this.buildToolLoop(rt, conv)),
+            ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
+          });
       })
       .then((out: Conversation): void => {
         const stopped: boolean = operationAbort.signal.aborted;
@@ -3357,7 +3368,7 @@ struct ChatPage {
         this.warnIfToolAbilityMissing(rt);
         // D-132c:水合 subagent 设置 + 工具(buildToolLoop 前;parentToolsProvider 惰性)
         await this.prepareSubAgentTools(conv);
-        return runToolLoopContinuation(conv, {
+        const deps: ChatTurnDeps = {
           assistant: rt.assistant,
           // D-090:agentSoul 静态块首槽位(GenerationHandler.kt:721-724)
           agentSoul: buildAgentSoulPrompt(this.agentRuntime.agentSoulMarkdown),
@@ -3401,7 +3412,13 @@ struct ChatPage {
             this.lastRawSnapshot = msgs;
             this.captureStreamCheckpoint(msgs);
           },
-        }, this.buildToolLoop(rt, conv));
+        };
+        return runInteractiveTurn(
+          conv,
+          deps,
+          (runtimeDeps: ChatTurnDeps): Promise<Conversation> =>
+            runToolLoopContinuation(conv, runtimeDeps, this.buildToolLoop(rt, conv)),
+        ).then((result: InteractiveTurnRunResult): Conversation => result.conversation);
       })
       .then((out: Conversation): void => {
         const stopped: boolean = operationAbort.signal.aborted;
@@ -3909,14 +3926,25 @@ struct ChatPage {
             this.conversation = blocker.conversation;
             this.refreshRowsAfterConversationChange(previous, blocker.conversation);
             return getChatRepository().save(blocker.conversation)
-              .then((): Promise<Conversation> => runToolLoopContinuation(
-                blocker.conversation, deps, this.buildToolLoop(rt, blocker.conversation)));
+              .then((): Promise<InteractiveTurnRunResult> => runInteractiveTurn(
+                blocker.conversation, deps,
+                (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runToolLoopContinuation(
+                  blocker.conversation, runtimeDeps, this.buildToolLoop(rt, blocker.conversation))))
+              .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
           }
           return getChatRepository().save(blocker.conversation)
-            .then((): Promise<Conversation> => runChatTurnWithTools(
-              blocker.conversation, userInput, deps, this.buildToolLoop(rt, blocker.conversation)));
+            .then((): Promise<InteractiveTurnRunResult> => runInteractiveTurn(
+              blocker.conversation, deps,
+              (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
+                blocker.conversation, userInput, runtimeDeps,
+                this.buildToolLoop(rt, blocker.conversation))))
+            .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
         }
-        return runChatTurnWithTools(conv, userInput, deps, this.buildToolLoop(rt, conv));
+        return runInteractiveTurn(
+          conv, deps,
+          (runtimeDeps: ChatTurnDeps): Promise<Conversation> => runChatTurnWithTools(
+            conv, userInput, runtimeDeps, this.buildToolLoop(rt, conv)))
+          .then((result: InteractiveTurnRunResult): Conversation => result.conversation);
       })
       .then((out: Conversation): void => {
         const stopped: boolean = operationAbort.signal.aborted;

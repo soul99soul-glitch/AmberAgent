@@ -9,7 +9,7 @@ import type {
   DeepReadOutput, DeepReadScheduler, DeepReadCacheEntry, Observable, HttpClient, Storage,
   DeepReadRepository, SearchProviderRegistry, Notifier,
   SourcePrefetcher, FileStore, ModelRegistry,
-  ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat,
+  ModelCouncilTextRunner, ModelCouncilRuntimeSetting, ModelCouncilSeat, ModelConfig,
 } from '@amber/deepread-domain';
 import {
   isInterruptedPhase, createScheduler, createSourcePrefetcher,
@@ -27,7 +27,7 @@ import { createNotificationNotifier } from '../platform_impl/NotificationNotifie
 import { createFileStore } from '../platform_impl/FileStore.ets';
 import { getChatKeyRoulette } from '../platform_impl/KeyRouletteSupport.ets';
 import { createModelCouncilRunner } from '../platform_impl/ModelCouncilRunner.ets';
-import { createNovelModelAdapter } from '../platform_impl/NovelModelAdapter.ets';
+import { createEntryNovelChatRunAdapter } from '../platform_impl/NovelChatRunAdapter.ets';
 import { createEntryAbortController } from '../platform_impl/EntryAbortController.ets';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import type { Context } from '@kit.AbilityKit';
@@ -38,7 +38,7 @@ import type {
   AgentTool, ChatStreamProvider, ChatToolDefinition, CustomHeader,
   SubAgentRuntimeSetting, SubAgentOverride, SubAgentManagerDeps, SubAgentRunner,
   SubAgentAssistantResolution, SubAgentGenerationPort,
-  AgentPromptSettingsPort,
+  AgentPromptSettingsPort, NovelInteractiveRuntimeConfig,
 } from '@amber/chat-domain';
 import {
   loadAssistants, loadProviders, makeAssistant, saveAssistants, patchAssistant,
@@ -53,6 +53,7 @@ import {
   AgentPermissionBroker, createPermissionsStatusTool,
   AgentTaskStore, AgentTaskScheduler, AgentTaskTools, AgentCronManager,
   asChatStreamProvider, makeGenerationRetrySetting, makeSubAgentRuntimeSetting,
+  makeChatModel,
   SubAgentManager, GenerationSubAgentRunner, ChatStreamSubAgentGenerationPort,
   SubAgentTools,
 } from '@amber/chat-domain';
@@ -659,7 +660,7 @@ export const getNovelCreation = (): NovelCreation => {
     const c: Container = getAppContainer();
     novelCreation = createNovelCreation({
       repository: createFileNovelRepository(c.fileStore),
-      modelRunning: createNovelModelAdapter(c.httpClient, c.modelRegistry),
+      modelRunning: createEntryNovelChatRunAdapter(resolveNovelInteractiveRuntime),
     });
   }
   return novelCreation;
@@ -1113,7 +1114,9 @@ export const buildProviderApi = (
   });
 };
 
-export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRuntime | null> => {
+export const resolveChatRuntime = async (
+  assistantId?: string, exactModelId?: string,
+): Promise<ChatRuntime | null> => {
   // 助手解析(D-028):会话绑定 assistantId 优先,未命中/未传 → 首个(D-019 延续)
   const assistants: Assistant[] = await getChatAssistants();
   let assistant: Assistant = assistants[0];
@@ -1125,8 +1128,11 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
       }
     }
   }
-  // Assistant.chatModelId must be resolved before the global selection.
-  const choice = await resolveChatProviderChoice(assistant);
+  // Novel/任务显式指定模型时必须精确解析，不得静默改用默认聊天模型。
+  // 普通 Chat 仍维持 Assistant.chatModelId → 全局选择的既有顺序。
+  const choice = exactModelId !== undefined && exactModelId.length > 0
+    ? await resolveConfiguredTaskChatModel(exactModelId)
+    : await resolveChatProviderChoice(assistant);
   if (choice === null) return null;
   const chosen: ProviderSetting = choice.provider;
   const model = choice.model;
@@ -1167,5 +1173,78 @@ export const resolveChatRuntime = async (assistantId?: string): Promise<ChatRunt
     modelAbilities: model.abilities,
     // D-123:技能库快照(每次发送重新扫描;SkillManager 内部缓存,变更后失效)
     allSkills: getSkillManager().listSkills(),
+  };
+};
+
+// C2:Novel 与 Chat 共用生成深模块。优先使用统一 Chat Provider；尚未迁移的设备
+// 可把 legacy ModelConfig 只转换为 Chat provider/params，仍走同一 SSE parser、
+// MessageStreamAccumulator、retry/abort 与 output transformer，不回退旧 Novel HTTP 轮子。
+const resolveNovelInteractiveRuntime = async (
+  modelId: string | null,
+): Promise<NovelInteractiveRuntimeConfig | null> => {
+  const explicitModelId: string | null = modelId !== null && modelId.length > 0 ? modelId : null;
+  const chatRuntime: ChatRuntime | null = explicitModelId === null
+    ? await resolveChatRuntime()
+    : await resolveChatRuntime(undefined, explicitModelId);
+  if (chatRuntime !== null) {
+    return {
+      assistant: chatRuntime.assistant,
+      provider: asChatStreamProvider(
+        chatRuntime.api, (): TextGenerationParams => chatRuntime.params),
+      retrySetting: makeGenerationRetrySetting({}),
+    };
+  }
+
+  const registry: ModelRegistry = getModelRegistry();
+  let config: ModelConfig | null = explicitModelId !== null
+    ? await registry.get(explicitModelId) : null;
+  if (config === null && explicitModelId === null) {
+    const configs: ModelConfig[] = await registry.list();
+    config = configs.length > 0 ? configs[0] : null;
+  }
+  if (config === null || config.apiKey.length === 0 || config.model.length === 0) return null;
+
+  const apiKey: string = config.apiKey;
+  const baseUrl: string = config.baseUrl.replace(/\/+$/, '');
+  const setting = makeProviderSettingOpenAI({
+    id: `legacy-novel:${config.id}`,
+    enabled: true,
+    name: config.label.length > 0 ? config.label : '小说模型',
+    baseUrl,
+    chatCompletionsPath: baseUrl.endsWith('/v1') ? '/chat/completions' : '/v1/chat/completions',
+    authMode: 'api_key',
+    brand: 'generic',
+  });
+  const api: OpenAIChatApi = createOpenAIChatApi({
+    http: getAppContainer().httpClient,
+    setting,
+    headers: (): Record<string, string> => {
+      const headers: Record<string, string> = {};
+      headers['Authorization'] = `Bearer ${apiKey}`;
+      return headers;
+    },
+    encodeImage: encodeImageForChat,
+  });
+  const params: TextGenerationParams = makeTextGenerationParams({
+    model: makeChatModel({
+      modelId: config.model,
+      displayName: config.label.length > 0 ? config.label : config.model,
+      abilities: [],
+      inputModalities: ['text'],
+      outputModalities: ['text'],
+    }),
+    maxTokens: null,
+    reasoningLevel: 'auto',
+  });
+  return {
+    assistant: makeAssistant({
+      id: `legacy-novel:${config.id}`,
+      name: config.label.length > 0 ? config.label : '小说模型',
+      systemPrompt: '',
+      streamOutput: true,
+      localTools: [],
+    }),
+    provider: asChatStreamProvider(api, (): TextGenerationParams => params),
+    retrySetting: makeGenerationRetrySetting({}),
   };
 };

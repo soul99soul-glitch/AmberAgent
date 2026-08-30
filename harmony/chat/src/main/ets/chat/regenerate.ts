@@ -58,6 +58,7 @@ export interface RegenerateDeps {
   inputTransformers: MessageTransformer[];
   outputTransformers: OutputMessageTransformer[];
   provider: ChatStreamProvider;
+  wrapStreamProvider?: (provider: ChatStreamProvider) => ChatStreamProvider;
   store: ConversationStore;
   agentSoul?: string;
   contextMessageSize?: number;
@@ -173,12 +174,15 @@ export const runRegenerateAt = async (
   const seed: UIMessage[] = isUserNode
     ? baseMessages
     : [...baseMessages, makeUIMessage('assistant', [])];
-  const streamOpts: StreamOpts | undefined = deps.abortSignal !== undefined
-    ? { signal: deps.abortSignal }
-    : undefined;
+  const streamOpts: StreamOpts = {
+    signal: deps.abortSignal,
+    baselineMessages: seed,
+  };
+  const provider: ChatStreamProvider = deps.wrapStreamProvider !== undefined
+    ? deps.wrapStreamProvider(deps.provider) : deps.provider;
   // D-040:streamOutput=false 且 provider 支持 → 非流式单次补全(chat_turn 同语义)
   const useNonStream: boolean = deps.assistant.streamOutput === false
-    && deps.provider.generateText !== undefined;
+    && provider.generateText !== undefined;
   // D-050 重试循环(chat_turn 同构,runProviderCallWithRetry:774-820 忠实):
   //   每次尝试全新 accumulator(失败尝试的部分输出丢弃);
   //   sawChunk 仅累计「最终存活尝试」的 chunk
@@ -200,8 +204,8 @@ export const runRegenerateAt = async (
     // D-071a:provider 调用闭包 — 视觉兜底重跑与首轮共用同一 accumulator
     //   (chat_turn generateAssistantOnce 同构,GenerationHandler.kt:601-665)
     const callProvider = async (msgs: UIMessage[]): Promise<void> => {
-      if (useNonStream && deps.provider.generateText !== undefined) {
-        const chunk: MessageChunk = await deps.provider.generateText(msgs, streamOpts);
+      if (useNonStream && provider.generateText !== undefined) {
+        const chunk: MessageChunk = await provider.generateText(msgs, streamOpts);
         // 只有携带实际 delta/message 的 chunk 才算有产出:finish-only/usage-only
         // 尾块(choices 空)不得点亮 sawChunk,否则空占位会追加成新分支
         if (chunk.choices.length > 0
@@ -216,7 +220,7 @@ export const runRegenerateAt = async (
           deps.onUpdate(accumulator.snapshot());
         }
       } else {
-        await deps.provider.streamText(msgs, (chunk: MessageChunk): void => {
+        await provider.streamText(msgs, (chunk: MessageChunk): void => {
           if (chunk.choices.length > 0
             && (chunk.choices[0].delta !== null || chunk.choices[0].message !== null)) {
             sawChunk = true;

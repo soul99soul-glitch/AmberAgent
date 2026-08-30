@@ -68,6 +68,9 @@ export struct AgentMessageRow {
   // D-053:本行是否属于活动流式尾部(reasoning loading 判定;
   //   Android messageLoading 语义,流式尾/regen 预览传 true)
   @Prop @Watch('onStreamingChange') streaming: boolean = false;
+  // generationActive 与网络文本增量分离：reasoning/tool loading 跟随前者，
+  // Markdown reveal 只在真实 live text delta 时启用，避免 one-shot 假流式。
+  @Prop textDeltasLive: boolean = true;
   @Prop autoCloseThinking: boolean = true;
   // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
   @Prop streamKeyTag: string = '';
@@ -337,7 +340,8 @@ export struct AgentMessageRow {
                 content: block.part.text,
                 fontSize: 15,
                 fontColor: INK,
-                streaming: this.streaming && this.isLastTextBlock(this.getBlocks(), bi),
+                streaming: this.streaming && this.textDeltasLive &&
+                  this.isLastTextBlock(this.getBlocks(), bi),
                 streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
                 onVisibleGrow: (): void => { this.onTextGrow(); },
               })

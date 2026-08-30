@@ -8,6 +8,10 @@ import type { TokenUsage } from './usage.ts';
 
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
+// 传输事实与 UI reveal 分离：live 只表示请求完成前已收到解析后的增量；
+// buffered 表示走流式端口但首个可见帧直到收流边界；unavailable 表示非流式或无增量。
+export type StreamTransportState = 'live' | 'buffered' | 'unavailable';
+
 export type ToolApprovalState =
   | { type: 'auto' }
   | { type: 'pending' }

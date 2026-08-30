@@ -38,7 +38,10 @@ const fakeHttp = (script: FakeScript, capture: FakeCapture): HttpClient => ({
       status: script.status, headers: {}, body: script.finalBody ?? script.chunks.join(''),
     });
   },
-  fetchStream: (req: HttpRequest, opts: { onChunk: (c: ArrayBuffer, end: boolean) => void }): Promise<HttpResponse> => {
+  fetchStream: (req: HttpRequest, opts: {
+    onChunk: (c: ArrayBuffer, end: boolean) => void;
+    onDataEnd?: () => void;
+  }): Promise<HttpResponse> => {
     capture.req = req;
     for (let i = 0; i < script.chunks.length; i++) {
       const isLast = i === script.chunks.length - 1;
@@ -47,6 +50,7 @@ const fakeHttp = (script: FakeScript, capture: FakeCapture): HttpClient => ({
     if (script.chunks.length === 0) {
       opts.onChunk(new ArrayBuffer(0), true);
     }
+    opts.onDataEnd?.();
     return Promise.resolve({ status: script.status, headers: {}, body: script.finalBody ?? '' });
   },
 });
@@ -184,8 +188,14 @@ test('asChatStreamProvider: 适配 chat_turn 的 ChatStreamProvider 接口', asy
   });
   const provider = asChatStreamProvider(api, () => params);
   const chunks: MessageChunk[] = [];
-  await provider.streamText([makeUserMessage('hi')], (c: MessageChunk): void => { chunks.push(c); });
+  let dataEnded: boolean = false;
+  await provider.streamText(
+    [makeUserMessage('hi')],
+    (c: MessageChunk): void => { chunks.push(c); },
+    { onDataEnd: (): void => { dataEnded = true; } },
+  );
   assert.equal(chunks.length, 2);
+  assert.equal(dataEnded, true);
 });
 
 test('Responses API remains unsupported at the request boundary', async () => {

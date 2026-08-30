@@ -25,11 +25,17 @@ import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModel
 import type { NovelProjectRepository } from './repository.ts';
 import { parseSettingProposals } from './discussion_structured.ts';
 import type { NovelSettingProposalDraft, NovelSettingProposalsParsed } from './discussion_structured.ts';
+import { latestAssistantText } from '../agent/message.ts';
+import type { StreamTransportState, UIMessage } from '../agent/message.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
   | { kind: 'started' }
   | { kind: 'status'; text: string }
+  | {
+    kind: 'snapshot'; messages: UIMessage[]; generationActive: boolean;
+    textDeltasLive: boolean; transport: StreamTransportState;
+  }
   | { kind: 'delta'; text: string }
   | { kind: 'replace'; text: string }
   | { kind: 'completed'; message: NovelMessage }
@@ -641,6 +647,24 @@ export class NovelCreation {
         resetIdle();
         if (evt.kind === 'status') {
           emitter.emit({ kind: 'status', text: evt.text });
+        } else if (evt.kind === 'snapshot') {
+          const snapshotText: string = latestAssistantText(evt.messages);
+          if (snapshotText.length > MAX_OUTPUT_CHARS) {
+            finish(() => {
+              this.modelRunning.cancel(request.runId);
+              reject(outputTooLarge(MAX_OUTPUT_CHARS));
+            });
+            return;
+          }
+          buffer = snapshotText;
+          live.partial = snapshotText;
+          emitter.emit({
+            kind: 'snapshot',
+            messages: evt.messages.slice(),
+            generationActive: evt.generationActive,
+            textDeltasLive: evt.textDeltasLive,
+            transport: evt.transport,
+          });
         } else if (evt.kind === 'delta') {
           buffer += evt.text;
           live.partial = buffer;

@@ -196,6 +196,21 @@ describe('runChatTurnWithTools 单步与循环', () => {
     assert.equal(seenDefs[0].name, 'conversation_search');
     assert.equal(seenDefs[0].parameters['type'], 'object');
   });
+  it('tool step providerOverride 仍经过统一 provider wrapper', async () => {
+    const provider = scriptedProvider([[textDelta('ok')]]);
+    let wrapped: number = 0;
+    const deps: ChatTurnDeps = {
+      ...baseDeps(provider),
+      wrapStreamProvider: (source: ChatStreamProvider): ChatStreamProvider => {
+        wrapped += 1;
+        return source;
+      },
+    };
+    await runChatTurnWithTools(
+      makeConversation('wrapped-step', []), 'hi', deps,
+      loopOf(provider, [echoTool('conversation_search')]));
+    assert.equal(wrapped, 1);
+  });
 });
 
 describe('审批门(:288-339)', () => {

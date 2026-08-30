@@ -52,7 +52,7 @@ export type { ToolDefinition, ApprovalMatrix } from './agent/tool_execution.ts';
 export type { JsonValue, JsonObject } from './agent/json.ts';
 export type { TokenUsage } from './agent/usage.ts';
 export type {
-  MessageRole, ToolApprovalState,
+  MessageRole, StreamTransportState, ToolApprovalState,
   UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
   UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
   UIMessagePartReasoning, UIMessagePartTool,

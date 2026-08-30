@@ -2,7 +2,7 @@
 // both domain modules consume one physical definition without a reverse edge.
 
 export type {
-  MessageRole, ToolApprovalState,
+  MessageRole, StreamTransportState, ToolApprovalState,
   UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
   UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
   UIMessagePartReasoning, UIMessagePartTool,

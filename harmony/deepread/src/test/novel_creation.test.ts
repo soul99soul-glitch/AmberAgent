@@ -8,6 +8,7 @@ import type {
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
+import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 
 const NOW = 1_000_000;
 const delay = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
@@ -115,6 +116,34 @@ test('generate write: streams, persists user+assistant, sets granularity', async
   assert.equal(reloaded.messages[1].role, 'assistant');
   assert.equal(reloaded.messages[1].content, '这是正文');
   assert.equal(reloaded.lastGenerationGranularity, 'whole_chapter');
+});
+
+test('generate write: canonical snapshots replace partial and persist the final assistant text', async () => {
+  const ctl = controllableModel();
+  const creation = makeCreation(ctl.model);
+  const project = await creation.create('小说');
+  const terminal = runToTerminal(creation.generate(project.id, '写一段', 'write', 'continuation'));
+  await delay(10);
+  ctl.emit({
+    kind: 'snapshot',
+    messages: [makeAssistantMessage('第一帧')],
+    generationActive: true,
+    textDeltasLive: true,
+    transport: 'live',
+  });
+  ctl.emit({
+    kind: 'snapshot',
+    messages: [makeAssistantMessage('第一帧继续')],
+    generationActive: false,
+    textDeltasLive: false,
+    transport: 'live',
+  });
+  ctl.emit({ kind: 'completed' });
+  const events = await terminal;
+  assert.equal(events.filter(event => event.kind === 'snapshot').length, 2);
+
+  const reloaded = await creation.open(project.id);
+  assert.equal(reloaded.messages[1].content, '第一帧继续');
 });
 
 test('generate discuss: granularity stays null on message', async () => {

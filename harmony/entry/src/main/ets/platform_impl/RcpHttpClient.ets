@@ -36,6 +36,7 @@ interface FetchOpts {
 
 interface StreamOpts {
   onChunk: (chunk: ArrayBuffer, end: boolean) => void;
+  onDataEnd?: () => void;
   signal?: AbortSignalLike;
 }
 
@@ -155,6 +156,7 @@ class OhosHttpClient implements HttpClient {
       let pendingChunks: ArrayBuffer[] = [];
       let chunkCount: number = 0;
       let totalBytes: number = 0;
+      let dataEndNotified: boolean = false;
 
       const destroyOnce = (): void => {
         if (destroyed) return;
@@ -189,6 +191,19 @@ class OhosHttpClient implements HttpClient {
           if (!emit(chunk, false)) return false;
         }
         return true;
+      };
+      const notifyDataEnd = (): boolean => {
+        if (dataEndNotified) return true;
+        dataEndNotified = true;
+        if (opts.onDataEnd === undefined) return true;
+        try {
+          opts.onDataEnd();
+          return true;
+        } catch (e) {
+          fail(new Error(`${safeUrl} dataEnd callback failed: ${String(e)}`),
+            'fetchStream dataEnd callback failed: %{public}s');
+          return false;
+        }
       };
       const settleWhenReady = (): void => {
         if (settled || status === null) return;
@@ -249,6 +264,7 @@ class OhosHttpClient implements HttpClient {
       });
       httpRequest.on('dataEnd', (): void => {
         if (settled) return;
+        if (!notifyDataEnd()) return;
         dataEnded = true;
         settleWhenReady();
       });

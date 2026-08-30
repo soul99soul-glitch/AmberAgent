@@ -21,6 +21,7 @@ export interface HttpClient {
     req: HttpRequest,
     opts: {
       onChunk: (chunk: ArrayBuffer, end: boolean) => void;
+      onDataEnd?: () => void;
       signal?: AbortSignalLike;
     },
   ): Promise<HttpResponse>;

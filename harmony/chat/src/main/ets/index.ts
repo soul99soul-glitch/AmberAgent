@@ -8,7 +8,7 @@ export type { TokenUsage } from './chat/usage.ts';
 export { mergeUsage } from './chat/usage.ts';
 
 export type {
-  MessageRole, ToolApprovalState,
+  MessageRole, StreamTransportState, ToolApprovalState,
   UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
   UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
   UIMessagePartReasoning, UIMessagePartTool,
@@ -67,6 +67,15 @@ export type {
   ChatStreamProvider, ConversationStore, MemoryConversationStore, ChatTurnDeps, StreamOpts,
 } from './chat/chat_turn.ts';
 export { createMemoryConversationStore, runChatTurn, runAppendUserMessage } from './chat/chat_turn.ts';
+export type {
+  InteractiveTurnSnapshot, InteractiveTurnHooks, InteractiveTurnRunResult,
+  InteractiveTurnOperation,
+} from './chat/interactive_turn_runtime.ts';
+export { runInteractiveTurn } from './chat/interactive_turn_runtime.ts';
+export type {
+  NovelInteractiveRuntimeConfig, NovelInteractiveAdapterDeps,
+} from './chat/novel_interactive_adapter.ts';
+export { createNovelInteractiveAdapter } from './chat/novel_interactive_adapter.ts';
 export { selectMessageBranch, runRegenerateAt } from './chat/regenerate.ts';
 export { deleteMessage } from './chat/delete_message.ts';
 export { editMessage } from './chat/edit_message.ts';

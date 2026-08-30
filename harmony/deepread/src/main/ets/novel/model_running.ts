@@ -1,6 +1,8 @@
 // novel/model_running — 小说模型调用端口(移植自 Android NovelModelRunning.kt)
 // entry 用流式 OpenAI 兼容客户端实现(NovelModelAdapter.ets),复用 fetchStream + createOpenAiTextStream。
 
+import type { StreamTransportState, UIMessage } from '../agent/message.ts';
+
 export interface NovelModelRequest {
   runId: string;
   systemPrompt: string;
@@ -12,6 +14,10 @@ export interface NovelModelRequest {
 export type NovelModelEvent =
   | { kind: 'activity' }
   | { kind: 'status'; text: string }
+  | {
+    kind: 'snapshot'; messages: UIMessage[]; generationActive: boolean;
+    textDeltasLive: boolean; transport: StreamTransportState;
+  }
   | { kind: 'delta'; text: string }
   | { kind: 'replace'; text: string }
   | { kind: 'completed' }

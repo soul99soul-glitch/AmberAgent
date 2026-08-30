@@ -135,6 +135,7 @@ export const createGoogleChatApi = (deps: GoogleChatApiDeps): OpenAIChatApi => {
 
     const resp = await deps.http.fetchStream(req, {
       signal: opts?.signal,
+      onDataEnd: opts?.onDataEnd,
       onChunk: (bytes: ArrayBuffer, end: boolean): void => {
         if (state.error !== null) return; // 终止后不再消费
         try {
@@ -182,8 +183,10 @@ export const asGoogleChatStreamProvider = (
   streamText: (
     messages: UIMessage[], onChunk: (chunk: MessageChunk) => void, opts?: StreamOpts,
   ): Promise<void> =>
-    api.streamText(messages, paramsFor(), onChunk,
-      opts?.signal !== undefined ? { signal: opts.signal } : undefined),
+    api.streamText(messages, paramsFor(), onChunk, opts === undefined ? undefined : {
+      signal: opts.signal,
+      onDataEnd: opts.onDataEnd,
+    }),
   generateText: (messages: UIMessage[], opts?: StreamOpts): Promise<MessageChunk> =>
     api.generateText(messages, paramsFor(),
       opts?.signal !== undefined ? { signal: opts.signal } : undefined),

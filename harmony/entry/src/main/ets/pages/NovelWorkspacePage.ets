@@ -13,7 +13,7 @@ import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard
 import {
   NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
 } from '../components/NovelBatchPolishSheet.ets';
-import { router, promptAction } from '@kit.ArkUI';
+import { KeyboardAvoidMode, router, promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
@@ -23,8 +23,13 @@ import {
   NovelRunKind, NovelRun, NovelChapterVersion, NovelChapterVersionKind,
   parseDiscussionAsk, stripDiscussionAskFence, stripSettingProposalsFence, formatDiscussionAnswersFromToolPayload,
   NovelDiscussionAskParsed, NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
-  UIMessage, UIMessageAnnotation, makeUIMessage,
+  StreamTransportState, UIMessage, UIMessageAnnotation, makeUIMessage,
 } from '@amber/deepread-domain';
+import {
+  shouldScrollOnStreamUpdate, transitionOnGenerateEnd, transitionOnJumpToBottom,
+  transitionOnStreamUpdate, transitionOnUserScroll,
+} from '@amber/chat-domain';
+import type { FollowMode } from '@amber/chat-domain';
 
 const GREEN: string = '#43A047';
 
@@ -67,7 +72,13 @@ struct NovelWorkspacePage {
   // 聊天
   @State draft: string = '';
   @State composeMode: ComposeMode = 'whole_chapter';
-  @State streamingText: string = '';
+  @State activeMessages: UIMessage[] = [];
+  @State activeTextDeltasLive: boolean = false;
+  @State activeTransport: StreamTransportState = 'unavailable';
+  @State activeFrameSeen: boolean = false;
+  @State followMode: FollowMode = 'idle';
+  @State atBottomApprox: boolean = true;
+  @State jumpButtonVisible: boolean = false;
   @State generationStatus: string = '';
   @State activeRunId: string = '';
   @State activeRunCreatedAt: number = 0;
@@ -131,8 +142,11 @@ struct NovelWorkspacePage {
   private chatScroller: Scroller = new Scroller();
   private pageAlive: boolean = false;
   private reloadToken: number = 0;
+  private initialScrollArmed: boolean = false;
+  private userTouchActive: boolean = false;
 
   aboutToAppear(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
     this.pageAlive = true;
     const params = router.getParams() as Record<string, string>;
     this.projectId = params ? (params['projectId'] ?? '') : '';
@@ -140,8 +154,12 @@ struct NovelWorkspacePage {
   }
 
   aboutToDisappear(): void {
+    this.getUIContext().setKeyboardAvoidMode(KeyboardAvoidMode.OFFSET);
     this.pageAlive = false;
     this.reloadToken++;
+    if (this.activeRunId.length > 0) {
+      getNovelCreation().interrupt(this.activeRunId);
+    }
     if (this.currentUnsub !== null) {
       const unsub: (() => void) = this.currentUnsub;
       this.currentUnsub = null;
@@ -164,7 +182,12 @@ struct NovelWorkspacePage {
     const projectId: string = this.projectId;
     try {
       const project: NovelProject = await getNovelCreation().open(projectId);
-      if (this.pageAlive && token === this.reloadToken) this.project = project;
+      if (this.pageAlive && token === this.reloadToken) {
+        this.project = project;
+        // 等 List 收到新 rows 的可见范围回调再落底；Promise 返回后的
+        // setTimeout 仍可能早于 ArkUI 完成 ForEach 布局。
+        this.initialScrollArmed = true;
+      }
     } catch (e) {
       if (this.pageAlive && token === this.reloadToken) this.errorMsg = '项目无法打开';
     }
@@ -228,16 +251,64 @@ struct NovelWorkspacePage {
     });
   }
 
-  private activeRunUi(): UIMessage {
+  private activeStatusUi(): UIMessage {
     const createdAt: string = this.messageTimestamp(
       this.activeRunCreatedAt > 0 ? this.activeRunCreatedAt : Date.now());
-    const text: string = this.streamingText.length > 0 ? this.streamingText : this.generationStatus;
-    return makeUIMessage('assistant', [{ type: 'text', text, metadata: null }], {
+    return makeUIMessage('assistant', [{ type: 'text', text: this.generationStatus, metadata: null }], {
       id: `novel-run:${this.activeRunId}`,
       createdAt,
       finishedAt: null,
       modelId: this.project?.modelId ?? null,
     });
+  }
+
+  private scheduleNovelScrollToBottom(): void {
+    setTimeout((): void => {
+      if (!this.pageAlive) return;
+      this.atBottomApprox = true;
+      this.jumpButtonVisible = false;
+      this.chatScroller.scrollEdge(Edge.Bottom);
+    }, 0);
+  }
+
+  private beginNovelGenerationFollow(): void {
+    this.followMode = transitionOnJumpToBottom(true);
+    this.atBottomApprox = true;
+    this.jumpButtonVisible = false;
+    this.scheduleNovelScrollToBottom();
+  }
+
+  private followNovelStreamingUpdate(): void {
+    this.followMode = transitionOnStreamUpdate(this.followMode, this.atBottomApprox);
+    this.jumpButtonVisible = this.followMode === 'paused';
+    if (shouldScrollOnStreamUpdate(this.followMode, this.atBottomApprox)) {
+      this.scheduleNovelScrollToBottom();
+    }
+  }
+
+  private finishNovelGenerationFollow(): void {
+    const wasPaused: boolean = this.followMode === 'paused';
+    this.followMode = transitionOnGenerateEnd(this.followMode);
+    this.jumpButtonVisible = wasPaused;
+    if (!wasPaused) this.scheduleNovelScrollToBottom();
+  }
+
+  private reconcileNovelUserScroll(): void {
+    let atEnd: boolean = false;
+    try {
+      atEnd = this.chatScroller.isAtEnd();
+    } catch (_error) {
+      atEnd = this.atBottomApprox;
+    }
+    this.atBottomApprox = atEnd;
+    this.followMode = transitionOnUserScroll(
+      this.followMode, atEnd, this.activeRunId.length > 0);
+    this.jumpButtonVisible = !atEnd;
+  }
+
+  private jumpNovelToBottom(): void {
+    this.followMode = transitionOnJumpToBottom(this.activeRunId.length > 0);
+    this.scheduleNovelScrollToBottom();
   }
 
   send(runKindOverride: NovelRunKind | null = null): void {
@@ -254,25 +325,35 @@ struct NovelWorkspacePage {
 
     this.pendingUserText = text;
     this.draft = '';
-    this.streamingText = '';
+    this.activeMessages = [];
+    this.activeTextDeltasLive = false;
+    this.activeTransport = 'unavailable';
+    this.activeFrameSeen = false;
     this.generationStatus = '正在连接模型并组织正文…';
     this.errorMsg = '';
 
     const run = getNovelCreation().generate(this.projectId, text, mode, gran, runKind);
     this.activeRunId = run.id;
     this.activeRunCreatedAt = Date.now();
+    this.beginNovelGenerationFollow();
     this.currentUnsub = run.subscribe((e): void => {
       if (e.kind === 'status') {
         if (e.text.length > 0) this.generationStatus = e.text;
-      } else if (e.kind === 'delta') {
-        this.streamingText += e.text;
-      } else if (e.kind === 'replace') {
-        this.streamingText = e.text;
+      } else if (e.kind === 'snapshot') {
+        this.activeMessages = e.messages.slice();
+        this.activeTextDeltasLive = e.textDeltasLive;
+        this.activeTransport = e.transport;
+        this.activeFrameSeen = true;
+        this.followNovelStreamingUpdate();
       } else if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
+        this.finishNovelGenerationFollow();
         this.activeRunId = '';
         this.activeRunCreatedAt = 0;
         this.pendingUserText = '';
-        this.streamingText = '';
+        this.activeMessages = [];
+        this.activeTextDeltasLive = false;
+        this.activeTransport = 'unavailable';
+        this.activeFrameSeen = false;
         this.generationStatus = '';
         if (e.kind === 'failed') this.errorMsg = e.message;
         this.currentUnsub = null;
@@ -376,19 +457,31 @@ struct NovelWorkspacePage {
   // N2:订阅章节级 Run(复用 send 的流式订阅;终态 reload)
   private attachChapterRun(run: NovelRun, statusText: string): void {
     this.activeRunId = run.id;
-    this.streamingText = '';
+    this.activeRunCreatedAt = Date.now();
+    this.activeMessages = [];
+    this.activeTextDeltasLive = false;
+    this.activeTransport = 'unavailable';
+    this.activeFrameSeen = false;
     this.generationStatus = statusText;
     this.errorMsg = '';
+    this.beginNovelGenerationFollow();
     this.currentUnsub = run.subscribe((e): void => {
       if (e.kind === 'status') {
         if (e.text.length > 0) this.generationStatus = e.text;
-      } else if (e.kind === 'delta') {
-        this.streamingText += e.text;
-      } else if (e.kind === 'replace') {
-        this.streamingText = e.text;
+      } else if (e.kind === 'snapshot') {
+        this.activeMessages = e.messages.slice();
+        this.activeTextDeltasLive = e.textDeltasLive;
+        this.activeTransport = e.transport;
+        this.activeFrameSeen = true;
+        this.followNovelStreamingUpdate();
       } else if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
+        this.finishNovelGenerationFollow();
         this.activeRunId = '';
-        this.streamingText = '';
+        this.activeRunCreatedAt = 0;
+        this.activeMessages = [];
+        this.activeTextDeltasLive = false;
+        this.activeTransport = 'unavailable';
+        this.activeFrameSeen = false;
         this.generationStatus = '';
         if (e.kind === 'failed') this.errorMsg = e.message;
         this.currentUnsub = null;
@@ -684,11 +777,20 @@ struct NovelWorkspacePage {
   }
 
   @Builder
-  activeRunHeader(): void {
-    Text(this.streamingText.length > 0 ? '正在写' : '正在思考')
-      .fontSize(12)
-      .fontColor(ACCENT)
-      .margin({ bottom: 4 })
+  activeRunHeader(show: boolean = true): void {
+    if (show) {
+      Text(this.activeMessages.length > 0 ? '正在写' : '正在思考')
+        .fontSize(12)
+        .fontColor(ACCENT)
+        .margin({ bottom: 4 })
+      if (this.activeFrameSeen) {
+        Text(this.activeTransport === 'live' ? '实时' :
+          (this.activeTransport === 'buffered' ? '缓冲' : '非流式'))
+          .fontSize(10)
+          .fontColor(INK3)
+          .margin({ left: 8, bottom: 4 })
+      }
+    }
   }
 
   @Builder
@@ -737,16 +839,34 @@ struct NovelWorkspacePage {
   @Builder
   novelTimelineActiveTail(): void {
     if (this.activeRunId.length > 0) {
-      ListItem() {
-        AgentMessageRow({
-          message: this.activeRunUi(),
-          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
-          hostHeader: (): void => { this.activeRunHeader(); },
-          hostFooter: (): void => { this.emptyAgentRowSlot(); },
-          // C1 保持真实语义：当前 adapter 是 one-shot；C2 资格通过后才标记 live streaming。
-          streaming: false,
-          isLastAssistant: true,
-        })
+      if (this.activeMessages.length > 0) {
+        ForEach(this.activeMessages, (message: UIMessage, index: number): void => {
+          ListItem() {
+            AgentMessageRow({
+              message,
+              capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+              hostHeader: (): void => { this.activeRunHeader(index === 0); },
+              hostFooter: (): void => { this.emptyAgentRowSlot(); },
+              streaming: true,
+              textDeltasLive: this.activeTextDeltasLive,
+              isLastAssistant: index === this.activeMessages.length - 1,
+              onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
+            })
+          }
+        }, (message: UIMessage): string => message.id)
+      } else {
+        ListItem() {
+          AgentMessageRow({
+            message: this.activeStatusUi(),
+            capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+            hostHeader: (): void => { this.activeRunHeader(); },
+            hostFooter: (): void => { this.emptyAgentRowSlot(); },
+            streaming: true,
+            textDeltasLive: false,
+            isLastAssistant: true,
+            onTextGrow: (): void => { this.followNovelStreamingUpdate(); },
+          })
+        }
       }
     }
   }
@@ -787,7 +907,36 @@ struct NovelWorkspacePage {
         rows: (): void => { this.novelTimelineRows(); },
         activeTail: (): void => { this.novelTimelineActiveTail(); },
         hostTail: (): void => { this.emptyTimelineSlot(); },
+        onTimelineAppear: (): void => {
+          if (this.initialScrollArmed) {
+            this.initialScrollArmed = false;
+            this.scheduleNovelScrollToBottom();
+          }
+        },
+        onVisibleRangeChange: (_start: number, _end: number): void => {
+          if (this.initialScrollArmed) {
+            this.initialScrollArmed = false;
+            this.scheduleNovelScrollToBottom();
+          }
+        },
+        onTimelineTouch: (event: TouchEvent): void => {
+          if (event.type === TouchType.Down) this.userTouchActive = true;
+          if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+            this.userTouchActive = false;
+            this.reconcileNovelUserScroll();
+          }
+        },
+        onTimelineScroll: (_offset: number, state: ScrollState): void => {
+          if (this.userTouchActive &&
+            (state === ScrollState.Scroll || state === ScrollState.Fling)) {
+            this.reconcileNovelUserScroll();
+          }
+        },
+        onTimelineScrollStop: (): void => { this.reconcileNovelUserScroll(); },
       })
+      .overlay(this.novelJumpButton(), { align: Alignment.BottomEnd })
+      .layoutWeight(1)
+      .clip(true)
 
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg).fontSize(12).fontColor('#E53935').padding({ left: 16, right: 16, bottom: 6 })
@@ -820,9 +969,29 @@ struct NovelWorkspacePage {
         bottom: 12 + Math.max(this.navBarHeight, 24) })
       .border({ width: { top: 0.5 }, color: { top: LINE } })
     }
+    .layoutWeight(1)
+    .width('100%')
     }
     .layoutWeight(1)
     .width('100%')
+  }
+
+  @Builder
+  private novelJumpButton(): void {
+    if (this.jumpButtonVisible) {
+      Stack() {
+        Icon({ name: 'arrow_down_to_line', iconSize: 20, color: INK })
+      }
+      .width(44)
+      .height(44)
+      .margin({ right: 16, bottom: 12 })
+      .backgroundColor(SURFACE2)
+      .borderRadius(22)
+      .border({ width: 1, color: LINE })
+      .alignContent(Alignment.Center)
+      .onClick((): void => { this.jumpNovelToBottom(); })
+      .accessibilityText('回到消息底部')
+    }
   }
 
   composerPlaceholder(): string {
