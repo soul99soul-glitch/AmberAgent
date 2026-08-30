@@ -107,8 +107,6 @@ export default class EntryAbility extends UIAbility {
     try {
       const win: window.Window = windowStage.getMainWindowSync();
       themeWindow = win;
-      // 字体走 UIContext 注册(全局 font.registerFont 本机实测不生效,见 design/fonts.ets)
-      registerAmberFontsFor(win.getUIContext().getFont());
       // 先读 avoid area(全屏前), 再全屏; 全屏后 TYPE_SYSTEM 可能返回 0
       const avoidBefore: window.AvoidArea = win.getWindowAvoidArea(window.AvoidAreaType.TYPE_SYSTEM);
       win.setWindowLayoutFullScreen(true);
@@ -130,6 +128,13 @@ export default class EntryAbility extends UIAbility {
       hilog.info(DOMAIN, TAG, 'statusBar px=%{public}d density=%{public}f vp=%{public}d', topPx, density, topVp);
       hilog.info(DOMAIN, TAG, 'navBar px=%{public}d vp=%{public}d', bottomPx, bottomVp);
       this.avoidAreaWindow = win;
+      // 字体走 UIContext 注册(全局 font.registerFont 本机实测不生效,见 design/fonts.ets);
+      // 独立 try:getUIContext 竞态抛异常时不得连累沉浸式设置
+      try {
+        registerAmberFontsFor(win.getUIContext().getFont());
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, 'uicontext font register failed: %{public}s', String(e));
+      }
       win.on('avoidAreaChange', (info: window.AvoidAreaOptions): void => {
         if (info.type === window.AvoidAreaType.TYPE_SYSTEM) {
           this.updateSystemAvoidArea(info.area, true);
@@ -148,6 +153,12 @@ export default class EntryAbility extends UIAbility {
           hilog.error(DOMAIN, TAG, 'loadContent failed: %{public}s', JSON.stringify(err));
         } else {
           hilog.info(DOMAIN, TAG, 'loadContent success');
+          // 竞态兜底:内容加载后 UIContext 必然就绪,再注册一次字体(幂等)
+          try {
+            registerAmberFontsFor(windowStage.getMainWindowSync().getUIContext().getFont());
+          } catch (e) {
+            hilog.warn(DOMAIN, TAG, 'post-load font register failed: %{public}s', String(e));
+          }
           // 通知授权申请(API 10+;窗口就绪后调用才弹窗;首次一次,之后静默)
           notificationManager.requestEnableNotification(this.context).catch((): void => {
             hilog.warn(DOMAIN, TAG, 'requestEnableNotification rejected');
