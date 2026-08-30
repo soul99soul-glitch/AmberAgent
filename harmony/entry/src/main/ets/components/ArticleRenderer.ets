@@ -95,6 +95,7 @@ export struct ArticleRenderer {
         content: this.output.summary,
         fontSize: this.scaledSize(16),
         fontColor: INK2,
+        lineHeightScale: 1.7,
       })
         .margin({ top: 12, bottom: 8 })
     }
@@ -190,7 +191,7 @@ export struct ArticleRenderer {
       Text(' ' + title).fontSize(this.scaledSize(BODY)).fontWeight(FontWeight.Medium).fontColor(INK2)
     }
     .width('100%')
-    .margin({ top: 20, bottom: 8 })
+    .margin({ top: 24, bottom: 10 })
   }
 
   @Builder
@@ -202,6 +203,7 @@ export struct ArticleRenderer {
         content: o.analysis.coreDispute,
         fontSize: this.scaledSize(BODY),
         fontColor: INK2,
+        lineHeightScale: 1.7,
       })
     }
     // 各方立场 — Perspective 卡片(holder accent + viewpoint)
@@ -218,6 +220,7 @@ export struct ArticleRenderer {
         content: o.analysis.implications,
         fontSize: this.scaledSize(BODY),
         fontColor: INK2,
+        lineHeightScale: 1.7,
       })
     }
     // 引述 — Quote 卡片(accent 左竖条 + 斜体)

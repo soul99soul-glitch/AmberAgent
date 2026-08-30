@@ -43,9 +43,9 @@ struct BoardHotItemRow {
           .fontColor(INK4)
           .width(28)
         Text(this.title)
-          .fontSize(BODY2)
+          .fontSize(TEXT_STYLES.body.size)
           .fontWeight(400)
-          .lineHeight(TEXT_STYLES.secondary.lineHeight)
+          .lineHeight(21)
           .fontFamily(TEXT_STYLES.secondary.family)
           .fontColor(INK2)
           .layoutWeight(1)
@@ -62,8 +62,7 @@ struct BoardHotItemRow {
         }
       }
       .width('100%')
-      .constraintSize({ minHeight: 64 })
-      .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .padding({ left: 16, right: 16, top: 11, bottom: 11 })
       .backgroundColor(this.pressed ? SURFACE2 : Color.Transparent)
       .onTouch((event: TouchEvent): void => {
         if (event.type === TouchType.Down) this.pressed = true;
@@ -172,9 +171,9 @@ struct BoardPage {
         Column() {
           // 标题宽度交给外层 Column 的 layoutWeight;此处禁 layoutWeight(竖向 Column 里会吃满剩余高)
           Text(tp.title)
-            .fontSize(isLead ? 18 : BODY2)
+            .fontSize(isLead ? 18 : TEXT_STYLES.body.size)
             .fontWeight(isLead ? 600 : FontWeight.Normal)
-            .lineHeight(isLead ? 25 : TEXT_STYLES.secondary.lineHeight)
+            .lineHeight(isLead ? 25 : 21)
             .fontFamily(TEXT_STYLES.secondary.family)
             .fontColor(isLead ? INK : INK2)
             .width('100%')
@@ -197,8 +196,8 @@ struct BoardPage {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-      .constraintSize({ minHeight: isLead ? 72 : 60 })
-      .padding({ left: 16, right: 16, top: isLead ? 14 : 12, bottom: isLead ? 14 : 12 })
+      .constraintSize({ minHeight: isLead ? 72 : 0 })
+      .padding({ left: 16, right: 16, top: isLead ? 14 : 11, bottom: isLead ? 14 : 11 })
       .onClick((): void => {
         // 生成入口:话题第一名来源的 url 兼 topicId/seedUrl
         const first: HotItem = {

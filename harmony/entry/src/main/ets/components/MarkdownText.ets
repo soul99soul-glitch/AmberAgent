@@ -110,6 +110,8 @@ export struct MarkdownText {
   @Prop @Watch('onContentChanged') content: string = '';
   @Prop fontSize: number = BODY;
   @Prop fontColor: string = INK;
+  // 阅读模式行高倍率(0 = 走契约档;长文场景传 1.7 左右)
+  @Prop lineHeightScale: number = 0;
   // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
   @Prop fillWidth: boolean = true;
   // P3:是否活动流式尾(仅最后文本块传 true)→ 启动逐字 reveal
@@ -529,7 +531,7 @@ export struct MarkdownText {
     .width(this.fillWidth ? '100%' : 'auto')
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
-    .lineHeight(lineHeightForSize(this.fontSize))
+    .lineHeight(this.effLineHeight(this.fontSize))
     .fontFamily(FONT_SANS)
     .margin({ top: 2, bottom: 4 })
   }
@@ -551,11 +553,17 @@ export struct MarkdownText {
     .width('100%')
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
-    .lineHeight(lineHeightForSize(this.fontSize))
+    .lineHeight(this.effLineHeight(this.fontSize))
     .fontFamily(FONT_SANS)
     .border({ width: { left: 3 }, color: LINE })
     .padding({ left: 10 })
     .margin({ top: 4, bottom: 4 })
+  }
+
+  // 有效行高:lineHeightScale > 0 时按倍率,否则契约档
+  private effLineHeight(size: number): number {
+    if (this.lineHeightScale > 0) return Math.round(size * this.lineHeightScale * 10) / 10;
+    return lineHeightForSize(size);
   }
 
   // 列表项嵌套深度(parser depths;每级缩进 12)
@@ -583,12 +591,13 @@ export struct MarkdownText {
           block.items,
           (itemInlines: InlineToken[], idx: number): void => {
             Row() {
+              // 标记与正文同 lineHeight 且顶对齐:多行条目圆点不再垂直漂移
               Text(block.ordered ? this.orderedLabel(block, idx) : '•')
                 .fontSize(this.fontSize)
                 .fontColor(this.fontColor)
                 .fontFamily(FONT_SANS)
+                .lineHeight(this.effLineHeight(this.fontSize))
                 .width(block.ordered ? 32 : 16)
-                .margin({ top: 2 })
               Text() {
                 ForEach(
                   itemInlines,
@@ -600,13 +609,14 @@ export struct MarkdownText {
               }
               .fontSize(this.fontSize)
               .fontColor(this.fontColor)
-              .lineHeight(lineHeightForSize(this.fontSize))
+              .lineHeight(this.effLineHeight(this.fontSize))
               .fontFamily(FONT_SANS)
               .layoutWeight(1)
             }
             .width('100%')
+            .alignItems(VerticalAlign.Top)
             .padding({ left: this.listDepthAt(block, idx) * 12 })
-            .margin({ bottom: 2 })
+            .margin({ bottom: 6 })
           },
           (itemInlines: InlineToken[], idx: number): string => `list-${idx}`,
         )
