@@ -127,7 +127,7 @@ export const executeToolsAndMerge = async (
     // 仅剩已置 pending(等用户)的工具 → 报告 pending,让 agent loop 以
     // pending_approval 退出而非空转重调模型
     const parked: boolean = getTools(lastMessage).some(
-      t => !isToolExecuted(t) && t.approvalState === 'pending');
+      t => !isToolExecuted(t) && t.approvalState.type === 'pending');
     return { messages, hasPendingApproval: parked, executedCount: 0, deniedCount: 0 };
   }
 
@@ -209,11 +209,11 @@ const markPendingApprovals = (
   decisions: Array<{ tool: UIMessagePartTool; decision: PermissionDecision }>,
 ): UIMessagePart[] => {
   return parts.map(p => {
-    if (p.kind !== 'tool') return p;
+    if (p.type !== 'tool') return p;
     // 恒等匹配:并行无 id 工具的 toolCallId 同为 '',按 id 会误标全部
     const dec = decisions.find(d => d.tool === p);
     if (dec && dec.decision.action === 'ask') {
-      return { ...p, approvalState: 'pending' as const };
+      return { ...p, approvalState: { type: 'pending' } };
     }
     return p;
   });
@@ -224,7 +224,7 @@ const mergeResultsIntoParts = (
   results: Array<{ part: UIMessagePartTool; toolCallId: string; output: UIMessagePartText[] }>,
 ): UIMessagePart[] => {
   return parts.map(p => {
-    if (p.kind !== 'tool') return p;
+    if (p.type !== 'tool') return p;
     const r = results.find(x => x.part === p);
     if (!r) return p;
     return { ...p, output: r.output };
@@ -234,8 +234,9 @@ const mergeResultsIntoParts = (
 // ===== Tool output 工厂(对应 Android 各种 status JSON) =====
 
 export const makeSuccessOutput = (payload: Record<string, unknown>): UIMessagePartText => ({
-  kind: 'text',
+  type: 'text',
   text: JSON.stringify({ status: 'ok', ...payload }),
+  metadata: null,
 });
 
 export const makeFailedOutput = (
@@ -243,16 +244,18 @@ export const makeFailedOutput = (
   trace: string[] = [],
   recoverable = false,
 ): UIMessagePartText => ({
-  kind: 'text',
+  type: 'text',
   text: JSON.stringify({ status: 'failed', message, recoverable, permission_trace: trace }),
+  metadata: null,
 });
 
 export const makeDeniedOutput = (
   reason: string,
   trace: string[] = [],
 ): UIMessagePartText => ({
-  kind: 'text',
+  type: 'text',
   text: JSON.stringify({ status: 'denied', message: `Tool execution denied. Reason: ${reason}`, permission_trace: trace }),
+  metadata: null,
 });
 
 // 解析 tool output,提取 status(给 supervisor loop 用)

@@ -25,6 +25,7 @@ export struct ChatMessageAskUserStep {
   @Prop part: UIMessagePartTool;
   @Prop answers: AnswerMap;
   @Prop multiAnswers: MultiAnswerMap;
+  @Prop interactive: boolean = true;
   onSubmit: (answers: AnswerMap, multiAnswers: MultiAnswerMap) => void = (): void => {};
   onAnswer: (questionId: string, value: string) => void = (): void => {};
   onToggleMulti: (questionId: string, option: string) => void = (): void => {};
@@ -55,36 +56,40 @@ export struct ChatMessageAskUserStep {
             if (q.options.length > 0) {
               Flex({ wrap: FlexWrap.Wrap }) {
                 ForEach(q.options, (opt: string) => {
-                  Row() {
-                    if (this.isOptionSelected(q, opt)) {
-                      Text('✓').fontSize(11).fontColor('#FFFFFF').margin({ right: 4 })
-                    }
-                    Text(opt)
-                      .fontSize(11)
-                      .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
-                      .fontWeight(this.isOptionSelected(q, opt) ? FontWeight.Medium : FontWeight.Normal)
+                  if (this.interactive) {
+                    Row() { this.OptionChipContent(q, opt); }
+                      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                      .margin({ right: 8, top: 6 })
+                      .borderRadius(999)
+                      .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
+                      .border({
+                        width: this.isOptionSelected(q, opt) ? 0 : 1,
+                        color: LINE,
+                      })
+                      .onClick((): void => {
+                        if (q.selectionType === 'multi') {
+                          this.onToggleMulti(q.id, opt);
+                        } else {
+                          this.onAnswer(q.id, opt);
+                        }
+                      })
+                  } else {
+                    Row() { this.OptionChipContent(q, opt); }
+                      .padding({ left: 14, right: 14, top: 8, bottom: 8 })
+                      .margin({ right: 8, top: 6 })
+                      .borderRadius(999)
+                      .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
+                      .border({
+                        width: this.isOptionSelected(q, opt) ? 0 : 1,
+                        color: LINE,
+                      })
                   }
-                  .padding({ left: 14, right: 14, top: 8, bottom: 8 })
-                  .margin({ right: 8, top: 6 })
-                  .borderRadius(999)
-                  .backgroundColor(this.isOptionSelected(q, opt) ? ACCENT : SURFACE2)
-                  .border({
-                    width: this.isOptionSelected(q, opt) ? 0 : 1,
-                    color: LINE,
-                  })
-                  .onClick((): void => {
-                    if (q.selectionType === 'multi') {
-                      this.onToggleMulti(q.id, opt);
-                    } else {
-                      this.onAnswer(q.id, opt);
-                    }
-                  })
                 }, (opt: string, oi: number): string => `opt-${qi}-${oi}`)
               }
               .width('100%')
             }
             // text 类型 → 自由文本框
-            if (q.selectionType !== 'single' && q.selectionType !== 'multi') {
+            if (this.interactive && q.selectionType !== 'single' && q.selectionType !== 'multi') {
               TextArea({ placeholder: '在此输入回答…', text: this.answerAt(q.id) })
                 .width('100%').height(64).fontSize(12).fontColor(INK)
                 .backgroundColor(SURFACE).borderRadius(10)
@@ -122,7 +127,7 @@ export struct ChatMessageAskUserStep {
       }, (q: AskUserQuestion, qi: number): string => `${qi}:${q.id}`)
 
       // pending → 操作行:清空 + 提交
-      if (this.part.approvalState.type === 'pending') {
+      if (this.part.approvalState.type === 'pending' && this.interactive) {
         Row() {
           Blank()
           if (hasAnyAskAnswer(this.answers, this.multiAnswers)) {
@@ -148,6 +153,17 @@ export struct ChatMessageAskUserStep {
       }
     }
     .width('100%')
+  }
+
+  @Builder
+  private OptionChipContent(q: AskUserQuestion, opt: string): void {
+    if (this.isOptionSelected(q, opt)) {
+      Text('✓').fontSize(11).fontColor('#FFFFFF').margin({ right: 4 })
+    }
+    Text(opt)
+      .fontSize(11)
+      .fontColor(this.isOptionSelected(q, opt) ? '#FFFFFF' : INK2)
+      .fontWeight(this.isOptionSelected(q, opt) ? FontWeight.Medium : FontWeight.Normal)
   }
 
   private heading(): string {

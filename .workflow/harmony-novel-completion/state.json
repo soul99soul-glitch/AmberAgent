@@ -10,8 +10,8 @@
   },
   "packets": [
     {"id":"C0","status":"complete"},
-    {"id":"C1","status":"in_progress"},
-    {"id":"C2","status":"pending"},
+    {"id":"C1","status":"complete"},
+    {"id":"C2","status":"in_progress"},
     {"id":"C3","status":"pending"},
     {"id":"C4","status":"pending"},
     {"id":"C5","status":"pending"},

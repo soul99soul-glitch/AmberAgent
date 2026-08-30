@@ -54,7 +54,7 @@ const mockRegistry = (hits: SearchHit[]): SearchProviderRegistry => ({
 
 const mockAi = (responseText: string): AiClient => ({
   generateText: async (): Promise<UIMessage[]> => [
-    makeAssistantMessage([{ kind: 'text', text: responseText }]),
+    makeAssistantMessage(responseText),
   ],
 });
 

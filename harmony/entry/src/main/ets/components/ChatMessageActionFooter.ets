@@ -29,12 +29,24 @@ export struct ChatMessageActionFooter {
   @Prop isLastAssistant: boolean = false;
   @Prop branchCount: number = 1;
   @Prop selectIndex: number = 0;
+  @Prop canCopy: boolean = true;
+  @Prop canFork: boolean = true;
+  @Prop canBranchSwitch: boolean = true;
+  @Prop canEdit: boolean = true;
+  @Prop canRegenerate: boolean = true;
+  @Prop canFavorite: boolean = true;
   onCopy: () => void = (): void => {};
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
   onFavorite: () => void = (): void => {};
   onSwitch: (index: number) => void = (_i: number): void => {};
+
+  private hasVisibleActions(): boolean {
+    return this.canCopy || this.canFork || (this.isUser && this.canEdit) ||
+      ((this.isLastAssistant || this.isUser) && this.canRegenerate) ||
+      (!this.isUser && this.canFavorite) || (this.canBranchSwitch && this.branchCount > 1);
+  }
 
   build(): void {
     if (this.mode === 'hidden') {
@@ -48,17 +60,24 @@ export struct ChatMessageActionFooter {
         })
 
         // 操作行(reserved 态不可见但占位)
-        if (this.mode === 'visible') {
+        if (this.mode === 'visible' && this.hasVisibleActions()) {
           Row() {
             // 分支切换器(assistant 且 branchCount > 1 时显示)
-            ChatMessageBranch({
-              branchCount: this.branchCount,
-              selectIndex: this.selectIndex,
-              onSwitch: (idx: number): void => { this.onSwitch(idx); },
-            })
+            if (this.canBranchSwitch) {
+              ChatMessageBranch({
+                branchCount: this.branchCount,
+                selectIndex: this.selectIndex,
+                onSwitch: (idx: number): void => { this.onSwitch(idx); },
+              })
+            }
             ChatMessageActions({
               isUser: this.isUser,
               isLastAssistant: this.isLastAssistant,
+              canCopy: this.canCopy,
+              canFork: this.canFork,
+              canEdit: this.canEdit,
+              canRegenerate: this.canRegenerate,
+              canFavorite: this.canFavorite,
               onCopy: (): void => this.onCopy(),
               onFork: (): void => this.onFork(),
               onEdit: (): void => this.onEdit(),
@@ -69,7 +88,7 @@ export struct ChatMessageActionFooter {
           .width('100%')
           // 用户消息操作行跟随气泡右对齐;助手消息保持左起
           .justifyContent(this.isUser ? FlexAlign.End : FlexAlign.Start)
-        } else if (this.mode === 'reserved') {
+        } else if (this.mode === 'reserved' && this.hasVisibleActions()) {
           // 占位高度与 visible 操作行一致(按钮 44 + 上下 padding 4×2),避免结束时跳变
           Row().height(52).width('100%')
         }

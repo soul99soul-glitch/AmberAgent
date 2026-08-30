@@ -24,6 +24,9 @@ export struct ChatMessageTools {
   onDeny: (toolCallId: string) => void = (): void => {};
   onOpenPreview: () => void = (): void => {};
   deniedLabel: string = '';
+  @Prop canApprove: boolean = true;
+  @Prop canDeny: boolean = true;
+  @Prop canOpenPreview: boolean = true;
   @State outputExpanded: boolean = false;
 
   // 状态判定(对齐 Android toolHasFailure)
@@ -100,7 +103,10 @@ export struct ChatMessageTools {
         toolName: this.part.toolName,
         title: this.toolTitle(),
         status: this.resolveStatus(),
-        showApproval: this.part.approvalState.type === 'pending',
+        showApproval: this.part.approvalState.type === 'pending' && (this.canApprove || this.canDeny),
+        canOpen: this.canOpenPreview,
+        canApprove: this.canApprove,
+        canDeny: this.canDeny,
         onApprove: (): void => { this.onApprove(this.part.toolCallId); },
         onDeny: (): void => { this.onDeny(this.part.toolCallId); },
         onCapsuleClick: (): void => { this.onOpenPreview(); },

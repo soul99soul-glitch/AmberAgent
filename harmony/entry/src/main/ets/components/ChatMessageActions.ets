@@ -12,6 +12,11 @@ export struct ChatMessageActions {
   @StorageProp('darkMode') darkMode: boolean = false;
   @Prop isUser: boolean = false;
   @Prop isLastAssistant: boolean = false;
+  @Prop canCopy: boolean = true;
+  @Prop canFork: boolean = true;
+  @Prop canEdit: boolean = true;
+  @Prop canRegenerate: boolean = true;
+  @Prop canFavorite: boolean = true;
   onFork: () => void = (): void => {};
   onEdit: () => void = (): void => {};
   onRegenerate: () => void = (): void => {};
@@ -21,30 +26,34 @@ export struct ChatMessageActions {
   build(): void {
     Row() {
       // copy:自绘双框线字形(SDK 无 outline 版 square_on_square,与其余细线图标统一)
-      Row() {
-        Stack() {
-          Column().width(9).height(11).borderRadius(2)
-            .border({ width: 1, color: INK3 })
-            .offset({ x: 2.5, y: -2.5 })
-          Column().width(9).height(11).borderRadius(2)
-            .border({ width: 1, color: INK3 })
-            .backgroundColor(BG)
-            .offset({ x: -2.5, y: 2.5 })
+      if (this.canCopy) {
+        Row() {
+          Stack() {
+            Column().width(9).height(11).borderRadius(2)
+              .border({ width: 1, color: INK3 })
+              .offset({ x: 2.5, y: -2.5 })
+            Column().width(9).height(11).borderRadius(2)
+              .border({ width: 1, color: INK3 })
+              .backgroundColor(BG)
+              .offset({ x: -2.5, y: 2.5 })
+          }
+          .width(17).height(17)
         }
-        .width(17).height(17)
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .margin({ right: 4 })
+          .accessibilityText('复制消息')
+          .onClick((): void => this.onCopy())
       }
-        .width(44).height(44)
-        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        .margin({ right: 4 })
-        .accessibilityText('复制消息')
-        .onClick((): void => this.onCopy())
-      Row() { Icon({ name: 'share', iconSize: 17, color: INK3 }) }
-        .width(44).height(44)
-        .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
-        .margin({ right: 4 })
-        .accessibilityText('创建消息分支')
-        .onClick((): void => this.onFork())
-      if (this.isUser) {
+      if (this.canFork) {
+        Row() { Icon({ name: 'share', iconSize: 17, color: INK3 }) }
+          .width(44).height(44)
+          .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
+          .margin({ right: 4 })
+          .accessibilityText('创建消息分支')
+          .onClick((): void => this.onFork())
+      }
+      if (this.isUser && this.canEdit) {
         Row() { Icon({ name: 'edit', iconSize: 17, color: INK3 }) }
           .width(44).height(44)
           .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
@@ -52,14 +61,14 @@ export struct ChatMessageActions {
           .accessibilityText('编辑消息')
           .onClick((): void => this.onEdit())
       }
-      if (this.isLastAssistant || this.isUser) {
+      if ((this.isLastAssistant || this.isUser) && this.canRegenerate) {
         Row() { Icon({ name: 'retry', iconSize: 17, color: INK3 }) }
           .width(44).height(44)
           .justifyContent(FlexAlign.Center).alignItems(VerticalAlign.Center)
           .accessibilityText('重新生成')
           .onClick((): void => this.onRegenerate())
       }
-      if (!this.isUser) {
+      if (!this.isUser && this.canFavorite) {
         // 收藏(真实 FavoriteStore 落盘)
         Row() { Icon({ name: 'star', iconSize: 17, color: INK3 }) }
           .width(44).height(44)

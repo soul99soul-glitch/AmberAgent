@@ -248,7 +248,7 @@ export const getDeepReadScheduler = (): Promise<DeepReadScheduler> => {
       let kinds: string = '';
       for (const m of out) {
         for (const p of m.parts) {
-          kinds += p.kind + ',';
+          kinds += p.type + ',';
         }
       }
       hilog.info(DOMAIN, TAG, 'collectRun done: msgs=%{public}d parts=[%{public}s]', out.length, kinds);

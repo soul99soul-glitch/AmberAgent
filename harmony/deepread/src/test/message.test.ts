@@ -1,23 +1,36 @@
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import {
-  makeUserMessage, makeAssistantMessage, makeSystemMessage,
+  makeUserMessage, makeAssistantMessage, makeSystemMessage, makeUIMessage,
   getTools, isToolExecuted, canToolResumeExecution, latestAssistantText,
-  UIMessagePartTool,
 } from '../main/ets/agent/message.ts';
+import type {
+  UIMessagePart, UIMessagePartText, UIMessagePartTool,
+} from '../main/ets/agent/message.ts';
+
+const textPart = (text: string): UIMessagePartText => ({ type: 'text', text, metadata: null });
+
+const toolPart = (
+  toolCallId: string,
+  toolName: string = 'x',
+  approvalState: UIMessagePartTool['approvalState'] = { type: 'auto' },
+  output: UIMessagePart[] = [],
+): UIMessagePartTool => ({
+  type: 'tool', toolCallId, toolName, input: '{}', output, approvalState, metadata: null,
+});
 
 test('makeUserMessage creates user role with single text part', () => {
   const m = makeUserMessage('hello');
   assert.equal(m.role, 'user');
   assert.equal(m.parts.length, 1);
-  assert.equal(m.parts[0].kind, 'text');
-  if (m.parts[0].kind === 'text') assert.equal(m.parts[0].text, 'hello');
+  assert.equal(m.parts[0].type, 'text');
+  if (m.parts[0].type === 'text') assert.equal(m.parts[0].text, 'hello');
 });
 
 test('makeAssistantMessage creates empty assistant', () => {
-  const m = makeAssistantMessage();
+  const m = makeAssistantMessage('');
   assert.equal(m.role, 'assistant');
-  assert.deepEqual(m.parts, []);
+  assert.deepEqual(m.parts, [textPart('')]);
 });
 
 test('makeSystemMessage creates system role', () => {
@@ -32,11 +45,11 @@ test('each message has unique id', () => {
 });
 
 test('getTools extracts only tool parts', () => {
-  const m = makeAssistantMessage([
-    { kind: 'text', text: 'thinking...' },
-    { kind: 'tool', toolCallId: 'c1', toolName: 'search', input: '{}', output: [], approvalState: 'auto' },
-    { kind: 'text', text: 'more' },
-    { kind: 'tool', toolCallId: 'c2', toolName: 'write', input: '{}', output: [], approvalState: 'auto' },
+  const m = makeUIMessage('assistant', [
+    textPart('thinking...'),
+    toolPart('c1', 'search'),
+    textPart('more'),
+    toolPart('c2', 'write'),
   ]);
   const tools = getTools(m);
   assert.equal(tools.length, 2);
@@ -45,56 +58,43 @@ test('getTools extracts only tool parts', () => {
 });
 
 test('isToolExecuted false when output empty', () => {
-  const t: UIMessagePartTool = {
-    kind: 'tool', toolCallId: 'c1', toolName: 'x', input: '{}', output: [], approvalState: 'auto',
-  };
+  const t = toolPart('c1');
   assert.equal(isToolExecuted(t), false);
 });
 
 test('isToolExecuted true when output non-empty', () => {
-  const t: UIMessagePartTool = {
-    kind: 'tool', toolCallId: 'c1', toolName: 'x', input: '{}',
-    output: [{ kind: 'text', text: 'result' }],
-    approvalState: 'auto',
-  };
+  const t = toolPart('c1', 'x', { type: 'auto' }, [textPart('result')]);
   assert.equal(isToolExecuted(t), true);
 });
 
 test('canToolResumeExecution: approved + not executed = true', () => {
-  const t: UIMessagePartTool = {
-    kind: 'tool', toolCallId: 'c1', toolName: 'x', input: '{}', output: [], approvalState: 'approved',
-  };
+  const t = toolPart('c1', 'x', { type: 'approved' });
   assert.equal(canToolResumeExecution(t), true);
 });
 
 test('canToolResumeExecution: executed = false even if approved', () => {
-  const t: UIMessagePartTool = {
-    kind: 'tool', toolCallId: 'c1', toolName: 'x', input: '{}',
-    output: [{ kind: 'text', text: 'done' }],
-    approvalState: 'approved',
-  };
+  const t = toolPart('c1', 'x', { type: 'approved' }, [textPart('done')]);
   assert.equal(canToolResumeExecution(t), false);
 });
 
 test('canToolResumeExecution: pending = false (awaiting user)', () => {
-  const t: UIMessagePartTool = {
-    kind: 'tool', toolCallId: 'c1', toolName: 'x', input: '{}', output: [], approvalState: 'pending',
-  };
+  const t = toolPart('c1', 'x', { type: 'pending' });
   assert.equal(canToolResumeExecution(t), false);
 });
 
 test('latestAssistantText returns concatenated text of last assistant message', () => {
   const msgs = [
     makeUserMessage('q1'),
-    makeAssistantMessage([
-      { kind: 'text', text: 'first ' },
-      { kind: 'reasoning', reasoning: 'internal', createdAt: 0, finishedAt: null },
-      { kind: 'text', text: 'answer' },
+    makeUIMessage('assistant', [
+      textPart('first '),
+      {
+        type: 'reasoning', reasoning: 'internal',
+        createdAt: '1970-01-01T00:00:00.000Z', finishedAt: null, metadata: null,
+      },
+      textPart('answer'),
     ]),
     makeUserMessage('q2'),
-    makeAssistantMessage([
-      { kind: 'text', text: 'second answer' },
-    ]),
+    makeUIMessage('assistant', [textPart('second answer')]),
   ];
   assert.equal(latestAssistantText(msgs), 'second answer');
 });
@@ -105,13 +105,13 @@ test('latestAssistantText returns empty string when no assistant message', () =>
 });
 
 test('JSON round-trip preserves discriminated union', () => {
-  const m = makeAssistantMessage([
-    { kind: 'text', text: 'a' },
-    { kind: 'tool', toolCallId: 'c1', toolName: 'search', input: '{"q":"x"}', output: [], approvalState: 'auto' },
-    { kind: 'image', url: 'https://x.com/y.png' },
+  const m = makeUIMessage('assistant', [
+    textPart('a'),
+    { ...toolPart('c1', 'search'), input: '{"q":"x"}' },
+    { type: 'image', url: 'https://x.com/y.png', metadata: null },
   ]);
   const round = JSON.parse(JSON.stringify(m));
-  assert.equal(round.parts[0].kind, 'text');
-  assert.equal(round.parts[1].kind, 'tool');
-  assert.equal(round.parts[2].kind, 'image');
+  assert.equal(round.parts[0].type, 'text');
+  assert.equal(round.parts[1].type, 'tool');
+  assert.equal(round.parts[2].type, 'image');
 });

@@ -22,12 +22,12 @@ import { systemShare } from '@kit.ShareKit';
 import { uniformTypeDescriptor as utd } from '@kit.ArkData';
 import type {
   Conversation, MessageNode, UIMessage, UIMessagePart, UIMessagePartText, Assistant, TransformerContext,
-  PendingUserMessage, PendingUserMessageMode, DequeueNextResult, UIMessagePartReasoning, ReasoningCardState,
+  PendingUserMessage, PendingUserMessageMode, DequeueNextResult,
   CompactPolicy, CompactResult, PreparedContext, DisplaySetting, MessageSearchHit,
   UIMessagePartTool, ToolLoopOptions, IdleToolBlockerResult, ChatToolDefinition,
   TextGenerationParams, ChatStreamProvider, ToolApprovalVerdict, ChatTurnDeps,
   ToolRegistry, DeepReadOpenEvent, MessageTransformer, AgentTool, LocalToolOption,
-  MessageChunk, OpenAIChatApi, AskUserQuestion, AskedAnswers, ConversationCompact,
+  MessageChunk, OpenAIChatApi, AskedAnswers, ConversationCompact,
   ImageGuardSettings, VisionModelHealth, VisionProbeDeps, ProviderModel, ProviderSetting,
   AgentToolActivityStore, SandboxActivityUiState, McpToolActivityPort, JsonValue,
 } from '@amber/chat-domain';
@@ -46,7 +46,6 @@ import {
   cancelPendingUserMessage, preparePendingMessageForDispatch, pendingPreviewText,
   convertSteerToFollowup, runAppendUserMessage,
   persistPendingQueue, persistPendingQueueWithEvent, loadPendingQueue, recordPendingQueueEvent,
-  reasoningCardStateExpanded, onReasoningExpandedChange,
   makeCompactPolicy, prepareContext, invalidateCompacts, estimateContextWindow,
   copyValidCompactsToConversation, ContextCompactionFailedError,
   conversationWithMessagesAsNodes,
@@ -59,8 +58,6 @@ import {
   parseDeepReadSlashCommand,
   applyToolApprovalToConversation, conversationHasPendingTools,
   conversationHasPendingOrUnexecutedTools, resolveIdleToolBlocker,
-  parseAskUserQuestions, buildAskUserAnswerPayload,
-  ASK_USER_TOOL_NAME,
   estimateConversationInputTokens, formatNumberInt, formatContextTokens,
   loadSearchPrefs, SearchSettings, createSearchTools,
   createTimeReminderTransformer, javaLocalDateTimeString, dayOfWeekFullName,
@@ -81,7 +78,6 @@ import {
   defaultReasoningLevelForModel, reasoningLevelsForModel,
   deriveSandboxActivities, mergeSandboxTimeline, idleSandboxActivity,
   withStepProgress, isActiveOperation,
-  groupMessageParts,
   buildTopModelMenuGroups,
   loadProviders, loadDisplaySetting, isCloseEnoughToBottom, FOLLOW_BOTTOM_TOLERANCE_VP,
   createMiniAppPromptTransformer, createMiniAppOutputTransformer,
@@ -90,10 +86,7 @@ import {
 import type {
   MiniAppSetting, MiniAppRecord, MiniAppRepository,
 } from '@amber/chat-domain';
-import type {
-  ThinkingStep, MessagePartBlock,
-  TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel,
-} from '@amber/chat-domain';
+import type { TopModelMenuGroup, ReasoningLevelOption, ReasoningLevel } from '@amber/chat-domain';
 import {
   getChatRepository, getChatAssistants, resolveChatRuntime, describeChatModel, ChatRuntime,
   getChatKvStore, getCompactStore, getSessionGrantStore,
@@ -131,24 +124,18 @@ import {
 import { compressImageAsDataUrl } from '../platform_impl/ImageCompress.ets';
 import type { TokenUsage } from '@amber/chat-domain';
 import { EntryAbortController } from '../platform_impl/EntryAbortController.ets';
-import { MarkdownText } from '../components/MarkdownText.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { DotText, DotGround } from '../components/ui/DotMatrix.ets';
-import { DotLoading } from '../components/ui/DotLoading.ets';
 import { addFavorite } from '../platform_impl/FavoriteStore.ets';
 import { notifyGenerationDone } from '../platform_impl/NotificationNotifier.ets';
 import { WebMountHost, getWebMountSession } from '../platform_impl/WebMountSession.ets';
 import { createWebMountTools } from '../platform_impl/WebMountTools.ets';
-import { ChatMessageReasoning } from '../components/ChatMessageReasoning.ets';
-import { ChatMessageTools } from '../components/ChatMessageTools.ets';
-import { ChatMessageAskUserStep } from '../components/ChatMessageAskUserStep.ets';
 import { ChatInput } from '../components/ChatInput.ets';
 import type { QuickMessage } from '../components/SlashCommandPanel.ets';
 import { ContextBarsIndicator } from '../components/ChatInputUsage.ets';
-import { ChatMessageAvatar } from '../components/ChatMessageAvatar.ets';
-import { ChatMessageSubAgentStep } from '../components/ChatMessageSubAgentStep.ets';
-import { ChatMessageCouncilStep } from '../components/ChatMessageCouncilStep.ets';
-import { ChatMessageActionFooter, resolveActionFooterMode } from '../components/ChatMessageActionFooter.ets';
+import { AgentMessageRow } from '../components/AgentMessageRow.ets';
+import type { AgentMessageRowHostCapabilities } from '../components/AgentMessageRow.ets';
+import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
 import { SubAgentRunSheet } from '../components/SubAgentRunSheet.ets';
 import { ChatMessageCopySheet } from '../components/ChatMessageCopySheet.ets';
 import { ChatMessageToolPreviewSheet } from '../components/ChatMessageToolPreviewSheet.ets';
@@ -156,7 +143,6 @@ import { ChatMessageActionsSheet } from '../components/ChatMessageActionsSheet.e
 import { ChatDrawer } from '../components/ChatDrawer.ets';
 import { ChatListGrouped } from '../components/ChatListGrouped.ets';
 import { TopModelMenu } from '../components/TopModelMenu.ets';
-import { ContentAttachmentChip, urlBasename } from '../components/ContentAttachmentChip.ets';
 import { createEntryClipboardPort, sha256HexUtf8 } from '../platform_impl/EntryLocalToolPorts.ets';
 import { ensureSearchSdk } from '../platform_impl/SearchSdkInit.ets';
 import { createEntryOcrTransformer, findModelByIdInProviders, findProviderOfModel, generateVisionText, loadOcrSeed, OcrSeed } from '../platform_impl/OcrSupport.ets';
@@ -173,10 +159,27 @@ import {
 } from '../platform_impl/MemoryStore.ets';
 import { getMiniAppPlatform, getMiniAppRepositorySync } from '../platform_impl/MiniAppPlatform.ets';
 import type { MiniAppPlatform } from '../platform_impl/MiniAppPlatform.ets';
-import { MiniAppChatCard } from '../components/MiniAppChatCard.ets';
 
 // D-122:沙盒 sheet 代码块底色(设置面 ROW 惯例同值)
 const ROW: string = SURFACE2;
+
+const CHAT_MESSAGE_ROW_CAPABILITIES: AgentMessageRowHostCapabilities = {
+  copy: true,
+  fork: true,
+  branchSwitch: true,
+  edit: true,
+  regenerate: true,
+  favorite: true,
+  openActions: true,
+  approveTool: true,
+  denyTool: true,
+  answerTool: true,
+  openToolPreview: true,
+  openSubAgentRun: true,
+  runMiniApp: true,
+  modifyMiniApp: true,
+  openMiniAppList: true,
+};
 
 // accent rgba 混色(建议 chips 描边等;与 tokens 令牌 #RRGGBB 配合)
 const accentAlpha = (hex: string, alpha: number): string => {
@@ -285,451 +288,6 @@ const buildRowsFromNodes = (nodes: MessageNode[]): MsgRow[] => {
   return rows;
 };
 
-@Component
-struct MessageRow {
-  @StorageProp('darkMode') darkMode: boolean = false;
-  @Prop message: UIMessage;
-  @Prop branchCount: number = 1;
-  @Prop selectIndex: number = 0;
-  @Prop isLastAssistant: boolean = false;
-  // D-053:本行是否属于活动流式尾部(reasoning loading 判定;
-  //   Android messageLoading 语义,流式尾/regen 预览传 true)
-  @Prop @Watch('onStreamingChange') streaming: boolean = false;
-  @Prop autoCloseThinking: boolean = true;
-  // 同一 message id 可同时出现在已提交行与工具续跑预览中；预览使用独立键命名空间。
-  @Prop streamKeyTag: string = '';
-  onSwitch: (idx: number) => void = (_idx: number): void => {};
-  onRegenerate: () => void = (): void => {};
-  onDelete: () => void = (): void => {};
-  onEdit: () => void = (): void => {};
-  onOpenActions: () => void = (): void => {};
-  onFork: () => void = (): void => {};
-  // D-057:工具审批回调(toolCallId 定位,ChatService.handleToolApproval)
-  onApproveTool: (toolCallId: string) => void = (_id: string): void => {};
-  onDenyTool: (toolCallId: string) => void = (_id: string): void => {};
-  // D-105:ask_user 应答回调(ChatMessageAskUserStep.kt onToolAnswer)
-  onAnswerTool: (toolCallId: string, answer: string) => void = (_id: string, _a: string): void => {};
-  onOpenSubAgentRun: (runId: string, tools: UIMessagePartTool[]) => void = (_id: string, _t: UIMessagePartTool[]): void => {};
-  onCopy: () => void = (): void => {};
-  onFavorite: (text: string) => void = (_t: string): void => {};
-  onOpenToolPreview: (part: UIMessagePartTool) => void = (_p: UIMessagePartTool): void => {};
-  // P3:可见文本增长回调(逐字 reveal / 终态 drain 推进时触发;冒泡到 ChatPage
-  //   复用既有 followStreamingUpdate,不新建第二套滚动状态机)
-  onTextGrow: () => void = (): void => {};
-  // MiniApp:卡片回调冒泡(onRun 进 Runner;onModify 组装修订 prompt 回填输入框;
-  //   onOpenList 进列表页 — 均在 ChatPage 层实现,MessageRow 仅透传)
-  onRunMiniApp: (appId: string) => void = (_appId: string): void => {};
-  onModifyMiniApp: (prompt: string) => void = (_prompt: string): void => {};
-  onOpenMiniAppList: () => void = (): void => {};
-  // D-053:reasoning 卡片态(part 下标 → 用户显式选择;未选走默认迁移)
-  @State reasoningStates: Record<string, string> = {};
-  @State thinkingExpandedStates: Record<string, boolean> = {};
-  // D-105:ask_user 草稿态(题 id → 文本/单选值;:102;题 id → 多选集;:104)
-  @State askAnswers: Record<string, string> = {};
-  @State askMultiAnswers: Record<string, string[]> = {};
-  // D-053:本会话内见过流式(Android sawStreamingMessage:123 —
-  //   流式结束后保持 Preview 不自动折叠)
-  @State sawStream: boolean = false;
-  // 1:1 原型 fadeRise .26s ease-out:行入场 opacity 0→1 + translateY 4→0
-  @State enterOpacity: number = 0;
-  @State enterY: number = 4;
-
-  aboutToAppear(): void {
-    if (this.streaming) this.sawStream = true;
-  }
-
-  private onStreamingChange(_propName: string): void {
-    if (this.streaming) this.sawStream = true;
-  }
-
-  // loading = messageLoading && finishedAt == null(ChatMessageReasoning.kt:107)
-  private reasoningLoading(p: UIMessagePartReasoning): boolean {
-    return this.streaming && p.finishedAt === null;
-  }
-
-  // 纯文本:text part 拼接 + 去 **/`(收藏等用途)
-  private plainText(): string {
-    let s: string = '';
-    for (const p of this.message.parts) {
-      if (p.type === 'text') s += p.text;
-    }
-    return s.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1');
-  }
-
-  // :952-960 已拒绝展示:'已拒绝' + 非空白 reason → ': reason'(红色;
-  //   chat_message_tool_denied zh 逐字,冒号为 ASCII ': ')
-  private deniedLabel(t: UIMessagePartTool): string {
-    if (t.approvalState.type !== 'denied') return '';
-    const reason: string = t.approvalState.reason;
-    return reason.trim().length > 0 ? `已拒绝: ${reason}` : '已拒绝';
-  }
-
-  // ===== D-105:ask_user 问题卡片(ChatMessageAskUserStep.kt 子集) =====
-  // :87-99 解析(渲染期重算,题量小;解析失败 → [])
-  private askQuestionsOf(t: UIMessagePartTool): AskUserQuestion[] {
-    return parseAskUserQuestions(t.input);
-  }
-
-  // :174 单选/文本选项 chip 点选
-  private setAskAnswer(qid: string, value: string): void {
-    const copy: Record<string, string> = {};
-    const keys: string[] = Object.keys(this.askAnswers);
-    for (const k of keys) {
-      copy[k] = this.askAnswers[k];
-    }
-    copy[qid] = value;
-    this.askAnswers = copy;
-  }
-
-  // :191-196 多选 chip 切换(Set 增删语义)
-  private toggleAskMulti(qid: string, option: string): void {
-    const copy: Record<string, string[]> = {};
-    const keys: string[] = Object.keys(this.askMultiAnswers);
-    for (const k of keys) {
-      copy[k] = this.askMultiAnswers[k].slice();
-    }
-    const cur: string[] = copy[qid] !== undefined ? copy[qid] : [];
-    const idx: number = cur.indexOf(option);
-    if (idx >= 0) {
-      cur.splice(idx, 1);
-    } else {
-      cur.push(option);
-    }
-    copy[qid] = cur;
-    this.askMultiAnswers = copy;
-  }
-
-  // :307-309 清空
-  private clearAskDrafts(): void {
-    this.askAnswers = {};
-    this.askMultiAnswers = {};
-  }
-
-  // :330-347 提交(载荷逐字;使能判定 :348-353 由按钮侧调 isAskUserSubmittable)
-  private submitAskAnswers(t: UIMessagePartTool): void {
-    const qs: AskUserQuestion[] = this.askQuestionsOf(t);
-    this.onAnswerTool(t.toolCallId,
-      buildAskUserAnswerPayload(qs, this.askAnswers, this.askMultiAnswers));
-  }
-
-  // 初始 Collapsed(:88);流式开始 → Preview(:125-126,showThinkingContent
-  //   设置项鸿蒙未接,Android 默认 true);流式过 → 保持 Preview(:129-133)
-  //   idx 为字符串 key(block-step 复合索引,避免数字碰撞)
-  private reasoningStateAt(idx: string): ReasoningCardState {
-    const s: string | undefined = this.reasoningStates[idx];
-    if (s === 'collapsed' || s === 'preview' || s === 'expanded') {
-      return s as ReasoningCardState;
-    }
-    return (this.streaming || this.sawStream) ? 'preview' : 'collapsed';
-  }
-
-  private toggleReasoning(idx: string, loading: boolean): void {
-    const cur: ReasoningCardState = this.reasoningStateAt(idx);
-    const next: ReasoningCardState =
-      onReasoningExpandedChange(!reasoningCardStateExpanded(cur), loading);
-    const copy: Record<string, string> = {};
-    const keys: string[] = Object.keys(this.reasoningStates);
-    for (const k of keys) {
-      copy[k] = this.reasoningStates[k];
-    }
-    copy[idx] = next;
-    this.reasoningStates = copy;
-  }
-
-  private autoCollapseReasoning(idx: string): void {
-    if (this.streaming || this.reasoningStateAt(idx) !== 'expanded') return;
-    const copy: Record<string, string> = {};
-    const keys: string[] = Object.keys(this.reasoningStates);
-    for (const k of keys) copy[k] = this.reasoningStates[k];
-    copy[idx] = 'preview';
-    this.reasoningStates = copy;
-  }
-
-  // groupMessageParts 分组结果(每次 build 重算,题量小)
-  private getBlocks(): MessagePartBlock[] {
-    return groupMessageParts(this.message.parts);
-  }
-
-  private isLastTextBlock(blocks: MessagePartBlock[], index: number): boolean {
-    for (let i: number = blocks.length - 1; i >= 0; i--) {
-      // ArkTS 不通过下标访问收窄判别联合 → 先取局部 const
-      const block: MessagePartBlock = blocks[i];
-      if (block.kind === 'content' && block.part.type === 'text') {
-        return i === index;
-      }
-    }
-    return false;
-  }
-
-  // ThinkingBlock 组级折叠(ChainOfThought 语义)
-  private thinkingExpanded(bi: number): boolean {
-    const v: boolean | undefined = this.thinkingExpandedStates[`${bi}`];
-    return v !== undefined ? v : true; // 默认展开
-  }
-
-  private toggleThinkingExpanded(bi: number): void {
-    // 含 pending 审批 tool 的 block 不允许折叠(用户需要看到审批按钮)
-    if (this.hasPendingToolInBlock(bi)) return;
-    const key: string = `${bi}`;
-    const cur: boolean = this.thinkingExpanded(bi);
-    const copy: Record<string, boolean> = {};
-    const keys: string[] = Object.keys(this.thinkingExpandedStates);
-    for (const k of keys) {
-      copy[k] = this.thinkingExpandedStates[k];
-    }
-    copy[key] = !cur;
-    this.thinkingExpandedStates = copy;
-  }
-
-  // 检查指定 block 是否含 pending 审批 tool(禁止折叠)
-  private hasPendingToolInBlock(bi: number): boolean {
-    const blocks: MessagePartBlock[] = this.getBlocks();
-    if (bi >= blocks.length) return false;
-    const block: MessagePartBlock = blocks[bi];
-    if (block.kind !== 'thinking') return false;
-    // ArkTS 联合 narrowing 后需显式访问
-    const steps: ThinkingStep[] = (block as Record<string, Object>)['steps'] as ThinkingStep[];
-    for (const step of steps) {
-      if (step.kind === 'tool' && step.tool.approvalState.type === 'pending') return true;
-    }
-    return false;
-  }
-
-  private thinkingSummary(steps: ThinkingStep[]): string {
-    let reasoningCount: number = 0;
-    let toolCount: number = 0;
-    for (const step of steps) {
-      if (step.kind === 'reasoning') reasoningCount++;
-      else if (step.kind === 'tool') toolCount++;
-    }
-    if (reasoningCount > 0 && toolCount > 0) return `思考 ${reasoningCount} 段 · 工具 ${toolCount} 次`;
-    if (reasoningCount > 0) return `思考 ${reasoningCount} 段`;
-    if (toolCount > 0) return `工具 ${toolCount} 次`;
-    return '思考过程';
-  }
-
-  build() {
-    Column() {
-      // 1:1 原型抬头:assistant=amber 标签(+流式光标),user=无
-      ChatMessageAvatar({ message: this.message, streaming: this.streaming })
-      // 阶段 A 接入:用 groupMessageParts 分组渲染,而非直接遍历 parts。
-      //   ThinkingBlock → 连续 reasoning+tool 折叠为一组;
-      //   ContentBlock → text/image/video/audio/document/mini_app;
-      //   SubAgentBlock/CouncilBlock → 真实卡片(ChatMessageSubAgentStep/
-      //   ChatMessageCouncilStep + SubAgentRunSheet 流式详情)。
-      //   reasoning 状态索引仍用原始 part index(通过 ContentBlock.index 或
-      //   ThinkingBlock 内 step 遍历时累加获得)。
-      Column() {
-      ForEach(this.getBlocks(), (block: MessagePartBlock, bi: number): void => {
-        if (block.kind === 'thinking') {
-          // 组级折叠头部(ChainOfThought 语义:摘要+步骤数)
-          Row() {
-            Text(this.thinkingExpanded(bi) ? '▾' : '▸').fontSize(11).fontColor(INK3)
-            Text(this.thinkingSummary(block.steps))
-              .fontSize(META).fontColor(INK3)
-              .margin({ left: 6 })
-              .layoutWeight(1)
-          }
-          .width('100%')
-          .padding({ left: 8, right: 8, top: 4, bottom: 4 })
-          .backgroundColor(SURFACE2)
-          .borderRadius(6)
-          .margin({ bottom: 2 })
-          .onClick((): void => { this.toggleThinkingExpanded(bi); })
-
-          if (this.thinkingExpanded(bi)) {
-            ForEach(block.steps, (step: ThinkingStep, si: number): void => {
-            if (step.kind === 'reasoning') {
-              ChatMessageReasoning({
-                part: step.reasoning,
-                state: this.reasoningStateAt(`${bi}-${si}`),
-                loading: this.reasoningLoading(step.reasoning),
-                autoCloseThinking: this.autoCloseThinking,
-                onToggle: (): void => {
-                  this.toggleReasoning(`${bi}-${si}`, this.reasoningLoading(step.reasoning));
-                },
-                onAutoCollapse: (): void => {
-                  this.autoCollapseReasoning(`${bi}-${si}`);
-                },
-              })
-            } else if (step.kind === 'tool') {
-              if (step.tool.toolName === ASK_USER_TOOL_NAME) {
-                ChatMessageAskUserStep({
-                  part: step.tool,
-                  answers: this.askAnswers,
-                  multiAnswers: this.askMultiAnswers,
-                  onSubmit: (_a: Record<string, string>, _m: Record<string, string[]>): void => {
-                    this.submitAskAnswers(step.tool);
-                  },
-                  onAnswer: (qid: string, value: string): void => {
-                    this.setAskAnswer(qid, value);
-                  },
-                  onToggleMulti: (qid: string, opt: string): void => {
-                    this.toggleAskMulti(qid, opt);
-                  },
-                  onClear: (): void => {
-                    this.clearAskDrafts();
-                  },
-                })
-              } else {
-                ChatMessageTools({
-                  part: step.tool,
-                  onApprove: (toolCallId: string): void => {
-                    this.onApproveTool(toolCallId);
-                  },
-                  onDeny: (toolCallId: string): void => {
-                    this.onDenyTool(toolCallId);
-                  },
-                  onOpenPreview: (): void => {
-                    this.onOpenToolPreview(step.tool);
-                  },
-                  deniedLabel: step.tool.approvalState.type === 'denied'
-                    ? this.deniedLabel(step.tool) : '',
-                })
-              }
-            }
-          }, (step: ThinkingStep, si: number): string => `${bi}-${si}-${step.kind}`)
-          }
-        } else if (block.kind === 'content') {
-          if (block.part.type === 'text') {
-            if (this.message.role === 'user') {
-              // 1:1 原型 UserBubble:INK 底/USER_INK 字/radius 16-16-5-16/padding 11-15
-              // P3:user 内容恒 settled(streaming=false)→ 即时渲染,精确缓存兜底
-              Column() {
-                MarkdownText({
-                  content: block.part.text,
-                  fontSize: 15,
-                  fontColor: USER_INK,
-                  fillWidth: false,
-                  streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
-                })
-              }
-              .alignItems(HorizontalAlign.Start)
-              .padding({ left: 15, right: 15, top: 11, bottom: 11 })
-              .backgroundColor(USER_BG)
-              .borderRadius({ topLeft: 16, topRight: 16, bottomRight: 5, bottomLeft: 16 })
-              .constraintSize({ maxWidth: '82%' })
-              .margin({ bottom: 4 })
-            } else {
-              // 1:1 原型 AgentTurn:无卡片,正文直接落在 BG 上(15/1.66/ink)
-  // P3:活动流式尾消息(streaming=true)只对最后文本块启用逐字 reveal;
-  //   streamKey(messageId+part index)恒传 → 跨 streamingTail→rows 迁移
-  //   保留 pacing 状态完成终态 drain,且 settled 内容命中精确缓存;
-  //   历史/非尾文本 streaming=false → 即时完整渲染,不逐字重放。
-  Column() {
-    MarkdownText({
-      content: block.part.text,
-      fontSize: 15,
-      fontColor: INK,
-      streaming: this.streaming && this.isLastTextBlock(this.getBlocks(), bi),
-      streamKey: `${this.streamKeyTag}${this.message.id}#${block.index}`,
-      onVisibleGrow: (): void => { this.onTextGrow(); },
-    })
-  }
-              .margin({ bottom: 4 })
-            }
-          } else if (block.part.type === 'image') {
-            Image(block.part.url)
-              .width(160)
-              .objectFit(ImageFit.Cover)
-              .borderRadius(8)
-              .margin({ bottom: 4 })
-          } else if (block.part.type === 'video') {
-            // M2.2:占位文本 → 真实附件 chip(图标 + 文件名/mime)
-            ContentAttachmentChip({
-              icon: '🎬',
-              label: urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '视频',
-              sublabel: block.part.mime,
-            })
-          } else if (block.part.type === 'audio') {
-            ContentAttachmentChip({
-              icon: '🎵',
-              label: block.part.fileName.length > 0 ? block.part.fileName : (urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '音频'),
-              sublabel: block.part.mime,
-            })
-          } else if (block.part.type === 'document') {
-            ContentAttachmentChip({
-              icon: '📄',
-              label: block.part.fileName.length > 0 ? block.part.fileName : (urlBasename(block.part.url).length > 0 ? urlBasename(block.part.url) : '文档'),
-              sublabel: block.part.mime,
-            })
-          } else if (block.part.type === 'mini_app') {
-            // MiniApp:M2.2 占位卡 → 真卡片(运行/修改/菜单;回调冒泡到 ChatPage)
-            MiniAppChatCard({
-              part: block.part,
-              onRun: (appId: string): void => { this.onRunMiniApp(appId); },
-              onOpenList: (): void => { this.onOpenMiniAppList(); },
-              onModify: (prompt: string): boolean => {
-                this.onModifyMiniApp(prompt);
-                return true;
-              },
-            })
-          }
-        } else if (block.kind === 'subagent') {
-          ChatMessageSubAgentStep({
-            tools: block.step.tools,
-            runId: block.step.runId,
-            onOpenRun: (rid: string): void => {
-              this.onOpenSubAgentRun(rid, block.step.tools);
-            },
-          })
-        } else if (block.kind === 'council') {
-          ChatMessageCouncilStep({
-            tools: block.step.tools,
-            runId: block.step.runId,
-            onOpenRun: (_rid: string): void => {
-              // council run sheet:复用 tool preview sheet 展示 council 工具详情
-              if (block.step.tools.length > 0) {
-                this.onOpenToolPreview(block.step.tools[0]);
-              }
-            },
-          })
-        }
-      }, (block: MessagePartBlock, bi: number): string => `block-${bi}-${block.kind}`)
-      }
-      .gesture(
-        GestureGroup(
-          GestureMode.Exclusive,
-          LongPressGesture().onAction((): void => {
-            if (this.message.role === 'user') this.onOpenActions();
-          }),
-          TapGesture().onAction((): void => {
-            if (this.message.role === 'user') this.onEdit();
-          }),
-        )
-      )
-      // 第三梯队:ChatMessageActionFooter 替换内联操作行(annotations + branch + actions 统一尾部)
-      // streaming 期间交给 resolveActionFooterMode → reserved(占位防跳动),不再强制 hidden
-      ChatMessageActionFooter({
-        annotations: this.message.annotations,
-        mode: resolveActionFooterMode(
-          this.message.role, this.isLastAssistant, this.streaming, this.message.parts.length > 0,
-        ),
-        isUser: this.message.role === 'user',
-        isLastAssistant: this.isLastAssistant,
-        branchCount: this.branchCount,
-        selectIndex: this.selectIndex,
-        onCopy: (): void => this.onCopy(),
-        onFork: (): void => this.onFork(),
-        onEdit: (): void => this.onEdit(),
-        onRegenerate: (): void => this.onRegenerate(),
-        onFavorite: (): void => { this.onFavorite(this.plainText()); },
-        onSwitch: (idx: number): void => { this.onSwitch(idx); },
-      })
-    }
-    .width('100%')
-    .alignItems(this.message.role === 'user' ? HorizontalAlign.End : HorizontalAlign.Start)
-    .padding({ left: 20, right: 20, top: 8, bottom: 8 })
-    .opacity(this.enterOpacity)
-    .translate({ y: this.enterY })
-    .onAppear((): void => {
-      animateTo({ duration: 260, curve: Curve.EaseOut }, (): void => {
-        this.enterOpacity = 1;
-        this.enterY = 0;
-      });
-    })
-  }
-}
 
 // holder 模式:跨 then 传递 runtime(ArkTS 闭包收窄限制 + arkts-no-obj-literals-as-types)
 interface RuntimeHolder {
@@ -4711,8 +4269,115 @@ struct ChatPage {
       }
         .align(Alignment.TopStart)
       .width('100%').layoutWeight(1).margin({ top: 12 })
-    }
+  }
     .width('100%').height('100%').padding(16)
+  }
+
+  @Builder
+  chatTimelineRows(): void {
+    ForEach(this.rows, (row: MsgRow): void => {
+      ListItem() {
+        AgentMessageRow({
+          message: row.message,
+          capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => {},
+          hostFooter: (): void => {},
+          autoCloseThinking: this.autoCloseThinking,
+          branchCount: row.branchCount,
+          selectIndex: row.selectIndex,
+          isLastAssistant: row.isLastAssistant,
+          onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
+          onRegenerate: (): void => this.regenerate(row.nodeId),
+          onEdit: (): void => this.startEditMessage(row),
+          onOpenActions: (): void => this.openActionsSheet(row),
+          onFork: (): void => this.forkAt(row),
+          onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
+          onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
+          onAnswerTool: (toolCallId: string, answer: string): void =>
+            this.handleToolAnswer(toolCallId, answer),
+          onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
+            this.openSubAgentSheet(rid, tools);
+          },
+          onCopy: (): void => { this.openCopySheet(row.message); },
+          onFavorite: (text: string): void => { this.favoriteText(text); },
+          onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          onTextGrow: (): void => { this.followStreamingUpdate(); },
+          onRunMiniApp: (appId: string): void => {
+            router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
+          },
+          onModifyMiniApp: (prompt: string): void => { this.inputText = prompt; },
+          onOpenMiniAppList: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
+        })
+      }
+      if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
+        ListItem() {
+          AgentMessageRow({
+            message: this.regenTail as UIMessage,
+            capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+            hostHeader: (): void => {},
+            hostFooter: (): void => {},
+            autoCloseThinking: this.autoCloseThinking,
+            streaming: true,
+            streamKeyTag: 'regen:',
+            isLastAssistant: true,
+            onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
+            onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
+            onAnswerTool: (toolCallId: string, answer: string): void =>
+              this.handleToolAnswer(toolCallId, answer),
+            onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
+              this.openSubAgentSheet(rid, tools);
+            },
+            onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+            onTextGrow: (): void => { this.followStreamingUpdate(); },
+            onRunMiniApp: (appId: string): void => {
+              router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
+            },
+            onModifyMiniApp: (prompt: string): void => { this.inputText = prompt; },
+            onOpenMiniAppList: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
+          })
+        }
+      }
+    }, (row: MsgRow): string => row.nodeId + (this.darkMode ? '-d' : '-l'))
+  }
+
+  @Builder
+  chatTimelineActiveTail(): void {
+    ForEach(this.streamingTail, (message: UIMessage): void => {
+      ListItem() {
+        AgentMessageRow({
+          message,
+          capabilities: CHAT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => {},
+          hostFooter: (): void => {},
+          autoCloseThinking: this.autoCloseThinking,
+          streaming: true,
+          isLastAssistant: true,
+          onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
+          onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
+          onAnswerTool: (toolCallId: string, answer: string): void =>
+            this.handleToolAnswer(toolCallId, answer),
+          onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
+            this.openSubAgentSheet(rid, tools);
+          },
+          onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
+          onTextGrow: (): void => { this.followStreamingUpdate(); },
+          onRunMiniApp: (appId: string): void => {
+            router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
+          },
+          onModifyMiniApp: (prompt: string): void => { this.inputText = prompt; },
+          onOpenMiniAppList: (): void => { router.pushUrl({ url: 'pages/MiniAppListPage' }); },
+        })
+      }
+    }, (message: UIMessage): string => `tail-${message.id}`)
+  }
+
+  @Builder
+  chatTimelineHostTail(): void {
+    if (this.sending) {
+      ListItem() {
+        Text('生成中…').fontSize(12).fontColor(INK3).padding({ top: 4, bottom: 4 })
+      }
+    }
   }
 
   build() {
@@ -4723,140 +4388,56 @@ struct ChatPage {
       // 1:1 原型:头部悬浮层(默认全透明,scrollTop>4 玻璃化+浮出发丝线),
       //   消息区 paddingTop 补偿头部高度
       Stack({ alignContent: Alignment.Top }) {
-      // cachedCount 预渲染可见区外 5 项,改善滚动流畅度
-      // LazyForEach 替换 ForEach 需 IDataSource 重构(涉及 18+ 处 rows 赋值),
-      //   登记为设备验证项(需真机验证 IDataSource 响应式 + 性能提升)
-      List({ scroller: this.scroller }) {
-        // Phase 5:历史加载占位 item(仅在有更早历史可加载时显示;计划 §6.8 —
-        //   高 48vp,居中 META 文案 + DotLoading)
-        if (!this.timelineLoadState.fullyLoaded) {
-          ListItem() {
-            Row() {
-              DotLoading({ dotSize: 6, color: INK3 })
-              Text('加载更早消息…')
-                .fontSize(META).fontColor(INK3)
-                .margin({ left: 8 })
-            }
-            .width('100%').height(48)
-            .justifyContent(FlexAlign.Center)
+      // 共用 Timeline 只承载 List/几何/事件透传；Chat 的窗口、首帧定位与三态跟底保持原状态机。
+      InteractiveMessageTimeline({
+        scroller: this.scroller,
+        horizontalGutter: 20,
+        topPadding: this.statusBarHeight + 58,
+        bottomPadding: this.navBarHeight + 28,
+        cachedItems: 5,
+        showOlderLoader: !this.timelineLoadState.fullyLoaded,
+        showDivider: true,
+        rows: (): void => { this.chatTimelineRows(); },
+        activeTail: (): void => { this.chatTimelineActiveTail(); },
+        hostTail: (): void => { this.chatTimelineHostTail(); },
+        onTimelineAppear: (): void => {
+          this.listReady = true;
+          if (this.initialScrollArmed) this.performInitialScroll();
+        },
+        onViewportHeightChange: (height: number): void => { this.listViewportHeight = height; },
+        onReachStart: (): void => { this.loadOlderTimeline(); },
+        onVisibleRangeChange: (start: number, end: number): void => {
+          this.firstVisibleListIndex = start;
+          this.lastVisibleListIndex = end;
+        },
+        onTimelineTouch: (event: TouchEvent): void => {
+          if (event.type === TouchType.Down) this.userTouchActive = true;
+          if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
+            this.userTouchActive = false;
+            if (this.generationEndScrollPending) this.reconcileAtEnd();
           }
-        }
-        ForEach(this.rows, (row: MsgRow): void => {
-          ListItem() {
-              MessageRow({
-                message: row.message,
-                autoCloseThinking: this.autoCloseThinking,
-                branchCount: row.branchCount,
-              selectIndex: row.selectIndex,
-              isLastAssistant: row.isLastAssistant,
-              onSwitch: (idx: number): void => this.switchBranch(row.nodeId, idx),
-              onRegenerate: (): void => this.regenerate(row.nodeId),
-              onDelete: (): void => this.confirmDeleteMessage(row),
-              onEdit: (): void => this.startEditMessage(row),
-              onOpenActions: (): void => this.openActionsSheet(row),
-              onFork: (): void => this.forkAt(row),
-              onApproveTool: (toolCallId: string): void => this.handleToolApproval(toolCallId, true),
-              onDenyTool: (toolCallId: string): void => this.openDenyDialog(toolCallId),
-              onAnswerTool: (toolCallId: string, answer: string): void =>
-                this.handleToolAnswer(toolCallId, answer),
-              onOpenSubAgentRun: (rid: string, tools: UIMessagePartTool[]): void => {
-                this.openSubAgentSheet(rid, tools);
-              },
-              onCopy: (): void => { this.openCopySheet(row.message); },
-              onFavorite: (t: string): void => { this.favoriteText(t); },
-              onOpenToolPreview: (part: UIMessagePartTool): void => { this.openToolPreview(part); },
-              onTextGrow: (): void => { this.followStreamingUpdate(); },
-              onRunMiniApp: (appId: string): void => {
-                router.pushUrl({ url: 'pages/MiniAppRunnerPage', params: { appId: appId } });
-              },
-              onModifyMiniApp: (prompt: string): void => {
-                this.inputText = prompt;
-              },
-              onOpenMiniAppList: (): void => {
-                router.pushUrl({ url: 'pages/MiniAppListPage' });
-              },
-            })
+        },
+        onTimelineScroll: (_scrollOffset: number, scrollState: ScrollState): void => {
+          const y: number = this.scroller.currentOffset().yOffset;
+          const solid: boolean = y > 4;
+          if (solid !== this.headerSolid) {
+            animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+              this.headerSolid = solid;
+            });
           }
-          // D-041:regenerate 流式预览渲染在目标节点行下
-          if (row.nodeId === this.regenNodeId && this.regenTail !== null) {
-            ListItem() {
-              MessageRow({
-                message: this.regenTail as UIMessage,
-                autoCloseThinking: this.autoCloseThinking,
-                streaming: true,
-                streamKeyTag: 'regen:',
-                // 流式尾 = 正在生成的最后一条 assistant(footer 走 reserved 占位)
-                isLastAssistant: true,
-                onTextGrow: (): void => { this.followStreamingUpdate(); },
-              })
-            }
+          if (this.programmaticScrollPending && scrollState === ScrollState.Idle) {
+            this.programmaticScrollPending = false;
+          } else if ((scrollState === ScrollState.Scroll || scrollState === ScrollState.Fling) &&
+            (this.userTouchActive || !this.programmaticScrollPending)) {
+            this.handleUserScroll(this.isGenerationActive());
           }
-        }, (row: MsgRow): string => row.nodeId + (this.darkMode ? "-d" : "-l"))
-        ForEach(this.streamingTail, (m: UIMessage): void => {
-          ListItem() {
-            MessageRow({ message: m, autoCloseThinking: this.autoCloseThinking, streaming: true,
-              isLastAssistant: true,
-              onTextGrow: (): void => { this.followStreamingUpdate(); } })
-          }
-        }, (m: UIMessage): string => `tail-${m.id}`)
-        if (this.sending) {
-          ListItem() {
-            Text('生成中…').fontSize(12).fontColor(INK3)
-              .padding({ left: 20, right: 20, top: 4, bottom: 4 })
-          }
-        }
-      }
-      .width('100%').layoutWeight(1)
-      .cachedCount(5)
-      // P4:消息区底部安全区 padding = 导航条高 + TimelineBottomSafetyPadding(28vp,
-      //   对齐 Android ChatList.kt:105);全屏布局下避免末条消息被导航条遮挡
-      .padding({ top: this.statusBarHeight + 58, bottom: this.navBarHeight + 28 })
-      .overlay(this.BottomFade(56), { align: Alignment.Bottom })
-      // Phase 1:首帧定位在 List 挂载后执行(此时 scroller 已绑定)
-      .onAppear((): void => {
-        this.listReady = true;
-        if (this.initialScrollArmed) this.performInitialScroll();
-      })
-      .onAreaChange((_oldValue: Area, newValue: Area): void => {
-        const height: number = Number(newValue.height);
-        if (Number.isFinite(height)) this.listViewportHeight = height;
-      })
-      // Phase 5:上滑到顶部 → 加载更早历史(计划 §6.6 step 4;防重入门在
-      //   canLoadOlder/beginLoadOlder)
-      .onReachStart((): void => {
-        this.loadOlderTimeline();
-      })
-      .onScrollIndex((start: number, end: number, _center: number): void => {
-        this.firstVisibleListIndex = start;
-        this.lastVisibleListIndex = end;
-      })
-      .onTouch((event: TouchEvent): void => {
-        if (event.type === TouchType.Down) this.userTouchActive = true;
-        if (event.type === TouchType.Up || event.type === TouchType.Cancel) {
-          this.userTouchActive = false;
-          if (this.generationEndScrollPending) this.reconcileAtEnd();
-        }
-      })
-      .onDidScroll((_scrollOffset: number, scrollState: ScrollState): void => {
-        const y: number = this.scroller.currentOffset().yOffset;
-        const solid: boolean = y > 4;
-        if (solid !== this.headerSolid) {
-          animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
-            this.headerSolid = solid;
-          });
-        }
-        if (this.programmaticScrollPending && scrollState === ScrollState.Idle) {
+        },
+        onTimelineScrollStop: (): void => {
           this.programmaticScrollPending = false;
-        } else if ((scrollState === ScrollState.Scroll || scrollState === ScrollState.Fling) &&
-          (this.userTouchActive || !this.programmaticScrollPending)) {
-          this.handleUserScroll(this.isGenerationActive());
-        }
+          this.reconcileAtEnd();
+        },
       })
-      .onScrollStop((): void => {
-        this.programmaticScrollPending = false;
-        this.reconcileAtEnd();
-      })
-      .divider({ strokeWidth: 1, color: LINE })
+      .overlay(this.BottomFade(56), { align: Alignment.Bottom })
 
       // 悬浮头部(1:1 原型 padding 2px 20px 11px;透明 → 毛玻璃 blur14)
       Row() {

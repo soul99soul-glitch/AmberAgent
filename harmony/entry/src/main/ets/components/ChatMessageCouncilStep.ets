@@ -78,6 +78,7 @@ const extractSeats = (tools: UIMessagePartTool[]): string[] => {
 export struct ChatMessageCouncilStep {
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
+  @Prop canOpenRun: boolean = true;
   onOpenRun: (runId: string) => void = (_id: string): void => {};
   @State phaseIndex: number = 0;
   @State objectiveExpanded: boolean = false;
@@ -108,6 +109,7 @@ export struct ChatMessageCouncilStep {
         title: `@Council ${councilStatusVerb(this.currentStatus())} · ${this.currentPhase()}`,
         status: councilStatusToToolStatus(this.currentStatus()),
         showApproval: false,
+        canOpen: this.canOpenRun,
         onCapsuleClick: (): void => { this.onOpenRun(this.runId); },
       })
 

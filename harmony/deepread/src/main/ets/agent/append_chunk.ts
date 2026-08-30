@@ -1,152 +1,143 @@
-// appendChunk — streaming 增量合并,对应 Android UIMessage.appendChunk
-// 一次 LLM 流式响应由多个 chunk 组成,每个 chunk 含 delta parts
-// appendChunk 把 delta fold 进现有 message parts,保持不可变(返回新数组)
+// Streaming delta folding for the canonical UIMessage part schema.
 
-import {
-  UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartImage,
-  UIMessagePartReasoning, UIMessagePartTool,
+import type { JsonObject, JsonValue } from './json.ts';
+import { nowIso } from './ids.ts';
+import type {
+  UIMessagePart, UIMessagePartImage, UIMessagePartReasoning,
+  UIMessagePartText, UIMessagePartTool,
 } from './message.ts';
 
-// 一次 delta 的 part(和正常 part 同形,字段可为部分)
-// 流式协议(OpenAI):每个 delta 含部分字段(如只有 text 增量、toolCallId 后到等)
+const STREAM_TOOL_INDEX_METADATA_KEY = 'stream_tool_index';
+
 export type DeltaPart =
-  | { kind: 'text'; text: string }
-  | { kind: 'image'; url: string }
-  | { kind: 'reasoning'; reasoning: string; finishedAt?: number | null }
+  | { type: 'text'; text: string; metadata?: JsonObject | null }
+  | { type: 'image'; url: string; metadata?: JsonObject | null }
+  | { type: 'reasoning'; reasoning: string; finishedAt?: string | null; metadata?: JsonObject | null }
   | {
-      kind: 'tool';
-      toolCallId?: string;       // 可能后续 chunk 才到
-      toolName?: string;          // 可能流式追加
-      input?: string;             // 可能流式追加
-      output?: UIMessagePartText[];
+      type: 'tool';
+      toolCallId?: string;
+      toolName?: string;
+      input?: string;
+      output?: UIMessagePart[];
       approvalState?: UIMessagePartTool['approvalState'];
-      // streamToolIndex 用于早期没 id 时按顺序匹配(Android findToolMergeTarget)
-      streamToolIndex?: number;
-      // replace 语义:整个 input 替换(arguments.done 事件)
+      metadata?: JsonObject | null;
       streamArgsReplace?: boolean;
     };
 
-// 把 delta fold 进 parts 数组,返回新数组(不可变)
 export const appendChunk = (parts: UIMessagePart[], delta: DeltaPart): UIMessagePart[] => {
-  switch (delta.kind) {
-    case 'text':
-      return appendText(parts, delta);
-    case 'image':
-      return appendImage(parts, delta);
-    case 'reasoning':
-      return appendReasoning(parts, delta);
-    case 'tool':
-      return appendTool(parts, delta);
+  switch (delta.type) {
+    case 'text': return appendText(parts, delta);
+    case 'image': return appendImage(parts, delta);
+    case 'reasoning': return appendReasoning(parts, delta);
+    case 'tool': return appendTool(parts, delta);
   }
 };
 
-const appendText = (parts: UIMessagePart[], delta: { text: string }): UIMessagePart[] => {
+const appendText = (
+  parts: UIMessagePart[], delta: { text: string; metadata?: JsonObject | null },
+): UIMessagePart[] => {
   if (delta.text.length === 0) return parts;
-  const last = parts[parts.length - 1];
-  if (last && last.kind === 'text') {
-    // 追加到最后一个 Text part
-    return [...parts.slice(0, -1), { kind: 'text', text: last.text + delta.text }];
+  const last: UIMessagePart | undefined = parts[parts.length - 1];
+  if (last !== undefined && last.type === 'text') {
+    const merged: UIMessagePartText = {
+      type: 'text',
+      text: last.text + delta.text,
+      metadata: delta.metadata !== undefined && delta.metadata !== null ? delta.metadata : last.metadata,
+    };
+    return [...parts.slice(0, -1), merged];
   }
-  return [...parts, { kind: 'text', text: delta.text }];
+  return [...parts, { type: 'text', text: delta.text, metadata: delta.metadata ?? null }];
 };
 
-const appendImage = (parts: UIMessagePart[], delta: { url: string }): UIMessagePart[] => {
+const appendImage = (
+  parts: UIMessagePart[], delta: { url: string; metadata?: JsonObject | null },
+): UIMessagePart[] => {
   if (delta.url.length === 0) return parts;
-  // Android:连续 image 拼接 url;这里简化为新建 part(Deep Read 流式 image 罕见)
-  return [...parts, { kind: 'image', url: delta.url }];
+  const image: UIMessagePartImage = { type: 'image', url: delta.url, metadata: delta.metadata ?? null };
+  return [...parts, image];
 };
 
 const appendReasoning = (
   parts: UIMessagePart[],
-  delta: { reasoning: string; finishedAt?: number | null },
+  delta: { reasoning: string; finishedAt?: string | null; metadata?: JsonObject | null },
 ): UIMessagePart[] => {
-  const last = parts[parts.length - 1];
-  // 空推理 + 无关闭信号 = skip(Android 同样行为)
+  const last: UIMessagePart | undefined = parts[parts.length - 1];
   if (delta.reasoning.length === 0 && delta.finishedAt === undefined) return parts;
-  if (last && last.kind === 'reasoning') {
-    // 追加 reasoning,保留 createdAt,处理 finishedAt
-    return [
-      ...parts.slice(0, -1),
-      {
-        kind: 'reasoning',
-        reasoning: last.reasoning + delta.reasoning,
-        createdAt: last.createdAt,
-        finishedAt: delta.finishedAt ?? null,
-      },
-    ];
-  }
-  // 新建 reasoning part
-  return [
-    ...parts,
-    {
-      kind: 'reasoning',
-      reasoning: delta.reasoning,
-      createdAt: Date.now(),
+  if (last !== undefined && last.type === 'reasoning') {
+    const merged: UIMessagePartReasoning = {
+      type: 'reasoning',
+      reasoning: last.reasoning + delta.reasoning,
+      createdAt: last.createdAt,
       finishedAt: delta.finishedAt ?? null,
-    },
-  ];
+      metadata: delta.metadata !== undefined && delta.metadata !== null ? delta.metadata : last.metadata,
+    };
+    return [...parts.slice(0, -1), merged];
+  }
+  const reasoning: UIMessagePartReasoning = {
+    type: 'reasoning',
+    reasoning: delta.reasoning,
+    createdAt: nowIso(),
+    finishedAt: delta.finishedAt ?? null,
+    metadata: delta.metadata ?? null,
+  };
+  return [...parts, reasoning];
 };
 
-const appendTool = (parts: UIMessagePart[], delta: DeltaPart & { kind: 'tool' }): UIMessagePart[] => {
-  if (delta.kind !== 'tool') return parts;
-  // 找合并目标:已存在且未执行的 Tool part,按 toolCallId 匹配(或 streamToolIndex 兜底)
-  const targetIdx = findToolMergeTarget(parts, delta);
-  if (targetIdx < 0) {
-    // 新 tool part
-    const newPart: UIMessagePartTool = {
-      kind: 'tool',
+const metadataStreamToolIndex = (metadata: JsonObject | null | undefined): number | null => {
+  if (metadata === null || metadata === undefined) return null;
+  const value: JsonValue | undefined = metadata[STREAM_TOOL_INDEX_METADATA_KEY];
+  return typeof value === 'number' ? value : null;
+};
+
+const appendTool = (parts: UIMessagePart[], delta: DeltaPart & { type: 'tool' }): UIMessagePart[] => {
+  const targetIndex: number = findToolMergeTarget(parts, delta);
+  if (targetIndex < 0) {
+    const tool: UIMessagePartTool = {
+      type: 'tool',
       toolCallId: delta.toolCallId ?? '',
       toolName: delta.toolName ?? '',
       input: delta.input ?? '',
       output: delta.output ?? [],
-      approvalState: delta.approvalState ?? 'auto',
-      streamIndex: delta.streamToolIndex,
+      approvalState: delta.approvalState ?? { type: 'auto' },
+      metadata: delta.metadata ?? null,
     };
-    return [...parts, newPart];
+    return [...parts, tool];
   }
-  // 合并到现有
-  const existing = parts[targetIdx] as UIMessagePartTool;
-  const merged = mergeTool(existing, delta);
-  return [...parts.slice(0, targetIdx), merged, ...parts.slice(targetIdx + 1)];
+  const existing: UIMessagePartTool = parts[targetIndex] as UIMessagePartTool;
+  const merged: UIMessagePartTool = mergeTool(existing, delta);
+  return [...parts.slice(0, targetIndex), merged, ...parts.slice(targetIndex + 1)];
 };
 
-// 找合并目标(对应 Android findToolMergeTarget)
-// 规则:
-// 1. 跳过已 executed 的 tool part
-// 2. 优先按 toolCallId 匹配(delta id 非空时)
-// 3. fallback 按 streamToolIndex(part 创建时记录,多工具无 id 场景的归位依据)
-export const findToolMergeTarget = (parts: UIMessagePart[], delta: DeltaPart & { kind: 'tool' }): number => {
-  const candidates: { idx: number; part: UIMessagePartTool }[] = [];
+export const findToolMergeTarget = (
+  parts: UIMessagePart[], delta: DeltaPart & { type: 'tool' },
+): number => {
+  const candidates: { index: number; part: UIMessagePartTool }[] = [];
   for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    if (p.kind === 'tool' && p.output.length === 0) {
-      candidates.push({ idx: i, part: p });
-    }
+    const part: UIMessagePart = parts[i];
+    if (part.type === 'tool' && part.output.length === 0) candidates.push({ index: i, part });
   }
-  // 按 toolCallId
-  if (delta.toolCallId && delta.toolCallId.length > 0) {
-    const hit = candidates.find(c => c.part.toolCallId === delta.toolCallId);
-    if (hit) return hit.idx;
+  if (delta.toolCallId !== undefined && delta.toolCallId.length > 0) {
+    const byId = candidates.find(candidate => candidate.part.toolCallId === delta.toolCallId);
+    if (byId !== undefined) return byId.index;
   }
-  // 按 streamToolIndex(part.streamIndex 与 delta.streamToolIndex 一致才归位)
-  if (delta.streamToolIndex !== undefined) {
-    const hit = candidates.find(c => c.part.streamIndex === delta.streamToolIndex);
-    if (hit) return hit.idx;
+  const incomingIndex: number | null = metadataStreamToolIndex(delta.metadata);
+  if (incomingIndex !== null) {
+    const byIndex = candidates.find(
+      candidate => metadataStreamToolIndex(candidate.part.metadata) === incomingIndex,
+    );
+    if (byIndex !== undefined) return byIndex.index;
   }
-  // delta 无 id 无 index:不合并(让上层决定是否新建)
   return -1;
 };
 
-// 合并 tool delta 到现有 tool part(对应 Android Tool.merge)
 export const mergeTool = (
   existing: UIMessagePartTool,
-  delta: DeltaPart & { kind: 'tool' },
+  delta: DeltaPart & { type: 'tool' },
 ): UIMessagePartTool => {
-  const replaceArgs = delta.streamArgsReplace === true;
+  const replaceArgs: boolean = delta.streamArgsReplace === true;
   return {
-    kind: 'tool',
-    // 后到的 id 覆盖(OpenAI 行为:首个 chunk 无 id,后续才有)
-    toolCallId: (delta.toolCallId && delta.toolCallId.length > 0)
+    type: 'tool',
+    toolCallId: delta.toolCallId !== undefined && delta.toolCallId.length > 0
       ? delta.toolCallId
       : existing.toolCallId,
     toolName: replaceArgs
@@ -155,9 +146,10 @@ export const mergeTool = (
     input: replaceArgs
       ? (delta.input ?? existing.input)
       : existing.input + (delta.input ?? ''),
-    output: delta.output ? [...existing.output, ...delta.output] : existing.output,
+    output: delta.output !== undefined ? [...existing.output, ...delta.output] : existing.output,
     approvalState: delta.approvalState ?? existing.approvalState,
-    // 归位键跟随目标 part(创建时的 index 即该调用在数组中的稳定位置)
-    streamIndex: existing.streamIndex ?? delta.streamToolIndex,
+    metadata: delta.metadata !== undefined && delta.metadata !== null
+      ? delta.metadata
+      : existing.metadata,
   };
 };

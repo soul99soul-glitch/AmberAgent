@@ -5,8 +5,8 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { runAgentLoop } from '../main/ets/agent/agent_loop.ts';
 import type { AgentLoopDeps } from '../main/ets/agent/agent_loop.ts';
-import type { UIMessage, UIMessagePart } from '../main/ets/agent/message.ts';
-import { makeUserMessage, makeAssistantMessage } from '../main/ets/agent/message.ts';
+import type { UIMessage } from '../main/ets/agent/message.ts';
+import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/agent/message.ts';
 import type { ToolDefinition, ApprovalMatrix } from '../main/ets/agent/tool_execution.ts';
 
 // 构造一个 assistant message 含一个 tool call(未执行)
@@ -14,13 +14,16 @@ const assistantWithToolCall = (
   toolName: string,
   toolCallId: string,
   input: string,
-): UIMessage => makeAssistantMessage([
-  { kind: 'text', text: '正在调用工具。' },
-  { kind: 'tool', toolCallId, toolName, input, approvalState: 'approved', output: [] },
+): UIMessage => makeUIMessage('assistant', [
+  { type: 'text', text: '正在调用工具。', metadata: null },
+  {
+    type: 'tool', toolCallId, toolName, input, approvalState: { type: 'approved' },
+    output: [], metadata: null,
+  },
 ]);
 
 const assistantText = (text: string): UIMessage =>
-  makeAssistantMessage([{ kind: 'text', text }]);
+  makeAssistantMessage(text);
 
 const approval: ApprovalMatrix = {
   autoApproveTools: true,
@@ -55,7 +58,7 @@ test('runAgentLoop: one tool call → execute → second call returns text → s
     isHighRisk: false,
     execute: async (input) => {
       toolExecutions.push(input);
-      return [{ kind: 'text', text: JSON.stringify({ status: 'ok' }) }];
+      return [{ type: 'text', text: JSON.stringify({ status: 'ok' }), metadata: null }];
     },
   };
   const deps: AgentLoopDeps = {
@@ -77,8 +80,8 @@ test('runAgentLoop: one tool call → execute → second call returns text → s
   assert.deepEqual(toolExecutions, ['{"x":1}']);
   // 最后一条 assistant 的 tool part 应有 output(写回)
   const lastAssistant = result.messages[result.messages.length - 2];
-  const toolPart = lastAssistant.parts.find(p => p.kind === 'tool');
-  assert.ok(toolPart !== undefined && toolPart.kind === 'tool');
+  const toolPart = lastAssistant.parts.find(p => p.type === 'tool');
+  assert.ok(toolPart !== undefined && toolPart.type === 'tool');
   assert.ok(toolPart.output.length > 0, 'tool output written back');
 });
 
@@ -88,7 +91,7 @@ test('runAgentLoop: chain of tool calls (3 steps)', async () => {
   let callCount = 0;
   const toolA: ToolDefinition = {
     name: 'tool_a', description: 'd', allowsAutoApproval: true, isHighRisk: false,
-    execute: async () => [{ kind: 'text', text: '{"status":"ok"}' }],
+    execute: async () => [{ type: 'text', text: '{"status":"ok"}', metadata: null }],
   };
   const deps: AgentLoopDeps = {
     callModel: async (messages) => {
@@ -113,7 +116,7 @@ test('runAgentLoop: hits maxSteps → stopReason max_steps', async () => {
   let callCount = 0;
   const tool: ToolDefinition = {
     name: 'tool_a', description: 'd', allowsAutoApproval: true, isHighRisk: false,
-    execute: async () => [{ kind: 'text', text: '{}' }],
+    execute: async () => [{ type: 'text', text: '{}', metadata: null }],
   };
   const deps: AgentLoopDeps = {
     callModel: async (messages) => {
@@ -134,7 +137,7 @@ test('runAgentLoop: hits maxSteps → stopReason max_steps', async () => {
 test('runAgentLoop: tool requires approval (ASK) → pause, pending_approval', async () => {
   const highRiskTool: ToolDefinition = {
     name: 'high_risk_tool', description: 'd', allowsAutoApproval: false, isHighRisk: true,
-    execute: async () => [{ kind: 'text', text: '{}' }],
+    execute: async () => [{ type: 'text', text: '{}', metadata: null }],
   };
   const noAutoApprove: ApprovalMatrix = {
     autoApproveTools: false,
@@ -174,9 +177,11 @@ test('runAgentLoop: tool throws → failed output written back, loop continues',
   assert.equal(result.stopReason, 'no_more_tools');
   // tool part 的 output 应是 failed JSON
   const toolMsg = result.messages[result.messages.length - 2];
-  const toolPart = toolMsg.parts.find(p => p.kind === 'tool');
-  assert.ok(toolPart !== undefined && toolPart.kind === 'tool');
-  const outJson = JSON.parse(toolPart.output[0].text);
+  const toolPart = toolMsg.parts.find(p => p.type === 'tool');
+  assert.ok(toolPart !== undefined && toolPart.type === 'tool');
+  const output = toolPart.output[0];
+  assert.equal(output.type, 'text');
+  const outJson = JSON.parse(output.type === 'text' ? output.text : '{}');
   assert.equal(outJson.status, 'failed');
   assert.equal(outJson.message, 'boom');
 });
@@ -195,7 +200,7 @@ test('runAgentLoop: budget FINAL (small loop) → passes budget prompt to callMo
     },
     tools: new Map([['writer_tool', {
       name: 'writer_tool', description: 'd', allowsAutoApproval: true, isHighRisk: false,
-      execute: async () => [{ kind: 'text', text: '{"status":"ok"}' }],
+      execute: async () => [{ type: 'text', text: '{"status":"ok"}', metadata: null }],
     }]]),
     approval,
     maxSteps: 3,  // small loop:step 1 → TIGHT, step 2 → FINAL
@@ -227,7 +232,7 @@ test('runAgentLoop: onMessagesUpdate called after each step', async () => {
   let callCount = 0;
   const tool: ToolDefinition = {
     name: 'tool_a', description: 'd', allowsAutoApproval: true, isHighRisk: false,
-    execute: async () => [{ kind: 'text', text: '{}' }],
+    execute: async () => [{ type: 'text', text: '{}', metadata: null }],
   };
   const deps: AgentLoopDeps = {
     callModel: async (messages) => {

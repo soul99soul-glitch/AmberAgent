@@ -70,6 +70,7 @@ const statusToToolStatus = (status: string): ToolStatus => {
 export struct ChatMessageSubAgentStep {
   @Prop tools: UIMessagePartTool[];
   @Prop runId: string = '';
+  @Prop canOpenRun: boolean = true;
   onOpenRun: (runId: string) => void = (_id: string): void => {};
   @State objectiveExpanded: boolean = false;
 
@@ -82,37 +83,24 @@ export struct ChatMessageSubAgentStep {
   build(): void {
     Column() {
       // capsule: avatar + @name + status + phase
-      Row() {
-        SubAgentAvatar({
-          subagentId: this.displayName(),
-          name: this.displayName(),
-          avatarSize: 16,
-          status: this.currentStatus(),
-        })
-        Text(`@${this.displayName()} ${statusVerb(this.currentStatus())} · ${this.currentPhase()}`)
-          .fontSize(META)
-          .fontColor(INK2)
-          .fontWeight(FontWeight.Medium)
-          .fontFamily('JetBrainsMono')
-          .margin({ left: 6 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-
-        // 状态徽章
-        if (this.currentStatus() === 'running') {
-          Text('●')
-            .fontSize(10)
-            .fontColor(ACCENT)
-        }
+      if (this.canOpenRun) {
+        Row() { this.HeaderContent(); }
+          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+          .backgroundColor(SURFACE2)
+          .borderRadius(50)
+          .border({ width: 1, color: LINE })
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.onOpenRun(this.runId); })
+          .margin({ bottom: 4 })
+      } else {
+        Row() { this.HeaderContent(); }
+          .padding({ left: 7, right: 7, top: 3, bottom: 3 })
+          .backgroundColor(SURFACE2)
+          .borderRadius(50)
+          .border({ width: 1, color: LINE })
+          .alignItems(VerticalAlign.Center)
+          .margin({ bottom: 4 })
       }
-      .padding({ left: 7, right: 7, top: 3, bottom: 3 })
-      .backgroundColor(SURFACE2)
-      .borderRadius(50)
-      .border({ width: 1, color: LINE })
-      .alignItems(VerticalAlign.Center)
-      .onClick((): void => { this.onOpenRun(this.runId); })
-      .margin({ bottom: 4 })
 
       // 任务目标(可折叠)
       if (this.objective().length > 0) {
@@ -148,6 +136,31 @@ export struct ChatMessageSubAgentStep {
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
+  }
+
+  @Builder
+  private HeaderContent(): void {
+    SubAgentAvatar({
+      subagentId: this.displayName(),
+      name: this.displayName(),
+      avatarSize: 16,
+      status: this.currentStatus(),
+    })
+    Text(`@${this.displayName()} ${statusVerb(this.currentStatus())} · ${this.currentPhase()}`)
+      .fontSize(META)
+      .fontColor(INK2)
+      .fontWeight(FontWeight.Medium)
+      .fontFamily('JetBrainsMono')
+      .margin({ left: 6 })
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .layoutWeight(1)
+
+    if (this.currentStatus() === 'running') {
+      Text('●')
+        .fontSize(10)
+        .fontColor(ACCENT)
+    }
   }
 
   private displayName(): string {

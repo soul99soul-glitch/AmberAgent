@@ -49,8 +49,27 @@ export type { RunManagerDeps, RunResult } from './agent/run_manager.ts';
 export { runAgentLoop } from './agent/agent_loop.ts';
 export type { AgentLoopDeps, AgentLoopResult, StopReason } from './agent/agent_loop.ts';
 export type { ToolDefinition, ApprovalMatrix } from './agent/tool_execution.ts';
-export type { UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool, MessageRole, ToolApprovalState } from './agent/message.ts';
-export { makeUIMessage, makeUserMessage, makeAssistantMessage, makeSystemMessage, getTools, isToolExecuted, latestAssistantText } from './agent/message.ts';
+export type { JsonValue, JsonObject } from './agent/json.ts';
+export type { TokenUsage } from './agent/usage.ts';
+export type {
+  MessageRole, ToolApprovalState,
+  UIMessagePart, UIMessagePartText, UIMessagePartImage, UIMessagePartVideo,
+  UIMessagePartAudio, UIMessagePartDocument, UIMessagePartMiniApp,
+  UIMessagePartReasoning, UIMessagePartTool,
+  UIMessageAnnotation, UIMessage, UIMessageOpts, UIMessageChoice, MessageChunk,
+} from './agent/message.ts';
+export {
+  makeUIMessage, makeSystemMessage, makeUserMessage, makeAssistantMessage, finishAssistantMessage,
+  canResumeToolExecution, isToolExecuted, isToolPending, canToolResumeExecution,
+  isToolAwaitingExecution, toolInputAsJson, toText, reasoningPartText, summaryAsText,
+  getTools, latestAssistantText, isValidToUpload, hasBase64Part,
+  isEmptyInputMessage, isEmptyUIMessage,
+} from './agent/message.ts';
+export type {
+  LegacyToolApprovalState, LegacyUIMessagePartText, LegacyUIMessagePartImage,
+  LegacyUIMessagePartReasoning, LegacyUIMessagePartTool, LegacyUIMessagePart, LegacyUIMessage,
+} from './agent/legacy_message.ts';
+export { migrateLegacyUIMessage } from './agent/legacy_message.ts';
 export { createScheduler, isInterruptedPhase } from './agent/scheduler.ts';
 export type { DeepReadScheduler, SchedulerRunOptions } from './agent/scheduler.ts';
 export { createSourcePrefetcher } from './research/source_prefetcher.ts';

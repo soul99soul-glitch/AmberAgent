@@ -9,7 +9,7 @@ import { createScheduler, isInterruptedPhase } from '../main/ets/agent/scheduler
 import { createSectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
 import type { SectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
 import type { CollectRunFn } from '../main/ets/agent/supervisor_loop.ts';
-import type { UIMessage } from '../main/ets/agent/message.ts';
+import type { UIMessage, UIMessagePartText } from '../main/ets/agent/message.ts';
 import { makeAssistantMessage } from '../main/ets/agent/message.ts';
 import type { DeepReadSource, SourcePrefetcher } from '../main/ets/research/source_prefetcher.ts';
 import type { AiClient } from '../main/ets/platform/ai_client.ts';
@@ -40,9 +40,9 @@ const mockAi: AiClient = { generateText: async () => [] };  // plan 走 fallback
 const makeWritingCollectRun = (writerRef: { w: SectionWriterTools | null }): CollectRunFn =>
   async (messages: UIMessage[]): Promise<UIMessage[]> => {
     const w = writerRef.w;
-    if (w === null) return [...messages, makeAssistantMessage([{ kind: 'text', text: 'no writer' }])];
+    if (w === null) return [...messages, makeAssistantMessage('no writer')];
     const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    const promptPart = lastUser?.parts.find((p): p is { kind: 'text'; text: string } => p.kind === 'text');
+    const promptPart = lastUser?.parts.find((p): p is UIMessagePartText => p.type === 'text');
     const prompt = promptPart?.text ?? '';
 
     if (prompt.includes(WRITER_TOOL_NAMES.OVERVIEW)) {
@@ -58,7 +58,7 @@ const makeWritingCollectRun = (writerRef: { w: SectionWriterTools | null }): Col
       const t = w.tools(new Set(['EXTENDED_READING'])).find(x => x.name === WRITER_TOOL_NAMES.EXTENDED_READING)!;
       await t.execute(JSON.stringify({ links: [{ title: '扩展阅读', url: 'https://ext.example.com/1' }] }));
     }
-    return [...messages, makeAssistantMessage([{ kind: 'text', text: 'written' }])];
+    return [...messages, makeAssistantMessage('written')];
   };
 
 // ===== isInterruptedPhase =====
@@ -136,7 +136,7 @@ test('run(): full pipeline → complete DeepReadOutput (all 4 stages READY)', as
 // ===== generateStages: collectRun 不写 → 不崩溃,返回 IDLE =====
 
 test('generateStages: collectRun writes nothing → returns without throw, phase IDLE', async () => {
-  const noWriteCollectRun: CollectRunFn = async (m) => [...m, makeAssistantMessage([{ kind: 'text', text: '...' }])];
+  const noWriteCollectRun: CollectRunFn = async (m) => [...m, makeAssistantMessage('...')];
   const deps: RunManagerDeps = {
     prefetcher: mockPrefetcher, collectRun: noWriteCollectRun, aiClient: mockAi,
     model: 'm', playbookMarkdown: '', nowIso: () => '2026-06-23',

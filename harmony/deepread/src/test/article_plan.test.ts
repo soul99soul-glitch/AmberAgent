@@ -58,7 +58,7 @@ const buildPack = (count: number): DeepReadEvidencePack => {
 // mock AiClient 返回固定 assistant text
 const mockAi = (responseText: string): AiClient => ({
   generateText: async (): Promise<UIMessage[]> => {
-    return [makeAssistantMessage([{ kind: 'text', text: responseText }])];
+    return [makeAssistantMessage(responseText)];
   },
 });
 

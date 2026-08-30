@@ -26,6 +26,9 @@ interface ChatCardVersionTarget {
 @Component
 export struct MiniAppChatCard {
   @Prop part: UIMessagePartMiniApp;
+  @Prop canRun: boolean = true;
+  @Prop canModify: boolean = true;
+  @Prop canOpenList: boolean = true;
   onRun: (appId: string) => void = (_appId: string): void => {};
   onOpenList: () => void = (): void => {};
   onModify: (prompt: string) => boolean = (_prompt: string): boolean => false;
@@ -43,6 +46,7 @@ export struct MiniAppChatCard {
 
   aboutToAppear(): void {
     this.alive = true;
+    if (!this.canModify && !this.canOpenList) return;
     getMiniAppPlatform().then((platform: MiniAppPlatform): void => {
       this.platform = platform;
     }).catch((e: Error): void => {
@@ -373,41 +377,49 @@ export struct MiniAppChatCard {
           .width('100%')
           .margin({ top: 4 })
 
-        Row() {
+        if (this.canRun || this.canModify || this.canOpenList) {
           Row() {
-            Text('运行')
-              .fontSize(BODY)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(ACCENT_INK)
-              .padding({ left: 16, right: 16, top: 7, bottom: 7 })
-          }
-          .backgroundColor(ACCENT)
-          .borderRadius(8)
-          .onClick((): void => { this.onRun(this.part.appId); })
+            if (this.canRun) {
+              Row() {
+                Text('运行')
+                  .fontSize(BODY)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(ACCENT_INK)
+                  .padding({ left: 16, right: 16, top: 7, bottom: 7 })
+              }
+              .backgroundColor(ACCENT)
+              .borderRadius(8)
+              .onClick((): void => { this.onRun(this.part.appId); })
+            }
 
-          Row() {
-            Text('修改')
-              .fontSize(BODY)
-              .fontWeight(FontWeight.Medium)
-              .fontColor(this.accentColorStore)
-              .padding({ left: 16, right: 16, top: 7, bottom: 7 })
-          }
-          .backgroundColor(SURFACE2)
-          .borderRadius(8)
-          .margin({ left: 8 })
-          .onClick((): void => { this.beginModify(); })
+            if (this.canModify) {
+              Row() {
+                Text('修改')
+                  .fontSize(BODY)
+                  .fontWeight(FontWeight.Medium)
+                  .fontColor(this.accentColorStore)
+                  .padding({ left: 16, right: 16, top: 7, bottom: 7 })
+              }
+              .backgroundColor(SURFACE2)
+              .borderRadius(8)
+              .margin({ left: this.canRun ? 8 : 0 })
+              .onClick((): void => { this.beginModify(); })
+            }
 
-          Row() {
-            Text('⋯').fontSize(18).fontColor(INK3)
+            if (this.canOpenList) {
+              Row() {
+                Text('⋯').fontSize(18).fontColor(INK3)
+              }
+              .width(40).height(36)
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+              .margin({ left: 4 })
+              .bindContextMenu(this.cardMenu(), ResponseType.LongPress)
+            }
           }
-          .width(40).height(36)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .margin({ left: 4 })
-          .bindContextMenu(this.cardMenu(), ResponseType.LongPress)
+          .width('100%')
+          .margin({ top: 8 })
         }
-        .width('100%')
-        .margin({ top: 8 })
       }
       .width('100%')
       .padding(12)

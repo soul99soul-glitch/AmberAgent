@@ -3,10 +3,10 @@
 
 import type {
   AiClient, GenerateTextParams, HttpClient, Storage, HttpRequest, HttpResponse,
-  UIMessage, UIMessagePart, UIMessagePartTool, AbortSignalLike, Tool,
+  UIMessage, UIMessagePart, UIMessagePartText, UIMessagePartTool, AbortSignalLike, Tool,
   OpenAiStreamDelta, DecodeChunk, SseEvent,
 } from '@amber/deepread-domain';
-import { makeAssistantMessage, makeUIMessage, SseAssembler, parseOpenAiStreamEvent } from '@amber/deepread-domain';
+import { makeUIMessage, SseAssembler, parseOpenAiStreamEvent } from '@amber/deepread-domain';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { util } from '@kit.ArkTS';
 
@@ -92,13 +92,8 @@ interface StreamToolCallDelta {
   args?: string;
 }
 
-interface ToolTextOutput {
-  kind: 'text';
-  text: string;
-}
-
 interface ExecutableTool extends Tool {
-  execute: (input: string) => Promise<ToolTextOutput[]>;
+  execute: (input: string) => Promise<UIMessagePartText[]>;
   allowsAutoApproval?: boolean;
   isHighRisk?: boolean;
 }
@@ -132,8 +127,8 @@ const isAborted = (signal?: AbortSignalLike): boolean => signal !== undefined &&
 const textFromParts = (parts: UIMessagePart[]): string => {
   let text: string = '';
   for (const part of parts) {
-    if (part.kind === 'text') text += part.text;
-    if (part.kind === 'reasoning') text += part.reasoning;
+    if (part.type === 'text') text += part.text;
+    if (part.type === 'reasoning') text += part.reasoning;
   }
   return text;
 };
@@ -141,14 +136,14 @@ const textFromParts = (parts: UIMessagePart[]): string => {
 const contentFromParts = (parts: UIMessagePart[]): string | OpenAiContent[] => {
   const content: OpenAiContent[] = [];
   for (const part of parts) {
-    if (part.kind === 'text') {
+    if (part.type === 'text') {
       const textContent: OpenAiTextContent = { type: 'text', text: part.text };
       content.push(textContent);
-    } else if (part.kind === 'image') {
+    } else if (part.type === 'image') {
       const imageUrl: OpenAiImageUrl = { url: part.url };
       const imageContent: OpenAiImageContent = { type: 'image_url', image_url: imageUrl };
       content.push(imageContent);
-    } else if (part.kind === 'reasoning') {
+    } else if (part.type === 'reasoning') {
       const reasoningContent: OpenAiTextContent = { type: 'text', text: part.reasoning };
       content.push(reasoningContent);
     }
@@ -164,7 +159,7 @@ const toolOutputText = (part: UIMessagePartTool): string => textFromParts(part.o
 const toolPartsFrom = (parts: UIMessagePart[]): UIMessagePartTool[] => {
   const result: UIMessagePartTool[] = [];
   for (const part of parts) {
-    if (part.kind === 'tool') result.push(part);
+    if (part.type === 'tool') result.push(part);
   }
   return result;
 };
@@ -240,18 +235,21 @@ const accumulateToolCall = (calls: AccumulatedToolCall[], delta: StreamToolCallD
 
 const assistantFromParsed = (parsed: ParsedAssistant): UIMessage => {
   const parts: UIMessagePart[] = [];
-  if (parsed.text.length > 0) parts.push({ kind: 'text', text: parsed.text });
+  if (parsed.text.length > 0) parts.push({ type: 'text', text: parsed.text, metadata: null });
   if (parsed.reasoning.length > 0) {
-    const now: number = Date.now();
-    parts.push({ kind: 'reasoning', reasoning: parsed.reasoning, createdAt: now, finishedAt: now });
+    const now: string = new Date().toISOString();
+    parts.push({
+      type: 'reasoning', reasoning: parsed.reasoning,
+      createdAt: now, finishedAt: now, metadata: null,
+    });
   }
   for (const call of parsed.toolCalls) {
     parts.push({
-      kind: 'tool', toolCallId: call.id, toolName: call.name, input: call.arguments,
-      output: [], approvalState: 'auto', streamIndex: call.index,
+      type: 'tool', toolCallId: call.id, toolName: call.name, input: call.arguments,
+      output: [], approvalState: { type: 'auto' }, metadata: { stream_tool_index: call.index },
     });
   }
-  return makeAssistantMessage(parts);
+  return makeUIMessage('assistant', parts);
 };
 
 class OpenAiCompatibleAiClient implements AiClient {
@@ -368,17 +366,16 @@ class OpenAiCompatibleAiClient implements AiClient {
     for (const part of toolParts) {
       if (isAborted(signal)) throw this.abortError();
       const tool: ExecutableTool | undefined = definitions.get(part.toolName);
-      let output: ToolTextOutput[] = [];
+      let output: UIMessagePartText[] = [];
       if (tool === undefined) {
-        const missingText: ToolTextOutput = {
-          kind: 'text', text: JSON.stringify({ status: 'failed', message: 'tool definition missing' }),
+        const missingText: UIMessagePartText = {
+          type: 'text', text: JSON.stringify({ status: 'failed', message: 'tool definition missing' }),
+          metadata: null,
         };
         output = [missingText];
       } else if (!this.shouldExecute(tool, params)) {
-        const pendingText: ToolTextOutput = {
-          kind: 'text', text: JSON.stringify({ status: 'pending_approval', tool: tool.name }),
-        };
-        output = [pendingText];
+        part.approvalState = { type: 'pending' };
+        continue;
       } else {
         try {
           output = await tool.execute(part.input);
@@ -386,17 +383,16 @@ class OpenAiCompatibleAiClient implements AiClient {
         } catch (error) {
           if (isAborted(signal)) throw this.abortError();
           const message: string = error instanceof Error ? error.message : String(error);
-          const failedText: ToolTextOutput = {
-            kind: 'text', text: JSON.stringify({ status: 'failed', message: message }),
+          const failedText: UIMessagePartText = {
+            type: 'text', text: JSON.stringify({ status: 'failed', message: message }), metadata: null,
           };
           output = [failedText];
         }
       }
       part.output = output;
-      part.approvalState = output.length > 0 ? 'answered' : 'pending';
       resultMessages.push(makeUIMessage('tool', [{
-        kind: 'tool', toolCallId: part.toolCallId, toolName: part.toolName, input: part.input,
-        output: output, approvalState: 'answered', streamIndex: part.streamIndex,
+        type: 'tool', toolCallId: part.toolCallId, toolName: part.toolName, input: part.input,
+        output: output, approvalState: part.approvalState, metadata: part.metadata,
       }]));
     }
     return resultMessages;

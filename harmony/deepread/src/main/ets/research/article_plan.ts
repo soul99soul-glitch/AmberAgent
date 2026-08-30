@@ -263,13 +263,4 @@ export const generateArticlePlan = async (
   }
 };
 
-// AiClient UIMessage 是 platform/ai_client.ts 的 unknown 占位
-// 这里用 latestAssistantText(agent/message.ts),它接受 UIMessage[];由于 AiClient 返回 unknown,
-// 做防御性 cast 到 agent 层的 UIMessage 结构
-const extractAssistantText = (messages: unknown): string => {
-  try {
-    return latestAssistantText(messages as UIMessage[]);
-  } catch {
-    return '';
-  }
-};
+const extractAssistantText = (messages: UIMessage[]): string => latestAssistantText(messages);

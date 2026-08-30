@@ -7,7 +7,7 @@ import {
 import { tryFallbackAfterStageFailure } from '../main/ets/agent/try_fallback.ts';
 import { createSectionWriterTools } from '../main/ets/agent/section_writer_tools.ts';
 import type { UIMessage, UIMessagePart, UIMessagePartText } from '../main/ets/agent/message.ts';
-import { makeUserMessage, makeAssistantMessage } from '../main/ets/agent/message.ts';
+import { makeUserMessage, makeAssistantMessage, makeUIMessage } from '../main/ets/agent/message.ts';
 import type { DeepReadEvidencePack, EvidenceCard, DeepReadArticlePlan } from '../main/ets/research/evidence_pack.ts';
 import type { DeepReadOutput } from '../main/ets/domain/models.ts';
 import { makeEmptyDeepReadOutput } from '../main/ets/domain/models.ts';
@@ -43,14 +43,14 @@ const makePack = (cards: EvidenceCard[] = [makeCard('src-1')]): DeepReadEvidence
 const assistantWithOverviewToolCall = (): UIMessage => {
   // 模拟 assistant 调用 overview writer tool(带有效 summary)
   const parts: UIMessagePart[] = [
-    { kind: 'text', text: '正在写入概览。' },
+    { type: 'text', text: '正在写入概览。', metadata: null },
     {
-      kind: 'tool', toolName: WRITER_TOOL_NAMES.OVERVIEW, toolCallId: 'tc1',
+      type: 'tool', toolName: WRITER_TOOL_NAMES.OVERVIEW, toolCallId: 'tc1',
       input: JSON.stringify({ summary: '这是有效的概览内容,充分满足最小字符阈值长度要求。', topic_type: 'event' }),
-      approvalState: 'approved', output: [],
+      approvalState: { type: 'approved' }, output: [], metadata: null,
     },
   ];
-  return makeAssistantMessage(parts);
+  return makeUIMessage('assistant', parts);
 };
 
 // ===== buildPrompt =====
@@ -205,7 +205,7 @@ test('tryFallback: useful assistant text → recovered (READY BASIC)', async () 
   const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
   const msgs: UIMessage[] = [
     makeUserMessage('研究'),
-    makeAssistantMessage([{ kind: 'text', text: '这是模型生成的足够长的中文概览文本内容,包含足够汉字以通过有效性检查阈值要求。' }]),
+    makeAssistantMessage('这是模型生成的足够长的中文概览文本内容,包含足够汉字以通过有效性检查阈值要求。'),
   ];
   const result = await tryFallbackAfterStageFailure({
     writer, stage: 'OVERVIEW', messages: msgs, sources: [makeCard('s1')], reason: 'missing writer tool', allowReadyRewrite: false,
@@ -218,7 +218,7 @@ test('tryFallback: useful assistant text → recovered (READY BASIC)', async () 
 test('tryFallback: low-quality text + no sources → not recovered (false)', async () => {
   const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
   const msgs: UIMessage[] = [
-    makeAssistantMessage([{ kind: 'text', text: '短' }]),
+    makeAssistantMessage('短'),
   ];
   // EXTENDED_READING fallback 需要 http 链接;给空 sources → 不会 READY
   const result = await tryFallbackAfterStageFailure({
@@ -260,7 +260,7 @@ test('supervisor loop: no write on pass 0, writes on pass 1 → ready', async ()
     callCount++;
     if (callCount === 1) {
       // pass 0: 不调工具,只返回自由文本 → 无写入
-      return [...messages, makeAssistantMessage([{ kind: 'text', text: '我还在思考。' }])];
+      return [...messages, makeAssistantMessage('我还在思考。')];
     }
     // pass 1: 调 overview tool
     const tool = writer.tools(new Set(['OVERVIEW'])).find(t => t.name === WRITER_TOOL_NAMES.OVERVIEW)!;
@@ -284,7 +284,7 @@ test('supervisor loop: no write on pass 0, writes on pass 1 → ready', async ()
 test('supervisor loop: 2 passes no write → tryFallback recovers', async () => {
   const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
   const collectRun: CollectRunFn = async (messages): Promise<UIMessage[]> => {
-    return [...messages, makeAssistantMessage([{ kind: 'text', text: '思考中...' }])];
+    return [...messages, makeAssistantMessage('思考中...')];
   };
   let fallbackCalled = false;
   const tryFallback = async (): Promise<boolean> => {
@@ -308,7 +308,7 @@ test('supervisor loop: 2 passes no write → tryFallback recovers', async () => 
 
 test('supervisor loop: 2 passes no write + fallback fails → markFailed', async () => {
   const writer = createSectionWriterTools({ topicId: 't', topicTitle: 'x', imageCandidates: [] });
-  const collectRun: CollectRunFn = async (messages) => [...messages, makeAssistantMessage([{ kind: 'text', text: '...' }])];
+  const collectRun: CollectRunFn = async (messages) => [...messages, makeAssistantMessage('...')];
   const tryFallback = async (): Promise<boolean> => false;  // fallback 失败
   const ctx: SupervisorContext = {
     writer, evidencePack: makePack(), articlePlan: emptyPlan(),
@@ -403,7 +403,7 @@ test('supervisor loop: first collectRun receives user prompt with buildPrompt co
   await runStageSupervisorLoop(ctx, 'OVERVIEW');
   assert.ok(received.length > 0);
   // user message 应包含 buildPrompt 生成的标题
-  const textPart = received[0].parts.find((p): p is UIMessagePartText => p.kind === 'text');
+  const textPart = received[0].parts.find((p): p is UIMessagePartText => p.type === 'text');
   assert.ok(textPart !== undefined);
   if (textPart !== undefined) {
     assert.ok(textPart.text.includes('独特话题标题'));

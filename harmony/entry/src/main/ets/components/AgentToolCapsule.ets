@@ -109,69 +109,89 @@ export struct AgentToolCallCapsule {
   @Prop title: string = '';
   @Prop status: ToolStatus = ToolStatus.Running;
   @Prop showApproval: boolean = false;
+  @Prop canOpen: boolean = true;
+  @Prop canApprove: boolean = true;
+  @Prop canDeny: boolean = true;
   onApprove: () => void = (): void => {};
   onDeny: () => void = (): void => {};
   onCapsuleClick: () => void = (): void => {};
 
   build(): void {
     Row() {
-      Row() {
-        Text(toolIconEmoji(this.toolName))
-          .fontSize(14)
-          .margin({ right: 6 })
-
-        Text(this.title)
-          .fontSize(META)
-          .fontColor(this.showApproval ? INK2 : ACCENT)
-          .fontWeight(FontWeight.Medium)
-          .fontFamily('JetBrainsMono')
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .layoutWeight(1)
-
-        if (!this.showApproval) {
-          if (this.status === ToolStatus.Running) {
-            DotLoading({ dotSize: 6, color: ACCENT })
-          } else {
-            Text(toolStatusIcon(this.status))
-              .fontSize(10)
-              .fontColor('#FFFFFF')
-              .width(16)
-              .height(16)
-              .borderRadius(8)
-              .backgroundColor(toolStatusColor(this.status))
-              .textAlign(TextAlign.Center)
-          }
-        }
+      if (this.canOpen) {
+        Row() { this.CapsuleContent(); }
+          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+          .constraintSize({ minHeight: 32 })
+          .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
+          .borderRadius(50)
+          .border({ width: this.showApproval ? 1 : 0, color: LINE })
+          .alignItems(VerticalAlign.Center)
+          .onClick((): void => { this.onCapsuleClick(); })
+          .accessibilityText(`查看工具 ${this.title}`)
+      } else {
+        Row() { this.CapsuleContent(); }
+          .padding({ left: 9, right: 9, top: 3, bottom: 3 })
+          .constraintSize({ minHeight: 32 })
+          .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
+          .borderRadius(50)
+          .border({ width: this.showApproval ? 1 : 0, color: LINE })
+          .alignItems(VerticalAlign.Center)
       }
-      .padding({ left: 9, right: 9, top: 3, bottom: 3 })
-      .constraintSize({ minHeight: 32 })
-      .backgroundColor(this.showApproval ? SURFACE2 : accentAlpha(this.accentColorStore, 0.16))
-      .borderRadius(50)
-      .border({ width: this.showApproval ? 1 : 0, color: LINE })
-      .alignItems(VerticalAlign.Center)
-      .onClick((): void => { this.onCapsuleClick(); })
-      .accessibilityText(`查看工具 ${this.title}`)
 
       if (this.showApproval) {
-        Text('✕')
-          .fontSize(12)
-          .fontColor(ERROR)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick((): void => { this.onDeny(); })
-          .accessibilityText('拒绝工具执行')
-        Text('✓')
-          .fontSize(12)
-          .fontColor(SIGNAL)
-          .width(44)
-          .height(44)
-          .textAlign(TextAlign.Center)
-          .onClick((): void => { this.onApprove(); })
-          .accessibilityText('批准工具执行')
+        if (this.canDeny) {
+          Text('✕')
+            .fontSize(12)
+            .fontColor(ERROR)
+            .width(44)
+            .height(44)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => { this.onDeny(); })
+            .accessibilityText('拒绝工具执行')
+        }
+        if (this.canApprove) {
+          Text('✓')
+            .fontSize(12)
+            .fontColor(SIGNAL)
+            .width(44)
+            .height(44)
+            .textAlign(TextAlign.Center)
+            .onClick((): void => { this.onApprove(); })
+            .accessibilityText('批准工具执行')
+        }
       }
     }
     .alignItems(VerticalAlign.Center)
+  }
+
+  @Builder
+  private CapsuleContent(): void {
+    Text(toolIconEmoji(this.toolName))
+      .fontSize(14)
+      .margin({ right: 6 })
+
+    Text(this.title)
+      .fontSize(META)
+      .fontColor(this.showApproval ? INK2 : ACCENT)
+      .fontWeight(FontWeight.Medium)
+      .fontFamily('JetBrainsMono')
+      .maxLines(1)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .layoutWeight(1)
+
+    if (!this.showApproval) {
+      if (this.status === ToolStatus.Running) {
+        DotLoading({ dotSize: 6, color: ACCENT })
+      } else {
+        Text(toolStatusIcon(this.status))
+          .fontSize(10)
+          .fontColor('#FFFFFF')
+          .width(16)
+          .height(16)
+          .borderRadius(8)
+          .backgroundColor(toolStatusColor(this.status))
+          .textAlign(TextAlign.Center)
+      }
+    }
   }
 }

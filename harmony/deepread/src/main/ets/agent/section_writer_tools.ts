@@ -965,6 +965,7 @@ const buildVisualDiagnostics = (
 
 // ===== Writer output 工厂(对应 Android ok/missing JSON) =====
 const makeWriterOutput = (status: string, payload: Record<string, unknown>): UIMessagePartText => ({
-  kind: 'text',
+  type: 'text',
   text: JSON.stringify({ status, ...payload }),
+  metadata: null,
 });

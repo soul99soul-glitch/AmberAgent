@@ -4,6 +4,10 @@ import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } f
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { ChatInput } from '../components/ChatInput.ets';
+import {
+  AgentMessageRow, NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+} from '../components/AgentMessageRow.ets';
+import { InteractiveMessageTimeline } from '../components/InteractiveMessageTimeline.ets';
 import { NovelDiscussionAskCard } from '../components/NovelDiscussionAskCard.ets';
 import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard.ets';
 import {
@@ -19,6 +23,7 @@ import {
   NovelRunKind, NovelRun, NovelChapterVersion, NovelChapterVersionKind,
   parseDiscussionAsk, stripDiscussionAskFence, stripSettingProposalsFence, formatDiscussionAnswersFromToolPayload,
   NovelDiscussionAskParsed, NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
+  UIMessage, UIMessageAnnotation, makeUIMessage,
 } from '@amber/deepread-domain';
 
 const GREEN: string = '#43A047';
@@ -65,6 +70,7 @@ struct NovelWorkspacePage {
   @State streamingText: string = '';
   @State generationStatus: string = '';
   @State activeRunId: string = '';
+  @State activeRunCreatedAt: number = 0;
   // N3:讨论归档蒸馏(取当前讨论模式中未收录的 assistant 消息)
   async archiveDiscussion(): Promise<void> {
     if (this.project === null || this.activeRunId.length > 0) return;
@@ -122,6 +128,7 @@ struct NovelWorkspacePage {
 
   private projectId: string = '';
   private currentUnsub: (() => void) | null = null;
+  private chatScroller: Scroller = new Scroller();
   private pageAlive: boolean = false;
   private reloadToken: number = 0;
 
@@ -178,9 +185,59 @@ struct NovelWorkspacePage {
 
   // ===== 聊天 =====
   assistantLabel(m: NovelMessage): string {
-    if (m.interrupted) return 'Amber · 已停止（内容已保留）';
-    if (m.mode === 'discuss') return 'Amber · 讨论';
-    return m.granularity === 'continuation' ? 'Amber · 续写' : 'Amber · 整章';
+    if (m.interrupted) return '已停止（内容已保留）';
+    if (m.mode === 'discuss') return '讨论';
+    return m.granularity === 'continuation' ? '续写' : '整章';
+  }
+
+  private messageTimestamp(epochMillis: number): string {
+    return new Date(epochMillis).toISOString();
+  }
+
+  private displayedNovelContent(message: NovelMessage): string {
+    if (message.mode !== 'discuss') return message.content;
+    return stripSettingProposalsFence(stripDiscussionAskFence(message.content));
+  }
+
+  private projectMessageUi(message: NovelMessage): UIMessage {
+    const annotations: UIMessageAnnotation[] = message.interrupted
+      ? [{ type: 'generation_interrupted', reason: '用户停止生成' }]
+      : [];
+    const createdAt: string = this.messageTimestamp(message.createdAt);
+    return makeUIMessage(message.role, [{
+      type: 'text',
+      text: this.displayedNovelContent(message),
+      metadata: null,
+    }], {
+      id: message.id,
+      annotations,
+      createdAt,
+      finishedAt: createdAt,
+      modelId: this.project?.modelId ?? null,
+    });
+  }
+
+  private pendingUserUi(): UIMessage {
+    const createdAt: string = this.messageTimestamp(
+      this.activeRunCreatedAt > 0 ? this.activeRunCreatedAt : Date.now());
+    return makeUIMessage('user', [{ type: 'text', text: this.pendingUserText, metadata: null }], {
+      id: `novel-user:${this.activeRunId}`,
+      createdAt,
+      finishedAt: createdAt,
+      modelId: this.project?.modelId ?? null,
+    });
+  }
+
+  private activeRunUi(): UIMessage {
+    const createdAt: string = this.messageTimestamp(
+      this.activeRunCreatedAt > 0 ? this.activeRunCreatedAt : Date.now());
+    const text: string = this.streamingText.length > 0 ? this.streamingText : this.generationStatus;
+    return makeUIMessage('assistant', [{ type: 'text', text, metadata: null }], {
+      id: `novel-run:${this.activeRunId}`,
+      createdAt,
+      finishedAt: null,
+      modelId: this.project?.modelId ?? null,
+    });
   }
 
   send(runKindOverride: NovelRunKind | null = null): void {
@@ -203,6 +260,7 @@ struct NovelWorkspacePage {
 
     const run = getNovelCreation().generate(this.projectId, text, mode, gran, runKind);
     this.activeRunId = run.id;
+    this.activeRunCreatedAt = Date.now();
     this.currentUnsub = run.subscribe((e): void => {
       if (e.kind === 'status') {
         if (e.text.length > 0) this.generationStatus = e.text;
@@ -212,6 +270,7 @@ struct NovelWorkspacePage {
         this.streamingText = e.text;
       } else if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
         this.activeRunId = '';
+        this.activeRunCreatedAt = 0;
         this.pendingUserText = '';
         this.streamingText = '';
         this.generationStatus = '';
@@ -585,6 +644,117 @@ struct NovelWorkspacePage {
 
   // ===== 页签内容 =====
   @Builder
+  novelMessageHeader(message: NovelMessage): void {
+    if (message.role === 'assistant') {
+      Text(this.assistantLabel(message))
+        .fontSize(12)
+        .fontColor(INK3)
+        .margin({ bottom: 4 })
+    }
+  }
+
+  @Builder
+  novelMessageFooter(message: NovelMessage): void {
+    if (!this.hasBlockingNovelRun() && this.shouldShowDiscussionAsk(message.id) &&
+      this.discussionAskInputFor(message).length > 0) {
+      NovelDiscussionAskCard({
+        input: this.discussionAskInputFor(message),
+        askId: message.id,
+        onSubmit: (payload: string): void => { this.submitDiscussionAsk(message, payload); },
+      })
+    }
+    if (message.mode === 'write' && message.collectedChapterId === null &&
+      message.content.trim().length > 0) {
+      Row() {
+        Text(message.interrupted ? '收进章节（部分）' : '收进章节')
+          .fontSize(12)
+          .fontColor(ACCENT)
+      }
+      .constraintSize({ minHeight: 44 })
+      .padding({ left: 12, right: 12 })
+      .borderRadius(22)
+      .backgroundColor(SURFACE2)
+      .margin({ top: 6 })
+      .alignItems(VerticalAlign.Center)
+      .onClick((): void => { this.openCollect(message.id); })
+      .accessibilityText(message.interrupted ? '收进章节，部分内容' : '收进章节')
+    } else if (message.collectedChapterId !== null) {
+      Text('已收进章节').fontSize(12).fontColor(GREEN).margin({ top: 10 })
+    }
+  }
+
+  @Builder
+  activeRunHeader(): void {
+    Text(this.streamingText.length > 0 ? '正在写' : '正在思考')
+      .fontSize(12)
+      .fontColor(ACCENT)
+      .margin({ bottom: 4 })
+  }
+
+  @Builder
+  emptyAgentRowSlot(): void {}
+
+  @Builder
+  novelTimelineRows(): void {
+    if (this.project !== null) {
+      ForEach(this.project.messages, (message: NovelMessage): void => {
+        ListItem() {
+          AgentMessageRow({
+            message: this.projectMessageUi(message),
+            capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+            hostHeader: (): void => { this.novelMessageHeader(message); },
+            hostFooter: (): void => { this.novelMessageFooter(message); },
+            streaming: false,
+          })
+        }
+      }, (message: NovelMessage): string => message.id)
+      ForEach(this.project.settingProposals.filter(
+        (proposal: NovelSettingProposal): boolean => proposal.status === 'pending'),
+      (proposal: NovelSettingProposal): void => {
+        ListItem() {
+          NovelSettingProposalCard({
+            title: proposal.title,
+            content: proposal.content,
+            kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
+            onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
+          })
+        }
+      }, (proposal: NovelSettingProposal): string => proposal.id)
+    }
+    if (this.pendingUserText.length > 0) {
+      ListItem() {
+        AgentMessageRow({
+          message: this.pendingUserUi(),
+          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => { this.emptyAgentRowSlot(); },
+          hostFooter: (): void => { this.emptyAgentRowSlot(); },
+          streaming: false,
+        })
+      }
+    }
+  }
+
+  @Builder
+  novelTimelineActiveTail(): void {
+    if (this.activeRunId.length > 0) {
+      ListItem() {
+        AgentMessageRow({
+          message: this.activeRunUi(),
+          capabilities: NO_AGENT_MESSAGE_ROW_CAPABILITIES,
+          hostHeader: (): void => { this.activeRunHeader(); },
+          hostFooter: (): void => { this.emptyAgentRowSlot(); },
+          // C1 保持真实语义：当前 adapter 是 one-shot；C2 资格通过后才标记 live streaming。
+          streaming: false,
+          isLastAssistant: true,
+        })
+      }
+    }
+  }
+
+  @Builder
+  emptyTimelineSlot(): void {}
+
+  @Builder
   chatPane(): void {
     Column() {
     Row() {
@@ -605,51 +775,19 @@ struct NovelWorkspacePage {
         .alignItems(HorizontalAlign.Center)
         .width('100%').padding({ left: 24, right: 24, top: 120, bottom: 24 })
       }
-      // 消息列表
-      List({ space: 0 }) {
-        if (this.project !== null) {
-          ForEach(this.project.messages, (m: NovelMessage) => {
-            ListItem() {
-              this.messageCard(m)
-            }
-          }, (m: NovelMessage) => m.id)
-          // 讨论产生的设定提案紧随聊天记录；只有确认后才写入项目设定。
-          ForEach(this.project.settingProposals.filter((proposal: NovelSettingProposal): boolean => proposal.status === 'pending'),
-            (proposal: NovelSettingProposal) => {
-              ListItem() {
-                NovelSettingProposalCard({
-                  title: proposal.title,
-                  content: proposal.content,
-                  kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
-                  onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
-                })
-              }
-            }, (proposal: NovelSettingProposal): string => proposal.id)
-        }
-        // 乐观用户气泡
-        if (this.pendingUserText.length > 0) {
-          ListItem() {
-            this.userBubble(this.pendingUserText)
-          }
-        }
-        // 流式卡片
-        if (this.activeRunId.length > 0) {
-          ListItem() {
-            Column() {
-              Text('Amber 正在写').fontSize(12).fontColor(ACCENT).margin({ bottom: 6 })
-              if (this.streamingText.length > 0) {
-                Text(this.streamingText + '▍').fontSize(14).fontColor(INK).lineHeight(24)
-              } else {
-                Text(this.generationStatus).fontSize(13).fontColor(INK3)
-              }
-            }
-            .width('94%').padding(14).backgroundColor(SURFACE).borderRadius(12)
-            .border({ width: 1, color: LINE }).margin({ bottom: 12 })
-            .alignItems(HorizontalAlign.Start)
-          }
-        }
-      }
-      .layoutWeight(1).padding({ left: 16, right: 16, top: 8 })
+      // Chat 与 Novel 共享同一 Timeline/AgentMessageRow；Timeline 独占 16vp 水平 gutter。
+      InteractiveMessageTimeline({
+        scroller: this.chatScroller,
+        horizontalGutter: 16,
+        topPadding: 8,
+        bottomPadding: 0,
+        cachedItems: 5,
+        showOlderLoader: false,
+        showDivider: false,
+        rows: (): void => { this.novelTimelineRows(); },
+        activeTail: (): void => { this.novelTimelineActiveTail(); },
+        hostTail: (): void => { this.emptyTimelineSlot(); },
+      })
 
       if (this.errorMsg.length > 0) {
         Text(this.errorMsg).fontSize(12).fontColor('#E53935').padding({ left: 16, right: 16, bottom: 6 })

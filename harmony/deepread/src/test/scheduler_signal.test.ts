@@ -75,7 +75,7 @@ test('scheduler.abort: signal reaches collectRun; run rejects with abort; cleanu
         }
       });
     }
-    return [...messages, makeAssistantMessage([{ kind: 'text', text: 'x' }])];
+    return [...messages, makeAssistantMessage('x')];
   };
   const deps = baseDeps(collectRun);
   const scheduler = createScheduler({
@@ -103,7 +103,7 @@ test('scheduler.abort: signal reaches collectRun; run rejects with abort; cleanu
 
 test('scheduler: sequential runs on same topic complete (topicLock release)', async () => {
   const collectRun: CollectRunFn = async (messages) =>
-    [...messages, makeAssistantMessage([{ kind: 'text', text: 'done' }])];
+    [...messages, makeAssistantMessage('done')];
   const scheduler = createScheduler({
     runManager: baseDeps(collectRun),
     observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
@@ -127,7 +127,7 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
   const collectRunA: CollectRunFn = async (messages) => {
     aCollectCalls++;
     await aGate; // 显式释放前不结束(无视 signal = 故意不遵守,模拟坏实现)
-    return [...messages, makeAssistantMessage([{ kind: 'text', text: 'A done' }])];
+    return [...messages, makeAssistantMessage('A done')];
   };
   const depsA = baseDeps(collectRunA);
 
@@ -181,7 +181,7 @@ test('scheduler: REPLACE after abort-wait timeout keeps B registration (token gu
 
 test('scheduler: notifyRunning rejection does not leak runningJobs registration', async () => {
   const collectRun: CollectRunFn = async (messages) =>
-    [...messages, makeAssistantMessage([{ kind: 'text', text: 'x' }])];
+    [...messages, makeAssistantMessage('x')];
   const scheduler = createScheduler({
     runManager: baseDeps(collectRun),
     observeOutput: () => makeMemoryObservable(makeEmptyDeepReadOutput()),
@@ -228,7 +228,7 @@ test('scheduler: concurrent REPLACE admission — later caller aborts the earlie
       timer = setTimeout((): void => finish(), 60_000);
       gate.then((): void => finish(), (): void => finish());
     });
-    return [...messages, makeAssistantMessage([{ kind: 'text', text: 'done' }])];
+    return [...messages, makeAssistantMessage('done')];
   };
   const scheduler = createScheduler({
     runManager: baseDeps(collectRun),
