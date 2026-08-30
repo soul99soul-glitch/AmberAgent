@@ -70,3 +70,10 @@ F1 重定向 + F2 SearchPage 真搜索 + F4 MemoryPage 真数据 + F5 QuickMessa
 - TTS/Office Pro 相关功能已按用户决定整体移除(设置入口/页面/朗读按钮/本地工具选项/Display 字段);终端运行环境经 HiSH 调研裁定保留。
 - 完成度缺口全量盘点与分阶段完善计划见 `2026-08-29-harmony-completion-plan.md`(P0 卫生 → P5 基建)。
 - P0 已执行:本地工具页 7 个无实体平台工具(javascript_engine/terminal/system_access/webview/icloud/webmount/webmount_eval)诚实禁用+「未实装」标注;AppContainer 过时 mock 注释与 MockAiClient 死代码清除;ChatPage D-085d 过时偏差注释修正。
+
+## 2026-08-30 小说创作重新开账
+
+旧 `2026-08-30-novel-parity-plan.md` 的“N1-N3 全部落地”已由源码审计推翻；当前只确认
+“非流式整章生成 → 手动收录”真机窄闭环。Chat 共用呈现/运行时、三职责模型、真实工具
+循环、合同/候选/审稿/原子提交、持久代笔、后台恢复和通知深链重新列为未完成。
+完整阶段与验收契约见 `2026-08-30-harmony-novel-product-completion-plan.md`。
