@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 import { createNovelCreation } from '../main/ets/novel/creation.ts';
 import type { NovelCreation } from '../main/ets/novel/creation.ts';
-import type { NovelRunEvent, NovelRun } from '../main/ets/novel/creation.ts';
+import type {
+  NovelRunEvent, NovelRun, NovelBatchPolishEvent, NovelBatchPolishRun,
+} from '../main/ets/novel/creation.ts';
 import { createFileNovelRepository } from '../main/ets/novel/repository.ts';
 import { createMemoryFileStore } from '../main/ets/platform/files.ts';
 import type { NovelModelRunning, NovelModelEvent, NovelModelRequest } from '../main/ets/novel/model_running.ts';
@@ -19,6 +21,16 @@ const runToTerminal = (run: NovelRun): Promise<NovelRunEvent[]> => {
       if (e.kind === 'completed' || e.kind === 'interrupted' || e.kind === 'failed') {
         resolve(events);
       }
+    });
+  });
+};
+
+const batchToTerminal = (run: NovelBatchPolishRun): Promise<NovelBatchPolishEvent[]> => {
+  return new Promise<NovelBatchPolishEvent[]>(resolve => {
+    const events: NovelBatchPolishEvent[] = [];
+    run.subscribe((event: NovelBatchPolishEvent): void => {
+      events.push(event);
+      if (event.kind === 'completed' || event.kind === 'cancelled') resolve(events);
     });
   });
 };
@@ -350,4 +362,142 @@ test('regression: collectMessage does not block on suggestion analysis', async (
   // 章节已落库
   const reloaded = await creation.open(p.id);
   assert.equal(reloaded.chapters.length, 1);
+});
+
+test('discussion setting proposals persist atomically with user and assistant', async () => {
+  const proposalModel: NovelModelRunning = {
+    async validate(): Promise<void> {},
+    start(): { subscribe: (cb: (event: NovelModelEvent) => void) => () => void } {
+      const subs = new Set<(event: NovelModelEvent) => void>();
+      setTimeout(() => {
+        const text = '建议保留。\n```setting_proposals\n'
+          + '{"proposals":[{"kind":"world","title":"灵脉","content":"贯穿大陆"}]}\n```';
+        subs.forEach(cb => { cb({ kind: 'delta', text: text }); });
+        subs.forEach(cb => { cb({ kind: 'completed' }); });
+      }, 0);
+      return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
+    },
+    cancel(): void {},
+  };
+  const creation = makeCreation(proposalModel);
+  const project = await creation.create('小说');
+  await runToTerminal(creation.generate(project.id, '聊设定', 'discuss'));
+
+  const persisted = await creation.open(project.id);
+  assert.equal(persisted.messages.length, 2);
+  assert.equal(persisted.settingProposals.length, 1);
+  assert.equal(persisted.settingProposals[0].sourceMessageId, persisted.messages[1].id);
+  assert.ok(persisted.messages[1].content.includes('```setting_proposals'));
+
+  const material = await creation.resolveSettingProposal(
+    project.id, persisted.settingProposals[0].id, true);
+  assert.equal(material?.title, '灵脉');
+  const resolved = await creation.open(project.id);
+  assert.equal(resolved.settingProposals[0].status, 'accepted');
+  assert.equal(resolved.materials.length, 1);
+});
+
+test('batch polish runs chapters serially and returns assistant message ids', async () => {
+  let active = 0;
+  let maxActive = 0;
+  const starts: string[] = [];
+  const serialModel: NovelModelRunning = {
+    async validate(): Promise<void> {},
+    start(request: NovelModelRequest) {
+      starts.push(request.userPrompt);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      const subs = new Set<(event: NovelModelEvent) => void>();
+      setTimeout(() => {
+        subs.forEach(cb => { cb({ kind: 'delta', text: `润色${starts.length}` }); });
+        active -= 1;
+        subs.forEach(cb => { cb({ kind: 'completed' }); });
+      }, 5);
+      return { subscribe: (cb): (() => void) => { subs.add(cb); return () => { subs.delete(cb); }; } };
+    },
+    cancel(): void {},
+  };
+  const creation = makeCreation(serialModel);
+  const project = await creation.create('小说');
+  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
+  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
+
+  const events = await batchToTerminal(creation.startBatchPolish(project.id, [first.id, second.id]));
+  const completed = events.find(event => event.kind === 'completed');
+  assert.ok(completed?.kind === 'completed');
+  assert.equal(maxActive, 1);
+  assert.equal(starts.length, 2);
+  assert.ok(starts[0].includes('第一章'));
+  assert.ok(starts[1].includes('第二章'));
+  assert.deepEqual(completed.results.map(result => result.status), ['succeeded', 'succeeded']);
+  assert.ok(completed.results.every(result => result.messageId !== null));
+});
+
+test('batch polish cancellation interrupts current chapter and does not start the next', async () => {
+  const ctl = controllableModel();
+  const creation = makeCreation(ctl.model);
+  const project = await creation.create('小说');
+  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
+  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
+  const batch = creation.startBatchPolish(project.id, [first.id, second.id]);
+  const terminal = batchToTerminal(batch);
+  await delay(10);
+  batch.cancel();
+  const events = await terminal;
+  const cancelled = events.find(event => event.kind === 'cancelled');
+  assert.ok(cancelled?.kind === 'cancelled');
+  assert.equal(cancelled.results.length, 1);
+  assert.equal(cancelled.results[0].chapterId, first.id);
+  assert.equal(cancelled.results[0].status, 'cancelled');
+  assert.ok(!events.some(event => event.kind === 'progress' && event.chapterId === second.id));
+});
+
+test('repeated batch polish call for one project returns the active run', async () => {
+  const ctl = controllableModel();
+  const creation = makeCreation(ctl.model);
+  const project = await creation.create('小说');
+  const chapter = await creation.saveChapter(project.id, null, '第一章', '旧正文');
+  const first = creation.startBatchPolish(project.id, [chapter.id]);
+  const repeated = creation.startBatchPolish(project.id, [chapter.id]);
+  assert.equal(repeated.id, first.id);
+  const terminal = batchToTerminal(first);
+  await delay(10);
+  first.cancel();
+  await terminal;
+});
+
+test('adoptPolishMessage saves polish version, replaces chapter and marks message collected', async () => {
+  const creation = makeCreation(smartModel());
+  const project = await creation.create('小说');
+  const chapter = await creation.saveChapter(project.id, null, '第一章', '旧正文');
+  const events = await batchToTerminal(creation.startBatchPolish(project.id, [chapter.id]));
+  const completed = events.find(event => event.kind === 'completed');
+  assert.ok(completed?.kind === 'completed');
+  const messageId = completed.results[0].messageId;
+  assert.ok(messageId !== null);
+
+  const adopted = await creation.adoptPolishMessage(project.id, chapter.id, messageId);
+  assert.equal(adopted.content, '这是正文');
+  const reloaded = await creation.open(project.id);
+  assert.equal(reloaded.chapterVersions.length, 1);
+  assert.equal(reloaded.chapterVersions[0].kind, 'polish');
+  assert.equal(reloaded.chapterVersions[0].content, '旧正文');
+  assert.equal(reloaded.messages.find(message => message.id === messageId)?.collectedChapterId, chapter.id);
+});
+
+test('adoptPolishMessage rejects a polish result generated for another chapter', async () => {
+  const creation = makeCreation(smartModel());
+  const project = await creation.create('小说');
+  const first = await creation.saveChapter(project.id, null, '第一章', '旧一');
+  const second = await creation.saveChapter(project.id, null, '第二章', '旧二');
+  const events = await batchToTerminal(creation.startBatchPolish(project.id, [first.id]));
+  const completed = events.find(event => event.kind === 'completed');
+  assert.ok(completed?.kind === 'completed');
+  const messageId = completed.results[0].messageId;
+  assert.ok(messageId !== null);
+
+  await assert.rejects(creation.adoptPolishMessage(project.id, second.id, messageId));
+  const reloaded = await creation.open(project.id);
+  assert.equal(reloaded.chapters.find(chapter => chapter.id === second.id)?.content, '旧二');
+  assert.equal(reloaded.chapterVersions.length, 0);
 });

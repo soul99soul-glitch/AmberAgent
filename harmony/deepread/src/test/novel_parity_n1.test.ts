@@ -22,6 +22,15 @@ test('PromptCatalog: 6 种 RunKind 均有非空模板', () => {
   }
 });
 
+test('discussion prompt declares ask_user and setting_proposals fenced protocols', () => {
+  const discussion = novelPromptTemplate('discussion').systemText;
+  assert.ok(discussion.includes('```ask_user'));
+  assert.ok(discussion.includes('selection_type'));
+  assert.ok(discussion.includes('```setting_proposals'));
+  assert.ok(discussion.includes('proposals'));
+  assert.ok(discussion.includes('明确采纳'));
+});
+
 test('润色哨兵: 剥离/检测', () => {
   const out = `润色后的正文。\n\n${POLISH_COMPLETION_SENTINEL}`;
   assert.equal(hasPolishSentinel(out), true);

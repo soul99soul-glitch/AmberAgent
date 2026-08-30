@@ -1,8 +1,8 @@
 // novel/models — 小说创作数据模型(移植自 codex/novel-under-7000 model/NovelModels.kt)
-// 扁平模型(schemaVersion=2):项目内嵌 messages/chapters/materials/materialSuggestions。
+// 扁平模型(schemaVersion=3):项目内嵌 messages/chapters/materials/materialSuggestions/settingProposals。
 // 枚举用小写字符串联合(本地存储,无需与 Android 线格式一致)。ArkTS 安全。
 
-export const NOVEL_SCHEMA_VERSION = 2;
+export const NOVEL_SCHEMA_VERSION = 3;
 
 // 校验上限(照搬 Android NovelMutations.kt)
 export const MAX_PROJECT_NAME_CHARS = 200;
@@ -16,6 +16,7 @@ export type NovelChatMode = 'write' | 'discuss';
 export type NovelGenerationGranularity = 'continuation' | 'whole_chapter';
 export type NovelMaterialKind = 'world' | 'character' | 'outline' | 'requirement' | 'other';
 export type NovelSuggestionStatus = 'pending' | 'accepted' | 'rejected';
+export type NovelSettingProposalStatus = 'pending' | 'accepted' | 'rejected';
 
 // 收录目标(运行时参数,不持久化)
 export type NovelCollectionTarget =
@@ -89,6 +90,17 @@ export interface NovelMaterialSuggestion {
   resolvedAt: number | null;
 }
 
+export interface NovelSettingProposal {
+  id: string;
+  sourceMessageId: string;
+  kind: NovelMaterialKind;
+  title: string;
+  content: string;
+  status: NovelSettingProposalStatus;
+  createdAt: number;
+  resolvedAt: number | null;
+}
+
 export interface NovelProject {
   schemaVersion: number;
   id: string;
@@ -101,6 +113,7 @@ export interface NovelProject {
   modelId: string | null;
   lastGenerationGranularity: NovelGenerationGranularity;
   materialSuggestions: NovelMaterialSuggestion[];
+  settingProposals: NovelSettingProposal[];
   // N1:分支与章节版本(Android Branch/Checkpoint 语义的轻量等价)
   branches: NovelBranch[];
   chapterVersions: NovelChapterVersion[];
@@ -136,6 +149,7 @@ export const makeNovelProject = (init: NovelProjectInit): NovelProject => {
     modelId: init.modelId !== undefined ? init.modelId : null,
     lastGenerationGranularity: 'whole_chapter',
     materialSuggestions: [],
+    settingProposals: [],
     branches: [],
     chapterVersions: [],
     revision: 0,
@@ -255,6 +269,26 @@ export const makeNovelSuggestion = (init: NovelSuggestionInit): NovelMaterialSug
   };
   return s;
 };
+
+export interface NovelSettingProposalInit {
+  id?: string;
+  sourceMessageId: string;
+  kind: NovelMaterialKind;
+  title: string;
+  content: string;
+  now: number;
+}
+
+export const makeNovelSettingProposal = (init: NovelSettingProposalInit): NovelSettingProposal => ({
+  id: init.id !== undefined && init.id.length > 0 ? init.id : novelId(),
+  sourceMessageId: init.sourceMessageId,
+  kind: init.kind,
+  title: init.title,
+  content: init.content,
+  status: 'pending',
+  createdAt: init.now,
+  resolvedAt: null,
+});
 
 // 素材 kind 显示名(中文)
 export const MATERIAL_KIND_LABELS: Record<NovelMaterialKind, string> = {

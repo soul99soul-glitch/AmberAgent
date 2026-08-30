@@ -88,13 +88,14 @@ export { ModelCouncilManager, createModelCouncilManager } from './council/manage
 // ===== Novel Creation(小说创作) =====
 export type {
   NovelMessageRole, NovelChatMode, NovelGenerationGranularity, NovelMaterialKind,
-  NovelSuggestionStatus, NovelCollectionTarget, NovelMessage, NovelChapter, NovelMaterial,
+  NovelSuggestionStatus, NovelSettingProposalStatus, NovelCollectionTarget, NovelMessage, NovelChapter, NovelMaterial,
   NovelMaterialSuggestion, NovelProject, NovelProjectInit, NovelMessageInit, NovelChapterInit,
-  NovelMaterialInit, NovelSuggestionInit, NovelChapterVersion, NovelChapterVersionKind, NovelBranch } from './novel/models.ts';
+  NovelMaterialInit, NovelSuggestionInit, NovelSettingProposal, NovelSettingProposalInit,
+  NovelChapterVersion, NovelChapterVersionKind, NovelBranch } from './novel/models.ts';
 export {
   NOVEL_SCHEMA_VERSION, MAX_PROJECT_NAME_CHARS, MAX_TITLE_CHARS, MAX_CHAPTER_CHARS,
   MAX_MATERIAL_CHARS, MATERIAL_KIND_LABELS, novelId, makeNovelProject, makeNovelMessage,
-  makeNovelChapter, makeNovelMaterial, makeNovelSuggestion,
+  makeNovelChapter, makeNovelMaterial, makeNovelSuggestion, makeNovelSettingProposal,
 } from './novel/models.ts';
 export type { NovelErrorCode } from './novel/error.ts';
 export {
@@ -104,6 +105,7 @@ export {
 export {
   createProject, renameProject, setProjectModel, appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
+  addSettingProposals, resolveSettingProposal,
 } from './novel/mutations.ts';
 export type { NovelMutation } from './novel/mutations.ts';
 export { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS, MAX_SYSTEM_CHARS } from './novel/context_builder.ts';
@@ -113,9 +115,19 @@ export {
   collectModelText, analyzeChapterSuggestions, MAX_SUGGESTIONS,
 } from './novel/suggestion_engine.ts';
 export type { NovelProjectRepository } from './novel/repository.ts';
-export { createFileNovelRepository } from './novel/repository.ts';
+export { createFileNovelRepository, migrateNovelProject } from './novel/repository.ts';
+export type {
+  NovelDiscussionAsk, NovelDiscussionQuestion, NovelDiscussionAskParsed,
+  NovelSettingProposalDraft, NovelSettingProposalsParsed,
+} from './novel/discussion_structured.ts';
+export {
+  MAX_SETTING_PROPOSALS, parseDiscussionAsk, stripDiscussionAskFence,
+  encodeDiscussionToolInput, formatDiscussionAnswers, formatDiscussionAnswersFromToolPayload,
+  parseSettingProposals, stripSettingProposalsFence,
+} from './novel/discussion_structured.ts';
 export type {
   NovelRunEvent, NovelRun, NovelCollectionResult, NovelSuggestionRefreshResult, NovelCreationDeps,
+  NovelBatchPolishResultStatus, NovelBatchPolishResult, NovelBatchPolishEvent, NovelBatchPolishRun,
 } from './novel/creation.ts';
 export { NovelCreation, createNovelCreation } from './novel/creation.ts';
 

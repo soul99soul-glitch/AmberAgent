@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import {
   createProject, renameProject, saveChapter, deleteChapter, upsertMaterial, deleteMaterial,
   collect, replacePendingSuggestions, resolveSuggestion, normalizeTitle, appendMessage,
+  addSettingProposals, resolveSettingProposal,
 } from '../main/ets/novel/mutations.ts';
 import {
   makeNovelProject, makeNovelMessage, makeNovelSuggestion,
@@ -19,7 +20,7 @@ const assistantWrite = (content: string, over: Partial<ReturnType<typeof makeNov
 test('createProject: trims name and sets schema', () => {
   const p = createProject('  我的小说  ', NOW);
   assert.equal(p.name, '我的小说');
-  assert.equal(p.schemaVersion, 2);
+  assert.equal(p.schemaVersion, 3);
 });
 
 test('createProject: blank name throws NovelError', () => {
@@ -199,4 +200,31 @@ test('resolveSuggestion reject: no material, status rejected', () => {
   assert.equal(res.value, null);
   assert.equal(res.project.materials.length, 0);
   assert.equal(res.project.materialSuggestions.find(s => s.id === sug.id)?.status, 'rejected');
+});
+
+test('setting proposals persist and accept upserts material by kind+normalized title', () => {
+  let project = upsertMaterial(base(), null, 'character', '主 角', '旧设定', true, NOW).project;
+  project = addSettingProposals(project, 'assistant-1', [{
+    kind: 'character', title: ' 主角 ', content: '新设定',
+  }], NOW + 1);
+  assert.equal(project.settingProposals.length, 1);
+  assert.equal(project.settingProposals[0].sourceMessageId, 'assistant-1');
+  assert.equal(project.settingProposals[0].status, 'pending');
+
+  const resolved = resolveSettingProposal(project, project.settingProposals[0].id, true, NOW + 2);
+  assert.equal(resolved.project.materials.length, 1);
+  assert.equal(resolved.value?.content, '新设定');
+  assert.equal(resolved.project.settingProposals[0].status, 'accepted');
+  assert.equal(resolved.project.settingProposals[0].resolvedAt, NOW + 2);
+});
+
+test('reject setting proposal only resolves proposal', () => {
+  let project = addSettingProposals(base(), 'assistant-1', [{
+    kind: 'world', title: '灵脉', content: '贯穿大陆',
+  }], NOW);
+  const resolved = resolveSettingProposal(project, project.settingProposals[0].id, false, NOW + 1);
+  assert.equal(resolved.value, null);
+  assert.equal(resolved.project.materials.length, 0);
+  assert.equal(resolved.project.settingProposals[0].status, 'rejected');
+  assert.equal(resolved.project.settingProposals[0].resolvedAt, NOW + 1);
 });

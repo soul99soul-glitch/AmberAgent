@@ -8,8 +8,8 @@ import { getChatKvStore, getChatRepository } from '../di/AppContainer.ets';
 import { cleanupDeletedConversation } from '../platform_impl/ManagedFileStore.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { UIAvatar } from '../components/UIAvatar.ets';
-import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, SURFACE, SURFACE2 } from '../design/tokens.ets';
-import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_MONO_BOLD } from '../design/fonts.ets';
+import { ACCENT, ACCENT_INK, BG, BG_FADE_END, BG_FADE_START, BODY, ERROR, INK, INK2, INK3, INK4, LINE, META, MOTION_ENTER, MOTION_STAGGER, SURFACE, SURFACE2, TEXT_STYLES } from '../design/tokens.ets';
+import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_SANS_SEMIBOLD, FONT_MONO, FONT_MONO_BOLD } from '../design/fonts.ets';
 import { BlinkingCursor } from '../design/components.ets';
 
 interface ActionMenuResult {
@@ -105,8 +105,16 @@ struct ChatListPage {
       const pendingId: string = this.pendingDeleted !== null ? this.pendingDeleted.id : '';
       const visible: ConversationSummary[] = list.filter(
         (item: ConversationSummary): boolean => item.id !== pendingId);
-      this.items = visible;
-      this.loaded = true;
+      // 首次填充走 animateTo,让列表项交错入场 transition 生效;后续刷新保持即时
+      if (!this.loaded && visible.length > 0) {
+        animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+          this.items = visible;
+          this.loaded = true;
+        });
+      } else {
+        this.items = visible;
+        this.loaded = true;
+      }
 
       // 会话行预览: 使用末条选中消息的第一行，并去除常见 Markdown 行内标记。
       for (const summary of visible) {
@@ -172,7 +180,9 @@ struct ChatListPage {
     repo.getById(item.id).then((fullConversation: Conversation | null): void => {
       if (fullConversation === null) return;
       this.pendingDeleted = fullConversation;
-      this.snackVisible = true;
+      animateTo({ duration: 220, curve: Curve.EaseOut }, (): void => {
+        this.snackVisible = true;
+      });
       this.refresh();
       this.snackTimer = setTimeout((): void => {
         this.commitPendingDelete();
@@ -192,7 +202,9 @@ struct ChatListPage {
   private undoDelete(): void {
     this.pendingDeleted = null;
     this.clearSnackTimer();
-    this.snackVisible = false;
+    animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+      this.snackVisible = false;
+    });
     this.refresh();
   }
 
@@ -200,7 +212,9 @@ struct ChatListPage {
     const fullConversation: Conversation | null = this.pendingDeleted;
     this.pendingDeleted = null;
     this.clearSnackTimer();
-    this.snackVisible = false;
+    animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+      this.snackVisible = false;
+    });
     if (fullConversation === null) return;
     const repo = getChatRepository();
     repo.delete(fullConversation.id)
@@ -404,7 +418,16 @@ struct ChatListPage {
   @Builder
   FeatureItem(id: string, label: string, icon: string): void {
     Column() {
-      Icon({ name: icon, iconSize: 24, color: this.accentColorStore })
+      // 图标座:accent 淡底圆角座,入口从裸图标升级为可识别「按钮」
+      Row() {
+        Icon({ name: icon, iconSize: 22, color: this.accentColorStore })
+      }
+      .width(44)
+      .height(44)
+      .borderRadius(14)
+      .backgroundColor(accentAlpha(this.accentColorStore, 0.10))
+      .justifyContent(FlexAlign.Center)
+      .alignItems(VerticalAlign.Center)
       Text(label)
         .fontSize(12.5)
         .fontWeight(FontWeight.Medium)
@@ -414,7 +437,7 @@ struct ChatListPage {
         .fontColor(INK2)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
-        .margin({ top: 7 })
+        .margin({ top: 8 })
     }
     .width('100%')
     .height('100%')
@@ -519,42 +542,70 @@ struct ChatListPage {
           Column() { this.FeatureItem('council', '模型议会', 'hi_message') }.height('100%').layoutWeight(1)
         }
         .width('100%')
-        .height(84)
-        .padding({ left: 20, right: 20, top: 6 })
+        .height(92)
+        .padding({ left: 20, right: 20, top: 8 })
         .alignItems(VerticalAlign.Center)
         .border({ width: { bottom: 1 }, color: { bottom: LINE } })
 
         Stack({ alignContent: Alignment.BottomEnd }) {
-          List() {
-            if (!this.loaded) {
-              ListItem() {
-                Text('加载会话中…')
-                  .fontSize(BODY)
-                  .fontColor(INK3)
-                  .padding({ top: 48 })
+          if (!this.loaded) {
+            // 首载:居中文案,避免顶部孤立一行
+            Column() {
+              Text('加载会话中…')
+                .fontSize(BODY)
+                .fontColor(INK3)
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+          } else if (this.items.length === 0) {
+            // 空态精装:accent 淡底图标座 + 文案 + 主 CTA,填充整屏而非顶部两行
+            Column() {
+              Row() {
+                Icon({ name: 'hi_message', iconSize: 30, color: this.accentColorStore })
               }
-            } else if (this.items.length === 0) {
-              ListItem() {
-                Column() {
-                  Text('还没有会话')
-                    .fontSize(16)
-                    .fontWeight(FontWeight.Medium)
-                    .lineHeight(22)
-                    .fontFamily(FONT_SANS_MEDIUM)
-                    .fontColor(INK2)
-                  Text('点击右下角按钮开始新的对话。')
-                    .fontSize(14)
-                    .lineHeight(19)
-                    .fontFamily(FONT_SANS)
-                    .fontColor(INK3)
-                    .margin({ top: 6 })
-                }
-                .width('100%')
-                .alignItems(HorizontalAlign.Center)
-                .padding({ top: 48, bottom: 48 })
-              }
-            } else {
-              ForEach(this.items, (item: ConversationSummary): void => {
+              .width(76)
+              .height(76)
+              .borderRadius(38)
+              .backgroundColor(accentAlpha(this.accentColorStore, 0.10))
+              .justifyContent(FlexAlign.Center)
+              .alignItems(VerticalAlign.Center)
+
+              Text('还没有会话')
+                .fontSize(17)
+                .fontWeight(FontWeight.Bold)
+                .lineHeight(23)
+                .fontFamily(FONT_SANS_SEMIBOLD)
+                .fontColor(INK)
+                .margin({ top: 18 })
+              Text('从一句问候开始，或点击右下角按钮\n发起新的对话。')
+                .fontSize(13.5)
+                .lineHeight(20)
+                .fontFamily(FONT_SANS)
+                .fontColor(INK3)
+                .textAlign(TextAlign.Center)
+                .margin({ top: 8 })
+              Text('开始新对话')
+                .fontSize(14)
+                .fontWeight(FontWeight.Medium)
+                .fontFamily(FONT_SANS_MEDIUM)
+                .fontColor(this.accentColorStore)
+                .padding({ left: 20, right: 20, top: 10, bottom: 10 })
+                .borderRadius(999)
+                .border({ width: 1, color: accentAlpha(this.accentColorStore, 0.5) })
+                .backgroundColor(accentAlpha(this.accentColorStore, 0.06))
+                .margin({ top: 22 })
+                .onClick((): void => { this.newConversation(); })
+            }
+            .width('100%')
+            .height('100%')
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+            .padding({ bottom: 96 }) // 视觉重心略上移,避开 FAB
+          } else {
+            List() {
+              ForEach(this.items, (item: ConversationSummary, idx: number): void => {
                 ListItem() {
                   this.ConversationRow(item)
                 }
@@ -562,23 +613,29 @@ struct ChatListPage {
                   start: (): void => { this.SwipePin(item); },
                   end: (): void => { this.SwipeDelete(item); },
                 })
+                .transition(TransitionEffect.OPACITY
+                  .combine(TransitionEffect.translate({ y: 16 }))
+                  .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
+                    delay: Math.min(idx * MOTION_STAGGER, 240) }))
               }, (item: ConversationSummary): string => item.id + (this.darkMode ? '-dark' : '-light'))
             }
-          }
-          .width('100%')
-          .height('100%')
-          .padding({ bottom: this.snackVisible ? 168 : 108 })
-          .backgroundColor(BG)
-          .divider({ strokeWidth: 0, color: Color.Transparent })
-
-          Column()
             .width('100%')
-            .height(52)
-            .linearGradient({
-              direction: GradientDirection.Bottom,
-              colors: [[BG_FADE_START, 0], [BG_FADE_END, 1]],
-            })
-            .hitTestBehavior(HitTestMode.None)
+            .height('100%')
+            .padding({ bottom: this.snackVisible ? 168 : 108 })
+            .backgroundColor(BG)
+            .divider({ strokeWidth: 0, color: Color.Transparent })
+          }
+
+          if (this.items.length > 0) {
+            Column()
+              .width('100%')
+              .height(52)
+              .linearGradient({
+                direction: GradientDirection.Bottom,
+                colors: [[BG_FADE_START, 0], [BG_FADE_END, 1]],
+              })
+              .hitTestBehavior(HitTestMode.None)
+          }
 
           Column() {
             Icon({ name: 'hi_message', iconSize: 24, color: ACCENT_INK })
@@ -587,6 +644,7 @@ struct ChatListPage {
           .height(56)
           .borderRadius(28)
           .backgroundColor(this.accentColorStore)
+          .shadow({ radius: 14, color: accentAlpha(this.accentColorStore, 0.38), offsetY: 5 })
           .justifyContent(FlexAlign.Center)
           .alignItems(HorizontalAlign.Center)
           .scale({ x: this.fabScale, y: this.fabScale })
@@ -619,7 +677,11 @@ struct ChatListPage {
         .padding({ left: 16, right: 16, top: 10, bottom: 10 })
         .backgroundColor(SNACK_BG)
         .borderRadius(8)
+        .shadow({ radius: 12, color: '#33000000', offsetY: 4 })
         .margin({ bottom: 24 })
+        .transition(TransitionEffect.OPACITY
+          .combine(TransitionEffect.translate({ y: 14 }))
+          .animation({ duration: 220, curve: Curve.EaseOut }))
       }
     }
     .width('100%')

@@ -11,8 +11,8 @@ import type { HotTopic } from '../platform_impl/HotListAggregator.ets';
 import { getAppContainer } from '../di/AppContainer.ets';
 
 import {
-  BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT, ERROR, OVERLAY, SURFACE, LINE, LABEL,
-  BODY2, META, TEXT_STYLES,
+  BG, SURFACE2, INK, INK2, INK3, INK4, ACCENT, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER,
+  OVERLAY, SHADOW_OVERLAY, SURFACE, LINE, LABEL, BODY2, META, TEXT_STYLES,
 } from '../design/tokens.ets';
 import { FONT_MONO_MEDIUM, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
 import { PageTitleBar, PageSpacer, PaperSeparator, SectionHeader } from '../components/PageTemplate.ets';
@@ -27,6 +27,7 @@ struct BoardHotItemRow {
   @Prop title: string = '';
   @Prop heat: string = '';
   @Prop isLast: boolean = false;
+  @Prop idx: number = 0;
   // 条目点击 → 深度阅读文章页(热榜条目 url 兼作 topicId 与 run seedUrl)
   onRowClick: () => void = (): void => {};
   @State private pressed: boolean = false;
@@ -74,6 +75,10 @@ struct BoardHotItemRow {
       }
     }
     .width('100%')
+    .transition(TransitionEffect.OPACITY
+      .combine(TransitionEffect.translate({ y: 12 }))
+      .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
+        delay: Math.min(this.idx * MOTION_STAGGER, 300) }))
   }
 }
 
@@ -154,7 +159,7 @@ struct BoardPage {
   // 热榜条目 → 深度阅读文章页(topicId = 条目 url,run seedUrl 同源直抓)
   // 聚合话题条目:index 0 = 头条(大字),其余索引行
   @Builder
-  HotTopicEntry(tp: HotTopic, isLead: boolean, isLast: boolean): void {
+  HotTopicEntry(tp: HotTopic, isLead: boolean, isLast: boolean, idx: number): void {
     Column() {
       Row() {
         Text(`${tp.bestRank}`)
@@ -201,13 +206,19 @@ struct BoardPage {
           url: tp.sources.length > 0 ? tp.sources[0].url : '',
           heat: tp.sources.length > 0 ? tp.sources[0].heat : '',
         };
-        this.sheetItem = first;
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.sheetItem = first;
+        });
       })
       if (!isLast) {
         PaperSeparator()
       }
     }
     .width('100%')
+    .transition(TransitionEffect.OPACITY
+      .combine(TransitionEffect.translate({ y: 12 }))
+      .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
+        delay: Math.min(idx * MOTION_STAGGER, 300) }))
   }
 
   private openArticle(item: HotItem, force: boolean = false): void {
@@ -260,9 +271,12 @@ struct BoardPage {
         const step = (i: number): Promise<void> => {
           if (i >= all.length) {
             if (!storageFailed) {
-              this.sections = acc;
-              this.topics = aggregateHotTopics(acc, 10);
+              const nextTopics: HotTopic[] = aggregateHotTopics(acc, 10);
               this.lastUpdatedAt = Date.now();
+              animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+                this.sections = acc;
+                this.topics = nextTopics;
+              });
               this.applyFocusFilter();
             }
             return Promise.resolve();
@@ -357,7 +371,7 @@ struct BoardPage {
                 }
                 .width('100%').padding({ left: 16, right: 16, top: 14, bottom: 4 })
                 ForEach(this.topics, (tp: HotTopic, index: number): void => {
-                  this.HotTopicEntry(tp, index === 0, index === Math.min(this.topics.length, 10) - 1)
+                  this.HotTopicEntry(tp, index === 0, index === Math.min(this.topics.length, 10) - 1, index)
                 }, (tp: HotTopic): string => tp.id)
               }
               .width('100%')
@@ -389,6 +403,7 @@ struct BoardPage {
                     title: sec.error !== null ? `抓取失败:${sec.error}` : '无条目',
                     heat: '',
                     isLast: true,
+                    idx: 0,
                   })
                 } else {
                   ForEach(sec.items.slice(0, 12), (item: HotItem, index: number): void => {
@@ -397,7 +412,12 @@ struct BoardPage {
                       title: item.title,
                       heat: item.heat,
                       isLast: index === Math.min(sec.items.length, 12) - 1,
-                      onRowClick: (): void => { this.sheetItem = item; },
+                      idx: index,
+                      onRowClick: (): void => {
+                        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+                          this.sheetItem = item;
+                        });
+                      },
                     })
                   }, (item: HotItem): string => `${sec.sourceId}-${item.rank}`)
                 }
@@ -416,7 +436,11 @@ struct BoardPage {
       if (this.sheetItem !== null) {
         Column() {
           Blank()
-            .onClick((): void => { this.sheetItem = null; })
+            .onClick((): void => {
+              animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+                this.sheetItem = null;
+              });
+            })
           Column() {
             Text(this.sheetItem.title)
               .fontSize(BODY2).fontWeight(FontWeight.Medium).fontColor(INK)
@@ -434,10 +458,15 @@ struct BoardPage {
           .padding({ bottom: 12 })
           .backgroundColor(SURFACE)
           .borderRadius({ topLeft: 20, topRight: 20 })
+          .shadow({ radius: 20, color: SHADOW_OVERLAY, offsetY: -4 })
+          .transition(TransitionEffect.translate({ y: 160 })
+            .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
         }
         .width('100%').height('100%')
         .backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.End)
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
       }
     }
     .width('100%').height('100%')
@@ -461,7 +490,9 @@ struct BoardPage {
     .padding({ left: 20, right: 20 })
     .onClick((): void => {
       const it: HotItem | null = this.sheetItem;
-      this.sheetItem = null;
+      animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+        this.sheetItem = null;
+      });
       if (it === null) return;
       if (action === 'read') this.openArticle(it, false);
       else if (action === 'regenerate') this.openArticle(it, true);

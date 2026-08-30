@@ -80,3 +80,27 @@ test('listProjects ignores non-novel files', async () => {
   const list = await repo.listProjects();
   assert.equal(list.length, 1);
 });
+
+test('loadProject migrates existing v2 project without losing real project data', async () => {
+  const fs = createMemoryFileStore();
+  const repo = createFileNovelRepository(fs);
+  const current = makeNovelProject({ id: 'cultivation', name: '修仙日常', now: NOW });
+  const legacy: Record<string, unknown> = { ...current, schemaVersion: 2 };
+  delete legacy.settingProposals;
+  await fs.writeText(
+    'amberagent/novel-creation/projects/cultivation.novel.json',
+    JSON.stringify(legacy),
+  );
+
+  const loaded = await repo.loadProject('cultivation');
+  assert.equal(loaded.schemaVersion, 3);
+  assert.equal(loaded.name, '修仙日常');
+  assert.deepEqual(loaded.messages, current.messages);
+  assert.deepEqual(loaded.chapters, current.chapters);
+  assert.deepEqual(loaded.materials, current.materials);
+  assert.deepEqual(loaded.settingProposals, []);
+
+  const updated = await repo.updateProject('cultivation', project => ({ ...project, updatedAt: NOW + 1 }));
+  assert.equal(updated.schemaVersion, 3);
+  assert.equal(updated.revision, 1);
+});

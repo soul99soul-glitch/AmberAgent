@@ -9,10 +9,12 @@ import {
 import type { NovelRunKind } from './prompt_catalog.ts';
 import type {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
-  NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget, NovelChapterVersion } from './models.ts';
+  NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget, NovelChapterVersion,
+} from './models.ts';
 import {
   createProject, renameProject, setProjectModel, appendMessage, saveChapter, deleteChapter,
   upsertMaterial, deleteMaterial, collect, replacePendingSuggestions, resolveSuggestion,
+  addSettingProposals, resolveSettingProposal as resolveSettingProposalMutation, saveChapterVersion,
 } from './mutations.ts';
 import {
   invalidInput, notFound, projectBusy, providerError, outputTooLarge, isNovelError,
@@ -21,6 +23,8 @@ import { systemPrompt, MAX_USER_CHARS, MAX_OUTPUT_CHARS } from './context_builde
 import { analyzeChapterSuggestions } from './suggestion_engine.ts';
 import type { NovelModelRunning, NovelModelRequest, NovelModelEvent , NovelModelStream } from './model_running.ts';
 import type { NovelProjectRepository } from './repository.ts';
+import { parseSettingProposals } from './discussion_structured.ts';
+import type { NovelSettingProposalDraft, NovelSettingProposalsParsed } from './discussion_structured.ts';
 
 // ===== 运行事件 / 句柄 =====
 export type NovelRunEvent =
@@ -49,6 +53,27 @@ export interface NovelSuggestionRefreshResult {
   warning: string | null;
 }
 
+export type NovelBatchPolishResultStatus = 'succeeded' | 'failed' | 'cancelled';
+
+export interface NovelBatchPolishResult {
+  chapterId: string;
+  status: NovelBatchPolishResultStatus;
+  messageId: string | null;
+  error: string | null;
+}
+
+export type NovelBatchPolishEvent =
+  | { kind: 'progress'; completed: number; total: number; chapterId: string }
+  | { kind: 'result'; result: NovelBatchPolishResult }
+  | { kind: 'completed'; results: NovelBatchPolishResult[] }
+  | { kind: 'cancelled'; results: NovelBatchPolishResult[] };
+
+export interface NovelBatchPolishRun {
+  id: string;
+  subscribe(cb: (event: NovelBatchPolishEvent) => void): () => void;
+  cancel(): void;
+}
+
 // ===== 依赖 =====
 export interface NovelCreationDeps {
   repository: NovelProjectRepository;
@@ -68,7 +93,7 @@ interface Emitter<T> {
 
 const isTerminal = <T>(v: T): boolean => {
   const k: string = (v as { kind?: string }).kind ?? '';
-  return k === 'completed' || k === 'interrupted' || k === 'failed';
+  return k === 'completed' || k === 'interrupted' || k === 'failed' || k === 'cancelled';
 };
 
 const createEmitter = <T>(): Emitter<T> => {
@@ -99,12 +124,22 @@ interface LiveRun {
   donePromise: Promise<void>;
 }
 
+interface LiveBatchPolishRun {
+  runId: string;
+  projectId: string;
+  cancelled: boolean;
+  currentRunId: string | null;
+}
+
 export class NovelCreation {
   private repository: NovelProjectRepository;
   private modelRunning: NovelModelRunning;
   private nowMs: () => number;
   private idleTimeoutMs: number;
   private projectRuns: Map<string, LiveRun> = new Map();
+  private batchPolishRuns: Map<string, LiveBatchPolishRun> = new Map();
+  private batchPolishProjectRuns: Map<string, NovelBatchPolishRun> = new Map();
+  private polishMessageChapterIds: Map<string, string> = new Map();
 
   constructor(deps: NovelCreationDeps) {
     this.repository = deps.repository;
@@ -230,6 +265,18 @@ export class NovelCreation {
     return material;
   }
 
+  async resolveSettingProposal(
+    projectId: string, proposalId: string, accept: boolean,
+  ): Promise<NovelMaterial | null> {
+    let material: NovelMaterial | null = null;
+    await this.repository.updateProject(projectId, (project: NovelProject): NovelProject => {
+      const mutation = resolveSettingProposalMutation(project, proposalId, accept, this.nowMs());
+      material = mutation.value;
+      return mutation.project;
+    });
+    return material;
+  }
+
   // ===== 生成 =====
   generate(
     projectId: string, userText: string, mode: NovelChatMode,
@@ -273,6 +320,55 @@ export class NovelCreation {
     if (chapter === null) throw notFound('chapter', chapterId);
     const userText: string = `请润色章节「${chapter.title}」,输出润色后的完整章节全文。\n\n${chapter.content}`;
     return this.generate(projectId, userText, 'write', 'whole_chapter', 'polish');
+  }
+
+  startBatchPolish(projectId: string, chapterIds: string[]): NovelBatchPolishRun {
+    const existing: NovelBatchPolishRun | undefined = this.batchPolishProjectRuns.get(projectId);
+    if (existing !== undefined) return existing;
+    const runId: string = novelId();
+    const emitter: Emitter<NovelBatchPolishEvent> = createEmitter<NovelBatchPolishEvent>();
+    const live: LiveBatchPolishRun = {
+      runId: runId,
+      projectId: projectId,
+      cancelled: false,
+      currentRunId: null,
+    };
+    const publicRun: NovelBatchPolishRun = {
+      id: runId,
+      subscribe: (cb: (event: NovelBatchPolishEvent) => void): (() => void) => emitter.subscribe(cb),
+      cancel: (): void => { this.cancelBatchPolish(runId); },
+    };
+    this.batchPolishRuns.set(runId, live);
+    this.batchPolishProjectRuns.set(projectId, publicRun);
+    void this.runBatchPolish(live, chapterIds.slice(), emitter);
+    return publicRun;
+  }
+
+  cancelBatchPolish(runId: string): void {
+    const live: LiveBatchPolishRun | undefined = this.batchPolishRuns.get(runId);
+    if (live === undefined || live.cancelled) return;
+    live.cancelled = true;
+    if (live.currentRunId !== null) this.interrupt(live.currentRunId);
+  }
+
+  async adoptPolishMessage(
+    projectId: string, chapterId: string, messageId: string,
+  ): Promise<NovelChapter> {
+    const sourceChapterId: string | undefined = this.polishMessageChapterIds.get(messageId);
+    if (sourceChapterId === undefined || sourceChapterId !== chapterId) {
+      throw invalidInput('润色结果与目标章节不匹配');
+    }
+    const box: { value: NovelChapter | null } = { value: null };
+    await this.repository.updateProject(projectId, (project: NovelProject): NovelProject => {
+      const now: number = this.nowMs();
+      const versioned: NovelProject = saveChapterVersion(project, chapterId, 'polish', now).project;
+      const adopted = collect(versioned, messageId, { kind: 'replace', chapterId: chapterId }, now);
+      box.value = adopted.value;
+      return adopted.project;
+    });
+    if (box.value === null) throw new Error('adoptPolishMessage: 更新未返回章节');
+    this.polishMessageChapterIds.delete(messageId);
+    return box.value;
   }
 
   // N2:快速开始(空项目kick)
@@ -391,9 +487,13 @@ export class NovelCreation {
       const assistantMsg: NovelMessage = makeNovelMessage({
         role: 'assistant', mode: mode, content: fullText, createdAt: now, granularity: gran,
       });
+      const proposalBlock: NovelSettingProposalsParsed | null =
+        mode === 'discuss' ? parseSettingProposals(fullText) : null;
+      const proposalDrafts: NovelSettingProposalDraft[] = proposalBlock?.proposals ?? [];
       await this.repository.updateProject(projectId, p => {
         let np: NovelProject = appendMessage(p, userMsg, now);
         np = appendMessage(np, assistantMsg, now);
+        np = addSettingProposals(np, assistantMsg.id, proposalDrafts, now);
         if (gran !== null) np = { ...np, lastGenerationGranularity: gran };
         return np;
       });
@@ -409,6 +509,91 @@ export class NovelCreation {
     } finally {
       this.projectRuns.delete(projectId);
       live.doneResolve();
+    }
+  }
+
+  private waitForNovelRun(run: NovelRun): Promise<NovelRunEvent> {
+    return new Promise<NovelRunEvent>((resolve: (event: NovelRunEvent) => void): void => {
+      let unsub: () => void = (): void => {};
+      let settled: boolean = false;
+      unsub = run.subscribe((event: NovelRunEvent): void => {
+        if (event.kind !== 'completed' && event.kind !== 'interrupted' && event.kind !== 'failed') return;
+        settled = true;
+        unsub();
+        resolve(event);
+      });
+      if (settled) unsub();
+    });
+  }
+
+  private async runBatchPolish(
+    live: LiveBatchPolishRun, chapterIds: string[], emitter: Emitter<NovelBatchPolishEvent>,
+  ): Promise<void> {
+    const results: NovelBatchPolishResult[] = [];
+    try {
+      for (let i = 0; i < chapterIds.length; i++) {
+        if (live.cancelled) break;
+        const chapterId: string = chapterIds[i];
+        emitter.emit({ kind: 'progress', completed: results.length, total: chapterIds.length, chapterId: chapterId });
+        let result: NovelBatchPolishResult;
+        try {
+          const run: NovelRun = await this.polishChapter(live.projectId, chapterId);
+          live.currentRunId = run.id;
+          if (live.cancelled) this.interrupt(run.id);
+          const terminal: NovelRunEvent = await this.waitForNovelRun(run);
+          if (terminal.kind === 'completed') {
+            this.polishMessageChapterIds.set(terminal.message.id, chapterId);
+            result = {
+              chapterId: chapterId,
+              status: 'succeeded',
+              messageId: terminal.message.id,
+              error: null,
+            };
+          } else if (live.cancelled || terminal.kind === 'interrupted') {
+            result = {
+              chapterId: chapterId,
+              status: live.cancelled ? 'cancelled' : 'failed',
+              messageId: null,
+              error: live.cancelled ? '批量润色已取消' : '润色已中断',
+            };
+          } else if (terminal.kind === 'failed') {
+            result = {
+              chapterId: chapterId,
+              status: 'failed',
+              messageId: null,
+              error: terminal.message,
+            };
+          } else {
+            result = {
+              chapterId: chapterId,
+              status: 'failed',
+              messageId: null,
+              error: '润色运行异常结束',
+            };
+          }
+        } catch (error) {
+          result = {
+            chapterId: chapterId,
+            status: live.cancelled ? 'cancelled' : 'failed',
+            messageId: null,
+            error: live.cancelled ? '批量润色已取消' : String(error),
+          };
+        } finally {
+          live.currentRunId = null;
+        }
+        results.push(result);
+        emitter.emit({ kind: 'result', result: result });
+        if (live.cancelled) break;
+      }
+      if (live.cancelled) {
+        emitter.emit({ kind: 'cancelled', results: results.slice() });
+      } else {
+        emitter.emit({ kind: 'completed', results: results.slice() });
+      }
+    } finally {
+      this.batchPolishRuns.delete(live.runId);
+      const publicRun: NovelBatchPolishRun | undefined = this.batchPolishProjectRuns.get(live.projectId);
+      if (publicRun?.id === live.runId) this.batchPolishProjectRuns.delete(live.projectId);
     }
   }
 

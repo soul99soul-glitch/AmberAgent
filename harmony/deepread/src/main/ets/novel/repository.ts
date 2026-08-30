@@ -5,7 +5,7 @@
 import type { FileStore } from '../platform/files.ts';
 import { joinPath } from '../platform/files.ts';
 import { NOVEL_SCHEMA_VERSION } from './models.ts';
-import type { NovelProject } from './models.ts';
+import type { NovelProject, NovelSettingProposal } from './models.ts';
 import { notFound, invalidInput } from './error.ts';
 
 const PROJECTS_DIR: string = 'amberagent/novel-creation/projects';
@@ -21,6 +21,21 @@ export interface NovelProjectRepository {
   // N1:删除进入回收(改名入 DELETED_DIR);restorePrevious 恢复最近一次删除
   restorePrevious(): Promise<NovelProject | null>;
 }
+
+interface PersistedNovelProject extends Omit<NovelProject, 'settingProposals'> {
+  settingProposals?: NovelSettingProposal[];
+}
+
+export const migrateNovelProject = (stored: PersistedNovelProject): NovelProject => {
+  if (stored.schemaVersion === 2) {
+    return {
+      ...stored,
+      schemaVersion: NOVEL_SCHEMA_VERSION,
+      settingProposals: [],
+    };
+  }
+  return stored as NovelProject;
+};
 
 const validate = (p: NovelProject): NovelProject => {
   if (p.schemaVersion !== NOVEL_SCHEMA_VERSION) throw invalidInput('项目版本不受支持');
@@ -48,7 +63,10 @@ export const createFileNovelRepository = (fileStore: FileStore): NovelProjectRep
     });
   };
 
-  const decode = (raw: string): NovelProject => validate(JSON.parse(raw) as NovelProject);
+  const decode = (raw: string): NovelProject => {
+    const stored: PersistedNovelProject = JSON.parse(raw) as PersistedNovelProject;
+    return validate(migrateNovelProject(stored));
+  };
 
   const write = async (id: string, project: NovelProject): Promise<void> => {
     const raw: string = JSON.stringify(project);

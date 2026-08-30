@@ -79,6 +79,7 @@ export const applyTheme = (dark: boolean): void => {
     USER_BG = '#ECE8DF'; USER_INK = '#1B1A17'; CODE_BG = '#211F1A';
     BG_FADE_START = '#00161512'; BG_FADE_END = '#161512'; BG_GLASS = '#CC161512';
     STATUS_BLUE_LIGHT = '#1B2638';
+    SHADOW_KEY = '#99000000'; SHADOW_OVERLAY = '#B3000000';
     ERROR = '#FF8F86'; // Material dark error(原固定 #C2553F 在深色下过暗)
   } else {
     BG = '#F4F2EC'; SURFACE = '#FAF9F5'; SURFACE2 = '#EFECE4'; RAISED = '#FFFFFF';
@@ -87,6 +88,7 @@ export const applyTheme = (dark: boolean): void => {
     USER_BG = '#1B1A17'; USER_INK = '#F6F4EE'; CODE_BG = '#EDEAE1';
     BG_FADE_START = '#00F4F2EC'; BG_FADE_END = '#F4F2EC'; BG_GLASS = '#CCF4F2EC';
     STATUS_BLUE_LIGHT = '#E8F0FE';
+    SHADOW_KEY = '#261B1A17'; SHADOW_OVERLAY = '#381B1A17';
     ERROR = '#C93A2F'; // Material light error
   }
   ACCENT_LIGHT = accentLightFor(ACCENT, darkTheme);
@@ -171,3 +173,13 @@ export const PAD_ITEM: number = 13;
 export const RADIUS: number = 14;            // 卡片/字段圆角
 export const RADIUS_PILL: number = 999;      // 药丸/开关
 export const GUTTER: number = 18;            // 屏幕边距
+
+// ── 动效(统一时长,精装打磨;曲线统一 EaseOut) ──
+export const MOTION_PRESS: number = 140;     // 按压反馈
+export const MOTION_ENTER: number = 300;     // 列表项/区块入场
+export const MOTION_STAGGER: number = 30;    // 列表项交错延迟步长
+export const MOTION_OVERLAY: number = 240;   // 对话框/弹层
+
+// ── 阴影(浮层专用,随主题;flat & hairline 仍是基底) ──
+export let SHADOW_KEY: string = '#261B1A17';     // FAB/发送键等浮键
+export let SHADOW_OVERLAY: string = '#381B1A17'; // 对话框/底部弹层

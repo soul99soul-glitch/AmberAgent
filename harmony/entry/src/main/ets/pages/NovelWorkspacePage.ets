@@ -4,6 +4,11 @@ import { ACCENT, BG, INK, INK2, INK3, INK4, LINE, OVERLAY, SURFACE, SURFACE2 } f
 import { FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from '../components/ui/Icon.ets';
 import { ChatInput } from '../components/ChatInput.ets';
+import { NovelDiscussionAskCard } from '../components/NovelDiscussionAskCard.ets';
+import { NovelSettingProposalCard } from '../components/NovelSettingProposalCard.ets';
+import {
+  NovelBatchPolishSheet, NovelBatchPolishSheetChapter, NovelBatchPolishSheetResult,
+} from '../components/NovelBatchPolishSheet.ets';
 import { router, promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { getNovelCreation } from '../di/AppContainer.ets';
@@ -11,7 +16,10 @@ import { MATERIAL_KIND_LABELS } from '@amber/deepread-domain';
 import {
   NovelProject, NovelMessage, NovelChapter, NovelMaterial, NovelMaterialSuggestion,
   NovelChatMode, NovelGenerationGranularity, NovelMaterialKind, NovelCollectionTarget,
-  NovelRunKind , NovelRun, NovelChapterVersion, NovelChapterVersionKind } from '@amber/deepread-domain';
+  NovelRunKind, NovelRun, NovelChapterVersion, NovelChapterVersionKind,
+  parseDiscussionAsk, stripDiscussionAskFence, stripSettingProposalsFence, formatDiscussionAnswersFromToolPayload,
+  NovelDiscussionAskParsed, NovelSettingProposal, NovelBatchPolishEvent, NovelBatchPolishRun,
+} from '@amber/deepread-domain';
 
 const GREEN: string = '#43A047';
 
@@ -102,6 +110,15 @@ struct NovelWorkspacePage {
   @State materialTitle: string = '';
   @State materialContent: string = '';
   @State materialEnabled: boolean = true;
+  // 批量润色：所有集合型状态均用整体赋值，保证 ArkUI V1 可观察。
+  @State batchPolishOpen: boolean = false;
+  @State batchPolishRunning: boolean = false;
+  @State batchPolishCurrent: number = 0;
+  @State batchPolishTotal: number = 0;
+  @State batchPolishTitle: string = '';
+  @State batchPolishResults: NovelBatchPolishSheetResult[] = [];
+  private batchPolishRun: NovelBatchPolishRun | null = null;
+  private batchPolishUnsub: (() => void) | null = null;
 
   private projectId: string = '';
   private currentUnsub: (() => void) | null = null;
@@ -119,10 +136,18 @@ struct NovelWorkspacePage {
     this.pageAlive = false;
     this.reloadToken++;
     if (this.currentUnsub !== null) {
-      this.currentUnsub();
-const unsub: (() => void) | null = this.currentUnsub;
-        this.currentUnsub = null;
-        if (unsub !== null) unsub(); // 终结即退订,emitter 不再持有页面闭包
+      const unsub: (() => void) = this.currentUnsub;
+      this.currentUnsub = null;
+      unsub(); // 终结即退订,emitter 不再持有页面闭包
+    }
+    if (this.batchPolishRun !== null) {
+      this.batchPolishRun.cancel();
+      this.batchPolishRun = null;
+    }
+    if (this.batchPolishUnsub !== null) {
+      const unsub: (() => void) = this.batchPolishUnsub;
+      this.batchPolishUnsub = null;
+      unsub();
     }
   }
 
@@ -160,11 +185,15 @@ const unsub: (() => void) | null = this.currentUnsub;
 
   send(runKindOverride: NovelRunKind | null = null): void {
     const text: string = this.draft.trim();
-    if (text.length === 0 || this.activeRunId.length > 0 || this.project === null) return;
+    if (text.length === 0 || this.hasBlockingNovelRun() || this.project === null) return;
     const mode: NovelChatMode = this.composeMode === 'discuss' ? 'discuss' : 'write';
     let gran: NovelGenerationGranularity | null = null;
     if (this.composeMode === 'continue') gran = 'continuation';
     else if (this.composeMode === 'whole_chapter') gran = 'whole_chapter';
+    let runKind: NovelRunKind = 'discussion';
+    if (this.composeMode === 'continue') runKind = 'prose_continuation';
+    else if (this.composeMode === 'whole_chapter') runKind = 'prose_whole_chapter';
+    if (runKindOverride !== null) runKind = runKindOverride;
 
     this.pendingUserText = text;
     this.draft = '';
@@ -172,7 +201,7 @@ const unsub: (() => void) | null = this.currentUnsub;
     this.generationStatus = '正在连接模型并组织正文…';
     this.errorMsg = '';
 
-    const run = getNovelCreation().generate(this.projectId, text, mode, gran);
+    const run = getNovelCreation().generate(this.projectId, text, mode, gran, runKind);
     this.activeRunId = run.id;
     this.currentUnsub = run.subscribe((e): void => {
       if (e.kind === 'status') {
@@ -197,10 +226,45 @@ const unsub: (() => void) | null = this.currentUnsub;
     if (this.activeRunId.length > 0) getNovelCreation().interrupt(this.activeRunId);
   }
 
+  private hasBlockingNovelRun(): boolean {
+    return this.activeRunId.length > 0 || this.batchPolishRunning;
+  }
+
   openCollect(messageId: string): void {
     this.collectMessageId = messageId;
     const p: NovelProject | null = this.project;
     this.collectTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
+  }
+
+  private discussionAskFor(message: NovelMessage): NovelDiscussionAskParsed | null {
+    if (message.role !== 'assistant' || message.mode !== 'discuss') return null;
+    return parseDiscussionAsk(message.content);
+  }
+
+  // 一旦结构化提问之后已经出现用户讨论消息，该卡不再显示，避免旧问题重复提交。
+  private shouldShowDiscussionAsk(messageId: string): boolean {
+    const p: NovelProject | null = this.project;
+    if (p === null) return false;
+    const index: number = p.messages.findIndex((message: NovelMessage): boolean => message.id === messageId);
+    if (index < 0) return false;
+    for (let cursor: number = index + 1; cursor < p.messages.length; cursor++) {
+      const next: NovelMessage = p.messages[cursor];
+      if (next.role === 'user' && next.mode === 'discuss') return false;
+    }
+    return true;
+  }
+
+  private discussionAskInputFor(message: NovelMessage): string {
+    const ask: NovelDiscussionAskParsed | null = this.discussionAskFor(message);
+    return ask !== null ? ask.toolInput : '';
+  }
+
+  private submitDiscussionAsk(source: NovelMessage, payload: string): void {
+    const ask: NovelDiscussionAskParsed | null = this.discussionAskFor(source);
+    if (ask === null || this.hasBlockingNovelRun()) return;
+    this.draft = formatDiscussionAnswersFromToolPayload(payload, ask.questions);
+    this.composeMode = 'discuss';
+    this.send('discussion');
   }
 
   async doCollect(target: NovelCollectionTarget): Promise<void> {
@@ -219,8 +283,22 @@ const unsub: (() => void) | null = this.currentUnsub;
     }
   }
 
+  private async resolveSettingProposal(proposal: NovelSettingProposal, accept: boolean): Promise<void> {
+    this.busy = true;
+    try {
+      await getNovelCreation().resolveSettingProposal(this.projectId, proposal.id, accept);
+      this.errorMsg = '';
+      await this.reload();
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
   // ===== 章节 =====
   openNewChapter(): void {
+    if (this.batchPolishRunning) return;
     this.editingChapterId = '';
     const p: NovelProject | null = this.project;
     this.chapterTitle = p !== null ? `第 ${p.chapters.length + 1} 章` : '第 1 章';
@@ -229,6 +307,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   }
 
   openEditChapter(c: NovelChapter): void {
+    if (this.batchPolishRunning) return;
     this.editingChapterId = c.id;
     this.chapterTitle = c.title;
     this.chapterContent = c.content;
@@ -261,7 +340,7 @@ const unsub: (() => void) | null = this.currentUnsub;
 
   // N2:单章重新生成(整章 regeneration Run)
   async regenerateChapter(chapterId: string): Promise<void> {
-    if (this.activeRunId.length > 0) return;
+    if (this.hasBlockingNovelRun()) return;
     try {
       const creation = getNovelCreation();
       const run: NovelRun = await creation.regenerateChapter(this.projectId, chapterId);
@@ -273,13 +352,117 @@ const unsub: (() => void) | null = this.currentUnsub;
 
   // N2:单章润色(polish 哨兵协议)
   async polishChapter(chapterId: string): Promise<void> {
-    if (this.activeRunId.length > 0) return;
+    if (this.hasBlockingNovelRun()) return;
     try {
       const creation = getNovelCreation();
       const run: NovelRun = await creation.polishChapter(this.projectId, chapterId);
       this.attachChapterRun(run, '润色中…');
     } catch (e) {
       this.errorMsg = String(e);
+    }
+  }
+
+  private batchSheetChapters(): NovelBatchPolishSheetChapter[] {
+    const p: NovelProject | null = this.project;
+    if (p === null) return [];
+    return p.chapters.map((chapter: NovelChapter): NovelBatchPolishSheetChapter => ({
+      id: chapter.id,
+      title: chapter.title,
+      discarded: chapter.discarded,
+    }));
+  }
+
+  private chapterTitleFor(chapterId: string): string {
+    const p: NovelProject | null = this.project;
+    const chapter: NovelChapter | undefined = p?.chapters.find((item: NovelChapter): boolean => item.id === chapterId);
+    return chapter !== undefined && chapter.title.length > 0 ? chapter.title : '未命名章节';
+  }
+
+  private startBatchPolish(chapterIds: string[]): void {
+    if (this.batchPolishRunning || chapterIds.length === 0) return;
+    this.batchPolishResults = [];
+    this.batchPolishCurrent = 0;
+    this.batchPolishTotal = chapterIds.length;
+    this.batchPolishTitle = '';
+    this.batchPolishRunning = true;
+    const run: NovelBatchPolishRun = getNovelCreation().startBatchPolish(this.projectId, chapterIds);
+    this.batchPolishRun = run;
+    this.batchPolishUnsub = run.subscribe((event: NovelBatchPolishEvent): void => {
+      this.handleBatchPolishEvent(event);
+    });
+  }
+
+  private handleBatchPolishEvent(event: NovelBatchPolishEvent): void {
+    if (event.kind === 'progress') {
+      this.batchPolishCurrent = event.completed + 1;
+      this.batchPolishTotal = event.total;
+      this.batchPolishTitle = this.chapterTitleFor(event.chapterId);
+      return;
+    }
+    if (event.kind === 'result') {
+      this.putBatchPolishResult(event.result.chapterId, event.result.status, event.result.messageId, event.result.error);
+      return;
+    }
+    this.batchPolishResults = event.results.map((result) => this.toBatchPolishSheetResult(
+      result.chapterId, result.status, result.messageId, result.error));
+    this.batchPolishRunning = false;
+    this.batchPolishRun = null;
+    if (this.batchPolishUnsub !== null) {
+      const unsub: (() => void) = this.batchPolishUnsub;
+      this.batchPolishUnsub = null;
+      unsub();
+    }
+    this.reload();
+  }
+
+  private putBatchPolishResult(
+    chapterId: string, status: 'succeeded' | 'failed' | 'cancelled', messageId: string | null, error: string | null,
+  ): void {
+    const next: NovelBatchPolishSheetResult[] = this.batchPolishResults.filter(
+      (result: NovelBatchPolishSheetResult): boolean => result.chapterId !== chapterId);
+    next.push(this.toBatchPolishSheetResult(chapterId, status, messageId, error));
+    this.batchPolishResults = next;
+  }
+
+  private toBatchPolishSheetResult(
+    chapterId: string, status: 'succeeded' | 'failed' | 'cancelled', messageId: string | null, error: string | null,
+  ): NovelBatchPolishSheetResult {
+    return {
+      chapterId: chapterId,
+      title: this.chapterTitleFor(chapterId),
+      status: status === 'succeeded' ? 'ready' : status,
+      detail: error ?? '',
+      messageId: messageId ?? '',
+    };
+  }
+
+  private cancelBatchPolish(): void {
+    if (this.batchPolishRun !== null) this.batchPolishRun.cancel();
+  }
+
+  private closeBatchPolishSheet(): void {
+    if (this.batchPolishRunning) return;
+    this.batchPolishOpen = false;
+    this.batchPolishResults = [];
+    this.batchPolishCurrent = 0;
+    this.batchPolishTotal = 0;
+    this.batchPolishTitle = '';
+  }
+
+  private async adoptBatchPolish(chapterId: string, messageId: string): Promise<void> {
+    this.busy = true;
+    try {
+      await getNovelCreation().adoptPolishMessage(this.projectId, chapterId, messageId);
+      this.batchPolishResults = this.batchPolishResults.map((result: NovelBatchPolishSheetResult): NovelBatchPolishSheetResult =>
+        result.chapterId === chapterId ? {
+          chapterId: result.chapterId, title: result.title, status: 'adopted', detail: result.detail,
+          messageId: result.messageId,
+        } : result);
+      await this.reload();
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
     }
   }
 
@@ -294,6 +477,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   }
 
   async saveChapter(): Promise<void> {
+    if (this.batchPolishRunning) return;
     this.busy = true;
     try {
       const saved: NovelChapter = await getNovelCreation().saveChapter(
@@ -311,6 +495,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   }
 
   async deleteChapter(id: string): Promise<void> {
+    if (this.batchPolishRunning) return;
     this.busy = true;
     try {
       await getNovelCreation().deleteChapter(this.projectId, id);
@@ -428,6 +613,18 @@ const unsub: (() => void) | null = this.currentUnsub;
               this.messageCard(m)
             }
           }, (m: NovelMessage) => m.id)
+          // 讨论产生的设定提案紧随聊天记录；只有确认后才写入项目设定。
+          ForEach(this.project.settingProposals.filter((proposal: NovelSettingProposal): boolean => proposal.status === 'pending'),
+            (proposal: NovelSettingProposal) => {
+              ListItem() {
+                NovelSettingProposalCard({
+                  title: proposal.title,
+                  content: proposal.content,
+                  kindLabel: MATERIAL_KIND_LABELS[proposal.kind],
+                  onResolve: (accept: boolean): void => { this.resolveSettingProposal(proposal, accept); },
+                })
+              }
+            }, (proposal: NovelSettingProposal): string => proposal.id)
         }
         // 乐观用户气泡
         if (this.pendingUserText.length > 0) {
@@ -470,10 +667,13 @@ const unsub: (() => void) | null = this.currentUnsub;
 
         ChatInput({
           text: this.draft,
-          sending: this.activeRunId.length > 0,
+          sending: this.hasBlockingNovelRun(),
           onTextChange: (v: string): void => { this.draft = v; },
           onSend: (): void => { this.send(); },
-          onStop: (): void => { this.interrupt(); },
+          onStop: (): void => {
+            if (this.batchPolishRunning) this.cancelBatchPolish();
+            else this.interrupt();
+          },
           onClearInput: (): void => { this.draft = ''; },
         })
       }
@@ -500,8 +700,8 @@ const unsub: (() => void) | null = this.currentUnsub;
       .fontColor(this.composeMode === mode ? '#FFFFFF' : INK2)
       .backgroundColor(this.composeMode === mode ? ACCENT : SURFACE2)
       .margin({ right: 8 })
-      .opacity(this.activeRunId.length > 0 ? 0.5 : 1)
-      .onClick(() => { if (this.activeRunId.length === 0) this.composeMode = mode; })
+      .opacity(this.hasBlockingNovelRun() ? 0.5 : 1)
+      .onClick(() => { if (!this.hasBlockingNovelRun()) this.composeMode = mode; })
   }
 
   @Builder
@@ -521,7 +721,15 @@ const unsub: (() => void) | null = this.currentUnsub;
     } else {
       Column() {
         Text(this.assistantLabel(m)).fontSize(12).fontColor(INK3).margin({ bottom: 6 })
-        Text(m.content).fontSize(14).fontColor(INK).lineHeight(24)
+        Text(m.mode === 'discuss' ? stripSettingProposalsFence(stripDiscussionAskFence(m.content)) : m.content)
+          .fontSize(14).fontColor(INK).lineHeight(24)
+        if (!this.hasBlockingNovelRun() && this.shouldShowDiscussionAsk(m.id) && this.discussionAskInputFor(m).length > 0) {
+          NovelDiscussionAskCard({
+            input: this.discussionAskInputFor(m),
+            askId: m.id,
+            onSubmit: (payload: string): void => { this.submitDiscussionAsk(m, payload); },
+          })
+        }
         if (m.mode === 'write' && m.collectedChapterId === null && m.content.trim().length > 0) {
           // write 模式且有正文即可收录(含 interrupted 的部分内容)
           Text(m.interrupted ? '收进章节（部分）' : '收进章节').fontSize(12).fontColor(ACCENT)
@@ -546,6 +754,11 @@ const unsub: (() => void) | null = this.currentUnsub;
         Row() {
           Text('章节目录').fontSize(15).fontWeight(FontWeight.Bold).fontColor(INK2)
           Blank()
+          Text('批量润色').fontSize(12).fontColor(INK3).margin({ right: 16 })
+            .opacity(this.batchPolishRunning ? 0.5 : 1)
+            .onClick((): void => {
+              if (!this.batchPolishRunning) this.batchPolishOpen = true;
+            })
           Text('新建章节').fontSize(12).fontColor(ACCENT)
             .onClick(() => { this.openNewChapter(); })
         }
@@ -797,6 +1010,20 @@ const unsub: (() => void) | null = this.currentUnsub;
       if (this.versionsOpen) {
         this.versionsSheetOverlay()
       }
+      if (this.batchPolishOpen) {
+        NovelBatchPolishSheet({
+          chapters: this.batchSheetChapters(),
+          running: this.batchPolishRunning,
+          current: this.batchPolishCurrent,
+          total: this.batchPolishTotal,
+          currentTitle: this.batchPolishTitle,
+          results: this.batchPolishResults,
+          onStart: (chapterIds: string[]): void => { this.startBatchPolish(chapterIds); },
+          onCancel: (): void => { this.cancelBatchPolish(); },
+          onAdopt: (chapterId: string, messageId: string): void => { this.adoptBatchPolish(chapterId, messageId); },
+          onClose: (): void => { this.closeBatchPolishSheet(); },
+        })
+      }
     }
     .width('100%').height('100%')
     .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
@@ -960,7 +1187,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   private onChapterMenuAction(action: string): void {
     const id: string = this.chapterMenuId;
     this.chapterMenuId = '';
-    if (id.length === 0) return;
+    if (id.length === 0 || this.batchPolishRunning) return;
     if (action === 'regenerate') this.regenerateChapter(id);
     else if (action === 'polish') this.polishChapter(id);
     else if (action === 'versions') this.openChapterVersions(id);
@@ -1023,6 +1250,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   }
 
   private async toggleDiscarded(chapterId: string, discarded: boolean): Promise<void> {
+    if (this.batchPolishRunning) return;
     this.busy = true;
     try {
       this.project = await getNovelCreation().setChapterDiscarded(this.projectId, chapterId, discarded);
@@ -1052,6 +1280,7 @@ const unsub: (() => void) | null = this.currentUnsub;
   }
 
   private async restoreVersion(versionId: string): Promise<void> {
+    if (this.batchPolishRunning) return;
     this.busy = true;
     try {
       this.project = await getNovelCreation().restoreChapterVersion(this.projectId, versionId);

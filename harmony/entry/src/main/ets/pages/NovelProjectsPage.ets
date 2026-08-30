@@ -1,11 +1,15 @@
 // NovelProjectsPage — 小说项目库:列表 / 新建 / 重命名 / 删除 / 进工作区
-import { ACCENT, BG, INK, INK2, INK3, INK4, ERROR, OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
+import { ACCENT, ACCENT_LIGHT, BG, INK, INK2, INK3, INK4, ERROR, MOTION_ENTER, MOTION_OVERLAY, MOTION_STAGGER, OVERLAY, SHADOW_OVERLAY, SURFACE, SURFACE2, TITLE, TEXT_STYLES } from '../design/tokens.ets';
 import { FONT_SERIF, FONT_SANS_SEMIBOLD } from '../design/fonts.ets';
-import { PageTitleBar, SectionHeader, BtnFill, BtnGhost, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
-import { router } from '@kit.ArkUI';
+import { PageTitleBar, SectionHeader, BtnFill, IconSeat, PaperSeparator, PageSpacer } from '../components/PageTemplate.ets';
+import { Icon } from '../components/ui/Icon.ets';
+import { router, promptAction } from '@kit.ArkUI';
 import { getNovelCreation } from '../di/AppContainer.ets';
 import type { NovelProject } from '@amber/deepread-domain';
 
+interface RowMenuResult {
+  index: number;
+}
 
 @Entry
 @Component
@@ -19,6 +23,7 @@ struct NovelProjectsPage {
   @State confirmDeleteId: string = '';
   @State restoring: boolean = false;
   @State errorMsg: string = '';
+  @State pressedId: string = '';
   private pageAlive: boolean = false;
   private loadToken: number = 0;
 
@@ -40,7 +45,14 @@ struct NovelProjectsPage {
     try {
       const projects: NovelProject[] = await getNovelCreation().listProjects();
       if (this.pageAlive && token === this.loadToken) {
-        this.projects = projects;
+        // 首次填充走 animateTo,让行交错入场 transition 生效
+        if (this.loading && projects.length > 0) {
+          animateTo({ duration: MOTION_ENTER, curve: Curve.EaseOut }, (): void => {
+            this.projects = projects;
+          });
+        } else {
+          this.projects = projects;
+        }
         this.errorMsg = '';
       }
     } finally {
@@ -51,13 +63,17 @@ struct NovelProjectsPage {
   openNew(): void {
     this.editingId = '';
     this.nameInput = '';
-    this.nameDialogOpen = true;
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.nameDialogOpen = true;
+    });
   }
 
   openRename(p: NovelProject): void {
     this.editingId = p.id;
     this.nameInput = p.name;
-    this.nameDialogOpen = true;
+    animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+      this.nameDialogOpen = true;
+    });
   }
 
   async submitName(): Promise<void> {
@@ -69,11 +85,11 @@ struct NovelProjectsPage {
     try {
       if (this.editingId.length === 0) {
         const created: NovelProject = await getNovelCreation().create(name);
-        this.nameDialogOpen = false;
+        animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.nameDialogOpen = false; });
         this.openWorkspace(created.id);
       } else {
         await getNovelCreation().rename(this.editingId, name);
-        this.nameDialogOpen = false;
+        animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.nameDialogOpen = false; });
         await this.loadProjects();
       }
       this.errorMsg = '';
@@ -84,8 +100,9 @@ struct NovelProjectsPage {
 
   async confirmDelete(): Promise<void> {
     if (this.confirmDeleteId.length === 0) return;
-    await getNovelCreation().delete(this.confirmDeleteId);
-    this.confirmDeleteId = '';
+    const targetId: string = this.confirmDeleteId;
+    animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => { this.confirmDeleteId = ''; });
+    await getNovelCreation().delete(targetId);
     await this.loadProjects();
   }
 
@@ -113,8 +130,25 @@ struct NovelProjectsPage {
     router.pushUrl({ url: 'pages/NovelWorkspacePage', params: params });
   }
 
+  // 行操作收进长按菜单(对齐会话首页交互),列表不再常驻两个盒按钮
+  private showRowMenu(p: NovelProject): void {
+    promptAction.showActionMenu({
+      buttons: [
+        { text: '重命名', color: INK },
+        { text: '删除', color: ERROR },
+      ],
+    }).then((result: RowMenuResult): void => {
+      if (result.index === 0) this.openRename(p);
+      else if (result.index === 1) {
+        animateTo({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }, (): void => {
+          this.confirmDeleteId = p.id;
+        });
+      }
+    }).catch((): void => {});
+  }
+
   @Builder
-  projectRow(project: NovelProject, isLast: boolean): void {
+  projectRow(project: NovelProject, isLast: boolean, idx: number): void {
     Column() {
       Row() {
         IconSeat({ iconName: 'book' })
@@ -139,21 +173,30 @@ struct NovelProjectsPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-        Row() {
-          BtnGhost({ label: '重命名', onTap: (): void => { this.openRename(project); } })
-          Blank().width(8)
-          BtnGhost({ label: '删除', onTap: (): void => { this.confirmDeleteId = project.id; } })
-        }
+        Icon({ name: 'chevron_right', iconSize: 16, color: INK4 })
       }
       .width('100%')
       .constraintSize({ minHeight: 64 })
       .padding({ left: 16, right: 16, top: 12, bottom: 12 })
+      .backgroundColor(this.pressedId === project.id ? SURFACE2 : Color.Transparent)
+      .onTouch((e: TouchEvent): void => {
+        if (e.type === TouchType.Down) this.pressedId = project.id;
+        else if (e.type === TouchType.Up || e.type === TouchType.Cancel) this.pressedId = '';
+      })
       .onClick((): void => { this.openWorkspace(project.id); })
+      .gesture(
+        LongPressGesture()
+          .onAction((): void => { this.showRowMenu(project); })
+      )
       if (!isLast) {
         PaperSeparator()
       }
     }
     .width('100%')
+    .transition(TransitionEffect.OPACITY
+      .combine(TransitionEffect.translate({ y: 14 }))
+      .animation({ duration: MOTION_ENTER, curve: Curve.EaseOut,
+        delay: Math.min(idx * MOTION_STAGGER, 240) }))
   }
 
   build(): void {
@@ -185,6 +228,15 @@ struct NovelProjectsPage {
           .alignItems(HorizontalAlign.Start)
         } else if (this.projects.length === 0) {
           Column() {
+            // 空态图标座:accent 淡底圆座,避免纯文字荒芜感
+            Row() {
+              Icon({ name: 'book', iconSize: 30, color: ACCENT })
+            }
+            .width(76).height(76).borderRadius(38)
+            .backgroundColor(ACCENT_LIGHT)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(VerticalAlign.Center)
+            .margin({ bottom: 20 })
             Text('开始你的第一部小说')
               .fontSize(TITLE)
               .fontWeight(600)
@@ -210,7 +262,7 @@ struct NovelProjectsPage {
             Column() {
               SectionHeader({ label: '项目' })
               ForEach(this.projects, (p: NovelProject, idx: number): void => {
-                this.projectRow(p, idx === this.projects.length - 1)
+                this.projectRow(p, idx === this.projects.length - 1, idx)
               }, (p: NovelProject): string => p.id)
               PageSpacer()
             }
@@ -246,7 +298,11 @@ struct NovelProjectsPage {
               Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
                 .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
-                .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
+                .onClick(() => {
+                  animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+                    this.nameDialogOpen = false; this.errorMsg = '';
+                  });
+                })
               Text('确定').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
                 .fontColor(ACCENT).layoutWeight(1).textAlign(TextAlign.Center)
@@ -255,10 +311,17 @@ struct NovelProjectsPage {
             .width('100%').margin({ top: 20 })
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+          .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
         }
         .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
-        .onClick(() => { this.nameDialogOpen = false; this.errorMsg = ''; })
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+        .onClick(() => {
+          animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+            this.nameDialogOpen = false; this.errorMsg = '';
+          });
+        })
       }
 
       // 删除确认叠层
@@ -274,7 +337,11 @@ struct NovelProjectsPage {
               Text('取消').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family)
                 .fontColor(INK3).layoutWeight(1).textAlign(TextAlign.Center)
-                .onClick(() => { this.confirmDeleteId = ''; })
+                .onClick(() => {
+                  animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+                    this.confirmDeleteId = '';
+                  });
+                })
               Text('删除').fontSize(TEXT_STYLES.secondary.size).fontWeight(TEXT_STYLES.secondary.weight)
                 .lineHeight(TEXT_STYLES.secondary.lineHeight).fontFamily(TEXT_STYLES.secondary.family).fontColor(ERROR).layoutWeight(1).textAlign(TextAlign.Center)
                 .onClick(() => { this.confirmDelete(); })
@@ -282,10 +349,17 @@ struct NovelProjectsPage {
             .width('100%').margin({ top: 20 })
           }
           .width('80%').padding(22).backgroundColor(SURFACE).borderRadius(16)
+          .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
         }
         .width('100%').height('100%').backgroundColor(OVERLAY)
         .justifyContent(FlexAlign.Center)
-        .onClick(() => { this.confirmDeleteId = ''; })
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: MOTION_OVERLAY, curve: Curve.EaseOut }))
+        .onClick(() => {
+          animateTo({ duration: 200, curve: Curve.EaseIn }, (): void => {
+            this.confirmDeleteId = '';
+          });
+        })
       }
     }
     .width('100%').height('100%')

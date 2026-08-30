@@ -227,6 +227,9 @@ export struct ChatInput {
           .borderRadius(999)
           .backgroundColor(this.canSend() ? this.accentColorStore : SURFACE2)
           .border({ width: 1, color: this.canSend() ? this.accentColorStore : LINE })
+          .shadow(this.canSend()
+            ? { radius: 12, color: this.accentShadow(), offsetY: 4 }
+            : { radius: 0, color: Color.Transparent, offsetY: 0 })
           .justifyContent(FlexAlign.Center)
           .alignItems(VerticalAlign.Center)
           .scale({ x: this.sendScale, y: this.sendScale })
@@ -262,5 +265,15 @@ export struct ChatInput {
 
   private canSend(): boolean {
     return this.text.trim().length > 0 || this.hasImages;
+  }
+
+  // accent 35% 透明阴影色(发送键可发态浮起)
+  private accentShadow(): string {
+    const value: string = this.accentColorStore.replace('#', '');
+    if (value.length !== 6) return '#33000000';
+    const r: number = parseInt(value.substring(0, 2), 16);
+    const g: number = parseInt(value.substring(2, 4), 16);
+    const b: number = parseInt(value.substring(4, 6), 16);
+    return `rgba(${r}, ${g}, ${b}, 0.35)`;
   }
 }

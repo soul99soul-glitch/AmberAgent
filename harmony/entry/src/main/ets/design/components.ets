@@ -1,6 +1,6 @@
 // 设计系统组件 — 杂志风排版原语 + 聊天交互原语
 // 基准: Android ds/AmberPrimitives.kt(186 行) + 杂志风既有组件
-import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS, OVERLAY } from './tokens.ets';
+import { INK, INK2, INK3, INK4, LINE, ACCENT, SURFACE, SURFACE2, BG, SIGNAL, ERROR, TITLE, BODY, META, LABEL, PAD_CARD, PAD_ITEM, RADIUS, OVERLAY, SHADOW_OVERLAY } from './tokens.ets';
 
 // ===== 聊天交互原语(Android AmberPrimitives.kt 对齐) =====
 
@@ -45,6 +45,7 @@ export struct BtnInk {
       .backgroundColor(this.fieldEnabled ? INK : SURFACE2)
       .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
       .opacity(this.pressed ? 0.85 : 1)
+      .animation({ duration: 140, curve: Curve.EaseOut })
       .onTouch((e: TouchEvent): void => {
         if (!this.fieldEnabled) return;
         if (e.type === TouchType.Down) this.pressed = true;
@@ -72,6 +73,7 @@ export struct BtnAccent {
       .backgroundColor(this.fieldEnabled ? ACCENT : SURFACE2)
       .scale({ x: this.pressed ? 0.975 : 1, y: this.pressed ? 0.975 : 1 })
       .opacity(this.pressed ? 0.85 : 1)
+      .animation({ duration: 140, curve: Curve.EaseOut })
       .onTouch((e: TouchEvent): void => {
         if (!this.fieldEnabled) return;
         if (e.type === TouchType.Down) this.pressed = true;
@@ -222,7 +224,17 @@ export struct EmptyState {
   onAction: () => void = () => {};
   build(): void {
     Column() {
-      if (this.icon.length > 0) { Text(this.icon).fontSize(34) }
+      if (this.icon.length > 0) {
+        // 图标座:淡底圆座承载 emoji/glyph,避免裸字符漂浮感
+        Row() {
+          Text(this.icon).fontSize(30)
+        }
+        .width(72).height(72).borderRadius(36)
+        .backgroundColor(SURFACE2)
+        .border({ width: 1, color: LINE })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+      }
       Text(this.title).fontSize(TITLE).fontWeight(FontWeight.Medium).fontColor(INK2)
         .margin({ top: 12 })
       if (this.subtitle.length > 0) {
@@ -338,6 +350,7 @@ export struct ConfirmDialog {
         .padding(20)
         .backgroundColor(SURFACE)
         .borderRadius(16)
+        .shadow({ radius: 24, color: SHADOW_OVERLAY, offsetY: 8 })
         .scale({ x: this.entered ? 1 : 0.96, y: this.entered ? 1 : 0.96 })
         .opacity(this.entered ? 1 : 0)
       }
@@ -481,6 +494,7 @@ export struct ShareSheet {
         .width('100%')
         .backgroundColor(SURFACE)
         .borderRadius({ topLeft: 16, topRight: 16 })
+        .shadow({ radius: 20, color: SHADOW_OVERLAY, offsetY: -4 })
         .translate({ y: this.entered ? 0 : 80 })
       }
       .width('100%')
