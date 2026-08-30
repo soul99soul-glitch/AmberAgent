@@ -500,7 +500,11 @@ struct DeepReadArticlePage {
                   .borderRadius(14).clip(true)
                   .margin({ top: 14 })
               }
-              Text(this.currentStage).fontSize(META).fontColor(INK3).margin({ top: 10 })
+              Row() {
+                Text('//').fontSize(META).fontColor(ACCENT).fontWeight(FontWeight.Bold)
+                Text(' ' + this.currentStage).fontSize(META).fontColor(INK3)
+              }
+              .width('100%').justifyContent(FlexAlign.Center).margin({ top: 10 })
               if (this.fromHistory && this.historyExpired) {
                 Text('内容已过 24 小时，可能需要重新生成')
                   .fontSize(META).fontColor(INK3)
@@ -544,8 +548,10 @@ struct DeepReadArticlePage {
               }
               MarkdownText({
                 content: this.markdownContent(),
-                fontSize: BODY * this.fontScale,
-                fontColor: INK2,
+                fontSize: 16 * this.fontScale,
+                fontColor: INK,
+                readingMode: true,
+                lineHeightScale: 1.75,
               })
               if (this.inlineImageAssets().length > 0) {
                 ForEach(this.inlineImageAssets(), (asset: DeepReadImageAsset) => {
@@ -581,7 +587,7 @@ struct DeepReadArticlePage {
               .margin({ top: 24, bottom: 40 })
               .onClick((): void => { this.showRegenerateDialog = true; })
             }
-            .width('100%').padding({ left: 14, right: 14, top: 2, bottom: 11 })
+            .width('100%').padding({ left: 20, right: 20, top: 2, bottom: 11 })
           }
         .align(Alignment.TopStart)
           .layoutWeight(1)

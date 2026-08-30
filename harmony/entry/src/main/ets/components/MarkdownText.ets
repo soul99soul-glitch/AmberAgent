@@ -29,7 +29,7 @@ import type {
   MarkdownCacheResult,
 } from '@amber/chat-domain';
 import { ACCENT, BODY, INK, INK3, LINE, META, MONO_SMALL, SURFACE2, TEXT_STYLES, lineHeightForSize } from '../design/tokens.ets';
-import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO } from '../design/fonts.ets';
+import { FONT_SANS, FONT_SANS_BOLD, FONT_SANS_MEDIUM, FONT_MONO, FONT_SERIF } from '../design/fonts.ets';
 import { Icon } from './ui/Icon.ets';
 import { promptAction } from '@kit.ArkUI';
 import { pasteboard } from '@kit.BasicServicesKit';
@@ -112,6 +112,8 @@ export struct MarkdownText {
   @Prop fontColor: string = INK;
   // 阅读模式行高倍率(0 = 走契约档;长文场景传 1.7 左右)
   @Prop lineHeightScale: number = 0;
+  // 阅读模式:衬线正文 + 两端对齐 + 段落间距(深读长文用;聊天消息保持默认)
+  @Prop readingMode: boolean = false;
   // 收缩包裹场景(用户气泡 maxWidth 82%)需 'auto',否则 100% 使测宽失效不换行
   @Prop fillWidth: boolean = true;
   // P3:是否活动流式尾(仅最后文本块传 true)→ 启动逐字 reveal
@@ -511,8 +513,12 @@ export struct MarkdownText {
     .fontSize(this.headingSize(block.kind === 'heading' ? block.level : 1))
     .fontColor(this.fontColor)
     .lineHeight(lineHeightForSize(this.headingSize(block.kind === 'heading' ? block.level : 1)))
-    .fontFamily(FONT_SANS_BOLD)
-    .margin({ top: block.kind === 'heading' && block.level <= 2 ? 12 : 8, bottom: 4 })
+    .fontWeight(FontWeight.Bold)
+    .fontFamily(this.headFamily())
+    .margin({ top: this.readingMode
+      ? (block.kind === 'heading' && block.level <= 2 ? 22 : 14)
+      : (block.kind === 'heading' && block.level <= 2 ? 12 : 8),
+      bottom: this.readingMode ? 8 : 4 })
   }
 
   @Builder
@@ -532,8 +538,9 @@ export struct MarkdownText {
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
     .lineHeight(this.effLineHeight(this.fontSize))
-    .fontFamily(FONT_SANS)
-    .margin({ top: 2, bottom: 4 })
+    .fontFamily(this.bodyFamily())
+    .textAlign(this.readingMode ? TextAlign.JUSTIFY : TextAlign.Start)
+    .margin({ top: this.readingMode ? 0 : 2, bottom: this.readingMode ? 12 : 4 })
   }
 
   @Builder
@@ -554,10 +561,19 @@ export struct MarkdownText {
     .fontSize(this.fontSize)
     .fontColor(this.fontColor)
     .lineHeight(this.effLineHeight(this.fontSize))
-    .fontFamily(FONT_SANS)
+    .fontFamily(this.bodyFamily())
     .border({ width: { left: 3 }, color: LINE })
     .padding({ left: 10 })
     .margin({ top: 4, bottom: 4 })
+  }
+
+  // 阅读模式字体族:正文/标题衬线(粗体经 fontWeight 合成)
+  private bodyFamily(): string {
+    return this.readingMode ? FONT_SERIF : FONT_SANS;
+  }
+
+  private headFamily(): string {
+    return this.readingMode ? FONT_SERIF : FONT_SANS_BOLD;
   }
 
   // 有效行高:lineHeightScale > 0 时按倍率,否则契约档
@@ -595,7 +611,7 @@ export struct MarkdownText {
               Text(block.ordered ? this.orderedLabel(block, idx) : '•')
                 .fontSize(this.fontSize)
                 .fontColor(this.fontColor)
-                .fontFamily(FONT_SANS)
+                .fontFamily(this.bodyFamily())
                 .lineHeight(this.effLineHeight(this.fontSize))
                 .width(block.ordered ? 32 : 16)
               Text() {
@@ -610,7 +626,7 @@ export struct MarkdownText {
               .fontSize(this.fontSize)
               .fontColor(this.fontColor)
               .lineHeight(this.effLineHeight(this.fontSize))
-              .fontFamily(FONT_SANS)
+              .fontFamily(this.bodyFamily())
               .layoutWeight(1)
             }
             .width('100%')
@@ -782,6 +798,7 @@ export struct MarkdownText {
 
   // 权重→家族名(字重由注册的静态档承载;仅设 fontWeight 会落到合成加粗)
   private spanFamily(weight: FontWeight): string {
+    if (this.readingMode) return FONT_SERIF;
     if (weight === FontWeight.Bold) return FONT_SANS_BOLD;
     if (weight === FontWeight.Medium) return FONT_SANS_MEDIUM;
     return FONT_SANS;
