@@ -98,8 +98,12 @@ harmony/scripts/lint-arkts.sh <改动文件或子目录>   # 日常:单文件 ~3
 # 1. 构建(封装 hvigorw assembleApp,自动定位 SDK)
 node scripts/harmony-inventory/build-harmony-app.mjs
 
-# 2. 签名(离线自建 CA)
-harmony/scripts/sign-hap.sh
+# 2. 签名:两条路线
+#   a) AGC 调试签名(真机必用):devecocli auth login 一次 → devecocli signature generate
+#      (材料落 ~/.ohos/config,配置写进 build-profile.json5)——之后 hvigorw 构建直接产出
+#      已签名的 entry-default-signed.hap,无需 sign-hap.sh
+#   b) 离线自建 CA(harmony/scripts/sign-hap.sh):仅模拟器认,零售真机会拒
+#      (install 报 9568257 "fail to verify pkcs7 file")
 
 # 3. 模拟器验证(Pura 90 AVD 启动后)
 hdc tconn 127.0.0.1:5555
@@ -111,6 +115,12 @@ hdc -t 127.0.0.1:5555 shell snapshot_display -f /data/local/tmp/verify.jpeg
 hdc -t 127.0.0.1:5555 file recv /data/local/tmp/verify.jpeg /tmp/verify.jpeg
 # UI 注入: hdc -t 127.0.0.1:5555 shell "uitest uiInput click 540 1200"
 #          hdc -t 127.0.0.1:5555 shell "uitest uiInput swipe 540 1500 540 500 500"
+
+# 4. 真机验证(须先用上面 2a 的 AGC 签名;UDID: hdc -t <serial> shell bm get --udid)
+hdc list targets   # 真机 serial 形如 5MT0225B12013017,模拟器是 127.0.0.1:5555
+hdc -t <serial> install -r harmony/entry/build/default/outputs/default/entry-default-signed.hap
+hdc -t <serial> shell aa start -b app.amber.deepread -a EntryAbility
+hdc -t <serial> shell snapshot_display -f /data/local/tmp/v.jpeg   # 真机截图同样可用
 ```
 
 改了 UI / 主题 / 生命周期逻辑,必须走第 3 步截图目测——暗色 bug 就是只在模拟器上现形的。

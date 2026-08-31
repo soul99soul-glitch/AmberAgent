@@ -143,11 +143,15 @@ export struct NovelBatchPolishSheet {
               if (result.status === 'ready' && result.messageId.length > 0) {
                 Text('采纳').fontSize(13).fontColor('#FFFFFF').padding({ left: 14, right: 14, top: 7, bottom: 7 })
                   .backgroundColor(ACCENT).borderRadius(14).margin({ left: 12 })
-                  .onClick((): void => { this.onAdopt(result.chapterId, result.messageId); })
               }
             }
             .width('100%').padding({ top: 12, bottom: 12 })
             .border({ width: { bottom: 0.5 }, color: { bottom: LINE } })
+            .onClick((): void => {
+              if (result.status === 'ready' && result.messageId.length > 0) {
+                this.onAdopt(result.chapterId, result.messageId);
+              }
+            })
           }, (result: NovelBatchPolishSheetResult): string => result.chapterId)
         }
         .width('100%')
