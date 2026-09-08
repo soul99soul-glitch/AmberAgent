@@ -19,6 +19,7 @@ import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
+import app.amber.feature.webmount.login.InlineLoginActivity
 
 import java.io.File
 import java.io.FileOutputStream
@@ -61,6 +62,14 @@ fun Context.openUrl(url: String) {
     Log.i(TAG, "openUrl: $normalizedUrl")
     if (normalizedUrl.isBlank()) return
     val parsedUri = normalizedUrl.toUri()
+    if (parsedUri.scheme == "amberagent" && parsedUri.host == "webmount" && parsedUri.path == "/login") {
+        startActivity(
+            Intent(this, InlineLoginActivity::class.java)
+                .setData(parsedUri)
+                .withContextLaunchFlags(this)
+        )
+        return
+    }
     val bilibiliLink = parsedUri.toBilibiliLink()
     val fallbackUri = bilibiliLink?.webUri ?: parsedUri
 

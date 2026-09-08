@@ -14,6 +14,10 @@ import app.amber.agent.R
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.core.WebMountStatus
+import app.amber.feature.webmount.profile.ProfileRegistry
+import app.amber.feature.webmount.usersites.AuthKind
+import app.amber.feature.webmount.usersites.UserSite
+import app.amber.feature.webmount.usersites.UserSiteRegistry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +36,8 @@ class InlineLoginActivity : Activity() {
 
     private val webMountManager: WebMountManager by inject()
     private val cookieProvider: WebMountCookieProvider by inject()
+    private val profileRegistry: ProfileRegistry by inject()
+    private val userSiteRegistry: UserSiteRegistry by inject()
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var controller: WebMountLoginController? = null
@@ -48,13 +54,47 @@ class InlineLoginActivity : Activity() {
             finish()
             return
         }
+        val userSite = userSiteRegistry.byId(stationId)
         val adapter = webMountManager.adapterOf(stationId)
-        if (adapter == null) {
+        // A built-in profile can outlive its optional UserSite seed. Keep
+        // profile-generated login helpers usable without silently adding the
+        // site back to the user's settings list.
+        val profileSite = profileRegistry.byId(stationId)?.profile?.let { profile ->
+            val loginCookie = profile.hints.loginCookie
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            val homepageUrl = profile.origins.firstOrNull()
+            if (loginCookie == null || homepageUrl.isNullOrBlank()) {
+                null
+            } else {
+                UserSite(
+                    id = profile.id,
+                    displayName = profile.name,
+                    homepageUrl = homepageUrl,
+                    authKind = AuthKind.COOKIE,
+                    loginCookieName = loginCookie,
+                )
+            }
+        }
+        val target = when {
+            userSite != null -> WebMountLoginTarget.fromUserSite(
+                userSite,
+                webMountManager,
+                profileRegistry,
+            )
+            profileSite != null -> WebMountLoginTarget.fromUserSite(
+                profileSite,
+                webMountManager,
+                profileRegistry,
+            )
+            adapter != null -> WebMountLoginTarget.fromAdapter(adapter)
+            else -> null
+        }
+        if (target == null) {
             Log.w(TAG, "InlineLogin: station '$stationId' is not registered")
             finish()
             return
         }
-        val target = WebMountLoginTarget.fromAdapter(adapter)
         if (target.startUrl.isBlank()) {
             Log.w(TAG, "InlineLogin: station '$stationId' has no primaryLoginUrl")
             finish()
@@ -66,7 +106,7 @@ class InlineLoginActivity : Activity() {
             setBackgroundColor(0xFFFFFFFF.toInt())
         }
         statusLabel = TextView(this).apply {
-            text = getString(R.string.webmount_inline_login_status_loading, adapter.displayName)
+            text = getString(R.string.webmount_inline_login_status_loading, target.displayName)
             setPadding(32, 32, 32, 16)
             textSize = 14f
             setTextColor(0xFF333333.toInt())

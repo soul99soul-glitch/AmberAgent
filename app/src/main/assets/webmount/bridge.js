@@ -12,6 +12,9 @@
   if (window.__amberWmReady) return;
   window.__amberWmReady = true;
   window.__amberWmDocumentStart = window.__amberWmDocumentStart === true || document.readyState === 'loading';
+  // Refs are opaque handles to this JS realm. Include a realm token so a ref
+  // from a prior document cannot alias a freshly numbered ref after reload.
+  window.__amberWmRealmId = window.__amberWmRealmId || Math.random().toString(36).substring(2, 10);
   window.__amberWmSnapshotSeq = window.__amberWmSnapshotSeq || 0;
   window.__amberWmSnapshot = window.__amberWmSnapshot || { id: 0, entries: {} };
 
@@ -75,9 +78,26 @@
     return raw.replace(/\s+/g, ' ').trim().substring(0, maxChars || 4000);
   }
 
+  function interactiveState(el) {
+    var tag = (el.tagName || '').toLowerCase();
+    var state = [];
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') {
+      var value = '';
+      try { value = el.value == null ? '' : String(el.value); } catch (_) {}
+      state.push('value_hash=' + hashString(value));
+      if (tag === 'input' && (el.type === 'checkbox' || el.type === 'radio')) {
+        state.push('checked=' + (!!el.checked));
+      }
+      if (tag === 'select') state.push('selected_index=' + (el.selectedIndex | 0));
+    }
+    state.push('disabled=' + isDisabled(el));
+    state.push('readonly=' + isReadOnly(el));
+    return state.join(',');
+  }
+
   function semanticState(args) {
     args = args || {};
-    var text = semanticText(args.text_fingerprint_chars || 4000);
+    var text = semanticText(args.text_fingerprint_chars || 60000);
     var interactive = Array.prototype.slice.call(document.querySelectorAll(
       'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]'
     )).filter(isVisible);
@@ -88,8 +108,8 @@
       document.title || '',
       document.readyState,
       text,
-      interactive.slice(0, 80).map(function (el) {
-        return [roleOf(el), accessibleName(el, 80), nodePath(el)].join(':');
+      interactive.slice(0, 300).map(function (el) {
+        return [roleOf(el), accessibleName(el, 80), nodePath(el), interactiveState(el)].join(':');
       }).join('|'),
       window.scrollX | 0,
       window.scrollY | 0,
@@ -155,14 +175,33 @@
     if (sel.indexOf('text=') === 0) {
       var needle = sel.substring(5).toLowerCase();
       var all = Array.prototype.slice.call(document.querySelectorAll('a,button,input,[role=button],[role=link],label,h1,h2,h3,h4,li,p,span,div'));
-      return all.filter(function (el) {
+      var matches = all.filter(function (el) {
         var t = (el.innerText || el.textContent || '').toLowerCase();
         return t.indexOf(needle) >= 0;
+      });
+      // Ancestor containers often contain the same text as their button/link
+      // child. Prefer actionable matches, then keep the deepest match so a
+      // text selector cannot silently click a non-interactive wrapper.
+      var actionable = matches.filter(isActionableTarget);
+      var preferred = actionable.length > 0 ? actionable : matches;
+      return preferred.filter(function (el) {
+        return !preferred.some(function (other) {
+          return other !== el && el.contains && el.contains(other);
+        });
       });
     }
     var css = sel.indexOf('css:') === 0 ? sel.substring(4) : sel;
     try { return Array.prototype.slice.call(document.querySelectorAll(css)); }
     catch (e) { return []; }
+  }
+
+  function isActionableTarget(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toLowerCase();
+    if (tag === 'a' || tag === 'button' || tag === 'input' || tag === 'select' || tag === 'textarea' || tag === 'label') return true;
+    var role = el.getAttribute && el.getAttribute('role');
+    if (role === 'button' || role === 'link' || role === 'tab' || role === 'menuitem') return true;
+    return !!(el.getAttribute && el.getAttribute('onclick'));
   }
 
   function isVisible(el) {
@@ -197,6 +236,20 @@
       var ref = document.getElementById(labelled);
       if (ref) return (ref.innerText || ref.textContent || '').trim();
     }
+    // Native form labels are part of the accessible name even without ARIA.
+    // HTMLInputElement/HTMLTextAreaElement/HTMLSelectElement expose the
+    // associated labels through the standard `labels` property.
+    try {
+      var labels = el.labels;
+      if (labels && labels.length) {
+        var labelText = [];
+        for (var i = 0; i < labels.length; i++) {
+          var text = (labels[i].innerText || labels[i].textContent || '').trim();
+          if (text) labelText.push(text);
+        }
+        if (labelText.length) return labelText.join(' ');
+      }
+    } catch (_) { /* ignore unsupported/non-form elements */ }
     var alt = el.getAttribute && el.getAttribute('alt');
     if (alt) return alt.trim();
     var title = el.getAttribute && el.getAttribute('title');
@@ -205,6 +258,20 @@
     var text = (el.innerText || el.textContent || '').trim();
     if (text.length > 0 && text.length < 200) return text;
     return null;
+  }
+
+  function isDisabled(el) {
+    if (!el) return false;
+    if (el.disabled === true) return true;
+    if (el.getAttribute && String(el.getAttribute('aria-disabled') || '').toLowerCase() === 'true') return true;
+    try { return !!(el.matches && el.matches(':disabled')); }
+    catch (_) { return false; }
+  }
+
+  function isReadOnly(el) {
+    if (!el) return false;
+    if (el.readOnly === true) return true;
+    return !!(el.getAttribute && String(el.getAttribute('aria-readonly') || '').toLowerCase() === 'true');
   }
 
   function rectOf(el) {
@@ -269,7 +336,9 @@
 
   function rememberSnapshotNode(el, node, forcedRef) {
     var snapshot = window.__amberWmSnapshot;
-    var ref = forcedRef != null ? String(forcedRef) : String(Object.keys(snapshot.entries).length + 1);
+    var ref = forcedRef != null
+      ? String(forcedRef)
+      : 'wmref_' + window.__amberWmRealmId + '_' + snapshot.id + '_' + (Object.keys(snapshot.entries).length + 1);
     var fp = fingerprintOf(el);
     node.ref = ref;
     node.css = node.path;
@@ -587,7 +656,8 @@
 
   function extractVisualSnapshot(args) {
     args = args || {};
-    var maxCandidates = Math.min(((args.max_candidates | 0) || 30), 120);
+    var requestedMax = args.max_candidates == null ? 30 : (args.max_candidates | 0);
+    var maxCandidates = Math.min(Math.max(requestedMax, 0), 120);
     var nodes = [];
     var snapshotId = args.snapshot_id && window.__amberWmSnapshot && window.__amberWmSnapshot.id === args.snapshot_id
       ? args.snapshot_id
@@ -596,7 +666,7 @@
     var els = Array.prototype.slice.call(document.querySelectorAll(selector));
     for (var i = 0; i < els.length && nodes.length < maxCandidates; i++) {
       var el = els[i];
-      if (!isVisible(el)) continue;
+      if (!isElementInViewport(el)) continue;
       var tag = (el.tagName || '').toLowerCase();
       var source = tag;
       if (tag !== 'img' && tag !== 'canvas' && tag !== 'svg' && tag !== 'video' && tag !== 'iframe') {
@@ -675,7 +745,8 @@
     args = args || {};
     var maxText = Math.min(((args.max_text_chars | 0) || 12000), 60000);
     var maxNodes = Math.min(((args.max_nodes | 0) || 80), 300);
-    var maxVisual = Math.min(((args.max_visual_candidates | 0) || 30), 120);
+    var requestedVisual = args.max_visual_candidates == null ? 30 : (args.max_visual_candidates | 0);
+    var maxVisual = Math.min(Math.max(requestedVisual, 0), 120);
     var snapshotId = startSnapshot();
     return {
       mode: 'observe',
@@ -964,6 +1035,9 @@
     var resolved = resolveTarget(args, { allowFingerprintFallback: false, requireStableRect: true });
     if (!resolved.ok) return resolved;
     var target = resolved.el;
+    if (isDisabled(target)) {
+      return targetError('target_disabled', 'element is disabled', 'Choose an enabled control from wm_extract(mode="interactive").', [candidateSummary(target, resolved.ref)]);
+    }
     if (args.visible_only !== false && !isVisible(target)) {
       // Try scrollIntoView once.
       if (target.scrollIntoView) target.scrollIntoView({ block: 'center', inline: 'center' });
@@ -988,6 +1062,9 @@
     var y = args.y | 0;
     var target = document.elementFromPoint(x, y);
     if (!target) return targetError('target_not_found', 'no element at viewport coordinate', 'Use wm_visual_snapshot or wm_observe to inspect visible regions.');
+    if (isDisabled(target)) {
+      return targetError('target_disabled', 'element is disabled', 'Choose an enabled control from wm_extract(mode="interactive").', [candidateSummary(target)]);
+    }
     if (target.focus) try { target.focus(); } catch (_) {}
     dispatchMouseEvent(target, 'mousedown');
     dispatchMouseEvent(target, 'mouseup');
@@ -1010,17 +1087,23 @@
     if (el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA' && !el.isContentEditable) {
       return targetError('target_not_editable', 'element is not editable', 'Use wm_extract(mode="interactive") and choose an input, textarea, or contenteditable node.', [candidateSummary(el, resolved.ref)]);
     }
+    if (isDisabled(el)) {
+      return targetError('target_disabled', 'element is disabled', 'Choose an enabled input from wm_extract(mode="interactive").', [candidateSummary(el, resolved.ref)]);
+    }
+    if (isReadOnly(el)) {
+      return targetError('target_readonly', 'element is read-only', 'Choose an editable input or omit readonly state before typing.', [candidateSummary(el, resolved.ref)]);
+    }
     if (el.focus) try { el.focus(); } catch (_) {}
     var clear = args.clear === true;
-    if (clear) {
-      if (el.isContentEditable) el.textContent = '';
-      else el.value = '';
-    }
     if (el.isContentEditable) {
       // Simple insert at end.
-      el.textContent = (el.textContent || '') + text;
+      el.textContent = (clear ? '' : (el.textContent || '')) + text;
     } else {
-      el.value = (el.value || '') + text;
+      // Frameworks such as React wrap the instance value setter to track
+      // programmatic writes. Use the native setter so the input event below
+      // observes a changed value and updates the controlled state.
+      var prototype = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value').set.call(el, (clear ? '' : (el.value || '')) + text);
     }
     // Fire input/change so frameworks observe the new value.
     el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1149,6 +1232,7 @@
 
     function isSignalRequest(url) {
       var u = String(url || '').toLowerCase();
+      var path = u.split(/[?#]/, 1)[0];
       return !(
         u.indexOf('google-analytics') >= 0 ||
         u.indexOf('/analytics') >= 0 ||
@@ -1157,7 +1241,7 @@
         u.indexOf('googletagmanager') >= 0 ||
         u.indexOf('sentry') >= 0 ||
         u.indexOf('log.') >= 0 ||
-        u.indexOf('/log') >= 0 ||
+        /(?:^|\/)logs?(?:\/|$)/.test(path) ||
         u.indexOf('/metrics') >= 0 ||
         u.indexOf('/collect') >= 0
       );
@@ -1306,6 +1390,11 @@
           text_chars: text.length,
           truncated: text.length > maxChars,
         }));
+      }, function (err) {
+        AmberWM.resolve(reqId, safeJson({
+          ok: false,
+          error: String(err && err.message || err),
+        }));
       });
     }, function (err) {
       AmberWM.resolve(reqId, safeJson({
@@ -1424,11 +1513,17 @@
     if (!resolved.ok) return resolved;
     var el = resolved.el;
     if (el.tagName !== 'SELECT') return targetError('target_not_select', 'target is not a <select>', 'Use wm_extract(mode="interactive") and choose a select node.', [candidateSummary(el, resolved.ref)]);
+    if (isDisabled(el)) {
+      return targetError('target_disabled', 'select is disabled', 'Choose an enabled select from wm_extract(mode="interactive").', [candidateSummary(el, resolved.ref)]);
+    }
     var value = args.value;
     if (typeof value !== 'string') throw new Error('select requires value string');
     var found = false;
     for (var i = 0; i < el.options.length; i++) {
       if (el.options[i].value === value || el.options[i].text === value) {
+        if (el.options[i].disabled || (el.options[i].parentElement && el.options[i].parentElement.disabled)) {
+          return targetError('option_disabled', 'option is disabled: ' + value, 'Choose an enabled option from the select.', [candidateSummary(el, resolved.ref)]);
+        }
         el.selectedIndex = i;
         found = true;
         break;

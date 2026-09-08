@@ -1,11 +1,14 @@
 package app.amber.feature.runtime
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -63,6 +66,91 @@ class AgentToolDispatcherTest {
         assertEquals(listOf("a", "b"), result.map { it.toolCallId })
         assertEquals("first", (result[0].output.single() as UIMessagePart.Text).text)
         assertEquals("second", (result[1].output.single() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun executeBatchSerializesWebMountCallsInSameSession() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        val first = Tool(
+            name = "wm_state",
+            description = "",
+            execute = {
+                firstStarted.complete(Unit)
+                releaseFirst.await()
+                listOf(UIMessagePart.Text("first"))
+            },
+        )
+        val second = Tool(
+            name = "wm_extract",
+            description = "",
+            execute = {
+                secondStarted.complete(Unit)
+                listOf(UIMessagePart.Text("second"))
+            },
+        )
+
+        val batch = async {
+            dispatcher.executeBatch(
+                tools = listOf(
+                    toolCall("wm_state", id = "first", input = """{"session_id":"shared"}"""),
+                    toolCall("wm_extract", id = "second", input = """{"session_id":"shared"}"""),
+                ),
+                toolDefinitions = mapOf("wm_state" to first, "wm_extract" to second),
+                autoApproveTools = false,
+            )
+        }
+
+        firstStarted.await()
+        assertEquals(false, secondStarted.isCompleted)
+        releaseFirst.complete(Unit)
+
+        val result = batch.await()
+        assertEquals(listOf("first", "second"), result.map { it.toolCallId })
+    }
+
+    @Test
+    fun executeBatchKeepsDifferentWebMountSessionsParallel() = runBlocking {
+        val firstStarted = CompletableDeferred<Unit>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val secondStarted = CompletableDeferred<Unit>()
+        val first = Tool(
+            name = "wm_state",
+            description = "",
+            execute = {
+                firstStarted.complete(Unit)
+                releaseFirst.await()
+                listOf(UIMessagePart.Text("first"))
+            },
+        )
+        val second = Tool(
+            name = "wm_extract",
+            description = "",
+            execute = {
+                secondStarted.complete(Unit)
+                listOf(UIMessagePart.Text("second"))
+            },
+        )
+
+        val batch = async {
+            dispatcher.executeBatch(
+                tools = listOf(
+                    toolCall("wm_state", id = "first", input = """{"session_id":"one"}"""),
+                    toolCall("wm_extract", id = "second", input = """{"session_id":"two"}"""),
+                ),
+                toolDefinitions = mapOf("wm_state" to first, "wm_extract" to second),
+                autoApproveTools = false,
+            )
+        }
+
+        firstStarted.await()
+        val secondWasStarted = withTimeoutOrNull(1_000L) { secondStarted.await() } != null
+        releaseFirst.complete(Unit)
+
+        val result = batch.await()
+        assertTrue("different WebMount sessions should run in parallel", secondWasStarted)
+        assertEquals(listOf("first", "second"), result.map { it.toolCallId })
     }
 
     @Test

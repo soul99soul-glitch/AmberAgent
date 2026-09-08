@@ -9,6 +9,7 @@ import app.amber.core.agent.runtime.AgentEventWriter
 import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.feature.tools.effectClass
+import app.amber.feature.tools.ToolEffectClass
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -121,6 +122,43 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
         val effect = ledger.getByToolCallId("call_1")!!
         assertEquals(ToolEffectStatus.STARTED, effect.status)
         assertNull(effect.finishedAtMs)
+    }
+
+    @Test
+    fun interruptedWebMountWritesRequireReconciliationButSignedReadsStayRetryable() = runBlocking {
+        val calls = listOf(
+            toolCall(toolCallId = "eval", toolName = "wm_eval", input = """{"expression":"submit()"}"""),
+            toolCall(toolCallId = "remove", toolName = "wm_site_remove", input = """{"site_id":"github"}"""),
+            toolCall(toolCallId = "post", toolName = "wm_signed_fetch", input = """{"method":"POST"}"""),
+            toolCall(toolCallId = "get", toolName = "wm_signed_fetch", input = """{"method":"GET"}"""),
+        )
+        calls.forEach { call ->
+            val result = runCatching {
+                dispatcher.execute(
+                    tool = call,
+                    toolDef = toolDef(call.toolName) { throw CancellationException("stopped after dispatch") },
+                    autoApproveTools = false,
+                    ledgerContext = context(),
+                )
+            }
+            assertTrue(result.exceptionOrNull() is CancellationException)
+        }
+
+        val recovery = RunRecoveryService(
+            ledger = ledger,
+            runTerminalStore = runTerminalStore,
+            conversationRepo = conversationRepository(),
+            json = Json,
+        )
+        assertTrue(recovery.reconcileStartedEffects("run_1"))
+        calls.take(3).forEach { call ->
+            val effect = ledger.getByToolCallId(call.toolCallId)!!
+            assertEquals(ToolEffectClass.NON_IDEMPOTENT_WRITE, effect.effectClass)
+            assertEquals(ToolEffectStatus.OUTCOME_UNKNOWN, effect.status)
+        }
+        val read = ledger.getByToolCallId("get")!!
+        assertEquals(ToolEffectClass.READ_ONLY, read.effectClass)
+        assertEquals(ToolEffectStatus.STARTED, read.status)
     }
 
     @Test

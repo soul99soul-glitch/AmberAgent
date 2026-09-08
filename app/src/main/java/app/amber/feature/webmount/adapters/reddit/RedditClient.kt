@@ -122,7 +122,7 @@ class RedditClient(
         )
     }
 
-    private fun parseChild(kind: String?, data: JsonObject): RedditChild = when (kind) {
+    private fun parseChild(kind: String?, data: JsonObject): RedditChild? = when (kind) {
         "t1" -> RedditChild.Comment(
             id = data.s("id").orEmpty(),
             author = data.s("author"),
@@ -132,7 +132,7 @@ class RedditClient(
             permalink = data.s("permalink"),
             parentId = data.s("parent_id"),
         )
-        else -> RedditChild.Post(
+        "t3" -> RedditChild.Post(
             id = data.s("id").orEmpty(),
             subreddit = data.s("subreddit"),
             author = data.s("author"),
@@ -146,6 +146,7 @@ class RedditClient(
             isSelf = data["is_self"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false,
             over18 = data["over_18"]?.jsonPrimitive?.contentOrNull?.toBoolean() ?: false,
         )
+        else -> null
     }
 
     private fun JsonObject.s(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull

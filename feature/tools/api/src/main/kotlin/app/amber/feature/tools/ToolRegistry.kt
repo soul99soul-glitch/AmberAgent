@@ -575,7 +575,7 @@ private fun Tool.mutatesState(): Boolean {
         name == "conversation_compact" ||
         name == "deep_read_finish" ||
         name in setOf("subagent_start", "subagent_cancel") ||
-        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select") ||
+        name in setOf("wm_click", "wm_tap", "wm_type", "wm_keys", "wm_select", "wm_eval", "wm_site_remove") ||
         name.startsWith("skill_enable") ||
         name.startsWith("skill_disable")
 }
@@ -832,7 +832,14 @@ private const val SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS =
  *  - nonIdempotentWrite: everything else that mutates — external side effects
  *    that cannot be safely retried. This is the safety default.
  */
-fun Tool.effectClass(): ToolEffectClass = when {
+fun Tool.effectClass(input: String? = null): ToolEffectClass = when {
+    // Signing supports both reads and writes. Recovery needs the actual
+    // invocation method; without args, its static metadata cannot promise a read.
+    name == "wm_signed_fetch" -> if (input != null && !invocationPolicy(input).mutates) {
+        ToolEffectClass.READ_ONLY
+    } else {
+        ToolEffectClass.NON_IDEMPOTENT_WRITE
+    }
     !mutatesState() -> ToolEffectClass.READ_ONLY
     name in IDEMPOTENT_WRITE_TOOLS -> ToolEffectClass.IDEMPOTENT_WRITE
     else -> ToolEffectClass.NON_IDEMPOTENT_WRITE

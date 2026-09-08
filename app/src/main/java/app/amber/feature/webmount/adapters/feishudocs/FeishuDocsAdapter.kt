@@ -52,12 +52,11 @@ class FeishuDocsAdapter(
                 "未连接飞书 OAuth —— 在 WebMount Stations 设置页找到「飞书云文档」一行,先点「编辑凭据」填好 App ID / Secret,再点「Connect」。"
             )
         return runCatching {
-            val ok = tools.probe(token)
-            if (ok) WebMountProbeResult.success(
+            tools.probe(token)
+            WebMountProbeResult.success(
                 WebMountCapability.READ_WRITE,
                 "飞书云文档 OpenAPI reachable, token valid",
             )
-            else WebMountProbeResult.degraded("飞书 /drive/v1/files returned empty — token may lack scope")
         }.getOrElse { error ->
             val message = error.message.orEmpty()
             if ("99991663" in message || "expired" in message.lowercase()) {

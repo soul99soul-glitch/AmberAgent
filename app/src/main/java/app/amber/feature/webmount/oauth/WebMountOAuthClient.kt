@@ -9,6 +9,8 @@ import io.ktor.client.HttpClient
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import app.amber.common.oauth.LoopbackOAuthCallbackServer
 import app.amber.agent.AppScope
@@ -51,6 +53,7 @@ class WebMountOAuthClient(
 ) {
 
     private val providers = ConcurrentHashMap<String, OAuthProvider>()
+    private val refreshLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
      * States currently being handled by a live in-process [connect] coroutine.
@@ -273,19 +276,30 @@ class WebMountOAuthClient(
         val provider = providers[providerId] ?: return null
         val current = store.getToken(providerId) ?: return null
         if (!current.isExpired(skewMs = REFRESH_SKEW_MS)) return current.accessToken
-        val refreshToken = current.refreshToken ?: return null
-        val credentials = store.getCredentials(providerId) ?: return null
-        return runCatching {
-            val refreshed = provider.refresh(
-                credentials,
-                refreshToken,
-                http,
-                errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
-            )
-            store.putToken(providerId, refreshed)
-            refreshed.accessToken
-        }.onFailure { Log.w(TAG, "Inline refresh failed for $providerId", it) }
-            .getOrNull()
+        val lock = refreshLocks.computeIfAbsent(providerId) { Mutex() }
+        return lock.withLock {
+            // Another caller may have refreshed while this caller waited.
+            val latest = store.getToken(providerId) ?: return@withLock null
+            if (!latest.isExpired(skewMs = REFRESH_SKEW_MS)) return@withLock latest.accessToken
+            val refreshToken = latest.refreshToken ?: return@withLock null
+            val credentials = store.getCredentials(providerId) ?: return@withLock null
+            runCatching {
+                val refreshed = provider.refresh(
+                    credentials,
+                    refreshToken,
+                    http,
+                    errorCopy = OAuthDisplayLocalizer.oauthProviderErrors(context),
+                )
+                if (!store.putTokenIfCurrent(providerId, latest, refreshed)) {
+                    Log.i(TAG, "Discarding stale OAuth refresh result for $providerId")
+                    return@runCatching null
+                }
+                refreshed.accessToken
+            }.onFailure {
+                if (it is CancellationException) throw it
+                Log.w(TAG, "Inline refresh failed for $providerId", it)
+            }.getOrNull()
+        }
     }
 
     // ----------------------------------------------------------------------

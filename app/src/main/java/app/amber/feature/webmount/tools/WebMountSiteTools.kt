@@ -17,6 +17,7 @@ import app.amber.core.agent.utils.string
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.core.WebMountStatus
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
+import app.amber.feature.webmount.login.WebMountLoginTarget
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.feature.webmount.profile.ImportResult
 import app.amber.feature.webmount.profile.ProfileRegistry
@@ -24,8 +25,7 @@ import app.amber.feature.webmount.usersites.AuthKind
 import app.amber.feature.webmount.usersites.UserSite
 import app.amber.feature.webmount.usersites.UserSiteRegistry
 import app.amber.feature.webmount.usersites.collectSiteUrls
-import app.amber.feature.webmount.usersites.loginCookieCandidatesFor
-import java.util.Locale
+import app.amber.feature.webmount.usersites.userSiteId
 
 internal fun createStationsTool(
     deps: WebMountDeps,
@@ -48,6 +48,13 @@ internal fun createStationsTool(
             might be perfectly signed in via the WebView. When unknown, attempt the action
             anyway (wm_open + wm_extract) and only report "not signed in" if the page
             itself shows a login wall.
+        For OAuth, unknown also means the access token needs refresh and local refresh
+        credentials exist; the native adapter can attempt that refresh when called.
+        For a cookie-auth site whose login_status is logged_out, render
+        login_helper.intent as a Markdown link; the amberagent:// URI opens
+        AmberAgent's in-app login WebView. For an OAuth site, login_helper
+        gives the WebMount Stations settings path and Connect action instead;
+        it has no cookie-login URI.
         Built-in sites with a native adapter also include status / capability / message.
         Read-only and side-effect-free.
     """.trimIndent().replace("\n", " "),
@@ -94,34 +101,42 @@ internal fun createStationsTool(
                     buildJsonArray {
                         sites.forEach { site ->
                             val state = site.nativeAdapterId?.let { manager.states.value[it] }
-                            // B-3 fix: profile lookup falls back to site.id
-                            // so synthesized profiles (keyed under user_<slug>)
-                            // are picked up too. Without the fallback,
-                            // wm_profile_synthesize was effectively invisible
-                            // to subsequent wm_stations calls.
                             val profileEntry = profileRegistry.byId(site.nativeAdapterId ?: site.id)
-                            val loginCookie = site.loginCookieName ?: profileEntry?.profile?.hints?.loginCookie
-                            val loginCookieNames = buildList {
-                                loginCookie?.let { add(it) }
-                                addAll(loginCookieCandidatesFor(site))
-                            }.distinct()
-                            val urls = collectSiteUrls(site, manager, profileRegistry)
-                            val loggedIn = if (loginCookieNames.isNotEmpty()) {
-                                val bundle = cookieProvider.getCookies(endpoints = emptyList(), extraUrls = urls)
-                                loginCookieNames.any { bundle.value(it) != null }
+                            // Build the same login target used by the Settings
+                            // WebView. This includes synthesized-profile cookie
+                            // hints and, for known sites such as X.com, the
+                            // complete required cookie set.
+                            val loginTarget = if (site.authKind == AuthKind.COOKIE) {
+                                WebMountLoginTarget.fromUserSite(site, manager, profileRegistry)
+                            } else {
+                                null
+                            }
+                            val loggedIn = if (loginTarget != null && loginTarget.candidateCookieNames.isNotEmpty()) {
+                                val snapshot = cookieProvider.snapshotCookies(loginTarget.urls)
+                                when {
+                                    loginTarget.requiredCookieSets.isNotEmpty() ->
+                                        loginTarget.requiredCookieSets.any(snapshot::containsAll)
+                                    else ->
+                                        loginTarget.candidateCookieNames.any {
+                                            snapshot.valuesByName(it).isNotEmpty()
+                                        }
+                                }
                             } else null
                             val adapter = site.nativeAdapterId?.let { manager.adapterOf(it) }
                             val loginUrl = adapter?.primaryLoginUrl() ?: site.homepageUrl
-                            // B-4 fix: OAuth sites also report needs_login
-                            // when no token is stored, with a login_helper
-                            // pointing the agent at the same deep link.
                             val oauthProviderId = site.oauthProviderId ?: site.id
-                            val oauthTokenMissing = site.authKind == AuthKind.OAUTH &&
-                                oauthStore.getToken(oauthProviderId) == null
+                            val oauthToken = if (site.authKind == AuthKind.OAUTH) {
+                                oauthStore.getToken(oauthProviderId)
+                            } else null
+                            val oauthTokenPresent = oauthToken != null
+                            val oauthTokenExpired = oauthToken?.isExpired() == true
+                            val oauthRefreshable = oauthTokenExpired &&
+                                !oauthToken.refreshToken.isNullOrBlank() &&
+                                oauthStore.getCredentials(oauthProviderId) != null
                             // Three-state login signal:
-                            //   "logged_in"  — probed and the cookie / token is present
-                            //   "logged_out" — probed and absent
-                            //   "unknown"    — couldn't probe (no cookie name configured)
+                            //   "logged_in"  — a usable cookie / token is present
+                            //   "logged_out" — absent or has no local refresh material
+                            //   "unknown"    — an expired token may still be refreshed
                             //
                             // The pre-fix code conflated "unknown" with "logged_out" and
                             // emitted `needs_login: true` whenever the probe came back
@@ -136,9 +151,10 @@ internal fun createStationsTool(
                                     null -> "unknown"
                                 }
                                 AuthKind.OAUTH -> when {
-                                    !oauthTokenMissing -> "logged_in"
-                                    oauthTokenMissing -> "logged_out"
-                                    else -> "unknown"
+                                    !oauthTokenPresent -> "logged_out"
+                                    !oauthTokenExpired -> "logged_in"
+                                    oauthRefreshable -> "unknown"
+                                    else -> "logged_out"
                                 }
                                 AuthKind.ANONYMOUS -> "logged_in" // public — always usable
                             }
@@ -171,16 +187,35 @@ internal fun createStationsTool(
                                 // user is logged out when login_status == "unknown".
                                 put("login_status", loginStatus)
                                 if (site.authKind == AuthKind.OAUTH) {
-                                    put("oauth_token_present", !oauthTokenMissing)
+                                    // Presence is deliberately physical state; validity is
+                                    // reported separately so callers can distinguish an
+                                    // expired token that may still be refreshed.
+                                    put("oauth_token_present", oauthTokenPresent)
+                                    if (oauthTokenPresent) {
+                                        put("oauth_access_token_expired", oauthTokenExpired)
+                                    }
                                 }
                                 if (needsLogin) {
                                     put("needs_login", true)
                                     put("login_helper", buildJsonObject {
                                         put("station_id", site.id)
-                                        put("intent", "amberagent://webmount/login?station=${site.id}")
-                                        put("login_url", loginUrl)
                                         put("label", site.displayName)
                                         put("auth_kind", site.authKind.name.lowercase())
+                                        when (site.authKind) {
+                                            AuthKind.COOKIE -> {
+                                                put("intent", "amberagent://webmount/login?station=${site.id}")
+                                                put("login_url", loginUrl)
+                                            }
+                                            AuthKind.OAUTH -> {
+                                                put("action", "open_webmount_settings")
+                                                put("settings_destination", "WebMount Stations")
+                                                put(
+                                                    "instruction",
+                                                    "Open Settings → WebMount Stations, configure OAuth credentials if needed, then tap Connect.",
+                                                )
+                                            }
+                                            AuthKind.ANONYMOUS -> Unit
+                                        }
                                     })
                                 }
                             })
@@ -226,12 +261,7 @@ internal fun createSiteAddTool(
             }
             val needsLogin = input.boolean("needs_login") ?: true
             val cookieName = input.string("cookie_name")?.takeIf { it.isNotBlank() && needsLogin }
-            val id = "user_" + name
-                .lowercase(Locale.ROOT)
-                .replace(Regex("[^a-z0-9]+"), "_")
-                .trim('_')
-                .ifBlank { "site" }
-                .take(40)
+            val id = userSiteId(name)
             val site = UserSite(
                 id = id,
                 displayName = name,
@@ -294,14 +324,6 @@ internal fun createSiteRemoveTool(
                     put("error", "No site with id '$siteId' is registered.")
                 }.toString()))
             }
-            val removed = userSiteRegistry.remove(siteId)
-            if (!removed) {
-                return@track listOf(UIMessagePart.Text(buildJsonObject {
-                    put("ok", false)
-                    put("site_id", siteId)
-                    put("error", "Failed to remove site '$siteId' (registry rejected the change).")
-                }.toString()))
-            }
             // Mirror the settings page's delete behavior so "remove" wipes
             // ALL data tied to this site — cookies + OAuth + profile.
             // B-2 fix: use shared collectSiteUrls so synthesized-profile
@@ -310,7 +332,10 @@ internal fun createSiteRemoveTool(
             // clearCookiesFor are no-ops when nothing exists, so unconditional
             // calls are safe AND prevent leaks when a site's kind flipped.
             val urls = collectSiteUrls(site, manager, profileRegistry)
-            val cookiesCleared = cookieProvider.clearCookiesFor(urls)
+            val cookiesCleared = cookieProvider.clearCookiesFor(
+                urls,
+                WebMountLoginTarget.fromUserSite(site, manager, profileRegistry).manualCookieFields,
+            )
             val providerId = site.oauthProviderId ?: siteId
             val hadOauthToken = oauthStore.getToken(providerId) != null
             val hadOauthCreds = oauthStore.getCredentials(providerId) != null
@@ -320,6 +345,9 @@ internal fun createSiteRemoveTool(
             // Also drop the synthesized profile, if any, so the agent's
             // "knowledge" of this site doesn't outlive the site itself.
             val profileRemoved = profileRegistry.remove(siteId)
+            // Keep the registry entry until cleanup completes so an interrupted
+            // removal still has the URLs/provider needed for a user-approved retry.
+            check(userSiteRegistry.remove(siteId)) { "Failed to remove site '$siteId' from the registry." }
             val payload = buildJsonObject {
                 put("ok", true)
                 put("site_id", siteId)
@@ -381,6 +409,7 @@ internal fun createProfileSynthesizeTool(
                 }.toString()))
             }
             val loginCookie = input.string("login_cookie")?.takeIf { it.isNotBlank() }
+                ?: userSite.loginCookieName?.takeIf { it.isNotBlank() }
             val rawSelectors = (input.jsonObject)["interactive_selectors"] as? JsonObject
             val selectors: Map<String, String> = rawSelectors?.let { obj ->
                 obj.entries.mapNotNull { entry ->

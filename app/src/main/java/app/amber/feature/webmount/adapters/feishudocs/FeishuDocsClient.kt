@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -230,12 +231,13 @@ class FeishuDocsClient(
             })
             put("style", buildJsonObject {})
         }
-        val block = if (wrapInCallout) {
-            // Callout is a container block: it carries no direct text;
-            // instead it has a child `text` block. The Feishu API accepts
-            // a `callout` block with a nested `children[0]` text block in
-            // the same request.
-            buildJsonObject {
+        if (wrapInCallout) {
+            // The descendant endpoint creates the callout and its text child in
+            // one request. `children` contains temporary child ids here; the
+            // service resolves them and returns the real block ids.
+            val callout = buildJsonObject {
+                put("block_id", "callout")
+                put("children", buildJsonArray { add(JsonPrimitive("text")) })
                 put("block_type", 19)
                 put("callout", buildJsonObject {
                     // Default background; agents can hint a color in a
@@ -244,18 +246,32 @@ class FeishuDocsClient(
                     put("border_color", 1)
                     put("emoji_id", "memo")
                 })
-                put("children", buildJsonArray {
-                    add(buildJsonObject {
-                        put("block_type", 2)
-                        put("text", textRun)
+            }
+            val textBlock = buildJsonObject {
+                put("block_id", "text")
+                put("block_type", 2)
+                put("text", textRun)
+            }
+            val response = http.post(
+                "$DOCX_BASE/v1/documents/$documentId/blocks/$resolvedParent/descendant"
+            ) {
+                applyHeaders(accessToken)
+                contentType(ContentType.Application.Json)
+                setBody(buildJsonObject {
+                    put("children_id", buildJsonArray { add(JsonPrimitive("callout")) })
+                    put("index", -1)
+                    put("descendants", buildJsonArray {
+                        add(callout)
+                        add(textBlock)
                     })
-                })
+                }.toString())
             }
-        } else {
-            buildJsonObject {
-                put("block_type", blockType)
-                put(BLOCK_FIELD_FOR_TYPE[blockType] ?: "text", textRun)
-            }
+            return parseFeishu(response, "append rich block callout").data ?: buildJsonObject {}
+        }
+
+        val block = buildJsonObject {
+            put("block_type", blockType)
+            put(BLOCK_FIELD_FOR_TYPE[blockType] ?: "text", textRun)
         }
         val response = http.post("$DOCX_BASE/v1/documents/$documentId/blocks/$resolvedParent/children") {
             applyHeaders(accessToken)
@@ -336,10 +352,10 @@ class FeishuDocsClient(
      * 200 + non-zero code returns the standard envelope with the user's OpenAPI
      * surface visible.
      */
-    suspend fun probe(accessToken: String): Boolean = runCatching {
+    suspend fun probe(accessToken: String): Boolean {
         listFiles(accessToken, folderToken = null, pageSize = 1, pageToken = null)
-        true
-    }.getOrElse { false }
+        return true
+    }
 
     // ----------------------------------------------------------------------
 

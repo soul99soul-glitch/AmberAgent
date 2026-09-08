@@ -125,7 +125,11 @@ class AgentToolDispatcher(
         val reusedIds = reused.mapTo(HashSet()) { it.toolCallId }
         val remaining = tools.filterNot { tool -> tool.toolCallId in reusedIds }
         if (remaining.isEmpty()) return reused
-        val executed = if (remaining.size > 1 && remaining.all { tool -> canRunInParallel(tool, toolDefinitions[tool.toolName]) }) {
+        val executed = if (
+            remaining.size > 1 &&
+            remaining.all { tool -> canRunInParallel(tool, toolDefinitions[tool.toolName]) } &&
+            !hasConflictingWebMountParallelGroup(remaining, toolDefinitions)
+        ) {
             coroutineScope {
                 remaining.map { tool ->
                     async {
@@ -547,7 +551,7 @@ class AgentToolDispatcher(
             toolCallId = tool.toolCallId,
             toolName = tool.toolName,
             input = tool.input,
-            effectClass = toolDef.effectClass(),
+            effectClass = toolDef.effectClass(tool.input),
             messagePersistenceCursor = ctx.messagePersistenceCursor,
         )
         if (preExistingEffect == null) {
@@ -739,6 +743,21 @@ class AgentToolDispatcher(
             !policy.needsApproval &&
             policy.risk == ToolRisk.Normal &&
             policy.parallelGroup != null
+    }
+
+    private fun hasConflictingWebMountParallelGroup(
+        tools: List<UIMessagePart.Tool>,
+        toolDefinitions: Map<String, Tool>,
+    ): Boolean {
+        val groups = tools.asSequence()
+            .filter { it.toolName.startsWith("wm_") }
+            .mapNotNull { tool ->
+                toolDefinitions[tool.toolName]
+                    ?.invocationPolicy(tool.input)
+                    ?.parallelGroup
+            }
+            .toList()
+        return groups.size != groups.toSet().size
     }
 
     private fun validateCompositeResumeProvenance(

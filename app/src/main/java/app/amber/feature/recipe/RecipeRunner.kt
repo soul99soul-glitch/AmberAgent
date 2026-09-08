@@ -271,7 +271,7 @@ class RecipeRunner(
         }
         val primitiveMetadata = primitiveRegistry.metadataFor(step.tool)
         if ((context.runId == null || context.ledger == null) &&
-            (primitiveMetadata?.mutates == true || toolDef.effectClass() != ToolEffectClass.READ_ONLY)
+            (primitiveMetadata?.mutates == true || toolDef.effectClass(resolvedArgs.toString()) != ToolEffectClass.READ_ONLY)
         ) {
             return failedStep(
                 "blocked",
