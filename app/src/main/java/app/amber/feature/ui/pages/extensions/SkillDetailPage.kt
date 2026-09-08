@@ -69,6 +69,7 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun SkillDetailPage(skillName: String) {
@@ -126,17 +127,30 @@ fun SkillDetailPage(skillName: String) {
     }
 
     editingFile?.let { skillFile ->
-        EditFileDialog(
-            skillFile = skillFile,
-            initialContent = remember(skillFile.relativePath) { vm.readFile(skillFile) },
-            onDismiss = { editingFile = null },
-            onConfirm = { content ->
-                vm.saveFile(skillFile.relativePath, content) { error ->
-                    if (error == null) editingFile = null
-                    else toaster.show(error)
-                }
-            },
-        )
+        var initialContent by remember(skillFile) { mutableStateOf<String?>(null) }
+        LaunchedEffect(skillFile) {
+            try {
+                initialContent = vm.readFile(skillFile)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                toaster.show(error.message ?: context.getString(R.string.workspace_read_failed))
+                editingFile = null
+            }
+        }
+        initialContent?.let { loadedContent ->
+            EditFileDialog(
+                skillFile = skillFile,
+                initialContent = loadedContent,
+                onDismiss = { editingFile = null },
+                onConfirm = { content ->
+                    vm.saveFile(skillFile.relativePath, content) { error ->
+                        if (error == null) editingFile = null
+                        else toaster.show(error)
+                    }
+                },
+            )
+        }
     }
 
     if (showAddDialog) {

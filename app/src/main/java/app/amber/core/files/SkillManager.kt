@@ -283,14 +283,14 @@ class SkillManager(
 
         try {
             if (targetDir.exists() && !targetDir.renameTo(swapDir)) return false
-            // P2-04 m1: the kept previous snapshot carries .promotion.json —
-            // drop it before restoring so the active skill dir stays clean
-            // (no meta residue after the rollback).
-            previousDir.resolve(META_FILE_NAME).delete()
             if (!previousDir.renameTo(targetDir)) {
                 if (swapDir.exists() && !targetDir.exists()) swapDir.renameTo(targetDir)
                 return false
             }
+            // P2-04 m1: the kept previous snapshot carries .promotion.json —
+            // drop it after restoring so a failed rename keeps the complete
+            // rollback snapshot and the active skill dir stays clean.
+            targetDir.resolve(META_FILE_NAME).delete()
             swapDir.deleteRecursively()
             // Rolled-back skill had no previous files (it was newly promoted):
             // the promotion created it, so rollback removes it entirely.
@@ -304,7 +304,10 @@ class SkillManager(
             if (swapDir.exists() && !targetDir.exists()) swapDir.renameTo(targetDir)
             return false
         } finally {
-            if (previousDir.exists()) previousDir.deleteRecursively()
+            // A failed target rename leaves the newly-created swap directory
+            // empty; clean it up. If restoring the old target also failed,
+            // keep swapDir as the only remaining copy of that active version.
+            if (targetDir.exists() && swapDir.exists()) swapDir.deleteRecursively()
         }
     }
 

@@ -1,6 +1,7 @@
 package app.amber.feature.task
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -10,7 +11,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
+
+private const val TAG = "AgentTaskStore"
 
 class AgentTaskStore(
     context: Context,
@@ -72,14 +78,15 @@ class AgentTaskStore(
         retryPolicy: AgentTaskRetryPolicy? = null,
         outputRef: AgentTaskOutputRef? = null,
         lastHeartbeatMs: Long? = null,
+        clearError: Boolean = false,
     ): AgentTaskSnapshot? = mutex.withLock {
         val current = tasks[taskId] ?: return@withLock null
         val next = current.copy(
             status = status ?: current.status,
             queueState = queueState ?: status?.toQueueState(current.type) ?: current.queueState,
             summary = summary ?: current.summary,
-            error = error ?: current.error,
-            lastErrorCode = lastErrorCode ?: current.lastErrorCode,
+            error = if (clearError) error else error ?: current.error,
+            lastErrorCode = if (clearError) lastErrorCode else lastErrorCode ?: current.lastErrorCode,
             outputPath = outputPath ?: current.outputPath,
             outputOffset = outputOffset ?: current.outputOffset,
             cancelCapability = cancelCapability ?: current.cancelCapability,
@@ -168,6 +175,7 @@ class AgentTaskStore(
                 summary = "Retry requested.",
                 error = null,
                 lastErrorCode = null,
+                clearError = true,
             )
         } else {
             update(
@@ -223,8 +231,29 @@ class AgentTaskStore(
     }
 
     private fun persist(snapshot: AgentTaskSnapshot) {
-        runCatching {
-            File(taskDir, "${snapshot.taskId}.json").writeText(json.encodeToString(AgentTaskSnapshot.serializer(), snapshot))
+        val destination = File(taskDir, "${snapshot.taskId}.json")
+        val temp = runCatching {
+            File.createTempFile("task-${snapshot.taskId}-", ".tmp", taskDir)
+        }.getOrElse { error ->
+            Log.w(TAG, "Failed to create task snapshot temp file for ${snapshot.taskId}", error)
+            return
+        }
+        try {
+            temp.writeText(
+                json.encodeToString(AgentTaskSnapshot.serializer(), snapshot),
+                Charsets.UTF_8,
+            )
+            RandomAccessFile(temp, "rw").use { it.fd.sync() }
+            Files.move(
+                temp.toPath(),
+                destination.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        } catch (error: Exception) {
+            Log.w(TAG, "Failed to persist task snapshot for ${snapshot.taskId}", error)
+        } finally {
+            temp.delete()
         }
     }
 

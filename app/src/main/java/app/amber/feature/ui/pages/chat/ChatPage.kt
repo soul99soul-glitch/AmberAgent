@@ -823,8 +823,17 @@ private fun ChatPageContent(
                 },
                 onForkMessage = {
                     scope.launch {
-                        val fork = vm.forkMessage(message = it)
-                        navigateToChatPage(navController, chatId = fork.id)
+                        try {
+                            val fork = vm.forkMessage(message = it)
+                            navigateToChatPage(navController, chatId = fork.id)
+                        } catch (error: kotlinx.coroutines.CancellationException) {
+                            throw error
+                        } catch (error: Exception) {
+                            toaster.show(
+                                error.message ?: resourceContext.getString(R.string.error_title_operation),
+                                type = ToastType.Error,
+                            )
+                        }
                     }
                 },
                 onDelete = {

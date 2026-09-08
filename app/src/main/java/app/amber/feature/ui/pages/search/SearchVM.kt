@@ -5,9 +5,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import app.amber.agent.data.db.fts.MessageSearchResult
 import app.amber.agent.data.db.fts.SearchHitSource
@@ -39,7 +40,7 @@ internal fun shouldShowRecentConversations(
 class SearchVM(
     private val conversationRepo: ConversationRepository,
 ) : ViewModel() {
-    private val _searchQuery = MutableStateFlow("")
+    private var searchJob: Job? = null
 
     var searchQuery by mutableStateOf("")
         private set
@@ -57,11 +58,7 @@ class SearchVM(
         private set
 
     init {
-        viewModelScope.launch {
-            _searchQuery
-                .debounce(300L)
-                .collectLatest { query -> performSearch(query) }
-        }
+        search()
     }
 
     val visibleResults: List<MessageSearchResult>
@@ -69,7 +66,7 @@ class SearchVM(
 
     fun onQueryChange(query: String) {
         searchQuery = query
-        _searchQuery.value = query
+        scheduleSearch(delayMillis = 300L)
     }
 
     fun onFilterChange(filter: SearchFilter) {
@@ -77,12 +74,19 @@ class SearchVM(
     }
 
     fun search() {
-        viewModelScope.launch {
+        scheduleSearch()
+    }
+
+    private fun scheduleSearch(delayMillis: Long = 0L) {
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(delayMillis)
             performSearch(searchQuery)
         }
     }
 
     fun rebuildIndex() {
+        if (isRebuilding) return
         viewModelScope.launch {
             isRebuilding = true
             rebuildProgress = 0 to 0
@@ -90,6 +94,7 @@ class SearchVM(
                 conversationRepo.rebuildAllIndexes { current, total ->
                     rebuildProgress = current to total
                 }
+                search()
             } finally {
                 isRebuilding = false
             }
@@ -109,7 +114,7 @@ class SearchVM(
                 results = conversationRepo.searchMessages(query)
             }
         } finally {
-            isLoading = false
+            if (currentCoroutineContext().isActive) isLoading = false
         }
     }
 }

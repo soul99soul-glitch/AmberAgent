@@ -15,6 +15,7 @@ import app.amber.core.ai.GenerationRunSession
 import app.amber.core.ai.GenerationTerminal
 import app.amber.core.ai.RunKernel
 import app.amber.core.service.ConversationAccess
+import app.amber.core.model.toMessageNode
 import java.time.Instant
 import kotlin.uuid.Uuid
 import app.amber.core.settings.Settings
@@ -99,7 +100,11 @@ class ChatTurnAgent(
                         // in real time (mirrors the legacy path's behavior).
                         val conversationUuid = Uuid.parse(input.conversationId.value)
                         val current = conversationAccess.getConversationFlow(conversationUuid).value
-                        val updated = mergeMessages(current, chunk.messages)
+                        val updated = mergeMessages(
+                            conversation = current,
+                            generatedMessages = chunk.messages,
+                            sourceStartIndex = input.messageRangeStart,
+                        )
                         conversationAccess.updateConversation(
                             conversationUuid,
                             updated,
@@ -189,8 +194,57 @@ class ChatTurnAgent(
 private fun mergeMessages(
     conversation: Conversation,
     generatedMessages: List<UIMessage>,
+    sourceStartIndex: Int? = null,
 ): Conversation {
     if (generatedMessages.isEmpty()) return conversation
+    if (sourceStartIndex != null) {
+        val updatedNodes = conversation.messageNodes.toMutableList()
+        var changed = false
+        generatedMessages.forEachIndexed { offset, message ->
+            val nodeIndex = sourceStartIndex + offset
+            val existingNode = updatedNodes.getOrNull(nodeIndex)
+            if (existingNode == null) {
+                updatedNodes.add(message.toMessageNode())
+                changed = true
+                return@forEachIndexed
+            }
+
+            val existingMessageIndex = existingNode.messages.indexOfFirst { it.id == message.id }
+            if (
+                existingMessageIndex >= 0 &&
+                existingNode.messages[existingMessageIndex] === message &&
+                existingNode.selectIndex == existingMessageIndex
+            ) {
+                return@forEachIndexed
+            }
+
+            val nextMessages = existingNode.messages.toMutableList()
+            val nextSelectIndex = if (existingMessageIndex >= 0) {
+                nextMessages[existingMessageIndex] = message
+                existingMessageIndex
+            } else {
+                nextMessages.add(message)
+                nextMessages.lastIndex
+            }
+            val nextNode = existingNode.copy(
+                messages = nextMessages,
+                selectIndex = nextSelectIndex,
+            )
+            if (nextNode != existingNode) {
+                updatedNodes[nodeIndex] = nextNode
+                changed = true
+            }
+        }
+        return if (changed) {
+            conversation.copy(
+                messageNodes = updatedNodes,
+                updateAt = Instant.now(),
+            )
+        } else {
+            conversation
+        }
+    }
+
     val generatedById = generatedMessages.associateBy { it.id }
     var changed = false
     val updatedNodes = conversation.messageNodes.map { node ->

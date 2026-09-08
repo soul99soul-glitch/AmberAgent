@@ -37,7 +37,7 @@ class MiniAppSourceChecksTest {
     fun unbalancedClosingTagIsReported() {
         val html = "<html><body><div>text</span></body></html>"
         val issues = MiniAppSourceChecks.issues(html)
-        assertTrue(issues.any { it.message.contains("标签不配对") })
+        assertTrue(issues.any { it.message.contains("Mismatched tag") })
         assertFalse(MiniAppSourceChecks.isSavable(html))
     }
 
@@ -45,7 +45,7 @@ class MiniAppSourceChecksTest {
     fun unclosedTagIsReported() {
         val html = "<html><body><div>text</div><section>no close</section></body>"
         val issues = MiniAppSourceChecks.issues(html)
-        assertTrue(issues.any { it.message.contains("未闭合的标签") })
+        assertTrue(issues.any { it.message.contains("Unclosed tag") })
     }
 
     @Test
@@ -68,14 +68,14 @@ class MiniAppSourceChecksTest {
     fun unbalancedScriptBracesAreReported() {
         val html = "<html><body><script>function f() { return 1; </script></body></html>"
         val issues = MiniAppSourceChecks.issues(html)
-        assertTrue(issues.any { it.message.contains("未闭合的花括号") })
+        assertTrue(issues.any { it.message.contains("Unbalanced brackets in script") })
     }
 
     @Test
     fun unbalancedStyleBracesAreReported() {
         val html = "<html><head><style>body { color: red; </style></head></html>"
         val issues = MiniAppSourceChecks.issues(html)
-        assertTrue(issues.any { it.message.contains("花括号") })
+        assertTrue(issues.any { it.message.contains("Unbalanced braces in style") })
     }
 
     @Test

@@ -311,7 +311,7 @@ class ConversationRepository(
      */
     suspend fun cleanupDeletedConversation(conversation: Conversation) {
         favoriteDAO.deleteByConversation(conversation.id.toString())
-        filesManager.deleteChatFiles(conversation.files)
+        filesManager.deleteChatFiles(conversation.files).join()
         // Drop any generate_image tool output bound to this conversation.
         // The dir is `filesDir/chat_images/{conversationId}/` and is created
         // lazily on first generation — deleteRecursively no-ops when missing.
@@ -321,15 +321,19 @@ class ConversationRepository(
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)
 
     suspend fun rebuildAllIndexes(onProgress: (current: Int, total: Int) -> Unit = { _, _ -> }) {
-        messageFtsManager.deleteAll()
-        val allIds = conversationDAO.getAllIds()
-        val total = allIds.size
-        allIds.forEachIndexed { index, id ->
-            val entity = conversationDAO.getConversationById(id) ?: return@forEachIndexed
-            val nodes = loadMessageNodes(entity.id)
-            val conversation = conversationEntityToConversation(entity, nodes)
-            messageFtsManager.indexConversation(conversation)
-            onProgress(index + 1, total)
+        // Rebuilding in one transaction prevents a concurrent conversation
+        // write from being indexed against a mixed old/new snapshot.
+        database.withTransaction {
+            messageFtsManager.deleteAllInTransaction()
+            val allIds = conversationDAO.getAllIds()
+            val total = allIds.size
+            allIds.forEachIndexed { index, id ->
+                val entity = conversationDAO.getConversationById(id) ?: return@forEachIndexed
+                val nodes = loadMessageNodes(entity.id)
+                val conversation = conversationEntityToConversation(entity, nodes)
+                messageFtsManager.indexConversationInTransaction(conversation)
+                onProgress(index + 1, total)
+            }
         }
     }
 

@@ -23,7 +23,6 @@ import app.amber.feature.webmount.login.InlineLoginActivity
 
 import java.io.File
 import java.io.FileOutputStream
-import java.io.OutputStream
 
 private const val TAG = "ContextUtil"
 
@@ -283,24 +282,27 @@ fun Context.exportImage(
     activity: Activity,
     bitmap: Bitmap,
     fileName: String = "AmberAgent_${System.currentTimeMillis()}.png"
-) {
+): Boolean {
     // 检查存储权限（Android 9及以下需要）
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                1
-            )
-            return
+            activity.runOnUiThread {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1
+                )
+            }
+            return false
         }
     }
 
     // 保存到相册
-    var outputStream: OutputStream? = null
-    try {
+    var insertedUri: Uri? = null
+    var createdLegacyFile: File? = null
+    return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android 10及以上使用MediaStore API
             val contentValues = ContentValues().apply {
@@ -308,17 +310,20 @@ fun Context.exportImage(
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
             }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                outputStream = contentResolver.openOutputStream(it)
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream!!)
+            val uri = checkNotNull(contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues))
+                .also { insertedUri = it }
+            checkNotNull(contentResolver.openOutputStream(uri)).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Failed to encode image" }
             }
         } else {
             // Android 9及以下直接写入文件
             val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            val image = File(imagesDir, fileName)
-            outputStream = FileOutputStream(image)
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+            val image = File(imagesDir, fileName).also {
+                if (!it.exists()) createdLegacyFile = it
+            }
+            FileOutputStream(image).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)) { "Failed to encode image" }
+            }
 
             // 通知图库更新
             val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
@@ -326,10 +331,12 @@ fun Context.exportImage(
             sendBroadcast(mediaScanIntent)
         }
         Log.i(TAG, "Image saved successfully: $fileName")
+        true
     } catch (e: Exception) {
+        insertedUri?.let { uri -> runCatching { contentResolver.delete(uri, null, null) } }
+        createdLegacyFile?.let { file -> runCatching { file.delete() } }
         Log.e(TAG, "Failed to save image", e)
-    } finally {
-        outputStream?.close()
+        false
     }
 }
 
@@ -342,16 +349,19 @@ fun Context.exportJpegImage(
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                1
-            )
+            activity.runOnUiThread {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1
+                )
+            }
             return false
         }
     }
 
-    var outputStream: OutputStream? = null
+    var insertedUri: Uri? = null
+    var createdLegacyFile: File? = null
     return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val contentValues = ContentValues().apply {
@@ -359,15 +369,19 @@ fun Context.exportJpegImage(
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
             }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            outputStream = uri?.let { contentResolver.openOutputStream(it) }
-            val stream = checkNotNull(outputStream) { "Unable to open image output stream" }
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 94, stream)
+            val uri = checkNotNull(contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues))
+                .also { insertedUri = it }
+            checkNotNull(contentResolver.openOutputStream(uri)).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output)) { "Failed to encode image" }
+            }
         } else {
             val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            val image = File(imagesDir, fileName)
-            outputStream = FileOutputStream(image)
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 94, outputStream)
+            val image = File(imagesDir, fileName).also {
+                if (!it.exists()) createdLegacyFile = it
+            }
+            FileOutputStream(image).use { output ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output)) { "Failed to encode image" }
+            }
 
             val mediaScanIntent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
             mediaScanIntent.data = Uri.fromFile(image)
@@ -376,10 +390,10 @@ fun Context.exportJpegImage(
         Log.i(TAG, "JPEG image saved successfully: $fileName")
         true
     } catch (e: Exception) {
+        insertedUri?.let { uri -> runCatching { contentResolver.delete(uri, null, null) } }
+        createdLegacyFile?.let { file -> runCatching { file.delete() } }
         Log.e(TAG, "Failed to save JPEG image", e)
         false
-    } finally {
-        outputStream?.close()
     }
 }
 
@@ -387,24 +401,27 @@ fun Context.exportImageFile(
     activity: Activity,
     file: File,
     fileName: String = "AmberAgent_${System.currentTimeMillis()}.png"
-) {
+): Boolean {
     // 检查存储权限（Android 9及以下需要）
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
             != PackageManager.PERMISSION_GRANTED
         ) {
-            ActivityCompat.requestPermissions(
-                activity,
-                arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
-                1
-            )
-            return
+            activity.runOnUiThread {
+                ActivityCompat.requestPermissions(
+                    activity,
+                    arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE),
+                    1
+                )
+            }
+            return false
         }
     }
 
     // 保存到相册
-    var outputStream: OutputStream? = null
-    try {
+    var insertedUri: Uri? = null
+    var createdLegacyFile: File? = null
+    return try {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             // Android 10及以上使用MediaStore API
             val contentValues = ContentValues().apply {
@@ -412,15 +429,17 @@ fun Context.exportImageFile(
                 put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
             }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                outputStream = contentResolver.openOutputStream(it)
-                file.inputStream().copyTo(outputStream!!)
+            val uri = checkNotNull(contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues))
+                .also { insertedUri = it }
+            checkNotNull(contentResolver.openOutputStream(uri)).use { output ->
+                file.inputStream().use { it.copyTo(output) }
             }
         } else {
             // Android 9及以下直接写入文件
             val imagesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-            val image = File(imagesDir, fileName)
+            val image = File(imagesDir, fileName).also {
+                if (!it.exists()) createdLegacyFile = it
+            }
             file.copyTo(image, overwrite = true)
 
             // 通知图库更新
@@ -429,9 +448,11 @@ fun Context.exportImageFile(
             sendBroadcast(mediaScanIntent)
         }
         Log.i(TAG, "Image file saved successfully: $fileName")
+        true
     } catch (e: Exception) {
+        insertedUri?.let { uri -> runCatching { contentResolver.delete(uri, null, null) } }
+        createdLegacyFile?.let { file -> runCatching { file.delete() } }
         Log.e(TAG, "Failed to save image file", e)
-    } finally {
-        outputStream?.close()
+        false
     }
 }

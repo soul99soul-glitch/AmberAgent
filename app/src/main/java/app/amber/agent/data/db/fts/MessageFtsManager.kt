@@ -145,6 +145,11 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
+        deleteAllInTransaction()
+    }
+
+    /** 见 [indexConversationInTransaction]。 */
+    fun deleteAllInTransaction() {
         db.execSQL("DELETE FROM message_fts")
         db.execSQL("DELETE FROM conversation_title_fts")
     }

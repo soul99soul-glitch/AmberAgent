@@ -19,6 +19,7 @@ import app.amber.core.ai.transformers.OutputMessageTransformer
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.Conversation
 import app.amber.core.model.AMBER_AGENT_ID
+import app.amber.core.model.MessageNode
 import app.amber.core.service.ConversationAccess
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.core.settings.AgentRuntimeSetting
@@ -66,6 +67,7 @@ class ChatTurnAgentTest {
         private val captured: CapturedCall,
         private val replyText: String = "hello",
         private val failure: Throwable? = null,
+        private val messageChunks: List<List<UIMessage>>? = null,
     ) : RunKernel {
         override fun run(session: GenerationRunSession): Flow<GenerationChunk> {
             captured.runId = session.runId
@@ -80,16 +82,16 @@ class ChatTurnAgentTest {
             captured.maxSteps = session.maxSteps
             return flow {
                 failure?.let { throw it }
-                emit(
-                    GenerationChunk.Messages(
-                        listOf(
-                            UIMessage(
-                                role = MessageRole.ASSISTANT,
-                                parts = listOf(UIMessagePart.Text(replyText)),
-                            ),
+                (messageChunks ?: listOf(
+                    listOf(
+                        UIMessage(
+                            role = MessageRole.ASSISTANT,
+                            parts = listOf(UIMessagePart.Text(replyText)),
                         ),
                     ),
-                )
+                )).forEach { messages ->
+                    emit(GenerationChunk.Messages(messages))
+                }
             }
         }
     }
@@ -410,5 +412,78 @@ class ChatTurnAgentTest {
         // The generation loop never ran, but the settle hook did.
         assertTrue(!captured.runIdPassed)
         assertEquals(listOf(runId.value to boom), hooks.finishes)
+    }
+
+    @Test
+    fun `ranged generation updates the selected assistant variant in place`() = runTest {
+        val conversationId = Uuid.random()
+        val prefixUser = UIMessage.user("question")
+        val prefixAssistant = UIMessage.assistant("prefix")
+        val targetUser = UIMessage.user("regenerate question")
+        val oldAssistant = UIMessage.assistant("old answer")
+        val trailingUser = UIMessage.user("later question")
+        val targetNode = MessageNode.of(oldAssistant)
+        val conversation = Conversation(
+            id = conversationId,
+            assistantId = AMBER_AGENT_ID,
+            messageNodes = listOf(
+                MessageNode.of(prefixUser),
+                MessageNode.of(prefixAssistant),
+                MessageNode.of(targetUser),
+                targetNode,
+                MessageNode.of(trailingUser),
+            ),
+        )
+        val regeneratedId = Uuid.random()
+        val firstAssistantChunk = UIMessage(
+            id = regeneratedId,
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("new answer")),
+        )
+        val secondAssistantChunk = firstAssistantChunk.copy(
+            parts = listOf(UIMessagePart.Text("new answer, continued")),
+        )
+        val access = FakeConversationAccess(conversation)
+        val agent = ChatTurnAgent(
+            kernel = FakeKernel(
+                captured = CapturedCall(),
+                messageChunks = listOf(
+                    listOf(prefixUser, prefixAssistant, targetUser, firstAssistantChunk),
+                    listOf(prefixUser, prefixAssistant, targetUser, secondAssistantChunk),
+                ),
+            ),
+            sessionResolver = object : ChatSessionResolver {
+                override suspend fun resolve(
+                    input: ChatTurnInput,
+                    runId: String,
+                    events: app.amber.core.agent.runtime.AgentEventWriter?,
+                ) = sessionOf(conversation, hooks = null)
+            },
+            conversationAccess = access,
+        )
+
+        agent.handler.handle(
+            input(conversationId).copy(
+                messageNodeId = MessageNodeId(targetNode.id.toString()),
+                messageRangeStart = 0,
+                messageRangeEndExclusive = 3,
+            ),
+            LegacyRunScope(runId = AgentRunId("ranged-regenerate")),
+        )
+
+        assertEquals(2, access.updates.size)
+        val firstUpdateTarget = access.updates.first().messageNodes[3]
+        val finalTarget = access.updates.last().messageNodes[3]
+        assertEquals(5, access.updates.last().messageNodes.size)
+        assertEquals(
+            listOf(prefixUser.id, prefixAssistant.id, targetUser.id),
+            access.updates.last().messageNodes.take(3).map { it.currentMessage.id },
+        )
+        assertEquals(2, firstUpdateTarget.messages.size)
+        assertEquals(2, finalTarget.messages.size)
+        assertEquals(oldAssistant.id, finalTarget.messages[0].id)
+        assertEquals(regeneratedId, finalTarget.currentMessage.id)
+        assertEquals("new answer, continued", finalTarget.currentMessage.parts
+            .filterIsInstance<UIMessagePart.Text>().single().text)
     }
 }

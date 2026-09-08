@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import app.amber.feature.deepread.api.DeepReadDescriptor
@@ -39,7 +40,8 @@ class DeepReadWorker(
         val repository = get<HotListRepository>()
         val locale = applicationContext.appLocale()
         val ttlDays = get<SettingsAggregator>()
-            .settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays
+            .settingsFlow.filterNot { it.init }.first()
+            .agentRuntime.todayBoard.deepReadCacheTtlDays
 
         try {
             setForeground(createForegroundInfo(notifier, topicId, title, sourceUrl, locale))

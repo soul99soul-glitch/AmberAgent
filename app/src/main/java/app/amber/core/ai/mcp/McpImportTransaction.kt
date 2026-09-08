@@ -123,8 +123,10 @@ class McpImportTransaction(
 
         val root = runCatching { json.parseToJsonElement(rawJson).jsonObject }
             .getOrElse { return McpImportPreparation.Rejected(listOf("Invalid JSON: ${it.message}")) }
-        val mcpServers = root["mcpServers"]?.jsonObject
+        val mcpServersElement = root["mcpServers"]
             ?: return McpImportPreparation.Rejected(listOf("Missing 'mcpServers' object in the input"))
+        val mcpServers = mcpServersElement as? JsonObject
+            ?: return McpImportPreparation.Rejected(listOf("'mcpServers' must be a JSON object"))
 
         val candidates = mcpServers.mapNotNull { (name, element) ->
             parseCandidate(name, element, errors)
@@ -246,7 +248,10 @@ class McpImportTransaction(
         element: kotlinx.serialization.json.JsonElement,
         errors: MutableList<String>,
     ): McpImportCandidate? {
-        val obj = element.jsonObject
+        val obj = element as? JsonObject ?: run {
+            errors += "Server '$name' must be a JSON object"
+            return null
+        }
         val type = obj["type"]?.jsonPrimitive?.contentOrNull
         val transport = when (type) {
             "streamable_http" -> McpImportTransport.STREAMABLE_HTTP

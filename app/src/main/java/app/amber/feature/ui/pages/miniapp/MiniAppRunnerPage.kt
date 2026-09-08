@@ -366,7 +366,7 @@ private fun MiniAppWebView(
                         toast = { message -> Toast.makeText(ctx, message, Toast.LENGTH_SHORT).show() },
                         clipboardCopy = { text -> ctx.writeClipboardText(text) },
                         updateBoardSummary = { summary ->
-                            scope.launch { repository.updateBoardSummary(app.id, summary) }
+                            repository.updateBoardSummary(app.id, summary)
                         },
                         launchApp = { targetAppId ->
                             navController.navigate(Screen.MiniAppRunner(targetAppId))

@@ -42,7 +42,7 @@ val novelModule = module {
 
     single { NovelTurnPayloads() }
 
-    single { NovelTurnLauncher(get(), get()) }
+    single { NovelTurnLauncher(get(), get(), get()) }
 
     single { NovelWorkspaceGhostwriteCoordinator(NovelWorkspaceRuntime(get()), get()) }
 

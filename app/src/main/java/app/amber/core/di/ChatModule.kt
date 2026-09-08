@@ -60,6 +60,7 @@ val chatModule = module {
             toolEffectLedger = get(),
             runTerminalStore = get(),
             runRecovery = get(),
+            coldStartRecoveryGate = get(),
             runOwnershipRegistry = get(),
             notificationApprovalTokens = get(),
             capabilityPermissionStore = get(),

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import kotlinx.coroutines.Dispatchers
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
@@ -28,6 +31,7 @@ import app.amber.feature.task.AgentTaskStore
 import app.amber.feature.task.toQueueState
 import java.time.ZoneId
 import java.util.concurrent.TimeUnit
+import java.util.UUID
 import kotlin.uuid.Uuid
 
 private val Context.agentCronDataStore by preferencesDataStore(name = "agent_cron_tasks")
@@ -38,6 +42,7 @@ class AgentCronManager(
     private val agentTaskStore: AgentTaskStore,
 ) {
     private val workManager = WorkManager.getInstance(context)
+    private val mutationMutex = Mutex()
 
     val tasksFlow: Flow<List<AgentCronTask>> = context.agentCronDataStore.data
         .map { preferences ->
@@ -63,32 +68,34 @@ class AgentCronManager(
         timezoneId: String?,
         enabled: Boolean,
     ): AgentCronTask = withContext(Dispatchers.IO) {
-        val safePrompt = prompt.trim()
-        require(safePrompt.isNotBlank()) { "Cron task prompt cannot be blank" }
-        val safeTitle = title.trim().ifBlank { safePrompt.take(32) }
-        val zone = resolveZone(timezoneId)
-        val expression = CronExpression.parse(cronExpression)
-        val now = System.currentTimeMillis()
-        val nextRunAt = if (enabled) expression.nextRunAfter(now, zone) else null
-        if (enabled) {
-            requireNotNull(nextRunAt) { "Cron expression has no run time in the next 366 days" }
+        mutationMutex.withLock {
+            val safePrompt = prompt.trim()
+            require(safePrompt.isNotBlank()) { "Cron task prompt cannot be blank" }
+            val safeTitle = title.trim().ifBlank { safePrompt.take(32) }
+            val zone = resolveZone(timezoneId)
+            val expression = CronExpression.parse(cronExpression)
+            val now = System.currentTimeMillis()
+            val nextRunAt = if (enabled) expression.nextRunAfter(now, zone) else null
+            if (enabled) {
+                requireNotNull(nextRunAt) { "Cron expression has no run time in the next 366 days" }
+            }
+            val task = AgentCronTask(
+                id = Uuid.random().toString(),
+                title = safeTitle.take(80),
+                prompt = safePrompt,
+                cronExpression = expression.raw,
+                timezoneId = zone.id,
+                conversationId = Uuid.random().toString(),
+                enabled = enabled,
+                createdAtMs = now,
+                updatedAtMs = now,
+                nextRunAtMs = nextRunAt,
+            )
+            replaceTasks { tasks -> tasks + task }
+            schedule(task)
+            agentTaskStore.register(task.toAgentTaskSnapshot())
+            task
         }
-        val task = AgentCronTask(
-            id = Uuid.random().toString(),
-            title = safeTitle.take(80),
-            prompt = safePrompt,
-            cronExpression = expression.raw,
-            timezoneId = zone.id,
-            conversationId = Uuid.random().toString(),
-            enabled = enabled,
-            createdAtMs = now,
-            updatedAtMs = now,
-            nextRunAtMs = nextRunAt,
-        )
-        replaceTasks { tasks -> tasks + task }
-        schedule(task)
-        agentTaskStore.register(task.toAgentTaskSnapshot())
-        task
     }
 
     suspend fun updateTask(
@@ -99,162 +106,205 @@ class AgentCronManager(
         timezoneId: String? = null,
         enabled: Boolean? = null,
     ): AgentCronTask = withContext(Dispatchers.IO) {
-        var updated: AgentCronTask? = null
-        replaceTasks { tasks ->
-            tasks.map { task ->
-                if (task.id != id) return@map task
-                val nextTitle = title?.trim()?.takeIf { it.isNotBlank() }?.take(80) ?: task.title
-                val nextPrompt = prompt?.trim()?.takeIf { it.isNotBlank() } ?: task.prompt
-                val nextCron = cronExpression?.trim()?.takeIf { it.isNotBlank() } ?: task.cronExpression
-                val nextZone = resolveZone(timezoneId ?: task.timezoneId)
-                val nextEnabled = enabled ?: task.enabled
-                val expression = CronExpression.parse(nextCron)
-                val now = System.currentTimeMillis()
-                val nextRunAt = if (nextEnabled) expression.nextRunAfter(now, nextZone) else null
-                if (nextEnabled) {
-                    requireNotNull(nextRunAt) { "Cron expression has no run time in the next 366 days" }
+        mutationMutex.withLock {
+            var updated: AgentCronTask? = null
+            replaceTasks { tasks ->
+                tasks.map { task ->
+                    if (task.id != id) return@map task
+                    val nextTitle = title?.trim()?.takeIf { it.isNotBlank() }?.take(80) ?: task.title
+                    val nextPrompt = prompt?.trim()?.takeIf { it.isNotBlank() } ?: task.prompt
+                    val nextCron = cronExpression?.trim()?.takeIf { it.isNotBlank() } ?: task.cronExpression
+                    val nextZone = resolveZone(timezoneId ?: task.timezoneId)
+                    val nextEnabled = enabled ?: task.enabled
+                    val expression = CronExpression.parse(nextCron)
+                    val now = System.currentTimeMillis()
+                    val nextRunAt = if (nextEnabled) expression.nextRunAfter(now, nextZone) else null
+                    if (nextEnabled) {
+                        requireNotNull(nextRunAt) { "Cron expression has no run time in the next 366 days" }
+                    }
+                    task.copy(
+                        title = nextTitle,
+                        prompt = nextPrompt,
+                        cronExpression = expression.raw,
+                        timezoneId = nextZone.id,
+                        enabled = nextEnabled,
+                        updatedAtMs = now,
+                        nextRunAtMs = nextRunAt,
+                        lastError = null,
+                        lastStatus = AgentCronTaskStatus.Idle,
+                    ).also { updated = it }
                 }
-                task.copy(
-                    title = nextTitle,
-                    prompt = nextPrompt,
-                    cronExpression = expression.raw,
-                    timezoneId = nextZone.id,
-                    enabled = nextEnabled,
-                    updatedAtMs = now,
-                    nextRunAtMs = nextRunAt,
-                    lastError = null,
-                    lastStatus = AgentCronTaskStatus.Idle,
-                ).also { updated = it }
             }
+            val task = requireNotNull(updated) { "Cron task not found: $id" }
+            schedule(task)
+            agentTaskStore.upsert(task.toAgentTaskSnapshot())
+            task
         }
-        val task = requireNotNull(updated) { "Cron task not found: $id" }
-        schedule(task)
-        agentTaskStore.upsert(task.toAgentTaskSnapshot())
-        task
     }
 
     suspend fun deleteTask(id: String): Boolean = withContext(Dispatchers.IO) {
-        var removed = false
-        replaceTasks { tasks ->
-            removed = tasks.any { it.id == id }
-            tasks.filterNot { it.id == id }
+        mutationMutex.withLock {
+            var removed = false
+            replaceTasks { tasks ->
+                removed = tasks.any { it.id == id }
+                tasks.filterNot { it.id == id }
+            }
+            workManager.cancelUniqueWork(workName(id)).result.get()
+            if (removed) agentTaskStore.remove(id)
+            removed
         }
-        workManager.cancelUniqueWork(workName(id))
-        if (removed) agentTaskStore.remove(id)
-        removed
     }
 
     suspend fun runTaskNow(id: String): Boolean = withContext(Dispatchers.IO) {
-        val task = listTasks().firstOrNull { it.id == id } ?: return@withContext false
-        val request = OneTimeWorkRequestBuilder<AgentCronWorker>()
-            .setInputData(
-                workDataOf(
-                    AgentCronWorker.KEY_TASK_ID to task.id,
-                    AgentCronWorker.KEY_MANUAL_RUN to true,
+        mutationMutex.withLock {
+            val task = listTasks().firstOrNull { it.id == id } ?: return@withLock false
+            val request = OneTimeWorkRequestBuilder<AgentCronWorker>()
+                .setInputData(
+                    workDataOf(
+                        AgentCronWorker.KEY_TASK_ID to task.id,
+                        AgentCronWorker.KEY_MANUAL_RUN to true,
+                    )
                 )
+                .addTag(WORK_TAG)
+                .addTag(MANUAL_WORK_TAG)
+                .build()
+            workManager.enqueueUniqueWork(workName(task.id), ExistingWorkPolicy.REPLACE, request).result.get()
+            agentTaskStore.upsert(task.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED))
+            true
+        }
+    }
+
+    suspend fun prepareTriggeredRun(
+        id: String,
+        workerId: UUID,
+        manual: Boolean = false,
+    ): AgentCronTask? = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            if (!isCurrentWorker(id, workerId)) return@withLock null
+            var prepared: AgentCronTask? = null
+            replaceTasks { tasks ->
+                tasks.map { task ->
+                    if (task.id != id || (!manual && !task.enabled)) return@map task
+                    val now = System.currentTimeMillis()
+                    val nextRunAt = if (task.enabled) {
+                        runCatching {
+                            CronExpression.parse(task.cronExpression).nextRunAfter(now, resolveZone(task.timezoneId))
+                        }.getOrNull()
+                    } else {
+                        null
+                    }
+                    task.copy(
+                        lastRunAtMs = now,
+                        nextRunAtMs = nextRunAt,
+                        lastStatus = AgentCronTaskStatus.Queued,
+                        lastError = null,
+                        runCount = task.runCount + 1,
+                        updatedAtMs = now,
+                    ).also { prepared = it }
+                }
+            }
+            // The next occurrence is enqueued by the worker on its way out (see
+            // AgentCronWorker). Scheduling here — while the triggered run is already
+            // executing under the same unique work name — would REPLACE-cancel it.
+            prepared?.let { agentTaskStore.upsert(it.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED)) }
+            prepared
+        }
+    }
+
+    suspend fun scheduleNextRun(id: String, workerId: UUID) = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            if (!isCurrentWorker(id, workerId)) return@withLock
+            listTasks().firstOrNull { it.id == id }?.let { schedule(it) }
+        }
+    }
+
+    suspend fun markRunStarted(id: String, workerId: UUID): Boolean = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            if (!isCurrentWorker(id, workerId)) return@withLock false
+            replaceTasks { tasks ->
+                tasks.map { task ->
+                    if (task.id == id) {
+                        task.copy(
+                            lastStatus = AgentCronTaskStatus.Running,
+                            lastError = null,
+                            updatedAtMs = System.currentTimeMillis(),
+                        )
+                    } else {
+                        task
+                    }
+                }
+            }
+            agentTaskStore.update(id, status = AgentTaskStatus.RUNNING, clearError = true)
+            true
+        }
+    }
+
+    suspend fun markRunCompleted(id: String, workerId: UUID): Boolean = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            if (!isCurrentWorker(id, workerId)) return@withLock false
+            replaceTasks { tasks ->
+                tasks.map { task ->
+                    if (task.id == id) {
+                        task.copy(
+                            lastStatus = AgentCronTaskStatus.Succeeded,
+                            lastError = null,
+                            updatedAtMs = System.currentTimeMillis(),
+                        )
+                    } else {
+                        task
+                    }
+                }
+            }
+            agentTaskStore.update(
+                id,
+                status = AgentTaskStatus.COMPLETED,
+                summary = "Cron run completed.",
+                clearError = true,
             )
-            .addTag(WORK_TAG)
-            .build()
-        workManager.enqueueUniqueWork(workName(task.id), ExistingWorkPolicy.REPLACE, request)
-        agentTaskStore.upsert(task.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED))
-        true
-    }
-
-    suspend fun prepareTriggeredRun(id: String, manual: Boolean = false): AgentCronTask? = withContext(Dispatchers.IO) {
-        var prepared: AgentCronTask? = null
-        replaceTasks { tasks ->
-            tasks.map { task ->
-                if (task.id != id || (!manual && !task.enabled)) return@map task
-                val now = System.currentTimeMillis()
-                val nextRunAt = if (task.enabled) {
-                    runCatching {
-                        CronExpression.parse(task.cronExpression).nextRunAfter(now, resolveZone(task.timezoneId))
-                    }.getOrNull()
-                } else {
-                    null
-                }
-                task.copy(
-                    lastRunAtMs = now,
-                    nextRunAtMs = nextRunAt,
-                    lastStatus = AgentCronTaskStatus.Queued,
-                    lastError = null,
-                    runCount = task.runCount + 1,
-                    updatedAtMs = now,
-                ).also { prepared = it }
-            }
+            true
         }
-        // The next occurrence is enqueued by the worker on its way out (see
-        // AgentCronWorker). Scheduling here — while the triggered run is already
-        // executing under the same unique work name — would REPLACE-cancel it.
-        prepared?.let { agentTaskStore.upsert(it.toAgentTaskSnapshot(status = AgentTaskStatus.QUEUED)) }
-        prepared
     }
 
-    suspend fun scheduleNextRun(id: String) = withContext(Dispatchers.IO) {
-        listTasks().firstOrNull { it.id == id }?.let { schedule(it) }
-    }
-
-    suspend fun markRunStarted(id: String) = withContext(Dispatchers.IO) {
-        replaceTasks { tasks ->
-            tasks.map { task ->
-                if (task.id == id) {
-                    task.copy(
-                        lastStatus = AgentCronTaskStatus.Running,
-                        lastError = null,
-                        updatedAtMs = System.currentTimeMillis(),
-                    )
-                } else {
-                    task
+    suspend fun markRunFailed(id: String, workerId: UUID, message: String): Boolean = withContext(Dispatchers.IO) {
+        mutationMutex.withLock {
+            if (!isCurrentWorker(id, workerId)) return@withLock false
+            replaceTasks { tasks ->
+                tasks.map { task ->
+                    if (task.id == id) {
+                        task.copy(
+                            lastStatus = AgentCronTaskStatus.Failed,
+                            lastError = message.take(500),
+                            updatedAtMs = System.currentTimeMillis(),
+                        )
+                    } else {
+                        task
+                    }
                 }
             }
+            agentTaskStore.update(
+                id,
+                status = AgentTaskStatus.FAILED,
+                error = message.take(500),
+                clearError = true,
+            )
+            true
         }
-        agentTaskStore.update(id, status = AgentTaskStatus.RUNNING, error = "")
-    }
-
-    suspend fun markRunCompleted(id: String) = withContext(Dispatchers.IO) {
-        replaceTasks { tasks ->
-            tasks.map { task ->
-                if (task.id == id) {
-                    task.copy(
-                        lastStatus = AgentCronTaskStatus.Succeeded,
-                        lastError = null,
-                        updatedAtMs = System.currentTimeMillis(),
-                    )
-                } else {
-                    task
-                }
-            }
-        }
-        agentTaskStore.update(id, status = AgentTaskStatus.COMPLETED, summary = "Cron run completed.")
-    }
-
-    suspend fun markRunFailed(id: String, message: String) = withContext(Dispatchers.IO) {
-        replaceTasks { tasks ->
-            tasks.map { task ->
-                if (task.id == id) {
-                    task.copy(
-                        lastStatus = AgentCronTaskStatus.Failed,
-                        lastError = message.take(500),
-                        updatedAtMs = System.currentTimeMillis(),
-                    )
-                } else {
-                    task
-                }
-            }
-        }
-        agentTaskStore.update(id, status = AgentTaskStatus.FAILED, error = message.take(500))
     }
 
     suspend fun rescheduleAll() = withContext(Dispatchers.IO) {
-        val tasks = listTasks()
-        tasks.forEach { task ->
-            if (task.enabled) {
-                val next = task.nextRunAtMs ?: runCatching {
-                    CronExpression.parse(task.cronExpression).nextRunAfter(System.currentTimeMillis(), resolveZone(task.timezoneId))
-                }.getOrNull()
-                schedule(task.copy(nextRunAtMs = next))
-            } else {
-                workManager.cancelUniqueWork(workName(task.id))
+        mutationMutex.withLock {
+            val tasks = listTasks()
+            tasks.forEach { task ->
+                if (task.enabled) {
+                    val next = task.nextRunAtMs ?: runCatching {
+                        CronExpression.parse(task.cronExpression).nextRunAfter(System.currentTimeMillis(), resolveZone(task.timezoneId))
+                    }.getOrNull()
+                    schedule(task.copy(nextRunAtMs = next), ExistingWorkPolicy.KEEP)
+                } else {
+                    if (!hasActiveManualRun(task.id)) {
+                        workManager.cancelUniqueWork(workName(task.id)).result.get()
+                    }
+                }
             }
         }
     }
@@ -267,9 +317,12 @@ class AgentCronManager(
         }
     }
 
-    private fun schedule(task: AgentCronTask) {
+    private fun schedule(
+        task: AgentCronTask,
+        policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE,
+    ) {
         if (!task.enabled || task.nextRunAtMs == null) {
-            workManager.cancelUniqueWork(workName(task.id))
+            workManager.cancelUniqueWork(workName(task.id)).result.get()
             return
         }
         val delayMs = (task.nextRunAtMs - System.currentTimeMillis()).coerceAtLeast(0L)
@@ -278,7 +331,24 @@ class AgentCronManager(
             .setInputData(workDataOf(AgentCronWorker.KEY_TASK_ID to task.id))
             .addTag(WORK_TAG)
             .build()
-        workManager.enqueueUniqueWork(workName(task.id), ExistingWorkPolicy.REPLACE, request)
+        workManager.enqueueUniqueWork(workName(task.id), policy, request).result.get()
+    }
+
+    private suspend fun isCurrentWorker(taskId: String, workerId: UUID): Boolean {
+        return workManager.getWorkInfosForUniqueWorkFlow(workName(taskId))
+            .first()
+            .any { info ->
+                info.id == workerId && info.state == WorkInfo.State.RUNNING
+            }
+    }
+
+    private suspend fun hasActiveManualRun(taskId: String): Boolean {
+        return workManager.getWorkInfosForUniqueWorkFlow(workName(taskId))
+            .first()
+            .any { info ->
+                MANUAL_WORK_TAG in info.tags &&
+                    info.state in ACTIVE_WORK_STATES
+            }
     }
 
     private fun decode(raw: String?): List<AgentCronTask> {
@@ -385,5 +455,11 @@ class AgentCronManager(
     companion object {
         private val TASKS_KEY = stringPreferencesKey("tasks_json")
         private const val WORK_TAG = "amberagent_cron"
+        private const val MANUAL_WORK_TAG = "amberagent_cron_manual"
+        private val ACTIVE_WORK_STATES = setOf(
+            WorkInfo.State.ENQUEUED,
+            WorkInfo.State.RUNNING,
+            WorkInfo.State.BLOCKED,
+        )
     }
 }

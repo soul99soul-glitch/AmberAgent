@@ -40,7 +40,7 @@ class BoardScheduler(
             return
         }
         if (board.backgroundStrategy == TodayBoardBackgroundStrategy.FOREGROUND_ONLY) {
-            cancelAll()
+            cancelAutomatic()
             return
         }
         scheduleNextAnchorRun(board)
@@ -64,7 +64,7 @@ class BoardScheduler(
     /** Enqueued by the aggregator when unprocessed signals cross the threshold. */
     fun runIncremental() {
         val board = settingsStore.settingsFlow.value.agentRuntime.todayBoard
-        if (!board.enabled) return
+        if (!board.enabled || board.backgroundStrategy == TodayBoardBackgroundStrategy.FOREGROUND_ONLY) return
         val request = OneTimeWorkRequestBuilder<BoardWorker>()
             .setConstraints(buildConstraints(board))
             .addTag(TAG_INCREMENTAL)
@@ -98,14 +98,20 @@ class BoardScheduler(
     }
 
     fun cancelAll() {
+        cancelAutomatic()
+        workManager.cancelUniqueWork(WORK_MANUAL)
+    }
+
+    private fun cancelAutomatic() {
         workManager.cancelUniqueWork(WORK_ANCHOR)
         workManager.cancelUniqueWork(WORK_INCREMENTAL)
-        workManager.cancelUniqueWork(WORK_MANUAL)
     }
 
     fun rescheduleNextAnchor() {
         val board = settingsStore.settingsFlow.value.agentRuntime.todayBoard
-        if (board.enabled) scheduleNextAnchorRun(board)
+        if (board.enabled && board.backgroundStrategy != TodayBoardBackgroundStrategy.FOREGROUND_ONLY) {
+            scheduleNextAnchorRun(board)
+        }
     }
 
     private fun buildConstraints(board: TodayBoardSetting): Constraints {

@@ -417,10 +417,11 @@ class SubAgentManager(
         if (node == null) {
             return@withContext errorPayload("not_found", "Unknown thread_id: $threadId")
         }
-        val record = threadGraphManager.enqueueMessage(threadId, message.take(MAX_SEND_MESSAGE_CHARS))
+        val safeMessage = message.take(MAX_SEND_MESSAGE_CHARS)
+        val record = threadGraphManager.enqueueMessage(threadId, safeMessage)
         val live = runs[threadId]?.snapshot
         val delivered = live?.status == SubAgentRunStatus.RUNNING && mailboxes[threadId]?.trySend(
-            UIMessage.user(message)
+            UIMessage.user(safeMessage)
         )?.isSuccess == true
         if (delivered) {
             threadGraphManager.markDelivered(record.messageId)
@@ -649,6 +650,7 @@ class SubAgentManager(
                 summary = effectiveResult.summary.ifBlank { effectiveResult.findings.joinToString("; ").take(1_000) },
                 error = effectiveResult.error.takeIf { it.isNotBlank() },
                 cancelCapability = effectiveResult.status == SubAgentRunStatus.APPROVAL_REQUIRED,
+                clearError = true,
             )
         }
         appendEvent(runtimeRun, "finished", runToPayload(next, includeDisplayText = true))

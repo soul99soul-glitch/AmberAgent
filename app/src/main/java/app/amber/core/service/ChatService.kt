@@ -13,6 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.providers.GoogleProvider
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.openai.supportsResponsesResume
@@ -297,6 +299,7 @@ class ChatService(
     private val toolEffectLedger: ToolEffectLedger? = null,
     private val runTerminalStore: RunTerminalStore? = null,
     private val runRecovery: RunRecoveryService? = null,
+    private val coldStartRecoveryGate: app.amber.feature.runtime.ColdStartRuntimeRecoveryGate? = null,
     private val runOwnershipRegistry: RunOwnershipRegistry? = null,
     // P8-10: one-time approval tokens for notification approve/deny/reply
     // actions — nullable so legacy construction sites stay untouched.
@@ -849,7 +852,7 @@ class ChatService(
             mode = if (session.isGenerating) queueMode else PendingUserMessageMode.FOLLOWUP,
         )
 
-        if (session.isGenerating) {
+        if (session.isGenerating || session.pendingUserMessages.value.isNotEmpty()) {
             val accepted = session.enqueuePendingUserMessage(pendingMessage)
             if (!accepted) {
                 addError(
@@ -866,6 +869,12 @@ class ChatService(
                     messageId = pendingMessage.id,
                     detail = pendingMessage.mode.name.lowercase(),
                 )
+            }
+            // A queue restored after process death must stay ahead of a new
+            // message entered while the session is idle; otherwise the new
+            // message would bypass the durable FIFO and run first.
+            if (!session.isGenerating) {
+                launchViaKernel(conversationId)
             }
             return true
         }
@@ -1058,6 +1067,14 @@ class ChatService(
         userMessageText: String,
         messageRange: ClosedRange<Int>? = null,
     ) {
+        try {
+            coldStartRecoveryGate?.awaitReady()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            addError(error, conversationId, title = "Runtime recovery failed")
+            return
+        }
         val settings = settingsStore.settingsFlow.first()
         // Legacy parity: a turn with no chat model configured ends silently.
         val model = settings.getCurrentChatModel() ?: return
@@ -1870,6 +1887,17 @@ class ChatService(
                             return@launch
                         }
                         contextEngine.invalidateCompacts(conversationId, "message_regenerated")
+                        // The answer being regenerated is a branch point: any
+                        // later messages were generated from the old answer
+                        // and must not remain in the active context while the
+                        // replacement is streamed. Keep the target node so
+                        // the new answer can become its selected variant.
+                        saveConversation(
+                            conversationId,
+                            conversation.copy(
+                                messageNodes = conversation.messageNodes.take(nodeIndex + 1),
+                            ),
+                        )
                         continueGenerationInline(conversationId, messageRange = 0..<nodeIndex)
                     }
 
@@ -1950,6 +1978,11 @@ class ChatService(
         // decision (approve/deny/answer), and resume the same run.
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
+        // Notification actions run in an AppScope coroutine rather than the
+        // in-app session job. Register that coroutine as the new owner before
+        // resuming so the UI observes the resumed generation and Stop/edit
+        // guards cannot treat the conversation as idle.
+        kotlinx.coroutines.currentCoroutineContext()[Job]?.let(session::setJob)
         try {
             applyToolApprovalDecision(conversationId, toolCallId, approved, reason, answer)
         } catch (e: Exception) {
@@ -2684,13 +2717,15 @@ class ChatService(
         } else {
             conversation.copy()
         }
-        updateConversation(conversationId, updatedConversation)
-
+        val previousConversation = getConversationFlow(conversationId).value
+        updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
         if (!exists) {
             conversationRepo.insertConversation(updatedConversation)
         } else {
             conversationRepo.updateConversation(updatedConversation)
         }
+        // Removing old attachments is only safe after the new references commit.
+        checkFilesDelete(updatedConversation, previousConversation)
     }
 
     private fun mergeConversationWindowIntoFull(
@@ -2856,30 +2891,35 @@ class ChatService(
             node.messages.any { it.id == messageId }
         }.takeIf { it >= 0 } ?: throw NoSuchElementException("Message not found")
 
-        val sourceNodes = currentConversation.messageNodes.take(targetNodeIndex + 1)
-        val copiedNodes = buildList(sourceNodes.size) {
-            sourceNodes.forEach { sourceNode ->
-                val copiedMessages = sourceNode.messages.map { sourceMessage ->
-                    sourceMessage.copy(
-                        parts = sourceMessage.parts.map { part -> part.copyWithForkedFileUrl() },
-                    )
-                }
-                add(
-                    sourceNode.copy(
-                        id = Uuid.random(),
-                        messages = copiedMessages,
-                    )
+        val copiedFiles = mutableListOf<android.net.Uri>()
+        val forkedId = Uuid.random()
+        val forked = try {
+            val sourceNodes = currentConversation.messageNodes.take(targetNodeIndex + 1)
+            val copiedNodes = sourceNodes.map { sourceNode ->
+                sourceNode.copy(
+                    id = Uuid.random(),
+                    messages = sourceNode.messages.map { sourceMessage ->
+                        sourceMessage.copy(
+                            parts = sourceMessage.parts.map { part -> part.copyWithForkedFileUrl(copiedFiles) },
+                        )
+                    },
                 )
             }
+            Conversation(
+                id = forkedId,
+                assistantId = currentConversation.assistantId,
+                messageNodes = copiedNodes,
+            ).also { saveConversation(it.id, it) }
+        } catch (error: Exception) {
+            withContext(NonCancellable) {
+                // A cancelled save may already have committed. Only reclaim an
+                // aborted fork whose files have no persisted conversation owner.
+                if (!conversationRepo.existsConversationById(forkedId)) {
+                    filesManager.deleteChatFiles(copiedFiles).join()
+                }
+            }
+            throw error
         }
-
-        val forked = Conversation(
-            id = Uuid.random(),
-            assistantId = currentConversation.assistantId,
-            messageNodes = copiedNodes,
-        )
-
-        saveConversation(forked.id, forked)
         contextEngine.copyValidCompactsToConversation(
             sourceConversationId = conversationId,
             targetConversation = forked,
@@ -2936,6 +2976,11 @@ class ChatService(
 
         contextEngine.invalidateCompacts(conversationId, "message_deleted")
         saveConversation(conversationId, updatedConversation)
+        val retainedFiles = updatedConversation.files.toHashSet()
+        filesManager.deleteChatImageFiles(
+            conversationId,
+            currentConversation.files.filterNot(retainedFiles::contains),
+        )
     }
 
     suspend fun deleteMessage(
@@ -2965,7 +3010,10 @@ class ChatService(
         return conversation.copy(messageNodes = nextNodes)
     }
 
-    private suspend fun UIMessagePart.copyWithForkedFileUrl(): UIMessagePart {
+    private suspend fun UIMessagePart.copyWithForkedFileUrl(copiedFiles: MutableList<android.net.Uri>): UIMessagePart {
+        if (this is UIMessagePart.Tool) {
+            return copy(output = output.map { it.copyWithForkedFileUrl(copiedFiles) })
+        }
         val sourceUrl = when (this) {
             is UIMessagePart.Image -> url
             is UIMessagePart.Document -> url
@@ -2977,7 +3025,8 @@ class ChatService(
         val copiedUrl = filesManager.createChatFilesByContents(listOf(sourceUrl.toUri()))
             .firstOrNull()
             ?.toString()
-            ?: return this
+            ?: error("Failed to copy attachment for fork: $sourceUrl")
+        copiedFiles.add(copiedUrl.toUri())
 
         return when (this) {
             is UIMessagePart.Image -> copy(url = copiedUrl)
@@ -3271,6 +3320,7 @@ class ChatService(
                 secretStore = secretStore,
                 providerCatalog = providerCatalog,
                 googleProvider = googleProvider,
+                codexOAuthTokenResolver = OpenAICodexAuthStore(context)::get,
             )
         } else {
             emptyList()
@@ -3433,25 +3483,65 @@ class ChatService(
      * 直接走 repository 删除时，生成中的流式 checkpoint / saveConversation 会在删除后
      * 把会话重新插入（复活），且复活时会话引用的附件可能已被清理。
      */
-    suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
+    suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) = withContext(NonCancellable) {
         val conversationId = conversation.id
         deletedConversationIds.add(conversationId)
-        sessions[conversationId]?.let { session ->
-            session.getJob()?.let { job ->
-                job.cancel()
-                runCatching { job.join() }
-            }
-            if (session.pendingUserMessages.value.isNotEmpty()) {
-                session.clearPendingUserMessages()
-            }
-        }
-        stopGenerationKeepAlive(conversationId)
-        cancelLiveUpdateNotification(conversationId)
         try {
+            stopRunForDeletion(conversationId)
+            sessions[conversationId]?.let { session ->
+                session.getJob()?.let { job ->
+                    job.cancel()
+                    runCatching { job.join() }
+                }
+                if (session.pendingUserMessages.value.isNotEmpty()) {
+                    session.clearPendingUserMessages()
+                }
+            }
+            stopGenerationKeepAlive(conversationId)
+            cancelLiveUpdateNotification(conversationId)
             conversationRepo.deleteConversation(conversation, deferCleanup = deferCleanup)
         } catch (t: Throwable) {
-            deletedConversationIds.remove(conversationId)
+            if (conversationRepo.existsConversationById(conversationId)) {
+                deletedConversationIds.remove(conversationId)
+            }
             throw t
+        }
+    }
+
+    private suspend fun stopRunForDeletion(conversationId: Uuid) {
+        val kernelRun = activeKernelRuns.value[conversationId]
+        val persistedRun = runTerminalStore?.activeForConversation(conversationId.toString())
+        stopGeneration(conversationId, kernelRun?.value ?: persistedRun?.runId)
+        if (kernelRun != null) {
+            agentRunner?.observe(kernelRun)?.first { it.status.isTerminal || it.status.isPause }
+        }
+        val remaining = persistedRun?.let { runTerminalStore?.get(it.runId) }
+            ?.takeIf { !it.state.isTerminal && it.conversationId == conversationId.toString() } ?: return
+        if (responsesResumeStore?.load(remaining.runId) != null) {
+            // An unconfirmed remote cancel still needs recovery to settle its
+            // real outcome, even though the local conversation is being deleted.
+            runTerminalStore?.pause(remaining.runId, RunTerminalState.WAITING_EXTERNAL, PauseReason.USER_STOP)
+            agentEventStore?.transitionRun(
+                app.amber.core.agent.runtime.AgentRunId(remaining.runId),
+                app.amber.core.agent.runtime.RunStatus.PAUSE_STATES,
+                app.amber.core.agent.runtime.RunStatus.RUNNING,
+                reason = "conversation_deleted_server_cancel_pending",
+            )
+            agentEventStore?.transitionRun(
+                app.amber.core.agent.runtime.AgentRunId(remaining.runId),
+                app.amber.core.agent.runtime.RunStatus.LIVE_STATES,
+                app.amber.core.agent.runtime.RunStatus.WAITING_EXTERNAL,
+                reason = "conversation_deleted_server_cancel_pending",
+            )
+        } else {
+            runRecovery?.reconcileStartedEffects(remaining.runId)
+            runTerminalStore?.finish(remaining.runId, RunTerminalState.CANCELLED, PauseReason.USER_STOP)
+            agentEventStore?.transitionRun(
+                app.amber.core.agent.runtime.AgentRunId(remaining.runId),
+                app.amber.core.agent.runtime.RunStatus.LIVE_STATES,
+                app.amber.core.agent.runtime.RunStatus.CANCELLED,
+                reason = "conversation_deleted",
+            )
         }
     }
 
@@ -3464,13 +3554,14 @@ class ChatService(
      * Clear every Amber conversation through the same tombstone and cancellation path
      * as single-item deletion so an active checkpoint cannot recreate deleted history.
      */
-    suspend fun deleteAllConversations() {
+    suspend fun deleteAllConversations() = withContext(NonCancellable) {
         val conversations = conversationRepo.getConversations().first()
         val tombstoned = mutableListOf<Uuid>()
         try {
             conversations.forEach { conversation ->
                 deletedConversationIds.add(conversation.id)
                 tombstoned.add(conversation.id)
+                stopRunForDeletion(conversation.id)
                 sessions[conversation.id]?.let { session ->
                     session.getJob()?.let { job ->
                         job.cancel()
@@ -3485,7 +3576,9 @@ class ChatService(
             }
             conversationRepo.deleteAllConversations()
         } catch (t: Throwable) {
-            tombstoned.forEach(deletedConversationIds::remove)
+            tombstoned.forEach { id ->
+                if (conversationRepo.existsConversationById(id)) deletedConversationIds.remove(id)
+            }
             throw t
         }
     }
@@ -3512,10 +3605,29 @@ class ChatService(
         // pretend cancelled); recovery settles it later.
         var serverCancelUnconfirmed = false
         val stopCancel = storedResponseStopCancel
+        val durableStopEnabled = runId != null && durableRuntimeForStop()
+        if (durableStopEnabled) {
+            val activeRun = runTerminalStore?.activeForConversation(conversationId.toString())
+            val requestedRunId = runId!!
+            val terminalOwnsRun = activeRun != null &&
+                !activeRun.state.isTerminal &&
+                activeRun.conversationId == conversationId.toString() &&
+                activeRun.runId == requestedRunId
+            val terminalOwnsAnotherRun = activeRun != null &&
+                activeRun.runId != requestedRunId
+            val kernelOwnsRun = activeKernelRuns.value[conversationId]?.value == requestedRunId
+            if (terminalOwnsAnotherRun || (!terminalOwnsRun && !kernelOwnsRun)) {
+                Log.w(
+                    TAG,
+                    "stopGeneration: refusing server cancel for unowned run " +
+                        "conversation=$conversationId runId=$runId",
+                )
+                return
+            }
+        }
         if (
-            runId != null &&
-            durableRuntimeForStop() &&
-            storedResponseToggleOnForRun(runId) &&
+            durableStopEnabled &&
+            storedResponseToggleOnForRun(runId!!) &&
             stopCancel != null
         ) {
             runCatching { stopCancel.cancelStored(runId) }
@@ -3530,6 +3642,7 @@ class ChatService(
         if (serverCancelUnconfirmed) {
             pendingServerCancelFailures.add(runId)
         }
+        val activeKernelRun = activeKernelRuns.value[conversationId]
         val cancelledByOwner = if (runId != null) {
             runOwnershipRegistry?.cancel(runId = runId, conversationId = conversationId.toString()) == true
         } else {
@@ -3545,10 +3658,13 @@ class ChatService(
         // Kernel-dispatched runs are owned by the AgentRunner, not the
         // session job or the ownership registry — cancel through the runner;
         // its CancellationException path settles the durable records.
-        val cancelledKernelRun = activeKernelRuns.value[conversationId]?.let { kernelRunId ->
-            agentRunner?.cancel(kernelRunId)
-            true
-        } ?: false
+        val cancelledKernelRun = activeKernelRun
+            ?.takeIf { runId == null || it.value == runId }
+            ?.let { kernelRunId ->
+                agentRunner?.cancel(kernelRunId)
+                true
+            }
+            ?: false
         // WAITING_USER has no active generation Job by design: onCompletion
         // releases the in-memory owner while the persisted terminal keeps the
         // approval resumable. Notification Stop therefore falls back to the

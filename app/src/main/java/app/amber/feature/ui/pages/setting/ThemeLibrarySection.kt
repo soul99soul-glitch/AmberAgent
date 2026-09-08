@@ -46,7 +46,9 @@ import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.buildAmberTokens
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 /**
@@ -81,14 +83,16 @@ fun ThemeLibrarySection(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val json = runCatching {
-            context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
-        }.getOrNull()
-        if (json == null) {
-            importError = listOf(context.getString(R.string.setting_theme_library_read_failed))
-            return@rememberLauncherForActivityResult
-        }
         scope.launch {
+            val json = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes().decodeToString() }
+                }.getOrNull()
+            }
+            if (json == null) {
+                importError = listOf(context.getString(R.string.setting_theme_library_read_failed))
+                return@launch
+            }
             when (val result = manager.prepareImport(json)) {
                 is ThemePackageImportResult.Preview -> importPreview = result
                 is ThemePackageImportResult.Rejected -> importError = result.issues

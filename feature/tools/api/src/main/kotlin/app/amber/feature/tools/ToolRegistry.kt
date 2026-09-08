@@ -269,6 +269,13 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
     var concurrencySafe = concurrencySafe()
 
     when (name) {
+        // Image generation has a remote, non-idempotent side effect, but keep
+        // the existing approval UX. It must not share the read-only parallel
+        // fast path with ordinary utility tools.
+        "generate_image" -> {
+            concurrencySafe = false
+        }
+
         "http_request" -> {
             val method = input.stringValue("method")?.uppercase(Locale.ROOT) ?: "GET"
             val readMethod = method in setOf("GET", "HEAD")
@@ -833,6 +840,11 @@ private const val SUB_AGENT_TOOL_OUTPUT_BUDGET_CHARS =
  *    that cannot be safely retried. This is the safety default.
  */
 fun Tool.effectClass(input: String? = null): ToolEffectClass = when {
+    // The tool writes generated output and may charge/consume a remote
+    // provider request. Its existing approval UX is independent from ledger
+    // recovery semantics, so classify it explicitly without changing
+    // mutatesState()/approval policy.
+    name == "generate_image" -> ToolEffectClass.NON_IDEMPOTENT_WRITE
     // Signing supports both reads and writes. Recovery needs the actual
     // invocation method; without args, its static metadata cannot promise a read.
     name == "wm_signed_fetch" -> if (input != null && !invocationPolicy(input).mutates) {

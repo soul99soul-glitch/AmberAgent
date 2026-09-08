@@ -52,6 +52,7 @@ import app.amber.feature.miniapp.minimalHostContext
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.core.utils.appLocale
 import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MiniAppBridge(
@@ -70,7 +71,7 @@ class MiniAppBridge(
     private val systemBridge: MiniAppSystemBridge,
     private val toast: (String) -> Unit,
     private val clipboardCopy: (String) -> Unit,
-    private val updateBoardSummary: (String) -> Unit,
+    private val updateBoardSummary: suspend (String) -> Unit,
     private val launchApp: (String) -> Unit,
     private val themeProvider: () -> MiniAppTheme,
     private val conversationWriter: MiniAppConversationWriter,
@@ -80,9 +81,9 @@ class MiniAppBridge(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val sensorListeners = mutableMapOf<String, SensorEventListener>()
+    private val sensorListeners = ConcurrentHashMap<String, SensorEventListener>()
     private val eventPublishTimes = ArrayDeque<Long>()
-    private val eventSubscriptionIds = mutableSetOf<String>()
+    private val eventSubscriptionIds = ConcurrentHashMap.newKeySet<String>()
     private val closed = AtomicBoolean(false)
 
     // Bridge requests run off the WebView JavaBridge thread so a pending user
@@ -333,6 +334,7 @@ class MiniAppBridge(
 
             "eventBus.subscribe" -> {
                 sandbox.require(MiniAppPermission.EventBus)
+                if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
                 val namespace = ownNamespace(params.stringOrNull("namespace") ?: appId)
                 val topic = safeTopic(params.string("topic"))
                 audit(method, MiniAppPermission.EventBus, "eventBus.subscribe", params)
@@ -343,6 +345,10 @@ class MiniAppBridge(
                     }
                 }
                 eventSubscriptionIds.add(subscriptionId)
+                if (closed.get() && eventSubscriptionIds.remove(subscriptionId)) {
+                    MiniAppEventBus.unsubscribe(subscriptionId)
+                    throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
+                }
                 buildJsonObject { put("subscriptionId", subscriptionId) }
             }
 
@@ -535,6 +541,7 @@ class MiniAppBridge(
         }
         val sensor = sensorManager.getDefaultSensor(sensorType)
             ?: throw MiniAppValidationException("Sensor is unavailable")
+        if (closed.get()) throw MiniAppBridgeException("runner_closed", "MiniApp runner is closed")
         val id = java.util.UUID.randomUUID().toString()
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
@@ -556,7 +563,12 @@ class MiniAppBridge(
         }
         sensorListeners[id] = listener
         mainHandler.post {
-            sensorManager.registerListener(listener, sensor, intervalMs * 1000)
+            if (closed.get() || sensorListeners[id] !== listener) {
+                sensorManager.unregisterListener(listener)
+                sensorListeners.remove(id, listener)
+            } else {
+                sensorManager.registerListener(listener, sensor, intervalMs * 1000)
+            }
         }
         return id
     }

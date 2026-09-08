@@ -88,9 +88,11 @@ class WebDavSyncProvider(
             // 归档已 MOVE publish 为最终名的快照 id；sidecar 发布失败时据此回滚。
             var publishedArchiveSnapshotId: String? = null
             try {
-                archiveManager.createArchiveFile(request.toSyncExportRequest()).let { created ->
-                    created.copyTo(archiveFile, overwrite = true)
-                    created.delete()
+                val createdArchive = archiveManager.createArchiveFile(request.toSyncExportRequest())
+                try {
+                    createdArchive.copyTo(archiveFile, overwrite = true)
+                } finally {
+                    createdArchive.delete()
                 }
                 val contentSha256 = crypto.sha256(archiveFile)
                 val preview = archiveManager.inspectArchive(archiveFile)

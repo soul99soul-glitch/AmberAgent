@@ -17,6 +17,7 @@ class MemoryImportExportManager(
         val root = resolveRoot(directory)
         val records = memoryRepository.getAllRecords()
         val events = memoryRepository.getRecentEvents(limit = 500)
+        val exportedMemoryPaths = mutableSetOf<String>()
         MemoryKind.entries.forEach { kind ->
             File(root, "memories/${kind.wireName}").mkdirs()
             File(root, "archive/${kind.wireName}").mkdirs()
@@ -30,6 +31,7 @@ class MemoryImportExportManager(
             val file = File(root, "$baseDir/${fileName(record)}")
             file.parentFile?.mkdirs()
             file.writeText(codec.encode(record))
+            exportedMemoryPaths += file.relativeTo(root).invariantSeparatorsPath
         }
         File(root, "manifest.json").writeText(
             JsonInstant.encodeToString(
@@ -47,6 +49,11 @@ class MemoryImportExportManager(
         File(root, "events/memory_events.ndjson").writeText(
             events.joinToString("\n") { JsonInstant.encodeToString(it) }
         )
+        sequenceOf(File(root, "memories"), File(root, "archive"))
+            .flatMap { it.walkTopDown() }
+            .filter { it.isFile && it.name.endsWith(".mem.md") }
+            .filter { it.relativeTo(root).invariantSeparatorsPath !in exportedMemoryPaths }
+            .forEach { file -> check(file.delete()) { "Failed to remove stale memory export: ${file.name}" } }
         return MemoryExportResult(
             root = root,
             memoryCount = records.size,

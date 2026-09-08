@@ -6,6 +6,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -353,7 +355,7 @@ class DeepReadAgentRunManager(
         locale: Locale,
     ): Result<DeepReadRunContext> {
         return try {
-            val settings = settingsStore.settingsFlow.value
+            val settings = settingsStore.settingsFlow.filterNot { it.init }.first()
             val resolvedModel = resolveModel(settings)
                 ?: return Result.failure(
                     IllegalStateException(appContext.getString(R.string.setting_model_page_follow_chat_model_unavailable))
@@ -1213,8 +1215,9 @@ class DeepReadAgentRunManager(
         }
     }
 
-    private fun currentDeepReadTtlDays(): Int =
-        settingsStore.settingsFlow.value.agentRuntime.todayBoard.deepReadCacheTtlDays
+    private suspend fun currentDeepReadTtlDays(): Int =
+        settingsStore.settingsFlow.filterNot { it.init }.first()
+            .agentRuntime.todayBoard.deepReadCacheTtlDays
 
     private fun resolveModel(settings: Settings): Model? {
         val boardModelId = settings.agentRuntime.todayBoard.boardModelId

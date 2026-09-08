@@ -3,6 +3,7 @@ package app.amber.core.ai.tools
 import android.app.Application
 import android.content.Context
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import app.amber.agent.R
 import app.amber.ai.core.Tool
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
@@ -10,8 +11,10 @@ import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.GoogleAuthMode
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.localization.OAuthDisplayLocalizer
 import app.amber.core.infra.AppScope
 import app.amber.core.model.MainAgentToolProfile
 import app.amber.core.settings.prefs.AgentPrefs
@@ -90,6 +93,7 @@ class ProviderConfigToolsTest {
     private lateinit var secretBackend: SecretStoreBackend
     private lateinit var providerCatalog: ProviderCatalog
     private lateinit var googleProvider: app.amber.ai.provider.providers.GoogleProvider
+    private lateinit var codexAuthStore: OpenAICodexAuthStore
     private val mainDispatcher = UnconfinedTestDispatcher()
 
     private val openAiProvider = ProviderSetting.OpenAI(
@@ -115,6 +119,20 @@ class ProviderConfigToolsTest {
                 id = Uuid.parse("1eeea727-0000-4000-8000-000000000022"),
                 modelId = "gemini-3-pro-preview",
                 displayName = "Gemini 3 Pro Preview",
+            ),
+        ),
+    )
+
+    private val codexOAuthProvider = ProviderSetting.OpenAI(
+        id = Uuid.parse("1eeea727-0000-4000-8000-000000000031"),
+        name = "TestCodexOAuth",
+        enabled = true,
+        authMode = app.amber.ai.provider.OpenAIAuthMode.CODEX_OAUTH,
+        models = listOf(
+            Model(
+                id = Uuid.parse("1eeea727-0000-4000-8000-000000000032"),
+                modelId = "gpt-5.4",
+                displayName = "GPT-5.4",
             ),
         ),
     )
@@ -162,7 +180,12 @@ class ProviderConfigToolsTest {
         )
         withTimeout(5_000) { settingsStore.settingsFlow.first { !it.init } }
         val httpClient = OkHttpClient()
-        googleProvider = app.amber.ai.provider.providers.GoogleProvider(httpClient, context)
+        googleProvider = app.amber.ai.provider.providers.GoogleProvider(
+            client = httpClient,
+            context = context,
+            oauthCopy = OAuthDisplayLocalizer.googleGeminiOAuth(context),
+        )
+        codexAuthStore = OpenAICodexAuthStore(context)
         providerCatalog = ProviderCatalog(
             openAIProvider = app.amber.ai.provider.providers.OpenAIProvider(httpClient, context),
             googleProvider = googleProvider,
@@ -198,7 +221,14 @@ class ProviderConfigToolsTest {
     }
 
     private fun tools(modelFetcher: ProviderModelFetcher = ProviderModelFetcher { emptyList() }): List<Tool> =
-        createProviderConfigTools(settingsStore, secretStore, providerCatalog, googleProvider, modelFetcher)
+        createProviderConfigTools(
+            settingsStore,
+            secretStore,
+            providerCatalog,
+            googleProvider,
+            codexOAuthTokenResolver = codexAuthStore::get,
+            modelFetcher = modelFetcher,
+        )
 
     private fun tool(name: String, modelFetcher: ProviderModelFetcher = ProviderModelFetcher { emptyList() }): Tool =
         tools(modelFetcher).first { it.name == name }
@@ -281,7 +311,7 @@ class ProviderConfigToolsTest {
                 brokenStore,
                 providerCatalog,
                 googleProvider,
-                ProviderModelFetcher { emptyList() },
+                modelFetcher = ProviderModelFetcher { emptyList() },
             )
                 .first { it.name == TOOL_PROVIDER_CONFIG_STATUS },
             """{}""",
@@ -311,6 +341,23 @@ class ProviderConfigToolsTest {
     }
 
     @Test
+    fun `status does not treat Codex OAuth without a session as ready`() = runBlocking {
+        seed(
+            app.amber.core.settings.Settings.dummy().copy(
+                init = false,
+                providers = listOf(codexOAuthProvider),
+            )
+        )
+        val result = runTool(tool(TOOL_PROVIDER_CONFIG_STATUS), "{\"provider_name_contains\":\"TestCodexOAuth\"}")
+        val providerJson = result["providers"]!!.jsonArray.first().jsonObject
+        assertEquals(false, providerJson["has_api_key"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
+        assertEquals(false, providerJson["auth_usable"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull())
+        assertEquals("not_signed_in", providerJson["auth_status"]?.jsonPrimitive?.contentOrNull)
+        val issues = result["issues"]!!.jsonArray.map { it.jsonPrimitive.contentOrNull.orEmpty() }
+        assertTrue(issues.any { it.contains("OAuth auth is not_signed_in") })
+    }
+
+    @Test
     fun `refresh Gemini OAuth refuses before model catalog fetch when session is absent`() = runBlocking {
         seed(
             app.amber.core.settings.Settings.dummy().copy(
@@ -330,7 +377,10 @@ class ProviderConfigToolsTest {
             false,
             result["models_modified"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull(),
         )
-        assertTrue(result["error"]?.jsonPrimitive?.contentOrNull.orEmpty().contains("尚未登录"))
+        val error = result["error"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        assertTrue(
+            error.contains(context.getString(R.string.setting_provider_page_gemini_oauth_session_missing))
+        )
         assertEquals(
             listOf("gemini-3-pro-preview"),
             settingsStore.settingsFlow.value.providers.single().models.map { it.modelId },

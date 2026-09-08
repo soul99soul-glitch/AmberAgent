@@ -3,11 +3,14 @@ package app.amber.feature.board.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import app.amber.core.ai.GenerationFailureClassifier
 import app.amber.feature.board.BoardRepository
+import app.amber.feature.board.TodayBoardBackgroundStrategy
 import app.amber.feature.board.agent.BoardAgent
 import app.amber.feature.board.agent.BoardRunResult
 import app.amber.feature.board.agent.DailyReviewAgent
@@ -40,6 +43,12 @@ class BoardWorker(
         val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val board = settings.agentRuntime.todayBoard
         if (!board.enabled) return Result.success()
+        if (
+            board.backgroundStrategy == TodayBoardBackgroundStrategy.FOREGROUND_ONLY &&
+            !tags.contains(BoardScheduler.TAG_MANUAL)
+        ) {
+            return Result.success()
+        }
 
         val aggregator = get<SignalAggregator>()
         val repository = get<BoardRepository>()
@@ -72,10 +81,12 @@ class BoardWorker(
     ): Result {
         val boardDate = repository.resolveBoardDate()
 
-        runCatching {
+        try {
             aggregator.collectAll()
-        }.onFailure {
-            android.util.Log.w("BoardWorker", "collectAll failed", it)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Throwable) {
+            android.util.Log.w("BoardWorker", "collectAll failed", error)
         }
 
         val batch = aggregator.getFilteredSignalBatch(limit = 200)
@@ -120,9 +131,14 @@ class BoardWorker(
 
             is BoardRunResult.Failed -> {
                 notifier.notifyFailure(result.reason)
-                // Distinguish permanent failures (auth/config) from transient ones.
-                // "model call failed" typically means no provider configured or invalid
-                // API key — retrying won't help and just burns quota.
+                val modelFailure = result.cause
+                if (modelFailure != null) {
+                    val retryable = GenerationFailureClassifier.classify(modelFailure).retryable
+                    if (retryable && runAttemptCount < 3) return Result.retry()
+                    return Result.failure()
+                }
+                // Preserve the existing parse-failure retry behavior. A model call that
+                // returned no text has no Throwable and remains a permanent failure.
                 if (result.reason.contains("model call failed")) return Result.failure()
                 if (runAttemptCount >= 3) return Result.failure()
                 return Result.retry()
@@ -143,11 +159,13 @@ class BoardWorker(
             in 18..23 -> DailyReviewAgent.PHASE_EVENING
             else -> return // outside review windows
         }
-        runCatching {
+        try {
             val agent = get<DailyReviewAgent>()
             agent.run(boardDate, phase, locale)
-        }.onFailure {
-            android.util.Log.w("BoardWorker", "daily review failed", it)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Throwable) {
+            android.util.Log.w("BoardWorker", "daily review failed", error)
         }
     }
 
@@ -155,7 +173,7 @@ class BoardWorker(
         repository: BoardRepository,
         currentBoardDate: String,
     ) {
-        runCatching {
+        try {
             // Keep only today's board - earlier dates are archived at 04:00 cutoff.
             val today = LocalDate.parse(currentBoardDate)
             repository.purgeItemsBefore(today.toString())
@@ -165,6 +183,9 @@ class BoardWorker(
             // Prune daily reviews older than 30 days.
             val cutoffDate = today.minusDays(30).toString()
             repository.pruneDailyReviews(cutoffDate)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (_: Throwable) {
         }
     }
 }

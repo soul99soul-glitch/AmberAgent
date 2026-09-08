@@ -25,6 +25,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -46,6 +47,7 @@ import app.amber.core.files.FilesManager
 import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.checkDifferent
 import okhttp3.OkHttpClient
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.io.encoding.Base64
 import kotlin.time.Duration.Companion.seconds
@@ -84,9 +86,9 @@ class McpManager(
         install(SSE)
     }
 
-    private val clients: MutableMap<McpServerConfig, Client> = mutableMapOf()
-    private val reconnectJobs: MutableMap<Uuid, Job> = mutableMapOf()
-    private val reconnectAttempts: MutableMap<Uuid, Int> = mutableMapOf()
+    private val clients = ConcurrentHashMap<McpServerConfig, Client>()
+    private val reconnectJobs = ConcurrentHashMap<Uuid, Job>()
+    private val reconnectAttempts = ConcurrentHashMap<Uuid, Int>()
     val syncingStatus = MutableStateFlow<Map<Uuid, McpStatus>>(mapOf())
 
     private val oauthCoordinator = McpOAuthCoordinator(
@@ -95,7 +97,7 @@ class McpManager(
         appEventBus = appEventBus,
         oauthClient = McpOAuthClient(okHttpClient, context),
         updateStatus = { configId, status ->
-            syncingStatus.value = syncingStatus.value + (configId to status)
+            syncingStatus.update { it + (configId to status) }
         },
     )
 
@@ -110,21 +112,23 @@ class McpManager(
                         val currentConfigs = clients.keys.toList()
                         val (toAdd, toRemove) = currentConfigs.checkDifferent(
                             other = newConfigs,
-                            eq = { a, b -> a.id == b.id }
+                            eq = { a, b ->
+                                a.id == b.id && hasSameConnectionParameters(a, b)
+                            }
                         )
                         Log.i(TAG, "to_add: ${toAdd.map { it.commonOptions.name }}")
                         Log.i(TAG, "to_remove: ${toRemove.map { it.commonOptions.name }}")
+                        toRemove.forEach { cfg ->
+                            // 仅真正移除（禁用/删除）时清理 OAuth 授权状态，连接参数替换不取消授权
+                            if (newConfigs.none { it.id == cfg.id }) {
+                                oauthCoordinator.forget(cfg.id)
+                            }
+                            removeClient(cfg)
+                        }
                         toAdd.forEach { cfg ->
                             appScope.launch {
                                 runCatching { addClient(cfg) }
                                     .onFailure { it.printStackTrace() }
-                            }
-                        }
-                        toRemove.forEach { cfg ->
-                            appScope.launch {
-                                // 仅真正移除（禁用/删除）时清理 OAuth 授权状态，重连不取消进行中的授权
-                                oauthCoordinator.forget(cfg.id)
-                                removeClient(cfg)
                             }
                         }
                     }.onFailure {
@@ -242,21 +246,34 @@ class McpManager(
     ): List<UIMessagePart> {
         // OAuth：连接前确保令牌新鲜；令牌被刷新后按连接参数差异重建客户端
         val freshConfig = oauthCoordinator.ensureFreshToken(server)
-        var client = getClient(freshConfig)
-        val liveConfig = clients.keys.firstOrNull { it.id == freshConfig.id }
-        if (liveConfig == null || !hasSameConnectionParameters(liveConfig, freshConfig)) {
-            addClient(freshConfig)
+        var client: Client? = null
+        if (isCurrentEnabledConfig(freshConfig)) {
             client = getClient(freshConfig)
+            val liveConfig = clients.keys.firstOrNull { it.id == freshConfig.id }
+            if (liveConfig == null || !hasSameConnectionParameters(liveConfig, freshConfig)) {
+                addClient(freshConfig)
+                if (isCurrentEnabledConfig(freshConfig)) {
+                    client = getClient(freshConfig)
+                }
+            }
         }
-        val liveClient = client ?: return listOf(UIMessagePart.Text(
-            buildJsonObject {
-                put("status", "mcp_connection_failed")
-                put("message", "MCP client is not connected: ${server.commonOptions.name}")
-                put("recoverable", JsonPrimitive(true))
-            }.toString()
-        ))
+        val liveClient = client ?: return mcpConnectionFailure(server.commonOptions.name)
         val effectiveConfig = clients.keys.firstOrNull { it.id == freshConfig.id } ?: freshConfig
-        if (liveClient.transport == null) liveClient.connect(getTransport(effectiveConfig))
+        if (liveClient.transport == null) {
+            if (!isCurrentEnabledClient(effectiveConfig, liveClient)) {
+                discardClientInstance(effectiveConfig.id, liveClient)
+                return mcpConnectionFailure(server.commonOptions.name)
+            }
+            liveClient.connect(getTransport(effectiveConfig))
+            if (!isCurrentEnabledClient(effectiveConfig, liveClient)) {
+                discardClientInstance(effectiveConfig.id, liveClient)
+                return mcpConnectionFailure(server.commonOptions.name)
+            }
+        }
+        if (!isCurrentEnabledClient(effectiveConfig, liveClient)) {
+            discardClientInstance(effectiveConfig.id, liveClient)
+            return mcpConnectionFailure(server.commonOptions.name)
+        }
         Log.i(TAG, "callServerTool: ${server.commonOptions.name}/${tool.name} keys=${args.keys}")
         val result = try {
             liveClient.callTool(
@@ -271,8 +288,8 @@ class McpManager(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            if (oauthCoordinator.needsAuthorization(effectiveConfig, e)) {
-                setStatus(effectiveConfig, McpStatus.NeedsAuthorization)
+            if (isCurrentEnabledClient(effectiveConfig, liveClient) && oauthCoordinator.needsAuthorization(effectiveConfig, e)) {
+                setStatus(effectiveConfig, McpStatus.NeedsAuthorization, liveClient)
             }
             throw e
         }
@@ -284,6 +301,14 @@ class McpManager(
             }
         }
     }
+
+    private fun mcpConnectionFailure(serverName: String): List<UIMessagePart> = listOf(UIMessagePart.Text(
+        buildJsonObject {
+            put("status", "mcp_connection_failed")
+            put("message", "MCP client is not connected: $serverName")
+            put("recoverable", JsonPrimitive(true))
+        }.toString()
+    ))
 
     suspend fun callConfiguredTool(
         serverId: String?,
@@ -359,6 +384,9 @@ class McpManager(
 
         // OAuth：连接前确保令牌新鲜（刷新成功会持久化并更新配置）
         val freshConfig = oauthCoordinator.ensureFreshToken(config)
+        if (!isCurrentEnabledConfig(freshConfig) || clients.keys.any { it.id == freshConfig.id }) {
+            return@withContext
+        }
         val transport = getTransport(freshConfig)
         val client = Client(
             clientInfo = Implementation(
@@ -372,8 +400,8 @@ class McpManager(
             Log.i(TAG, "Transport closed for ${freshConfig.commonOptions.name}")
             val currentStatus = syncingStatus.value[freshConfig.id]
             // 只有在已连接状态下才触发重连，避免正常关闭时重连
-            if (currentStatus == McpStatus.Connected) {
-                scheduleReconnect(freshConfig)
+            if (isCurrentEnabledClient(freshConfig, client) && currentStatus == McpStatus.Connected) {
+                scheduleReconnect(freshConfig, client)
             }
         }
 
@@ -381,33 +409,57 @@ class McpManager(
             Log.e(TAG, "Transport error for ${freshConfig.commonOptions.name}: ${error.message}")
             val currentStatus = syncingStatus.value[freshConfig.id]
             // 只有在已连接状态下才触发重连
-            if (currentStatus == McpStatus.Connected) {
-                scheduleReconnect(freshConfig)
+            if (isCurrentEnabledClient(freshConfig, client) && currentStatus == McpStatus.Connected) {
+                scheduleReconnect(freshConfig, client)
             }
         }
 
-        clients[freshConfig] = client
-        runCatching {
-            setStatus(config = freshConfig, status = McpStatus.Connecting)
+        if (clients.putIfAbsent(freshConfig, client) != null) {
+            runCatching { client.close() }.onFailure { it.printStackTrace() }
+            return@withContext
+        }
+        if (!isCurrentEnabledClient(freshConfig, client)) {
+            discardClientInstance(freshConfig.id, client)
+            return@withContext
+        }
+        try {
+            setStatus(config = freshConfig, status = McpStatus.Connecting, owner = client)
             client.connect(transport)
             sync(freshConfig)
-            setStatus(config = freshConfig, status = McpStatus.Connected)
+            if (!isCurrentEnabledClient(freshConfig, client)) {
+                discardClientInstance(freshConfig.id, client)
+                return@withContext
+            }
+            setStatus(config = freshConfig, status = McpStatus.Connected, owner = client)
             reconnectAttempts[freshConfig.id] = 0 // 重置重连计数
             Log.i(TAG, "addClient: connected ${freshConfig.commonOptions.name}")
-        }.onFailure {
-            it.printStackTrace()
-            if (oauthCoordinator.needsAuthorization(freshConfig, it)) {
-                setStatus(config = freshConfig, status = McpStatus.NeedsAuthorization)
-            } else {
-                setStatus(config = freshConfig, status = McpStatus.Error(it.message ?: it.javaClass.name))
+        } catch (e: CancellationException) {
+            discardClientInstance(freshConfig.id, client)
+            throw e
+        } catch (e: Exception) {
+            val removed = removeClientInstance(freshConfig.id, client)
+            e.printStackTrace()
+            if (removed) {
+                if (oauthCoordinator.needsAuthorization(freshConfig, e)) {
+                    setStatusIfNoCurrentClient(freshConfig, McpStatus.NeedsAuthorization)
+                } else {
+                    setStatusIfNoCurrentClient(
+                        freshConfig,
+                        McpStatus.Error(e.message ?: e.javaClass.name),
+                    )
+                }
             }
         }
     }
 
     private suspend fun sync(config: McpServerConfig) {
-        val client = clients[config] ?: return
+        val client = clients.entries.firstOrNull { it.key.id == config.id }?.value ?: return
+        if (!isCurrentEnabledClient(config, client)) {
+            discardClientInstance(config.id, client)
+            return
+        }
 
-        setStatus(config = config, status = McpStatus.Connecting)
+        setStatus(config = config, status = McpStatus.Connecting, owner = client)
 
         // Update tools
         if (client.transport == null) {
@@ -415,6 +467,10 @@ class McpManager(
         }
         val serverTools = client.listTools().tools
         Log.i(TAG, "sync: tools: $serverTools")
+        if (!isCurrentEnabledClient(config, client)) {
+            discardClientInstance(config.id, client)
+            return
+        }
         settingsStore.update { old ->
             old.copy(
                 mcpServers = old.mcpServers.map { serverConfig ->
@@ -447,7 +503,7 @@ class McpManager(
                     tools.removeIf { tool -> serverTools.none { it.name == tool.name } }
 
                     // 更新clients
-                    clients.remove(config)
+                    clients.remove(config, client)
                     clients.put(
                         config.clone(
                             commonOptions = common.copy(
@@ -466,17 +522,22 @@ class McpManager(
             )
         }
 
-        setStatus(config = config, status = McpStatus.Connected)
+        if (isCurrentEnabledClient(config, client)) {
+            setStatus(config = config, status = McpStatus.Connected, owner = client)
+        } else {
+            discardClientInstance(config.id, client)
+        }
     }
 
     suspend fun syncAll() = withContext(Dispatchers.IO) {
         clients.keys.toList().forEach { config ->
+            val client = clients.entries.firstOrNull { it.key.id == config.id }?.value ?: return@forEach
             runCatching {
                 sync(config)
             }.onFailure {
                 it.printStackTrace()
-                if (oauthCoordinator.needsAuthorization(config, it)) {
-                    setStatus(config = config, status = McpStatus.NeedsAuthorization)
+                if (isCurrentEnabledClient(config, client) && oauthCoordinator.needsAuthorization(config, it)) {
+                    setStatus(config = config, status = McpStatus.NeedsAuthorization, owner = client)
                 }
             }
         }
@@ -486,29 +547,41 @@ class McpManager(
         cancelReconnect(config.id)
         val toRemove = clients.entries.filter { it.key.id == config.id }
         toRemove.forEach { entry ->
-            runCatching {
-                entry.value.close()
-            }.onFailure {
-                it.printStackTrace()
+            val removed = clients.remove(entry.key, entry.value)
+            if (removed) {
+                if (clients.keys.none { it.id == entry.key.id }) {
+                    syncingStatus.update { it - entry.key.id }
+                }
+                runCatching {
+                    entry.value.close()
+                }.onFailure {
+                    it.printStackTrace()
+                }
             }
-            clients.remove(entry.key)
-            syncingStatus.emit(syncingStatus.value.toMutableMap().apply { remove(entry.key.id) })
             Log.i(TAG, "removeClient: ${entry.key} / ${entry.key.commonOptions.name}")
+        }
+        if (clients.keys.none { it.id == config.id }) {
+            syncingStatus.update { it - config.id }
         }
         reconnectAttempts.remove(config.id)
     }
 
-    private fun scheduleReconnect(config: McpServerConfig) {
+    private fun scheduleReconnect(config: McpServerConfig, owner: Client? = null) {
         val configId = config.id
         val currentAttempt = (reconnectAttempts[configId] ?: 0) + 1
 
         if (currentAttempt > MAX_RECONNECT_ATTEMPTS) {
             Log.w(TAG, "Max reconnect attempts reached for ${config.commonOptions.name}")
             appScope.launch {
-                setStatus(
-                    config,
-                    McpStatus.Error(context.getString(R.string.setting_mcp_status_error)),
-                )
+                if (isCurrentEnabledConfig(config) &&
+                    (owner == null || isCurrentEnabledClient(config, owner))
+                ) {
+                    setStatus(
+                        config,
+                        McpStatus.Error(context.getString(R.string.setting_mcp_status_error)),
+                        owner,
+                    )
+                }
             }
             return
         }
@@ -524,15 +597,24 @@ class McpManager(
 
         reconnectJobs[configId] = appScope.launch {
             try {
-                setStatus(config, McpStatus.Reconnecting(currentAttempt, MAX_RECONNECT_ATTEMPTS))
+                if (owner != null && !isCurrentEnabledClient(config, owner)) return@launch
+                if (!isCurrentEnabledConfig(config)) return@launch
+                setStatus(config, McpStatus.Reconnecting(currentAttempt, MAX_RECONNECT_ATTEMPTS), owner)
                 delay(delayMs)
 
                 // 检查配置是否仍然启用
                 val currentConfig = settingsStore.settingsFlow.value.mcpServers
                     .find { it.id == configId && it.commonOptions.enable }
 
-                if (currentConfig == null) {
+                if (currentConfig == null || !hasSameConnectionParameters(currentConfig, config)) {
                     Log.i(TAG, "Config disabled or removed, cancelling reconnect for ${config.commonOptions.name}")
+                    syncingStatus.update { statuses ->
+                        if (statuses[configId] == McpStatus.Reconnecting(currentAttempt, MAX_RECONNECT_ATTEMPTS)) {
+                            statuses - configId
+                        } else {
+                            statuses
+                        }
+                    }
                     return@launch
                 }
 
@@ -544,7 +626,9 @@ class McpManager(
             } catch (e: Exception) {
                 Log.e(TAG, "Reconnect failed for ${config.commonOptions.name}", e)
                 // 继续尝试重连
-                scheduleReconnect(config)
+                if (isCurrentEnabledConfig(config)) {
+                    scheduleReconnect(config)
+                }
             }
         }
     }
@@ -564,12 +648,15 @@ class McpManager(
         // 先关闭旧客户端
         val oldEntry = clients.entries.find { it.key.id == config.id }
         if (oldEntry != null) {
+            clients.remove(oldEntry.key, oldEntry.value)
             runCatching { oldEntry.value.close() }.onFailure { it.printStackTrace() }
-            clients.remove(oldEntry.key)
         }
 
         // OAuth：重连前确保令牌新鲜
         val freshConfig = oauthCoordinator.ensureFreshToken(config)
+        if (!isCurrentEnabledConfig(freshConfig) || clients.keys.any { it.id == freshConfig.id }) {
+            return@withContext
+        }
         val transport = getTransport(freshConfig)
         val client = Client(
             clientInfo = Implementation(
@@ -582,41 +669,104 @@ class McpManager(
         transport.onClose {
             Log.i(TAG, "Transport closed for ${freshConfig.commonOptions.name}")
             val currentStatus = syncingStatus.value[freshConfig.id]
-            if (currentStatus == McpStatus.Connected) {
-                scheduleReconnect(freshConfig)
+            if (isCurrentEnabledClient(freshConfig, client) && currentStatus == McpStatus.Connected) {
+                scheduleReconnect(freshConfig, client)
             }
         }
 
         transport.onError { error ->
             Log.e(TAG, "Transport error for ${freshConfig.commonOptions.name}: ${error.message}")
             val currentStatus = syncingStatus.value[freshConfig.id]
-            if (currentStatus == McpStatus.Connected) {
-                scheduleReconnect(freshConfig)
+            if (isCurrentEnabledClient(freshConfig, client) && currentStatus == McpStatus.Connected) {
+                scheduleReconnect(freshConfig, client)
             }
         }
 
-        clients[freshConfig] = client
-        runCatching {
-            setStatus(freshConfig, McpStatus.Connecting)
+        if (clients.putIfAbsent(freshConfig, client) != null) {
+            runCatching { client.close() }.onFailure { it.printStackTrace() }
+            return@withContext
+        }
+        if (!isCurrentEnabledClient(freshConfig, client)) {
+            discardClientInstance(freshConfig.id, client)
+            return@withContext
+        }
+        try {
+            setStatus(freshConfig, McpStatus.Connecting, client)
             client.connect(transport)
             sync(freshConfig)
-            setStatus(freshConfig, McpStatus.Connected)
+            if (!isCurrentEnabledClient(freshConfig, client)) {
+                discardClientInstance(freshConfig.id, client)
+                return@withContext
+            }
+            setStatus(freshConfig, McpStatus.Connected, client)
             reconnectAttempts[freshConfig.id] = 0 // 重置重连计数
             Log.i(TAG, "Reconnected successfully: ${freshConfig.commonOptions.name}")
-        }.onFailure {
-            it.printStackTrace()
-            if (oauthCoordinator.needsAuthorization(freshConfig, it)) {
-                setStatus(freshConfig, McpStatus.NeedsAuthorization)
-            } else {
-                setStatus(freshConfig, McpStatus.Error(it.message ?: it.javaClass.name))
+        } catch (e: CancellationException) {
+            discardClientInstance(freshConfig.id, client)
+            throw e
+        } catch (e: Exception) {
+            val removed = removeClientInstance(freshConfig.id, client)
+            e.printStackTrace()
+            if (removed) {
+                if (oauthCoordinator.needsAuthorization(freshConfig, e)) {
+                    setStatusIfNoCurrentClient(freshConfig, McpStatus.NeedsAuthorization)
+                } else {
+                    setStatusIfNoCurrentClient(
+                        freshConfig,
+                        McpStatus.Error(e.message ?: e.javaClass.name),
+                    )
+                }
             }
         }
     }
 
-    private suspend fun setStatus(config: McpServerConfig, status: McpStatus) {
-        syncingStatus.emit(syncingStatus.value.toMutableMap().apply {
-            put(config.id, status)
-        })
+    private suspend fun setStatus(config: McpServerConfig, status: McpStatus, owner: Client? = null) {
+        syncingStatus.update { statuses ->
+            if (owner != null && !isCurrentEnabledClient(config, owner)) statuses
+            else statuses + (config.id to status)
+        }
+    }
+
+    private fun setStatusIfNoCurrentClient(config: McpServerConfig, status: McpStatus) {
+        syncingStatus.update { statuses ->
+            if (!isCurrentEnabledConfig(config) || clients.keys.any { it.id == config.id }) {
+                statuses
+            } else {
+                statuses + (config.id to status)
+            }
+        }
+    }
+
+    private fun isCurrentEnabledConfig(config: McpServerConfig): Boolean {
+        val currentConfig = settingsStore.settingsFlow.value.mcpServers
+            .firstOrNull { it.id == config.id }
+        return currentConfig?.commonOptions?.enable == true &&
+            hasSameConnectionParameters(currentConfig, config)
+    }
+
+    private fun isCurrentEnabledClient(config: McpServerConfig, client: Client): Boolean {
+        if (!isCurrentEnabledConfig(config)) return false
+        val entries = clients.entries.filter { it.key.id == config.id }
+        val entry = entries.singleOrNull() ?: return false
+        return entry.value === client && hasSameConnectionParameters(entry.key, config)
+    }
+
+    private suspend fun discardClientInstance(configId: Uuid, client: Client) {
+        if (removeClientInstance(configId, client)) {
+            runCatching { client.close() }.onFailure { it.printStackTrace() }
+        }
+    }
+
+    private fun removeClientInstance(configId: Uuid, client: Client): Boolean {
+        var removed = false
+        clients.entries
+            .filter { it.key.id == configId && it.value === client }
+            .forEach { entry ->
+                if (clients.remove(entry.key, entry.value)) {
+                    removed = true
+                }
+            }
+        return removed
     }
 
     fun getStatus(config: McpServerConfig): Flow<McpStatus> {

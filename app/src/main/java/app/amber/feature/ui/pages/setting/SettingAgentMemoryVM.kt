@@ -3,6 +3,7 @@ package app.amber.feature.ui.pages.setting
 import android.app.Application
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -87,13 +88,29 @@ class SettingAgentMemoryVM(
 
     fun updateMemory(memory: AssistantMemory) {
         viewModelScope.launch {
-            memoryRepository.updateContent(id = memory.id, content = memory.content)
+            try {
+                memoryRepository.updateContent(
+                    id = memory.id,
+                    content = memory.content,
+                    expectedRevision = memory.revision,
+                )
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                reportMemoryOperationError(error)
+            }
         }
     }
 
     fun deleteMemory(memory: AssistantMemory) {
         viewModelScope.launch {
-            memoryRepository.deleteMemory(memory.id)
+            try {
+                memoryRepository.deleteMemoryCas(memory.id, expectedRevision = memory.revision)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                reportMemoryOperationError(error)
+            }
         }
     }
 
@@ -260,5 +277,9 @@ class SettingAgentMemoryVM(
 
     fun consumeOperationMessage() {
         _operationMessage.value = null
+    }
+
+    private fun reportMemoryOperationError(error: Exception) {
+        _operationMessage.value = error.message ?: error::class.java.simpleName
     }
 }

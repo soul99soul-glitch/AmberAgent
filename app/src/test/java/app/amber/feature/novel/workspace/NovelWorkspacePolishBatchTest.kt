@@ -68,20 +68,20 @@ class NovelWorkspacePolishBatchTest {
                 kotlinx.coroutines.SupervisorJob() +
                     kotlinx.coroutines.test.StandardTestDispatcher(it),
             )
-        }
+        } ?: kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+        )
         val runner = app.amber.core.agent.runtime.impl.InProcessAgentRunner(
             registry,
             app.amber.core.agent.runtime.InMemoryAgentEventStore(),
             runScopeFactory = { id, _ ->
                 app.amber.core.agent.runtime.adapter.LegacyRunScope(runId = id)
             },
-            scope = scope ?: kotlinx.coroutines.CoroutineScope(
-                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
-            ),
+            scope = scope,
         )
         return NovelWorkspaceGhostwriteCoordinator(
             runtime,
-            NovelTurnLauncher(runner, payloads),
+            NovelTurnLauncher(runner, payloads, scope),
         )
     }
 

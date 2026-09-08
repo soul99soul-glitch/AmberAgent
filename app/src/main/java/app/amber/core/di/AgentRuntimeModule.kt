@@ -41,6 +41,7 @@ import app.amber.feature.novel.workspace.NovelTurnArtifact
 import app.amber.feature.novel.workspace.NovelTurnDescriptor
 import app.amber.feature.novel.workspace.NovelTurnEventPayload
 import app.amber.feature.novel.workspace.NovelTurnInput
+import app.amber.feature.runtime.ColdStartRuntimeRecoveryGate
 import app.amber.feature.runtime.RunRecoveryService
 import app.amber.feature.subagent.GenerationSubAgentRunner
 import app.amber.feature.subagent.SubAgentManager
@@ -63,6 +64,7 @@ import org.koin.dsl.module
  */
 val agentRuntimeModule = module {
     single { SessionAccessGrantStore() }
+    single { ColdStartRuntimeRecoveryGate() }
 
     // Agent Kernel
     single<AgentRegistry> {
@@ -164,6 +166,7 @@ val agentRuntimeModule = module {
         InProcessAgentRunner(
             registry = get(),
             eventStore = get<RoomAgentEventStore>(),
+            awaitColdStartRecovery = { get<ColdStartRuntimeRecoveryGate>().awaitReady() },
             runScopeFactory = { runId, input ->
                 // Step 3: every registered run kind gets a persisting event
                 // writer — the event stream is the unified run truth, not a

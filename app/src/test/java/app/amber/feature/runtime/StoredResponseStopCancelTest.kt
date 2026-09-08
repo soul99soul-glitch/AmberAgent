@@ -23,6 +23,8 @@ import kotlin.uuid.Uuid
  * P6-01 Stop path — server-side cancel is awaited for a decidable outcome
  * (plan §P6-01 #5): an unconfirmed cancel must NOT pretend the run was
  * cancelled; the caller keeps WAITING_EXTERNAL with the cursor for recovery.
+ * ChatService's conversation/run ownership gate is outside this fixture;
+ * these tests cover provider cancel outcomes after that gate admits a run.
  */
 class StoredResponseStopCancelTest {
 

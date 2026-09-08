@@ -40,7 +40,15 @@ class ShortcutHandlerActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        photoURI = savedInstanceState?.getString("photoURI")?.let(Uri::parse)
+        if (savedInstanceState == null) {
+            requestPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("photoURI", photoURI?.toString())
+        super.onSaveInstanceState(outState)
     }
 
     private fun launchCamera() {

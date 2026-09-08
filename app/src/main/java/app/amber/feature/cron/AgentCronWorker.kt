@@ -10,10 +10,13 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -36,43 +39,52 @@ class AgentCronWorker(
         val taskId = inputData.getString(KEY_TASK_ID) ?: return Result.failure()
         val manualRun = inputData.getBoolean(KEY_MANUAL_RUN, false)
         val manager = get<AgentCronManager>()
-        val task = manager.prepareTriggeredRun(taskId, manual = manualRun) ?: return Result.success()
-        setForeground(createForegroundInfo(task))
-        manager.markRunStarted(taskId)
-        try {
-            return runCatching {
-                val conversationId = Uuid.parse(task.conversationId)
-                val prompt = buildString {
-                    appendLine("This is an AmberAgent mobile Cron task trigger.")
-                    appendLine("Task name: ${task.title}")
-                    appendLine("Cron: ${task.cronExpression} (${task.timezoneId})")
-                    if (manualRun) appendLine("Trigger mode: Run immediately by user request")
-                    appendLine("Respond in app locale ${applicationContext.appLocale().toLanguageTag().ifBlank { "en" }} and preserve stable protocol/schema field names.")
-                    appendLine()
-                    append(task.prompt)
-                }
-                val chatService = get<ChatService>()
-                coroutineScope {
-                    val completion = async {
-                        withTimeout(CRON_GENERATION_TIMEOUT_MS) {
-                            chatService.generationDoneFlow.first { it == conversationId }
-                        }
-                    }
-                    chatService.sendMessage(
-                        conversationId = conversationId,
-                        content = listOf(UIMessagePart.Text(prompt)),
-                        answer = true,
-                    )
-                    completion.await()
-                }
-                manager.markRunCompleted(taskId)
-                sendCronNotification(task, success = true)
-                Result.success()
-            }.getOrElse { error ->
-                manager.markRunFailed(taskId, error.message ?: error::class.simpleName.orEmpty())
-                sendCronNotification(task, success = false, error = error)
-                Result.failure()
+        val task = manager.prepareTriggeredRun(taskId, id, manual = manualRun) ?: return Result.success()
+        if (!manager.markRunStarted(taskId, id)) return Result.success()
+        return try {
+            setForeground(createForegroundInfo(task))
+            val conversationId = Uuid.parse(task.conversationId)
+            val prompt = buildString {
+                appendLine("This is an AmberAgent mobile Cron task trigger.")
+                appendLine("Task name: ${task.title}")
+                appendLine("Cron: ${task.cronExpression} (${task.timezoneId})")
+                if (manualRun) appendLine("Trigger mode: Run immediately by user request")
+                appendLine("Respond in app locale ${applicationContext.appLocale().toLanguageTag().ifBlank { "en" }} and preserve stable protocol/schema field names.")
+                appendLine()
+                append(task.prompt)
             }
+            val chatService = get<ChatService>()
+            coroutineScope {
+                val completion = async {
+                    withTimeout(CRON_GENERATION_TIMEOUT_MS) {
+                        chatService.generationDoneFlow.first { it == conversationId }
+                    }
+                }
+                chatService.sendMessage(
+                    conversationId = conversationId,
+                    content = listOf(UIMessagePart.Text(prompt)),
+                    answer = true,
+                )
+                completion.await()
+            }
+            if (manager.markRunCompleted(taskId, id)) {
+                sendCronNotification(task, success = true)
+            }
+            Result.success()
+        } catch (error: TimeoutCancellationException) {
+            currentCoroutineContext().ensureActive()
+            if (manager.markRunFailed(taskId, id, error.message ?: error::class.simpleName.orEmpty())) {
+                sendCronNotification(task, success = false, error = error)
+            }
+            Result.failure()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            currentCoroutineContext().ensureActive()
+            if (manager.markRunFailed(taskId, id, error.message ?: error::class.simpleName.orEmpty())) {
+                sendCronNotification(task, success = false, error = error)
+            }
+            Result.failure()
         } finally {
             // Enqueueing the next occurrence under the same unique work name while
             // this run is still active would REPLACE-cancel it, so schedule on the
@@ -80,7 +92,7 @@ class AgentCronWorker(
             // must not be clobbered by this run's own reschedule.
             if (!isStopped) {
                 withContext(NonCancellable) {
-                    runCatching { manager.scheduleNextRun(taskId) }
+                    runCatching { manager.scheduleNextRun(taskId, id) }
                 }
             }
         }

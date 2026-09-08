@@ -141,6 +141,44 @@ class ImageGenerationRepositoryTest {
         assertTrue(saved.file.exists())
     }
 
+    @Test
+    fun partialWriteFailureRemovesFilesCreatedByThisInvocation() = runTest {
+        val conversationId = conversationId()
+        fakeProvider.generatedItems = listOf(
+            fakeProvider.generatedItems.single(),
+            ImageGenerationItem(data = "%%%invalid%%%", mimeType = "image/png"),
+        )
+
+        val result = repository.generateForConversation(
+            modelId = imageModel.id,
+            prompt = "two cats",
+            aspectRatio = ImageAspectRatio.SQUARE,
+            numOfImages = 2,
+            conversationId = conversationId,
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(filesManager.getChatImagesDir(conversationId).listFiles().orEmpty().isEmpty())
+    }
+
+    @Test
+    fun emptyProviderResultFailsInsteadOfReportingSuccess() = runTest {
+        val conversationId = conversationId()
+        fakeProvider.generatedItems = emptyList()
+
+        val result = repository.generateForConversation(
+            modelId = imageModel.id,
+            prompt = "an empty result",
+            aspectRatio = ImageAspectRatio.SQUARE,
+            numOfImages = 1,
+            conversationId = conversationId,
+        )
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull()?.message.orEmpty().contains("no images"))
+        assertTrue(filesManager.getChatImagesDir(conversationId).listFiles().orEmpty().isEmpty())
+    }
+
     // ---- repository: edit ----
 
     @Test
@@ -356,6 +394,12 @@ class ImageGenerationRepositoryTest {
         var editSupported: Boolean = true,
     ) : TextModelGateway<ProviderSetting.OpenAI>, ImageModelGateway<ProviderSetting.OpenAI> {
         val received = mutableListOf<ImageGenerationParams>()
+        var generatedItems: List<ImageGenerationItem> = listOf(
+            ImageGenerationItem(
+                data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+                mimeType = "image/png",
+            )
+        )
 
         override suspend fun listModels(providerSetting: ProviderSetting.OpenAI): List<Model> = emptyList()
 
@@ -376,14 +420,7 @@ class ImageGenerationRepositoryTest {
             params: ImageGenerationParams,
         ): ImageGenerationResult {
             received += params
-            return ImageGenerationResult(
-                items = listOf(
-                    ImageGenerationItem(
-                        data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-                        mimeType = "image/png",
-                    )
-                )
-            )
+            return ImageGenerationResult(items = generatedItems)
         }
 
         override fun supportsImageEdit(providerSetting: ProviderSetting.OpenAI): Boolean = editSupported

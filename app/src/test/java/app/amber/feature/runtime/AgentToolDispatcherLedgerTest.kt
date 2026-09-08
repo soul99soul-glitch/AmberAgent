@@ -10,6 +10,7 @@ import app.amber.core.agent.runtime.ToolLifecycleEvent
 import app.amber.core.ai.GenerationRetrySetting
 import app.amber.feature.tools.effectClass
 import app.amber.feature.tools.ToolEffectClass
+import app.amber.feature.tools.invocationPolicy
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -338,6 +340,22 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
         assertNotNull(result)
         val effect = ledger.getByToolCallId("call_1")!!
         assertEquals(app.amber.feature.tools.ToolEffectClass.IDEMPOTENT_WRITE, effect.effectClass)
+    }
+
+    @Test
+    fun generateImageIsNonIdempotentButKeepsExistingApprovalContract() {
+        val tool = Tool(name = "generate_image", description = "", execute = { emptyList() })
+
+        assertEquals(ToolEffectClass.NON_IDEMPOTENT_WRITE, tool.effectClass())
+
+        val policy = tool.invocationPolicy("{}")
+        assertFalse(policy.concurrencySafe)
+        assertNull(policy.parallelGroup)
+        // Classification must not turn the existing auto-approved image tool
+        // into an extra user-approval gate.
+        assertFalse(policy.mutates)
+        assertFalse(policy.needsApproval)
+        assertTrue(policy.autoApprovable)
     }
 
     // ── Step 3: tool lifecycle protocol events, aligned with the ledger ──

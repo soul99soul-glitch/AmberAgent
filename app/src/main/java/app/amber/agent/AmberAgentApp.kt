@@ -14,6 +14,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.crashlytics.crashlytics
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig
 import com.google.firebase.remoteconfig.remoteConfigSettings
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ import app.amber.core.files.FilesManager
 import app.amber.core.files.SkillManager
 import app.amber.feature.cron.AgentCronManager
 import app.amber.feature.chat.impl.ChatEventProjector
+import app.amber.feature.runtime.ColdStartRuntimeRecoveryGate
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.prefs.SettingsProviderRescue
 import app.amber.core.settings.secret.SettingsSecretMigrator
@@ -153,12 +155,13 @@ class AmberAgentApp : Application() {
     }
 
     private fun recoverInterruptedAgentRuns() {
+        val recoveryGate = get<ColdStartRuntimeRecoveryGate>()
         get<AppScope>().launch(Dispatchers.IO) {
-            // P1-02/P1-03 first: the ledger decides what may be retried and
-            // replays finished results; WAITING_USER runs keep their state so
-            // approval can resume the same runId. ChatEventProjector then
-            // projects stream checkpoints (it skips parts already replayed).
-            runCatching {
+            try {
+                // P1-02/P1-03 first: the ledger decides what may be retried
+                // and replays finished results; ChatEventProjector then
+                // projects stream checkpoints. Both stages must finish before
+                // a new runner activation may append a durable RUNNING row.
                 val flags = get<app.amber.core.settings.CapabilityFlags>()
                 if (
                     flags.isEnabled(app.amber.core.settings.Capability.DurableToolEffects) &&
@@ -166,15 +169,26 @@ class AmberAgentApp : Application() {
                 ) {
                     get<app.amber.feature.runtime.RunRecoveryService>().recover()
                 }
-                // P4-03: persisted JS cells never resume across a process
-                // restart — RUNNING/WAITING cells are marked TERMINATED
-                // (store content and terminal states stay readable).
+                get<ChatEventProjector>().replayUnfinished()
+                recoveryGate.complete()
+            } catch (error: CancellationException) {
+                recoveryGate.fail(error)
+                throw error
+            } catch (error: Throwable) {
+                recoveryGate.fail(error)
+                Log.w(TAG, "Failed to recover durable runtime state", error)
+            }
+
+            // P4-03: persisted JS cells never resume across a process restart
+            // — RUNNING/WAITING cells are marked TERMINATED (store content and
+            // terminal states stay readable). This is not part of the durable
+            // agent recovery gate: a JS cleanup failure must not block chat.
+            runCatching {
+                val flags = get<app.amber.core.settings.CapabilityFlags>()
                 if (flags.isEnabled(app.amber.core.settings.Capability.JSCellRuntime)) {
                     get<app.amber.feature.jscell.JsCellRuntime>().recoverFromColdStart()
                 }
-            }.onFailure { Log.w(TAG, "Failed to recover durable runtime state", it) }
-            runCatching { get<ChatEventProjector>().replayUnfinished() }
-                .onFailure { Log.w(TAG, "Failed to recover interrupted agent runs", it) }
+            }.onFailure { Log.w(TAG, "Failed to recover persisted JS cells", it) }
         }
     }
 

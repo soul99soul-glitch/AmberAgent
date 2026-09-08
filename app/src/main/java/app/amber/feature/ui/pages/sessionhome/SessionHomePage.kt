@@ -99,6 +99,9 @@ import com.composables.icons.lucide.Settings
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import app.amber.feature.ui.context.LocalToaster
+import com.dokar.sonner.ToastType
+import kotlinx.coroutines.CancellationException
 
 /**
  * Session 首页 —— Fixed home of the app (Terminal × Modern graphite design).
@@ -118,6 +121,7 @@ fun SessionHomePage() {
     val navController = LocalNavController.current
     val settings = LocalSettings.current
     val tokens = LocalAmberTokens.current
+    val toaster = LocalToaster.current
     val vm: SessionHomeVM = koinViewModel()
     val listVm: ChatDrawerVM = koinViewModel(viewModelStoreOwner = activity)
 
@@ -140,27 +144,56 @@ fun SessionHomePage() {
                 assistantId = AMBER_AGENT_ID,
                 newConversation = true,
             ).updateCurrentMessages(councilSettings.presetMessages)
-            conversationRepo.insertConversation(councilConversation)
-            val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
-                seat.toCouncilParticipant().copy(
-                    modelName = councilSettings.findModelById(seat.modelId)?.displayName.orEmpty(),
+            var placeholderInserted = false
+            try {
+                conversationRepo.insertConversation(councilConversation)
+                placeholderInserted = true
+                val guests = councilSettings.agentRuntime.modelCouncil.defaultSeats.map { seat ->
+                    seat.toCouncilParticipant().copy(
+                        modelName = councilSettings.findModelById(seat.modelId)?.displayName.orEmpty(),
+                    )
+                }
+                val result = councilRoomManager.openRoom(
+                    conversationId = targetConversationId,
+                    hostAssistantId = AMBER_AGENT_ID,
+                    hostName = "Amber",
+                    objective = "多模型协作讨论",
+                    initialGuests = guests,
+                    maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
+                    hostModelIdOverride = councilSettings.agentRuntime.modelCouncil.hostModelId,
                 )
+                if (result is CouncilRoomOpResult.Err) {
+                    conversationRepo.deleteConversation(councilConversation)
+                    placeholderInserted = false
+                    toaster.show(
+                        result.message.ifBlank { result.code },
+                        type = ToastType.Error,
+                    )
+                    android.util.Log.w("SessionHomeCouncil", "openRoom failed: ${result.code}")
+                    return@launch
+                }
+                navController.navigate(Screen.CouncilRoom(conversationId = targetConversationId.toString()))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                if (placeholderInserted) {
+                    try {
+                        conversationRepo.deleteConversation(councilConversation)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (cleanupError: Exception) {
+                        android.util.Log.e(
+                            "SessionHomeCouncil",
+                            "failed to clean up placeholder conversation",
+                            cleanupError,
+                        )
+                    }
+                }
+                val message = error.message?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.error_title_operation)
+                toaster.show(message, type = ToastType.Error)
+                android.util.Log.e("SessionHomeCouncil", "failed to open council room", error)
             }
-            val result = councilRoomManager.openRoom(
-                conversationId = targetConversationId,
-                hostAssistantId = AMBER_AGENT_ID,
-                hostName = "Amber",
-                objective = "多模型协作讨论",
-                initialGuests = guests,
-                maxRounds = councilSettings.agentRuntime.modelCouncil.defaultRounds.coerceIn(2, 6),
-                hostModelIdOverride = councilSettings.agentRuntime.modelCouncil.hostModelId,
-            )
-            if (result is CouncilRoomOpResult.Err) {
-                vm.deleteConversation(councilConversation)
-                android.util.Log.w("SessionHomeCouncil", "openRoom failed: ${result.code}")
-                return@launch
-            }
-            navController.navigate(Screen.CouncilRoom(conversationId = targetConversationId.toString()))
         }
     }
 

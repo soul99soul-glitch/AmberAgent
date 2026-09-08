@@ -20,6 +20,7 @@ import app.amber.ai.provider.hasUsableAuth
 import app.amber.ai.provider.providers.GoogleProvider
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatus
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatusCode
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthTokens
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.settings.DEFAULT_AUTO_MODEL_ID
 import app.amber.core.settings.Settings
@@ -69,6 +70,7 @@ fun createProviderConfigTools(
     secretStore: SecretStore,
     providerCatalog: ProviderCatalog,
     googleProvider: GoogleProvider,
+    codexOAuthTokenResolver: (Uuid) -> OpenAICodexAuthTokens? = { null },
     modelFetcher: ProviderModelFetcher = ProviderModelFetcher { provider ->
         providerCatalog.text(provider).listModels(provider)
     },
@@ -86,12 +88,45 @@ fun createProviderConfigTools(
             null
         }
     }
+    val managedOAuthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus? = { provider ->
+        oauthStatusResolver(provider)?.let { status ->
+            ManagedOAuthStatus(status.code.wireValue, status.usable)
+        } ?: codexOAuthStatus(provider, codexOAuthTokenResolver)
+    }
     return listOf(
-        providerConfigStatusTool(settingsStore, secretStore, oauthStatusResolver),
+        providerConfigStatusTool(settingsStore, secretStore, managedOAuthStatusResolver),
         providerConfigApplyTool(settingsStore, secretStore),
         providerRefreshModelsTool(settingsStore, modelFetcher),
         settingsSetModelSlotTool(settingsStore),
     )
+}
+
+private data class ManagedOAuthStatus(
+    val wireValue: String,
+    val usable: Boolean,
+)
+
+private fun codexOAuthStatus(
+    provider: ProviderSetting,
+    tokenResolver: (Uuid) -> OpenAICodexAuthTokens?,
+): ManagedOAuthStatus? {
+    if (provider !is ProviderSetting.OpenAI ||
+        provider.authMode != app.amber.ai.provider.OpenAIAuthMode.CODEX_OAUTH
+    ) {
+        return null
+    }
+    val tokens = tokenResolver(provider.id)
+        ?: return ManagedOAuthStatus("not_signed_in", usable = false)
+    if (tokens.accessToken.isBlank()) {
+        return ManagedOAuthStatus("token_missing", usable = false)
+    }
+    if (tokens.expiresAtMillis <= System.currentTimeMillis()) {
+        return ManagedOAuthStatus(
+            wireValue = "token_expired",
+            usable = tokens.refreshToken.isNotBlank(),
+        )
+    }
+    return ManagedOAuthStatus("ready", usable = true)
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +136,7 @@ fun createProviderConfigTools(
 private fun providerConfigStatusTool(
     settingsStore: SettingsAggregator,
     secretStore: SecretStore,
-    oauthStatusResolver: (ProviderSetting) -> GoogleGeminiAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
 ): Tool = Tool(
     name = TOOL_PROVIDER_CONFIG_STATUS,
     description = "Read-only inventory of configured AI providers, their enabled/model/auth state, and the six default model slots (chat/title/ocr/compress/suggestion/image_generation). All output is redacted: API keys/tokens are never included; API-key providers expose has_api_key and managed OAuth providers expose auth_status/auth_usable; base_url is reported as host only. Use this first to diagnose missing credentials, empty model catalogs, or a dangling chat model before applying changes.",
@@ -140,7 +175,7 @@ private fun statusPayload(
     providerId: String?,
     nameContains: String?,
     includeModels: Boolean,
-    oauthStatusResolver: (ProviderSetting) -> GoogleGeminiAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
 ): JsonObject = buildJsonObject {
     val providers = settings.providers
         .filter { providerId == null || it.id.toString() == providerId }
@@ -166,11 +201,11 @@ private fun statusPayload(
         val oauthStatus = oauthStatusResolver(provider)
         val authUsable = oauthStatus?.usable ?: (provider.hasUsableAuth() || secretStore.hasStoredKey(provider))
         if (provider.enabled) {
-            if (oauthStatus != null && oauthStatus.code != GoogleGeminiAuthStatusCode.READY) {
-                issues += "provider ${provider.name} OAuth auth is ${oauthStatus.code.wireValue}"
+            if (oauthStatus != null && oauthStatus.wireValue != GoogleGeminiAuthStatusCode.READY.wireValue) {
+                issues += "provider ${provider.name} OAuth auth is ${oauthStatus.wireValue}"
             } else if (!authUsable) {
                 issues += if (oauthStatus != null) {
-                    "provider ${provider.name} OAuth auth is ${oauthStatus.code.wireValue}"
+                    "provider ${provider.name} OAuth auth is ${oauthStatus.wireValue}"
                 } else {
                     "provider ${provider.name} has no API key"
                 }
@@ -193,7 +228,7 @@ private fun providerStatusJson(
     provider: ProviderSetting,
     secretStore: SecretStore,
     includeModels: Boolean,
-    oauthStatusResolver: (ProviderSetting) -> GoogleGeminiAuthStatus?,
+    oauthStatusResolver: (ProviderSetting) -> ManagedOAuthStatus?,
 ): JsonObject = buildJsonObject {
     val oauthStatus = oauthStatusResolver(provider)
     val authUsable = oauthStatus?.usable ?: (provider.hasUsableAuth() || secretStore.hasStoredKey(provider))
@@ -206,7 +241,7 @@ private fun providerStatusJson(
     put("base_url_host", provider.hostOnly())
     put("has_api_key", if (oauthStatus != null) false else secretStore.hasStoredKey(provider))
     put("auth_usable", authUsable)
-    put("auth_status", oauthStatus?.code?.wireValue ?: if (authUsable) "ready" else "missing")
+    put("auth_status", oauthStatus?.wireValue ?: if (authUsable) "ready" else "missing")
     put("chat_model_count", provider.models.count { it.type == ModelType.CHAT })
     put("image_model_count", provider.models.count { it.type == ModelType.IMAGE })
     if (includeModels) {

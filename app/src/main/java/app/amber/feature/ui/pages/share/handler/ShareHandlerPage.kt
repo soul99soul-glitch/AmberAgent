@@ -19,6 +19,7 @@ import app.amber.core.utils.navigateToChatPage
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import org.koin.core.parameter.parametersOf
+import kotlinx.coroutines.CancellationException
 
 @Composable
 fun ShareHandlerPage(text: String, streamUris: List<String>) {
@@ -41,6 +42,7 @@ fun ShareHandlerPage(text: String, streamUris: List<String>) {
                 val displayName = filesManager.getFileNameFromUri(src) ?: src.lastPathSegment ?: "file"
                 workspaceManager.copyUriToUploads(src, displayName)
             }.getOrElse {
+                if (it is CancellationException) throw it
                 Log.w("ShareHandler", "Failed to stage $src to workspace; falling back to SAF URI", it)
                 src
             }

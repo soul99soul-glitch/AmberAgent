@@ -18,7 +18,7 @@ class MemoryDreamApplier(
     private val applyMutex = Mutex()
 
     suspend fun apply(plan: MemoryDreamPlan): MemoryDreamPlan = applyMutex.withLock {
-        val records = memoryRepository.getAllRecords().associateBy { it.id }
+        val records = memoryRepository.getAllRecords().associateBy { it.id }.toMutableMap()
         val applicablePlan = plan.onlyApplicableToManagedMemories(records)
         if (!applicablePlan.hasChanges) return@withLock applicablePlan
 
@@ -28,7 +28,7 @@ class MemoryDreamApplier(
                 ?.trim()
                 ?.takeIf { it.length >= 8 }
                 ?: target.content
-            memoryRepository.upsertRecord(target.copy(content = mergedContent))
+            records[target.id] = memoryRepository.upsertRecord(target.copy(content = mergedContent))
             eventLogger.log(
                 type = MemoryEventType.MEMORY_UPDATED,
                 memoryId = target.id,
@@ -36,7 +36,7 @@ class MemoryDreamApplier(
             )
             suggestion.duplicateMemoryIds.forEach { duplicateId ->
                 val duplicate = records[duplicateId] ?: return@forEach
-                memoryRepository.upsertRecord(duplicate.copy(archived = true))
+                records[duplicate.id] = memoryRepository.upsertRecord(duplicate.copy(archived = true))
                 eventLogger.log(
                     type = MemoryEventType.MEMORY_ARCHIVED,
                     memoryId = duplicateId,
@@ -48,7 +48,7 @@ class MemoryDreamApplier(
         applicablePlan.promoteMemoryIds.forEach { id ->
             val record = records[id] ?: return@forEach
             if (record.scope == MemoryScope.SHORT_TERM) {
-                memoryRepository.upsertRecord(
+                records[id] = memoryRepository.upsertRecord(
                     record.copy(
                         scope = MemoryScope.LONG_TERM,
                         assistantId = MemoryRepository.LONG_TERM_MEMORY_ID,
@@ -65,7 +65,7 @@ class MemoryDreamApplier(
 
         applicablePlan.archiveMemoryIds.forEach { id ->
             val record = records[id] ?: return@forEach
-            memoryRepository.upsertRecord(record.copy(archived = true))
+            records[id] = memoryRepository.upsertRecord(record.copy(archived = true))
             eventLogger.log(
                 type = MemoryEventType.MEMORY_ARCHIVED,
                 memoryId = id,
@@ -90,6 +90,7 @@ class MemoryDreamApplier(
                 supersedesIds = supersededIds,
                 confidence = suggestion.confidence,
             ).also { created ->
+                records[created.id] = created
                 eventLogger.log(
                     type = MemoryEventType.MEMORY_CREATED,
                     memoryId = created.id,
@@ -97,7 +98,8 @@ class MemoryDreamApplier(
                 )
             }
             oldRecords.forEach { oldRecord ->
-                memoryRepository.upsertRecord(oldRecord.copy(archived = true))
+                val currentRecord = records[oldRecord.id] ?: oldRecord
+                records[oldRecord.id] = memoryRepository.upsertRecord(currentRecord.copy(archived = true))
                 eventLogger.log(
                     type = MemoryEventType.MEMORY_ARCHIVED,
                     memoryId = oldRecord.id,

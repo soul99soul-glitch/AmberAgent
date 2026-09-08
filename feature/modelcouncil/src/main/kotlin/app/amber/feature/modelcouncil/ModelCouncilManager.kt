@@ -606,6 +606,7 @@ class ModelCouncilManager(
                 summary = result.finalRecommendation.ifBlank { result.error }.take(4_000),
                 error = result.error.takeIf { it.isNotBlank() },
                 cancelCapability = false,
+                clearError = true,
             )
         }
         appendEvent(runtimeRun, "finished", runToPayload(next))

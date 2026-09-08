@@ -911,7 +911,12 @@ private fun CodexOAuthConsole(
                                 .listModels(provider.codexOAuthReadyCopy())
                                 .sortedBy { it.modelId }
                         }.getOrNull()?.takeIf { it.isNotEmpty() } ?: defaultCodexOAuthModelList()
-                        onCommit(provider.copy(models = provider.models.withoutCodexReviewModels()))
+                        val newSelection = if (provider.models.withoutCodexReviewModels().isEmpty()) {
+                            listOfNotNull(fetchedModels.firstOrNull())
+                        } else {
+                            provider.models.withoutCodexReviewModels()
+                        }
+                        onCommit(provider.copy(models = newSelection))
                         toaster.show(
                             context.getString(R.string.setting_provider_page_codex_oauth_models_loaded, fetchedModels.size),
                             type = ToastType.Success,

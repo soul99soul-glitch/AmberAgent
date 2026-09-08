@@ -6,9 +6,12 @@ import app.amber.agent.data.db.dao.MemoryEventDAO
 import app.amber.agent.data.db.entity.MemoryCandidateEntity
 import app.amber.agent.data.db.entity.MemoryEntity
 import app.amber.agent.data.db.entity.MemoryEventEntity
+import app.amber.core.memory.export.MemoryImportExportManager
 import app.amber.core.memory.model.MemoryKind
 import app.amber.core.memory.model.MemoryScope
 import app.amber.feature.runtime.ContentDigest
+import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
@@ -299,5 +302,36 @@ class MemoryCasTest {
             assertEquals(3, error.actualRevision)
         }
         assertEquals("dream v3", repo.getLongTermMemories().single().content)
+    }
+
+    @Test
+    fun `repeated export is a snapshot for import`() = runBlocking {
+        val dao = FakeMemoryDAO()
+        val repo = repository(dao)
+        val manager = MemoryImportExportManager(repo)
+        val root = Files.createTempDirectory("memory-export").toFile()
+        try {
+            val deleted = repo.addMemory(MemoryScope.LONG_TERM, MemoryKind.NOTE, "memory to delete")
+            val edited = repo.addMemory(MemoryScope.LONG_TERM, MemoryKind.NOTE, "memory before edit")
+            manager.exportTo(root)
+
+            repo.deleteMemory(deleted.id)
+            repo.updateContent(edited.id, "memory after edit")
+            val secondExport = manager.exportTo(root)
+            assertEquals(1, secondExport.memoryCount)
+
+            val exportedRoot = File(root, "AmberAgentMemory")
+            assertTrue(exportedRoot.walkTopDown().none { it.isFile && it.name.contains("memory-to-delete") })
+            assertTrue(exportedRoot.walkTopDown().none { it.isFile && it.name.contains("memory-before-edit") })
+            assertTrue(exportedRoot.walkTopDown().any { it.isFile && it.name.contains("memory-after-edit") })
+
+            val imported = manager.importFrom(root)
+            assertEquals(1, imported.importedCount)
+            val records = repo.getAllRecords()
+            assertEquals(1, records.size)
+            assertEquals(listOf("memory after edit"), records.map { it.content })
+        } finally {
+            root.deleteRecursively()
+        }
     }
 }
