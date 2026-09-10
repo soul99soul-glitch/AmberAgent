@@ -24,6 +24,10 @@ class SubAgentTools(
     private val parentConversationId: Uuid,
     private val parentRunId: String? = null,
     private val parentToolsProvider: () -> List<Tool>,
+    /** Rebuild host-scoped tools with the internally assigned child scope id. */
+    private val parentToolsForRun: ((String) -> List<Tool>)? = null,
+    /** Close host resources when one generation reaches a terminal outcome. */
+    private val onRunFinished: ((String, String, Boolean) -> Unit)? = null,
     // P4-02: thread_graph_v2 gate — off keeps the legacy tool set (no
     // followup/send/interrupt) and the legacy in-memory behavior.
     private val threadGraphEnabled: Boolean = false,
@@ -135,7 +139,7 @@ class SubAgentTools(
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; passing both is invalid. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. Do not pass placeholder ids like \"custom\" or \"dynamic\". For OfficePro / terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
+                    put("subagent_id", stringProp("Roster subagent id. Omit this when using custom_subagent; passing both is invalid. In smart dynamic mode ordinary built-ins are disabled; use custom_subagent instead. Do not pass placeholder ids like \"custom\" or \"dynamic\". For terminal scenarios, call the underlying tools directly instead of dispatching a subagent."))
                     put("custom_subagent", buildJsonObject {
                         put("type", "object")
                         put("description", "Narrow dynamic subagent definition. name, description, and system_prompt are recommended, not strict: missing/generic names are replaced, and missing boundaries/report instructions are appended.")
@@ -196,6 +200,8 @@ class SubAgentTools(
                 input = input.jsonObject,
                 parentTools = parentToolsProvider(),
                 parentRunId = parentRunId,
+                parentToolsForRun = parentToolsForRun,
+                onRunFinished = onRunFinished,
             )
             listOf(UIMessagePart.Text(payload.toString()))
         }
@@ -292,6 +298,8 @@ class SubAgentTools(
                 input = input.jsonObject,
                 parentTools = parentToolsProvider(),
                 parentRunId = parentRunId,
+                parentToolsForRun = parentToolsForRun,
+                onRunFinished = onRunFinished,
             )
             listOf(UIMessagePart.Text(payload.toString()))
         }
@@ -351,7 +359,9 @@ class SubAgentTools(
     )
 
     private fun kotlinx.serialization.json.JsonElement.runId(): String =
-        jsonObject["run_id"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        jsonObject["run_id"]?.jsonPrimitive?.contentOrNull
+            ?: jsonObject["thread_id"]?.jsonPrimitive?.contentOrNull
+            ?: ""
 
     private fun stringProp(description: String) = buildJsonObject {
         put("type", "string")

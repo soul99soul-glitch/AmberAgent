@@ -11,6 +11,7 @@ import app.amber.agent.data.db.entity.BoardItemEntity
 import app.amber.agent.data.db.entity.BoardSignalEntity
 import app.amber.agent.data.db.entity.BoardWeightEntity
 import app.amber.agent.data.db.entity.DailyReviewEntity
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.time.ZoneId
 
 /**
@@ -27,6 +28,7 @@ class BoardRepository(
     private val focusRuleDao: BoardFocusRuleDAO,
     private val weightDao: BoardWeightDAO,
     private val dailyReviewDao: DailyReviewDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate,
 ) {
     // ---- Signals --------------------------------------------------------------------
 
@@ -51,17 +53,23 @@ class BoardRepository(
 
     suspend fun markSignalsProcessed(ids: List<String>, now: Long = System.currentTimeMillis()) {
         if (ids.isEmpty()) return
-        signalDao.markProcessed(ids, now)
+        restoreWriteGate.withCurrentWriterOrCancel {
+            signalDao.markProcessed(ids, now)
+        }
     }
 
     suspend fun pruneProcessedSignalsBefore(olderThanMs: Long): Int =
-        signalDao.pruneProcessedBefore(olderThanMs)
+        restoreWriteGate.withCurrentWriterOrCancel {
+            signalDao.pruneProcessedBefore(olderThanMs)
+        }
 
     // ---- Items ----------------------------------------------------------------------
 
     suspend fun saveItems(items: List<BoardItemEntity>) {
         if (items.isEmpty()) return
-        itemDao.insertAll(items)
+        restoreWriteGate.withCurrentWriterOrCancel {
+            itemDao.insertAll(items)
+        }
     }
 
     fun observeItems(boardDate: String): Flow<List<BoardItemEntity>> =
@@ -73,7 +81,11 @@ class BoardRepository(
         itemDao.getActiveByDate(boardDate)
 
     suspend fun markItemCompleted(id: String, now: Long = System.currentTimeMillis()) {
-        itemDao.markCompleted(id, now)
+        // A UI action has no owner epoch. Serialize it with restore so the ID lookup/update
+        // cannot race the transaction; after restore, a new tap targets the current row.
+        restoreWriteGate.withWriter {
+            itemDao.markCompleted(id, now)
+        }
     }
 
     suspend fun markItemsCompletedBySource(
@@ -82,11 +94,15 @@ class BoardRepository(
         boardDate: String = todayBoardDate(),
         now: Long = System.currentTimeMillis(),
     ) {
-        itemDao.markCompletedBySource(sourceType, sourceRef, boardDate, now)
+        restoreWriteGate.withCurrentWriterOrCancel {
+            itemDao.markCompletedBySource(sourceType, sourceRef, boardDate, now)
+        }
     }
 
     suspend fun markItemDismissed(id: String, now: Long = System.currentTimeMillis()) {
-        itemDao.markDismissed(id, now)
+        restoreWriteGate.withWriter {
+            itemDao.markDismissed(id, now)
+        }
     }
 
     suspend fun markItemsDismissedBySource(
@@ -95,12 +111,17 @@ class BoardRepository(
         boardDate: String = todayBoardDate(),
         now: Long = System.currentTimeMillis(),
     ) {
-        itemDao.markDismissedBySource(sourceType, sourceRef, boardDate, now)
+        restoreWriteGate.withCurrentWriterOrCancel {
+            itemDao.markDismissedBySource(sourceType, sourceRef, boardDate, now)
+        }
     }
 
     suspend fun getItem(id: String): BoardItemEntity? = itemDao.getById(id)
 
-    suspend fun purgeItemsBefore(keepFromDate: String): Int = itemDao.deleteBefore(keepFromDate)
+    suspend fun purgeItemsBefore(keepFromDate: String): Int =
+        restoreWriteGate.withCurrentWriterOrCancel {
+            itemDao.deleteBefore(keepFromDate)
+        }
 
     // ---- Focus rules ----------------------------------------------------------------
 
@@ -157,9 +178,15 @@ class BoardRepository(
     suspend fun getDailyReview(boardDate: String): DailyReviewEntity? =
         dailyReviewDao.getByDate(boardDate)
 
-    suspend fun saveDailyReview(entity: DailyReviewEntity) = dailyReviewDao.upsert(entity)
+    suspend fun saveDailyReview(entity: DailyReviewEntity) =
+        restoreWriteGate.withCurrentWriterOrCancel {
+            dailyReviewDao.upsert(entity)
+        }
 
-    suspend fun pruneDailyReviews(keepFromDate: String) = dailyReviewDao.deleteOlderThan(keepFromDate)
+    suspend fun pruneDailyReviews(keepFromDate: String) =
+        restoreWriteGate.withCurrentWriterOrCancel {
+            dailyReviewDao.deleteOlderThan(keepFromDate)
+        }
 
     suspend fun getCompletedItems(boardDate: String): List<BoardItemEntity> =
         itemDao.getCompletedByDate(boardDate)

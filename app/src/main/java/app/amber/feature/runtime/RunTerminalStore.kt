@@ -4,6 +4,7 @@ import android.util.Log
 import app.amber.agent.data.db.dao.RunTerminalDAO
 import app.amber.agent.data.db.entity.RunTerminalEntity
 import app.amber.core.ai.GenerationTerminal
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import kotlinx.coroutines.CancellationException
 
 private const val TAG = "RunTerminalStore"
@@ -121,69 +122,78 @@ interface RunTerminalStore {
 class RoomRunTerminalStore(
     private val dao: RunTerminalDAO,
     private val now: () -> Long = System::currentTimeMillis,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : RunTerminalStore {
 
     override suspend fun begin(runId: String, conversationId: String, assistantId: String?) {
-        val existing = dao.getByRunId(runId)
-        val nowMs = now()
-        dao.upsert(
-            existing?.copy(
-                conversationId = conversationId,
-                assistantId = assistantId,
-                state = RunTerminalState.RUNNING.name,
-                pauseReason = null,
-                updatedAtMs = nowMs,
-                finishedAtMs = null,
-            ) ?: RunTerminalEntity(
-                runId = runId,
-                conversationId = conversationId,
-                assistantId = assistantId,
-                state = RunTerminalState.RUNNING.name,
-                pauseReason = null,
-                startedAtMs = nowMs,
-                updatedAtMs = nowMs,
-                finishedAtMs = null,
+        withDurableWrite {
+            val existing = dao.getByRunId(runId)
+            val nowMs = now()
+            dao.upsert(
+                existing?.copy(
+                    conversationId = conversationId,
+                    assistantId = assistantId,
+                    state = RunTerminalState.RUNNING.name,
+                    pauseReason = null,
+                    updatedAtMs = nowMs,
+                    finishedAtMs = null,
+                ) ?: RunTerminalEntity(
+                    runId = runId,
+                    conversationId = conversationId,
+                    assistantId = assistantId,
+                    state = RunTerminalState.RUNNING.name,
+                    pauseReason = null,
+                    startedAtMs = nowMs,
+                    updatedAtMs = nowMs,
+                    finishedAtMs = null,
+                )
             )
-        )
+        }
     }
 
     override suspend fun pause(runId: String, state: RunTerminalState, reason: PauseReason?) {
-        val entity = dao.getByRunId(runId) ?: return
-        if (entity.finishedAtMs != null) return // terminal is write-once
-        dao.upsert(
-            entity.copy(
-                state = state.name,
-                pauseReason = reason?.name,
-                updatedAtMs = now(),
+        withDurableWrite {
+            val entity = dao.getByRunId(runId) ?: return@withDurableWrite
+            if (entity.finishedAtMs != null) return@withDurableWrite // terminal is write-once
+            dao.upsert(
+                entity.copy(
+                    state = state.name,
+                    pauseReason = reason?.name,
+                    updatedAtMs = now(),
+                )
             )
-        )
+        }
     }
 
     override suspend fun finish(runId: String, state: RunTerminalState, reason: PauseReason?) {
-        val entity = dao.getByRunId(runId) ?: return
-        if (entity.finishedAtMs != null) return // terminal is write-once
-        if (!state.isTerminal) {
-            runCatching { Log.w(TAG, "finish: refusing non-terminal state $state for $runId") }
-            return
-        }
-        // STEP_LIMIT must never be mapped to COMPLETED (plan §P1-03).
-        if (entity.state == RunTerminalState.STEP_LIMIT.name && state == RunTerminalState.COMPLETED) {
-            runCatching { Log.w(TAG, "finish: refusing to map STEP_LIMIT to COMPLETED for $runId") }
-            return
-        }
-        val nowMs = now()
-        dao.upsert(
-            entity.copy(
-                state = state.name,
-                pauseReason = reason?.name,
-                updatedAtMs = nowMs,
-                finishedAtMs = nowMs,
+        withDurableWrite {
+            val entity = dao.getByRunId(runId) ?: return@withDurableWrite
+            if (entity.finishedAtMs != null) return@withDurableWrite // terminal is write-once
+            if (!state.isTerminal) {
+                runCatching { Log.w(TAG, "finish: refusing non-terminal state $state for $runId") }
+                return@withDurableWrite
+            }
+            // STEP_LIMIT must never be mapped to COMPLETED (plan §P1-03).
+            if (entity.state == RunTerminalState.STEP_LIMIT.name && state == RunTerminalState.COMPLETED) {
+                runCatching { Log.w(TAG, "finish: refusing to map STEP_LIMIT to COMPLETED for $runId") }
+                return@withDurableWrite
+            }
+            val nowMs = now()
+            dao.upsert(
+                entity.copy(
+                    state = state.name,
+                    pauseReason = reason?.name,
+                    updatedAtMs = nowMs,
+                    finishedAtMs = nowMs,
+                )
             )
-        )
+        }
     }
 
     override suspend fun cancelWaitingUser(runId: String, conversationId: String): Boolean =
-        dao.cancelWaitingUser(runId, conversationId, now()) > 0
+        withDurableWrite {
+            dao.cancelWaitingUser(runId, conversationId, now()) > 0
+        }
 
     override suspend fun get(runId: String): RunTerminal? =
         dao.getByRunId(runId)?.let(RunTerminal::from)
@@ -193,6 +203,11 @@ class RoomRunTerminalStore(
 
     override suspend fun unfinished(): List<RunTerminal> =
         dao.listUnfinished().map(RunTerminal::from)
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
+    }
 }
 
 /**

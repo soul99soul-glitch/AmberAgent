@@ -7,7 +7,6 @@ import app.amber.feature.board.collector.AppUsageCollector
 import app.amber.feature.board.collector.BoardSignalCollector
 import app.amber.feature.board.collector.CalendarSignalCollector
 import app.amber.feature.board.collector.ChatHistorySignalCollector
-import app.amber.feature.board.collector.FeishuDocSignalCollector
 import app.amber.feature.board.collector.FeishuMessageSignalCollector
 import app.amber.feature.board.collector.NotificationSignalCollector
 import app.amber.feature.board.collector.TimeAnchorSignalCollector
@@ -26,8 +25,6 @@ import app.amber.feature.board.hotlist.deepread.template.DeepReadTemplateReposit
 import app.amber.feature.board.hotlist.providers.BuiltInHotListProviders
 import app.amber.feature.board.worker.BoardNotifier
 import app.amber.feature.board.worker.BoardScheduler
-import app.amber.feature.office.radar.DocRadar
-import app.amber.feature.office.radar.FeishuChangeNotifier
 import app.amber.feature.tools.AgentToolSetFactory
 import app.amber.feature.ui.pages.board.BoardViewModel
 import org.koin.core.module.dsl.viewModel
@@ -37,15 +34,13 @@ import org.koin.dsl.module
  * Today Board Koin module — extracted from AppModule in M1.5 continuation.
  *
  * Covers the pull-based signal collection pipeline (calendar, chat history,
- * Feishu docs/messages, notifications, time anchors), the SignalAggregator
+ * Feishu messages, notifications, time anchors), the SignalAggregator
  * that scores+filters them, the BoardScheduler / BoardNotifier that anchor
  * the daily run, the BoardAgent / DailyReviewAgent that consume scored
  * signals to produce items + reviews, and the BoardViewModel that surfaces
  * them to UI.
  */
 val boardModule = module {
-    single { FeishuChangeNotifier(get()) }
-
     single { BuiltInHotListProviders(client = get(), json = get()) }
 
     single { HotListAggregator() }
@@ -109,6 +104,7 @@ val boardModule = module {
             playbookRepository = get(),
             researchHarness = get(),
             appScope = get(),
+            restoreWriteGate = get(),
         )
     }
 
@@ -126,25 +122,7 @@ val boardModule = module {
     // Today Board — signal collectors
     single { CalendarSignalCollector(get()) }
 
-    single {
-        DocRadar(
-            context = get(),
-            subscriptionDao = get(),
-            changeLogDao = get(),
-            mcpManager = get(),
-            settingsStore = get(),
-            notifier = get(),
-        )
-    }
-
     single { ChatHistorySignalCollector(get()) }
-
-    single {
-        FeishuDocSignalCollector(
-            subscriptionDao = get<app.amber.agent.data.db.dao.DocSubscriptionDAO>(),
-            changeLogDao = get<app.amber.agent.data.db.dao.DocChangeLogDAO>(),
-        )
-    }
 
     single { FeishuMessageSignalCollector(get()) }
 
@@ -159,7 +137,6 @@ val boardModule = module {
         val collectors: List<BoardSignalCollector> = listOf(
             get<CalendarSignalCollector>(),
             get<ChatHistorySignalCollector>(),
-            get<FeishuDocSignalCollector>(),
             get<FeishuMessageSignalCollector>(),
             get<TimeAnchorSignalCollector>(),
         )
@@ -208,6 +185,7 @@ val boardModule = module {
             boardRepository = get(),
             conversationRepository = get(),
             appUsageCollector = get(),
+            restoreWriteGate = get(),
         )
     }
 

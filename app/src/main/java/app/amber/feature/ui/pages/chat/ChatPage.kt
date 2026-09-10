@@ -50,6 +50,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -108,6 +109,7 @@ import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.ai.mcp.McpToolNamespace
 import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.settings.Settings
+import app.amber.core.settings.findProvider
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.core.files.FilesManager
 import app.amber.core.context.ActiveCompactBoundary
@@ -145,6 +147,7 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.feature.ui.hooks.EditStateContent
 import app.amber.feature.ui.hooks.useEditState
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.core.utils.JsonInstant
 import app.amber.core.utils.base64Decode
 import app.amber.core.utils.jsonPrimitiveOrNull
@@ -155,13 +158,27 @@ import org.koin.core.parameter.parametersOf
 import kotlin.uuid.Uuid
 
 @Composable
-fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
+fun ChatPage(
+    id: Uuid,
+    text: String?,
+    files: List<Uri>,
+    nodeId: Uuid? = null,
+    messageId: String? = null,
+    toolCallId: String? = null,
+) {
     // T2 perf-layer dispatch — flag-gated route to ChatPageSplit (scaffold).
     // Default flag = false → legacy path below runs unchanged. See PerfFlags.kt
     // + ChatPageSplit.kt for the new code path and on-device verification
     // steps in docs/visual-sanity-check.md.
     if (app.amber.agent.PerfFlags.USE_SPLIT_CHATPAGE_COMPOSABLES) {
-        ChatPageSplit(id = id, text = text, files = files, nodeId = nodeId)
+        ChatPageSplit(
+            id = id,
+            text = text,
+            files = files,
+            nodeId = nodeId,
+            messageId = messageId,
+            toolCallId = toolCallId,
+        )
         return
     }
 
@@ -202,6 +219,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     val pendingUserMessageState = vm.pendingUserMessages.collectAsStateWithLifecycle()
     val pendingUserMessages = pendingUserMessageState.value
     val currentChatModel by vm.currentChatModel.collectAsStateWithLifecycle()
+    val configurationIssue = rememberChatConfigurationIssue(currentChatModel, setting.providers)
+    val latestConfigurationIssue by rememberUpdatedState(configurationIssue)
+    val context = LocalContext.current
     val enableWebSearch by vm.enableWebSearch.collectAsStateWithLifecycle()
     val errors by vm.errors.collectAsStateWithLifecycle()
     val globalErrors by vm.globalErrors.collectAsStateWithLifecycle()
@@ -215,6 +235,14 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         compactTwoPane || windowAdaptiveInfo.width >= 1100.dp
 
     val inputState = vm.inputState
+    var anchorNodeId by remember(id, messageId, toolCallId) { mutableStateOf<Uuid?>(null) }
+
+    LaunchedEffect(id, messageId, toolCallId) {
+        if (nodeId == null && (messageId != null || toolCallId != null)) {
+            anchorNodeId = vm.findNodeIdForAnchor(messageId, toolCallId)
+        }
+    }
+    val resolvedNodeId = nodeId ?: anchorNodeId
 
     // 初始化输入状态（处理传入的 files 和 text 参数）
     LaunchedEffect(files, text) {
@@ -289,6 +317,11 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
             if (event is AppEvent.EditGeneratedImage &&
                 event.sourceImageUrl.startsWith(chatImagesRoot)
             ) {
+                val issue = latestConfigurationIssue
+                if (issue != null) {
+                    toaster.show(context.getString(issue.messageRes), type = ToastType.Error)
+                    return@collect
+                }
                 vm.handleMessageSend(
                     content = buildList {
                         if (event.prompt.isNotBlank()) add(UIMessagePart.Text(event.prompt))
@@ -314,9 +347,9 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
     )
     // reverseLayout: lazy index 0 就是视觉底部（最新内容），默认状态即钉底，
     // 只有深链 nodeId 需要计算初始索引。
-    val initialChatListIndex = remember(conversation.id, nodeId, conversation.messageNodes, chatTimelinePlan) {
-        if (nodeId != null) {
-            val messageIndex = conversation.messageNodes.indexOfFirst { it.id == nodeId }
+    val initialChatListIndex = remember(conversation.id, resolvedNodeId, conversation.messageNodes, chatTimelinePlan) {
+        if (resolvedNodeId != null) {
+            val messageIndex = conversation.messageNodes.indexOfFirst { it.id == resolvedNodeId }
             chatTimelinePlan.lazyIndexForMessage(messageIndex).takeIf { messageIndex >= 0 } ?: 0
         } else {
             0
@@ -326,14 +359,14 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         rememberLazyListState(initialFirstVisibleItemIndex = initialChatListIndex)
     }
 
-    LaunchedEffect(nodeId, conversation.messageNodes.size, timelineLoadState.initialized, timelineLoadState.isFullyLoaded) {
+    LaunchedEffect(resolvedNodeId, conversation.messageNodes.size, timelineLoadState.initialized, timelineLoadState.isFullyLoaded) {
         // 无深链时 reverseLayout 的 (0,0) 默认位就是底部，直接标记完成。
-        if (nodeId == null) {
+        if (resolvedNodeId == null) {
             vm.chatListInitialized = true
         } else if (!vm.chatListInitialized) {
             // 深链目标可能尚未加载：找到即跳（目标钉在视口底缘、消息向上展开
             // 进入视口），没找到就先补齐时间线再等下一次触发。
-            val index = conversation.messageNodes.indexOfFirst { it.id == nodeId }
+            val index = conversation.messageNodes.indexOfFirst { it.id == resolvedNodeId }
             if (index >= 0) {
                 val listIndex = chatTimelinePlan.lazyIndexForMessage(index)
                 if (listIndex != null) {
@@ -367,6 +400,7 @@ fun ChatPage(id: Uuid, text: String?, files: List<Uri>, nodeId: Uuid? = null) {
         chatTimelinePlan = chatTimelinePlan,
         enableWebSearch = enableWebSearch,
         currentChatModel = currentChatModel,
+        configurationIssue = configurationIssue,
         bigScreen = isBigScreen,
         errors = errors,
         globalErrors = globalErrors,
@@ -452,6 +486,7 @@ private fun ChatPageContent(
     chatTimelinePlan: ChatTimelinePlan,
     enableWebSearch: Boolean,
     currentChatModel: Model?,
+    configurationIssue: ChatConfigurationIssue?,
     errors: List<ChatError>,
     globalErrors: List<ChatError> = emptyList(),
     onDismissError: (Uuid) -> Unit,
@@ -464,6 +499,11 @@ private fun ChatPageContent(
 ) {
     val scope = rememberCoroutineScope()
     val toaster = LocalToaster.current
+    val context = LocalContext.current
+    val filesManager: FilesManager = koinInject()
+    val chatProvidersForMenu = setting.providers.filter { provider ->
+        provider.enabled && provider.models.any { it.type == ModelType.CHAT }
+    }
     var previewMode by rememberSaveable { mutableStateOf(false) }
     var sandboxOverlayOpen by rememberSaveable { mutableStateOf(false) }
     var queuePanelOpen by rememberSaveable { mutableStateOf(false) }
@@ -472,6 +512,11 @@ private fun ChatPageContent(
     val hazeState = rememberHazeState()
     val activityStore: AgentToolActivityStore = koinInject()
     val liveSandboxActivity by activityStore.sandboxActivity.collectAsStateWithLifecycle()
+    val webMountSessionOwner: WebMountSessionOwner = koinInject()
+    val webMountSessions by webMountSessionOwner.sessions.collectAsStateWithLifecycle()
+    val conversationWebMountSessions = webMountSessions.filter {
+        it.conversationId == conversation.id.toString()
+    }
     val conversationIdText = conversation.id.toString()
     val messageSandboxActivities = remember(conversation.messageNodes, loadingJob, processingStatus) {
         conversation.deriveSandboxActivities(
@@ -512,6 +557,10 @@ private fun ChatPageContent(
     fun confirmEdit(regenerate: Boolean) {
         val parts = inputState.getContents()
         if (parts.isEmptyInputMessage()) return
+        if (regenerate && configurationIssue != null) {
+            toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
+            return
+        }
         val accepted = vm.handleMessageEdit(
             parts = parts,
             messageId = inputState.editingMessage!!,
@@ -629,8 +678,25 @@ private fun ChatPageContent(
                             generating = loadingJob != null,
                             onSaveOnly = { confirmEdit(regenerate = false) },
                             onSaveAndRegenerate = { confirmEdit(regenerate = true) },
-                            onCancelEdit = { inputState.clearInput() },
+                            onCancelEdit = {
+                                val discardedFiles = inputState.drainAttachmentFilesForDiscard()
+                                inputState.clearInput()
+                                if (discardedFiles.isNotEmpty()) {
+                                    scope.launch { filesManager.deleteChatFiles(discardedFiles) }
+                                }
+                            },
                         )
+                    }
+                    if (loadingJob == null && configurationIssue != null &&
+                        (inputState.isEditing() || !canSendWithoutChatModel(inputState.getContents()))) {
+                        ChatConfigurationHint(configurationIssue) {
+                            if (configurationIssue == ChatConfigurationIssue.MissingModel && chatProvidersForMenu.isNotEmpty()) {
+                                modelMenuOpen = true
+                            } else {
+                                val owner = currentChatModel?.findProvider(setting.providers, checkOverwrite = false)
+                                navController.navigate(owner?.let { Screen.SettingProviderDetail(it.id.toString()) } ?: Screen.SettingProvider)
+                            }
+                        }
                     }
                     ChatInput(
                     state = inputState,
@@ -671,14 +737,18 @@ private fun ChatPageContent(
                     } else {
                         null
                     },
+                    webMountSessions = conversationWebMountSessions,
+                    onOpenWebMountSession = { sessionId, reopen ->
+                        navController.navigate(Screen.WebMountSession(sessionId = sessionId, reopen = reopen))
+                    },
                     onOpenQueue = {
                         queuePanelOpen = true
                     },
                     suggestionFillPulseKey = suggestionFillPulseKey,
                     onSendClick = { queueMode, parts ->
                         val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
-                        if (currentChatModel == null && !canRouteWithoutChatModel) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                        if (configurationIssue != null && !canRouteWithoutChatModel) {
+                            toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
                             return@ChatInput
                         }
                         val accepted = if (inputState.isEditing()) {
@@ -700,8 +770,8 @@ private fun ChatPageContent(
                     },
                     onLongSendClick = { queueMode, parts ->
                         val canRouteWithoutChatModel = !inputState.isEditing() && canSendWithoutChatModel(parts)
-                        if (currentChatModel == null && !canRouteWithoutChatModel) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                        if (configurationIssue != null && !canRouteWithoutChatModel) {
+                            toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
                             return@ChatInput
                         }
                         val accepted = if (inputState.isEditing()) {
@@ -788,7 +858,11 @@ private fun ChatPageContent(
                 onDismissError = onDismissError,
                 onClearAllErrors = onClearAllErrors,
                 onRegenerate = {
-                    vm.regenerateAtMessage(it)
+                    if (configurationIssue != null) {
+                        toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
+                    } else {
+                        vm.regenerateAtMessage(it)
+                    }
                 },
                 onEdit = {
                     inputState.editingMessage = it.id
@@ -831,15 +905,13 @@ private fun ChatPageContent(
                     val text = suggestion.trim()
                     if (text.isNotEmpty()) {
                         val parts = listOf(UIMessagePart.Text(text))
-                        if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                        if (configurationIssue != null && !canSendWithoutChatModel(parts)) {
+                            toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
                         } else {
-                            inputState.editingMessage = null
                             vm.handleMessageSend(
                                 content = parts,
                                 queueMode = PendingUserMessageMode.FOLLOWUP,
                             )
-                            inputState.clearInput()
                         }
                     }
                 },
@@ -874,8 +946,8 @@ private fun ChatPageContent(
                     val text = instruction.trim()
                     if (text.isNotEmpty()) {
                         val parts = listOf(UIMessagePart.Text(text))
-                        if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
-                            toaster.show("请先选择模型", type = ToastType.Error)
+                        if (configurationIssue != null && !canSendWithoutChatModel(parts)) {
+                            toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
                         } else {
                             inputState.editingMessage = null
                             vm.handleMessageSend(
@@ -890,8 +962,8 @@ private fun ChatPageContent(
                     val parts = listOf(UIMessagePart.Text(text))
                     if (text.isEmpty()) {
                         false
-                    } else if (currentChatModel == null && !canSendWithoutChatModel(parts)) {
-                        toaster.show("请先选择模型", type = ToastType.Error)
+                    } else if (configurationIssue != null && !canSendWithoutChatModel(parts)) {
+                        toaster.show(context.getString(configurationIssue.messageRes), type = ToastType.Error)
                         false
                     } else {
                         vm.handleMessageSend(
@@ -995,9 +1067,6 @@ private fun ChatPageContent(
             // Graphite TopModelMenu —— 从 header 正下方 (innerPadding.top) 卷帘展开、覆盖内容区
             // 的服务商/模型手风琴下拉（替代旧 ModalBottomSheet）。
             val chatModelIdForMenu = setting.chatModelId
-            val chatProvidersForMenu = setting.providers.filter { p ->
-                p.enabled && p.models.any { it.type == ModelType.CHAT }
-            }
             val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { p ->
                 p.models.any { it.id == chatModelIdForMenu }
             }?.id

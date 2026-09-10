@@ -12,7 +12,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.service.ConversationAccess
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.time.Instant
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 private const val TAG = "ChatEventProjector"
@@ -22,6 +26,7 @@ class ChatEventProjector(
     private val conversationRepo: ConversationRepository,
     private val conversationAccess: ConversationAccess,
     private val json: Json,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     fun observeProjection(runId: AgentRunId): Flow<ProjectionState> {
         return eventStore.observeRun(runId).map { snapshot ->
@@ -38,6 +43,7 @@ class ChatEventProjector(
         conversationId: Uuid,
         event: ChatEventPayload.AssistantMessageFinalized,
     ) {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         val messageId = Uuid.parse(event.messageId)
         val conversation = conversationAccess.getConversationFlow(conversationId).value
 
@@ -52,11 +58,13 @@ class ChatEventProjector(
             return
         }
 
-        conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-        conversationRepo.updateConversationMetadata(
-            conversationId = conversationId,
-            updateAt = updatedConversation.updateAt,
-        )
+        withRestoreWrite(expectedRestoreEpoch) {
+            conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+            conversationRepo.updateConversationMetadata(
+                conversationId = conversationId,
+                updateAt = updatedConversation.updateAt,
+            )
+        }
         Log.i(TAG, "Projected assistant message $messageId into conversation $conversationId")
     }
 
@@ -116,13 +124,16 @@ class ChatEventProjector(
     }
 
     private suspend fun projectInterruptedRun(runId: AgentRunId) {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         val checkpoint = latestStreamCheckpoint(eventStore.listEvents(runId), json) ?: return
         val conversationId = runCatching { Uuid.parse(checkpoint.conversationId) }.getOrNull()
             ?: return
         val conversation = conversationRepo.getConversationById(conversationId) ?: return
         val projected = InterruptedRunProjection.project(conversation, checkpoint)
         if (projected !== conversation) {
-            conversationRepo.updateConversation(projected)
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationRepo.updateConversation(projected)
+            }
             Log.i(
                 TAG,
                 "Projected interrupted run ${runId.value} into conversation $conversationId " +
@@ -131,6 +142,24 @@ class ChatEventProjector(
         }
         // Recovery consumed the checkpoints; drop them so agent_event stays lean.
         eventStore.deleteEventsByType(runId, ChatEventPayload.StreamCheckpoint.TYPE)
+    }
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreWrite(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        val gate = restoreWriteGate ?: return block()
+        val epoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+            ?: gate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) {
+            gate.withCurrentWriterOrCancel(block)
+        }
     }
 
     companion object {

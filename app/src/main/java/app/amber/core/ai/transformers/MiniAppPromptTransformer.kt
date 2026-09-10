@@ -148,7 +148,7 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
           "description": "1-80 字描述",
           "icon": "最多 2 个字符",
           "category": "tool|game|info|custom",
-          "permissions": ["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read"],
+          "permissions": ["storage","toast","theme","network","externalImages","search","clipboard.copy","host.updateBoardSummary","host.context","host.sendToConversation","host.createArtifact","ai.generate","sharedStore","eventBus","launch","sensor","location","clipboard.read","haptics","device","screen","speech","share","openURL"],
           "html": "<!DOCTYPE html>..."
         }
         约束：只生成单文件 HTML；不要使用 script src、iframe、form、eval、new Function、import()、XMLHttpRequest、WebSocket、localStorage、sessionStorage、geolocation。
@@ -164,6 +164,15 @@ object MiniAppPromptTransformer : InputMessageTransformer, KoinComponent {
         事件用 await Amber.eventBus.subscribe({namespace,topic}, handler) 和 await Amber.eventBus.publish({namespace,topic,payload})，必须声明 eventBus；只在 Runner 生命周期内有效。
         打开其它小应用用 await Amber.launch({appId})，必须声明 launch，不允许 URL。
         定位用 await Amber.location.getCurrent({accuracy:"coarse"})，传感器用 await Amber.sensor.subscribe({type:"accelerometer|gyroscope|light", intervalMs:500}, handler)，都必须声明权限且会弹确认。常见别名 gyro / ambientLight / ambient-light 也会映射到传感器。
+        能力探测用 await Amber.getAppInfo() / await Amber.getCapabilities()；探测不会弹授权，返回 platform、bridgeVersion、可用 methods 和每项权限的 declared/enabled/decision。
+        系统能力（首次使用会请求授权，需声明对应 permission）：振动 await Amber.haptics.impact({style:"light|medium|heavy|soft|rigid", intensity:0..1}) / Amber.haptics.notification({type:"success|warning|error"}) / Amber.haptics.selection()，声明 haptics。
+        设备信息 await Amber.device.getInfo() / await Amber.device.getBattery()，声明 device；无电池时返回 null/unknown。
+        屏幕 await Amber.screen.getBrightness() / Amber.screen.setBrightness(0.6 或 {brightness:0..1}) / Amber.screen.setKeepAwake(true 或 {enabled})，声明 screen；只影响当前 Runner，退出后恢复。
+        朗读 await Amber.speech.speak(text 或 {text, language, rate:0..1, pitch:0.5..2, volume:0..1}) / Amber.speech.getVoices() / Amber.speech.stop() / pause() / resume()，声明 speech；text 1-4000 字符，无引擎时返回错误。
+        分享 await Amber.share({text, url})，声明 share；text/url 至少一项，返回 {completed}，打开系统面板不等于发送成功。
+        外链 await Amber.openURL(url 或 {url})，声明 openURL；仅允许公开 https、mailto、tel，每次都会弹确认；不要用 window.open 或 a 标签外跳。
+        二维码 await Amber.qrcode.generate(text 或 {text, size:128..1024})；text 最多 1024 UTF-8 字节，size 默认 256，返回 {dataURL,width,height}；二维码不需要 per-app 权限，但受系统总开关控制。
+        系统能力都要 try/catch 并处理拒绝（用户拒绝/未声明/开关关闭会 reject，error.code 可区分），不要假设一定成功。
         如做新闻、阅读、列表类小应用，更新按钮可以调用 Amber.search 或 Amber.fetch 获取新内容；如果未声明对应权限，就只能更新本地状态或演示数据。
         新闻、阅读、列表类小应用必须支持纵向滚动；不要把 body 固定成 overflow:hidden 或只能显示一屏，除非用户明确要求全屏游戏/计时器类工具。
         为避免 JSON 被截断：HTML 尽量紧凑，目标控制在 200KB 内；不要生成大型静态 JSON 数据集、长篇文章库、base64 大图或重复模板。杂志/新闻类只保留少量 seed 数据，其余通过 fetch/Amber.fetch 或 Amber.search 刷新。

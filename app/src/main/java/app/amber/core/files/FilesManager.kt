@@ -18,6 +18,7 @@ import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -28,17 +29,22 @@ import app.amber.common.android.Logging
 import app.amber.agent.AppScope
 import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.core.repository.FilesRepository
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.exportImage
 import app.amber.core.utils.exportImageFile
 import app.amber.core.utils.getActivity
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.uuid.Uuid
 
 class FilesManager(
     private val context: Context,
     private val repository: FilesRepository,
     private val appScope: AppScope,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     companion object {
         private const val TAG = "FilesManager"
@@ -64,18 +70,25 @@ class FilesManager(
             target.delete()
             throw error
         }
-        val now = System.currentTimeMillis()
-        repository.insert(
-            ManagedFileEntity(
-                folder = FileFolders.UPLOAD,
-                relativePath = "${FileFolders.UPLOAD}/${target.name}",
-                displayName = resolvedName,
-                mimeType = resolvedMime,
-                sizeBytes = target.length(),
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
+        try {
+            withManagedFileWrite {
+                val now = System.currentTimeMillis()
+                repository.insert(
+                    ManagedFileEntity(
+                        folder = FileFolders.UPLOAD,
+                        relativePath = "${FileFolders.UPLOAD}/${target.name}",
+                        displayName = resolvedName,
+                        mimeType = resolvedMime,
+                        sizeBytes = target.length(),
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                )
+            }
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
     }
 
     suspend fun saveUploadFromBytes(
@@ -85,18 +98,25 @@ class FilesManager(
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
         val target = createTargetFile(FileFolders.UPLOAD, displayName, mimeType)
         target.writeBytes(bytes)
-        val now = System.currentTimeMillis()
-        repository.insert(
-            ManagedFileEntity(
-                folder = FileFolders.UPLOAD,
-                relativePath = "${FileFolders.UPLOAD}/${target.name}",
-                displayName = displayName,
-                mimeType = mimeType,
-                sizeBytes = target.length(),
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
+        try {
+            withManagedFileWrite {
+                val now = System.currentTimeMillis()
+                repository.insert(
+                    ManagedFileEntity(
+                        folder = FileFolders.UPLOAD,
+                        relativePath = "${FileFolders.UPLOAD}/${target.name}",
+                        displayName = displayName,
+                        mimeType = mimeType,
+                        sizeBytes = target.length(),
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                )
+            }
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
     }
 
     suspend fun saveUploadText(
@@ -106,18 +126,25 @@ class FilesManager(
     ): ManagedFileEntity = withContext(Dispatchers.IO) {
         val target = createTargetFile(FileFolders.UPLOAD, displayName, mimeType)
         target.writeText(text)
-        val now = System.currentTimeMillis()
-        repository.insert(
-            ManagedFileEntity(
-                folder = FileFolders.UPLOAD,
-                relativePath = "${FileFolders.UPLOAD}/${target.name}",
-                displayName = displayName,
-                mimeType = mimeType,
-                sizeBytes = target.length(),
-                createdAt = now,
-                updatedAt = now,
-            )
-        )
+        try {
+            withManagedFileWrite {
+                val now = System.currentTimeMillis()
+                repository.insert(
+                    ManagedFileEntity(
+                        folder = FileFolders.UPLOAD,
+                        relativePath = "${FileFolders.UPLOAD}/${target.name}",
+                        displayName = displayName,
+                        mimeType = mimeType,
+                        sizeBytes = target.length(),
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                )
+            }
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
     }
 
     fun observe(folder: String = FileFolders.UPLOAD): Flow<List<ManagedFileEntity>> =
@@ -133,11 +160,19 @@ class FilesManager(
     fun getFile(entity: ManagedFileEntity): File =
         File(context.filesDir, entity.relativePath)
 
-    suspend fun createChatFilesByContents(uris: List<Uri>): List<Uri> = withContext(Dispatchers.IO) {
-        createChatFilesByContentsBlocking(uris)
+    suspend fun createChatFilesByContents(uris: List<Uri>): List<Uri> {
+        // Capture the generation epoch before copying. The tracker runs in
+        // appScope after this function returns and must retain this token.
+        val expectedRestoreEpoch = currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+        return withContext(Dispatchers.IO) {
+            createChatFilesByContentsBlocking(uris, expectedRestoreEpoch)
+        }
     }
 
-    private fun createChatFilesByContentsBlocking(uris: List<Uri>): List<Uri> {
+    private fun createChatFilesByContentsBlocking(
+        uris: List<Uri>,
+        expectedRestoreEpoch: Long?,
+    ): List<Uri> {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
@@ -166,7 +201,12 @@ class FilesManager(
                     throw error
                 }
                 val guessedMime = sourceMime ?: guessMimeType(file, sourceName)
-                trackUploadFile(file = file, displayName = sourceName, mimeType = guessedMime)
+                trackUploadFile(
+                    file = file,
+                    displayName = sourceName,
+                    mimeType = guessedMime,
+                    expectedRestoreEpoch = expectedRestoreEpoch,
+                )
                 newUris.add(file.toUri())
             }.onFailure {
                 it.printStackTrace()
@@ -180,7 +220,10 @@ class FilesManager(
         return newUris
     }
 
-    fun createChatFilesByByteArrays(byteArrays: List<ByteArray>): List<Uri> {
+    fun createChatFilesByByteArrays(
+        byteArrays: List<ByteArray>,
+        expectedRestoreEpoch: Long? = null,
+    ): List<Uri> {
         val newUris = mutableListOf<Uri>()
         val dir = context.filesDir.resolve(FileFolders.UPLOAD)
         if (!dir.exists()) {
@@ -199,7 +242,12 @@ class FilesManager(
             file.outputStream().use { outputStream ->
                 outputStream.write(byteArray)
             }
-            trackUploadFile(file = file, displayName = "image.png", mimeType = "image/png")
+            trackUploadFile(
+                file = file,
+                displayName = "image.png",
+                mimeType = "image/png",
+                expectedRestoreEpoch = expectedRestoreEpoch,
+            )
             newUris.add(newUri)
         }
         return newUris
@@ -228,8 +276,9 @@ class FilesManager(
     }
 
     @OptIn(ExperimentalEncodingApi::class)
-    suspend fun convertBase64ImagePartToLocalFile(message: UIMessage): UIMessage =
-        withContext(Dispatchers.IO) {
+    suspend fun convertBase64ImagePartToLocalFile(message: UIMessage): UIMessage {
+        val expectedRestoreEpoch = currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+        return withContext(Dispatchers.IO) {
             message.copy(
                 parts = message.parts.map { part ->
                     when (part) {
@@ -245,7 +294,10 @@ class FilesManager(
                                     return@map part
                                 }
                                 val byteArray = bitmap.compressToPng()
-                                val urls = createChatFilesByByteArrays(listOf(byteArray))
+                                val urls = createChatFilesByByteArrays(
+                                    byteArrays = listOf(byteArray),
+                                    expectedRestoreEpoch = expectedRestoreEpoch,
+                                )
                                 Log.i(
                                     TAG,
                                     "convertBase64ImagePartToLocalFile: convert base64 img to ${urls.joinToString(", ")}"
@@ -263,38 +315,74 @@ class FilesManager(
                 }
             )
         }
+    }
 
-    fun deleteChatFiles(uris: List<Uri>) {
-        appScope.launch(Dispatchers.IO) {
-            // Files under the workspace mirror are user-visible to Agent tools as
-            // `/workspace/uploads/<name>` (and may have been moved/renamed inside the
-            // workspace by the user or the Agent itself). Conversation deletion or
-            // attachment removal must NOT drag those files into the bin — leave them in
-            // place and let the user manage workspace storage explicitly.
-            val relativePaths = mutableSetOf<String>()
-            uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
-                runCatching {
-                    val file = uri.toFile()
-                    val relativePath = getRelativePathInFilesDir(file)
-                    if (relativePath == null || !relativePath.startsWith("${FileFolders.UPLOAD}/")) {
-                        return@runCatching
-                    }
-                    relativePaths.add(relativePath)
-                    if (file.exists()) {
-                        file.delete()
-                    }
-                }.onFailure {
-                    Log.e(TAG, "deleteChatFiles: Failed to delete $uri", it)
-                    Logging.log(TAG, "deleteChatFiles: Failed $uri ${it.message} | ${it.stackTraceToString()}")
+    /**
+     * Schedule attachment cleanup. Callers that already own a background
+     * generation must pass the epoch captured when that generation started;
+     * otherwise the old callback could unlink a restored file before reaching
+     * the managed-files DAO gate.
+     */
+    fun deleteChatFiles(uris: List<Uri>, expectedRestoreEpoch: Long? = null) {
+        appScope.launch(Dispatchers.IO + restoreEpochContext(expectedRestoreEpoch)) {
+            runCatching { deleteChatFilesInternal(uris) }
+                .onFailure {
+                    Log.e(TAG, "deleteChatFiles: cleanup rejected or failed", it)
+                    Logging.log(TAG, "deleteChatFiles: cleanup failed ${it.message} | ${it.stackTraceToString()}")
                 }
+        }
+    }
+
+    /** Await cleanup when conversation deletion needs a decidable outcome. */
+    suspend fun deleteChatFilesAndAwait(
+        uris: List<Uri>,
+        expectedRestoreEpoch: Long? = null,
+    ) {
+        val capturedEpoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+        withContext(Dispatchers.IO + restoreEpochContext(capturedEpoch)) {
+            deleteChatFilesInternal(uris)
+        }
+    }
+
+    private suspend fun deleteChatFilesInternal(uris: List<Uri>) {
+        // Files under the workspace mirror are user-visible to Agent tools as
+        // `/workspace/uploads/<name>` (and may have been moved/renamed inside the
+        // workspace by the user or the Agent itself). Conversation deletion or
+        // attachment removal must NOT drag those files into the bin — leave them in
+        // place and let the user manage workspace storage explicitly.
+        val relativePaths = mutableSetOf<String>()
+        uris.filter { it.toString().startsWith("file:") }.forEach { uri ->
+            runCatching {
+                val file = uri.toFile()
+                val relativePath = getRelativePathInFilesDir(file)
+                if (relativePath == null || !relativePath.startsWith("${FileFolders.UPLOAD}/")) {
+                    return@runCatching
+                }
+                relativePaths.add(relativePath)
+            }.onFailure {
+                Log.e(TAG, "deleteChatFiles: Failed to inspect $uri", it)
+                Logging.log(TAG, "deleteChatFiles: Failed $uri ${it.message} | ${it.stackTraceToString()}")
             }
-            relativePaths.forEach { path ->
-                runCatching {
+        }
+        relativePaths.forEach { path ->
+            try {
+                withManagedFileWrite {
+                    // Keep the local unlink beside the managed-file row delete
+                    // so restore cannot replace the row between the two
+                    // operations. This is one short path write, not a long
+                    // attachment copy.
+                    val file = File(context.filesDir, path)
+                    if (file.exists()) file.delete()
                     repository.deleteByPath(path)
-                }.onFailure {
-                    Log.e(TAG, "deleteChatFiles: Failed to forget $path", it)
-                    Logging.log(TAG, "deleteChatFiles: Failed $path ${it.message} | ${it.stackTraceToString()}")
                 }
+            } catch (rejected: app.amber.core.sync.core.SyncRestoreWriteRejectedException) {
+                // A stale cleanup must be observable to the suspend/awaiting
+                // caller and must never continue to a physical unlink.
+                throw rejected
+            } catch (error: Throwable) {
+                Log.e(TAG, "deleteChatFiles: Failed to forget $path", error)
+                Logging.log(TAG, "deleteChatFiles: Failed $path ${error.message} | ${error.stackTraceToString()}")
             }
         }
     }
@@ -310,20 +398,30 @@ class FilesManager(
         Pair(count, size)
     }
 
-    suspend fun createChatTextFile(text: String): UIMessagePart.Document = withContext(Dispatchers.IO) {
-        val dir = context.filesDir.resolve(FileFolders.UPLOAD)
-        if (!dir.exists()) {
-            dir.mkdirs()
+    suspend fun createChatTextFile(text: String): UIMessagePart.Document {
+        // Capture the generation epoch before staging the file; tracking is
+        // intentionally asynchronous and must not obtain a fresh epoch later.
+        val expectedRestoreEpoch = currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+        return withContext(Dispatchers.IO) {
+            val dir = context.filesDir.resolve(FileFolders.UPLOAD)
+            if (!dir.exists()) {
+                dir.mkdirs()
+            }
+            val fileName = buildUuidFileName(displayName = "pasted_text.txt", mimeType = "text/plain")
+            val file = dir.resolve(fileName)
+            file.writeText(text)
+            trackUploadFile(
+                file = file,
+                displayName = "pasted_text.txt",
+                mimeType = "text/plain",
+                expectedRestoreEpoch = expectedRestoreEpoch,
+            )
+            UIMessagePart.Document(
+                url = file.toUri().toString(),
+                fileName = "pasted_text.txt",
+                mime = "text/plain"
+            )
         }
-        val fileName = buildUuidFileName(displayName = "pasted_text.txt", mimeType = "text/plain")
-        val file = dir.resolve(fileName)
-        file.writeText(text)
-        trackUploadFile(file = file, displayName = "pasted_text.txt", mimeType = "text/plain")
-        return@withContext UIMessagePart.Document(
-            url = file.toUri().toString(),
-            fileName = "pasted_text.txt",
-            mime = "text/plain"
-        )
     }
 
     fun getImagesDir(): File {
@@ -350,6 +448,28 @@ class FilesManager(
 
     /** Recursively delete all chat-inline generated images for a conversation. */
     fun deleteChatImagesDir(conversationId: Uuid) {
+        deleteChatImagesDirInternal(conversationId)
+    }
+
+    /**
+     * Await image cleanup for a conversation deletion. The caller may pass the
+     * epoch captured when its cleanup started so a stale cleanup is rejected
+     * before it can remove images restored into the same directory.
+     */
+    suspend fun deleteChatImagesDirAndAwait(
+        conversationId: Uuid,
+        expectedRestoreEpoch: Long? = null,
+    ) {
+        val capturedEpoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+        withContext(Dispatchers.IO + restoreEpochContext(capturedEpoch)) {
+            withManagedFileWrite {
+                deleteChatImagesDirInternal(conversationId)
+            }
+        }
+    }
+
+    private fun deleteChatImagesDirInternal(conversationId: Uuid) {
         val dir = context.filesDir.resolve("chat_images").resolve(conversationId.toString())
         if (dir.exists()) {
             dir.deleteRecursively()
@@ -421,41 +541,66 @@ class FilesManager(
         }
     }
 
-    suspend fun syncFolder(folder: String = FileFolders.UPLOAD): Int = withContext(Dispatchers.IO) {
+    /** Reconcile files from an external caller; durable rows are restore-gated. */
+    suspend fun syncFolder(folder: String = FileFolders.UPLOAD): Int =
+        withContext(Dispatchers.IO) {
+            syncFolderInternal(folder, gateWrites = true)
+        }
+
+    /**
+     * Restore-owned reconciliation. [SyncArchiveManager] already holds the
+     * restore gate while importing its file tree, so acquiring the same mutex
+     * here would deadlock. Keep this entry internal and use it only from that
+     * restore pipeline; background callbacks must call [syncFolder].
+     */
+    internal suspend fun syncFolderDuringRestore(folder: String = FileFolders.UPLOAD): Int =
+        withContext(Dispatchers.IO) {
+            syncFolderInternal(folder, gateWrites = false)
+        }
+
+    private suspend fun syncFolderInternal(folder: String, gateWrites: Boolean): Int {
         val dir = File(context.filesDir, folder)
-        if (!dir.exists()) return@withContext 0
-        val files = dir.listFiles()?.filter { it.isFile } ?: return@withContext 0
+        if (!dir.exists()) return 0
+        val files = dir.listFiles()?.filter { it.isFile } ?: return 0
         var inserted = 0
         files.forEach { file ->
             val relativePath = "${folder}/${file.name}"
-            val existing = repository.getByPath(relativePath)
-            if (existing == null) {
-                val now = System.currentTimeMillis()
-                val displayName = file.name
-                val mimeType = guessMimeType(file, displayName)
-                repository.insert(
-                    ManagedFileEntity(
-                        folder = folder,
-                        relativePath = relativePath,
-                        displayName = displayName,
-                        mimeType = mimeType,
-                        sizeBytes = file.length(),
-                        createdAt = file.lastModified().takeIf { it > 0 } ?: now,
-                        updatedAt = now,
+            val now = System.currentTimeMillis()
+            val displayName = file.name
+            val mimeType = guessMimeType(file, displayName)
+            val write: suspend () -> Boolean = suspend {
+                if (repository.getByPath(relativePath) != null) {
+                    false
+                } else {
+                    repository.insert(
+                        ManagedFileEntity(
+                            folder = folder,
+                            relativePath = relativePath,
+                            displayName = displayName,
+                            mimeType = mimeType,
+                            sizeBytes = file.length(),
+                            createdAt = file.lastModified().takeIf { it > 0 } ?: now,
+                            updatedAt = now,
+                        )
                     )
-                )
+                    true
+                }
+            }
+            if (if (gateWrites) withManagedFileWrite(write) else write()) {
                 inserted += 1
             }
         }
-        inserted
+        return inserted
     }
 
     suspend fun delete(id: Long, deleteFromDisk: Boolean = true): Boolean = withContext(Dispatchers.IO) {
-        val entity = repository.getById(id) ?: return@withContext false
-        if (deleteFromDisk) {
-            runCatching { getFile(entity).delete() }
+        withManagedFileWrite {
+            val entity = repository.getById(id) ?: return@withManagedFileWrite false
+            if (deleteFromDisk) {
+                runCatching { getFile(entity).delete() }
+            }
+            repository.deleteById(id) > 0
         }
-        repository.deleteById(id) > 0
     }
 
     private fun createTargetFile(folder: String, displayName: String, mimeType: String?): File {
@@ -479,27 +624,40 @@ class FilesManager(
         return "${Uuid.random()}.$ext"
     }
 
-    private fun trackUploadFile(file: File, displayName: String, mimeType: String) {
+    private fun trackUploadFile(
+        file: File,
+        displayName: String,
+        mimeType: String,
+        expectedRestoreEpoch: Long? = null,
+    ) {
         val relativePath = "${FileFolders.UPLOAD}/${file.name}"
-        appScope.launch(Dispatchers.IO) {
+        appScope.launch(Dispatchers.IO + restoreEpochContext(expectedRestoreEpoch)) {
             runCatching {
-                val existing = repository.getByPath(relativePath)
-                if (existing != null) {
-                    return@runCatching
-                }
-                val now = System.currentTimeMillis()
-                repository.insert(
-                    ManagedFileEntity(
-                        folder = FileFolders.UPLOAD,
-                        relativePath = relativePath,
-                        displayName = displayName,
-                        mimeType = mimeType,
-                        sizeBytes = file.length(),
-                        createdAt = now,
-                        updatedAt = now,
+                withManagedFileWrite {
+                    val existing = repository.getByPath(relativePath)
+                    if (existing != null) {
+                        return@withManagedFileWrite
+                    }
+                    val now = System.currentTimeMillis()
+                    repository.insert(
+                        ManagedFileEntity(
+                            folder = FileFolders.UPLOAD,
+                            relativePath = relativePath,
+                            displayName = displayName,
+                            mimeType = mimeType,
+                            sizeBytes = file.length(),
+                            createdAt = now,
+                            updatedAt = now,
+                        )
                     )
-                )
+                }
             }.onFailure {
+                if (it is app.amber.core.sync.core.SyncRestoreWriteRejectedException) {
+                    // The file was staged before the epoch expired. It is not
+                    // part of the restored managed-file set, so do not leave
+                    // an untracked attachment behind.
+                    file.delete()
+                }
                 Log.e(TAG, "trackUploadFile: Failed to track file ${file.absolutePath}", it)
                 Logging.log(
                     TAG,
@@ -508,6 +666,12 @@ class FilesManager(
             }
         }
     }
+
+    private suspend fun <T> withManagedFileWrite(block: suspend () -> T): T =
+        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
+
+    private fun restoreEpochContext(expectedRestoreEpoch: Long?): CoroutineContext =
+        expectedRestoreEpoch?.let(::SyncRestoreWriteEpoch) ?: EmptyCoroutineContext
 
     private fun getRelativePathInFilesDir(file: File): String? {
         val canonicalFile = runCatching { file.canonicalFile }.getOrNull() ?: return null

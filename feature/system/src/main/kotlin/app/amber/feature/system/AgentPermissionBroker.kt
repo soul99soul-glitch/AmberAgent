@@ -63,6 +63,8 @@ data class AgentPermissionCapability(
     val toolNames: List<String> = emptyList(),
     val minSdk: Int = 1,
     val debugOnly: Boolean = false,
+    /** Some platform adapters own authorization state outside Android runtime permissions. */
+    val adapterManaged: Boolean = false,
 ) {
     fun currentRuntimePermissions(): List<String> =
         runtimePermissions.filter { it.appliesToCurrentSdk() }.map { it.permission }.distinct()
@@ -83,6 +85,10 @@ class AgentPermissionBroker(
     fun getStatus(capability: AgentPermissionCapability): AgentPermissionStatus {
         if (capability.debugOnly && !isDebugBuild) return AgentPermissionStatus.Unsupported
         if (Build.VERSION.SDK_INT < capability.minSdk) return AgentPermissionStatus.Unsupported
+        // Health Connect permissions are not normal runtime permissions; the adapter
+        // owns the result returned by its system authorization flow. Keep this
+        // capability visible for guidance without claiming Settings means granted.
+        if (capability.adapterManaged) return AgentPermissionStatus.Denied
 
         capability.specialAccess?.let { special ->
             return if (isSpecialAccessGranted(special)) {
@@ -306,13 +312,13 @@ object AgentPermissionRegistry {
         AgentPermissionCapability(
             id = "calendar_write",
             title = "日历写入",
-            description = "创建系统日历事件。",
+            description = "创建、更新或删除系统日历事件。",
             runtimePermissions = listOf(
                 RuntimePermissionSpec(Manifest.permission.READ_CALENDAR),
                 RuntimePermissionSpec(Manifest.permission.WRITE_CALENDAR),
             ),
             risk = AgentPermissionRisk.High,
-            toolNames = listOf("calendar_create"),
+            toolNames = listOf("calendar_create", "calendar_update", "calendar_delete"),
         ),
         AgentPermissionCapability(
             id = "media_images",
@@ -393,6 +399,15 @@ object AgentPermissionRegistry {
                 RuntimePermissionSpec(Manifest.permission.ACTIVITY_RECOGNITION, minSdk = Build.VERSION_CODES.Q),
             ),
             risk = AgentPermissionRisk.Sensitive,
+        ),
+        AgentPermissionCapability(
+            id = "health_connect_read",
+            title = "健康数据读取",
+            description = "通过 Health Connect 系统授权读取步数、心率、睡眠和体重摘要；授权结果由健康适配器维护，不以打开设置页代替授权。API 34 以下明确不支持。",
+            minSdk = Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
+            adapterManaged = true,
+            risk = AgentPermissionRisk.Sensitive,
+            toolNames = listOf("health_summary"),
         ),
         AgentPermissionCapability(
             id = "notification_access",

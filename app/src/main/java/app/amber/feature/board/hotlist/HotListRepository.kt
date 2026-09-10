@@ -3,6 +3,7 @@ package app.amber.feature.board.hotlist
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -12,12 +13,15 @@ import app.amber.agent.data.db.entity.DeepReadCacheEntity
 import app.amber.agent.data.db.entity.HotListCacheEntity
 import app.amber.agent.data.db.entity.HotListSourceEntity
 import app.amber.agent.data.db.entity.HotTopicCacheEntity
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
 
 class HotListRepository(
     private val dao: HotListDAO,
     private val json: Json,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     private val deepReadHistoryPreviews = ConcurrentHashMap<String, DeepReadHistoryItem>()
 
@@ -75,16 +79,17 @@ class HotListRepository(
         lastError: String? = null,
     ) {
         val now = System.currentTimeMillis()
-        dao.upsertProviderCache(
-            HotListCacheEntity(
-                providerId = providerId,
-                providerName = providerName,
-                itemsJson = json.encodeToString(result.items),
-                fetchedAt = result.fetchedAt,
-                updatedAt = now,
-                lastError = lastError,
-            )
+        val entity = HotListCacheEntity(
+            providerId = providerId,
+            providerName = providerName,
+            itemsJson = json.encodeToString(result.items),
+            fetchedAt = result.fetchedAt,
+            updatedAt = now,
+            lastError = lastError,
         )
+        withOwnerWrite {
+            dao.upsertProviderCache(entity)
+        }
     }
 
     suspend fun saveProviderFailure(
@@ -94,21 +99,22 @@ class HotListRepository(
     ) {
         val now = System.currentTimeMillis()
         val existing = dao.getProviderCache(providerId)
-        dao.upsertProviderCache(
-            HotListCacheEntity(
-                providerId = providerId,
-                providerName = existing?.providerName ?: providerName,
-                itemsJson = existing?.itemsJson ?: json.encodeToString(emptyList<HotListItem>()),
-                fetchedAt = existing?.fetchedAt ?: 0L,
-                updatedAt = now,
-                lastError = error.take(160),
-            )
+        val entity = HotListCacheEntity(
+            providerId = providerId,
+            providerName = existing?.providerName ?: providerName,
+            itemsJson = existing?.itemsJson ?: json.encodeToString(emptyList<HotListItem>()),
+            fetchedAt = existing?.fetchedAt ?: 0L,
+            updatedAt = now,
+            lastError = error.take(160),
         )
+        withOwnerWrite {
+            dao.upsertProviderCache(entity)
+        }
     }
 
     suspend fun replaceTopics(topics: List<HotTopic>) {
         val now = System.currentTimeMillis()
-        dao.replaceHotTopics(topics.map { topic ->
+        val entities = topics.map { topic ->
             HotTopicCacheEntity(
                 topicId = topic.id,
                 title = topic.title,
@@ -118,24 +124,26 @@ class HotListRepository(
                 latestFetchedAt = topic.latestFetchedAt,
                 updatedAt = now,
             )
-        })
+        }
+        withOwnerWrite {
+            dao.replaceHotTopics(entities)
+        }
     }
 
     suspend fun upsertTopic(topic: HotTopic) {
         val now = System.currentTimeMillis()
-        dao.upsertHotTopics(
-            listOf(
-                HotTopicCacheEntity(
-                    topicId = topic.id,
-                    title = topic.title,
-                    sourcesJson = json.encodeToString(topic.sources),
-                    sourceCount = topic.sourceCount,
-                    bestRank = topic.bestRank,
-                    latestFetchedAt = topic.latestFetchedAt,
-                    updatedAt = now,
-                )
-            )
+        val entity = HotTopicCacheEntity(
+            topicId = topic.id,
+            title = topic.title,
+            sourcesJson = json.encodeToString(topic.sources),
+            sourceCount = topic.sourceCount,
+            bestRank = topic.bestRank,
+            latestFetchedAt = topic.latestFetchedAt,
+            updatedAt = now,
         )
+        withUserWrite {
+            dao.upsertHotTopics(listOf(entity))
+        }
     }
 
     suspend fun getHotTopic(topicId: String): HotTopic? = dao.getHotTopic(topicId)?.toTopic(json)
@@ -163,13 +171,15 @@ class HotListRepository(
         val fallback = dao.getFreshDeepReadByTitle(title, now) ?: return null
         val output = fallback.toFreshDeepRead(json, now) ?: return null
         if (fallback.topicId != topicId) {
-            dao.upsertDeepRead(
-                fallback.copy(
-                    topicId = topicId,
-                    title = title,
-                    updatedAt = now,
+            withOwnerWrite {
+                dao.upsertDeepRead(
+                    fallback.copy(
+                        topicId = topicId,
+                        title = title,
+                        updatedAt = now,
+                    )
                 )
-            )
+            }
         }
         return output
     }
@@ -180,35 +190,79 @@ class HotListRepository(
         output: DeepReadOutput,
         now: Long = System.currentTimeMillis(),
         ttlDays: Int = DEFAULT_TTL_DAYS,
+        sourceUrl: String? = null,
     ) {
         // Preserve existing pinned state across regeneration: upsert uses REPLACE, so a
         // freshly-built entity with pinned=false (default) would clobber a user's pin.
-        val existingPinned = dao.getDeepRead(topicId)?.pinned == true
+        val existing = dao.getDeepRead(topicId)
+        val existingPinned = existing?.pinned == true
+        // Writer/section updates do not carry the seed URL. Preserve it unless a
+        // caller supplies a new non-blank URL for the same topic.
+        val persistedSourceUrl = sourceUrl
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: existing?.sourceUrl
         val expiresAt = if (ttlDays <= 0) Long.MAX_VALUE else now + ttlDays * DAY_MS
-        dao.upsertDeepRead(
-            DeepReadCacheEntity(
-                topicId = topicId,
-                title = title,
-                outputJson = json.encodeToString(output),
-                createdAt = now,
-                expiresAt = expiresAt,
-                updatedAt = now,
-                pinned = existingPinned,
-            )
+        val entity = DeepReadCacheEntity(
+            topicId = topicId,
+            title = title,
+            outputJson = json.encodeToString(output),
+            createdAt = now,
+            expiresAt = expiresAt,
+            updatedAt = now,
+            pinned = existingPinned,
+            sourceUrl = persistedSourceUrl,
         )
+        withOwnerWrite { dao.upsertDeepRead(entity) }
     }
 
-    suspend fun clearDeepRead(topicId: String) = dao.deleteDeepRead(topicId)
+    suspend fun clearDeepRead(topicId: String) = withOwnerOrUserWrite {
+        dao.deleteDeepRead(topicId)
+    }
 
-    suspend fun setDeepReadPinned(topicId: String, pinned: Boolean) =
+    suspend fun setDeepReadPinned(topicId: String, pinned: Boolean) = withUserWrite {
         dao.setDeepReadPinned(topicId, pinned)
+    }
 
-    suspend fun pruneExpiredDeepReads(now: Long = System.currentTimeMillis()): Int =
+    suspend fun pruneExpiredDeepReads(now: Long = System.currentTimeMillis()): Int = withOwnerWrite {
         dao.pruneExpiredDeepReads(now - DEEP_READ_HISTORY_RETENTION_MS)
+    }
 
-    suspend fun upsertSource(entity: HotListSourceEntity) = dao.upsertSource(entity)
+    suspend fun upsertSource(entity: HotListSourceEntity) = withUserWrite {
+        dao.upsertSource(entity)
+    }
 
-    suspend fun deleteSource(id: String) = dao.deleteSource(id)
+    suspend fun deleteSource(id: String) = withUserWrite {
+        dao.deleteSource(id)
+    }
+
+    private suspend fun <T> withOwnerWrite(block: suspend () -> T): T =
+        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
+
+    private suspend fun withUserWrite(block: suspend () -> Unit) {
+        val gate = restoreWriteGate
+        if (gate == null) {
+            block()
+        } else if (currentCoroutineContext()[SyncRestoreWriteEpoch] != null) {
+            // UI calls normally carry no epoch and wait for restore. If a
+            // background owner reaches this surface with an epoch, preserve
+            // the same stale-owner rejection as the agent writers.
+            gate.withCurrentWriterOrCancel(block)
+        } else {
+            gate.withWriter(block = block)
+        }
+    }
+
+    private suspend fun withOwnerOrUserWrite(block: suspend () -> Unit) {
+        val gate = restoreWriteGate
+        if (gate == null) {
+            block()
+        } else if (currentCoroutineContext()[SyncRestoreWriteEpoch] != null) {
+            gate.withCurrentWriterOrCancel(block)
+        } else {
+            gate.withWriter(block = block)
+        }
+    }
 
     companion object {
         const val DEEP_READ_TTL_MS = 24L * 60L * 60L * 1000L
@@ -238,6 +292,7 @@ data class DeepReadHistoryItem(
     val updatedAt: Long,
     val expired: Boolean,
     val pinned: Boolean = false,
+    val sourceUrl: String? = null,
 )
 
 private fun HotListCacheEntity.toSnapshot(json: Json): HotListProviderSnapshot =
@@ -282,6 +337,7 @@ private fun DeepReadCacheEntity.toHistoryItem(
         updatedAt = updatedAt,
         expired = !DeepReadCachePolicy.isFresh(expiresAt, now, pinned),
         pinned = pinned,
+        sourceUrl = sourceUrl,
     )
 
 private fun DeepReadCacheEntity.toDeepReadOutput(json: Json): DeepReadOutput? =

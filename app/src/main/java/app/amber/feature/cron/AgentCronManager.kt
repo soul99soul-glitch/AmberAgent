@@ -225,7 +225,13 @@ class AgentCronManager(
                 }
             }
         }
-        agentTaskStore.update(id, status = AgentTaskStatus.COMPLETED, summary = "Cron run completed.")
+        agentTaskStore.update(
+            id,
+            status = AgentTaskStatus.COMPLETED,
+            summary = "Cron run completed.",
+            clearError = true,
+            clearLastErrorCode = true,
+        )
     }
 
     suspend fun markRunFailed(id: String, message: String) = withContext(Dispatchers.IO) {

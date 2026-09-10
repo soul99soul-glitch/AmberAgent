@@ -6,12 +6,15 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import app.amber.ai.ui.UIMessagePart
 
-/** Tool names whose calls represent a single subagent task and should be coalesced by run_id. */
+/** Tool names whose calls represent a single subagent task and should be coalesced by thread id. */
 private val SUBAGENT_TASK_TOOLS = setOf(
     "subagent_start",
     "subagent_wait",
     "subagent_read",
     "subagent_cancel",
+    "subagent_followup",
+    "subagent_send_message",
+    "subagent_interrupt",
 )
 
 /** Tool names whose calls represent a single Model Council run and should be coalesced by run_id. */
@@ -38,8 +41,8 @@ sealed interface ThinkingStep {
     ) : ThinkingStep
 
     /**
-     * One subagent task: all of its `subagent_start / subagent_wait / subagent_read / subagent_cancel`
-     * tool calls (sharing the same `run_id`), folded into a single rendered card.
+     * One subagent task: all of its lifecycle, followup, message, and interrupt
+     * calls (sharing the same thread/run id), folded into a single rendered card.
      *
      * Note: a subagent_start whose result hasn't arrived yet has no `run_id` available; in that
      * case it briefly renders as a regular ToolStep and gets coalesced once the output appears.
@@ -85,9 +88,9 @@ sealed interface MessagePartBlock {
 }
 
 /**
- * Extract the `run_id` this tool call belongs to. For subagent_start, parse it from the result
- * JSON; for the rest, parse it from the call input. Returns null for any other tool, or when
- * the result hasn't arrived yet.
+ * Extract the thread id this tool call belongs to. The start result assigns the
+ * id; lifecycle calls use `run_id`, while followup/send/interrupt use
+ * `thread_id`. Returns null for any other tool, or when the id is not known yet.
  */
 private fun UIMessagePart.Tool.subagentRunId(): String? {
     if (toolName !in SUBAGENT_TASK_TOOLS) return null
@@ -109,8 +112,9 @@ private fun UIMessagePart.Tool.extractRunId(startToolName: String): String? = ru
         MessageRenderCache.toolOutputJson(output).jsonObject["run_id"]
             ?.jsonPrimitive?.contentOrNull
     } else {
-        MessageRenderCache.toolInputJson(input).jsonObject["run_id"]
-            ?.jsonPrimitive?.contentOrNull
+        val inputObject = MessageRenderCache.toolInputJson(input).jsonObject
+        inputObject["run_id"]?.jsonPrimitive?.contentOrNull
+            ?: inputObject["thread_id"]?.jsonPrimitive?.contentOrNull
     }
 }.getOrNull()?.takeIf { it.isNotBlank() }
 

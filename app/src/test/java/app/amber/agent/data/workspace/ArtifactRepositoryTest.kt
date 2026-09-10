@@ -12,9 +12,13 @@ import app.amber.agent.data.db.entity.MessageNodeEntity
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.workspace.WorkspaceManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -66,11 +70,15 @@ class ArtifactRepositoryTest {
         return db to repositoryOf(db)
     }
 
-    private fun repositoryOf(db: AppDatabase) = ArtifactRepository(
+    private fun repositoryOf(
+        db: AppDatabase,
+        restoreWriteGate: SyncRestoreWriteGate? = null,
+    ) = ArtifactRepository(
         dao = db.artifactDao(),
         workspaceManager = workspaceManager,
         messageNodeDao = db.messageNodeDao(),
         conversationDao = db.conversationDao(),
+        restoreWriteGate = restoreWriteGate,
     )
 
     private suspend fun insertChatSource(
@@ -287,6 +295,46 @@ class ArtifactRepositoryTest {
         )
         assertTrue(copy.artifactId != first.artifactId)
         assertEquals(2, repository.list().size)
+        db.close()
+    }
+
+    @Test
+    fun staleChatArtifactWriterIsRejectedAfterRestore() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        val gate = SyncRestoreWriteGate()
+        val repository = repositoryOf(db, gate)
+        val conversationId = "conv-stale-artifact"
+        val original = chatMessage("恢复前的 Artifact")
+        insertChatSource(db, conversationId, original)
+        val created = repository.saveChatMessage(
+            message = original,
+            conversationId = conversationId,
+            workspaceId = ArtifactRepository.DEFAULT_WORKSPACE_ID,
+            includeReasoning = false,
+        )
+        val staleEpoch = gate.currentEpoch()
+
+        gate.withRestore { gate.markDataCommitted() }
+
+        val stale = chatMessage("旧后台结果不应覆盖导入数据")
+        val failure = runCatching {
+            withContext(SyncRestoreWriteEpoch(staleEpoch)) {
+                repository.saveChatMessage(
+                    message = stale,
+                    conversationId = conversationId,
+                    workspaceId = ArtifactRepository.DEFAULT_WORKSPACE_ID,
+                    includeReasoning = false,
+                    existingArtifactId = created.artifactId,
+                )
+            }
+        }.exceptionOrNull()
+
+        assertTrue(failure is SyncRestoreWriteRejectedException)
+        val unchanged = repository.get(created.artifactId)!!
+        assertEquals("恢复前的 Artifact", repository.readContent(unchanged))
+        assertEquals("恢复前的 Artifact", unchanged.title)
         db.close()
     }
 

@@ -77,6 +77,9 @@ data class DeepReadCacheEntity(
     val updatedAt: Long,
     @ColumnInfo(name = "pinned", defaultValue = "0")
     val pinned: Boolean = false,
+    /** URL used to create this result; retained so history/Continue can reopen it. */
+    @ColumnInfo(name = "source_url")
+    val sourceUrl: String? = null,
 )
 
 @Entity(

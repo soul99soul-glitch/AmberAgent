@@ -1,6 +1,8 @@
 package app.amber.feature.home
 
 import app.amber.agent.data.db.dao.ConversationDAO
+import app.amber.agent.data.db.dao.ToolEffectConversationRow
+import app.amber.agent.data.db.dao.ToolEffectDAO
 import app.amber.feature.runtime.RunTerminal
 import app.amber.feature.runtime.RunTerminalState
 import app.amber.feature.runtime.RunTerminalStore
@@ -30,32 +32,39 @@ class ImageGenerationContinueSource(
     private val runTerminalStore: RunTerminalStore,
     private val toolEffectLedger: ToolEffectLedger,
     private val conversationDao: ConversationDAO,
+    private val toolEffectDao: ToolEffectDAO,
     private val pollIntervalMillis: Long = DEFAULT_POLL_INTERVAL_MILLIS,
+    private val nowMillis: () -> Long = System::currentTimeMillis,
 ) : ContinueCandidateSource {
 
     override fun observe(): Flow<List<ContinueCandidate>> = flow {
         while (currentCoroutineContext().isActive) {
-            val runs = runCatching { runTerminalStore.unfinished() }.getOrDefault(emptyList())
+            val runs = runTerminalStore.unfinished()
             val effectsByRun = runs.associate { run ->
-                run.runId to runCatching { toolEffectLedger.listByRun(run.runId) }
-                    .getOrDefault(emptyList())
+                run.runId to toolEffectLedger.listByRun(run.runId)
             }
             val existingConversationIds = mutableSetOf<String>()
             for (run in runs) {
-                val exists = try {
-                    conversationDao.existsById(run.conversationId)
-                } catch (_: Exception) {
-                    false
-                }
+                val exists = conversationDao.existsById(run.conversationId)
                 if (exists) existingConversationIds += run.conversationId
             }
-            emit(imageGenerationContinueCandidates(runs, effectsByRun, existingConversationIds))
+            val completed = toolEffectDao.listRecentFinishedWithConversation(
+                toolName = GENERATE_IMAGE_TOOL_NAME,
+                sinceMs = nowMillis() - COMPLETED_LOOKBACK_MILLIS,
+                limit = COMPLETED_LIMIT,
+            )
+            emit(
+                imageGenerationContinueCandidates(runs, effectsByRun, existingConversationIds) +
+                    imageGenerationCompletedContinueCandidates(completed)
+            )
             delay(pollIntervalMillis)
         }
     }.distinctUntilChanged().flowOn(Dispatchers.IO)
 
     companion object {
         private const val DEFAULT_POLL_INTERVAL_MILLIS = 5_000L
+        private const val COMPLETED_LOOKBACK_MILLIS = 7L * 24L * 60L * 60L * 1_000L
+        private const val COMPLETED_LIMIT = 20
     }
 }
 
@@ -79,7 +88,11 @@ internal fun imageGenerationContinueCandidates(
             ContinueCandidate(
                 sourceKind = ContinueSourceKind.IMAGE_GENERATION,
                 sourceId = "${run.conversationId}:${effect.toolCallId}",
-                route = ContinueRoute.Chat(conversationId = run.conversationId),
+                route = ContinueRoute.ImageGeneration(
+                    conversationId = run.conversationId,
+                    messageId = effect.messagePersistenceCursor,
+                    toolCallId = effect.toolCallId,
+                ),
                 title = "AI 生图",
                 summary = if (waitingForUser) "需要确认图片生成结果" else "正在生成图片",
                 lastUpdatedAt = Instant.ofEpochMilli(updatedAtMs),
@@ -91,6 +104,26 @@ internal fun imageGenerationContinueCandidates(
                 isRunning = !waitingForUser,
             )
         }
+}
+
+/** Projects completed results from the indexed effect query, still anchored to the source call. */
+internal fun imageGenerationCompletedContinueCandidates(
+    rows: List<ToolEffectConversationRow>,
+): List<ContinueCandidate> = rows.map { row ->
+    val effect = row.effect.let(ToolEffect::from)
+    ContinueCandidate(
+        sourceKind = ContinueSourceKind.IMAGE_GENERATION,
+        sourceId = "${row.conversationId}:${effect.toolCallId}",
+        route = ContinueRoute.ImageGeneration(
+            conversationId = row.conversationId,
+            messageId = effect.messagePersistenceCursor,
+            toolCallId = effect.toolCallId,
+        ),
+        title = "AI 生图",
+        summary = "最近生成的图片",
+        lastUpdatedAt = Instant.ofEpochMilli(effect.finishedAtMs ?: effect.startedAtMs),
+        status = ContinueStatus.DRAFT,
+    )
 }
 
 private const val GENERATE_IMAGE_TOOL_NAME = "generate_image"

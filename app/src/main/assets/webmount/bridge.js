@@ -82,6 +82,7 @@
       'a[href],button,input,select,textarea,[role=button],[role=link],[role=tab],[role=menuitem],[onclick]'
     )).filter(isVisible);
     var main = snapshotState();
+    main.snapshot_id = window.__amberWmSnapshot ? window.__amberWmSnapshot.id : null;
     var signalSeq = window.__amberWmNetSignalSeq || 0;
     var fpParts = [
       location.href,
@@ -355,6 +356,37 @@
     var target = args.target != null ? String(args.target) : null;
     var selector = args.selector;
     var candidates;
+
+    // Snapshot refs are currently compact numeric strings. They are opaque
+    // identities, not CSS selectors; accepting one without its snapshot id
+    // would let an old ref fall through to a newly-created entry (or to a
+    // selector lookup) after refs are reused. Legacy CSS/text/xpath selectors
+    // remain available through `selector`.
+    if (target && /^\d+$/.test(target) && args.snapshot_id == null) {
+      return targetError(
+        'missing_snapshot',
+        'snapshot_id is required when target is a snapshot ref: ' + target,
+        'Run wm_extract again and pass both the returned ref and snapshot_id.',
+      );
+    }
+
+    // A ref is only meaningful in the snapshot that produced it. Without this
+    // check a refreshed snapshot can reuse ref "1" and silently send the
+    // action to a different element. Selectors remain a deliberate fallback;
+    // ref based actions must carry the snapshot id returned by wm_extract.
+    if (target && args.snapshot_id != null) {
+      var requestedSnapshotId = String(args.snapshot_id);
+      var currentSnapshotId = window.__amberWmSnapshot
+        ? String(window.__amberWmSnapshot.id)
+        : null;
+      if (currentSnapshotId !== requestedSnapshotId) {
+        return targetError(
+          'stale_target',
+          'target ref belongs to an expired snapshot: ' + requestedSnapshotId,
+          'Run wm_extract again and use the new ref with its snapshot_id.',
+        );
+      }
+    }
 
     if (target && window.__amberWmSnapshot && window.__amberWmSnapshot.entries[target]) {
       var entry = window.__amberWmSnapshot.entries[target];
@@ -984,6 +1016,18 @@
   }
 
   function performTap(args) {
+    if (args.snapshot_id != null) {
+      var currentSnapshotId = window.__amberWmSnapshot
+        ? String(window.__amberWmSnapshot.id)
+        : null;
+      if (currentSnapshotId !== String(args.snapshot_id)) {
+        return targetError(
+          'stale_target',
+          'coordinate target belongs to an expired snapshot: ' + args.snapshot_id,
+          'Run wm_visual_snapshot or wm_observe again and use the new snapshot_id.',
+        );
+      }
+    }
     var x = args.x | 0;
     var y = args.y | 0;
     var target = document.elementFromPoint(x, y);
@@ -1498,6 +1542,7 @@
           var includeConsole = args.include_console !== false;
           var tail = args.console_tail | 0 || 16;
           var payload = snapshotState();
+          payload.snapshot_id = window.__amberWmSnapshot ? window.__amberWmSnapshot.id : null;
           if (includeConsole) payload.console_tail = consoleTail(tail);
           AmberWM.resolve(reqId, safeJson(payload));
           return;

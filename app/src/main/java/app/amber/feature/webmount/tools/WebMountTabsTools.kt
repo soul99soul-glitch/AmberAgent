@@ -8,6 +8,8 @@ import app.amber.ai.core.Tool
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.agent.utils.requiredString
 import app.amber.core.agent.utils.string
+import app.amber.feature.webmount.primitives.WebMountOwner
+import java.util.UUID
 
 internal fun createTabListTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_tab_list",
@@ -18,19 +20,43 @@ internal fun createTabListTool(deps: WebMountDeps): Tool = Tool(
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {})
     },
-    execute = { _ ->
-        deps.track("wm_tab_list", "WebMount 列出会话", buildJsonObject {}) {
-            val sessions = deps.pool.listSessions().map { handle ->
-                val ls = handle.loadState.value
+    execute = { input ->
+        deps.track("wm_tab_list", "WebMount 列出会话", input) {
+            input.agentScopeFailure()?.let { return@track it }
+            val conversationId = input.webMountConversationId()
+            val runId = input.webMountRunId()
+            // A human-held session is never enumerated. If it belongs to the
+            // current conversation, report the owner conflict without
+            // disclosing its URL/title or another conversation's sessions.
+            val humanOwned = deps.owner.sessions.value.firstOrNull { record ->
+                record.owner == WebMountOwner.HUMAN &&
+                    (record.conversationId == null || record.conversationId == conversationId)
+            }
+            if (humanOwned != null) {
+                return@track listOf(UIMessagePart.Text(buildJsonObject {
+                    put("ok", false)
+                    put("error", "owner_conflict")
+                    put("owner_conflict", true)
+                    put("current_owner", "human")
+                }.toString()))
+            }
+            val sessions = deps.owner.sessions.value
+                .filter { record ->
+                    record.conversationId == conversationId && record.runId == runId
+                }
+                .map { record ->
                 buildJsonObject {
-                    put("session_id", handle.sessionId)
-                    put("url", ls.currentUrl ?: ls.requestedUrl)
-                    put("title", ls.title)
-                    put("status", ls.status.wireName)
-                    put("destroyed", handle.destroyed)
+                    put("session_id", record.sessionId)
+                    put("url", record.redactedUrl)
+                    put("title", record.title)
+                    put("status", record.status)
+                    put("owner", record.owner.name.lowercase())
+                    put("needs_reopen", record.needsReopen)
+                    put("last_activity_ms", record.lastActivityMs)
                 }
             }
             val payload = buildJsonObject {
+                put("ok", true)
                 put("count", sessions.size)
                 put("sessions", buildJsonArray { sessions.forEach { add(it) } })
             }
@@ -50,14 +76,25 @@ internal fun createTabNewTool(deps: WebMountDeps): Tool = Tool(
     parameters = {
         InputSchema.Obj(properties = buildJsonObject {})
     },
-    execute = { _ ->
+    execute = { input ->
         deps.track("wm_tab_new", "WebMount 新建会话", buildJsonObject {}) {
-            val handle = deps.pool.acquireNew()
-            val payload = buildJsonObject {
-                put("session_id", handle.sessionId)
-                put("status", handle.loadState.value.status.wireName)
+            input.agentScopeFailure()?.let { return@track it }
+            val sessionId = "wm_" + UUID.randomUUID().toString().substring(0, 12)
+            deps.withAgentSession(input = input, sessionId = sessionId) { lease ->
+                val payload = buildJsonObject {
+                    put("session_id", lease.sessionId)
+                    put("action_id", UUID.randomUUID().toString())
+                    put("dispatched", true)
+                    put("status", "verified")
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", false)
+                    put("goal_verified", true)
+                    put("session_status", lease.handle.loadState.value.status.wireName)
+                    putWebMountWindowState(lease.handle)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )
@@ -85,13 +122,44 @@ internal fun createTabCloseTool(deps: WebMountDeps): Tool = Tool(
         deps.track("wm_tab_close", "WebMount 关闭会话", input) {
             val sessionId = input.requiredString("session_id")
             val reason = input.string("reason") ?: "agent requested"
-            deps.pool.release(sessionId, reason)
-            val payload = buildJsonObject {
-                put("session_id", sessionId)
-                put("closed", true)
-                put("reason", reason)
+            deps.withAgentSession(input, sessionId) { lease ->
+                val actionId = UUID.randomUUID().toString()
+                val closed = deps.owner.closeIfLeaseActive(
+                    leaseId = lease.leaseId,
+                    conversationId = input.webMountConversationId(),
+                    runId = input.webMountRunId(),
+                    reason = reason,
+                )
+                if (!closed) {
+                    return@withAgentSession listOf(UIMessagePart.Text(buildJsonObject {
+                        put("session_id", sessionId)
+                        put("action_id", actionId)
+                        put("dispatched", false)
+                        put("status", "failed")
+                        put("snapshot_id_before", null as String?)
+                        put("snapshot_id_after", null as String?)
+                        put("page_changed", false)
+                        put("goal_verified", false)
+                        put("error", "run_mismatch")
+                        put("auto_retry_after_event", false)
+                    }.toString()))
+                }
+                val payload = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("action_id", actionId)
+                    put("dispatched", true)
+                    put("status", "verified")
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", false)
+                    put("goal_verified", true)
+                    put("closed", true)
+                    put("reason", reason)
+                    put("requires_human", false)
+                    put("resume_condition", "continue")
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )

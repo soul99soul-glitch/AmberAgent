@@ -34,6 +34,9 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.coroutineContext
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
@@ -51,6 +54,7 @@ import app.amber.ai.core.Tool
 import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.providers.GoogleProvider
+import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.ProviderSetting
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.openai.supportsResponsesResume
@@ -82,6 +86,8 @@ import app.amber.core.ai.tools.createThemePackTools
 import app.amber.core.ai.tools.TOOL_THEME_PACK_IMPORT
 import app.amber.core.ai.tools.TOOL_THEME_PACK_STATUS
 import app.amber.core.files.SkillManager
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.ai.transformers.Base64ImageToLocalFileTransformer
 import app.amber.core.ai.transformers.DocumentAsPromptTransformer
 import app.amber.core.ai.transformers.MiniAppOutputTransformer
@@ -321,7 +327,16 @@ class ChatService(
     private val secretStore: app.amber.core.settings.secret.SecretStore? = null,
     // Android 主题包工具只在前台 Chat 注册；SubAgent / 后台 debug catalog 不可达。
     private val themePackageManager: ThemePackageManager? = null,
+    // Full restore raises an epoch and serializes durable conversation writes;
+    // nullable keeps legacy construction sites and isolated tests unchanged.
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ConversationAccess {
+    // ProviderConfigTools needs the same durable Codex OAuth store as the settings and
+    // provider layers. This instance is lightweight and reads the shared encrypted store.
+    private val openAICodexAuthStore = OpenAICodexAuthStore(context)
+    private val grokAuthStore = app.amber.ai.provider.providers.grok.GrokAuthStore(context)
+    private val antigravityAuthStore = app.amber.ai.provider.providers.google.AntigravityAuthStore(context)
+
     // 统一会话管理
     private val sessions = ConcurrentHashMap<Uuid, ConversationSession>()
     private val _sessionsVersion = MutableStateFlow(0L)
@@ -333,9 +348,12 @@ class ChatService(
     private val pendingServerCancelFailures = ConcurrentHashMap.newKeySet<String>()
     /** 已删除会话的 tombstone：阻止 checkpoint / saveConversation 等后台写者把会话重新插入。 */
     private val deletedConversationIds = ConcurrentHashMap.newKeySet<Uuid>()
+    /** Epoch captured by a deferred History purge; prevents it deleting a later restore. */
+    private val deletedConversationRestoreEpochs = ConcurrentHashMap<Uuid, Long>()
     private val pendingMessageStoreOps = Channel<PendingMessageStoreOp>(Channel.UNLIMITED)
     private val pendingMessagePersistRevisions = ConcurrentHashMap<Uuid, AtomicLong>()
     private val pendingMessagePersistLocks = ConcurrentHashMap<Uuid, Mutex>()
+    private val restoreWriteGateRegistration: AutoCloseable?
 
     private val aiAuxiliaryGenerator = AiAuxiliaryGenerator(
         context = context,
@@ -343,6 +361,7 @@ class ChatService(
         providerCatalog = providerCatalog,
         conversationRepo = conversationRepo,
         conversationAccess = this,
+        restoreWriteGate = restoreWriteGate,
     )
 
     // 错误状态
@@ -439,27 +458,64 @@ class ChatService(
                     is PendingMessageStoreOp.Persist -> {
                         pendingMessagePersistLock(op.conversationId).withLock {
                             if (op.revision == pendingMessagePersistRevision(op.conversationId).get()) {
-                                pendingMessageStore.persistBlocking(
-                                    conversationId = op.conversationId,
-                                    messages = op.messages,
-                                )
+                                withPendingMessageWrite {
+                                    pendingMessageStore.persistBlocking(
+                                        conversationId = op.conversationId,
+                                        messages = op.messages,
+                                    )
+                                }
                             }
                         }
                     }
 
-                    is PendingMessageStoreOp.Event -> pendingMessageStore.recordEvent(
-                        conversationId = op.conversationId,
-                        event = op.event,
-                        messageId = op.messageId,
-                        count = op.count,
-                        detail = op.detail,
-                    )
+                    is PendingMessageStoreOp.Event -> withPendingMessageWrite {
+                        pendingMessageStore.recordEvent(
+                            conversationId = op.conversationId,
+                            event = op.event,
+                            messageId = op.messageId,
+                            count = op.count,
+                            detail = op.detail,
+                        )
+                    }
                 }
             }
         }
+        restoreWriteGateRegistration = restoreWriteGate?.addRestoreLifecycleListener(
+            onStarted = {
+                // Stop active providers before the restore waits for the short
+                // durable writer section. Their callbacks keep their old
+                // coroutine epoch and are dropped at the gate.
+                sessions.values.forEach { it.getJob()?.cancel() }
+                // Invalidate queued async snapshots too; a worker already in
+                // the channel must not replay the pre-restore pending queue.
+                pendingMessagePersistRevisions.values.forEach { it.incrementAndGet() }
+            },
+            onFinished = { succeeded, dataCommitted ->
+                if (succeeded || dataCommitted) {
+                    // A successful or partial data commit makes every loaded
+                    // session stale. Clear only memory; the imported DB is the
+                    // source of truth and the next access reloads it.
+                    sessions.values.forEach { it.invalidateAfterRestore() }
+                    sessions.keys.forEach { conversationId ->
+                        persistPendingMessagesDurably(conversationId, emptyList())
+                    }
+                    generationCheckpointAt.clear()
+                    trustedRunToolNames.clear()
+                    deletedConversationIds.clear()
+                    deletedConversationRestoreEpochs.clear()
+                } else {
+                    // A failed restore that committed no data leaves the
+                    // pre-restore database intact. Drop only the captured
+                    // purge epochs: the tombstones remain, and a later
+                    // History purge will capture the now-current epoch.
+                    deletedConversationRestoreEpochs.clear()
+                }
+            },
+        )
     }
 
     fun cleanup() = runCatching {
+        restoreWriteGateRegistration?.close()
         lifecycleObserverRegistration.cancel()
         appScope.launch(Dispatchers.Main.immediate) {
             ProcessLifecycleOwner.get().lifecycle.removeObserver(lifecycleObserver)
@@ -557,8 +613,9 @@ class ChatService(
 
     private fun launchWithConversationReference(
         conversationId: Uuid,
-        block: suspend () -> Unit
-    ): Job = appScope.launch {
+        expectedRestoreEpoch: Long? = null,
+        block: suspend () -> Unit,
+    ): Job = appScope.launch(restoreWriteContext(expectedRestoreEpoch)) {
         val session = getOrCreateSession(conversationId)
         session.acquire()
         try {
@@ -567,6 +624,33 @@ class ChatService(
             session.release()
         }
     }
+
+    private fun restoreWriteContext(expectedRestoreEpoch: Long? = restoreWriteGate?.currentEpoch()): CoroutineContext =
+        expectedRestoreEpoch?.let(::SyncRestoreWriteEpoch) ?: EmptyCoroutineContext
+
+    private suspend fun expectedRestoreEpoch(): Long? =
+        coroutineContext[SyncRestoreWriteEpoch]?.value
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return coroutineContext[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreEpoch(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        if (restoreWriteGate == null) return block()
+        val epoch = expectedRestoreEpoch
+            ?: coroutineContext[SyncRestoreWriteEpoch]?.value
+            ?: restoreWriteGate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) { block() }
+    }
+
+    /** Capture the caller's epoch before a read/transform/write operation. */
+    private suspend fun <T> withCapturedRestoreWriteContext(
+        block: suspend () -> T,
+    ): T = withRestoreEpoch(captureRestoreEpoch(), block)
 
     // ---- 对话状态访问 ----
 
@@ -895,7 +979,7 @@ class ChatService(
     private fun launchViaKernel(conversationId: Uuid, message: PendingUserMessage) {
         val runner = agentRunner ?: return launchPendingMessageLoop(conversationId, message)
         val session = getOrCreateSession(conversationId)
-        val job = appScope.launch {
+        val job = appScope.launch(restoreWriteContext()) {
             try {
                 val dispatchMessage = session.preparePendingMessageForDispatch(conversationId, message)
                 recordPendingMessageEvent(
@@ -974,7 +1058,7 @@ class ChatService(
             return
         }
 
-        val job = appScope.launch {
+        val job = appScope.launch(restoreWriteContext()) {
             var nextMessage = firstMessage ?: session.dequeueNextPendingUserMessageDurably(conversationId)
             while (nextMessage != null) {
                 try {
@@ -1199,7 +1283,9 @@ class ChatService(
         appScope.launch(pendingMessagePersistDispatcher) {
             pendingMessagePersistLock(conversationId).withLock {
                 if (revision == pendingMessagePersistRevision(conversationId).get()) {
-                    pendingMessageStore.persistBlocking(conversationId, messages)
+                    withPendingMessageWrite {
+                        pendingMessageStore.persistBlocking(conversationId, messages)
+                    }
                 }
             }
         }
@@ -1234,10 +1320,22 @@ class ChatService(
         withContext(pendingMessagePersistDispatcher) {
             pendingMessagePersistLock(conversationId).withLock {
                 if (revision == pendingMessagePersistRevision(conversationId).get()) {
-                    pendingMessageStore.persistBlocking(conversationId, messages)
+                    val gate = restoreWriteGate
+                    if (gate == null) {
+                        pendingMessageStore.persistBlocking(conversationId, messages)
+                    } else {
+                        gate.withCurrentWriterOrCancel {
+                            pendingMessageStore.persistBlocking(conversationId, messages)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private suspend fun withPendingMessageWrite(block: suspend () -> Unit) {
+        val gate = restoreWriteGate
+        if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     private suspend fun ConversationSession.dequeueNextPendingUserMessageDurably(
@@ -1280,12 +1378,26 @@ class ChatService(
         val oldJob = session.getJob()
         oldJob?.cancel()
 
-        session.setJob(appScope.launch {
+        session.setJob(appScope.launch(restoreWriteContext()) {
             // Wait for the cancelled generation's onCompletion to finish writing,
             // so it doesn't race with our state mutations below.
             oldJob?.let { runCatching { it.join() } }
             try {
                 val conversation = ensureFullConversationLoaded(conversationId)
+
+                // Regenerate replaces an interrupted response; it must not
+                // reuse that response's runId or overwrite its resume cursor.
+                if (message.role == MessageRole.USER || regenerateAssistantMsg) {
+                    val previousRun = runTerminalStore?.activeForConversation(conversationId.toString())
+                        ?.takeIf { it.state in RESPONSES_RESUME_STATES }
+                    if (previousRun != null) {
+                        check(checkNotNull(storedResponseStopCancel).cancelForRegeneration(
+                            previousRun.runId, checkNotNull(runTerminalStore),
+                        )) { "原响应的取消尚未确认，请稍后再重新生成。" }
+                        runRecovery?.reconcileStartedEffects(previousRun.runId)
+                        refreshOutcomeUnknown()
+                    }
+                }
 
                 when {
                     message.role == MessageRole.USER -> {
@@ -1346,7 +1458,7 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         session.getJob()?.cancel()
 
-        session.setJob(appScope.launch {
+        session.setJob(appScope.launch(restoreWriteContext()) {
             try {
                 applyToolApprovalDecision(conversationId, toolCallId, approved, reason, answer)
             } catch (e: Exception) {
@@ -1372,9 +1484,9 @@ class ChatService(
         reason: String,
         answer: String?,
         token: String,
-    ): Boolean {
-        val registry = notificationApprovalTokens ?: return false
-        val binding = registry.consume(token) ?: return false
+    ): Boolean = withCapturedRestoreWriteContext restore@{
+        val registry = notificationApprovalTokens ?: return@restore false
+        val binding = registry.consume(token) ?: return@restore false
         val conversation = ensureFullConversationLoaded(conversationId)
         val toolPart = conversation.messageNodes
             .asSequence()
@@ -1395,7 +1507,7 @@ class ChatService(
                 TAG,
                 "handleNotificationApproval: rejected token conversation=$conversationId run=$runId toolCall=$toolCallId"
             )
-            return false
+            return@restore false
         }
         // Mirrors the in-app path: cancel the paused generation job, apply the
         // decision (approve/deny/answer), and resume the same run.
@@ -1405,9 +1517,9 @@ class ChatService(
             applyToolApprovalDecision(conversationId, toolCallId, approved, reason, answer)
         } catch (e: Exception) {
             addError(e, conversationId, title = context.getString(R.string.error_title_tool_approval))
-            return false
+            return@restore false
         }
-        return true
+        true
     }
 
     /**
@@ -1480,7 +1592,7 @@ class ChatService(
         val session = getOrCreateSession(conversationId)
         if (session.isGenerating) return
 
-        val job = appScope.launch {
+        val job = appScope.launch(restoreWriteContext()) {
             try {
                 val conversation = ensureFullConversationLoaded(conversationId)
                 var changed = false
@@ -1618,10 +1730,11 @@ class ChatService(
      * same conversation run resumes.
      */
     suspend fun reconcileOutcomeUnknown(conversationId: Uuid, effectId: String, retry: Boolean) {
-        if (!useDurableRuntime()) return
-        val effect = toolEffectLedger!!.get(effectId) ?: return
-        val run = effect.runId?.let { runTerminalStore!!.get(it) } ?: return
-        if (run.conversationId != conversationId.toString()) return
+        withCapturedRestoreWriteContext restore@{
+            if (!useDurableRuntime()) return@restore
+            val effect = toolEffectLedger!!.get(effectId) ?: return@restore
+            val run = effect.runId?.let { runTerminalStore!!.get(it) } ?: return@restore
+            if (run.conversationId != conversationId.toString()) return@restore
 
         val abandonedOutput = listOf(
             UIMessagePart.Text(
@@ -1694,7 +1807,8 @@ class ChatService(
         refreshOutcomeUnknown()
         // Resume the same conversation: retry re-executes the tool; abandon
         // lets the model see the structured rejection and continue.
-        handleMessageComplete(conversationId)
+            handleMessageComplete(conversationId)
+        }
     }
 
     // ---- 处理消息补全 ----
@@ -1703,6 +1817,7 @@ class ChatService(
         conversationId: Uuid,
         messageRange: ClosedRange<Int>? = null
     ) {
+        val generationRestoreEpoch = expectedRestoreEpoch()
         val settings = settingsStore.settingsFlow.first()
         val model = settings.getCurrentChatModel() ?: return
 
@@ -1717,6 +1832,16 @@ class ChatService(
             runTerminalStore!!.activeForConversation(conversationId.toString())
         } else {
             null
+        }
+        val resumeCursor = existingRun?.takeIf { it.state in RESPONSES_RESUME_STATES }
+            ?.let { responsesResumeStore?.load(it.runId) }
+        if (resumeCursor != null && resumeCursor.providerId != model.findProvider(settings.providers)?.id?.toString()) {
+            addError(
+                IllegalStateException("请切回原 Provider 后继续恢复，或选择重新生成。"),
+                conversationId,
+                title = context.getString(R.string.error_title_regenerate_message),
+            )
+            return // keep the paused run and cursor; do not begin/fail a different provider's run
         }
         val runId = if (durablePath) {
             val id = existingRun?.let { app.amber.core.agent.runtime.AgentRunId(it.runId) }
@@ -1751,7 +1876,9 @@ class ChatService(
             // check invalid messages
             val conversation = sanitizeInvalidMessages(initialConversation)
             if (conversation != initialConversation) {
-                conversationRepo.updateConversation(conversation)
+                withConversationWrite {
+                    conversationRepo.updateConversation(conversation)
+                }
                 replaceSessionWithFullConversation(conversationId, conversation)
             }
 
@@ -1884,6 +2011,7 @@ class ChatService(
                 app.amber.ai.provider.ResponsesResumeRequest(
                     runId = runId.value,
                     store = responsesResumeStore,
+                    resumeFrom = resumeCursor,
                 )
             } else {
                 null
@@ -1960,11 +2088,9 @@ class ChatService(
 
                                 app.amber.core.ai.GenerationTerminal.StepLimit -> {
                                     // STEP_LIMIT is terminal and never maps to COMPLETED.
-                                    runTerminalStore!!.finish(
-                                        runId!!.value,
-                                        RunTerminalState.STEP_LIMIT,
-                                        PauseReason.STEP_LIMIT_EXHAUSTED,
-                                    )
+                                    // Publish it after the final conversation checkpoint in
+                                    // onCompletion, so a process death cannot leave a terminal
+                                    // run with its final messages only in memory.
                                     refreshOutcomeUnknown()
                                 }
                             }
@@ -2003,9 +2129,26 @@ class ChatService(
                 } else {
                     cancelLiveUpdateNotification(conversationId)
                 }
+                // Persist the final in-memory conversation before publishing
+                // any terminal run state. The response cursor is cleared only
+                // after that checkpoint and the terminal owner both succeed.
+                val updatedConversation = getConversationFlow(conversationId).value.copy(
+                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
+                        node.copy(messages = node.messages.map { it.finishReasoning() })
+                    },
+                    updateAt = Instant.now()
+                )
+                updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                val conversationCheckpointed = checkpointConversation(
+                    conversationId,
+                    updatedConversation,
+                    force = true,
+                )
+                generationCheckpointAt.remove(conversationId)
                 // P1-03: foreground-service lifecycle follows the persisted
                 // terminal state, not the coroutine's exit. WAITING_USER is a
                 // pause — the keep-alive stays until the user decides.
+                var terminalOwnerSucceeded = !durablePath || runId == null
                 val terminalPublish = if (durablePath && runId != null) {
                     val (state, reason) = terminalForFlowEnd(cause, reportedTerminal)
                     // P6-01: when the user stopped but the server cancel could
@@ -2013,24 +2156,48 @@ class ChatService(
                     // WAITING_EXTERNAL (never pretend CANCELLED) and leave the
                     // resume cursor so recovery can settle it server-side.
                     val serverCancelPending = pendingServerCancelFailures.remove(runId.value) == true
-                    runCatching {
-                        when {
-                            serverCancelPending -> {
-                                runTerminalStore!!.pause(
-                                    runId.value,
-                                    RunTerminalState.WAITING_EXTERNAL,
-                                    PauseReason.USER_STOP,
-                                )
-                            }
+                    terminalOwnerSucceeded = if (
+                        state != RunTerminalState.COMPLETED &&
+                            state != RunTerminalState.STEP_LIMIT ||
+                            conversationCheckpointed
+                    ) {
+                        runCatching {
+                            when {
+                                serverCancelPending -> {
+                                    runTerminalStore!!.pause(
+                                        runId.value,
+                                        RunTerminalState.WAITING_EXTERNAL,
+                                        PauseReason.USER_STOP,
+                                    )
+                                }
 
-                            state == RunTerminalState.WAITING_USER -> {
-                                runTerminalStore!!.pause(runId.value, state, reason)
-                            }
+                                state == RunTerminalState.WAITING_USER -> {
+                                    runTerminalStore!!.pause(runId.value, state, reason)
+                                }
 
-                            else -> {
-                                runTerminalStore!!.finish(runId.value, state, reason)
+                                else -> {
+                                    runTerminalStore!!.finish(runId.value, state, reason)
+                                }
                             }
-                        }
+                            true
+                        }.onFailure { error ->
+                            Log.w(TAG, "terminal owner persist failed for $conversationId", error)
+                        }.getOrDefault(false)
+                    } else {
+                        Log.w(TAG, "terminal owner deferred because conversation checkpoint failed for $conversationId")
+                        false
+                    }
+                    if (
+                        terminalOwnerSucceeded &&
+                        conversationCheckpointed &&
+                        !serverCancelPending &&
+                        responsesResume != null &&
+                        (state == RunTerminalState.COMPLETED || state == RunTerminalState.STEP_LIMIT)
+                    ) {
+                        runCatching { responsesResume.store.clear(responsesResume.runId) }
+                            .onFailure { error ->
+                                Log.w(TAG, "stored response cursor clear failed for $conversationId", error)
+                            }
                     }
                     if (state == RunTerminalState.CANCELLED || state == RunTerminalState.FAILED || serverCancelPending) {
                         // A stop/failure may leave a STARTED non-idempotent
@@ -2050,6 +2217,20 @@ class ChatService(
                 } else {
                     null
                 }
+                // Keep a resumable WAITING_USER run bound to its identity, but
+                // close the WebMount run namespace for every terminal outcome.
+                if (
+                    runId != null &&
+                    terminalPublish != RunTerminalState.WAITING_USER &&
+                    terminalOwnerSucceeded
+                ) {
+                    localTools.endWebMountRun(
+                        runId = runId.value,
+                        conversationId = conversationId.toString(),
+                        reason = "generation finished",
+                        preservePendingHandoff = terminalPublish == RunTerminalState.COMPLETED,
+                    )
+                }
                 val keepAlive = if (terminalPublish == null) {
                     true // legacy path: keep-alive follows queued continuations below
                 } else {
@@ -2060,23 +2241,12 @@ class ChatService(
                 if (keepAlive && !hasQueuedContinuation(conversationId)) {
                     stopGenerationKeepAlive(conversationId)
                 }
-
-                // 可能被取消了，或者意外结束，兜底更新
-                val updatedConversation = getConversationFlow(conversationId).value.copy(
-                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
-                        node.copy(messages = node.messages.map { it.finishReasoning() })
-                    },
-                    updateAt = Instant.now()
-                )
-                updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-                checkpointConversation(conversationId, updatedConversation, force = true)
-                generationCheckpointAt.remove(conversationId)
                 finishGenerationTask(generationTaskId, cause)
                 cleanupRunResourcesIfDone(conversationId, updatedConversation)
 
                 // Show notification only when the run truly completed
                 // (STEP_LIMIT / WAITING_USER are never "done").
-                val completed = terminalPublish == RunTerminalState.COMPLETED ||
+                val completed = (terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded) ||
                     (terminalPublish == null && cause == null)
                 if (
                     completed &&
@@ -2131,33 +2301,44 @@ class ChatService(
             // thrown before the generation flow was even constructed.
             streamRecorder?.onRunFinished(it)
             trustedRunToolNames.remove(conversationId)
-            if (durablePath && runId != null) {
-                val state = if (it is CancellationException) {
-                    RunTerminalState.CANCELLED
-                } else {
-                    RunTerminalState.FAILED
-                }
-                runCatching {
-                    runTerminalStore!!.finish(
-                        runId.value,
-                        state,
-                        if (it is CancellationException) PauseReason.USER_STOP else null,
-                    )
-                    runRecovery!!.reconcileStartedEffects(runId.value)
-                    refreshOutcomeUnknown()
-                }
-                // P4-02: cascade cancellation (thread_graph_v2 gated inside).
-                if (state == RunTerminalState.CANCELLED) {
-                    runCatching {
-                        subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
-                    }
-                }
+            val failureState = if (durablePath && runId != null) {
+                if (it is CancellationException) RunTerminalState.CANCELLED else RunTerminalState.FAILED
+            } else {
+                null
             }
             if (!hasQueuedContinuation(conversationId)) {
                 stopGenerationKeepAlive(conversationId)
             }
             val latestConversation = getConversationFlow(conversationId).value
-            checkpointConversation(conversationId, latestConversation, force = true)
+            val conversationCheckpointed = checkpointConversation(
+                conversationId,
+                latestConversation,
+                force = true,
+            )
+            if (failureState != null && runId != null) {
+                runCatching {
+                    runTerminalStore!!.finish(
+                        runId.value,
+                        failureState,
+                        if (it is CancellationException) PauseReason.USER_STOP else null,
+                    )
+                    runRecovery!!.reconcileStartedEffects(runId.value)
+                    refreshOutcomeUnknown()
+                }.onFailure { error ->
+                    Log.w(TAG, "failure terminal owner persist failed for $conversationId", error)
+                }
+                localTools.endWebMountRun(
+                    runId = runId.value,
+                    conversationId = conversationId.toString(),
+                    reason = if (it is CancellationException) "generation cancelled" else "generation failed",
+                )
+                // P4-02: cascade cancellation (thread_graph_v2 gated inside).
+                if (failureState == RunTerminalState.CANCELLED) {
+                    runCatching {
+                        subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
+                    }
+                }
+            }
             generationCheckpointAt.remove(conversationId)
             screenCaptureManager.releaseSession()
             if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
@@ -2202,14 +2383,14 @@ class ChatService(
             persistConversationWindow(conversationId, finalConversation, indexFts = true)
             cleanupRunResourcesIfDone(conversationId, finalConversation)
 
-            launchWithConversationReference(conversationId) {
+            launchWithConversationReference(conversationId, generationRestoreEpoch) {
                 generateTitle(conversationId, finalConversation)
             }
-            launchWithConversationReference(conversationId) {
+            launchWithConversationReference(conversationId, generationRestoreEpoch) {
                 generateSuggestion(conversationId, finalConversation)
             }
             if (!finalConversation.hasPendingOrUnexecutedTools()) {
-                appScope.launch(Dispatchers.IO) {
+                appScope.launch(Dispatchers.IO + restoreWriteContext(generationRestoreEpoch)) {
                     memoryExtractor.extractAfterConversation(
                         loadFullConversationForGeneration(conversationId)
                     )
@@ -2523,13 +2704,13 @@ class ChatService(
         conversationId: Uuid,
         conversation: Conversation,
         force: Boolean = false,
-    ) {
+    ): Boolean {
         val now = System.currentTimeMillis()
         val last = generationCheckpointAt[conversationId] ?: 0L
-        if (!force && now - last < GENERATION_CHECKPOINT_INTERVAL_MS) return
+        if (!force && now - last < GENERATION_CHECKPOINT_INTERVAL_MS) return false
         generationCheckpointAt[conversationId] = now
         val startedAt = if (BuildConfig.DEBUG) System.nanoTime() else 0L
-        runCatching {
+        return runCatching {
             persistConversationWindow(
                 conversationId = conversationId,
                 conversation = conversation,
@@ -2543,12 +2724,23 @@ class ChatService(
                         "elapsedMs=${String.format(Locale.US, "%.2f", elapsedMs)}",
                 )
             }
+            true
         }.onFailure { error ->
             Log.w(TAG, "checkpointConversation failed for $conversationId", error)
-        }
+        }.getOrDefault(false)
     }
 
     private suspend fun persistConversationWindow(
+        conversationId: Uuid,
+        conversation: Conversation,
+        indexFts: Boolean,
+    ) {
+        withConversationWrite {
+            persistConversationWindowInternal(conversationId, conversation, indexFts)
+        }
+    }
+
+    private suspend fun persistConversationWindowInternal(
         conversationId: Uuid,
         conversation: Conversation,
         indexFts: Boolean,
@@ -2564,7 +2756,7 @@ class ChatService(
         }
         val loadState = getOrCreateSession(conversationId).timelineLoadState.value
         if (!loadState.initialized) {
-            saveConversation(conversationId, conversation)
+            saveConversationInternal(conversationId, conversation)
             return
         }
         conversationRepo.upsertConversationWindow(
@@ -2572,6 +2764,16 @@ class ChatService(
             firstNodeIndex = loadState.oldestLoadedIndex,
             indexFts = indexFts,
         )
+    }
+
+    /** Serialize the actual repository write and reject an old generation epoch. */
+    private suspend fun withConversationWrite(block: suspend () -> Unit) {
+        val gate = restoreWriteGate
+        if (gate == null) {
+            block()
+        } else {
+            gate.withCurrentWriterOrCancel(block)
+        }
     }
 
     /**
@@ -2609,9 +2811,12 @@ class ChatService(
     ) {
         if (conversation.id != conversationId) return
         val session = getOrCreateSession(conversationId)
-        if (checkDeletedFiles) {
-            checkFilesDelete(conversation, session.state.value)
-        }
+        // This API only projects the conversation into the in-memory session.
+        // Physical attachment cleanup belongs to saveConversationInternal,
+        // where the suspend caller's restore epoch is available. Keeping the
+        // old compatibility flag avoids breaking ConversationAccess callers,
+        // while preventing a synchronous update from scheduling cleanup under
+        // a newer epoch after an older generation resumes.
         session.state.value = conversation
         val loadState = session.timelineLoadState.value
         if (loadState.initialized) {
@@ -2636,16 +2841,33 @@ class ChatService(
         updateConversation(conversationId, update(current))
     }
 
-    private fun checkFilesDelete(newConversation: Conversation, oldConversation: Conversation) {
+    private fun checkFilesDelete(
+        newConversation: Conversation,
+        oldConversation: Conversation,
+        expectedRestoreEpoch: Long? = null,
+    ) {
         val retainedFiles = newConversation.files.toHashSet()
         val removedFiles = oldConversation.files.filterNot(retainedFiles::contains)
         if (removedFiles.isEmpty()) return
 
-        filesManager.deleteChatFiles(removedFiles)
+        filesManager.deleteChatFiles(removedFiles, expectedRestoreEpoch)
         Log.w(TAG, "checkFilesDelete: $removedFiles")
     }
 
     override suspend fun saveConversation(conversationId: Uuid, conversation: Conversation) {
+        withConversationWrite {
+            saveConversationInternal(conversationId, conversation)
+        }
+    }
+
+    /** User initiated pin changes share the same durable restore boundary as chat writes. */
+    suspend fun togglePinnedStatus(conversationId: Uuid) {
+        withConversationWrite {
+            conversationRepo.togglePinStatus(conversationId)
+        }
+    }
+
+    private suspend fun saveConversationInternal(conversationId: Uuid, conversation: Conversation) {
         if (conversationId in deletedConversationIds) return
         val exists = conversationRepo.existsConversationById(conversation.id)
         if (!exists && conversation.title.isBlank() && conversation.messageNodes.isEmpty()) {
@@ -2661,7 +2883,10 @@ class ChatService(
         } else {
             conversation.copy()
         }
-        updateConversation(conversationId, updatedConversation)
+        val expectedRestoreEpoch = captureRestoreEpoch()
+        val oldConversation = getConversationFlow(conversationId).value
+        checkFilesDelete(updatedConversation, oldConversation, expectedRestoreEpoch)
+        updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
 
         if (!exists) {
             conversationRepo.insertConversation(updatedConversation)
@@ -2791,54 +3016,56 @@ class ChatService(
         parts: List<UIMessagePart>,
         regenerate: Boolean = false,
     ) {
-        if (parts.isEmptyInputMessage()) return
-        val processedParts = userInputPreprocessor.process(parts)
+        withCapturedRestoreWriteContext restore@{
+            if (parts.isEmptyInputMessage()) return@restore
+            val processedParts = userInputPreprocessor.process(parts)
 
-        val session = getOrCreateSession(conversationId)
-        // P8-01: 生成中编辑冲突——明确提示并拒绝，不打断当前生成，也不做任何写操作。
-        val conflictReason = blockedReason(session.isGenerating, "请先停止生成再编辑消息")
-        if (conflictReason != null) {
-            addError(
-                IllegalStateException(conflictReason),
-                conversationId = conversationId,
-                title = context.getString(R.string.error_title_operation),
-            )
-            return
-        }
-
-        val currentConversation = ensureFullConversationLoaded(conversationId)
-        val updatedConversation = currentConversation.withEditedUserVariant(messageId, processedParts)
-        if (updatedConversation === currentConversation) return
-
-        contextEngine.invalidateCompacts(conversationId, "message_edited")
-        saveConversation(conversationId, updatedConversation)
-
-        // P8-01: 「保存并重新生成」——从新选中的 user variant 生成 assistant 分支。
-        // 生成绑定新 variant：handleMessageComplete 使用 conversation.currentMessages，
-        // 其 selectIndex 已指向新 variant。以会话 Job 运行，Stop 可取消、可防重复。
-        if (regenerate) {
-            val job = appScope.launch {
-                try {
-                    handleMessageComplete(conversationId)
-                    _generationDoneFlow.emit(conversationId)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    addError(
-                        e,
-                        conversationId,
-                        title = context.getString(R.string.error_title_regenerate_message),
-                    )
-                }
+            val session = getOrCreateSession(conversationId)
+            // P8-01: 生成中编辑冲突——明确提示并拒绝，不打断当前生成，也不做任何写操作。
+            val conflictReason = blockedReason(session.isGenerating, "请先停止生成再编辑消息")
+            if (conflictReason != null) {
+                addError(
+                    IllegalStateException(conflictReason),
+                    conversationId = conversationId,
+                    title = context.getString(R.string.error_title_operation),
+                )
+                return@restore
             }
-            session.setJob(job)
+
+            val currentConversation = ensureFullConversationLoaded(conversationId)
+            val updatedConversation = currentConversation.withEditedUserVariant(messageId, processedParts)
+            if (updatedConversation === currentConversation) return@restore
+
+            contextEngine.invalidateCompacts(conversationId, "message_edited")
+            saveConversation(conversationId, updatedConversation)
+
+            // P8-01: 「保存并重新生成」——从新选中的 user variant 生成 assistant 分支。
+            // 生成绑定新 variant：handleMessageComplete 使用 conversation.currentMessages，
+            // 其 selectIndex 已指向新 variant。以会话 Job 运行，Stop 可取消、可防重复。
+            if (regenerate) {
+                val job = appScope.launch(restoreWriteContext()) {
+                    try {
+                        handleMessageComplete(conversationId)
+                        _generationDoneFlow.emit(conversationId)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        addError(
+                            e,
+                            conversationId,
+                            title = context.getString(R.string.error_title_regenerate_message),
+                        )
+                    }
+                }
+                session.setJob(job)
+            }
         }
     }
 
     suspend fun forkConversationAtMessage(
         conversationId: Uuid,
         messageId: Uuid
-    ): Conversation {
+    ): Conversation = withCapturedRestoreWriteContext {
         val currentConversation = ensureFullConversationLoaded(conversationId)
         val targetNodeIndex = currentConversation.messageNodes.indexOfFirst { node ->
             node.messages.any { it.id == messageId }
@@ -2872,7 +3099,7 @@ class ChatService(
             sourceConversationId = conversationId,
             targetConversation = forked,
         )
-        return forked
+        forked
     }
 
     suspend fun selectMessageNode(
@@ -2880,28 +3107,30 @@ class ChatService(
         nodeId: Uuid,
         selectIndex: Int
     ) {
-        val session = getOrCreateSession(conversationId)
-        // Minor-1: 生成中切换 user variant 与生成写竞争（saveConversation 可能
-        // 覆盖流式写入的下游分支）。与 editMessage 的权威守卫一致：明确提示并
-        // 拒绝，不打断当前生成，也不做任何写操作。
-        val conflictReason = blockedReason(session.isGenerating, "请先停止生成再切换消息分支")
-        if (conflictReason != null) {
-            addError(
-                IllegalStateException(conflictReason),
-                conversationId = conversationId,
-                title = context.getString(R.string.error_title_operation),
-            )
-            return
+        withCapturedRestoreWriteContext restore@{
+            val session = getOrCreateSession(conversationId)
+            // Minor-1: 生成中切换 user variant 与生成写竞争（saveConversation 可能
+            // 覆盖流式写入的下游分支）。与 editMessage 的权威守卫一致：明确提示并
+            // 拒绝，不打断当前生成，也不做任何写操作。
+            val conflictReason = blockedReason(session.isGenerating, "请先停止生成再切换消息分支")
+            if (conflictReason != null) {
+                addError(
+                    IllegalStateException(conflictReason),
+                    conversationId = conversationId,
+                    title = context.getString(R.string.error_title_operation),
+                )
+                return@restore
+            }
+
+            val currentConversation = ensureFullConversationLoaded(conversationId)
+            // P8-02: 切换 variant 后，下游可见分支同步切换（截断到被切换节点，
+            // 与新 variant 上下文保持一致）。
+            val updatedConversation = currentConversation.withSelectedVariant(nodeId, selectIndex)
+            if (updatedConversation === currentConversation) return@restore
+
+            contextEngine.invalidateCompacts(conversationId, "message_branch_changed")
+            saveConversation(conversationId, updatedConversation)
         }
-
-        val currentConversation = ensureFullConversationLoaded(conversationId)
-        // P8-02: 切换 variant 后，下游可见分支同步切换（截断到被切换节点，
-        // 与新 variant 上下文保持一致）。
-        val updatedConversation = currentConversation.withSelectedVariant(nodeId, selectIndex)
-        if (updatedConversation === currentConversation) return
-
-        contextEngine.invalidateCompacts(conversationId, "message_branch_changed")
-        saveConversation(conversationId, updatedConversation)
     }
 
     suspend fun deleteMessage(
@@ -2909,18 +3138,20 @@ class ChatService(
         messageId: Uuid,
         failIfMissing: Boolean = true,
     ) {
-        val currentConversation = ensureFullConversationLoaded(conversationId)
-        val updatedConversation = buildConversationAfterMessageDelete(currentConversation, messageId)
+        withCapturedRestoreWriteContext restore@{
+            val currentConversation = ensureFullConversationLoaded(conversationId)
+            val updatedConversation = buildConversationAfterMessageDelete(currentConversation, messageId)
 
-        if (updatedConversation == null) {
-            if (failIfMissing) {
-                throw NoSuchElementException("Message not found")
+            if (updatedConversation == null) {
+                if (failIfMissing) {
+                    throw NoSuchElementException("Message not found")
+                }
+                return@restore
             }
-            return
-        }
 
-        contextEngine.invalidateCompacts(conversationId, "message_deleted")
-        saveConversation(conversationId, updatedConversation)
+            contextEngine.invalidateCompacts(conversationId, "message_deleted")
+            saveConversation(conversationId, updatedConversation)
+        }
     }
 
     suspend fun deleteMessage(
@@ -2997,7 +3228,11 @@ class ChatService(
             ledger = casLedger,
             previousStore = app.amber.feature.prompts.SoulPreviousStore(context),
         )
-        val assistantLocalTools = localTools.getTools(AMBER_AGENT_LOCAL_TOOLS, conversationId)
+        val assistantLocalTools = localTools.getTools(
+            options = AMBER_AGENT_LOCAL_TOOLS,
+            conversationId = conversationId,
+            runId = runId,
+        )
         val themePackTools = themePackageManager?.let(::createThemePackTools).orEmpty()
         val mcpManagementTools = if (conversationId != null) {
             createMcpManagementTools(
@@ -3070,7 +3305,7 @@ class ChatService(
             if (conversationId != null) {
                 addAll(
                     ConversationContextTools(
-                        contextEngine = contextEngine,
+        contextEngine = contextEngine,
                         conversationProvider = { getConversationFlow(conversationId).value },
                         settingsProvider = { settingsStore.settingsFlow.first() },
                         modelProvider = { settingsStore.settingsFlow.first().getCurrentChatModel() },
@@ -3104,6 +3339,26 @@ class ChatService(
                 parentConversationId = conversationId,
                 parentRunId = runId,
                 parentToolsProvider = { baseTools },
+                // A subagent receives the same logical catalog, but WebMount tools must bind
+                // their lease to the internally assigned child generation scope. Rebuild only
+                // the local-tool entries through the existing scoped factory; all other parent
+                // tool closures keep their current identity and no model-supplied identity is trusted.
+                parentToolsForRun = { childScopeId ->
+                    val childScopedLocalTools = localTools.getTools(
+                        options = AMBER_AGENT_LOCAL_TOOLS,
+                        conversationId = conversationId,
+                        runId = childScopeId,
+                    ).associateBy { it.name }
+                    baseTools.map { childScopedLocalTools[it.name] ?: it }
+                },
+                onRunFinished = { childScopeId, reason, preservePendingHandoff ->
+                    localTools.endWebMountRun(
+                        runId = childScopeId,
+                        conversationId = conversationId.toString(),
+                        reason = reason,
+                        preservePendingHandoff = preservePendingHandoff,
+                    )
+                },
                 // P4-02: thread_graph_v2 gate — off keeps the legacy tool set
                 // (no subagent_followup / send_message / interrupt).
                 threadGraphEnabled = threadGraphEnabled,
@@ -3153,6 +3408,9 @@ class ChatService(
                 secretStore = secretStore,
                 providerCatalog = providerCatalog,
                 googleProvider = googleProvider,
+                openAICodexAuthStore = openAICodexAuthStore,
+                grokAuthStore = grokAuthStore,
+                antigravityAuthStore = antigravityAuthStore,
             )
         } else {
             emptyList()
@@ -3269,6 +3527,12 @@ class ChatService(
                         revision = it.revision,
                         sourceRunId = it.sourceRunId,
                         sourceTrigger = it.sourceTrigger,
+                        sourceConversationId = it.sourceConversationId,
+                        sourceMessageIds = it.sourceMessageIds,
+                        supersedesIds = it.supersedesIds,
+                        createdAt = it.createdAt,
+                        updatedAt = it.updatedAt,
+                        lastUsedAt = it.lastUsedAt,
                     )
                 }
             },
@@ -3316,7 +3580,9 @@ class ChatService(
      */
     suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
         val conversationId = conversation.id
+        val expectedRestoreEpoch = captureRestoreEpoch()
         deletedConversationIds.add(conversationId)
+        expectedRestoreEpoch?.let { deletedConversationRestoreEpochs[conversationId] = it }
         sessions[conversationId]?.let { session ->
             session.getJob()?.let { job ->
                 job.cancel()
@@ -3329,9 +3595,15 @@ class ChatService(
         stopGenerationKeepAlive(conversationId)
         cancelLiveUpdateNotification(conversationId)
         try {
-            conversationRepo.deleteConversation(conversation, deferCleanup = deferCleanup)
+            withRestoreEpoch(expectedRestoreEpoch) {
+                conversationRepo.deleteConversation(conversation, deferCleanup = deferCleanup)
+            }
+            if (!deferCleanup) {
+                deletedConversationRestoreEpochs.remove(conversationId)
+            }
         } catch (t: Throwable) {
             deletedConversationIds.remove(conversationId)
+            deletedConversationRestoreEpochs.remove(conversationId)
             throw t
         }
     }
@@ -3339,6 +3611,28 @@ class ChatService(
     /** 删除被撤销（如 History 的 Undo）后解除 tombstone，恢复该会话的持久化通道。 */
     fun markConversationRestored(conversationId: Uuid) {
         deletedConversationIds.remove(conversationId)
+        deletedConversationRestoreEpochs.remove(conversationId)
+    }
+
+    /** Complete a deferred History deletion with the epoch captured at delete time. */
+    suspend fun purgeDeletedConversation(conversation: Conversation) {
+        val invocationEpoch = captureRestoreEpoch()
+        // A successful/partial restore clears the tombstone. A late snackbar
+        // callback must therefore be a no-op rather than treating its missing
+        // epoch as a new user write and deleting restored attachments.
+        if (conversation.id !in deletedConversationIds) return
+        val expectedRestoreEpoch = deletedConversationRestoreEpochs[conversation.id] ?: invocationEpoch
+        withRestoreEpoch(expectedRestoreEpoch) {
+            conversationRepo.cleanupDeletedConversation(
+                conversation = conversation,
+                expectedRestoreEpoch = expectedRestoreEpoch,
+            )
+        }
+        if (expectedRestoreEpoch == null) {
+            deletedConversationRestoreEpochs.remove(conversation.id)
+        } else {
+            deletedConversationRestoreEpochs.remove(conversation.id, expectedRestoreEpoch)
+        }
     }
 
     /**
@@ -3346,11 +3640,13 @@ class ChatService(
      * as single-item deletion so an active checkpoint cannot recreate deleted history.
      */
     suspend fun deleteAllConversations() {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         val conversations = conversationRepo.getConversations().first()
         val tombstoned = mutableListOf<Uuid>()
         try {
             conversations.forEach { conversation ->
                 deletedConversationIds.add(conversation.id)
+                expectedRestoreEpoch?.let { deletedConversationRestoreEpochs[conversation.id] = it }
                 tombstoned.add(conversation.id)
                 sessions[conversation.id]?.let { session ->
                     session.getJob()?.let { job ->
@@ -3364,9 +3660,13 @@ class ChatService(
                 stopGenerationKeepAlive(conversation.id)
                 cancelLiveUpdateNotification(conversation.id)
             }
-            conversationRepo.deleteAllConversations()
+            withRestoreEpoch(expectedRestoreEpoch) {
+                conversationRepo.deleteAllConversations()
+            }
+            tombstoned.forEach(deletedConversationRestoreEpochs::remove)
         } catch (t: Throwable) {
             tombstoned.forEach(deletedConversationIds::remove)
+            tombstoned.forEach(deletedConversationRestoreEpochs::remove)
             throw t
         }
     }

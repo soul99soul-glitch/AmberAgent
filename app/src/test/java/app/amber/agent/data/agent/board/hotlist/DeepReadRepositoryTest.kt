@@ -53,6 +53,34 @@ class DeepReadRepositoryTest {
     }
 
     @Test
+    fun saveDeepReadPreservesSourceUrlAcrossSectionWrites() = runTest {
+        val dao = FakeHotListDao()
+        val repo = HotListRepository(dao, json)
+
+        repo.saveDeepRead(
+            topicId = "topic",
+            title = "Topic",
+            output = DeepReadOutput(summary = "first"),
+            now = 1_000L,
+            ttlDays = 0,
+            sourceUrl = "https://example.com/article",
+        )
+        repo.saveDeepRead(
+            topicId = "topic",
+            title = "Topic",
+            output = DeepReadOutput(summary = "second"),
+            now = 2_000L,
+            ttlDays = 0,
+        )
+
+        assertEquals("https://example.com/article", dao.getDeepRead("topic")?.sourceUrl)
+        assertEquals(
+            "https://example.com/article",
+            repo.observeDeepReadEntry("topic").first()?.sourceUrl,
+        )
+    }
+
+    @Test
     fun getFreshDeepReadReturnsNullForInvalidJson() = runTest {
         val dao = FakeHotListDao()
         dao.upsertDeepRead(

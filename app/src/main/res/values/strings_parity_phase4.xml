@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_synara_workspace_error_title">Synara workspace could not be loaded</string>
+    <string name="parity_synara_workspace_unknown_error">Check the connection and try again.</string>
+    <string name="parity_synara_workspace_retry">Retry</string>
+    <string name="parity_synara_workspace_connection_settings">Connection settings</string>
+
+    <string name="parity_miniapp_source_unsaved_title">Unsaved changes</string>
+    <string name="parity_miniapp_source_unsaved_badge">Unsaved</string>
+    <string name="parity_miniapp_source_unsaved_message">Your source changes have not been saved. Close and discard them?</string>
+    <string name="parity_miniapp_source_keep_editing">Keep editing</string>
+    <string name="parity_miniapp_source_discard">Discard changes</string>
+    <string name="parity_miniapp_source_save_failed">Save failed</string>
+</resources>

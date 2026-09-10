@@ -19,6 +19,7 @@ import app.amber.agent.data.db.dao.FavoriteDAO
 import app.amber.agent.data.db.dao.MessageNodeDAO
 import app.amber.agent.data.db.dao.MessageStatsDAO
 import app.amber.agent.data.db.dao.findNodeIdContainingMessage
+import app.amber.agent.data.db.dao.findNodeIdContainingToolCall
 import app.amber.agent.data.db.entity.ConversationEntity
 import app.amber.agent.data.db.entity.MessageDayStatEntity
 import app.amber.agent.data.db.entity.MessageNodeEntity
@@ -26,8 +27,12 @@ import app.amber.agent.data.db.entity.MessageNodeStatEntity
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import java.time.Instant
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 class ConversationRepository(
@@ -38,6 +43,7 @@ class ConversationRepository(
     private val database: AppDatabase,
     private val filesManager: FilesManager,
     private val messageFtsManager: MessageFtsManager,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     companion object {
         private const val PAGE_SIZE = 20
@@ -65,6 +71,13 @@ class ConversationRepository(
                     conversationEntityToConversation(entity, emptyList())
                 }
             }
+    }
+
+    /** All conversation rows needed by list surfaces, without loading the nodes JSON column. */
+    fun getConversationSummaries(): Flow<List<Conversation>> {
+        return conversationDAO
+            .getAllSummaries()
+            .map { summaries -> summaries.map(::conversationSummaryToConversation) }
     }
 
     fun getConversationsPaging(): Flow<PagingData<Conversation>> = Pager(
@@ -114,6 +127,11 @@ class ConversationRepository(
     suspend fun getConversationSummaryById(uuid: Uuid): Conversation? {
         return conversationDAO.getConversationSummaryById(uuid.toString())
             ?.let(::conversationSummaryToConversation)
+    }
+
+    /** Load only the title needed to preview a cross-platform exchange conflict. */
+    suspend fun getConversationTitleById(uuid: Uuid): String? {
+        return conversationDAO.getConversationTitleById(uuid.toString())
     }
 
     suspend fun getConversationTailById(uuid: Uuid, limit: Int): ConversationWindow? {
@@ -193,12 +211,55 @@ class ConversationRepository(
         )
     }
 
+    suspend fun findNodeIdContainingToolCall(
+        conversationId: Uuid,
+        toolCallId: String,
+    ): String? {
+        return messageNodeDAO.findNodeIdContainingToolCall(
+            conversationId = conversationId.toString(),
+            toolCallId = toolCallId,
+        )
+    }
+
     suspend fun countConversationNodes(conversationId: Uuid): Int {
         return messageNodeDAO.countNodesOfConversation(conversationId.toString())
     }
 
     suspend fun existsConversationById(uuid: Uuid): Boolean {
         return conversationDAO.existsById(uuid.toString())
+    }
+
+    /**
+     * Loads the complete conversation documents for the lightweight
+     * cross-platform exchange format. This intentionally bypasses list flows,
+     * whose summaries omit message nodes.
+     */
+    suspend fun getAllConversationsForExchange(): List<Conversation> {
+        return conversationDAO.getAllIds()
+            .map { Uuid.parse(it) }
+            .mapNotNull { getConversationById(it) }
+    }
+
+    /**
+     * Imports complete documents in one transaction. Existing rows are
+     * replaced while the separately-owned Council Room checkpoint is kept by
+     * [ConversationDAO.updatePreservingCouncilState]. No unrelated rows or
+     * attachment files are deleted here.
+     */
+    suspend fun upsertConversationsForExchange(conversations: List<Conversation>) {
+        if (conversations.isEmpty()) return
+        database.withTransaction {
+            conversations.forEach { conversation ->
+                val entity = conversationToConversationEntity(conversation)
+                val inserted = conversationDAO.insert(entity)
+                if (inserted == -1L) {
+                    conversationDAO.updatePreservingCouncilState(entity)
+                    messageNodeDAO.deleteByConversation(conversation.id.toString())
+                }
+                saveMessageNodes(conversation.id.toString(), conversation.messageNodes)
+                messageFtsManager.indexConversationInTransaction(conversation)
+            }
+        }
     }
 
     suspend fun insertConversation(conversation: Conversation) {
@@ -285,21 +346,25 @@ class ConversationRepository(
     }
 
     suspend fun deleteConversation(conversation: Conversation, deferCleanup: Boolean = false) {
-        // 获取完整的 Conversation（包含 messageNodes）以正确清理文件
+        val expectedRestoreEpoch = captureRestoreEpoch()
+        // Load attachment references before entering the short durable
+        // transaction; the captured epoch is checked again before deletion.
         val fullConversation = if (conversation.messageNodes.isEmpty()) {
             getConversationById(conversation.id) ?: conversation
         } else {
             conversation
         }
-        database.withTransaction {
-            messageFtsManager.deleteConversationInTransaction(conversation.id.toString())
-            // message_node 会通过 CASCADE 自动删除
-            conversationDAO.delete(
-                conversationToConversationEntity(conversation)
-            )
+        // The captured epoch is carried to cleanup so a delayed purge cannot
+        // unlink files imported by a later restore.
+        withRestoreWrite(expectedRestoreEpoch) {
+            database.withTransaction {
+                messageFtsManager.deleteConversationInTransaction(fullConversation.id.toString())
+                // message_node 会通过 CASCADE 自动删除
+                conversationDAO.delete(conversationToConversationEntity(fullConversation))
+            }
         }
         if (!deferCleanup) {
-            cleanupDeletedConversation(fullConversation)
+            cleanupDeletedConversation(fullConversation, expectedRestoreEpoch)
         }
     }
 
@@ -309,13 +374,22 @@ class ConversationRepository(
      * [deleteConversation] so the History undo window can restore the
      * conversation with its files still intact.
      */
-    suspend fun cleanupDeletedConversation(conversation: Conversation) {
-        favoriteDAO.deleteByConversation(conversation.id.toString())
-        filesManager.deleteChatFiles(conversation.files)
+    suspend fun cleanupDeletedConversation(
+        conversation: Conversation,
+        expectedRestoreEpoch: Long? = null,
+    ) {
+        val cleanupEpoch = expectedRestoreEpoch ?: captureRestoreEpoch()
+        // Favorite rows are part of the archive and must be removed under the
+        // same captured epoch as the file cleanup. Release the gate before the
+        // file manager acquires it again; nested gate acquisition would deadlock.
+        withRestoreWrite(cleanupEpoch) {
+            favoriteDAO.deleteByConversation(conversation.id.toString())
+        }
+        filesManager.deleteChatFilesAndAwait(conversation.files, cleanupEpoch)
         // Drop any generate_image tool output bound to this conversation.
         // The dir is `filesDir/chat_images/{conversationId}/` and is created
         // lazily on first generation — deleteRecursively no-ops when missing.
-        filesManager.deleteChatImagesDir(conversation.id)
+        filesManager.deleteChatImagesDirAndAwait(conversation.id, cleanupEpoch)
     }
 
     suspend fun searchMessages(keyword: String) = messageFtsManager.search(keyword)
@@ -336,6 +410,24 @@ class ConversationRepository(
     suspend fun deleteAllConversations() {
         getConversations().first().forEach { conversation ->
             deleteConversation(conversation)
+        }
+    }
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreWrite(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        val gate = restoreWriteGate ?: return block()
+        val epoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+            ?: gate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) {
+            gate.withCurrentWriterOrCancel(block)
         }
     }
 

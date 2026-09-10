@@ -68,6 +68,13 @@
     });
   }
 
+  function valueParams(valueOrObject, key) {
+    if (valueOrObject && typeof valueOrObject === 'object') return valueOrObject;
+    const params = {};
+    params[key] = valueOrObject;
+    return params;
+  }
+
   window.AmberBridge = Object.freeze({
     _handleNativeResponse: function (response) {
       const entry = pending.get(response.id);
@@ -98,6 +105,34 @@
   });
 
   window.Amber = Object.freeze({
+    getAppInfo: function () { return call('app.info', {}, 5000); },
+    getCapabilities: function () { return call('app.capabilities', {}, 5000); },
+    haptics: Object.freeze({
+      impact: function (options) { return call('haptics.impact', options == null ? {} : options, 30000); },
+      notification: function (options) { return call('haptics.notification', options == null ? {} : options, 30000); },
+      selection: function () { return call('haptics.selection', {}, 30000); }
+    }),
+    device: Object.freeze({
+      getInfo: function () { return call('device.getInfo', {}, 30000); },
+      getBattery: function () { return call('device.getBattery', {}, 30000); }
+    }),
+    screen: Object.freeze({
+      getBrightness: function () { return call('screen.getBrightness', {}, 30000); },
+      setBrightness: function (value) { return call('screen.setBrightness', valueParams(value, 'brightness'), 30000); },
+      setKeepAwake: function (value) { return call('screen.setKeepAwake', valueParams(value, 'enabled'), 30000); }
+    }),
+    speech: Object.freeze({
+      getVoices: function () { return call('speech.getVoices', {}, 15000); },
+      speak: function (value) { return call('speech.speak', valueParams(value, 'text'), 15000); },
+      stop: function () { return call('speech.stop', {}, 30000); },
+      pause: function () { return call('speech.pause', {}, 30000); },
+      resume: function () { return call('speech.resume', {}, 30000); }
+    }),
+    share: function (options) { return call('share', options == null ? {} : options, 30000); },
+    openURL: function (value) { return call('openURL', valueParams(value, 'url'), 30000); },
+    qrcode: Object.freeze({
+      generate: function (value) { return call('qrcode.generate', valueParams(value, 'text'), 15000); }
+    }),
     storage: Object.freeze({
       get: function (key) { return call('storage.get', { key }); },
       set: function (key, value) { return call('storage.set', { key, value }); },

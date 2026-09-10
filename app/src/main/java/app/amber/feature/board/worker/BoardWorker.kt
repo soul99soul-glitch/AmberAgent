@@ -3,10 +3,13 @@ package app.amber.feature.board.worker
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.board.BoardRepository
 import app.amber.feature.board.agent.BoardAgent
 import app.amber.feature.board.agent.BoardRunResult
@@ -36,6 +39,7 @@ class BoardWorker(
 ) : CoroutineWorker(appContext, params), KoinComponent {
 
     override suspend fun doWork(): Result {
+        val restoreWriteEpoch = get<SyncRestoreWriteGate>().currentEpoch()
         val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val board = settings.agentRuntime.todayBoard
         if (!board.enabled) return Result.success()
@@ -50,12 +54,14 @@ class BoardWorker(
         // anchor is re-enqueued in the finally below — doing it upfront with
         // REPLACE on the same unique work name cancels this very run.
         val isAnchor = tags.contains(BoardScheduler.TAG_ANCHOR)
-        try {
-            return runCycle(aggregator, repository, agent, notifier)
-        } finally {
-            if (isAnchor && !isStopped) {
-                withContext(NonCancellable) {
-                    runCatching { scheduler.rescheduleNextAnchor() }
+        return withContext(SyncRestoreWriteEpoch(restoreWriteEpoch)) {
+            try {
+                runCycle(aggregator, repository, agent, notifier)
+            } finally {
+                if (isAnchor && !isStopped) {
+                    withContext(NonCancellable) {
+                        runCatching { scheduler.rescheduleNextAnchor() }
+                    }
                 }
             }
         }
@@ -72,6 +78,7 @@ class BoardWorker(
         runCatching {
             aggregator.collectAll()
         }.onFailure {
+            if (it is CancellationException) throw it
             android.util.Log.w("BoardWorker", "collectAll failed", it)
         }
 
@@ -143,6 +150,7 @@ class BoardWorker(
             val agent = get<DailyReviewAgent>()
             agent.run(boardDate, phase)
         }.onFailure {
+            if (it is CancellationException) throw it
             android.util.Log.w("BoardWorker", "daily review failed", it)
         }
     }
@@ -161,6 +169,8 @@ class BoardWorker(
             // Prune daily reviews older than 30 days.
             val cutoffDate = today.minusDays(30).toString()
             repository.pruneDailyReviews(cutoffDate)
+        }.onFailure {
+            if (it is CancellationException) throw it
         }
     }
 }

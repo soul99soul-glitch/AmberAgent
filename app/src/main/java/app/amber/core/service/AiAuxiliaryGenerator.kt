@@ -13,9 +13,13 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.applyPlaceholders
 import java.time.Instant
 import java.util.Locale
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlin.uuid.Uuid
 
 class AiAuxiliaryGenerator(
@@ -24,12 +28,14 @@ class AiAuxiliaryGenerator(
     private val providerCatalog: ProviderCatalog,
     private val conversationRepo: ConversationRepository,
     private val conversationAccess: ConversationAccess,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     suspend fun generateTitle(
         conversationId: Uuid,
         conversation: Conversation,
         force: Boolean = false,
     ) {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         val shouldGenerate = when {
             force -> true
             conversation.title.isBlank() -> true
@@ -67,12 +73,14 @@ class AiAuxiliaryGenerator(
                 title = title,
                 updateAt = Instant.now(),
             )
-            conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-            conversationRepo.updateConversationMetadata(
-                conversationId = conversationId,
-                title = title,
-                updateAt = updatedConversation.updateAt,
-            )
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                conversationRepo.updateConversationMetadata(
+                    conversationId = conversationId,
+                    title = title,
+                    updateAt = updatedConversation.updateAt,
+                )
+            }
         }.onFailure {
             if (it is CancellationException) throw it
             it.printStackTrace()
@@ -84,16 +92,19 @@ class AiAuxiliaryGenerator(
         conversationId: Uuid,
         conversation: Conversation,
     ) {
+        val expectedRestoreEpoch = captureRestoreEpoch()
         runCatching {
             val settings = settingsStore.settingsFlow.first()
             val model = settings.resolveTaskChatModel(settings.suggestionModelId) ?: return
             val provider = model.findProvider(settings.providers) ?: return
 
-            conversationAccess.getConversationFlowOrNull(conversationId)?.let { flow ->
-                conversationAccess.updateConversation(
-                    conversationId,
-                    flow.value.copy(chatSuggestions = emptyList()),
-                )
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationAccess.getConversationFlowOrNull(conversationId)?.let { flow ->
+                    conversationAccess.updateConversation(
+                        conversationId,
+                        flow.value.copy(chatSuggestions = emptyList()),
+                    )
+                }
             }
 
             val providerHandler = providerCatalog.text(provider)
@@ -124,15 +135,35 @@ class AiAuxiliaryGenerator(
                 chatSuggestions = suggestions.take(10),
                 updateAt = Instant.now(),
             )
-            conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-            conversationRepo.updateConversationMetadata(
-                conversationId = conversationId,
-                chatSuggestions = updatedConversation.chatSuggestions,
-                updateAt = updatedConversation.updateAt,
-            )
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationAccess.updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                conversationRepo.updateConversationMetadata(
+                    conversationId = conversationId,
+                    chatSuggestions = updatedConversation.chatSuggestions,
+                    updateAt = updatedConversation.updateAt,
+                )
+            }
         }.onFailure {
             if (it is CancellationException) throw it
             it.printStackTrace()
+        }
+    }
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreWrite(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        val gate = restoreWriteGate ?: return block()
+        val epoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+            ?: gate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) {
+            gate.withCurrentWriterOrCancel(block)
         }
     }
 }

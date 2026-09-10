@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -39,6 +41,8 @@ import app.amber.core.settings.prefs.SettingsAggregator
 import java.io.File
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.uuid.Uuid
 
 class SubAgentManager(
@@ -57,6 +61,8 @@ class SubAgentManager(
     private val runDir = File(context.filesDir, "amberagent/subagents/runs").also { it.mkdirs() }
     private val runs = ConcurrentHashMap<String, RuntimeRun>()
     private val admissionLock = Any()
+    /** Serialize lifecycle operations that can otherwise resurrect a thread. */
+    private val threadOperationLocks = ConcurrentHashMap<String, Mutex>()
 
     /**
      * Per-run streaming text flows. The runner writes the assistant's evolving response here as
@@ -65,6 +71,8 @@ class SubAgentManager(
      */
     private val liveTextFlows = ConcurrentHashMap<String, MutableStateFlow<String>>()
     private val livePartsFlows = ConcurrentHashMap<String, MutableStateFlow<List<UIMessagePart>>>()
+    /** Per-thread lifecycle stream used by task cards after a followup starts. */
+    private val runStateFlows = ConcurrentHashMap<String, MutableStateFlow<SubAgentRun?>>()
 
     /**
      * P4-02: per-running-thread mailbox for send_message. Messages delivered
@@ -83,11 +91,19 @@ class SubAgentManager(
         threadGraphStore != null &&
             capabilityFlags?.isEnabled(Capability.ThreadGraphV2) == true
 
+    private suspend fun captureThreadGraphWriteContext(): CoroutineContext =
+        threadGraphStore?.captureWriteContext() ?: EmptyCoroutineContext
+
+    private fun threadOperationLock(threadId: String): Mutex =
+        threadOperationLocks.getOrPut(threadId) { Mutex() }
+
     suspend fun start(
         parentConversationId: Uuid,
         input: JsonObject,
         parentTools: List<Tool>,
         parentRunId: String? = null,
+        parentToolsForRun: ((String) -> List<Tool>)? = null,
+        onRunFinished: ((String, String, Boolean) -> Unit)? = null,
     ): JsonObject = withContext(Dispatchers.IO) {
         val settings = settingsStore.settingsFlow.value
         val subAgentSetting = settings.agentRuntime.subAgent
@@ -139,7 +155,14 @@ class SubAgentManager(
             task
         }
 
-        val allowedTools = parentTools
+        val now = Instant.now().toEpochMilli()
+        val runId = Uuid.random().toString()
+        // A followup keeps the public thread/run id, but every generation gets
+        // its own opaque host-owned WebMount scope. It must never be reused by
+        // a later turn or exposed through the model payload.
+        val webMountScopeId = Uuid.random().toString()
+        val scopedParentTools = parentToolsForRun?.invoke(webMountScopeId) ?: parentTools
+        val allowedTools = scopedParentTools
             .filterNot { it.name.startsWith("subagent_") }
             .filter { it.name in effectiveDefinition.toolAllowlist }
             .map { tool ->
@@ -150,8 +173,6 @@ class SubAgentManager(
                 }
             }
 
-        val now = Instant.now().toEpochMilli()
-        val runId = Uuid.random().toString()
         val transcript = File(runDir, "$runId.jsonl")
         val run = SubAgentRun(
             runId = runId,
@@ -162,14 +183,29 @@ class SubAgentManager(
             transcriptPath = transcript.absolutePath,
             startedAtMs = now,
         )
-        val runtimeRun = RuntimeRun(run)
         val threadGraph = threadGraphEnabled()
+        // Capture once before the write-ahead node and before the model job
+        // starts. The same opaque context follows every terminal callback;
+        // it must never be reacquired after a restore.
+        val threadGraphWriteContext = if (threadGraph) {
+            requireNotNull(threadGraphStore).captureWriteContext()
+        } else {
+            EmptyCoroutineContext
+        }
+        val runtimeRun = RuntimeRun(
+            snapshot = run,
+            writeContext = threadGraphWriteContext,
+            webMountScopeId = webMountScopeId,
+            onRunFinished = onRunFinished,
+        )
         val threadStart = if (threadGraph) {
             try {
-                threadGraphManager.prepareStart(
-                    parentRunId = parentRunId,
-                    fallbackRootRunId = parentConversationId.toString(),
-                )
+                withContext(threadGraphWriteContext) {
+                    threadGraphManager.prepareStart(
+                        parentRunId = parentRunId,
+                        fallbackRootRunId = parentConversationId.toString(),
+                    )
+                }
             } catch (error: ThreadGraphManager.ThreadGraphDepthLimitException) {
                 return@withContext errorPayload("thread_depth_limit", error.message ?: "Thread depth limit reached.")
             } catch (error: IllegalArgumentException) {
@@ -200,6 +236,7 @@ class SubAgentManager(
         if (admissionError != null) {
             return@withContext errorPayload(admissionError.first, admissionError.second)
         }
+        runStateFlows[runId] = MutableStateFlow(run)
         agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
             cancel(runId)
             true
@@ -211,11 +248,13 @@ class SubAgentManager(
         // instead of a phantom in-memory run.
         if (threadGraph) {
             val startContext = requireNotNull(threadStart)
-            threadGraphManager.startNode(
-                run = run,
-                rootRunId = startContext.rootRunId,
-                parentThreadId = startContext.parentThreadId,
-            )
+            withContext(threadGraphWriteContext) {
+                threadGraphManager.startNode(
+                    run = run,
+                    rootRunId = startContext.rootRunId,
+                    parentThreadId = startContext.parentThreadId,
+                )
+            }
         }
 
         // Live text flow for UI subscribers — created BEFORE the runner starts so a sheet opened
@@ -224,12 +263,13 @@ class SubAgentManager(
         val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
         liveTextFlows[runId] = liveText
         livePartsFlows[runId] = liveParts
+        runStateFlows.getOrPut(runId) { MutableStateFlow(run) }.value = run
         capLiveTextFlows()
         if (threadGraph) {
             mailboxes[runId] = Channel(Channel.UNLIMITED)
         }
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+        runtimeRun.job = appScope.launch(Dispatchers.IO + threadGraphWriteContext) {
             val result = try {
                 withTimeout(definition.timeoutMs) {
                     runner.run(
@@ -267,7 +307,7 @@ class SubAgentManager(
                     error = error.message ?: error::class.java.simpleName,
                 )
             }
-            finish(runId, result, displayText = liveText.value)
+            finish(runtimeRun, result, displayText = liveText.value)
         }
 
         runToPayload(run)
@@ -280,7 +320,9 @@ class SubAgentManager(
         // (cold start / eviction). A persisted RUNNING node is a
         // process-death victim and is reconciled to INTERRUPTED here.
         if (threadGraphEnabled()) {
-            threadGraphManager.restorePayload(runId)?.let { return@withContext it }
+            withContext(captureThreadGraphWriteContext()) {
+                threadGraphManager.restorePayload(runId)
+            }?.let { return@withContext it }
         }
         readMissingRun(runId)
     }
@@ -291,7 +333,9 @@ class SubAgentManager(
             // P4-02: the thread is not live (restart/eviction). Waiting for
             // a dead process is pointless — reconcile and return its state.
             if (threadGraphEnabled()) {
-                threadGraphManager.restorePayload(runId)?.let { return@withContext it }
+                withContext(captureThreadGraphWriteContext()) {
+                    threadGraphManager.restorePayload(runId)
+                }?.let { return@withContext it }
             }
             return@withContext readMissingRun(runId)
         }
@@ -313,26 +357,29 @@ class SubAgentManager(
     }
 
     suspend fun cancel(runId: String): JsonObject = withContext(Dispatchers.IO) {
-        val runtimeRun = runs[runId]
-        if (runtimeRun != null) {
-            runtimeRun.job?.cancel()
-            finish(
-                runId,
-                SubAgentResult(
-                    status = SubAgentRunStatus.CANCELLED,
-                    summary = "Subagent run was cancelled.",
+        threadOperationLock(runId).withLock {
+            val runtimeRun = runs[runId]
+            if (runtimeRun != null) {
+                runtimeRun.job?.cancel()
+                finishLocked(
+                    runtimeRun,
+                    SubAgentResult(
+                        status = SubAgentRunStatus.CANCELLED,
+                        summary = "Subagent run was cancelled.",
+                    )
                 )
-            )
-            runToPayload(runtimeRun.snapshot)
-        } else {
-            // P4-02: cancel a persisted thread with no live run (cold-start
-            // cancellation — a stale RUNNING/INTERRUPTED node becomes
-            // CANCELLED with a terminal result).
-            if (threadGraphEnabled()) {
-                threadGraphManager.cancelPersisted(runId)
-                    ?.let { return@withContext it }
+                runToPayload(runtimeRun.snapshot)
+            } else {
+                // P4-02: cancel a persisted thread with no live run (cold-start
+                // cancellation — a stale RUNNING/INTERRUPTED node becomes
+                // CANCELLED with a terminal result).
+                if (threadGraphEnabled()) {
+                    withContext(captureThreadGraphWriteContext()) {
+                        threadGraphManager.cancelPersisted(runId)
+                    }?.let { return@withLock it }
+                }
+                readMissingRun(runId)
             }
-            readMissingRun(runId)
         }
     }
 
@@ -349,49 +396,78 @@ class SubAgentManager(
         input: JsonObject,
         parentTools: List<Tool>,
         parentRunId: String? = null,
+        parentToolsForRun: ((String) -> List<Tool>)? = null,
+        onRunFinished: ((String, String, Boolean) -> Unit)? = null,
     ): JsonObject = withContext(Dispatchers.IO) {
-        if (!threadGraphEnabled()) {
-            return@withContext errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
+        threadOperationLock(threadId).withLock {
+            if (!threadGraphEnabled()) {
+                return@withLock errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
+            }
+            val threadGraphWriteContext = captureThreadGraphWriteContext()
+            val settings = settingsStore.settingsFlow.value
+            val subAgentSetting = settings.agentRuntime.subAgent
+            if (!subAgentSetting.enabled) {
+                return@withLock errorPayload("subagent_disabled", "Subagent experimental mode is disabled.")
+            }
+            val live = runs[threadId]?.snapshot
+            var node = withContext(threadGraphWriteContext) {
+                threadGraphManager.getState(threadId)
+            }
+            if (live == null && node == null) {
+                return@withLock errorPayload("not_found", "Unknown thread_id: $threadId")
+            }
+            if (live == null && node != null) {
+                // A cold-start followup can arrive before the parent has issued
+                // read/wait. Reconcile the persisted owner here so a message
+                // claimed by the dead generation returns to QUEUED before the
+                // new generation drains it.
+                withContext(threadGraphWriteContext) {
+                    threadGraphManager.restorePayload(threadId)
+                    node = threadGraphManager.getState(threadId)
+                }
+            }
+            if (live?.status == SubAgentRunStatus.RUNNING || node?.status == SubAgentRunStatus.RUNNING) {
+                return@withLock errorPayload("thread_running", "Thread $threadId is still running; followup is only allowed on an idle thread.")
+            }
+            if (live?.status == SubAgentRunStatus.CANCELLED || node?.status == SubAgentRunStatus.CANCELLED) {
+                return@withLock errorPayload("thread_cancelled", "Thread $threadId was cancelled and cannot be continued.")
+            }
+            val restored = withContext(threadGraphWriteContext) {
+                restoreThreadForFollowup(threadId, live, node)
+            } ?: return@withLock errorPayload(
+                "not_found",
+                "Unknown thread_id: $threadId",
+            )
+            val followupTask = runCatching { SubAgentValidator.parseTask(input) }
+                .getOrElse { return@withLock errorPayload("invalid_task", it.message ?: it.toString()) }
+            // Merge the original task context so the continuation stays within the
+            // thread's boundaries; the followup objective drives the new turn.
+            val mergedTask = followupTask.copy(
+                context = buildString {
+                    append(restored.task.context)
+                    if (restored.task.context.isNotBlank() && followupTask.context.isNotBlank()) append("\n")
+                    append(followupTask.context)
+                },
+            )
+            val webMountScopeId = Uuid.random().toString()
+            val scopedParentTools = parentToolsForRun?.invoke(webMountScopeId) ?: parentTools
+            withContext(threadGraphWriteContext) {
+                threadGraphManager.enqueueFollowup(threadId, mergedTask)
+            }
+            launchFollowupGeneration(
+                parentConversationId = parentConversationId,
+                threadId = threadId,
+                definition = restored.definition,
+                task = mergedTask,
+                parentTools = scopedParentTools,
+                parentRunId = parentRunId,
+                previousAnswer = restored.previousAnswer,
+                writeContext = threadGraphWriteContext,
+                webMountScopeId = webMountScopeId,
+                onRunFinished = onRunFinished,
+            )
+            withContext(threadGraphWriteContext) { read(threadId) }
         }
-        val settings = settingsStore.settingsFlow.value
-        val subAgentSetting = settings.agentRuntime.subAgent
-        if (!subAgentSetting.enabled) {
-            return@withContext errorPayload("subagent_disabled", "Subagent experimental mode is disabled.")
-        }
-        val live = runs[threadId]?.snapshot
-        val node = threadGraphManager.getState(threadId)
-        if (live == null && node == null) {
-            return@withContext errorPayload("not_found", "Unknown thread_id: $threadId")
-        }
-        if (live?.status == SubAgentRunStatus.RUNNING || node?.status == SubAgentRunStatus.RUNNING) {
-            return@withContext errorPayload("thread_running", "Thread $threadId is still running; followup is only allowed on an idle thread.")
-        }
-        val restored = restoreThreadForFollowup(threadId, live, node) ?: return@withContext errorPayload(
-            "not_found",
-            "Unknown thread_id: $threadId",
-        )
-        val followupTask = runCatching { SubAgentValidator.parseTask(input) }
-            .getOrElse { return@withContext errorPayload("invalid_task", it.message ?: it.toString()) }
-        // Merge the original task context so the continuation stays within the
-        // thread's boundaries; the followup objective drives the new turn.
-        val mergedTask = followupTask.copy(
-            context = buildString {
-                append(restored.task.context)
-                if (restored.task.context.isNotBlank() && followupTask.context.isNotBlank()) append("\n")
-                append(followupTask.context)
-            },
-        )
-        threadGraphManager.enqueueFollowup(threadId, mergedTask)
-        launchFollowupGeneration(
-            parentConversationId = parentConversationId,
-            threadId = threadId,
-            definition = restored.definition,
-            task = mergedTask,
-            parentTools = parentTools,
-            parentRunId = parentRunId,
-            previousAnswer = restored.previousAnswer,
-        )
-        read(threadId)
     }
 
     /**
@@ -402,30 +478,46 @@ class SubAgentManager(
      * is never dropped between dequeue and result persistence.
      */
     suspend fun sendMessage(threadId: String, message: String): JsonObject = withContext(Dispatchers.IO) {
-        if (!threadGraphEnabled()) {
-            return@withContext errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
-        }
-        if (message.isBlank()) {
-            return@withContext errorPayload("invalid_message", "message must not be blank.")
-        }
-        val node = threadGraphManager.getState(threadId)
-        if (node == null) {
-            return@withContext errorPayload("not_found", "Unknown thread_id: $threadId")
-        }
-        val record = threadGraphManager.enqueueMessage(threadId, message.take(MAX_SEND_MESSAGE_CHARS))
-        val live = runs[threadId]?.snapshot
-        val delivered = live?.status == SubAgentRunStatus.RUNNING && mailboxes[threadId]?.trySend(
-            UIMessage.user(message)
-        )?.isSuccess == true
-        if (delivered) {
-            threadGraphManager.markDelivered(record.messageId)
-        }
-        buildJsonObject {
-            put("status", "ok")
-            put("thread_id", threadId)
-            put("message_id", record.messageId)
-            put("delivery_state", if (delivered) ThreadDeliveryState.DELIVERED.name.lowercase() else ThreadDeliveryState.QUEUED.name.lowercase())
-            put("digest", record.payloadDigest)
+        threadOperationLock(threadId).withLock {
+            if (!threadGraphEnabled()) {
+                return@withLock errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
+            }
+            if (message.isBlank()) {
+                return@withLock errorPayload("invalid_message", "message must not be blank.")
+            }
+            val threadGraphWriteContext = captureThreadGraphWriteContext()
+            val node = withContext(threadGraphWriteContext) {
+                threadGraphManager.getState(threadId)
+            }
+            if (node == null) {
+                return@withLock errorPayload("not_found", "Unknown thread_id: $threadId")
+            }
+            if (node.status == SubAgentRunStatus.CANCELLED) {
+                return@withLock errorPayload("thread_cancelled", "Thread $threadId was cancelled.")
+            }
+            val record = withContext(threadGraphWriteContext) {
+                threadGraphManager.enqueueMessage(threadId, message.take(MAX_SEND_MESSAGE_CHARS))
+            }
+            val live = runs[threadId]?.snapshot
+            val delivered = live?.status == SubAgentRunStatus.RUNNING && mailboxes[threadId]?.trySend(
+                UIMessage.user(message)
+            )?.isSuccess == true
+            if (delivered) {
+                withContext(threadGraphWriteContext) {
+                    threadGraphManager.markDelivered(record.messageId)
+                }
+            }
+            val updatedAtMs = withContext(threadGraphWriteContext) {
+                threadGraphManager.getState(threadId)?.updatedAtMs
+            }
+            buildJsonObject {
+                put("status", "ok")
+                put("thread_id", threadId)
+                put("message_id", record.messageId)
+                put("delivery_state", if (delivered) ThreadDeliveryState.DELIVERED.name.lowercase() else ThreadDeliveryState.QUEUED.name.lowercase())
+                put("digest", record.payloadDigest)
+                updatedAtMs?.let { put("updated_at_ms", it) }
+            }
         }
     }
 
@@ -435,39 +527,43 @@ class SubAgentManager(
      * never deleted and never marked CANCELLED/COMPLETED.
      */
     suspend fun interrupt(threadId: String): JsonObject = withContext(Dispatchers.IO) {
-        if (!threadGraphEnabled()) {
-            return@withContext errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
-        }
-        val runtimeRun = runs[threadId]
-        if (runtimeRun != null) {
-            val live = runtimeRun.snapshot
-            if (live.status != SubAgentRunStatus.RUNNING) {
-                return@withContext errorPayload("thread_not_running", "Thread $threadId is not running.")
+        threadOperationLock(threadId).withLock {
+            if (!threadGraphEnabled()) {
+                return@withLock errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
             }
-            runtimeRun.job?.cancel()
-            // Preserve the thread: status INTERRUPTED + a result carrying the
-            // text produced so far; the node stays (followup can continue it).
-            // The terminal snapshot is written back under the run lock (same
-            // path as finish()) so same-process followup/read/persistedState
-            // never observe a stale RUNNING after an interrupt.
-            val partialText = liveTextFlows[threadId]?.value.orEmpty().ifBlank { live.displayText }
-            val result = SubAgentResult(
-                status = SubAgentRunStatus.INTERRUPTED,
-                summary = "Subagent turn was interrupted.",
-            )
-            val next = writeTerminalSnapshot(runtimeRun, SubAgentRunStatus.INTERRUPTED, result, partialText)
-                ?: return@withContext errorPayload("thread_not_running", "Thread $threadId is not running.")
-            threadGraphManager.finishNode(
-                runId = threadId,
-                status = SubAgentRunStatus.INTERRUPTED,
-                result = result,
-                displayText = partialText,
-            )
-            runToPayload(next)
-        } else {
-            val payload = threadGraphManager.interruptPersisted(threadId, finalAnswer = "")
-                ?: return@withContext errorPayload("not_found", "Unknown thread_id: $threadId")
-            payload
+            val runtimeRun = runs[threadId]
+            if (runtimeRun != null) {
+                val live = runtimeRun.snapshot
+                if (live.status != SubAgentRunStatus.RUNNING) {
+                    return@withLock errorPayload("thread_not_running", "Thread $threadId is not running.")
+                }
+                runtimeRun.job?.cancel()
+                // Preserve the thread: status INTERRUPTED + a result carrying the
+                // text produced so far; the node stays (followup can continue it).
+                // The terminal snapshot is written back under the run lock (same
+                // path as finish()) so same-process followup/read/persistedState
+                // never observe a stale RUNNING after an interrupt.
+                val partialText = liveTextFlows[threadId]?.value.orEmpty().ifBlank { live.displayText }
+                val result = SubAgentResult(
+                    status = SubAgentRunStatus.INTERRUPTED,
+                    summary = "Subagent turn was interrupted.",
+                )
+                val next = writeTerminalSnapshot(runtimeRun, SubAgentRunStatus.INTERRUPTED, result, partialText)
+                    ?: return@withLock errorPayload("thread_not_running", "Thread $threadId is not running.")
+                withContext(runtimeRun.writeContext) {
+                    // Interrupt is a terminal generation outcome too: use the
+                    // same durable result, task snapshot, finished event and
+                    // WebMount cleanup path as a normal runner return.
+                    persistTerminal(runtimeRun, next, result, partialText)
+                }
+                runToPayload(next)
+            } else {
+                val payload = withContext(captureThreadGraphWriteContext()) {
+                    threadGraphManager.interruptPersisted(threadId, finalAnswer = "")
+                }
+                    ?: return@withLock errorPayload("not_found", "Unknown thread_id: $threadId")
+                payload
+            }
         }
     }
 
@@ -481,32 +577,43 @@ class SubAgentManager(
         if (!threadGraphEnabled()) {
             return@withContext errorPayload("thread_graph_disabled", "Thread graph is not enabled.")
         }
-        val nodes = threadGraphManager.listByRootRun(rootRunId)
+        val threadGraphWriteContext = captureThreadGraphWriteContext()
+        val nodes = withContext(threadGraphWriteContext) {
+            threadGraphManager.listByRootRun(rootRunId)
+        }
             .filter { it.conversationId == conversationId }
         var cancelled = 0
         for (node in nodes) {
-            val status = runCatching { SubAgentRunStatus.valueOf(node.status) }.getOrNull()
-            if (
-                status == SubAgentRunStatus.RUNNING ||
-                status == SubAgentRunStatus.INTERRUPTED ||
-                status == SubAgentRunStatus.APPROVAL_REQUIRED
-            ) {
-                val live = runs[node.threadId]
-                if (live != null) {
-                    live.job?.cancel()
-                    finish(
-                        node.threadId,
-                        SubAgentResult(
-                            status = SubAgentRunStatus.CANCELLED,
-                            summary = "Subagent run was cancelled because the parent run was cancelled.",
-                        )
-                    )
-                } else {
-                    threadGraphManager.cancelPersisted(node.threadId)
+            threadOperationLock(node.threadId).withLock {
+                val currentNode = withContext(threadGraphWriteContext) {
+                    threadGraphManager.getState(node.threadId)
                 }
-                cancelled++
-            } else if (status == SubAgentRunStatus.CANCELLED) {
-                cancelled++
+                val status = currentNode?.status
+                    ?: runCatching { SubAgentRunStatus.valueOf(node.status) }.getOrNull()
+                if (
+                    status == SubAgentRunStatus.RUNNING ||
+                    status == SubAgentRunStatus.INTERRUPTED ||
+                    status == SubAgentRunStatus.APPROVAL_REQUIRED
+                ) {
+                    val live = runs[node.threadId]
+                    if (live != null) {
+                        live.job?.cancel()
+                        finishLocked(
+                            live,
+                            SubAgentResult(
+                                status = SubAgentRunStatus.CANCELLED,
+                                summary = "Subagent run was cancelled because the parent run was cancelled.",
+                            )
+                        )
+                    } else {
+                        withContext(threadGraphWriteContext) {
+                            threadGraphManager.cancelPersisted(node.threadId)
+                        }
+                    }
+                    cancelled++
+                } else if (status == SubAgentRunStatus.CANCELLED) {
+                    cancelled++
+                }
             }
         }
         buildJsonObject {
@@ -559,6 +666,13 @@ class SubAgentManager(
 
     fun livePartsFlow(runId: String): StateFlow<List<UIMessagePart>>? = livePartsFlows[runId]?.asStateFlow()
 
+    /**
+     * Lifecycle updates for a task card. Create the per-run stream on demand so a card restored
+     * from history can subscribe before a later followup starts the same thread in this process.
+     */
+    fun runStateFlow(runId: String): StateFlow<SubAgentRun?> =
+        runStateFlows.getOrPut(runId) { MutableStateFlow(runs[runId]?.snapshot) }.asStateFlow()
+
     /** Snapshot of a known run, or null if it was never started or was already evicted. */
     fun snapshot(runId: String): SubAgentRun? = runs[runId]?.snapshot
 
@@ -580,9 +694,13 @@ class SubAgentManager(
      * eviction of a still-active run. Acceptable.
      */
     private fun capLiveTextFlows() {
-        if (liveTextFlows.size <= LIVE_TEXT_CAP && livePartsFlows.size <= LIVE_TEXT_CAP) return
+        if (
+            liveTextFlows.size <= LIVE_TEXT_CAP &&
+            livePartsFlows.size <= LIVE_TEXT_CAP &&
+            runStateFlows.size <= LIVE_TEXT_CAP
+        ) return
         // Build (runId, lastUpdate) for every live-text key and pick the oldest non-running ones.
-        val candidates = (liveTextFlows.keys + livePartsFlows.keys).mapNotNull { id ->
+        val candidates = (liveTextFlows.keys + livePartsFlows.keys + runStateFlows.keys).mapNotNull { id ->
             val snap = runs[id]?.snapshot
             when {
                 snap == null -> id to 0L  // orphan: definitely evictable, sort earliest
@@ -590,10 +708,11 @@ class SubAgentManager(
                 else -> id to snap.updatedAtMs
             }
         }.distinctBy { it.first }.sortedBy { it.second }
-        val toDrop = maxOf(liveTextFlows.size, livePartsFlows.size) - LIVE_TEXT_CAP
+        val toDrop = maxOf(liveTextFlows.size, livePartsFlows.size, runStateFlows.size) - LIVE_TEXT_CAP
         candidates.take(toDrop).forEach { (id, _) ->
             liveTextFlows.remove(id)
             livePartsFlows.remove(id)
+            runStateFlows.remove(id)
         }
     }
 
@@ -614,8 +733,32 @@ class SubAgentManager(
         }
     }
 
-    private suspend fun finish(runId: String, result: SubAgentResult, displayText: String = "") {
-        val runtimeRun = runs[runId] ?: return
+    private suspend fun finish(runtimeRun: RuntimeRun, result: SubAgentResult, displayText: String = "") {
+        val runId = runtimeRun.snapshot.runId
+        threadOperationLock(runId).withLock {
+            finishLocked(runtimeRun, result, displayText)
+        }
+    }
+
+    /** Finish while the caller already owns the per-thread lifecycle lock. */
+    private suspend fun finishLocked(runtimeRun: RuntimeRun, result: SubAgentResult, displayText: String = "") {
+        val runId = runtimeRun.snapshot.runId
+        if (runs[runId] !== runtimeRun) return
+        withContext(runtimeRun.writeContext) {
+            finishInCapturedContext(runtimeRun, result, displayText)
+        }
+    }
+
+    private suspend fun finishInCapturedContext(
+        runtimeRun: RuntimeRun,
+        result: SubAgentResult,
+        displayText: String,
+    ) {
+        val runId = runtimeRun.snapshot.runId
+        // The runner may ignore cancellation and return after a followup has
+        // installed a newer RuntimeRun for the same public thread id. That old
+        // callback must not publish into the new generation.
+        if (runs[runId] !== runtimeRun) return
         // P1-03: a step-limited child must never be published as COMPLETED.
         // The generator reported StepLimit via onTerminal; map the runner's
         // "completed" result to TIMED_OUT (thread status + payload).
@@ -626,24 +769,44 @@ class SubAgentManager(
         }
         val next = writeTerminalSnapshot(runtimeRun, effectiveResult.status, effectiveResult, displayText)
             ?: return
-        if (threadGraphEnabled()) {
-            threadGraphManager.finishNode(
-                runId = runId,
-                status = effectiveResult.status,
-                result = effectiveResult,
-                displayText = displayText.ifBlank { next.displayText },
-            )
+        persistTerminal(runtimeRun, next, effectiveResult, displayText)
+    }
+
+    /** Persist and close every terminal generation through one lifecycle path. */
+    private suspend fun persistTerminal(
+        runtimeRun: RuntimeRun,
+        next: SubAgentRun,
+        result: SubAgentResult,
+        displayText: String,
+    ) {
+        try {
+            if (threadGraphEnabled()) {
+                threadGraphManager.finishNode(
+                    runId = next.runId,
+                    status = result.status,
+                    result = result,
+                    displayText = displayText.ifBlank { next.displayText },
+                )
+            }
+        } finally {
+            // The host scope belongs to this generation even when a restore
+            // epoch rejects its durable write. Close it by identity before the
+            // callback can disappear with the failed persistence attempt.
+            if (next.status != SubAgentRunStatus.RUNNING && next.status != SubAgentRunStatus.APPROVAL_REQUIRED) {
+                runtimeRun.onRunFinished?.invoke(
+                    runtimeRun.webMountScopeId,
+                    "generation ${next.status.name.lowercase()}",
+                    next.status == SubAgentRunStatus.COMPLETED,
+                )
+            }
         }
-        val status = next.status
-        appScope.launch(Dispatchers.IO) {
-            agentTaskStore.update(
-                taskId = runId,
-                status = status.toAgentTaskStatus(),
-                summary = effectiveResult.summary.ifBlank { effectiveResult.findings.joinToString("; ").take(1_000) },
-                error = effectiveResult.error.takeIf { it.isNotBlank() },
-                cancelCapability = effectiveResult.status == SubAgentRunStatus.APPROVAL_REQUIRED,
-            )
-        }
+        agentTaskStore.update(
+            taskId = next.runId,
+            status = next.status.toAgentTaskStatus(),
+            summary = result.summary.ifBlank { result.findings.joinToString("; ").take(1_000) },
+            error = result.error.takeIf { it.isNotBlank() },
+            cancelCapability = result.status == SubAgentRunStatus.APPROVAL_REQUIRED,
+        )
         appendEvent(runtimeRun, "finished", runToPayload(next, includeDisplayText = true))
     }
 
@@ -671,6 +834,7 @@ class SubAgentManager(
             displayText = displayText.ifBlank { current.displayText },
             updatedAtMs = Instant.now().toEpochMilli(),
         ).also { runtimeRun.snapshot = it }
+            .also { next -> runStateFlows[runtimeRun.snapshot.runId]?.value = next }
     }
 
     /**
@@ -681,6 +845,7 @@ class SubAgentManager(
      * it to TIMED_OUT instead of COMPLETED.
      */
     private suspend fun handleChildTerminal(runtimeRun: RuntimeRun, terminal: GenerationTerminal) {
+        if (!isCurrentRunning(runtimeRun)) return
         when (terminal) {
             GenerationTerminal.WaitingUser -> {
                 if (threadGraphEnabled()) {
@@ -689,6 +854,11 @@ class SubAgentManager(
             }
             GenerationTerminal.StepLimit -> runtimeRun.stepLimited = true
         }
+    }
+
+    private fun isCurrentRunning(runtimeRun: RuntimeRun): Boolean = synchronized(runtimeRun) {
+        runs[runtimeRun.snapshot.runId] === runtimeRun &&
+            runtimeRun.snapshot.status == SubAgentRunStatus.RUNNING
     }
 
     /** Drain messages delivered to a running thread into its generation (steer). */
@@ -745,6 +915,9 @@ class SubAgentManager(
         parentTools: List<Tool>,
         parentRunId: String?,
         previousAnswer: String,
+        writeContext: CoroutineContext,
+        webMountScopeId: String,
+        onRunFinished: ((String, String, Boolean) -> Unit)?,
     ) {
         val settings = settingsStore.settingsFlow.value
         val now = Instant.now().toEpochMilli()
@@ -759,10 +932,17 @@ class SubAgentManager(
             status = SubAgentRunStatus.RUNNING,
             displayText = previousAnswer,
             transcriptPath = File(runDir, "$threadId.jsonl").absolutePath,
-            startedAtMs = threadGraphManager.getState(threadId)?.startedAtMs ?: now,
+            startedAtMs = withContext(writeContext) {
+                threadGraphManager.getState(threadId)?.startedAtMs
+            } ?: now,
             updatedAtMs = now,
         )
-        val runtimeRun = RuntimeRun(run)
+        val runtimeRun = RuntimeRun(
+            snapshot = run,
+            writeContext = writeContext,
+            webMountScopeId = webMountScopeId,
+            onRunFinished = onRunFinished,
+        )
         runs[threadId] = runtimeRun
         agentTaskStore.register(run.toAgentTaskSnapshot(), cancel = {
             cancel(threadId)
@@ -774,19 +954,22 @@ class SubAgentManager(
         val liveParts = MutableStateFlow<List<UIMessagePart>>(emptyList())
         liveTextFlows[threadId] = liveText
         livePartsFlows[threadId] = liveParts
+        runStateFlows.getOrPut(threadId) { MutableStateFlow(run) }.value = run
         capLiveTextFlows()
         mailboxes[threadId] = Channel(Channel.UNLIMITED)
 
         // Write-ahead node + deliver queued messages (followup/send) before
         // the job launches — nothing waits in the void if the process dies.
-        threadGraphManager.startNode(run = run, rootRunId = parentRunId ?: parentConversationId.toString())
-        threadGraphManager.drainQueued(threadId)
-            .filter { it.kind == "message" }
-            .forEach { message ->
-                mailboxes[threadId]?.trySend(UIMessage.user(message.payload))
-            }
+        withContext(writeContext) {
+            threadGraphManager.startNode(run = run, rootRunId = parentRunId ?: parentConversationId.toString())
+            threadGraphManager.drainQueued(threadId)
+                .filter { it.kind == "message" }
+                .forEach { message ->
+                    mailboxes[threadId]?.trySend(UIMessage.user(message.payload))
+                }
+        }
 
-        runtimeRun.job = appScope.launch(Dispatchers.IO) {
+        runtimeRun.job = appScope.launch(Dispatchers.IO + writeContext) {
             val result = try {
                 withTimeout(definition.timeoutMs) {
                     runner.run(
@@ -811,7 +994,7 @@ class SubAgentManager(
                     error = error.message ?: error::class.java.simpleName,
                 )
             }
-            finish(threadId, result, displayText = liveText.value)
+            finish(runtimeRun, result, displayText = liveText.value)
         }
     }
 
@@ -888,6 +1071,9 @@ class SubAgentManager(
         @Volatile var job: Job? = null,
         /** P1-03: the generator reported StepLimit for this run (see [finish]). */
         @Volatile var stepLimited: Boolean = false,
+        val writeContext: CoroutineContext = EmptyCoroutineContext,
+        val webMountScopeId: String = Uuid.random().toString(),
+        val onRunFinished: ((String, String, Boolean) -> Unit)? = null,
     )
 
     private fun SubAgentDefinition.isHistoryReader(): Boolean =

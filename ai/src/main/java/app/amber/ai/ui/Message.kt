@@ -461,6 +461,8 @@ sealed class UIMessagePart {
         val input: String,
         val output: List<UIMessagePart> = emptyList(),
         val approvalState: ToolApprovalState = ToolApprovalState.Auto,
+        /** Stable parallel-tool ordering carried by the iOS conversation wire format. */
+        val streamIndex: Int? = null,
         override var metadata: JsonObject? = null
     ) : UIMessagePart() {
         /** Whether the tool has been executed (has output) */
@@ -503,6 +505,7 @@ sealed class UIMessagePart {
                 },
                 output = output + incoming.output,
                 approvalState = approvalState,
+                streamIndex = incoming.streamIndex ?: streamIndex,
                 metadata = when {
                     incomingUsesFallbackId && !currentUsesFallbackId -> metadata
                     incoming.metadata != null -> incoming.metadata
@@ -537,7 +540,7 @@ internal fun UIMessagePart.Image.asStreamImage(): UIMessagePart.Image =
 
 // public: UI 层用它做 tool 卡片的稳定 Compose key (toolCallId 为空时的回退)
 fun UIMessagePart.Tool.streamToolIndex(): Int? =
-    metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
+    streamIndex ?: metadata?.get(STREAM_TOOL_INDEX_METADATA_KEY)?.jsonPrimitive?.intOrNull
 
 /**
  * 给 Tool part 附加流式 stream index 元数据 (合并入已有 metadata)。
@@ -548,7 +551,7 @@ internal fun UIMessagePart.Tool.withStreamToolIndex(index: Int): UIMessagePart.T
         metadata?.forEach { (key, value) -> put(key, value) }
         put(STREAM_TOOL_INDEX_METADATA_KEY, index)
     }
-    return copy(metadata = mergedMetadata)
+    return copy(streamIndex = index, metadata = mergedMetadata)
 }
 
 /**

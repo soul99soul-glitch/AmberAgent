@@ -1,0 +1,14 @@
+<resources>
+    <string name="chat_preview_standby">待命</string>
+    <string name="chat_setup_missing_provider">先添加服务商，再开始聊天</string>
+    <string name="chat_setup_missing_model">先选择聊天模型</string>
+    <string name="chat_setup_disabled_provider">启用当前服务商后即可发送</string>
+    <string name="chat_setup_invalid_address">请修正服务商地址</string>
+    <string name="chat_setup_missing_key">请为当前服务商添加 API Key</string>
+    <string name="chat_setup_codex_sign_in">请先为当前服务商登录 ChatGPT</string>
+    <string name="chat_setup_gemini_sign_in">请先为当前服务商登录 Google</string>
+    <string name="chat_setup_grok_sign_in">请先为当前服务商登录 Grok</string>
+    <string name="chat_setup_antigravity_sign_in">请先为当前服务商登录 Antigravity</string>
+    <string name="chat_setup_configure">前往配置</string>
+    <string name="chat_setup_choose_model">选择模型</string>
+</resources>

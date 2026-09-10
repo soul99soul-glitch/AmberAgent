@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -36,12 +37,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Cloud
 import com.composables.icons.lucide.DatabaseZap
@@ -59,11 +63,14 @@ import app.amber.core.sync.core.SYNC_ARCHIVE_MIME
 import app.amber.core.sync.core.SyncEncryptionMode
 import app.amber.core.sync.core.SyncPreview
 import app.amber.core.sync.core.SyncSettings
+import app.amber.core.sync.core.SyncRestorePartialCommitException
 import app.amber.core.sync.google.GoogleDriveFile
 import app.amber.core.sync.local.LocalBackupRepository
 import app.amber.core.sync.provider.SyncSnapshot
 import app.amber.core.sync.provider.UploadConflictPolicy
 import app.amber.core.sync.provider.checkSnapshotCompatibility
+import app.amber.core.settings.WebDavConfig
+import app.amber.agent.R
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -108,6 +115,24 @@ private fun formatBackupStatus(syncSettings: SyncSettings): String {
     }
     return "最近成功：" + parts.joinToString(separator = " · ")
 }
+
+internal data class WebDavDraft(
+    val url: String,
+    val username: String,
+    val password: String,
+    val path: String,
+    val urlDirty: Boolean = false,
+    val usernameDirty: Boolean = false,
+    val passwordDirty: Boolean = false,
+    val pathDirty: Boolean = false,
+)
+
+internal fun WebDavDraft.syncFrom(config: WebDavConfig): WebDavDraft = copy(
+    url = if (urlDirty) url else config.url,
+    username = if (usernameDirty) username else config.username,
+    password = if (passwordDirty) password else config.password,
+    path = if (pathDirty) path else config.path,
+)
 
 @Composable
 private fun BackupStatusContent(
@@ -156,7 +181,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val backupActivity by vm.backupActivity.collectAsState()
     val pendingGoogleAuthorization by vm.pendingGoogleAuthorization.collectAsState()
     val pendingCloudRestore by vm.pendingCloudRestore.collectAsState()
-    val cloudConflict by vm.cloudConflict.collectAsState()
     val cloudSnapshots by vm.cloudSnapshots.collectAsState()
     val cloudSnapshotPickerVisible by vm.cloudSnapshotPickerVisible.collectAsState()
     val context = LocalContext.current
@@ -170,6 +194,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     val pendingDeleteConfirm by vm.pendingDeleteConfirm.collectAsState()
     val pendingUploadConflict by vm.pendingUploadConflict.collectAsState()
     val pendingExportDialog by vm.pendingExportDialog.collectAsState()
+    val verifiedRestore by vm.pendingVerifiedRestore.collectAsState()
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     var pendingGoogleAction by remember { mutableStateOf<GoogleSyncAction?>(null) }
     // Restore scope is always EVERYTHING; within it the user opts in to
@@ -302,6 +327,31 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
     var webDavUsername by remember { mutableStateOf(settings.webDavConfig.username) }
     var webDavPassword by remember { mutableStateOf(settings.webDavConfig.password) }
     var webDavPath by remember { mutableStateOf(settings.webDavConfig.path) }
+    var webDavUrlDirty by remember { mutableStateOf(false) }
+    var webDavUsernameDirty by remember { mutableStateOf(false) }
+    var webDavPasswordDirty by remember { mutableStateOf(false) }
+    var webDavPathDirty by remember { mutableStateOf(false) }
+    val latestWebDavDraft by rememberUpdatedState(
+        WebDavDraft(
+            url = webDavUrl,
+            username = webDavUsername,
+            password = webDavPassword,
+            path = webDavPath,
+            urlDirty = webDavUrlDirty,
+            usernameDirty = webDavUsernameDirty,
+            passwordDirty = webDavPasswordDirty,
+            pathDirty = webDavPathDirty,
+        )
+    )
+
+    LaunchedEffect(settings.init, settings.webDavConfig) {
+        if (settings.init) return@LaunchedEffect
+        val synced = latestWebDavDraft.syncFrom(settings.webDavConfig)
+        webDavUrl = synced.url
+        webDavUsername = synced.username
+        webDavPassword = synced.password
+        webDavPath = synced.path
+    }
 
     Scaffold(
         topBar = {
@@ -319,6 +369,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
+                .imePadding()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -437,21 +488,30 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = webDavUrl,
-                                    onValueChange = { webDavUrl = it },
+                                    onValueChange = {
+                                        webDavUrl = it
+                                        webDavUrlDirty = true
+                                    },
                                     label = { Text("服务器地址") },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 OutlinedTextField(
                                     value = webDavUsername,
-                                    onValueChange = { webDavUsername = it },
+                                    onValueChange = {
+                                        webDavUsername = it
+                                        webDavUsernameDirty = true
+                                    },
                                     label = { Text("用户名") },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
                                 OutlinedTextField(
                                     value = webDavPassword,
-                                    onValueChange = { webDavPassword = it },
+                                    onValueChange = {
+                                        webDavPassword = it
+                                        webDavPasswordDirty = true
+                                    },
                                     label = { Text("密码") },
                                     singleLine = true,
                                     visualTransformation = PasswordVisualTransformation(),
@@ -459,7 +519,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                 )
                                 OutlinedTextField(
                                     value = webDavPath,
-                                    onValueChange = { webDavPath = it },
+                                    onValueChange = {
+                                        webDavPath = it
+                                        webDavPathDirty = true
+                                    },
                                     label = { Text("备份目录") },
                                     singleLine = true,
                                     modifier = Modifier.fillMaxWidth(),
@@ -468,6 +531,10 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                                     Button(
                                         onClick = {
                                             vm.saveWebDavConfig(webDavUrl, webDavUsername, webDavPassword, webDavPath)
+                                            webDavUrlDirty = false
+                                            webDavUsernameDirty = false
+                                            webDavPasswordDirty = false
+                                            webDavPathDirty = false
                                         },
                                     ) { Text("保存配置") }
                                     TextButton(onClick = { vm.refreshWebDavSnapshots() }) {
@@ -591,8 +658,14 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
 
     // P7-02 恢复两阶段：先输入口令并验证（头部 + 认证标签 + 解密，不写入），
     // 解密成功后展示恢复 preview（复用 ImportPreviewDialog），确认后才写入。
-    val verifiedRestore by vm.pendingVerifiedRestore.collectAsState()
     if (importPreview != null && verifiedRestore == null) {
+        val restoreRetryHint = (operationState as? UiState.Error)?.error?.let { error ->
+            if (error is SyncRestorePartialCommitException) {
+                stringResource(R.string.restore_partial_commit_retry)
+            } else {
+                stringResource(R.string.restore_apply_failed_retry)
+            }
+        }
         RestorePassphraseDialog(
             preview = importPreview!!,
             verifying = operationState is UiState.Loading,
@@ -625,6 +698,7 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
                     )
                 }
             },
+            retryHint = restoreRetryHint,
         )
     }
 
@@ -730,47 +804,6 @@ fun BackupPage(vm: BackupVM = koinViewModel()) {
         BackupDialog()
     }
 
-    cloudConflict?.let { conflict ->
-        AlertDialog(
-            onDismissRequest = { vm.dismissCloudConflict() },
-            title = { Text("云端快照冲突") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Google Drive 已有一个不同 revision 的同步快照。",
-                        style = LocalAmberType.current.secondary,
-                        color = LocalAmberTokens.current.ink3,
-                    )
-                    // Graphite §3: remote modified time + local revision are machine facts → MONO (meta).
-                    Text(
-                        "云端修改时间：${conflict.remoteFile.modifiedTime ?: "未知"}",
-                        style = LocalAmberType.current.meta,
-                        color = LocalAmberTokens.current.ink,
-                    )
-                    Text(
-                        "本机记录 revision：${conflict.localRevision.ifBlank { "无" }}",
-                        style = LocalAmberType.current.meta,
-                        color = LocalAmberTokens.current.ink,
-                    )
-                    Text(
-                        "为避免静默丢数据，请确认是否用本机快照覆盖云端。",
-                        style = LocalAmberType.current.secondary,
-                        color = LocalAmberTokens.current.ink3,
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = { vm.confirmOverwriteCloud() }) {
-                    Text("覆盖云端")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vm.dismissCloudConflict() }) {
-                    Text("取消")
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -896,13 +929,25 @@ private fun ImportPreviewDialog(
     onRestore: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.imePadding(),
+        properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = {
             if (!restoring) onDismiss()
         },
         title = { Text("确认覆盖") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 if (restoring) {
+                    Text(
+                        stringResource(R.string.restore_committing),
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink3,
+                    )
                     BackupStatusContent(
                         syncSettings = SyncSettings(),
                         activity = restoreActivity ?: BackupActivity(title = "正在恢复备份"),
@@ -1123,16 +1168,31 @@ private fun RestorePassphraseDialog(
     verifying: Boolean,
     onDismiss: () -> Unit,
     onVerify: (String) -> Unit,
+    retryHint: String? = null,
 ) {
     var passphrase by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     val needsPassphrase = restoreNeedsPassphrase(preview)
     val mismatch = needsPassphrase && passphrase != confirm
     AlertDialog(
+        modifier = Modifier.imePadding(),
+        properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = { if (!verifying) onDismiss() },
         title = { Text("恢复备份") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                retryHint?.let {
+                    Text(
+                        it,
+                        style = LocalAmberType.current.secondary,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Text(
                     "创建时间：${preview.createdAt}",
                     style = LocalAmberType.current.meta,
@@ -1229,10 +1289,17 @@ private fun ExportEncryptionDialog(
         else -> null
     }
     AlertDialog(
+        modifier = Modifier.imePadding(),
+        properties = DialogProperties(decorFitsSystemWindows = false),
         onDismissRequest = onDismiss,
         title = { Text("加密备份") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

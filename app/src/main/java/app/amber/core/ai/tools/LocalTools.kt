@@ -9,10 +9,10 @@ import app.amber.core.event.AppEventBus
 import app.amber.core.repository.ConversationRepository
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.tools.AgentCronTools
-import app.amber.feature.tools.FeishuOfficeTools
 import app.amber.feature.tools.ICloudDriveTools
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.tools.WebMountPrimitiveTools
+import app.amber.feature.webmount.tools.withWebMountScope
 import app.amber.feature.tools.ExternalFileTools
 import app.amber.feature.tools.ScreenAutomationTools
 import app.amber.feature.tools.SystemAccessTools
@@ -20,6 +20,7 @@ import app.amber.feature.tools.TerminalTools
 import app.amber.feature.tools.ToolRegistry
 import app.amber.feature.tools.WorkspaceArtifactTools
 import app.amber.feature.tools.WorkspaceTools
+import app.amber.feature.reminder.ReminderTools
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import app.amber.core.settings.prefs.SettingsAggregator
@@ -41,7 +42,6 @@ class LocalTools(
     private val permissionBroker: AgentPermissionBroker,
     private val webViewOperationStore: WebViewOperationStore,
     private val iCloudDriveTools: ICloudDriveTools,
-    private val feishuOfficeTools: FeishuOfficeTools,
     private val agentCronTools: AgentCronTools,
     private val webMountPrimitiveTools: WebMountPrimitiveTools,
     private val webMountManager: WebMountManager,
@@ -51,6 +51,8 @@ class LocalTools(
     private val promptConfigRepository: AgentPromptConfigRepository,
     private val deepReadPlaybookRepository: DeepReadPlaybookRepository,
     private val conversationRepository: ConversationRepository,
+    private val healthSummaryReader: app.amber.feature.health.HealthSummaryReader,
+    private val reminderTools: ReminderTools,
 ) {
     val javascriptTool by lazy { createJavascriptTool() }
 
@@ -94,6 +96,8 @@ class LocalTools(
 
     private val permissionsStatusTool by lazy { createPermissionsStatusTool(permissionBroker) }
 
+    private val healthSummaryTool by lazy { createHealthSummaryTool(healthSummaryReader) }
+
     private val runPlanUpdateTool by lazy { createRunPlanUpdateTool() }
 
     private val agentPromptConfigTool by lazy {
@@ -127,7 +131,11 @@ class LocalTools(
         }
     }
 
-    fun getTools(options: List<LocalToolOption>, conversationId: Uuid? = null): List<Tool> {
+    fun getTools(
+        options: List<LocalToolOption>,
+        conversationId: Uuid? = null,
+        runId: String? = null,
+    ): List<Tool> {
         val tools = mutableListOf<Tool>()
         if (options.contains(LocalToolOption.JavascriptEngine)) {
             tools.add(javascriptTool)
@@ -155,11 +163,6 @@ class LocalTools(
         if (options.contains(LocalToolOption.SystemAccess)) {
             tools.addAll(systemAccessTools.getTools())
         }
-        if (options.contains(LocalToolOption.SystemAccess) ||
-            settingsStore.settingsFlow.value.agentRuntime.feishuOfficeEnhancement.enabled
-        ) {
-            tools.addAll(feishuOfficeTools.getTools())
-        }
         if (options.contains(LocalToolOption.WebView)) {
             tools.add(webViewTool)
             tools.add(webViewSearchOpenTool)
@@ -178,7 +181,13 @@ class LocalTools(
         if (webMountActive) {
             // `wm_eval` is gated by the separate global WebMountEval toggle.
             val includeEval = webMountManager.evalEnabled
-            tools.addAll(webMountPrimitiveTools.getTools(includeEval = includeEval))
+            tools.addAll(
+                webMountPrimitiveTools.getTools(
+                    includeEval = includeEval,
+                    conversationId = conversationId?.toString(),
+                    runId = runId,
+                )
+            )
             // Plan v2: adapter tools are gated by the user's site list.
             // If the user deleted a site (e.g. removed Bilibili), its adapter's
             // tools (`bilibili_*`) drop out of the agent catalog automatically.
@@ -188,10 +197,26 @@ class LocalTools(
             val gatedAdapterTools = webMountManager.allToolsByAdapter().asSequence()
                 .filter { (adapterId, _) -> adapterId in activeAdapterIds }
                 .flatMap { it.value.asSequence() }
+                // Feishu's visible-page fallbacks use a pooled WebView too;
+                // carry the same host-owned identity fields into those two
+                // tools while leaving its OpenAPI-only tools unchanged.
+                .map { tool ->
+                    if (tool.name !in FEISHU_WEBMOUNT_SCOPED_TOOLS) {
+                        tool
+                    } else {
+                        tool.copy(
+                            execute = { input ->
+                                tool.execute(input.withWebMountScope(conversationId?.toString(), runId))
+                            },
+                        )
+                    }
+                }
                 .toList()
             tools.addAll(gatedAdapterTools)
         }
         tools.add(permissionsStatusTool)
+        tools.add(healthSummaryTool)
+        tools.addAll(reminderTools.getTools())
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         tools.add(agentPromptConfigTool)
@@ -209,4 +234,24 @@ class LocalTools(
         return tools
     }
 
+    /** Release any WebMount leases that outlive an individual tool call. */
+    fun endWebMountRun(
+        runId: String,
+        conversationId: String?,
+        reason: String = "run ended",
+        preservePendingHandoff: Boolean = false,
+    ) {
+        webMountPrimitiveTools.endRun(
+            runId = runId,
+            conversationId = conversationId,
+            reason = reason,
+            preservePendingHandoff = preservePendingHandoff,
+        )
+    }
+
 }
+
+private val FEISHU_WEBMOUNT_SCOPED_TOOLS = setOf(
+    "feishu_docs_snapshot",
+    "feishu_docs_network_summary",
+)

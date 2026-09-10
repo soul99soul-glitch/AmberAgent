@@ -1,7 +1,10 @@
 package app.amber.feature.board.agent
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withContext
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.ui.UIMessage
@@ -17,6 +20,8 @@ import app.amber.core.settings.resolveTaskChatModel
 import app.amber.agent.data.db.entity.BoardItemEntity
 import app.amber.agent.data.db.entity.DailyReviewEntity
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -41,8 +46,17 @@ class DailyReviewAgent(
     private val boardRepository: BoardRepository,
     private val conversationRepository: ConversationRepository,
     private val appUsageCollector: AppUsageCollector,
+    private val restoreWriteGate: SyncRestoreWriteGate,
 ) {
     suspend fun run(boardDate: String, phase: String): DailyReviewRunResult {
+        val epoch = currentCoroutineContext()[SyncRestoreWriteEpoch]
+            ?: SyncRestoreWriteEpoch(restoreWriteGate.currentEpoch())
+        return withContext(epoch) {
+            runInternal(boardDate, phase)
+        }
+    }
+
+    private suspend fun runInternal(boardDate: String, phase: String): DailyReviewRunResult {
         val settings = settingsStore.settingsFlow.value
         val now = System.currentTimeMillis()
 
@@ -167,7 +181,7 @@ class DailyReviewAgent(
         }
     }
 
-    private suspend fun collectRecentChatSummaries(): List<String> = runCatching {
+    private suspend fun collectRecentChatSummaries(): List<String> = try {
         val todayStart = java.time.LocalDate.now()
             .atStartOfDay(java.time.ZoneId.systemDefault())
             .toInstant()
@@ -180,18 +194,26 @@ class DailyReviewAgent(
             .filter { it.title.isNotBlank() }
             .take(10)
             .map { conv ->
-                val nodeCount = runCatching {
+                val nodeCount = try {
                     conversationRepository.countConversationNodes(conv.id)
-                }.getOrDefault(conv.messageNodes.size)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    conv.messageNodes.size
+                }
                 "${conv.title}（${nodeCount}轮对话）"
             }
-    }.getOrElse { emptyList() }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (_: Throwable) {
+        emptyList()
+    }
 
     private suspend fun callModel(settings: Settings, prompt: String): String? {
         val model = resolveModel(settings) ?: return null
         val provider = model.findProvider(settings.providers) ?: return null
         return withTimeout(90_000L) {
-            runCatching {
+            try {
                 val response = providerCatalog.text(provider).complete(
                     providerSetting = provider,
                     messages = listOf(
@@ -205,8 +227,12 @@ class DailyReviewAgent(
                     ),
                 )
                 response.choices.firstOrNull()?.message?.toText()
-            }.onFailure { Log.e(TAG, "daily review model call failed", it) }
-                .getOrNull()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                Log.e(TAG, "daily review model call failed", error)
+                null
+            }
         }
     }
 

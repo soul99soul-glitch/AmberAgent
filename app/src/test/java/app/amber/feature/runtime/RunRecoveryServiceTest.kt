@@ -8,6 +8,9 @@ import app.amber.core.model.Conversation
 import app.amber.core.model.AMBER_AGENT_ID
 import app.amber.core.model.MessageNode
 import app.amber.feature.tools.ToolEffectClass
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -235,5 +238,74 @@ class RunRecoveryServiceTest : DurableRuntimeTestBase() {
         val unknown = ledger.listOutcomeUnknown()
         assertEquals(1, unknown.size)
         assertEquals(effect.effectId, unknown.single().effectId)
+    }
+
+    @Test
+    fun recoveryStartedBeforeRestoreDropsOldTerminalAndLedgerWrites() = runBlocking {
+        val gate = SyncRestoreWriteGate()
+        val gatedLedger = RoomToolEffectLedger(
+            dao = database.toolEffectDao(),
+            runTerminalDao = database.runTerminalDao(),
+            json = Json,
+            restoreWriteGate = gate,
+        )
+        val gatedTerminal = RoomRunTerminalStore(
+            dao = database.runTerminalDao(),
+            restoreWriteGate = gate,
+        )
+        val conversationId = Uuid.random()
+        gatedTerminal.begin("run_old", conversationId.toString(), null)
+        val started = gatedLedger.prepare(
+            runId = "run_old",
+            turnId = 0,
+            toolCallId = "call_old",
+            toolName = "post_message",
+            input = "{\"text\":\"hello\"}",
+            effectClass = ToolEffectClass.NON_IDEMPOTENT_WRITE,
+        )
+        gatedLedger.markStarted(
+            started.effectId,
+            approvalDigest("run_old", "call_old", started.argsDigest),
+        )
+
+        val unfinishedRead = CompletableDeferred<Unit>()
+        val releaseRead = CompletableDeferred<Unit>()
+        val observingTerminal = object : RunTerminalStore by gatedTerminal {
+            override suspend fun unfinished(): List<RunTerminal> {
+                unfinishedRead.complete(Unit)
+                releaseRead.await()
+                return gatedTerminal.unfinished()
+            }
+        }
+        val service = RunRecoveryService(
+            ledger = gatedLedger,
+            runTerminalStore = observingTerminal,
+            conversationRepo = conversationRepository(gate),
+            json = Json,
+            restoreWriteGate = gate,
+        )
+
+        val recoveryJob = launch { service.recover() }
+        unfinishedRead.await()
+
+        val restoreStarted = CompletableDeferred<Unit>()
+        val releaseRestore = CompletableDeferred<Unit>()
+        val restoreJob = launch {
+            gate.withRestore {
+                restoreStarted.complete(Unit)
+                releaseRestore.await()
+            }
+        }
+        restoreStarted.await()
+        releaseRead.complete(Unit)
+        releaseRestore.complete(Unit)
+        recoveryJob.join()
+        restoreJob.join()
+
+        // Recovery captured epoch 0 before its unfinished-run read. Once the
+        // restore advances the epoch, its old OUTCOME_UNKNOWN/terminal writes
+        // are rejected instead of landing on the imported dataset.
+        assertEquals(RunTerminalState.RUNNING, gatedTerminal.get("run_old")!!.state)
+        assertEquals(ToolEffectStatus.STARTED, gatedLedger.get(started.effectId)!!.status)
     }
 }

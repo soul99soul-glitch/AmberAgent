@@ -1,5 +1,6 @@
 package app.amber.feature.ui.components.ai
 
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.content.MediaType
 import androidx.compose.foundation.content.ReceiveContentListener
@@ -72,6 +73,7 @@ import app.amber.core.model.QuickMessage
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalSettings
+import app.amber.feature.ui.hooks.ChatInputAttachmentKind
 import app.amber.feature.ui.hooks.ChatInputState
 import org.koin.compose.koinInject
 import java.util.Locale
@@ -117,6 +119,8 @@ internal fun TextInputRow(
     // V3: SlashCommandPanel footer 需要 commit reasoningLevel 到全局 Settings.
     // 为 null 时 (sandbox / 历史预览等场景) footer 不渲染. ChatInput 调用处必传.
     onUpdateSettings: ((app.amber.core.settings.Settings) -> Unit)? = null,
+    onImportAttachment: ((Uri, ChatInputAttachmentKind) -> Unit)? = null,
+    onImportTextFile: ((String) -> Unit)? = null,
 ) {
     val settings = LocalSettings.current
     val filesManager: FilesManager = koinInject()
@@ -152,6 +156,13 @@ internal fun TextInputRow(
         var isFocused by remember { mutableStateOf(false) }
         var isFullScreen by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
+        fun discardInput() {
+            val files = state.drainAttachmentFilesForDiscard()
+            state.clearInput()
+            if (files.isNotEmpty()) {
+                filesManager.deleteChatFiles(files)
+            }
+        }
         val slashQuery = state.textContent.text.toString().slashCommandQuery()
         val allSlashCommands = remember(
             quickMessages,
@@ -178,6 +189,8 @@ internal fun TextInputRow(
             filesManager,
             scope,
             state,
+            onImportAttachment,
+            onImportTextFile,
         ) {
             ReceiveContentListener { transferableContent ->
                 when {
@@ -185,13 +198,14 @@ internal fun TextInputRow(
                         transferableContent.consume { item ->
                             val uri = item.uri
                             if (uri != null) {
-                                scope.launch {
-                                    state.addImages(
-                                        filesManager.createChatFilesByContents(
-                                            listOf(uri)
+                                onImportAttachment?.invoke(uri, ChatInputAttachmentKind.IMAGE)
+                                    ?: scope.launch {
+                                        state.addImages(
+                                            filesManager.createChatFilesByContents(
+                                                listOf(uri)
+                                            )
                                         )
-                                    )
-                                }
+                                    }
                             }
                             uri != null
                         }
@@ -201,10 +215,11 @@ internal fun TextInputRow(
                         transferableContent.consume { item ->
                             val text = item.text?.toString()
                             if (text != null && text.length > settings.displaySetting.pasteLongTextThreshold) {
-                                scope.launch {
-                                    val document = filesManager.createChatTextFile(text)
-                                    state.addFiles(listOf(document))
-                                }
+                                onImportTextFile?.invoke(text)
+                                    ?: scope.launch {
+                                        val document = filesManager.createChatTextFile(text)
+                                        state.addFiles(listOf(document))
+                                    }
                                 true
                             } else {
                                 false
@@ -283,14 +298,14 @@ internal fun TextInputRow(
                         hasAnyCommand = retainedHasAnySlashCommand,
                         onSelect = { command ->
                             when (val action = command.action) {
-                                SlashCommandAction.ClearInput -> state.clearInput()
+                                SlashCommandAction.ClearInput -> discardInput()
                                 SlashCommandAction.CompactContext -> {
-                                    state.clearInput()
+                                    discardInput()
                                     onCompactContext()
                                 }
                                 is SlashCommandAction.InsertText -> state.setMessageText(action.text)
                                 SlashCommandAction.OpenUsage -> {
-                                    state.clearInput()
+                                    discardInput()
                                     onUsageClick()
                                 }
                             }

@@ -43,6 +43,12 @@ data class NovelWorkspaceGhostwriteJob(
 object NovelWorkspaceGhostwriteJobs {
     private const val DIR = "jobs"
 
+    data class Snapshot(
+        val jobs: List<NovelWorkspaceGhostwriteJob>,
+        /** Retained on disk; these records cannot acquire execution ownership. */
+        val unreadableFiles: List<String>,
+    )
+
     private val json = Json { ignoreUnknownKeys = true }
 
     private fun dir(projectDirectory: File): File =
@@ -69,13 +75,10 @@ object NovelWorkspaceGhostwriteJobs {
     }
 
     fun load(projectDirectory: File, jobId: String): NovelWorkspaceGhostwriteJob? {
+        if (jobId.isBlank() || jobId.any { it == '/' || it == '\\' } || jobId == "..") return null
         val f = File(dir(projectDirectory), "$jobId.json")
         if (!f.exists()) return null
-        return try {
-            json.decodeFromString(NovelWorkspaceGhostwriteJob.serializer(), f.readText(Charsets.UTF_8))
-        } catch (error: Exception) {
-            null
-        }
+        return readValidJob(f)
     }
 
     fun listActive(projectDirectory: File): List<NovelWorkspaceGhostwriteJob> =
@@ -180,22 +183,68 @@ object NovelWorkspaceGhostwriteJobs {
             }
             .maxByOrNull { it.updatedAt }
 
-    private fun decodeAll(projectDirectory: File): List<NovelWorkspaceGhostwriteJob> {
+    fun snapshot(projectDirectory: File): Snapshot {
         val directory = dir(projectDirectory)
-        if (!directory.exists()) return emptyList()
-        return directory.listFiles()
-            .orEmpty()
-            .filter { it.extension == "json" }
-            .mapNotNull { f ->
-                runCatching {
-                    json.decodeFromString(NovelWorkspaceGhostwriteJob.serializer(), f.readText(Charsets.UTF_8))
-                }.getOrNull()
+        if (!directory.exists()) return Snapshot(emptyList(), emptyList())
+        val files = directory.listFiles()
+            ?: throw NovelWorkspaceIoError("Cannot read jobs directory: $directory")
+        val jobs = mutableListOf<NovelWorkspaceGhostwriteJob>()
+        val unreadable = mutableListOf<String>()
+        for (file in files.filter { it.extension == "json" }) {
+            val job = readValidJob(file)
+            if (job == null) {
+                unreadable += file.name
+            } else {
+                jobs += job
             }
-            .sortedBy { it.createdAt }
+        }
+        return Snapshot(jobs.sortedBy { it.createdAt }, unreadable.sorted())
     }
 
-    fun delete(projectDirectory: File, jobId: String) {
-        File(dir(projectDirectory), "$jobId.json").delete()
+    private fun decodeAll(projectDirectory: File): List<NovelWorkspaceGhostwriteJob> =
+        snapshot(projectDirectory).jobs
+
+    private fun readValidJob(file: File): NovelWorkspaceGhostwriteJob? = runCatching {
+        json.decodeFromString(NovelWorkspaceGhostwriteJob.serializer(), file.readText(Charsets.UTF_8))
+    }.getOrNull()?.takeIf {
+        it.id == file.nameWithoutExtension && it.targetChapterCount > 0 && it.startOrdinal >= 0 &&
+            it.status in validStatuses && it.branchSlug.isNotBlank() &&
+            it.branchSlug != ".." && it.branchSlug.none { c -> c == '/' || c == '\\' }
+    }
+
+    /** Called after the controller has checked this execution against WorkManager. */
+    @Synchronized
+    fun recoverUnscheduled(
+        projectDirectory: File,
+        observedJob: NovelWorkspaceGhostwriteJob,
+        hasUnfinishedWork: Boolean,
+    ): NovelWorkspaceGhostwriteJob? {
+        if (hasUnfinishedWork || observedJob.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) return null
+        val current = load(projectDirectory, observedJob.id) ?: return null
+        if (current.executionKey != observedJob.executionKey || current.status != observedJob.status) return null
+        val complete = progress(current, NovelWorkspaceStore(projectDirectory)) >= current.targetChapterCount
+        return transition(
+            projectDirectory, current.id, setOf(NovelWorkspaceGhostwriteJob.STATUS_RUNNING),
+            if (complete) NovelWorkspaceGhostwriteJob.STATUS_COMPLETED else NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+            reason = if (complete) null else "后台执行已中断。已收录章节会保留，可继续剩余章节；未收录内容请先检查工作区。",
+            expectedExecutionId = current.executionKey,
+        )
+    }
+
+    private val validStatuses = setOf(
+        NovelWorkspaceGhostwriteJob.STATUS_RUNNING, NovelWorkspaceGhostwriteJob.STATUS_PAUSED,
+        NovelWorkspaceGhostwriteJob.STATUS_COMPLETED, NovelWorkspaceGhostwriteJob.STATUS_FAILED,
+        NovelWorkspaceGhostwriteJob.STATUS_CANCELLED,
+    )
+
+    @Synchronized
+    fun dismissFailed(projectDirectory: File, jobId: String, executionId: String): Boolean {
+        val current = load(projectDirectory, jobId) ?: return false
+        if (current.status != NovelWorkspaceGhostwriteJob.STATUS_FAILED || current.executionKey != executionId) return false
+        if (!File(dir(projectDirectory), "$jobId.json").delete()) {
+            throw NovelWorkspaceIoError("无法移除失败记录，请重试")
+        }
+        return true
     }
 
     /** Progress = durable branch-head chapters committed since the job started. */

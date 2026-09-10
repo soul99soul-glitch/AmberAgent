@@ -12,10 +12,12 @@ import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.feature.runtime.DurableRuntimeTestBase
 import app.amber.feature.runtime.RoomThreadGraphStore
 import app.amber.feature.task.AgentTaskStore
+import app.amber.feature.task.AgentTaskStatus
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
@@ -37,6 +39,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -100,6 +103,7 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
     private fun manager(
         runner: SubAgentRunner = fakeRunner,
         flags: CapabilityFlags? = threadGraphFlags,
+        restoreWriteGate: SyncRestoreWriteGate? = null,
     ) = SubAgentManager(
         context = context,
         appScope = appScope,
@@ -108,7 +112,7 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         runner = runner,
         agentTaskStore = AgentTaskStore(context, Json),
         sessionAccessGrantStore = SessionAccessGrantStore(),
-        threadGraphStore = RoomThreadGraphStore(database.threadGraphDao()),
+        threadGraphStore = RoomThreadGraphStore(database.threadGraphDao(), restoreWriteGate),
         capabilityFlags = flags,
     )
 
@@ -155,6 +159,25 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         error("thread $threadId did not reach a terminal status in time")
     }
 
+    /**
+     * A manager terminal snapshot is published before ThreadGraphManager
+     * finishes promoting delivered messages to their durable state. Wait for
+     * that actual Room write instead of making a fixed sleep or weakening the
+     * expected state.
+     */
+    private suspend fun awaitMessageDeliveryState(
+        store: RoomThreadGraphStore,
+        messageId: String,
+        expected: ThreadDeliveryState,
+    ) {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            if (store.getMessage(messageId)?.deliveryState == expected.name) return
+            Thread.sleep(20)
+        }
+        assertEquals(expected.name, store.getMessage(messageId)?.deliveryState)
+    }
+
     private fun payloadStatus(payload: JsonObject): String? =
         payload["status"]?.jsonPrimitive?.contentOrNull
 
@@ -186,6 +209,61 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
     }
 
     @Test
+    fun runScopedToolProviderReceivesOpaqueGenerationScopeId() = runBlocking {
+        val scopedRunIds = CopyOnWriteArrayList<String>()
+        val finishedScopeIds = CopyOnWriteArrayList<String>()
+        val manager = manager()
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Scoped tool provider test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+            parentToolsForRun = { scopeId ->
+                scopedRunIds += scopeId
+                parentTools()
+            },
+            onRunFinished = { scopeId, _, _ -> finishedScopeIds += scopeId },
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+
+        assertEquals(1, scopedRunIds.size)
+        assertNotEquals(threadId, scopedRunIds.single())
+        awaitTerminal(manager, threadId)
+        withTimeout(5_000) {
+            while (finishedScopeIds.isEmpty()) Thread.sleep(20)
+        }
+        assertEquals(scopedRunIds.single(), finishedScopeIds.single())
+    }
+
+    @Test
+    fun staleGenerationTerminalDoesNotOverwriteThreadAfterRestore() = runBlocking {
+        val gate = SyncRestoreWriteGate()
+        val manager = manager(restoreWriteGate = gate)
+        fakeRunner.gate = CompletableDeferred()
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Stale restore terminal test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitLive(threadId)
+
+        // The running generation captured its epoch before the model call.
+        // Once restore commits, its late terminal callback must be rejected
+        // instead of turning the imported RUNNING node into a stale result.
+        gate.withRestore { gate.markDataCommitted() }
+        fakeRunner.gate!!.complete(
+            SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "stale result")
+        )
+        awaitTerminal(manager, threadId)
+
+        val store = RoomThreadGraphStore(database.threadGraphDao(), gate)
+        assertEquals(SubAgentRunStatus.RUNNING.name, store.getNode(threadId)?.status)
+        assertNull(store.getResult(threadId))
+    }
+
+    @Test
     fun waitAfterRestartReconcilesDeadRunningThread() = runBlocking {
         val first = manager()
         fakeRunner.gate = CompletableDeferred()
@@ -203,6 +281,53 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         val second = manager()
         val payload = second.wait(threadId, waitTimeoutMs = 100)
         assertEquals("interrupted", payloadStatus(payload))
+    }
+
+    @Test
+    fun coldStartFollowupRequeuesDeliveredMessagesBeforeDrain() = runBlocking {
+        val first = manager()
+        val staleGate = CompletableDeferred<SubAgentResult>()
+        fakeRunner.gate = staleGate
+        val started = first.start(
+            parentConversationId = conversationId,
+            input = startInput("Cold followup delivery recovery"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitLive(threadId)
+
+        val sent = first.sendMessage(threadId, "recover this message")
+        assertEquals("delivered", sent["delivery_state"]?.jsonPrimitive?.contentOrNull)
+        val messageId = sent["message_id"]!!.jsonPrimitive.content
+        val store = RoomThreadGraphStore(database.threadGraphDao())
+        assertEquals(ThreadDeliveryState.DELIVERED.name, store.getMessage(messageId)!!.deliveryState)
+
+        // The new manager follows up directly. It must reconcile the stale
+        // RUNNING node and requeue its claimed message before draining.
+        val second = manager()
+        fakeRunner.gate = null
+        fakeRunner.nextResult = SubAgentResult(
+            status = SubAgentRunStatus.COMPLETED,
+            summary = "cold followup done",
+        )
+        val followup = second.followup(
+            parentConversationId = conversationId,
+            threadId = threadId,
+            input = buildJsonObject {
+                put("task", buildJsonObject { put("objective", "Resume after restart") })
+            },
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        assertTrue(payloadStatus(followup) in setOf("running", "completed"))
+        awaitTerminal(second, threadId)
+        awaitMessageDeliveryState(store, messageId, ThreadDeliveryState.PERSISTED)
+        assertTrue(store.listMessages(threadId).all { it.deliveryState == ThreadDeliveryState.PERSISTED.name })
+
+        // Release the old process-death fake runner; its late cancellation
+        // must not publish over the new generation.
+        staleGate.cancel()
     }
 
     @Test
@@ -346,12 +471,19 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         // blocks the followup with "thread_running" (the previous test only
         // passed because it followed up from a fresh manager instance).
         val manager = manager()
+        val scopeIds = CopyOnWriteArrayList<String>()
+        val finishedScopeIds = CopyOnWriteArrayList<String>()
         fakeRunner.gate = CompletableDeferred()
         val started = manager.start(
             parentConversationId = conversationId,
             input = startInput("Same-instance interrupt test"),
             parentTools = parentTools(),
             parentRunId = "parent_run_1",
+            parentToolsForRun = { scopeId ->
+                scopeIds += scopeId
+                parentTools()
+            },
+            onRunFinished = { scopeId, _, _ -> finishedScopeIds += scopeId },
         )
         val threadId = started["run_id"]!!.jsonPrimitive.content
         awaitLive(threadId)
@@ -361,6 +493,16 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
         // The in-memory snapshot is terminal immediately — no new instance needed.
         assertEquals(SubAgentRunStatus.INTERRUPTED, manager.snapshot(threadId)?.status)
         assertEquals("interrupted", payloadStatus(manager.read(threadId)))
+        assertEquals(
+            AgentTaskStatus.INTERRUPTED,
+            AgentTaskStore(context, Json).read(threadId)?.status,
+        )
+        assertTrue(
+            File(context.filesDir, "amberagent/subagents/runs/$threadId.jsonl")
+                .readText()
+                .contains("\"event\":\"finished\""),
+        )
+        assertEquals(1, finishedScopeIds.size)
 
         fakeRunner.gate = null
         fakeRunner.nextResult = SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "same-instance followup done")
@@ -372,12 +514,97 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
             },
             parentTools = parentTools(),
             parentRunId = "parent_run_1",
+            parentToolsForRun = { scopeId ->
+                scopeIds += scopeId
+                parentTools()
+            },
+            onRunFinished = { scopeId, _, _ -> finishedScopeIds += scopeId },
         )
         assertTrue(
             payloadStatus(followup) in setOf("running", "completed") // may finish before the call returns
         )
         awaitTerminal(manager, threadId)
         assertEquals("completed", payloadStatus(manager.read(threadId)))
+        withTimeout(5_000) {
+            while (finishedScopeIds.size < 2) Thread.sleep(20)
+        }
+        assertEquals(2, scopeIds.distinct().size)
+        assertEquals(scopeIds.toSet(), finishedScopeIds.toSet())
+    }
+
+    @Test
+    fun followupStateFlowPublishesTerminalWithoutAnotherToolRead() = runBlocking {
+        val manager = manager()
+        fakeRunner.gate = null
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("State flow followup test"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitTerminal(manager, threadId)
+        val stateFlow = manager.runStateFlow(threadId)
+
+        fakeRunner.gate = CompletableDeferred()
+        val followup = manager.followup(
+            parentConversationId = conversationId,
+            threadId = threadId,
+            input = buildJsonObject {
+                put("task", buildJsonObject { put("objective", "state flow continuation") })
+            },
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        assertEquals("running", payloadStatus(followup))
+        assertEquals(SubAgentRunStatus.RUNNING, stateFlow.value?.status)
+
+        fakeRunner.gate!!.complete(
+            SubAgentResult(status = SubAgentRunStatus.COMPLETED, summary = "flow terminal")
+        )
+        withTimeout(5_000) {
+            stateFlow.first { it?.status == SubAgentRunStatus.COMPLETED }
+        }
+        Unit
+    }
+
+    @Test
+    fun followupAndCancelCompetitionCannotResurrectCancelledThread() = runBlocking {
+        val manager = manager()
+        fakeRunner.gate = CompletableDeferred()
+        val started = manager.start(
+            parentConversationId = conversationId,
+            input = startInput("Followup cancel race"),
+            parentTools = parentTools(),
+            parentRunId = "parent_run_1",
+        )
+        val threadId = started["run_id"]!!.jsonPrimitive.content
+        awaitLive(threadId)
+
+        val cancel = async { manager.cancel(threadId) }
+        val followup = async {
+            manager.followup(
+                parentConversationId = conversationId,
+                threadId = threadId,
+                input = buildJsonObject {
+                    put("task", buildJsonObject { put("objective", "must not revive") })
+                },
+                parentTools = parentTools(),
+                parentRunId = "parent_run_1",
+            )
+        }
+
+        assertEquals("cancelled", payloadStatus(cancel.await()))
+        val followupPayload = followup.await()
+        assertTrue(
+            followupPayload["code"]?.jsonPrimitive?.contentOrNull in
+                setOf("thread_running", "thread_cancelled")
+        )
+        assertEquals("cancelled", payloadStatus(manager.read(threadId)))
+        assertEquals(
+            SubAgentRunStatus.CANCELLED,
+            manager.snapshot(threadId)?.status,
+        )
     }
 
     // ── send_message: queued / delivered / persisted ──────────────────────
@@ -439,7 +666,7 @@ class SubAgentThreadGraphIntegrationTest : DurableRuntimeTestBase() {
             parentRunId = "parent_run_1",
         )
         awaitTerminal(manager, threadId)
-        assertEquals(ThreadDeliveryState.PERSISTED.name, store.getMessage(messageId)!!.deliveryState)
+        awaitMessageDeliveryState(store, messageId, ThreadDeliveryState.PERSISTED)
         // Enqueued order preserved: the idle message first, then the followup —
         // both PERSISTED after the followup result landed, nothing lost.
         assertEquals(

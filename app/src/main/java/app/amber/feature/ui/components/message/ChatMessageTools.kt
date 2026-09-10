@@ -33,6 +33,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -391,83 +392,92 @@ internal fun AgentToolCallCapsule(
     //   inline "tool · query" 11.5sp letter 0.2  toolLabelInk W500 / inkSoft W400
     //   高度 ~22dp (3+16+3)
     val shape = androidx.compose.foundation.shape.CircleShape
-    Surface(
+    Box(
         modifier = modifier
             // V3: 改 wrapContentWidth, 胶囊自适应内容长度而非顶满整行
             .wrapContentWidth(align = Alignment.Start)
             .widthIn(max = 460.dp)
-            .clip(shape)
             .then(
                 if (onClick != null) {
-                    Modifier.clickable { onClick() }
+                    Modifier
+                        .clip(shape)
+                        .clickable { onClick() }
+                        .minimumInteractiveComponentSize()
                 } else {
                     Modifier
                 }
             ),
-        // 不在胶囊上再加 animateContentSize: 外层 ChatMessageToolStep Column 已有
-        // 一层 (input 流式增长/审批切换/output 回填时两层弹簧并行会弹跳)。
-        // 见 ChatMessage.kt 中关于 message 渲染路径禁止叠加 animateContentSize 的注释。
-        shape = shape,
-        color = theme.toolPillBg,
-        contentColor = workspace.ink,
-        shadowElevation = 0.dp,
-        border = BorderStroke(1.dp, theme.toolPillEdge),
+        contentAlignment = Alignment.CenterStart,
     ) {
-        val reserveStatusSlot = approvalActions == null
-        Box {
-            Row(
-                modifier = Modifier.padding(start = 7.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+        Surface(
+            modifier = Modifier
+                .wrapContentWidth(align = Alignment.Start)
+                .widthIn(max = 460.dp),
+            // 不在胶囊上再加 animateContentSize: 外层 ChatMessageToolStep Column 已有
+            // 一层 (input 流式增长/审批切换/output 回填时两层弹簧并行会弹跳)。
+            // 见 ChatMessage.kt 中关于 message 渲染路径禁止叠加 animateContentSize 的注释。
+            shape = shape,
+            color = theme.toolPillBg,
+            contentColor = workspace.ink,
+            shadowElevation = 0.dp,
+            border = BorderStroke(1.dp, theme.toolPillEdge),
+        ) {
+            val reserveStatusSlot = approvalActions == null
+            Box {
                 Row(
-                    modifier = if (reserveStatusSlot) {
-                        Modifier.padding(end = 24.dp)
-                    } else {
-                        Modifier.padding(end = 7.dp)
-                    },
+                    modifier = Modifier.padding(start = 7.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (leadingContent != null) {
-                        leadingContent()
-                    } else {
-                        V3ToolTypeIcon(
-                            icon = icon,
-                            kind = kind,
-                        )
-                    }
-
-                    val displayText = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
-                    val amberType = app.amber.feature.ui.theme.LocalAmberType.current
-                    Text(
-                        text = displayText,
-                        // §6.2 ToolCall row: tool name + args are machine-facts → mono (.meta),
-                        // colored with accent (toolLabelInk).
-                        style = amberType.meta,
-                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                        color = theme.toolLabelInk,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = (if (approvalActions == null) {
-                            Modifier.widthIn(max = 380.dp)
+                    Row(
+                        modifier = if (reserveStatusSlot) {
+                            Modifier.padding(end = 24.dp)
                         } else {
-                            Modifier.weight(1f, fill = false)
-                        })
-                            .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
-                    )
+                            Modifier.padding(end = 7.dp)
+                        },
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        if (leadingContent != null) {
+                            leadingContent()
+                        } else {
+                            V3ToolTypeIcon(
+                                icon = icon,
+                                kind = kind,
+                            )
+                        }
 
-                    if (approvalActions != null) {
-                        approvalActions()
+                        val displayText = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
+                        val amberType = app.amber.feature.ui.theme.LocalAmberType.current
+                        Text(
+                            text = displayText,
+                            // §6.2 ToolCall row: tool name + args are machine-facts → mono (.meta),
+                            // colored with accent (toolLabelInk).
+                            style = amberType.meta,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                            color = theme.toolLabelInk,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = (if (approvalActions == null) {
+                                Modifier.widthIn(max = 380.dp)
+                            } else {
+                                Modifier.weight(1f, fill = false)
+                            })
+                                .shimmer(isLoading = loading && status == AgentToolStatus.RUNNING),
+                        )
+
+                        if (approvalActions != null) {
+                            approvalActions()
+                        }
                     }
                 }
-            }
-            if (reserveStatusSlot) {
-                V3ToolStatusBadge(
-                    status = status,
-                    modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 3.dp),
-                )
+                if (reserveStatusSlot) {
+                    V3ToolStatusBadge(
+                        status = status,
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 3.dp),
+                    )
+                }
             }
         }
     }

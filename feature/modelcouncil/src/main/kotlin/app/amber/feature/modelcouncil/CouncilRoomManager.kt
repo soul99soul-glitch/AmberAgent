@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -218,7 +219,8 @@ class CouncilRoomManager(
             )
         }
         val mutex = lockFor(conversationId)
-        return mutex.withLock {
+        return withCapturedWriteContext {
+            mutex.withLock {
             val flow = store.observeRoom(conversationId)
             val existing = flow.value
             if (existing != null && !existing.status.terminal) {
@@ -278,7 +280,8 @@ class CouncilRoomManager(
                 userModeOverrideIds.remove(conversationId)
                 interjectionWatermarks.remove(conversationId)
             }
-            CouncilRoomOpResult.Ok(room)
+                CouncilRoomOpResult.Ok(room)
+            }
         }
     }
 
@@ -520,7 +523,7 @@ class CouncilRoomManager(
         mentionTargets: List<String> = emptyList(),
         attachments: List<UIMessagePart> = emptyList(),
         attachmentText: String = "",
-    ): CouncilRoomOpResult {
+    ): CouncilRoomOpResult = withCapturedWriteContext {
         val result = mutate(conversationId) { room ->
             if (room.status.terminal) {
                 return@mutate CouncilRoomOpResult.Err("room_terminal", "Room has ended; cannot send messages.")
@@ -587,7 +590,7 @@ class CouncilRoomManager(
             // run is already in flight (mid-run interjection is handled elsewhere).
             maybeStartAutoRun(conversationId)
         }
-        return result
+        result
     }
 
     /**
@@ -612,7 +615,7 @@ class CouncilRoomManager(
     private suspend fun hostActionInviteNext(
         conversationId: Uuid,
         action: HostAction.InviteNext,
-    ): CouncilRoomOpResult {
+    ): CouncilRoomOpResult = withCapturedWriteContext {
         val preflight = mutatePreflight(conversationId) { room ->
             val guest = room.participantById(action.participantId)
                 ?: return@mutatePreflight preflightNoParticipant(action.participantId)
@@ -651,13 +654,13 @@ class CouncilRoomManager(
                 invitedBy = COUNCIL_ROOM_HOST_ID,
             ))
         }
-        return launchGuestTurn(preflight, conversationId)
+        launchGuestTurn(preflight, conversationId)
     }
 
     private suspend fun hostActionAskFollowUp(
         conversationId: Uuid,
         action: HostAction.AskFollowUp,
-    ): CouncilRoomOpResult {
+    ): CouncilRoomOpResult = withCapturedWriteContext {
         val preflight = mutatePreflight(conversationId) { room ->
             val guest = room.participantById(action.toParticipantId)
                 ?: return@mutatePreflight preflightNoParticipant(action.toParticipantId)
@@ -694,13 +697,13 @@ class CouncilRoomManager(
                 invitedBy = COUNCIL_ROOM_HOST_ID,
             ))
         }
-        return launchGuestTurn(preflight, conversationId)
+        launchGuestTurn(preflight, conversationId)
     }
 
     private suspend fun hostActionLetGuestsRespond(
         conversationId: Uuid,
         action: HostAction.LetGuestsRespond,
-    ): CouncilRoomOpResult {
+    ): CouncilRoomOpResult = withCapturedWriteContext {
         // Multi-target: preflight validates + writes the host echo, then we launch
         // one generation per target guest. Each gets its own continuesFromMessageId.
         val preflight = mutatePreflight(conversationId) { room ->
@@ -751,7 +754,7 @@ class CouncilRoomManager(
                 },
             ))
         }
-        return launchGuestTurn(preflight, conversationId)
+        launchGuestTurn(preflight, conversationId)
     }
 
     private suspend fun hostActionRedirect(
@@ -790,7 +793,7 @@ class CouncilRoomManager(
      * The final verdict is written back via [RoomMutationSink.completeSynthesis],
      * which transitions the room to FINALIZED.
      */
-    suspend fun synthesize(conversationId: Uuid): CouncilRoomOpResult {
+    suspend fun synthesize(conversationId: Uuid): CouncilRoomOpResult = withCapturedWriteContext restore@{
         val settings = settingsFlow.value
         // Capture the resolved host model id inside the validation mutate so we
         // don't flip to FINALIZING and then discover the host has no model.
@@ -820,10 +823,10 @@ class CouncilRoomManager(
                 updatedAtMs = now,
             ))
         }
-        if (result is CouncilRoomOpResult.Err) return result
+        if (result is CouncilRoomOpResult.Err) return@restore result
         val updatedRoom = (result as CouncilRoomOpResult.Ok).room
         val resolvedHostModelId = hostModelId
-            ?: return CouncilRoomOpResult.Err("no_host_model", "Host model not found.")
+            ?: return@restore CouncilRoomOpResult.Err("no_host_model", "Host model not found.")
 
         val job = launchSynthesisJob(conversationId) {
             runCatching {
@@ -850,12 +853,12 @@ class CouncilRoomManager(
             // and falls through to mark FINALIZED). We surface a distinct error
             // code so the caller knows synthesis did not actually start rather
             // than silently returning Ok.
-            return CouncilRoomOpResult.Err(
+            return@restore CouncilRoomOpResult.Err(
                 code = "room_closing",
                 message = "Room is being closed; synthesis was not started.",
             )
         }
-        return CouncilRoomOpResult.Ok(updatedRoom)
+        CouncilRoomOpResult.Ok(updatedRoom)
     }
 
     // ── ask_user (FULL mode HITL) ───────────────────────────────────────────
@@ -2049,11 +2052,12 @@ class CouncilRoomManager(
         conversationId: Uuid,
         cancel: Boolean = false,
     ): CouncilRoomOpResult {
-        // Gate: prevent any new generation job from starting for this conversation.
-        // This closes the race between launching a job and cancelling existing ones.
-        jobsLock.withLock { closingConversationIds.add(conversationId) }
+        return withCapturedWriteContext {
+            // Gate: prevent any new generation job from starting for this conversation.
+            // This closes the race between launching a job and cancelling existing ones.
+            jobsLock.withLock { closingConversationIds.add(conversationId) }
 
-        try {
+            try {
             // Graceful close while synthesizing: give the host synthesis a chance
             // to complete naturally before we cancel it.
             if (!cancel) {
@@ -2141,9 +2145,10 @@ class CouncilRoomManager(
             // concurrent openRoom that grabs a fresh mutex will observe the
             // terminal/evicted state via observeRoom and refuse to proceed.
             locksLock.withLock { locks.remove(conversationId) }
-            return result
-        } finally {
-            jobsLock.withLock { closingConversationIds.remove(conversationId) }
+                result
+            } finally {
+                jobsLock.withLock { closingConversationIds.remove(conversationId) }
+            }
         }
     }
 
@@ -2158,19 +2163,21 @@ class CouncilRoomManager(
         conversationId: Uuid,
         transform: suspend (CouncilRoom) -> CouncilRoomOpResult,
     ): CouncilRoomOpResult {
-        val mutex = lockFor(conversationId)
-        return mutex.withLock {
-            val flow = store.observeRoom(conversationId)
-            val room = flow.value
-                ?: return@withLock CouncilRoomOpResult.Err("not_found", "No room for this conversation.")
-            when (val result = transform(room)) {
-                is CouncilRoomOpResult.Err -> result
-                is CouncilRoomOpResult.Ok -> {
-                    val now = nowMs()
-                    val next = result.room.copy(updatedAtMs = now)
-                    store.upsertRoom(next)
-                    updateTaskStatus(next)
-                    CouncilRoomOpResult.Ok(next)
+        return withCapturedWriteContext {
+            val mutex = lockFor(conversationId)
+            mutex.withLock {
+                val flow = store.observeRoom(conversationId)
+                val room = flow.value
+                    ?: return@withLock CouncilRoomOpResult.Err("not_found", "No room for this conversation.")
+                when (val result = transform(room)) {
+                    is CouncilRoomOpResult.Err -> result
+                    is CouncilRoomOpResult.Ok -> {
+                        val now = nowMs()
+                        val next = result.room.copy(updatedAtMs = now)
+                        store.upsertRoom(next)
+                        updateTaskStatus(next)
+                        CouncilRoomOpResult.Ok(next)
+                    }
                 }
             }
         }
@@ -2187,19 +2194,21 @@ class CouncilRoomManager(
         conversationId: Uuid,
         transform: suspend (CouncilRoom) -> PreflightResult,
     ): PreflightResult {
-        val mutex = lockFor(conversationId)
-        return mutex.withLock {
-            val flow = store.observeRoom(conversationId)
-            val room = flow.value
-                ?: return@withLock PreflightResult.Err("not_found", "No room for this conversation.")
-            when (val result = transform(room)) {
-                is PreflightResult.Err -> result
-                is PreflightResult.Plan -> {
-                    val now = nowMs()
-                    val next = result.plan.room.copy(updatedAtMs = now)
-                    store.upsertRoom(next)
-                    updateTaskStatus(next)
-                    PreflightResult.Plan(result.plan.copy(room = next))
+        return withCapturedWriteContext {
+            val mutex = lockFor(conversationId)
+            mutex.withLock {
+                val flow = store.observeRoom(conversationId)
+                val room = flow.value
+                    ?: return@withLock PreflightResult.Err("not_found", "No room for this conversation.")
+                when (val result = transform(room)) {
+                    is PreflightResult.Err -> result
+                    is PreflightResult.Plan -> {
+                        val now = nowMs()
+                        val next = result.plan.room.copy(updatedAtMs = now)
+                        store.upsertRoom(next)
+                        updateTaskStatus(next)
+                        PreflightResult.Plan(result.plan.copy(room = next))
+                    }
                 }
             }
         }
@@ -2283,8 +2292,12 @@ class CouncilRoomManager(
      * already closing, no job is launched.
      */
     private suspend fun launchGuestJob(conversationId: Uuid, block: suspend () -> Unit): Job? {
+        // Capture the restore epoch before the model/network work starts. The
+        // opaque context is supplied by the store implementation, so this
+        // feature module stays independent from app-level restore classes.
+        val writeContext = store.captureWriteContext()
         lateinit var job: Job
-        job = appScope.launch(start = CoroutineStart.LAZY) {
+        job = appScope.launch(context = writeContext, start = CoroutineStart.LAZY) {
             try {
                 block()
             } finally {
@@ -2312,8 +2325,12 @@ class CouncilRoomManager(
      * registers itself synchronously and respects the closing gate.
      */
     private suspend fun launchSynthesisJob(conversationId: Uuid, block: suspend () -> Unit): Job? {
+        // Synthesis can outlive the initiating UI call; carry the same epoch
+        // through its completion callbacks so a restore cannot be overwritten
+        // by an old host result.
+        val writeContext = store.captureWriteContext()
         lateinit var job: Job
-        job = appScope.launch(start = CoroutineStart.LAZY) {
+        job = appScope.launch(context = writeContext, start = CoroutineStart.LAZY) {
             try {
                 block()
             } finally {
@@ -2334,6 +2351,12 @@ class CouncilRoomManager(
         }
         job.start()
         return job
+    }
+
+    /** Carry one restore epoch across a room read/transform/write window. */
+    private suspend fun <T> withCapturedWriteContext(block: suspend () -> T): T {
+        val writeContext = store.captureWriteContext()
+        return withContext(writeContext) { block() }
     }
 
     private suspend fun registerTask(room: CouncilRoom) {

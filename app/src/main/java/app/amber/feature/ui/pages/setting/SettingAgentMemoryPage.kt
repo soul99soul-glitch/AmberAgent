@@ -13,11 +13,15 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,12 +44,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.util.fastForEach
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dokar.sonner.ToastType
 import com.composables.icons.lucide.Lucide
@@ -65,21 +72,22 @@ import app.amber.core.memory.safety.isSensitiveMemoryContent
 import app.amber.core.model.AssistantMemory
 import app.amber.core.model.MemoryKind
 import app.amber.core.model.MemoryScope
+import app.amber.core.repository.MemoryRepository
 import app.amber.feature.ui.components.ds.AmberCard
 import app.amber.feature.ui.components.ds.SectionLabel
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
-import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.hooks.EditStateContent
-import app.amber.feature.ui.hooks.useEditState
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import org.koin.androidx.compose.koinViewModel
+import java.text.DateFormat
+import java.util.Date
 import java.io.File
+import java.util.Locale
 
 @Composable
 fun SettingAgentMemoryPage(
@@ -96,16 +104,11 @@ fun SettingAgentMemoryPage(
     val dreamPlan by vm.dreamPlan.collectAsStateWithLifecycle()
     val memoryTaskRunning by vm.memoryTaskRunning.collectAsStateWithLifecycle()
     val operationMessage by vm.operationMessage.collectAsStateWithLifecycle()
+    val memoryMutation by vm.memoryMutation.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val memoryDialogState = useEditState<AssistantMemory> { memory ->
-        if (memory.id == 0) {
-            vm.addMemory(memory)
-        } else {
-            vm.updateMemory(memory)
-        }
-    }
+    var editingMemory by remember { mutableStateOf<AssistantMemory?>(null) }
     var pendingDeleteMemory by remember { mutableStateOf<AssistantMemory?>(null) }
     var memoryInfoDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     val pageTitle = when (subpage) {
@@ -123,26 +126,124 @@ fun SettingAgentMemoryPage(
         }
     }
 
-    memoryDialogState.EditStateContent { memory, update ->
+    LaunchedEffect(memoryMutation) {
+        when (val mutation = memoryMutation) {
+            is MemoryMutationState.Saved -> {
+                if (editingMemory?.id == mutation.memoryId ||
+                    mutation.operation == MemoryMutationOperation.CREATE
+                ) {
+                    editingMemory = null
+                }
+                vm.consumeMemoryMutation()
+            }
+
+            is MemoryMutationState.Deleted -> {
+                if (pendingDeleteMemory?.id == mutation.memoryId) {
+                    pendingDeleteMemory = null
+                }
+                vm.consumeMemoryMutation()
+            }
+
+            else -> Unit
+        }
+    }
+
+    editingMemory?.let { memory ->
+        val isSaving = memoryMutation is MemoryMutationState.Saving
+        val saveError = (memoryMutation as? MemoryMutationState.Failed)
+            ?.takeIf {
+                it.operation != MemoryMutationOperation.DELETE &&
+                    it.draft.id == memory.id
+            }
         AlertDialog(
-            onDismissRequest = { memoryDialogState.dismiss() },
-            title = { Text(stringResource(R.string.setting_agent_memory_edit_title)) },
-            text = {
-                TextField(
-                    value = memory.content,
-                    onValueChange = { update(memory.copy(content = it)) },
-                    label = { Text(stringResource(R.string.setting_agent_memory_content_label)) },
-                    minLines = 2,
-                    maxLines = 8,
+            modifier = Modifier.imePadding(),
+            properties = DialogProperties(decorFitsSystemWindows = false),
+            onDismissRequest = {
+                if (!isSaving) {
+                    editingMemory = null
+                    vm.consumeMemoryMutation()
+                }
+            },
+            title = {
+                Text(
+                    if (memory.id == 0) {
+                        stringResource(R.string.setting_agent_memory_add_title)
+                    } else {
+                        stringResource(R.string.setting_agent_memory_edit_title)
+                    },
                 )
             },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (memory.id != 0) {
+                        MemoryEditMetadata(memory)
+                    }
+                    TextField(
+                        value = memory.content,
+                        onValueChange = { editingMemory = memory.copy(content = it) },
+                        enabled = !isSaving,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = 360.dp),
+                        label = { Text(stringResource(R.string.setting_agent_memory_content_label)) },
+                        minLines = 5,
+                        maxLines = 12,
+                    )
+                    saveError?.let { error ->
+                        Text(
+                            text = stringResource(
+                                R.string.setting_agent_memory_write_error,
+                                error.message,
+                            ),
+                            color = MaterialTheme.colorScheme.error,
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
+                    if (isSaving) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularWavyProgressIndicator(modifier = Modifier.size(18.dp))
+                            Text(
+                                text = stringResource(R.string.setting_agent_memory_saving),
+                                style = LocalAmberType.current.secondary,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                    }
+                    MemoryClassificationEditor(
+                        memory = memory,
+                        enabled = !isSaving,
+                        onChange = { editingMemory = it },
+                    )
+                }
+            },
             confirmButton = {
-                TextButton(onClick = { memoryDialogState.confirm() }) {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = {
+                        if (memory.id == 0) {
+                            vm.addMemory(memory)
+                        } else {
+                            vm.updateMemory(memory)
+                        }
+                    },
+                ) {
                     Text(stringResource(R.string.common_save))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { memoryDialogState.dismiss() }) {
+                TextButton(
+                    enabled = !isSaving,
+                    onClick = {
+                        editingMemory = null
+                        vm.consumeMemoryMutation()
+                    },
+                ) {
                     Text(stringResource(R.string.cancel))
                 }
             },
@@ -242,8 +343,8 @@ fun SettingAgentMemoryPage(
                         val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
                         vm.importMemories(File(baseDir, "AmberAgentMemory"))
                     },
-                    onAddMemory = { memoryDialogState.open(AssistantMemory(0, "")) },
-                    onEditMemory = { memoryDialogState.open(it) },
+                    onAddMemory = { editingMemory = AssistantMemory(0, "") },
+                    onEditMemory = { editingMemory = it },
                     onDeleteMemory = { pendingDeleteMemory = it },
                     onInfoClick = { title, text -> memoryInfoDialog = title to text },
                 )
@@ -251,24 +352,99 @@ fun SettingAgentMemoryPage(
         }
     }
 
-    ConfirmDialog(
-        show = pendingDeleteMemory != null,
-        title = stringResource(R.string.confirm_delete),
-        confirmText = stringResource(R.string.confirm),
-        dismissText = stringResource(R.string.cancel),
-        onConfirm = {
-            pendingDeleteMemory?.let(vm::deleteMemory)
-            pendingDeleteMemory = null
-        },
-        onDismiss = { pendingDeleteMemory = null },
-        text = {
-            Text(
-                text = pendingDeleteMemory?.content.orEmpty(),
-                maxLines = 8,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-    )
+    pendingDeleteMemory?.let { memory ->
+        val isDeleting = memoryMutation is MemoryMutationState.Deleting
+        val deleteError = (memoryMutation as? MemoryMutationState.Failed)
+            ?.takeIf {
+                it.operation == MemoryMutationOperation.DELETE && it.draft.id == memory.id
+            }
+        AlertDialog(
+            onDismissRequest = {
+                if (!isDeleting) {
+                    pendingDeleteMemory = null
+                    vm.consumeMemoryMutation()
+                }
+            },
+            title = { Text(stringResource(R.string.confirm_delete)) },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 260.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(text = memory.content)
+                    deleteError?.let { error ->
+                        Text(
+                            text = stringResource(
+                                R.string.setting_agent_memory_delete_error,
+                                error.message,
+                            ),
+                            color = MaterialTheme.colorScheme.error,
+                            style = LocalAmberType.current.secondary,
+                        )
+                    }
+                    if (isDeleting) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CircularWavyProgressIndicator(modifier = Modifier.size(18.dp))
+                            Text(
+                                text = stringResource(R.string.setting_agent_memory_deleting),
+                                style = LocalAmberType.current.secondary,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isDeleting,
+                    onClick = { vm.deleteMemory(memory) },
+                ) {
+                    Text(stringResource(R.string.confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !isDeleting,
+                    onClick = {
+                        pendingDeleteMemory = null
+                        vm.consumeMemoryMutation()
+                    },
+                ) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
+    }
+
+    (memoryMutation as? MemoryMutationState.Conflict)?.let { conflict ->
+        MemoryConflictDialog(
+            conflict = conflict,
+            onDismiss = {
+                if (conflict.operation == MemoryMutationOperation.DELETE) {
+                    pendingDeleteMemory = null
+                }
+                vm.consumeMemoryMutation()
+            },
+            onUseLatest = { latest ->
+                if (conflict.operation == MemoryMutationOperation.UPDATE) {
+                    editingMemory = latest
+                } else {
+                    pendingDeleteMemory = latest
+                }
+                vm.consumeMemoryMutation()
+            },
+            onKeepDraft = { latest ->
+                editingMemory = conflict.draft.copy(revision = latest.revision)
+                vm.consumeMemoryMutation()
+            },
+        )
+    }
 
     memoryInfoDialog?.let { (title, text) ->
         AlertDialog(
@@ -283,6 +459,324 @@ fun SettingAgentMemoryPage(
         )
     }
 }
+
+@Composable
+private fun MemoryConflictDialog(
+    conflict: MemoryMutationState.Conflict,
+    onDismiss: () -> Unit,
+    onUseLatest: (AssistantMemory) -> Unit,
+    onKeepDraft: (AssistantMemory) -> Unit,
+) {
+    val latest = conflict.latest
+    val isUpdate = conflict.operation == MemoryMutationOperation.UPDATE
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (isUpdate) {
+                    stringResource(R.string.setting_agent_memory_edit_conflict_title)
+                } else {
+                    stringResource(R.string.setting_agent_memory_delete_conflict_title)
+                },
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 320.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    if (isUpdate) {
+                        stringResource(R.string.setting_agent_memory_edit_conflict_message)
+                    } else {
+                        stringResource(R.string.setting_agent_memory_delete_conflict_message)
+                    },
+                )
+                if (latest == null) {
+                    Text(
+                        text = stringResource(R.string.setting_agent_memory_conflict_deleted),
+                        color = MaterialTheme.colorScheme.error,
+                        style = LocalAmberType.current.secondary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(
+                            R.string.setting_agent_memory_conflict_latest_label,
+                            latest.revision,
+                        ),
+                        style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+                    )
+                    SelectionContainer {
+                        Text(
+                            text = latest.content,
+                            modifier = Modifier.fillMaxWidth(),
+                            style = LocalAmberType.current.body,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (latest != null) {
+                    TextButton(onClick = { onUseLatest(latest) }) {
+                        Text(
+                            if (isUpdate) {
+                                stringResource(R.string.setting_agent_memory_use_latest)
+                            } else {
+                                stringResource(R.string.setting_agent_memory_retry_delete)
+                            },
+                        )
+                    }
+                    if (isUpdate) {
+                        TextButton(onClick = { onKeepDraft(latest) }) {
+                            Text(stringResource(R.string.setting_agent_memory_keep_draft))
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        },
+    )
+}
+
+@Composable
+private fun MemoryEditMetadata(memory: AssistantMemory) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.setting_agent_memory_metadata_source),
+            style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+            color = LocalAmberTokens.current.accent,
+        )
+        MemoryMetadataLine(
+            label = stringResource(R.string.setting_agent_memory_metadata_source),
+            value = memorySourceLabel(memory),
+        )
+        MemoryMetadataLine(
+            label = stringResource(R.string.setting_agent_memory_metadata_kind),
+            value = memoryKindLabel(memory.kind),
+        )
+        MemoryMetadataLine(
+            label = stringResource(R.string.setting_agent_memory_metadata_confidence),
+            value = String.format(Locale.getDefault(), "%.2f", memory.confidence),
+        )
+        if (memory.updatedAt > 0L) {
+            MemoryMetadataLine(
+                label = stringResource(R.string.setting_agent_memory_metadata_updated),
+                value = formatMemoryDate(memory.updatedAt),
+            )
+        }
+        memory.lastUsedAt?.takeIf { it > 0L }?.let { lastUsedAt ->
+            MemoryMetadataLine(
+                label = stringResource(R.string.setting_agent_memory_metadata_last_used),
+                value = formatMemoryDate(lastUsedAt),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MemoryMetadataLine(
+    label: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(0.8f),
+            style = LocalAmberType.current.secondary,
+            color = workspaceColors().muted,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(1.2f),
+            style = LocalAmberType.current.secondary,
+            color = workspaceColors().ink,
+            textAlign = TextAlign.End,
+        )
+    }
+}
+
+@Composable
+private fun MemoryClassificationEditor(
+    memory: AssistantMemory,
+    enabled: Boolean,
+    onChange: (AssistantMemory) -> Unit,
+) {
+    var scopeMenuExpanded by remember(memory.id) { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp, start = 4.dp, end = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.setting_agent_memory_classification),
+            style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+            color = LocalAmberTokens.current.accent,
+        )
+        Box(modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                enabled = enabled,
+                onClick = { scopeMenuExpanded = true },
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.setting_agent_memory_scope),
+                            style = LocalAmberType.current.body,
+                            color = workspaceColors().ink,
+                        )
+                        Text(
+                            text = stringResource(R.string.setting_agent_memory_scope_desc),
+                            style = LocalAmberType.current.secondary,
+                            color = workspaceColors().muted,
+                        )
+                    }
+                    Text(
+                        text = memoryScopeLabel(memory.scope),
+                        style = LocalAmberType.current.secondary,
+                        color = workspaceColors().muted,
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+            DropdownMenu(
+                expanded = scopeMenuExpanded,
+                onDismissRequest = { scopeMenuExpanded = false },
+            ) {
+                MemoryScope.entries.forEach { scope ->
+                    DropdownMenuItem(
+                        text = { Text(memoryScopeLabel(scope)) },
+                        onClick = {
+                            scopeMenuExpanded = false
+                            if (scope != memory.scope) {
+                                onChange(memory.copy(scope = scope))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(enabled = enabled) {
+                    onChange(memory.copy(pinned = !memory.pinned))
+                }
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_agent_memory_pinned),
+                    style = LocalAmberType.current.body,
+                    color = workspaceColors().ink,
+                )
+                Text(
+                    text = stringResource(R.string.setting_agent_memory_pinned_desc),
+                    style = LocalAmberType.current.secondary,
+                    color = workspaceColors().muted,
+                )
+            }
+            Switch(
+                checked = memory.pinned,
+                onCheckedChange = { onChange(memory.copy(pinned = it)) },
+                enabled = enabled,
+            )
+        }
+    }
+}
+
+@Composable
+private fun memorySourceLabel(memory: AssistantMemory): String {
+    val parts = buildList {
+        if (!memory.sourceConversationId.isNullOrBlank()) {
+            add(stringResource(R.string.setting_agent_memory_source_chat))
+        }
+        if (memory.sourceMessageIds.isNotEmpty()) {
+            add(
+                stringResource(
+                    R.string.setting_agent_memory_source_messages,
+                    memory.sourceMessageIds.size,
+                )
+            )
+        }
+        if (memory.supersedesIds.isNotEmpty()) {
+            add(
+                stringResource(
+                    R.string.setting_agent_memory_source_supersedes,
+                    memory.supersedesIds.size,
+                )
+            )
+        }
+    }
+    if (parts.isNotEmpty()) return parts.joinToString(" · ")
+    return when (memory.sourceTrigger) {
+        MemoryRepository.TRIGGER_AUTO_EXTRACTION ->
+            stringResource(R.string.setting_agent_memory_source_auto_extraction)
+        MemoryRepository.TRIGGER_TOOL -> stringResource(R.string.setting_agent_memory_source_tool)
+        null -> if (memory.sourceRunId == null) {
+            stringResource(R.string.setting_agent_memory_source_manual)
+        } else {
+            stringResource(R.string.setting_agent_memory_source_run)
+        }
+        else -> stringResource(R.string.setting_agent_memory_source_run)
+    }
+}
+
+@Composable
+private fun memoryScopeLabel(scope: MemoryScope): String = when (scope) {
+    MemoryScope.CORE -> stringResource(R.string.setting_agent_memory_scope_core)
+    MemoryScope.SHORT_TERM -> stringResource(R.string.setting_agent_memory_scope_short_term)
+    MemoryScope.LONG_TERM -> stringResource(R.string.setting_agent_memory_scope_long_term)
+}
+
+@Composable
+private fun memoryKindLabel(kind: MemoryKind): String = when (kind) {
+    MemoryKind.USER -> stringResource(R.string.setting_agent_memory_kind_user)
+    MemoryKind.FEEDBACK -> stringResource(R.string.setting_agent_memory_kind_feedback)
+    MemoryKind.PROJECT -> stringResource(R.string.setting_agent_memory_kind_project)
+    MemoryKind.REFERENCE -> stringResource(R.string.setting_agent_memory_kind_reference)
+    MemoryKind.ROUTINE -> stringResource(R.string.setting_agent_memory_kind_routine)
+    MemoryKind.NOTE -> stringResource(R.string.setting_agent_memory_kind_note)
+}
+
+private fun formatMemoryDate(value: Long): String =
+    DateFormat.getDateTimeInstance(
+        DateFormat.MEDIUM,
+        DateFormat.SHORT,
+        Locale.getDefault(),
+    ).format(Date(value))
 
 enum class MemorySettingsSubpage {
     Overview,
@@ -1207,42 +1701,62 @@ private fun MemoryRecordsSection(
             .fillMaxWidth()
             .padding(horizontal = 8.dp),
     ) {
-        SectionLabel(
-            text = title,
-            modifier = Modifier
-                .padding(bottom = 8.dp)
-                .align(Alignment.CenterStart),
-        )
-        if (onInfoClick != null && infoTitle != null && infoText != null) {
-            IconButton(
-                onClick = { onInfoClick(infoTitle, infoText) },
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SectionLabel(
+                text = title,
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .size(40.dp),
+                    .weight(1f)
+                    .padding(bottom = 8.dp),
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(24.dp)
-                        .border(
-                            width = 1.dp,
-                            color = workspaceColors().hairline,
-                            shape = CircleShape,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "?",
-                        style = LocalAmberType.current.tinyTag,
-                        color = workspaceColors().muted,
-                    )
+                if (onInfoClick != null && infoTitle != null && infoText != null) {
+                    val infoDescription = stringResource(R.string.setting_agent_memory_info_content_description)
+                    IconButton(
+                        onClick = { onInfoClick(infoTitle, infoText) },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics {
+                                contentDescription = infoDescription
+                            },
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .border(
+                                    width = 1.dp,
+                                    color = workspaceColors().hairline,
+                                    shape = CircleShape,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "?",
+                                style = LocalAmberType.current.tinyTag,
+                                color = workspaceColors().muted,
+                            )
+                        }
+                    }
                 }
-            }
-        } else if (onAddMemory != null) {
-            IconButton(
-                onClick = onAddMemory,
-                modifier = Modifier.align(Alignment.CenterEnd),
-            ) {
-                Icon(Lucide.Plus, contentDescription = null)
+                if (onAddMemory != null) {
+                    IconButton(
+                        onClick = onAddMemory,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            Lucide.Plus,
+                            contentDescription = stringResource(
+                                R.string.setting_agent_memory_add_content_description,
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

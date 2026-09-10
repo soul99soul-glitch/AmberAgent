@@ -312,7 +312,9 @@ class ChatRunCoordinator(
                     conversation = conversation,
                     speculativeRunner = speculativeRunner,
                     loopBudgetPrompt = loopBudgetPrompt,
-                    responsesResume = responsesResume,
+                    responsesResume = responsesResume?.let {
+                        if (stepIndex == 0) it else it.copy(resumeFrom = null)
+                    },
                 )
                 val finalizedTurn = messages.visualTransforms(
                     transformers = outputTransformers,

@@ -6,10 +6,12 @@ import app.amber.agent.data.db.entity.FavoriteEntity
 import app.amber.core.favorite.NodeFavoriteAdapter
 import app.amber.core.model.FavoriteType
 import app.amber.core.model.NodeFavoriteTarget
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import kotlin.uuid.Uuid
 
 class FavoriteRepository(
     private val dao: FavoriteDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     fun listAll(): Flow<List<FavoriteEntity>> = dao.listAll()
 
@@ -19,28 +21,38 @@ class FavoriteRepository(
 
     suspend fun existsByRefKey(refKey: String): Boolean = dao.existsByRefKey(refKey)
 
-    suspend fun deleteByRefKey(refKey: String): Int = dao.deleteByRefKey(refKey)
+    suspend fun deleteByRefKey(refKey: String): Int =
+        withFavoriteWrite { dao.deleteByRefKey(refKey) }
 
-    suspend fun deleteById(id: String): Int = dao.deleteById(id)
+    suspend fun deleteById(id: String): Int =
+        withFavoriteWrite { dao.deleteById(id) }
 
-    suspend fun upsert(entity: FavoriteEntity) = dao.upsert(entity)
+    suspend fun upsert(entity: FavoriteEntity) =
+        withFavoriteWrite { dao.upsert(entity) }
 
     suspend fun addNodeFavorite(target: NodeFavoriteTarget): FavoriteEntity {
         val refKey = NodeFavoriteAdapter.buildRefKey(target)
-        val existing = dao.getByRefKey(refKey)
-        val favorite = NodeFavoriteAdapter.buildFavoriteEntity(
-            target = target,
-            existing = existing,
-        )
-        dao.upsert(favorite)
-        return favorite
+        return withFavoriteWrite {
+            val existing = dao.getByRefKey(refKey)
+            val favorite = NodeFavoriteAdapter.buildFavoriteEntity(
+                target = target,
+                existing = existing,
+            )
+            dao.upsert(favorite)
+            favorite
+        }
     }
 
     suspend fun removeNodeFavorite(conversationId: Uuid, nodeId: Uuid): Int {
-        return dao.deleteByRefKey(NodeFavoriteAdapter.buildRefKey(conversationId.toString(), nodeId.toString()))
+        return withFavoriteWrite {
+            dao.deleteByRefKey(NodeFavoriteAdapter.buildRefKey(conversationId.toString(), nodeId.toString()))
+        }
     }
 
     suspend fun isNodeFavorited(conversationId: Uuid, nodeId: Uuid): Boolean {
         return dao.existsByRefKey(NodeFavoriteAdapter.buildRefKey(conversationId.toString(), nodeId.toString()))
     }
+
+    private suspend fun <T> withFavoriteWrite(block: suspend () -> T): T =
+        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
 }

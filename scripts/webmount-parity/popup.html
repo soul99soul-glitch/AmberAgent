@@ -1,0 +1,5 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>合成登录窗口</title><style>body{font:18px/1.5 system-ui;padding:24px}button{font:inherit;min-height:48px;padding:12px}</style>
+<h1>合成登录</h1><p>这个窗口只验证 opener、cookie 与关闭后返回，未执行真实 SSO。</p>
+<button id="complete">完成合成登录</button>
+<script>document.querySelector('#complete').onclick=()=>{document.cookie='amber_parity_login=done; path=/; SameSite=Lax'; if(window.opener)window.opener.postMessage('parity-login-complete',location.origin);window.close();};</script></html>

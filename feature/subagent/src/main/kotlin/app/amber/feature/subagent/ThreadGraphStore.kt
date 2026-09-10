@@ -1,5 +1,8 @@
 package app.amber.feature.subagent
 
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+
 /**
  * P4-02 (capability parity plan): persistent thread graph records.
  *
@@ -86,6 +89,13 @@ data class ThreadArtifacts(
  * this store is never written or read.
  */
 interface ThreadGraphStore {
+    /**
+     * Capture the opaque context for a long-running thread generation.
+     * Implementations that coordinate restore return their current epoch;
+     * lightweight/fake stores keep the default empty context.
+     */
+    suspend fun captureWriteContext(): CoroutineContext = EmptyCoroutineContext
+
     suspend fun upsertNode(node: ThreadNodeRecord)
 
     suspend fun getNode(threadId: String): ThreadNodeRecord?

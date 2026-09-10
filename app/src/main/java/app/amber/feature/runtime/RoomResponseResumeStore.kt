@@ -4,6 +4,7 @@ import app.amber.agent.data.db.dao.RunResumeDAO
 import app.amber.agent.data.db.entity.RunResumeEntity
 import app.amber.ai.provider.ResponseCursor
 import app.amber.ai.provider.ResponseResumeStore
+import app.amber.core.sync.core.SyncRestoreWriteGate
 
 /**
  * P6-01 — Room-backed [ResponseResumeStore] keyed by local runId
@@ -11,17 +12,20 @@ import app.amber.ai.provider.ResponseResumeStore
  */
 class RoomResponseResumeStore(
     private val dao: RunResumeDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ResponseResumeStore {
 
     override suspend fun save(runId: String, responseId: String, sequence: Long, providerId: String) {
-        dao.upsert(
-            RunResumeEntity(
-                runId = runId,
-                responseId = responseId,
-                sequence = sequence,
-                providerId = providerId,
+        withDurableWrite {
+            dao.upsert(
+                RunResumeEntity(
+                    runId = runId,
+                    responseId = responseId,
+                    sequence = sequence,
+                    providerId = providerId,
+                )
             )
-        )
+        }
     }
 
     override suspend fun load(runId: String): ResponseCursor? =
@@ -30,6 +34,11 @@ class RoomResponseResumeStore(
         }
 
     override suspend fun clear(runId: String) {
-        dao.deleteByRunId(runId)
+        withDurableWrite { dao.deleteByRunId(runId) }
+    }
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 }

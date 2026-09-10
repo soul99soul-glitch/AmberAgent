@@ -19,8 +19,12 @@ import app.amber.core.settings.secret.SecretStore
 import app.amber.core.model.Conversation
 import app.amber.core.model.MessageNode
 import app.amber.core.repository.ConversationRepository
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlin.time.Clock
 import kotlin.random.Random
 import kotlin.uuid.Uuid
@@ -30,6 +34,7 @@ class DebugVM(
     private val conversationRepository: ConversationRepository,
     private val capabilityFlags: CapabilityFlags,
     private val secretStore: SecretStore,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ViewModel() {
     val settings: StateFlow<Settings> = settingsStore.settingsFlow
         .stateIn(viewModelScope, SharingStarted.Lazily, Settings.dummy())
@@ -75,6 +80,7 @@ class DebugVM(
      */
     fun createOversizedConversation(sizeMB: Int = 3) {
         viewModelScope.launch {
+            val expectedRestoreEpoch = captureRestoreEpoch()
             val targetSize = sizeMB * 1024 * 1024
             val messageNodes = mutableListOf<MessageNode>()
             var currentSize = 0
@@ -119,12 +125,15 @@ class DebugVM(
                 messageNodes = messageNodes,
             )
 
-            conversationRepository.insertConversation(conversation)
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationRepository.insertConversation(conversation)
+            }
         }
     }
 
     fun createConversationWithMessages(messageCount: Int = 1024) {
         viewModelScope.launch {
+            val expectedRestoreEpoch = captureRestoreEpoch()
             val messageNodes = ArrayList<MessageNode>(messageCount)
             val timeZone = TimeZone.currentSystemDefault()
             repeat(messageCount) { index ->
@@ -145,7 +154,27 @@ class DebugVM(
                 messageNodes = messageNodes,
             )
 
-            conversationRepository.insertConversation(conversation)
+            withRestoreWrite(expectedRestoreEpoch) {
+                conversationRepository.insertConversation(conversation)
+            }
+        }
+    }
+
+    private suspend fun captureRestoreEpoch(): Long? {
+        val gate = restoreWriteGate ?: return null
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]?.value ?: gate.currentEpoch()
+    }
+
+    private suspend fun <T> withRestoreWrite(
+        expectedRestoreEpoch: Long?,
+        block: suspend () -> T,
+    ): T {
+        val gate = restoreWriteGate ?: return block()
+        val epoch = expectedRestoreEpoch
+            ?: currentCoroutineContext()[SyncRestoreWriteEpoch]?.value
+            ?: gate.currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(epoch)) {
+            gate.withCurrentWriterOrCancel(block)
         }
     }
 

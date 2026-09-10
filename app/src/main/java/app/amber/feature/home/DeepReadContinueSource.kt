@@ -2,6 +2,7 @@ package app.amber.feature.home
 
 import app.amber.agent.data.db.dao.HotListDAO
 import app.amber.core.utils.JsonInstant
+import app.amber.feature.board.hotlist.DeepReadCachePolicy
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
 import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
 import app.amber.feature.board.hotlist.deepread.DeepReadOutput
@@ -27,7 +28,9 @@ class DeepReadContinueSource(
         hotListDao.observeAllDeepReads().map { entities ->
             val nowMs = now().toEpochMilli()
             entities.mapNotNull { entity ->
-                if (entity.expiresAt <= nowMs) return@mapNotNull null
+                if (!DeepReadCachePolicy.isFresh(entity.expiresAt, nowMs, entity.pinned)) {
+                    return@mapNotNull null
+                }
                 val output = runCatching {
                     JsonInstant.decodeFromString<DeepReadOutput>(entity.outputJson)
                 }.getOrNull() ?: return@mapNotNull null
@@ -41,7 +44,11 @@ class DeepReadContinueSource(
                 ContinueCandidate(
                     sourceKind = ContinueSourceKind.DEEP_READ,
                     sourceId = entity.topicId,
-                    route = ContinueRoute.DeepRead(topicId = entity.topicId, title = entity.title),
+                    route = ContinueRoute.DeepRead(
+                        topicId = entity.topicId,
+                        title = entity.title,
+                        sourceUrl = entity.sourceUrl,
+                    ),
                     title = entity.title,
                     summary = "深度阅读 · 已完成 $readyCount/${DeepReadGenerationStageAll.size} 部分",
                     lastUpdatedAt = Instant.ofEpochMilli(entity.updatedAt),

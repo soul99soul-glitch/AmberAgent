@@ -108,7 +108,13 @@ fun TodayBoardPage() {
         if (settings.agentRuntime.todayBoard.deepReadFirstUseConfirmed) {
             scope.launch {
                 val prepared = vm.prepareDeepReadTopic(topic, forceRegenerate = forceRegenerate)
-                navController.navigate(DeepRead(prepared.id, prepared.title))
+                navController.navigate(
+                    DeepRead(
+                        topicId = prepared.id,
+                        title = prepared.title,
+                        sourceUrl = prepared.primaryUrl(),
+                    )
+                )
             }
         } else {
             pendingDeepRead = PendingDeepReadRequest(topic, forceRegenerate)
@@ -187,7 +193,13 @@ fun TodayBoardPage() {
                                 forceRegenerate = request.forceRegenerate,
                             )
                             pendingDeepRead = null
-                            navController.navigate(DeepRead(prepared.id, prepared.title))
+                            navController.navigate(
+                                DeepRead(
+                                    topicId = prepared.id,
+                                    title = prepared.title,
+                                    sourceUrl = prepared.primaryUrl(),
+                                )
+                            )
                         }
                     }
                 ) {

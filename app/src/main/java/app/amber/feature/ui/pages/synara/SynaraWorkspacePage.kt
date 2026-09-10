@@ -9,15 +9,23 @@ import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -32,9 +40,60 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalNavController
 
 private const val TAG = "SynaraWorkspace"
+
+internal sealed interface SynaraWorkspaceLoadState {
+    data class Loading(val progress: Int = 0) : SynaraWorkspaceLoadState
+
+    data object Ready : SynaraWorkspaceLoadState
+
+    data class Error(val message: String?) : SynaraWorkspaceLoadState
+}
+
+internal fun synaraLoadStarted(): SynaraWorkspaceLoadState =
+    SynaraWorkspaceLoadState.Loading()
+
+internal fun synaraLoadProgress(
+    state: SynaraWorkspaceLoadState,
+    progress: Int,
+): SynaraWorkspaceLoadState = when (state) {
+    is SynaraWorkspaceLoadState.Loading -> SynaraWorkspaceLoadState.Loading(progress.coerceIn(0, 100))
+    else -> state
+}
+
+internal fun synaraLoadFinished(state: SynaraWorkspaceLoadState): SynaraWorkspaceLoadState =
+    when (state) {
+        is SynaraWorkspaceLoadState.Error -> state
+        else -> SynaraWorkspaceLoadState.Ready
+    }
+
+internal fun synaraMainFrameError(
+    state: SynaraWorkspaceLoadState,
+    description: String? = null,
+    isMainFrame: Boolean = true,
+): SynaraWorkspaceLoadState = if (isMainFrame) {
+    SynaraWorkspaceLoadState.Error(description.cleanSynaraError())
+} else {
+    state
+}
+
+internal fun synaraMainFrameHttpError(
+    state: SynaraWorkspaceLoadState,
+    statusCode: Int,
+    reason: String? = null,
+    isMainFrame: Boolean = true,
+): SynaraWorkspaceLoadState = if (isMainFrame) {
+    val status = statusCode.takeIf { it > 0 }?.let { "HTTP $it" }
+    SynaraWorkspaceLoadState.Error(reason.cleanSynaraError() ?: status)
+} else {
+    state
+}
+
+private fun String?.cleanSynaraError(): String? =
+    this?.trim()?.takeIf { it.isNotEmpty() }?.take(240)
 
 /**
  * Full-screen Synara LAN workbench — no Amber chrome.
@@ -54,6 +113,9 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
 
     var canGoBack by remember { mutableStateOf(false) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var loadState by remember(pageUrl) {
+        mutableStateOf<SynaraWorkspaceLoadState>(SynaraWorkspaceLoadState.Loading())
+    }
 
     BackHandler {
         if (canGoBack) {
@@ -87,15 +149,98 @@ fun SynaraWorkspacePage(connection: SynaraConnection) {
         return
     }
 
-    SynaraAndroidWebView(
-        connection = connection,
-        pageUrl = pageUrl,
-        onWebViewReady = { webViewRef = it },
-        onCanGoBack = { canGoBack = it },
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding(),
-    )
+    Box(modifier = Modifier.fillMaxSize()) {
+        SynaraAndroidWebView(
+            connection = connection,
+            pageUrl = pageUrl,
+            onWebViewReady = { webViewRef = it },
+            onCanGoBack = { canGoBack = it },
+            onPageStarted = { loadState = synaraLoadStarted() },
+            onPageProgress = { progress ->
+                loadState = synaraLoadProgress(loadState, progress)
+            },
+            onPageFinished = {
+                loadState = synaraLoadFinished(loadState)
+            },
+            onMainFrameError = { description ->
+                loadState = synaraMainFrameError(loadState, description)
+            },
+            onMainFrameHttpError = { statusCode, reason ->
+                loadState = synaraMainFrameHttpError(loadState, statusCode, reason)
+            },
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding(),
+        )
+
+        when (val state = loadState) {
+            is SynaraWorkspaceLoadState.Loading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 12.dp)
+                        .size(24.dp),
+                    strokeWidth = 2.dp,
+                )
+            }
+
+            is SynaraWorkspaceLoadState.Error -> {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                    tonalElevation = 4.dp,
+                    shape = MaterialTheme.shapes.large,
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                    ) {
+                        Text(
+                            text = androidx.compose.ui.res.stringResource(
+                                app.amber.agent.R.string.parity_synara_workspace_error_title,
+                            ),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        Text(
+                            text = state.message ?: androidx.compose.ui.res.stringResource(
+                                app.amber.agent.R.string.parity_synara_workspace_unknown_error,
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Button(
+                            onClick = {
+                                loadState = synaraLoadStarted()
+                                webViewRef?.stopLoading()
+                                webViewRef?.loadUrl(pageUrl)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = androidx.compose.ui.res.stringResource(
+                                    app.amber.agent.R.string.parity_synara_workspace_retry,
+                                ),
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { navController.navigate(Screen.SynaraCompanion) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = androidx.compose.ui.res.stringResource(
+                                    app.amber.agent.R.string.parity_synara_workspace_connection_settings,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+
+            SynaraWorkspaceLoadState.Ready -> Unit
+        }
+    }
 }
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -105,6 +250,11 @@ private fun SynaraAndroidWebView(
     pageUrl: String,
     onWebViewReady: (WebView) -> Unit,
     onCanGoBack: (Boolean) -> Unit,
+    onPageStarted: () -> Unit,
+    onPageProgress: (Int) -> Unit,
+    onPageFinished: () -> Unit,
+    onMainFrameError: (String?) -> Unit,
+    onMainFrameHttpError: (Int, String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val injectScript = remember(connection) { buildSynaraInjectScript(connection) }
@@ -157,6 +307,10 @@ private fun SynaraAndroidWebView(
                 }
 
                 webChromeClient = object : WebChromeClient() {
+                    override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                        onPageProgress(newProgress)
+                    }
+
                     override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
                         val msg = consoleMessage ?: return super.onConsoleMessage(consoleMessage)
                         if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
@@ -168,11 +322,13 @@ private fun SynaraAndroidWebView(
 
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                        onPageStarted()
                         view?.evaluateJavascript(injectScript, null)
                     }
 
                     override fun onPageFinished(view: WebView?, url: String?) {
                         onCanGoBack(view?.canGoBack() == true)
+                        onPageFinished()
                     }
 
                     override fun onReceivedError(
@@ -182,6 +338,20 @@ private fun SynaraAndroidWebView(
                     ) {
                         if (request?.isForMainFrame == true) {
                             Log.e(TAG, "main frame error ${error?.description}")
+                            onMainFrameError(error?.description?.toString())
+                        }
+                    }
+
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        errorResponse: WebResourceResponse?,
+                    ) {
+                        if (request?.isForMainFrame == true) {
+                            val statusCode = errorResponse?.statusCode ?: 0
+                            val reason = errorResponse?.reasonPhrase
+                            Log.e(TAG, "main frame HTTP error $statusCode $reason")
+                            onMainFrameHttpError(statusCode, reason)
                         }
                     }
                 }

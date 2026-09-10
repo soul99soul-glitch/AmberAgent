@@ -392,16 +392,15 @@ fun Tool.invocationPolicy(input: JsonElement?): ToolInvocationPolicy {
         }
 
         "wm_site_add" -> {
-            // Plan v2: agent-driven site add. Reversible (user can delete in
-            // the settings page or via wm_site_remove). Doesn't grant the
-            // agent new capabilities — agent already had wm_open for any URL.
-            // Auto-approve so bulk-add scenarios ("add these 10 sites I'm
-            // pasting") don't require 10 confirmations.
+            // Adding a station changes the user's persisted site list and may
+            // make adapter/profile capabilities appear in later runs. Keep an
+            // explicit per-call human approval even though the change is
+            // reversible; bulk-add must not bypass the same consent boundary.
             mutates = true
-            risk = ToolRisk.Normal
+            risk = ToolRisk.Sensitive
             riskExplicit = true
-            needsApproval = false
-            autoApprovable = true
+            needsApproval = true
+            autoApprovable = false
             concurrencySafe = false
         }
 
@@ -508,7 +507,6 @@ internal fun Tool.category(): String = when {
     name.startsWith("file_") || name.startsWith("archive_") ||
         name in setOf("download_file", "pdf_read", "pdf_render_page", "office_read", "image_info", "image_convert", "ocr_image") -> "workspace"
     name.startsWith("icloud_") -> "cloud"
-    name.startsWith("officepro_") -> "office"
     name.startsWith("terminal_") -> "terminal"
     name in setOf("search_web", "scrape_web", "search_sources_status", "search_strategy_explain", "http_request") -> "web"
     name.startsWith("webview_") -> "webview"
@@ -565,8 +563,6 @@ private fun Tool.mutatesState(): Boolean {
         name.contains("_stop") ||
         name == "pdf_render_page" ||
         name == "mcp_call_tool" ||
-        name == "officepro_make_report" ||
-        name == "officepro_project_update" ||
         name == "agent_prompt_config" ||
         name == "model_council_make_report" ||
         name in setOf("cron_task_create", "cron_task_update", "cron_task_delete") ||
@@ -615,18 +611,6 @@ private fun Tool.riskProfile(): RiskProfile = when {
     name == "pdf_render_page" -> RiskProfile(ToolRisk.High, explicit = true)
     name in setOf("agent_task_cancel", "agent_task_retry", "agent_task_cleanup") -> RiskProfile(ToolRisk.Sensitive, explicit = true)
     name == "subagent_start" -> RiskProfile(ToolRisk.Normal, explicit = true)
-    name == "officepro_read_screen" ||
-        name == "officepro_capture_context" ||
-        name == "officepro_context_digest" ||
-        name == "officepro_daily_radar" ||
-        name == "officepro_project_briefing" ||
-        name == "officepro_document_warroom" ||
-        name == "officepro_open_items_radar" ||
-        name == "officepro_meeting_closure" ||
-        name == "officepro_create_task_draft" ||
-        name == "officepro_create_base_record_draft" ||
-        name == "officepro_reply_draft" ||
-        name == "officepro_project_context" -> RiskProfile(ToolRisk.High, explicit = true)
     name.startsWith("external_file_") && (name.contains("_write") || name.contains("_delete")) -> RiskProfile(ToolRisk.High, explicit = true)
     name.startsWith("sms_") || name.startsWith("call_") || name.startsWith("contacts_write") -> RiskProfile(ToolRisk.High, explicit = true)
     name.startsWith("screen_") || name == "vlm_task" -> RiskProfile(ToolRisk.Sensitive, explicit = true)
@@ -653,7 +637,6 @@ private val FAIL_CLOSED_AUTO_APPROVAL_CATEGORIES = setOf(
     "external_file",
     "terminal",
     "screen",
-    "office",
 )
 
 private fun Tool.concurrencySafe(): Boolean = when {
@@ -666,24 +649,9 @@ private fun Tool.concurrencySafe(): Boolean = when {
 
 private fun Tool.sensitiveRead(): Boolean =
     name in setOf("session_read", "session_expand") ||
-        name.startsWith("screen_") ||
-        name in setOf(
-            "officepro_read_screen",
-            "officepro_capture_context",
-            "officepro_context_digest",
-        )
+        name.startsWith("screen_")
 
-private fun Tool.foregroundPackageRequirement(): String? = when (name) {
-    "officepro_read_screen",
-    "officepro_capture_context",
-    "officepro_context_digest",
-    "officepro_daily_radar",
-    "officepro_project_briefing",
-    "officepro_document_warroom",
-    "officepro_open_items_radar",
-    "officepro_meeting_closure" -> "configured_officepro_target"
-    else -> null
-}
+private fun Tool.foregroundPackageRequirement(): String? = null
 
 private fun Tool.speculativeBlockReason(
     category: String,

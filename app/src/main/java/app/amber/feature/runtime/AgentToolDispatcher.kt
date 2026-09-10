@@ -8,6 +8,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -109,21 +110,43 @@ class AgentToolDispatcher(
         if (remaining.isEmpty()) return reused
         val executed = if (remaining.size > 1 && remaining.all { tool -> canRunInParallel(tool, toolDefinitions[tool.toolName]) }) {
             coroutineScope {
+                // Keep the existing per-tool coroutines so different groups
+                // still overlap, but serialize calls sharing one resource
+                // owner (for example one WebMount session). The locks live
+                // only for this batch; they do not become a global scheduler.
+                val parallelGroups = remaining.associateWith { tool ->
+                    checkNotNull(toolDefinitions[tool.toolName]
+                        ?.invocationPolicy(tool.input)
+                        ?.parallelGroup) { "Parallel tool is missing its group: ${tool.toolName}" }
+                }
+                val groupLocks = parallelGroups.values
+                    .distinct()
+                    .associateWith { Mutex() }
                 remaining.map { tool ->
                     async {
-                        execute(
-                            tool = tool,
-                            toolDef = toolDefinitions[tool.toolName],
-                            autoApproveTools = autoApproveTools,
-                            autoApproveHighRiskTools = autoApproveHighRiskTools,
-                            autoApprovedToolNames = autoApprovedToolNames,
-                            invocationContext = invocationContext,
-                            retrySetting = retrySetting,
-                            ledgerContext = ledgerContext,
-                            capabilityPermissions = capabilityPermissions,
-                            approvalHistory = approvalHistory,
-                            permissionContext = permissionContext,
-                        )
+                        val executeTool: suspend () -> UIMessagePart.Tool? = {
+                            execute(
+                                tool = tool,
+                                toolDef = toolDefinitions[tool.toolName],
+                                autoApproveTools = autoApproveTools,
+                                autoApproveHighRiskTools = autoApproveHighRiskTools,
+                                autoApprovedToolNames = autoApprovedToolNames,
+                                invocationContext = invocationContext,
+                                retrySetting = retrySetting,
+                                ledgerContext = ledgerContext,
+                                capabilityPermissions = capabilityPermissions,
+                                approvalHistory = approvalHistory,
+                                permissionContext = permissionContext,
+                            )
+                        }
+                        val group = parallelGroups.getValue(tool)
+                        val lock = groupLocks.getValue(group)
+                        lock.lock()
+                        try {
+                            executeTool()
+                        } finally {
+                            lock.unlock()
+                        }
                     }
                 }.awaitAll().filterNotNull()
             }

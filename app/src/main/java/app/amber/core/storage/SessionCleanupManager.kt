@@ -4,8 +4,11 @@ import android.content.Context
 import androidx.room.withTransaction
 import app.amber.agent.data.db.AppDatabase
 import app.amber.core.files.FileFolders
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 
 /** 一个待清理会话的统计与附件集合。 */
@@ -27,6 +30,7 @@ data class ConversationCleanupTarget(
 data class CleanupDryRun(
     val cutoffAt: Long,
     val targets: List<ConversationCleanupTarget>,
+    val restoreEpoch: Long = 0L,
 ) {
     val conversationCount: Int get() = targets.size
     val messageNodeCount: Int get() = targets.sumOf { it.messageNodeCount }
@@ -46,20 +50,22 @@ data class CleanupResult(
  * P7-03 按时间清理会话：条件 `update_at < cutoffAt` 且非 pinned（默认排除
  * pinned）。执行顺序保证可重试、不重复删、不留不可追踪状态：
  *
- * 1. 重新 dry run（幂等 —— 已删除的会话不会再出现）。
+ * 1. 校验预览的恢复 epoch，并重新 dry run；保留其它会话引用的附件。
  * 2. **先删物理附件文件**（含会话生成图目录），任一失败立即中止 —— 数据库
  *    尚未动，状态完全可追踪，重试安全。
  * 3. 单事务删除 DB 记录：附件引用（managed_files）→ FTS → 草稿 → 收藏 →
  *    会话（message_node 及其统计、compact、context_event 由外键级联）。
  *    事务失败则 DB 原样，重试即可。
  *
- * 结果保证：DB 已删 ⇒ 附件物理文件已在步骤 2 删除，不产生无记录孤儿。
+ * 共享附件保留文件和登记行；专属附件在删会话前完成物理清理。
  */
 class SessionCleanupManager(
     private val context: Context,
     private val database: AppDatabase,
+    private val restoreWriteGate: SyncRestoreWriteGate = SyncRestoreWriteGate(),
 ) {
     suspend fun dryRun(cutoffAt: Long): CleanupDryRun = withContext(Dispatchers.IO) {
+        val restoreEpoch = restoreWriteGate.currentEpoch()
         val db = database.openHelper.readableDatabase
         val targets = db.query(
             "SELECT id FROM conversationentity WHERE is_pinned = 0 AND update_at < ?",
@@ -71,14 +77,37 @@ class SessionCleanupManager(
                 }
             }
         }
-        CleanupDryRun(cutoffAt = cutoffAt, targets = targets)
+        val targetIds = targets.mapTo(hashSetOf()) { it.conversationId }
+        val retainedPaths = hashSetOf<String>()
+        if (targets.any { it.attachmentPaths.isNotEmpty() }) {
+            db.query("SELECT conversation_id, messages FROM message_node").use { cursor ->
+                while (cursor.moveToNext()) {
+                    if (cursor.getString(0) !in targetIds) collectUploadPaths(cursor.getString(1), retainedPaths)
+                }
+            }
+        }
+        val countedPaths = hashSetOf<String>()
+        val deletableTargets = targets.map { target ->
+            val paths = target.attachmentPaths.filter { it !in retainedPaths && countedPaths.add(it) }
+            target.copy(attachmentPaths = paths, attachmentBytes = managedBytes(db, paths))
+        }
+        CleanupDryRun(cutoffAt = cutoffAt, targets = deletableTargets, restoreEpoch = restoreEpoch)
     }
 
-    /** 执行清理。入参仅作展示用途；实际删除以重新 dry run 的当前状态为准。 */
-    suspend fun execute(plan: CleanupDryRun): CleanupResult = withContext(Dispatchers.IO) {
+    /** 校验预览所属的数据集；删除目标以同一 gate 内重新 dry run 的当前状态为准。 */
+    suspend fun execute(plan: CleanupDryRun): CleanupResult =
+        withContext(Dispatchers.IO + SyncRestoreWriteEpoch(plan.restoreEpoch)) {
+            restoreWriteGate.withCurrentWriterOrCancel {
+                // Once deletion starts, leaving the page must not cancel the
+                // database cleanup after the physical files have been removed.
+                withContext(NonCancellable) { executeCurrent(plan) }
+            }
+        }
+
+    private suspend fun executeCurrent(plan: CleanupDryRun): CleanupResult {
         val current = dryRun(plan.cutoffAt)
         if (current.targets.isEmpty()) {
-            return@withContext CleanupResult(0, 0, 0, 0L)
+            return CleanupResult(0, 0, 0, 0L)
         }
         deletePhysicalAttachments(current)
         val db = database.openHelper.writableDatabase
@@ -111,7 +140,7 @@ class SessionCleanupManager(
                 )
             }
         }
-        CleanupResult(
+        return CleanupResult(
             conversationCount = current.conversationCount,
             messageNodeCount = current.messageNodeCount,
             attachmentCount = current.attachmentCount,
@@ -127,7 +156,7 @@ class SessionCleanupManager(
             "SELECT COUNT(*) FROM message_node WHERE conversation_id = ?",
             arrayOf(conversationId),
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getInt(0) else 0 }
-        val paths = db.query(
+        val referencedPaths = db.query(
             "SELECT messages FROM message_node WHERE conversation_id = ?",
             arrayOf(conversationId),
         ).use { cursor ->
@@ -137,19 +166,26 @@ class SessionCleanupManager(
             }
             found.toList()
         }
-        val managedBytes = if (paths.isEmpty()) 0L else db.query(
-            "SELECT COALESCE(SUM(size_bytes), 0) FROM managed_files WHERE relative_path IN (" +
-                paths.joinToString(",") { "?" } + ")",
-            paths.toTypedArray(),
-        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
+        val paths = if (referencedPaths.isEmpty()) emptyList() else db.query(
+            "SELECT relative_path FROM managed_files WHERE relative_path IN (" +
+                referencedPaths.joinToString(",") { "?" } + ")",
+            referencedPaths.toTypedArray(),
+        ).use { cursor -> buildList { while (cursor.moveToNext()) add(cursor.getString(0)) } }
         return ConversationCleanupTarget(
             conversationId = conversationId,
             messageNodeCount = messageNodeCount,
             attachmentPaths = paths,
-            attachmentBytes = managedBytes,
+            attachmentBytes = managedBytes(db, paths),
             chatImageBytes = directoryBytes(File(context.filesDir, "${FileFolders.CHAT_IMAGES}/$conversationId")),
         )
     }
+
+    private fun managedBytes(db: androidx.sqlite.db.SupportSQLiteDatabase, paths: List<String>): Long =
+        if (paths.isEmpty()) 0L else db.query(
+            "SELECT COALESCE(SUM(size_bytes), 0) FROM managed_files WHERE relative_path IN (" +
+                paths.joinToString(",") { "?" } + ")",
+            paths.toTypedArray(),
+        ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
 
     /**
      * 从 message_node.messages JSON 提取 `upload/...` 附件相对路径。

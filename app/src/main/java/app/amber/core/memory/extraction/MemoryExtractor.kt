@@ -26,8 +26,14 @@ import app.amber.core.memory.store.MemoryRepository
 import app.amber.core.memory.telemetry.MemoryEventLogger
 import app.amber.core.memory.time.MemoryTimeAnchorParser
 import app.amber.core.model.Conversation
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
 import kotlin.uuid.Uuid
 
 class MemoryExtractor(
@@ -37,151 +43,169 @@ class MemoryExtractor(
     private val memoryRepository: MemoryRepository,
     private val eventLogger: MemoryEventLogger,
     private val candidateFilter: MemoryCandidateFilter = MemoryCandidateFilter(),
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     private val lastRunAt = ConcurrentHashMap<Uuid, Long>()
 
-    suspend fun extractAfterConversation(conversation: Conversation) = withContext(Dispatchers.IO) {
-        val settings = settingsStore.settingsFlow.value
-        val worker = settings.agentRuntime.memoryWorker
-        val conversationId = conversation.id.toString()
-        if (!worker.enabled || !worker.extractionEnabled) {
-            eventLogger.log(
-                type = MemoryEventType.EXTRACTION_SKIPPED,
-                conversationId = conversationId,
-                message = "Memory worker disabled.",
-                messageCount = conversation.currentMessages.size,
-            )
-            return@withContext
-        }
-        val now = System.currentTimeMillis()
-        val previous = lastRunAt[conversation.id] ?: 0L
-        if (now - previous < 120_000L) {
-            eventLogger.log(
-                type = MemoryEventType.EXTRACTION_SKIPPED,
-                conversationId = conversationId,
-                message = "Debounced.",
-                messageCount = conversation.currentMessages.size,
-            )
-            return@withContext
-        }
-        val todayStart = now - (now % 86_400_000L)
-        val runsToday = memoryRepository.countEventsSince(MemoryEventType.EXTRACTION_STARTED, todayStart)
-        if (runsToday >= worker.maxDailyRuns.coerceAtLeast(1)) {
-            eventLogger.log(
-                type = MemoryEventType.EXTRACTION_SKIPPED,
-                conversationId = conversationId,
-                message = "Daily memory worker limit reached.",
-                messageCount = conversation.currentMessages.size,
-            )
-            return@withContext
-        }
-        lastRunAt[conversation.id] = now
-
-        val model = resolveMemoryModel(settings)
-        if (model == null) {
-            eventLogger.log(
-                type = MemoryEventType.EXTRACTION_SKIPPED,
-                conversationId = conversationId,
-                message = "No memory worker model available.",
-                messageCount = conversation.currentMessages.size,
-            )
-            return@withContext
-        }
-        val provider = model.findProvider(settings.providers)
-        if (provider == null) {
-            eventLogger.log(
-                type = MemoryEventType.EXTRACTION_SKIPPED,
-                conversationId = conversationId,
-                modelId = model.id.toString(),
-                message = "Memory worker model provider not found.",
-                messageCount = conversation.currentMessages.size,
-            )
-            return@withContext
-        }
-
-        val startedAt = System.currentTimeMillis()
-        eventLogger.log(
-            type = MemoryEventType.EXTRACTION_STARTED,
-            conversationId = conversationId,
-            modelId = model.id.toString(),
-            messageCount = conversation.currentMessages.size,
-        )
-
-        runCatching {
-            val sourceMessages = conversation.currentMessages.takeLast(16)
-            val sourceIds = sourceMessages.map { it.id.toString() }
-            val prompt = MemoryExtractionPrompt.build(
-                messages = sourceMessages,
-                sourceMessageIds = sourceIds,
-                locale = Locale.getDefault().displayName,
-            )
-            val response = providerCatalog.text(provider).complete(
-                providerSetting = provider,
-                messages = listOf(UIMessage.user(prompt)),
-                params = TextGenerationParams(model = model),
-            )
-            val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
-            val parsedCandidates = parseCandidates(
-                raw = text,
-                conversationId = conversationId,
-                sourceMessageIds = sourceIds,
-            )
-            val parseMetaById = parsedCandidates.associateBy { it.candidate.id }
-            val candidates = parsedCandidates.map { it.candidate }
-            val filtered = candidateFilter.filter(candidates, memoryRepository.getAllActiveRecords())
-            memoryRepository.addCandidates(filtered.rejected)
-            filtered.accepted.forEach { candidate ->
-                val meta = parseMetaById[candidate.id]
-                val autoWrite = shouldAutoWriteCandidate(
-                    candidate = candidate,
-                    explicitScope = meta?.explicitScope == true,
-                    explicitKind = meta?.explicitKind == true,
+    suspend fun extractAfterConversation(conversation: Conversation) {
+        // ChatService supplies the epoch captured before dispatching this work.
+        // Standalone extraction captures the current generation before any model
+        // call; repository writes then reject the result if restore starts later.
+        val writeContext = captureWriteContext()
+        withContext(Dispatchers.IO + writeContext) {
+            val settings = settingsStore.settingsFlow.value
+            val worker = settings.agentRuntime.memoryWorker
+            val conversationId = conversation.id.toString()
+            if (!worker.enabled || !worker.extractionEnabled) {
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_SKIPPED,
+                    conversationId = conversationId,
+                    message = "Memory worker disabled.",
+                    messageCount = conversation.currentMessages.size,
                 )
-                if (autoWrite) {
-                    val memory = memoryRepository.addMemory(
-                        scope = candidate.scope,
-                        kind = candidate.kind,
-                        content = candidate.content,
-                        sourceConversationId = candidate.sourceConversationId,
-                        sourceMessageIds = candidate.sourceMessageIds,
-                        expiresAt = candidate.expiresAt,
-                        confidence = candidate.confidence,
-                        // P2-06 provenance: automatic extraction writes are
-                        // distinguishable from tool-driven writes.
-                        sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
-                    )
-                    eventLogger.log(
-                        type = if (candidate.isDurableAutoWrite()) {
-                            MemoryEventType.DURABLE_MEMORY_CREATED
-                        } else {
-                            MemoryEventType.MEMORY_CREATED
-                        },
-                        conversationId = conversationId,
-                        memoryId = memory.id,
-                        modelId = model.id.toString(),
-                        message = candidate.autoWriteEventMessage(),
-                    )
-                } else {
-                    memoryRepository.addCandidate(candidate)
-                    eventLogger.log(
-                        type = MemoryEventType.CANDIDATE_CREATED,
-                        conversationId = conversationId,
-                        candidateId = candidate.id,
-                        modelId = model.id.toString(),
-                        message = candidate.reason,
-                    )
-                }
+                return@withContext
             }
-        }.onFailure { error ->
+            val now = System.currentTimeMillis()
+            val previous = lastRunAt[conversation.id] ?: 0L
+            if (now - previous < 120_000L) {
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_SKIPPED,
+                    conversationId = conversationId,
+                    message = "Debounced.",
+                    messageCount = conversation.currentMessages.size,
+                )
+                return@withContext
+            }
+            val todayStart = now - (now % 86_400_000L)
+            val runsToday = memoryRepository.countEventsSince(MemoryEventType.EXTRACTION_STARTED, todayStart)
+            if (runsToday >= worker.maxDailyRuns.coerceAtLeast(1)) {
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_SKIPPED,
+                    conversationId = conversationId,
+                    message = "Daily memory worker limit reached.",
+                    messageCount = conversation.currentMessages.size,
+                )
+                return@withContext
+            }
+            lastRunAt[conversation.id] = now
+
+            val model = resolveMemoryModel(settings)
+            if (model == null) {
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_SKIPPED,
+                    conversationId = conversationId,
+                    message = "No memory worker model available.",
+                    messageCount = conversation.currentMessages.size,
+                )
+                return@withContext
+            }
+            val provider = model.findProvider(settings.providers)
+            if (provider == null) {
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_SKIPPED,
+                    conversationId = conversationId,
+                    modelId = model.id.toString(),
+                    message = "Memory worker model provider not found.",
+                    messageCount = conversation.currentMessages.size,
+                )
+                return@withContext
+            }
+
+            val startedAt = System.currentTimeMillis()
             eventLogger.log(
-                type = MemoryEventType.EXTRACTION_FAILED,
+                type = MemoryEventType.EXTRACTION_STARTED,
                 conversationId = conversationId,
                 modelId = model.id.toString(),
-                message = error.message ?: error::class.java.simpleName,
-                durationMs = System.currentTimeMillis() - startedAt,
                 messageCount = conversation.currentMessages.size,
             )
+
+            runCatching {
+                val sourceMessages = conversation.currentMessages.takeLast(16)
+                val sourceIds = sourceMessages.map { it.id.toString() }
+                val prompt = MemoryExtractionPrompt.build(
+                    messages = sourceMessages,
+                    sourceMessageIds = sourceIds,
+                    locale = Locale.getDefault().displayName,
+                )
+                val response = providerCatalog.text(provider).complete(
+                    providerSetting = provider,
+                    messages = listOf(UIMessage.user(prompt)),
+                    params = TextGenerationParams(model = model),
+                )
+                val text = response.choices.firstOrNull()?.message?.toText().orEmpty()
+                val parsedCandidates = parseCandidates(
+                    raw = text,
+                    conversationId = conversationId,
+                    sourceMessageIds = sourceIds,
+                )
+                val parseMetaById = parsedCandidates.associateBy { it.candidate.id }
+                val candidates = parsedCandidates.map { it.candidate }
+                val filtered = candidateFilter.filter(candidates, memoryRepository.getAllActiveRecords())
+                memoryRepository.addCandidates(filtered.rejected)
+                filtered.accepted.forEach { candidate ->
+                    val meta = parseMetaById[candidate.id]
+                    val autoWrite = shouldAutoWriteCandidate(
+                        candidate = candidate,
+                        explicitScope = meta?.explicitScope == true,
+                        explicitKind = meta?.explicitKind == true,
+                    )
+                    if (autoWrite) {
+                        val memory = memoryRepository.addMemory(
+                            scope = candidate.scope,
+                            kind = candidate.kind,
+                            content = candidate.content,
+                            sourceConversationId = candidate.sourceConversationId,
+                            sourceMessageIds = candidate.sourceMessageIds,
+                            expiresAt = candidate.expiresAt,
+                            confidence = candidate.confidence,
+                            // P2-06 provenance: automatic extraction writes are
+                            // distinguishable from tool-driven writes.
+                            sourceTrigger = MemoryRepository.TRIGGER_AUTO_EXTRACTION,
+                        )
+                        eventLogger.log(
+                            type = if (candidate.isDurableAutoWrite()) {
+                                MemoryEventType.DURABLE_MEMORY_CREATED
+                            } else {
+                                MemoryEventType.MEMORY_CREATED
+                            },
+                            conversationId = conversationId,
+                            memoryId = memory.id,
+                            modelId = model.id.toString(),
+                            message = candidate.autoWriteEventMessage(),
+                        )
+                    } else {
+                        memoryRepository.addCandidate(candidate)
+                        eventLogger.log(
+                            type = MemoryEventType.CANDIDATE_CREATED,
+                            conversationId = conversationId,
+                            candidateId = candidate.id,
+                            modelId = model.id.toString(),
+                            message = candidate.reason,
+                        )
+                    }
+                }
+            }.onFailure { error ->
+                if (error is CancellationException) throw error
+                eventLogger.log(
+                    type = MemoryEventType.EXTRACTION_FAILED,
+                    conversationId = conversationId,
+                    modelId = model.id.toString(),
+                    message = error.message ?: error::class.java.simpleName,
+                    durationMs = System.currentTimeMillis() - startedAt,
+                    messageCount = conversation.currentMessages.size,
+                )
+            }
         }
+    }
+
+    private suspend fun captureWriteContext(): CoroutineContext {
+        coroutineContext[SyncRestoreWriteEpoch]?.let { return it }
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        // A standalone extractor has no generation from ChatService. Wait for
+        // an in-flight restore before reading limits or starting the model call;
+        // the short lock is released before any network work begins.
+        gate.withWriter { Unit }
+        return SyncRestoreWriteEpoch(gate.currentEpoch())
     }
 
     private fun resolveMemoryModel(settings: Settings) =

@@ -7,6 +7,8 @@ import android.os.Build
 import android.os.Looper
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.JsPromptResult
+import android.webkit.JsResult
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -14,6 +16,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import app.amber.feature.webmount.core.WebMountWebViewCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -41,10 +44,18 @@ class WebViewPool(
     private val userAgent: String? = DEFAULT_USER_AGENT,
     private val webContentsDebugging: Boolean = false,
     private val onSessionDestroyed: (String) -> Unit = {},
+    private val onSessionCreated: (SessionHandle) -> Unit = {},
+    private val onSessionStateChanged: (String, SessionHandle.LoadState) -> Unit = { _, _ -> },
 ) {
     private val sessions = ConcurrentHashMap<String, SessionHandle>()
     private val createLock = Mutex()
     private val lru = LinkedHashSet<String>()      // protected by [lruLock]
+    private val pinnedSessions = mutableSetOf<String>() // protected by [lruLock]
+    private val pinTokens = mutableMapOf<String, String>() // protected by [lruLock]
+    /** Owner reservations protect a handle before the owner can pin it. */
+    private val reservationTokens = mutableMapOf<String, Reservation>() // protected by [lruLock]
+    /** Evicted ids are removed from sessions before their main-thread destroy runs. */
+    private val retiringSessions = mutableSetOf<String>() // protected by [lruLock]
     private val lruLock = Any()
     private val bridgeBootstrapJs: String by lazy { loadBridgeBootstrap() }
     @Volatile
@@ -68,31 +79,49 @@ class WebViewPool(
      * tears down, so a stale read here would return a handle whose next
      * call throws "session ... already destroyed".
      */
-    suspend fun acquire(sessionId: String): SessionHandle {
+    suspend fun acquire(
+        sessionId: String,
+        reservationToken: String? = null,
+    ): SessionHandle {
         assertBridgeReady()
-        val existing = sessions[sessionId]
-        if (existing != null && !existing.destroyed) {
-            touch(sessionId)
-            return existing
-        }
-        if (existing != null && existing.destroyed) {
-            // Drop the stale entry; ignore race where someone else already removed it.
-            sessions.remove(sessionId, existing)
-            synchronized(lruLock) { lru.remove(sessionId) }
-            onSessionDestroyed(sessionId)
-        }
-        return createLock.withLock {
-            val racedExisting = sessions[sessionId]
-            if (racedExisting != null && !racedExisting.destroyed) {
-                touch(sessionId)
-                return@withLock racedExisting
+        try {
+            reservationToken?.let { reserve(sessionId, it) }
+            val existing = synchronized(lruLock) {
+                liveSessionLocked(sessionId)?.also {
+                    // A reservation can cover either a newly-created handle
+                    // or an existing one. Keep that distinction so a late
+                    // owner cancellation only removes the reservation when
+                    // this acquire reused the existing page.
+                    markReservationReusedLocked(sessionId, reservationToken)
+                }
             }
-            if (racedExisting != null && racedExisting.destroyed) {
-                sessions.remove(sessionId, racedExisting)
-                synchronized(lruLock) { lru.remove(sessionId) }
+            if (existing != null) return existing
+
+            val stale = removeStaleSession(sessionId)
+            if (stale != null) {
                 onSessionDestroyed(sessionId)
+                withContext(Dispatchers.Main) { stale.destroy("stale pooled session") }
             }
-            createSessionLocked(sessionId)
+            return createLock.withLock {
+                val racedExisting = synchronized(lruLock) {
+                    liveSessionLocked(sessionId)?.also {
+                        markReservationReusedLocked(sessionId, reservationToken)
+                    }
+                }
+                if (racedExisting != null) return@withLock racedExisting
+                val racedStale = removeStaleSession(sessionId)
+                if (racedStale != null) {
+                    onSessionDestroyed(sessionId)
+                    withContext(Dispatchers.Main) { racedStale.destroy("stale pooled session") }
+                }
+                createSessionLocked(sessionId, reservationToken)
+            }
+        } catch (cancel: CancellationException) {
+            reservationToken?.let { finishReservation(sessionId, it) }
+            throw cancel
+        } catch (error: Throwable) {
+            reservationToken?.let { finishReservation(sessionId, it) }
+            throw error
         }
     }
 
@@ -105,24 +134,114 @@ class WebViewPool(
         }
     }
 
+    /** Keep an owned session out of LRU eviction until its lease is released. */
+    fun pin(sessionId: String, leaseId: String? = null) {
+        synchronized(lruLock) {
+            val reservation = reservationTokens[sessionId]
+            if (leaseId != null && reservation != null) {
+                if (reservation.token != leaseId || reservation.cancelled) return
+                reservationTokens.remove(sessionId)
+            }
+            if (leaseId != null && reservation == null) {
+                val currentPin = pinTokens[sessionId]
+                if (currentPin != null && currentPin != leaseId) return
+            }
+            pinnedSessions += sessionId
+            leaseId?.let { pinTokens[sessionId] = it }
+        }
+    }
+
+    fun unpin(sessionId: String, leaseId: String? = null) {
+        synchronized(lruLock) {
+            if (leaseId != null) {
+                when {
+                    pinTokens[sessionId] == leaseId -> {
+                        pinnedSessions -= sessionId
+                        pinTokens.remove(sessionId)
+                    }
+                    reservationTokens[sessionId]?.token == leaseId -> {
+                        // Keep the token as a cancelled reservation until the
+                        // suspended acquire acknowledges it, so release(handle,
+                        // expectedPinToken) can still close that new handle.
+                        reservationTokens[sessionId]?.cancelled = true
+                    }
+                    else -> return
+                }
+            } else {
+                pinnedSessions -= sessionId
+                pinTokens.remove(sessionId)
+                reservationTokens[sessionId]?.cancelled = true
+            }
+        }
+    }
+
     /** Look up an existing live session without creating one. */
     fun peek(sessionId: String): SessionHandle? {
-        val handle = sessions[sessionId] ?: return null
-        if (handle.destroyed) {
-            sessions.remove(sessionId, handle)
-            synchronized(lruLock) { lru.remove(sessionId) }
+        val handle = synchronized(lruLock) { liveSessionLocked(sessionId) }
+        if (handle != null) return handle
+        val stale = removeStaleSession(sessionId)
+        if (stale != null) {
             onSessionDestroyed(sessionId)
-            return null
+            withMain { stale.destroy("stale pooled session") }
         }
-        touch(sessionId)
-        return handle
+        return null
     }
 
     /** Destroy and remove a single session. */
     suspend fun release(sessionId: String, reason: String = "released") {
-        val handle = sessions.remove(sessionId) ?: return
-        synchronized(lruLock) { lru.remove(sessionId) }
+        val handle = synchronized(lruLock) {
+            val removed = sessions.remove(sessionId)
+            lru.remove(sessionId)
+            pinnedSessions.remove(sessionId)
+            pinTokens.remove(sessionId)
+            if (removed != null) reservationTokens.remove(sessionId)
+            else reservationTokens[sessionId]?.let { it.cancelled = true }
+            removed
+        } ?: return
         onSessionDestroyed(sessionId)
+        withContext(Dispatchers.Main) { handle.destroy(reason) }
+    }
+
+    /**
+     * Destroy only [handle] if it is still the current mapping for its id.
+     * Used when an owner reservation is cancelled while a suspended acquire is
+     * still constructing a WebView; it cannot tear down a newer replacement.
+     */
+    suspend fun release(
+        handle: SessionHandle,
+        reason: String = "released",
+        expectedPinToken: String? = null,
+    ) {
+        val removed = synchronized(lruLock) {
+            val reservation = reservationTokens[handle.sessionId]
+            if (expectedPinToken != null &&
+                reservation?.token == expectedPinToken &&
+                reservation.reusedExisting
+            ) {
+                // This acquire borrowed an already-live page. The owner may
+                // cancel before pinning; clear only its reservation and keep
+                // the original WebView/session alive for its real owner.
+                reservationTokens.remove(handle.sessionId)
+                return@synchronized false
+            }
+            val pinMatches = expectedPinToken == null ||
+                pinTokens[handle.sessionId] == expectedPinToken ||
+                reservation?.token == expectedPinToken
+            if (!pinMatches) {
+                // The reservation that produced this handle has already been
+                // rolled back. A newer owner may be using the same WebView;
+                // never destroy it just because a stale acquire resumed late.
+                return@synchronized false
+            }
+            if (!sessions.remove(handle.sessionId, handle)) return@synchronized false
+            lru.remove(handle.sessionId)
+            pinnedSessions.remove(handle.sessionId)
+            pinTokens.remove(handle.sessionId)
+            reservationTokens.remove(handle.sessionId)
+            true
+        }
+        if (!removed) return
+        onSessionDestroyed(handle.sessionId)
         withContext(Dispatchers.Main) { handle.destroy(reason) }
     }
 
@@ -134,6 +253,9 @@ class WebViewPool(
         val ids = synchronized(lruLock) {
             val snapshot = lru.toList()
             lru.clear()
+            pinnedSessions.clear()
+            pinTokens.clear()
+            reservationTokens.values.forEach { it.cancelled = true }
             snapshot
         }
         ids.forEach { release(it, reason) }
@@ -143,11 +265,30 @@ class WebViewPool(
 
     // -------------------------------------------------- creation internals
 
-    private suspend fun createSessionLocked(sessionId: String): SessionHandle {
+    private suspend fun createSessionLocked(
+        sessionId: String,
+        reservationToken: String? = null,
+    ): SessionHandle {
         evictIfNeeded()
         val handle = withContext(Dispatchers.Main) { createOnMain(sessionId) }
-        sessions[sessionId] = handle
-        touch(sessionId)
+        val accepted = synchronized(lruLock) {
+            val reservation = reservationToken?.let { reservationTokens[sessionId] }
+            if (reservationToken != null &&
+                (reservation?.token != reservationToken || reservation.cancelled)
+            ) {
+                false
+            } else {
+                sessions[sessionId] = handle
+                touchLocked(sessionId)
+                true
+            }
+        }
+        if (!accepted) {
+            finishReservation(sessionId, reservationToken)
+            withContext(Dispatchers.Main) { handle.destroy("acquire reservation cancelled") }
+            throw ReservationCancelledException()
+        }
+        onSessionCreated(handle)
         return handle
     }
 
@@ -192,6 +333,8 @@ class WebViewPool(
         javaScriptEnabled = true
         domStorageEnabled = true
         databaseEnabled = true
+        javaScriptCanOpenWindowsAutomatically = true
+        setSupportMultipleWindows(true)
         loadsImagesAutomatically = true
         cacheMode = WebSettings.LOAD_DEFAULT
         useWideViewPort = true
@@ -208,24 +351,108 @@ class WebViewPool(
         }
     }
 
-    private fun touch(sessionId: String) {
-        synchronized(lruLock) {
-            lru.remove(sessionId)
-            lru.add(sessionId)
-        }
+    private fun touchLocked(sessionId: String) {
+        lru.remove(sessionId)
+        lru.add(sessionId)
     }
 
     private suspend fun evictIfNeeded() {
         val toEvict = synchronized(lruLock) {
             val excess = (lru.size - maxSessions + 1).coerceAtLeast(0)
-            if (excess == 0) emptyList() else lru.take(excess).also { lru.removeAll(it.toSet()) }
+            if (excess == 0) {
+                emptyList()
+            } else {
+                lru.asSequence()
+                    .filterNot { it in pinnedSessions || it in reservationTokens }
+                    .take(excess)
+                    .toList()
+                    .mapNotNull { id ->
+                        // Remove the mapping and its LRU entry under one lock;
+                        // a racing acquire cannot return a handle already
+                        // selected for destruction.
+                        lru.remove(id)
+                        val handle = sessions.remove(id) ?: return@mapNotNull null
+                        pinnedSessions.remove(id)
+                        pinTokens.remove(id)
+                        retiringSessions += id
+                        handle
+                    }
+            }
         }
-        toEvict.forEach { id ->
-            val handle = sessions.remove(id) ?: return@forEach
+        toEvict.forEach { handle ->
+            val id = handle.sessionId
             onSessionDestroyed(id)
-            withContext(Dispatchers.Main) { handle.destroy("evicted (LRU cap=$maxSessions)") }
+            try {
+                withContext(Dispatchers.Main) { handle.destroy("evicted (LRU cap=$maxSessions)") }
+            } finally {
+                synchronized(lruLock) { retiringSessions.remove(id) }
+            }
         }
     }
+
+    private fun reserve(sessionId: String, reservationToken: String) {
+        synchronized(lruLock) {
+            val currentPin = pinTokens[sessionId]
+            if (currentPin != null && currentPin != reservationToken) {
+                throw IllegalStateException("session $sessionId is already pinned")
+            }
+            val current = reservationTokens[sessionId]
+            if (current != null && current.token != reservationToken) {
+                throw IllegalStateException("session $sessionId is already reserved")
+            }
+            if (current == null) {
+                reservationTokens[sessionId] = Reservation(reservationToken)
+            }
+        }
+    }
+
+    private fun markReservationReusedLocked(sessionId: String, reservationToken: String?) {
+        if (reservationToken == null) return
+        reservationTokens[sessionId]
+            ?.takeIf { it.token == reservationToken }
+            ?.let { it.reusedExisting = true }
+    }
+
+    private fun finishReservation(sessionId: String, reservationToken: String?) {
+        if (reservationToken == null) return
+        synchronized(lruLock) {
+            if (reservationTokens[sessionId]?.token == reservationToken) {
+                reservationTokens.remove(sessionId)
+            }
+        }
+    }
+
+    private fun liveSessionLocked(sessionId: String): SessionHandle? {
+        val handle = sessions[sessionId] ?: return null
+        if (handle.destroyed || sessionId in retiringSessions) return null
+        touchLocked(sessionId)
+        return handle
+    }
+
+    private fun removeStaleSession(sessionId: String): SessionHandle? = synchronized(lruLock) {
+        val handle = sessions[sessionId] ?: return@synchronized null
+        if (!handle.destroyed && sessionId !in retiringSessions) return@synchronized null
+        sessions.remove(sessionId, handle)
+        lru.remove(sessionId)
+        pinnedSessions.remove(sessionId)
+        pinTokens.remove(sessionId)
+        handle
+    }
+
+    private fun withMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block()
+        else runBlocking { withContext(Dispatchers.Main) { block() } }
+    }
+
+    private data class Reservation(
+        val token: String,
+        var cancelled: Boolean = false,
+        var reusedExisting: Boolean = false,
+    )
+
+    private class ReservationCancelledException : RuntimeException(
+        "webmount pool reservation was cancelled before the handle was ready",
+    )
 
     private fun loadBridgeBootstrap(): String =
         runCatching {
@@ -257,7 +484,11 @@ class WebViewPool(
         private val handle: SessionHandle,
     ) : WebViewClient() {
         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-            url?.let { handle.onPageStarted(it) }
+            handle.cancelPendingJsDialogsFor(view ?: handle.webView, "primary navigation")
+            url?.let {
+                handle.onPageStarted(it)
+                onSessionStateChanged(handle.sessionId, handle.loadState.value)
+            }
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
@@ -265,6 +496,7 @@ class WebViewPool(
             WebMountWebViewCompat.injectFeishuCompatibility(view, url)
             handle.reinjectBridge()
             handle.onPageFinished(url ?: "", view?.title)
+            onSessionStateChanged(handle.sessionId, handle.loadState.value)
         }
 
         override fun onReceivedError(
@@ -277,6 +509,7 @@ class WebViewPool(
             val code = error?.errorCode ?: 0
             val msg = error?.description?.toString() ?: "load failed"
             handle.onReceivedError(code, msg)
+            onSessionStateChanged(handle.sessionId, handle.loadState.value)
         }
     }
 
@@ -287,7 +520,87 @@ class WebViewPool(
             if (newProgress >= 25) {
                 WebMountWebViewCompat.injectFeishuCompatibility(view, view?.url)
             }
-            handle.onLoadProgress(newProgress)
+            if (view === handle.webView) {
+                handle.onLoadProgress(newProgress)
+            } else {
+                handle.popups.value.firstOrNull { it.webView === view }?.let { popup ->
+                    handle.updatePopup(popup.popupId, url = view?.url, title = view?.title)
+                }
+            }
+        }
+
+        override fun onCreateWindow(
+            view: WebView?,
+            isDialog: Boolean,
+            isUserGesture: Boolean,
+            resultMsg: android.os.Message?,
+        ): Boolean {
+            val transport = resultMsg?.obj as? WebView.WebViewTransport ?: return false
+            val popupId = handle.nextPopupId()
+            val popup = createPopupOnMain(handle, popupId)
+            handle.registerPopup(popupId, popup, isDialog)
+            transport.webView = popup
+            resultMsg.sendToTarget()
+            return true
+        }
+
+        override fun onCloseWindow(window: WebView?) {
+            window?.let { handle.closePopup(it, "window closed") }
+        }
+
+        override fun onJsAlert(
+            view: WebView?,
+            url: String?,
+            message: String?,
+            result: JsResult?,
+        ): Boolean {
+            val dialogResult = result ?: return false
+            handle.enqueueJsDialog(
+                type = SessionHandle.JsDialogType.ALERT,
+                view = view,
+                url = url,
+                message = message.orEmpty(),
+                defaultValue = null,
+                result = dialogResult,
+            )
+            return true
+        }
+
+        override fun onJsConfirm(
+            view: WebView?,
+            url: String?,
+            message: String?,
+            result: JsResult?,
+        ): Boolean {
+            val dialogResult = result ?: return false
+            handle.enqueueJsDialog(
+                type = SessionHandle.JsDialogType.CONFIRM,
+                view = view,
+                url = url,
+                message = message.orEmpty(),
+                defaultValue = null,
+                result = dialogResult,
+            )
+            return true
+        }
+
+        override fun onJsPrompt(
+            view: WebView?,
+            url: String?,
+            message: String?,
+            defaultValue: String?,
+            result: JsPromptResult?,
+        ): Boolean {
+            val dialogResult = result ?: return false
+            handle.enqueueJsDialog(
+                type = SessionHandle.JsDialogType.PROMPT,
+                view = view,
+                url = url,
+                message = message.orEmpty(),
+                defaultValue = defaultValue,
+                result = dialogResult,
+            )
+            return true
         }
 
         override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
@@ -299,6 +612,54 @@ class WebViewPool(
             }
             handle.jsBridge.log(level, "[chrome] ${consoleMessage.message()}")
             return true
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createPopupOnMain(
+        opener: SessionHandle,
+        popupId: String,
+    ): WebView {
+        require(Looper.myLooper() == Looper.getMainLooper()) { "Popup creation must be on main" }
+        return WebView(appContext).apply {
+            settings.applyDefaults()
+            userAgent?.let { settings.userAgentString = it }
+            layout(0, 0, VIRTUAL_VIEWPORT_W, VIRTUAL_VIEWPORT_H)
+            val popupView = this
+            android.webkit.CookieManager.getInstance().apply {
+                setAcceptCookie(true)
+                setAcceptThirdPartyCookies(popupView, true)
+            }
+            webViewClient = PopupWebViewClient(opener, popupId)
+            webChromeClient = WebMountWebChromeClient(opener)
+            addJavascriptInterface(opener.jsBridge, "AmberWM")
+            opener.injectBridgeInto(this)
+        }
+    }
+
+    private inner class PopupWebViewClient(
+        private val opener: SessionHandle,
+        private val popupId: String,
+    ) : WebViewClient() {
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            view?.let { opener.cancelPendingJsDialogsFor(it, "popup navigation") }
+            opener.updatePopup(popupId, url = url, title = view?.title)
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            android.webkit.CookieManager.getInstance().flush()
+            WebMountWebViewCompat.injectFeishuCompatibility(view, url)
+            view?.let(opener::injectBridgeInto)
+            opener.updatePopup(popupId, url = url, title = view?.title)
+        }
+
+        override fun onReceivedError(
+            view: WebView?,
+            request: WebResourceRequest?,
+            error: WebResourceError?,
+        ) {
+            if (request?.isForMainFrame != true) return
+            opener.updatePopup(popupId, url = view?.url, title = view?.title)
         }
     }
 

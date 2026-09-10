@@ -6,6 +6,7 @@ import app.amber.agent.data.db.dao.ArtifactDAO
 import app.amber.agent.data.db.dao.ConversationDAO
 import app.amber.agent.data.db.dao.MessageNodeDAO
 import app.amber.agent.data.db.entity.ArtifactReferenceEntity
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
@@ -48,6 +49,7 @@ class ArtifactRepository(
     private val workspaceManager: WorkspaceManager,
     private val messageNodeDao: MessageNodeDAO,
     private val conversationDao: ConversationDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
     val observeAll: Flow<List<Artifact>> = dao.observeAll().map { list -> list.map { it.toArtifact() } }
 
@@ -80,52 +82,54 @@ class ArtifactRepository(
         val digest = sha256Hex(content)
         val size = content.toByteArray(Charsets.UTF_8).size.toLong()
         val title = ChatMessageContentBuilder.titleOf(message, content)
-        val now = System.currentTimeMillis()
         val metadata = ChatMessageContentBuilder.metadata(message, includeReasoning)
-        return if (existingArtifactId != null) {
-            val existing = requireNotNull(dao.getById(existingArtifactId)) {
-                "Artifact not found: $existingArtifactId"
+        return withArtifactWrite {
+            val now = System.currentTimeMillis()
+            if (existingArtifactId != null) {
+                val existing = requireNotNull(dao.getById(existingArtifactId)) {
+                    "Artifact not found: $existingArtifactId"
+                }
+                writeContentFile(existing.contentLocator, content)
+                val updated = existing.copy(
+                    workspaceId = workspaceId,
+                    title = title,
+                    contentDigest = digest,
+                    sizeBytes = size,
+                    parserVersion = CHAT_PARSER_VERSION,
+                    parseStatus = ArtifactParseStatus.PARSED.id,
+                    parseError = null,
+                    metadataJson = metadata,
+                    updatedAtMs = now,
+                )
+                dao.update(updated)
+                updated.toArtifact()
+            } else {
+                val artifactId = Uuid.random().toString()
+                val locator = contentLocatorFor(artifactId)
+                val created = Artifact(
+                    artifactId = artifactId,
+                    workspaceId = workspaceId,
+                    type = TYPE_CHAT_MESSAGE,
+                    mimeType = "text/markdown",
+                    title = title,
+                    sourceKind = ArtifactSourceKind.CHAT,
+                    sourceId = conversationId,
+                    sourceRunId = null,
+                    sourceMessageId = message.id.toString(),
+                    contentLocator = locator,
+                    contentDigest = digest,
+                    sizeBytes = size,
+                    parserVersion = CHAT_PARSER_VERSION,
+                    parseStatus = ArtifactParseStatus.PARSED,
+                    parseError = null,
+                    metadataJson = metadata,
+                    createdAtMs = now,
+                    updatedAtMs = now,
+                )
+                writeContentFile(locator, content)
+                dao.insert(created.toEntity())
+                created
             }
-            writeContentFile(existing.contentLocator, content)
-            val updated = existing.copy(
-                workspaceId = workspaceId,
-                title = title,
-                contentDigest = digest,
-                sizeBytes = size,
-                parserVersion = CHAT_PARSER_VERSION,
-                parseStatus = ArtifactParseStatus.PARSED.id,
-                parseError = null,
-                metadataJson = metadata,
-                updatedAtMs = now,
-            )
-            dao.update(updated)
-            updated.toArtifact()
-        } else {
-            val artifactId = Uuid.random().toString()
-            val locator = contentLocatorFor(artifactId)
-            writeContentFile(locator, content)
-            val created = Artifact(
-                artifactId = artifactId,
-                workspaceId = workspaceId,
-                type = TYPE_CHAT_MESSAGE,
-                mimeType = "text/markdown",
-                title = title,
-                sourceKind = ArtifactSourceKind.CHAT,
-                sourceId = conversationId,
-                sourceRunId = null,
-                sourceMessageId = message.id.toString(),
-                contentLocator = locator,
-                contentDigest = digest,
-                sizeBytes = size,
-                parserVersion = CHAT_PARSER_VERSION,
-                parseStatus = ArtifactParseStatus.PARSED,
-                parseError = null,
-                metadataJson = metadata,
-                createdAtMs = now,
-                updatedAtMs = now,
-            )
-            dao.insert(created.toEntity())
-            created
         }
     }
 
@@ -138,58 +142,60 @@ class ArtifactRepository(
     ): Artifact {
         val digest = sha256Hex(content)
         val size = content.toByteArray(Charsets.UTF_8).size.toLong()
-        val now = System.currentTimeMillis()
         val metadata = buildJsonObject {
             put("sourceTopicId", topicId)
         }.toString()
-        val existing = dao.listBySourceKindAndSourceId(
-            ArtifactSourceKind.DEEPREAD.id,
-            topicId,
-        ).firstOrNull()
-        if (existing != null) {
-            writeContentFile(existing.contentLocator, content)
-            val updated = existing.copy(
-                title = title,
+        return withArtifactWrite {
+            val now = System.currentTimeMillis()
+            val existing = dao.listBySourceKindAndSourceId(
+                ArtifactSourceKind.DEEPREAD.id,
+                topicId,
+            ).firstOrNull()
+            if (existing != null) {
+                writeContentFile(existing.contentLocator, content)
+                val updated = existing.copy(
+                    title = title,
+                    type = TYPE_DEEP_READ,
+                    mimeType = "application/json",
+                    contentDigest = digest,
+                    sizeBytes = size,
+                    parserVersion = DEEPREAD_PARSER_VERSION,
+                    parseStatus = ArtifactParseStatus.PARSED.id,
+                    parseError = null,
+                    metadataJson = metadata,
+                    updatedAtMs = now,
+                )
+                dao.update(updated)
+                insertReference(updated.artifactId, REF_KIND_DEEPREAD, topicId)
+                return@withArtifactWrite updated.toArtifact()
+            }
+
+            val artifactId = Uuid.random().toString()
+            val created = Artifact(
+                artifactId = artifactId,
+                workspaceId = DEFAULT_WORKSPACE_ID,
                 type = TYPE_DEEP_READ,
                 mimeType = "application/json",
+                title = title,
+                sourceKind = ArtifactSourceKind.DEEPREAD,
+                sourceId = topicId,
+                sourceRunId = null,
+                sourceMessageId = null,
+                contentLocator = deepReadContentLocatorFor(artifactId),
                 contentDigest = digest,
                 sizeBytes = size,
                 parserVersion = DEEPREAD_PARSER_VERSION,
-                parseStatus = ArtifactParseStatus.PARSED.id,
+                parseStatus = ArtifactParseStatus.PARSED,
                 parseError = null,
                 metadataJson = metadata,
+                createdAtMs = now,
                 updatedAtMs = now,
             )
-            dao.update(updated)
-            registerReference(updated.artifactId, REF_KIND_DEEPREAD, topicId)
-            return updated.toArtifact()
+            writeContentFile(created.contentLocator, content)
+            dao.insert(created.toEntity())
+            insertReference(created.artifactId, REF_KIND_DEEPREAD, topicId)
+            created
         }
-
-        val artifactId = Uuid.random().toString()
-        val created = Artifact(
-            artifactId = artifactId,
-            workspaceId = DEFAULT_WORKSPACE_ID,
-            type = TYPE_DEEP_READ,
-            mimeType = "application/json",
-            title = title,
-            sourceKind = ArtifactSourceKind.DEEPREAD,
-            sourceId = topicId,
-            sourceRunId = null,
-            sourceMessageId = null,
-            contentLocator = deepReadContentLocatorFor(artifactId),
-            contentDigest = digest,
-            sizeBytes = size,
-            parserVersion = DEEPREAD_PARSER_VERSION,
-            parseStatus = ArtifactParseStatus.PARSED,
-            parseError = null,
-            metadataJson = metadata,
-            createdAtMs = now,
-            updatedAtMs = now,
-        )
-        writeContentFile(created.contentLocator, content)
-        dao.insert(created.toEntity())
-        registerReference(created.artifactId, REF_KIND_DEEPREAD, topicId)
-        return created
     }
 
     /**
@@ -210,33 +216,37 @@ class ArtifactRepository(
         type: String,
         mimeType: String,
     ): Artifact {
-        val artifactId = Uuid.random().toString()
-        val locator = contentLocatorFor(artifactId)
-        writeContentFile(locator, content)
-        val now = System.currentTimeMillis()
-        val created = Artifact(
-            artifactId = artifactId,
-            workspaceId = DEFAULT_WORKSPACE_ID,
-            type = type,
-            mimeType = mimeType,
-            title = title,
-            sourceKind = ArtifactSourceKind.MINIAPP,
-            sourceId = appId,
-            sourceRunId = null,
-            sourceMessageId = null,
-            contentLocator = locator,
-            contentDigest = sha256Hex(content),
-            sizeBytes = content.toByteArray(Charsets.UTF_8).size.toLong(),
-            parserVersion = MINIAPP_PARSER_VERSION,
-            parseStatus = ArtifactParseStatus.PARSED,
-            parseError = null,
-            metadataJson = buildMiniAppMetadata(appId, effectId),
-            createdAtMs = now,
-            updatedAtMs = now,
-        )
-        dao.insert(created.toEntity())
-        registerReference(artifactId, REF_KIND_MINIAPP, appId)
-        return created
+        val contentDigest = sha256Hex(content)
+        val size = content.toByteArray(Charsets.UTF_8).size.toLong()
+        return withArtifactWrite {
+            val artifactId = Uuid.random().toString()
+            val locator = contentLocatorFor(artifactId)
+            val now = System.currentTimeMillis()
+            val created = Artifact(
+                artifactId = artifactId,
+                workspaceId = DEFAULT_WORKSPACE_ID,
+                type = type,
+                mimeType = mimeType,
+                title = title,
+                sourceKind = ArtifactSourceKind.MINIAPP,
+                sourceId = appId,
+                sourceRunId = null,
+                sourceMessageId = null,
+                contentLocator = locator,
+                contentDigest = contentDigest,
+                sizeBytes = size,
+                parserVersion = MINIAPP_PARSER_VERSION,
+                parseStatus = ArtifactParseStatus.PARSED,
+                parseError = null,
+                metadataJson = buildMiniAppMetadata(appId, effectId),
+                createdAtMs = now,
+                updatedAtMs = now,
+            )
+            writeContentFile(locator, content)
+            dao.insert(created.toEntity())
+            insertReference(artifactId, REF_KIND_MINIAPP, appId)
+            created
+        }
     }
 
     /**
@@ -286,29 +296,32 @@ class ArtifactRepository(
         }
         val includeReasoning = ChatMessageContentBuilder.includeReasoning(artifact.metadataJson)
         val content = ChatMessageContentBuilder.build(message, includeReasoning)
-        val now = System.currentTimeMillis()
-        writeContentFile(artifact.contentLocator, content)
-        val updated = artifact.toEntity().copy(
-            title = ChatMessageContentBuilder.titleOf(message, content),
-            contentDigest = sha256Hex(content),
-            sizeBytes = content.toByteArray(Charsets.UTF_8).size.toLong(),
-            parserVersion = CHAT_PARSER_VERSION,
-            parseStatus = ArtifactParseStatus.PARSED.id,
-            parseError = null,
-            updatedAtMs = now,
-        )
-        dao.update(updated)
-        return ReparseResult.Success(artifact.artifactId, CHAT_PARSER_VERSION)
+        return withArtifactWrite {
+            val updated = artifact.toEntity().copy(
+                title = ChatMessageContentBuilder.titleOf(message, content),
+                contentDigest = sha256Hex(content),
+                sizeBytes = content.toByteArray(Charsets.UTF_8).size.toLong(),
+                parserVersion = CHAT_PARSER_VERSION,
+                parseStatus = ArtifactParseStatus.PARSED.id,
+                parseError = null,
+                updatedAtMs = System.currentTimeMillis(),
+            )
+            writeContentFile(artifact.contentLocator, content)
+            dao.update(updated)
+            ReparseResult.Success(artifact.artifactId, CHAT_PARSER_VERSION)
+        }
     }
 
     private suspend fun markParseFailure(artifact: Artifact, error: String) {
-        dao.update(
-            artifact.toEntity().copy(
-                parseStatus = ArtifactParseStatus.FAILED.id,
-                parseError = error,
-                updatedAtMs = System.currentTimeMillis(),
+        withArtifactWrite {
+            dao.update(
+                artifact.toEntity().copy(
+                    parseStatus = ArtifactParseStatus.FAILED.id,
+                    parseError = error,
+                    updatedAtMs = System.currentTimeMillis(),
+                )
             )
-        )
+        }
     }
 
     /**
@@ -316,16 +329,24 @@ class ArtifactRepository(
      * file in the SAF workspace and the mirror.
      */
     suspend fun delete(artifactId: String): Boolean {
-        val artifact = dao.getById(artifactId)?.toArtifact() ?: return false
-        dao.deleteById(artifactId)
-        deleteContentFile(artifact.contentLocator)
-        return true
+        return withArtifactWrite {
+            val artifact = dao.getById(artifactId)?.toArtifact() ?: return@withArtifactWrite false
+            dao.deleteById(artifactId)
+            deleteContentFile(artifact.contentLocator)
+            true
+        }
     }
 
     /** Number of cross-feature references — shown in the delete confirmation. */
     suspend fun referenceCount(artifactId: String): Int = dao.countReferences(artifactId)
 
     suspend fun registerReference(artifactId: String, refKind: String, refId: String) {
+        withArtifactWrite {
+            insertReference(artifactId, refKind, refId)
+        }
+    }
+
+    private suspend fun insertReference(artifactId: String, refKind: String, refId: String) {
         dao.insertReference(
             ArtifactReferenceEntity(
                 artifactId = artifactId,
@@ -389,6 +410,9 @@ class ArtifactRepository(
     }
 
     private fun mirrorFile(locator: String): File = workspaceManager.mirrorDir.resolve(locator)
+
+    private suspend fun <T> withArtifactWrite(block: suspend () -> T): T =
+        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
 
     private suspend fun findSourceMessage(conversationId: String?, messageId: String?): UIMessage? {
         if (conversationId == null || messageId == null) return null

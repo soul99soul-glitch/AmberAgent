@@ -4,12 +4,17 @@ import app.amber.agent.data.db.dao.ThreadGraphDAO
 import app.amber.agent.data.db.entity.ThreadMessageEntity
 import app.amber.agent.data.db.entity.ThreadNodeEntity
 import app.amber.agent.data.db.entity.ThreadResultEntity
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.subagent.ThreadDeliveryState
 import app.amber.feature.subagent.ThreadGraphStore
 import app.amber.feature.subagent.ThreadMessageRecord
 import app.amber.feature.subagent.ThreadNodeRecord
 import app.amber.feature.subagent.ThreadResultRecord
 import java.time.Instant
+import kotlinx.coroutines.currentCoroutineContext
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 
 /** Schema version of the thread graph tables — surfaced on the debug page. */
 const val THREAD_GRAPH_SCHEMA_VERSION = 1
@@ -21,21 +26,30 @@ const val THREAD_GRAPH_SCHEMA_VERSION = 1
  */
 class RoomThreadGraphStore(
     private val dao: ThreadGraphDAO,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) : ThreadGraphStore {
 
+    override suspend fun captureWriteContext(): CoroutineContext {
+        val gate = restoreWriteGate ?: return EmptyCoroutineContext
+        return currentCoroutineContext()[SyncRestoreWriteEpoch]
+            ?: SyncRestoreWriteEpoch(gate.currentEpoch())
+    }
+
     override suspend fun upsertNode(node: ThreadNodeRecord) {
-        dao.upsertNode(
-            ThreadNodeEntity(
-                threadId = node.threadId,
-                parentThreadId = node.parentThreadId,
-                rootRunId = node.rootRunId,
-                conversationId = node.conversationId,
-                status = node.status,
-                task = node.task,
-                startedAtMs = node.startedAtMs,
-                updatedAtMs = node.updatedAtMs,
+        withDurableWrite {
+            dao.upsertNode(
+                ThreadNodeEntity(
+                    threadId = node.threadId,
+                    parentThreadId = node.parentThreadId,
+                    rootRunId = node.rootRunId,
+                    conversationId = node.conversationId,
+                    status = node.status,
+                    task = node.task,
+                    startedAtMs = node.startedAtMs,
+                    updatedAtMs = node.updatedAtMs,
+                )
             )
-        )
+        }
     }
 
     override suspend fun getNode(threadId: String): ThreadNodeRecord? =
@@ -67,7 +81,7 @@ class RoomThreadGraphStore(
         }
 
     override suspend fun enqueueMessage(message: ThreadMessageRecord) {
-        dao.upsertMessage(message.toEntity())
+        withDurableWrite { dao.upsertMessage(message.toEntity()) }
     }
 
     override suspend fun getMessage(messageId: String): ThreadMessageRecord? =
@@ -80,34 +94,49 @@ class RoomThreadGraphStore(
         dao.listQueuedMessages(threadId).map { it.toRecord() }
 
     override suspend fun claimQueuedMessages(threadId: String): List<ThreadMessageRecord> =
-        dao.claimQueuedMessages(
-            threadId = threadId,
-            state = ThreadDeliveryState.DELIVERED.name,
-            updatedAtMs = Instant.now().toEpochMilli(),
-        ).map { it.toRecord() }
+        withDurableWrite {
+            dao.claimQueuedMessages(
+                threadId = threadId,
+                state = ThreadDeliveryState.DELIVERED.name,
+                updatedAtMs = Instant.now().toEpochMilli(),
+            ).map { it.toRecord() }
+        }
 
     override suspend fun requeueDeliveredMessages(threadId: String): Int =
-        dao.requeueDeliveredMessages(threadId, Instant.now().toEpochMilli())
+        withDurableWrite {
+            dao.requeueDeliveredMessages(threadId, Instant.now().toEpochMilli())
+        }
 
     override suspend fun markMessageDelivered(messageId: String) {
-        val message = dao.getMessage(messageId) ?: return
-        if (message.deliveryState != ThreadDeliveryState.QUEUED.name) return
-        dao.updateDeliveryState(messageId, ThreadDeliveryState.DELIVERED.name, Instant.now().toEpochMilli())
+        withDurableWrite {
+            val message = dao.getMessage(messageId) ?: return@withDurableWrite
+            if (message.deliveryState != ThreadDeliveryState.QUEUED.name) return@withDurableWrite
+            dao.updateDeliveryState(messageId, ThreadDeliveryState.DELIVERED.name, Instant.now().toEpochMilli())
+        }
     }
 
     override suspend fun markDeliveredMessagesPersisted(threadId: String): Int =
-        dao.markDeliveredAsPersisted(threadId, ThreadDeliveryState.PERSISTED.name, Instant.now().toEpochMilli())
+        withDurableWrite {
+            dao.markDeliveredAsPersisted(threadId, ThreadDeliveryState.PERSISTED.name, Instant.now().toEpochMilli())
+        }
 
     override suspend fun upsertResult(result: ThreadResultRecord) {
-        dao.upsertResult(
-            ThreadResultEntity(
-                threadId = result.threadId,
-                finalAnswer = result.finalAnswer,
-                artifactsJson = result.artifactsJson,
-                terminalReason = result.terminalReason,
-                finishedAtMs = result.finishedAtMs,
+        withDurableWrite {
+            dao.upsertResult(
+                ThreadResultEntity(
+                    threadId = result.threadId,
+                    finalAnswer = result.finalAnswer,
+                    artifactsJson = result.artifactsJson,
+                    terminalReason = result.terminalReason,
+                    finishedAtMs = result.finishedAtMs,
+                )
             )
-        )
+        }
+    }
+
+    private suspend fun <T> withDurableWrite(block: suspend () -> T): T {
+        val gate = restoreWriteGate
+        return if (gate == null) block() else gate.withCurrentWriterOrCancel(block)
     }
 
     override suspend fun getResult(threadId: String): ThreadResultRecord? =

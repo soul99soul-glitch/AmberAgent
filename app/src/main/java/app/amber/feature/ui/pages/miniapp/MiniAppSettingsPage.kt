@@ -247,6 +247,15 @@ fun MiniAppSettingsPage(
                         }
                         item {
                             MiniAppSwitchRow(
+                                title = "系统交互",
+                                description = "允许已声明权限的小应用调用振动、设备、屏幕、语音、分享与外链；二维码也受此开关控制",
+                                checked = miniApp.systemCapabilitiesEnabled,
+                                enabled = miniApp.enabled,
+                                onCheckedChange = { enabled -> updateMiniApp { it.copy(systemCapabilitiesEnabled = enabled) } },
+                            )
+                        }
+                        item {
+                            MiniAppSwitchRow(
                                 title = "显示源码入口",
                                 description = "在 Runner 菜单里显示只读源码查看",
                                 checked = miniApp.showSourceButton,

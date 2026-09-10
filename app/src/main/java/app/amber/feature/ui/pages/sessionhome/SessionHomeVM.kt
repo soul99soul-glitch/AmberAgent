@@ -1,5 +1,6 @@
 package app.amber.feature.ui.pages.sessionhome
 
+import android.util.Log
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -17,9 +18,16 @@ import app.amber.feature.home.DEFAULT_DISMISS_DURATION
 import java.time.Instant
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -28,8 +36,7 @@ import kotlinx.coroutines.launch
  * （运行中任务、删除/置顶/重命名会话、更新设置），以及 P8-08 首页
  * 「继续」聚合（[continueCandidates] + [dismissContinueCandidate]）。
  *
- * 会话分页本身复用 [app.amber.feature.ui.pages.chat.ChatDrawerVM]
- * （activity 作用域，抽屉与首页共享同一滚动位置）。
+ * 会话摘要由本页直接观察；首页的快速筛选只在这些摘要上运行。
  */
 class SessionHomeVM(
     private val settingsStore: SettingsAggregator,
@@ -40,14 +47,60 @@ class SessionHomeVM(
     private val continueDismissStore: ContinueDismissStore,
 ) : ViewModel() {
 
+    private val reloadRequests = MutableStateFlow(0)
+    private val _conversationsLoaded = MutableStateFlow(false)
+    private val _hasConversationError = MutableStateFlow(false)
+    val conversationsLoaded: StateFlow<Boolean> = _conversationsLoaded
+    val hasConversationError: StateFlow<Boolean> = _hasConversationError
+
+    private val continueReloadRequests = MutableStateFlow(0)
+    private val _hasContinueError = MutableStateFlow(false)
+    val hasContinueError: StateFlow<Boolean> = _hasContinueError
+
+    /** Home uses the already persisted conversation summaries for instant local title filtering. */
+    val conversations: StateFlow<List<Conversation>> = reloadRequests
+        .flatMapLatest {
+            observeConversationStream(
+                source = { conversationRepo.getConversationSummaries() },
+                onValue = {
+                    _hasConversationError.value = false
+                    _conversationsLoaded.value = true
+                },
+                onError = { error ->
+                    Log.e(TAG, "Home conversation stream failed", error)
+                    _hasConversationError.value = true
+                },
+            )
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun retryConversations() {
+        _hasConversationError.value = false
+        reloadRequests.value += 1
+    }
+
     val conversationJobs: StateFlow<Map<Uuid, Job?>> = chatService
         .getConversationJobs()
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     /** P8-08：首页「继续」聚合列表（持久投影，进程死亡后仍正确）。 */
-    val continueCandidates: StateFlow<List<ContinueCandidate>> = continueAggregator
-        .observe()
+    val continueCandidates: StateFlow<List<ContinueCandidate>> = continueReloadRequests
+        .flatMapLatest {
+            observeContinueStream(
+                source = { continueAggregator.observe() },
+                onValue = { _hasContinueError.value = false },
+                onError = { error ->
+                    Log.e(TAG, "Home continue stream failed", error)
+                    _hasContinueError.value = true
+                },
+            )
+        }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun retryContinueCandidates() {
+        _hasContinueError.value = false
+        continueReloadRequests.value += 1
+    }
 
     /** P8-08：暂时隐藏一个候选（默认 24 小时，到期自动恢复）。 */
     fun dismissContinueCandidate(candidate: ContinueCandidate) {
@@ -85,7 +138,7 @@ class SessionHomeVM(
 
     fun updatePinnedStatus(conversation: Conversation) {
         viewModelScope.launch {
-            conversationRepo.togglePinStatus(conversation.id)
+            chatService.togglePinnedStatus(conversation.id)
         }
     }
 
@@ -94,5 +147,56 @@ class SessionHomeVM(
             val conversationFull = conversationRepo.getConversationById(conversation.id) ?: return@launch
             chatService.generateTitle(conversation.id, conversationFull, force)
         }
+    }
+}
+
+private const val TAG = "SessionHomeVM"
+
+/**
+ * Keeps stream construction failures and collection failures observable without
+ * emitting an empty replacement that would erase the last rendered list.
+ */
+internal fun observeConversationStream(
+    source: () -> Flow<List<Conversation>>,
+    onValue: (List<Conversation>) -> Unit,
+    onError: (Throwable) -> Unit,
+): Flow<List<Conversation>> {
+    return try {
+        source()
+            .onEach { value -> onValue(value) }
+            .catch { error ->
+                if (error is CancellationException) throw error
+                onError(error)
+            }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        onError(error)
+        emptyFlow()
+    }
+}
+
+/**
+ * Keeps the Continue list and its error state independent from conversation
+ * loading. A transient source failure must not erase already visible cards or
+ * masquerade as an empty Home state.
+ */
+internal fun observeContinueStream(
+    source: () -> Flow<List<ContinueCandidate>>,
+    onValue: (List<ContinueCandidate>) -> Unit,
+    onError: (Throwable) -> Unit,
+): Flow<List<ContinueCandidate>> {
+    return try {
+        source()
+            .onEach { value -> onValue(value) }
+            .catch { error ->
+                if (error is CancellationException) throw error
+                onError(error)
+            }
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        onError(error)
+        emptyFlow()
     }
 }

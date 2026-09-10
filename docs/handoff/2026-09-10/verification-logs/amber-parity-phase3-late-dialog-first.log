@@ -1,0 +1,51 @@
+
+app.amber.feature.webmount.WebMountLateDialogDeviceTest:
+Error in delayedDialogArrivingAfterRunEndIsCancelledAsOldRun(app.amber.feature.webmount.WebMountLateDialogDeviceTest):
+java.lang.AssertionError: late dialog must not survive cancelled run
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at app.amber.feature.webmount.WebMountLateDialogDeviceTest$delayedDialogArrivingAfterRunEndIsCancelledAsOldRun$1.invokeSuspend(WebMountLateDialogDeviceTest.kt:98)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:233)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:152)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at app.amber.feature.webmount.WebMountLateDialogDeviceTest.delayedDialogArrivingAfterRunEndIsCancelledAsOldRun(WebMountLateDialogDeviceTest.kt:58)
+
+
+Time: 1.147
+There was 1 failure:
+1) delayedDialogArrivingAfterRunEndIsCancelledAsOldRun(app.amber.feature.webmount.WebMountLateDialogDeviceTest)
+java.lang.AssertionError: late dialog must not survive cancelled run
+	at org.junit.Assert.fail(Assert.java:89)
+	at org.junit.Assert.assertTrue(Assert.java:42)
+	at app.amber.feature.webmount.WebMountLateDialogDeviceTest$delayedDialogArrivingAfterRunEndIsCancelledAsOldRun$1.invokeSuspend(WebMountLateDialogDeviceTest.kt:98)
+	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:34)
+	at kotlinx.coroutines.DispatchedTaskKt.resume(DispatchedTask.kt:233)
+	at kotlinx.coroutines.DispatchedTaskKt.dispatch(DispatchedTask.kt:152)
+	at kotlinx.coroutines.CancellableContinuationImpl.dispatchResume(CancellableContinuationImpl.kt:470)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core(CancellableContinuationImpl.kt:504)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeImpl$kotlinx_coroutines_core$default(CancellableContinuationImpl.kt:493)
+	at kotlinx.coroutines.CancellableContinuationImpl.resumeUndispatched(CancellableContinuationImpl.kt:596)
+	at kotlinx.coroutines.EventLoopImplBase$DelayedResumeTask.run(EventLoop.common.kt:497)
+	at kotlinx.coroutines.EventLoopImplBase.processNextEvent(EventLoop.common.kt:263)
+	at kotlinx.coroutines.BlockingCoroutine.joinBlocking(Builders.kt:94)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking(Builders.kt:70)
+	at kotlinx.coroutines.BuildersKt.runBlocking(Unknown Source:1)
+	at kotlinx.coroutines.BuildersKt__BuildersKt.runBlocking$default(Builders.kt:48)
+	at kotlinx.coroutines.BuildersKt.runBlocking$default(Unknown Source:1)
+	at app.amber.feature.webmount.WebMountLateDialogDeviceTest.delayedDialogArrivingAfterRunEndIsCancelledAsOldRun(WebMountLateDialogDeviceTest.kt:58)
+
+FAILURES!!!
+Tests run: 1,  Failures: 1
+
+

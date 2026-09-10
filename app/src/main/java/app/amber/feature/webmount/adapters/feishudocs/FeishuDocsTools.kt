@@ -1,5 +1,6 @@
 package app.amber.feature.webmount.adapters.feishudocs
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -21,7 +22,30 @@ import app.amber.core.agent.utils.string
 import app.amber.feature.webmount.core.WebMountToolHooks
 import app.amber.feature.webmount.oauth.WebMountOAuthClient
 import app.amber.feature.webmount.primitives.SessionHandle
-import app.amber.feature.webmount.primitives.WebViewPool
+import app.amber.feature.webmount.primitives.WebMountLeaseResult
+import app.amber.feature.webmount.primitives.WebMountOwner
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
+import app.amber.feature.webmount.tools.WEBMOUNT_CONVERSATION_ID
+import app.amber.feature.webmount.tools.WEBMOUNT_RUN_ID
+import app.amber.feature.webmount.tools.webMountConversationId
+import app.amber.feature.webmount.tools.webMountRunId
+
+/** Host-owned scope is needed for the lease, but must not enter activity previews. */
+private fun JsonElement.withoutWebMountScopeForPreview(): JsonElement {
+    val objectInput = this as? JsonObject ?: return this
+    if (!objectInput.containsKey(WEBMOUNT_CONVERSATION_ID) &&
+        !objectInput.containsKey(WEBMOUNT_RUN_ID)
+    ) return this
+    return JsonObject(objectInput.toMutableMap().apply {
+        remove(WEBMOUNT_CONVERSATION_ID)
+        remove(WEBMOUNT_RUN_ID)
+    })
+}
+
+private class FeishuSessionException(
+    val code: String,
+    message: String,
+) : IllegalStateException(message)
 
 /**
  * 飞书云文档 tool surface.
@@ -36,7 +60,7 @@ import app.amber.feature.webmount.primitives.WebViewPool
  */
 class FeishuDocsTools(
     private val client: FeishuDocsClient,
-    private val pool: WebViewPool,
+    private val sessionOwner: WebMountSessionOwner,
 ) {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -76,7 +100,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_resolve", "飞书 解析引用", input) {
+            hooks.track("feishu_docs_resolve", "飞书 解析引用", input.withoutWebMountScopeForPreview()) {
                 val result = runCatching {
                     val ref = resolveDocRef(input)
                     if (ref.docType != "docx") unsupportedDocRefJson(ref) else docRefJson(ref)
@@ -102,33 +126,36 @@ class FeishuDocsTools(
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("session_id", stringProp("WebMount session id returned by wm_open. Optional: if omitted, uses the first live Feishu document session."))
+                    put("session_id", stringProp("WebMount session id returned by wm_open. Optional: if omitted, uses a live Feishu document session bound to the current conversation."))
                     put("max_blocks", integerProp("Max visible blocks to return. Default 80, cap 300."))
                 },
                 required = emptyList(),
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_snapshot", "飞书 当前页快照", input) {
+            hooks.track("feishu_docs_snapshot", "飞书 当前页快照", input.withoutWebMountScopeForPreview()) {
                 val result = runCatching {
-                    val handle = requireFeishuSession(input.string("session_id"))
-                    val payload = handle.callBridge(
-                        method = "feishu_snapshot",
-                        args = buildJsonObject {
-                            put("max_blocks", (input.long("max_blocks") ?: 80L).coerceIn(1L, 300L))
-                        },
-                        timeoutMs = 8_000L,
-                    )
-                    val payloadObj = payload as? JsonObject ?: error("bridge returned non-object snapshot")
-                    buildJsonObject {
-                        put("session_id", handle.sessionId)
-                        payloadObj.forEach { (key, value) -> put(key, value) }
+                    withFeishuAgentSession(input, input.string("session_id")) { handle ->
+                        val payload = handle.callBridge(
+                            method = "feishu_snapshot",
+                            args = buildJsonObject {
+                                put("max_blocks", (input.long("max_blocks") ?: 80L).coerceIn(1L, 300L))
+                            },
+                            timeoutMs = 8_000L,
+                        )
+                        val payloadObj = payload as? JsonObject ?: error("bridge returned non-object snapshot")
+                        buildJsonObject {
+                            put("session_id", handle.sessionId)
+                            payloadObj.forEach { (key, value) -> put(key, value) }
+                        }
                     }
                 }.getOrElse { error ->
-                    val message = error.message ?: error.toString()
+                    if (error is CancellationException) throw error
+                    val sessionError = error as? FeishuSessionException
+                    val message = sessionError?.message ?: error.message ?: error.toString()
                     feishuErrorJson(
-                        code = if (message.startsWith("not_feishu_doc_page")) "not_feishu_doc_page" else "snapshot_failed",
-                        message = message.removePrefix("not_feishu_doc_page:").trim(),
+                        code = sessionError?.code ?: "snapshot_failed",
+                        message = message,
                         nextAction = "Open the Feishu document with wm_open, wait for it to finish loading, then call feishu_docs_snapshot with that session_id.",
                     )
                 }
@@ -147,7 +174,7 @@ class FeishuDocsTools(
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {
-                    put("session_id", stringProp("WebMount session id. Optional: if omitted, uses the first live Feishu document session."))
+                    put("session_id", stringProp("WebMount session id. Optional: if omitted, uses a live Feishu document session bound to the current conversation."))
                     put("network_since", integerProp("Return events with seq > this. Default 0."))
                     put("network_max", integerProp("Max events to summarize. Default 80, cap 200."))
                 },
@@ -155,19 +182,22 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_network_summary", "飞书 网络摘要", input) {
+            hooks.track("feishu_docs_network_summary", "飞书 网络摘要", input.withoutWebMountScopeForPreview()) {
                 val result = runCatching {
-                    val handle = requireFeishuSession(input.string("session_id"))
-                    val since = (input.long("network_since") ?: 0L).coerceAtLeast(0L)
-                    val max = (input.long("network_max") ?: 80L).coerceIn(1L, 200L).toInt()
-                    FeishuDocsNetworkSummary.summarize(
-                        sessionId = handle.sessionId,
-                        snapshot = handle.networkLog.snapshot(since, max),
-                    )
+                    withFeishuAgentSession(input, input.string("session_id")) { handle ->
+                        val since = (input.long("network_since") ?: 0L).coerceAtLeast(0L)
+                        val max = (input.long("network_max") ?: 80L).coerceIn(1L, 200L).toInt()
+                        FeishuDocsNetworkSummary.summarize(
+                            sessionId = handle.sessionId,
+                            snapshot = handle.networkLog.snapshot(since, max),
+                        )
+                    }
                 }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    val sessionError = error as? FeishuSessionException
                     feishuErrorJson(
-                        code = "network_summary_failed",
-                        message = error.message ?: error.toString(),
+                        code = sessionError?.code ?: "network_summary_failed",
+                        message = sessionError?.message ?: error.message ?: error.toString(),
                         nextAction = "Call wm_state for the session to verify that WebMount network logging is active.",
                     )
                 }
@@ -200,7 +230,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_markdown_pack", "飞书 Markdown Pack", input) {
+            hooks.track("feishu_docs_markdown_pack", "飞书 Markdown Pack", input.withoutWebMountScopeForPreview()) {
                 val result = runCatching {
                     val start = (input.long("start_char") ?: 0L).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                     val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1L, 200_000L).toInt()
@@ -264,7 +294,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_list", "飞书 文档列表", input) {
+            hooks.track("feishu_docs_list", "飞书 文档列表", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val folder = input.string("folder_token")
                 val pageSize = (input.long("page_size") ?: 50L).coerceIn(1L, 200L).toInt()
@@ -299,7 +329,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_read", "飞书 文档读取", input) {
+            hooks.track("feishu_docs_read", "飞书 文档读取", input.withoutWebMountScopeForPreview()) {
                 val result = runCatching {
                     val ref = resolveDocRef(input)
                     require(ref.docType == "docx") {
@@ -360,7 +390,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_blocks", "飞书 Block 列表", input) {
+            hooks.track("feishu_docs_blocks", "飞书 Block 列表", input.withoutWebMountScopeForPreview()) {
                 val payload = runCatching {
                     val ref = resolveDocRef(input)
                     require(ref.docType == "docx") {
@@ -415,7 +445,7 @@ class FeishuDocsTools(
             )
         },
         execute = { input ->
-            hooks.track("feishu_docs_search", "飞书 搜索", input) {
+            hooks.track("feishu_docs_search", "飞书 搜索", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val query = input.requiredString("query")
                 val limit = (input.long("limit") ?: 20L).coerceIn(1L, 100L).toInt()
@@ -447,7 +477,7 @@ class FeishuDocsTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            hooks.track("feishu_docs_create", "飞书 新建文档", input) {
+            hooks.track("feishu_docs_create", "飞书 新建文档", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val title = input.requiredString("title")
                 val folder = input.string("folder_token")
@@ -480,7 +510,7 @@ class FeishuDocsTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            hooks.track("feishu_docs_append_block", "飞书 追加段落", input) {
+            hooks.track("feishu_docs_append_block", "飞书 追加段落", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
@@ -535,7 +565,7 @@ class FeishuDocsTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            hooks.track("feishu_docs_append_heading", "飞书 追加标题", input) {
+            hooks.track("feishu_docs_append_heading", "飞书 追加标题", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val level = (input.long("level") ?: error("level is required (1-9)"))
@@ -581,7 +611,7 @@ class FeishuDocsTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            hooks.track("feishu_docs_append_list_item", "飞书 追加列表项", input) {
+            hooks.track("feishu_docs_append_list_item", "飞书 追加列表项", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
@@ -620,7 +650,7 @@ class FeishuDocsTools(
         needsApproval = true,
         allowsAutoApproval = false,
         execute = { input ->
-            hooks.track("feishu_docs_append_callout", "飞书 追加 Callout", input) {
+            hooks.track("feishu_docs_append_callout", "飞书 追加 Callout", input.withoutWebMountScopeForPreview()) {
                 val token = requireToken(oauth)
                 val docId = input.requiredString("document_id")
                 val text = input.requiredString("text")
@@ -744,21 +774,78 @@ class FeishuDocsTools(
         return input.string("parent_block_id")
     }
 
-    private fun requireFeishuSession(sessionId: String?): SessionHandle {
-        if (!sessionId.isNullOrBlank()) {
-            val handle = pool.peek(sessionId) ?: error("WebMount session not found: $sessionId")
-            require(isFeishuDocUrl(handle.loadState.value.currentUrl)) {
-                "not_feishu_doc_page: WebMount session is not a Feishu/Lark document page: $sessionId"
+    /**
+     * Keep WebView reads behind the owner CAS. An omitted id may only resolve
+     * to a live Feishu page already bound to this conversation; it must never
+     * fall through to an unrelated pooled session.
+     */
+    private suspend fun <T> withFeishuAgentSession(
+        input: JsonElement,
+        requestedSessionId: String?,
+        block: suspend (SessionHandle) -> T,
+    ): T {
+        val conversationId = input.webMountConversationId()
+            ?: throw FeishuSessionException(
+                code = "missing_conversation",
+                message = "WebMount Feishu tools require the current conversation scope.",
+            )
+        val runId = input.webMountRunId()
+            ?: throw FeishuSessionException(
+                code = "missing_run",
+                message = "WebMount Feishu tools require the current run scope.",
+            )
+        val normalizedRequestedId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() }
+        val sessionId = normalizedRequestedId ?: sessionOwner.sessions.value
+            .firstOrNull { metadata ->
+                metadata.conversationId == conversationId &&
+                    !metadata.needsReopen &&
+                    FeishuDocRefs.isFeishuDocumentUrl(metadata.redactedUrl)
             }
-            return handle
+            ?.sessionId
+            ?: throw FeishuSessionException(
+                code = "session_unavailable",
+                message = "No live Feishu document WebMount session is bound to conversation $conversationId. " +
+                    "Open the document with wm_open in this conversation or pass its session_id.",
+            )
+        if (normalizedRequestedId != null && sessionOwner.metadata(sessionId) == null) {
+            throw FeishuSessionException(
+                code = "session_unavailable",
+                message = "WebMount session not found: $sessionId",
+            )
         }
-        return pool.listSessions().firstOrNull { handle ->
-            isFeishuDocUrl(handle.loadState.value.currentUrl)
-        } ?: error("No live Feishu document WebMount session found. Open the document with wm_open or pass session_id.")
+        val result = sessionOwner.acquire(
+            sessionId = sessionId,
+            actor = WebMountOwner.AGENT,
+            conversationId = conversationId,
+            runId = runId,
+        )
+        val lease = when (result) {
+            is WebMountLeaseResult.Granted -> result.lease
+            is WebMountLeaseResult.Rejected -> throw FeishuSessionException(
+                code = result.failure.code,
+                message = "WebMount Feishu session '$sessionId' was rejected: ${result.failure.code}. " +
+                    "${result.metadata?.owner?.let { "current_owner=${it.name.lowercase()}; " }.orEmpty()}" +
+                    "Use a live session bound to the current conversation/run.",
+            )
+        }
+        return try {
+            if (!FeishuDocRefs.isFeishuDocumentUrl(lease.handle.loadState.value.currentUrl)) {
+                throw FeishuSessionException(
+                    code = "not_feishu_doc_page",
+                    message = "WebMount session is not a Feishu/Lark document page: $sessionId",
+                )
+            }
+            if (!sessionOwner.isLeaseActive(lease.leaseId, conversationId, runId)) {
+                throw FeishuSessionException(
+                    code = "lease_inactive",
+                    message = "WebMount Feishu session lease is no longer active: $sessionId",
+                )
+            }
+            block(lease.handle)
+        } finally {
+            sessionOwner.release(lease.leaseId, "feishu_tool_finished")
+        }
     }
-
-    private fun isFeishuDocUrl(url: String?): Boolean =
-        FeishuDocRefs.isFeishuDocumentUrl(url)
 
     private suspend fun readBlocksForPack(
         accessToken: String,

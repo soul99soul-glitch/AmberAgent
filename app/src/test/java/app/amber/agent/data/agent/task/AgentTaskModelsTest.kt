@@ -29,7 +29,7 @@ class AgentTaskModelsTest {
         )
         assertEquals(
             AgentTaskRecoveryState.OUTPUT_ONLY,
-            AgentTaskStatus.COMPLETED.toRecoveryState("officepro", AgentTaskRetryPolicy()),
+            AgentTaskStatus.COMPLETED.toRecoveryState("terminal", AgentTaskRetryPolicy()),
         )
     }
 }

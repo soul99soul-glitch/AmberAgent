@@ -27,6 +27,12 @@ val MiniAppV3Permissions = MiniAppV2Permissions + setOf(
     "sensor",
     "location",
     "clipboard.read",
+    "haptics",
+    "device",
+    "screen",
+    "speech",
+    "share",
+    "openURL",
 )
 val MiniAppCategories = setOf("tool", "game", "info", "custom")
 
@@ -50,6 +56,12 @@ val MiniAppPermissionAliases = mapOf(
     "ambient-light" to "sensor",
     "ambient_light" to "sensor",
     "illuminance" to "sensor",
+    "vibrate" to "haptics",
+    "vibration" to "haptics",
+    "haptic" to "haptics",
+    "振动" to "haptics",
+    "震动" to "haptics",
+    "openurl" to "openURL",
 )
 
 @Serializable
@@ -157,6 +169,25 @@ enum class MiniAppPermission(val value: String) {
 
     @SerialName("clipboard.read")
     ClipboardRead("clipboard.read"),
+
+    /** P4 W10: per-app system capability permissions (iOS parity). */
+    @SerialName("haptics")
+    Haptics("haptics"),
+
+    @SerialName("device")
+    Device("device"),
+
+    @SerialName("screen")
+    Screen("screen"),
+
+    @SerialName("speech")
+    Speech("speech"),
+
+    @SerialName("share")
+    Share("share"),
+
+    @SerialName("openURL")
+    OpenURL("openURL"),
 }
 
 enum class MiniAppGrantDecision {

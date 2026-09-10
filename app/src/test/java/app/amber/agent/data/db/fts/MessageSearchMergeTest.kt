@@ -1,7 +1,10 @@
 package app.amber.agent.data.db.fts
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -101,6 +104,40 @@ class MessageSearchMergeTest {
         )
 
         assertEquals(listOf("conv-1", "conv-9"), merged.map { it.conversationId })
+    }
+
+    @Test
+    fun `failure in either FTS projection propagates instead of returning a partial merge`() = runTest {
+        val bodyFailure = IllegalStateException("body query failed")
+        val observedBodyFailure = runCatching {
+            queryMessageSearchResults(
+                bodyQuery = { throw bodyFailure },
+                titleQuery = { error("title query must not run after body failure") },
+            )
+        }.exceptionOrNull()
+        assertSame(bodyFailure, observedBodyFailure)
+
+        val titleFailure = IllegalStateException("title query failed")
+        val observedTitleFailure = runCatching {
+            queryMessageSearchResults(
+                bodyQuery = { listOf(bodyHit("conv-1")) },
+                titleQuery = { throw titleFailure },
+            )
+        }.exceptionOrNull()
+        assertSame(titleFailure, observedTitleFailure)
+    }
+
+    @Test
+    fun `cancellation from an FTS projection is propagated unchanged`() = runTest {
+        val cancellation = CancellationException("search cancelled")
+        val observed = runCatching {
+            queryMessageSearchResults(
+                bodyQuery = { throw cancellation },
+                titleQuery = { emptyList() },
+            )
+        }.exceptionOrNull()
+
+        assertSame(cancellation, observed)
     }
 
     // ---- 已删除 / 重命名会话的标题索引同步（SQL 层，源码断言） ----

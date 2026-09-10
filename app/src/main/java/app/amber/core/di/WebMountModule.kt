@@ -30,6 +30,7 @@ import app.amber.feature.webmount.oauth.PendingOAuthStore
 import app.amber.feature.webmount.oauth.WebMountOAuthClient
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.feature.webmount.primitives.WebViewPool
+import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.webmount.profile.HostShimRegistry
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
@@ -87,7 +88,7 @@ val webMountModule = module {
     single { JuejinAdapter(tools = get(), cookieProvider = get()) }
 
     single { FeishuDocsClient(http = get()) }
-    single { FeishuDocsTools(client = get(), pool = get()) }
+    single { FeishuDocsTools(client = get(), sessionOwner = get()) }
     single { FeishuDocsAdapter(tools = get(), oauthClient = get()) }
 
     single { GithubClient(http = get()) }
@@ -124,9 +125,20 @@ val webMountModule = module {
     single {
         WebViewPool(
             appContext = get(),
-            onSessionDestroyed = WebMountPageSnapshotCache::invalidate,
+            onSessionDestroyed = { sessionId ->
+                WebMountPageSnapshotCache.invalidate(sessionId)
+                get<WebMountSessionOwner>().onPoolSessionDestroyed(sessionId)
+            },
+            onSessionCreated = { handle ->
+                get<WebMountSessionOwner>().onPoolSessionCreated(handle)
+            },
+            onSessionStateChanged = { sessionId, state ->
+                get<WebMountSessionOwner>().onPoolSessionStateChanged(sessionId, state)
+            },
         )
     }
+
+    single { WebMountSessionOwner(context = get(), pool = get()) }
 
     single { ProfileRegistry(context = get()) }
 
@@ -147,6 +159,7 @@ val webMountModule = module {
             userSiteRegistry = get(),
             oauthStore = get(),
             settingsStore = get<SettingsAggregator>(),
+            sessionOwner = get(),
         )
     }
 }

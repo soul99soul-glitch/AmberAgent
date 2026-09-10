@@ -44,6 +44,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import app.amber.ai.ui.UIMessagePart
 import app.amber.common.http.jsonObjectOrNull
 import com.composables.icons.lucide.Lucide
@@ -59,12 +60,14 @@ import java.io.File
 
 /**
  * Render a coalesced subagent task: one card replaces the multiple subagent_* tool calls
- * (start / wait / read / cancel) that share a run_id.
+ * (start / wait / read / cancel / followup / send / interrupt) that share a
+ * thread id.
  *
- * Status is derived from the parsed `status` field of the latest wait/read output (most
- * authoritative view of the subagent's actual state); falls back to RUNNING if no result
- * has arrived yet. While running, cycles through the role's [phaseLabels] every few seconds
- * to give a sense of progression. Phase 5 wires the click to an expandable run sheet.
+ * Status is derived from the latest lifecycle result and the manager's live
+ * thread state; operation receipts remain visibly pending until a turn result
+ * exists. While running, cycles through the role's [phaseLabels] every few
+ * seconds to give a sense of progression. Phase 5 wires the click to an
+ * expandable run sheet.
  */
 @Composable
 fun SubAgentTaskStepView(
@@ -87,24 +90,39 @@ fun SubAgentTaskStepView(
 
     // coalesceSubAgentSteps rebuilds step.tools each render even when contents are identical,
     // so remember(step.tools) wouldn't actually memoize — drop the wrap; the parse is cheap.
-    val parsedStatus = parseLatestSubAgentStatus(step.tools)
+    val cardState = deriveSubAgentCardState(step.tools)
+    val parsedStatus = cardState.status
 
     // P4-02: after a restart the conversation may only contain subagent_start
     // (the parent never got to wait/read), so the tool-derived status would
     // stay RUNNING forever while the thread has actually finished. When the
     // persisted thread graph knows a terminal status, prefer it.
     val manager: SubAgentManager = koinInject()
-    var persistedStatus by remember(step.runId) { mutableStateOf<SubAgentRunStatus?>(null) }
+    val observedRunFlow = remember(step.runId) { manager.runStateFlow(step.runId) }
+    val observedRunState = observedRunFlow.collectAsState(initial = null)
+    val observedRun = observedRunState.value
+    var persistedState by remember(step.runId) {
+        mutableStateOf<app.amber.feature.subagent.ThreadGraphManager.ThreadGraphState?>(null)
+    }
     LaunchedEffect(step.runId) {
-        persistedStatus = manager.persistedState(step.runId)
+        persistedState = manager.persistedState(step.runId)
             ?.takeIf { it.status.isTerminalForDisplay() }
-            ?.status
+    }
+    val persistedStatus = persistedState?.status
+    val persistedIsCurrentTurn = cardState.latestUpdatedAtMs?.let { latest ->
+        persistedState?.updatedAtMs?.let { it >= latest }
+    } == true
+    val timelineStatus = if (parsedStatus == SubAgentRunStatus.RUNNING && observedRun != null) {
+        observedRun.status
+    } else {
+        parsedStatus
     }
     val effectiveStatus = when {
-        parsedStatus == SubAgentRunStatus.RUNNING && persistedStatus != null -> persistedStatus!!
-        else -> parsedStatus
+        cardState.canUsePersistedStatus && persistedIsCurrentTurn &&
+            timelineStatus == SubAgentRunStatus.RUNNING && persistedStatus != null -> persistedStatus
+        else -> timelineStatus
     }
-    val isRunning = effectiveStatus == SubAgentRunStatus.RUNNING
+    val isRunning = cardState.isCurrentTurnActive(effectiveStatus)
 
     val phaseLabels = def?.phaseLabels.orEmpty()
     // Reset cycle when role's phaseLabels list changes (mid-run edits to a custom role would
@@ -123,19 +141,21 @@ fun SubAgentTaskStepView(
         else -> phaseLabels.last()
     }
 
-    val statusVerb = when (effectiveStatus) {
-        SubAgentRunStatus.RUNNING -> "正在工作"
-        SubAgentRunStatus.COMPLETED -> "已完成"
-        SubAgentRunStatus.FAILED -> "失败"
-        SubAgentRunStatus.CANCELLED -> "已取消"
-        SubAgentRunStatus.TIMED_OUT -> "超时"
-        SubAgentRunStatus.APPROVAL_REQUIRED -> "等待审批"
-        SubAgentRunStatus.INTERRUPTED -> "已中断"
-    }
-    val title = if (isRunning && currentPhase.isNotBlank()) {
+    val statusVerb = cardState.statusVerb(effectiveStatus)
+    val title = if (isRunning && currentPhase.isNotBlank() && !cardState.isAccepted && !cardState.isDelivered) {
         "@$displayName $statusVerb · $currentPhase"
     } else {
         "@$displayName $statusVerb"
+    }
+
+    // Accepted/queued/delivered are operation receipts, not task completion.
+    // Keep the existing capsule status vocabulary, but render these states as
+    // pending so the check badge never claims that send_message completed the
+    // subagent task.
+    val capsuleStatus = if (cardState.isPendingReceipt) {
+        AgentToolStatus.RUNNING
+    } else {
+        effectiveStatus.toAgentToolStatus()
     }
 
     AgentToolCallCapsule(
@@ -143,7 +163,7 @@ fun SubAgentTaskStepView(
         toolName = "subagent_task",
         icon = Lucide.WandSparkles,
         kind = AgentToolKind.GENERIC,
-        status = effectiveStatus.toAgentToolStatus(),
+        status = capsuleStatus,
         loading = loading && isRunning,
         onClick = { showSheet = true },
         approvalActions = null,
@@ -185,18 +205,172 @@ private fun SubAgentRunStatus.isTerminalForDisplay(): Boolean = when (this) {
     -> false
 }
 
+/** The operation represented by the latest subagent tool call in a task card. */
+internal enum class SubAgentCardOperation {
+    START,
+    WAIT,
+    READ,
+    CANCEL,
+    FOLLOWUP,
+    SEND_MESSAGE,
+    INTERRUPT,
+}
+
 /**
- * Walk the subagent_* tools in reverse order and pick the most recent parsable `status` from
- * the result payload. Returns RUNNING if no result has been observed yet (initial state).
+ * UI projection of the subagent tool timeline. [status] is the latest actual
+ * run status; receipt fields describe a newer followup/message operation and
+ * therefore must not be mistaken for a completed run.
  */
-private fun parseLatestSubAgentStatus(tools: List<UIMessagePart.Tool>): SubAgentRunStatus {
-    for (tool in tools.asReversed()) {
-        val statusStr = tool.cachedSubAgentOutputJsonObject()?.get("status")
-            ?.let { it as? JsonPrimitive }?.contentOrNull ?: continue
-        SubAgentRunStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
-            ?.let { return it }
+internal data class SubAgentCardState(
+    val status: SubAgentRunStatus,
+    val turn: Int,
+    val latestOperation: SubAgentCardOperation?,
+    val deliveryState: String?,
+    val latestUpdatedAtMs: Long?,
+    val requestPending: Boolean,
+) {
+    val isQueued: Boolean
+        get() = latestOperation == SubAgentCardOperation.SEND_MESSAGE &&
+            deliveryState == "queued"
+
+    val isDelivered: Boolean
+        get() = latestOperation == SubAgentCardOperation.SEND_MESSAGE &&
+            deliveryState == "delivered"
+
+    val isAccepted: Boolean
+        get() = requestPending && latestOperation in setOf(
+            SubAgentCardOperation.FOLLOWUP,
+            SubAgentCardOperation.SEND_MESSAGE,
+            SubAgentCardOperation.INTERRUPT,
+        )
+
+    /** Operation receipts use a pending visual state even when an older turn completed. */
+    val isPendingReceipt: Boolean
+        get() = isQueued || isAccepted || isDelivered
+
+    /** A timestamp lets cold-start reads distinguish this turn from an older result. */
+    val canUsePersistedStatus: Boolean
+        get() = status == SubAgentRunStatus.RUNNING && latestUpdatedAtMs != null
+
+    fun isCurrentTurnActive(effectiveStatus: SubAgentRunStatus): Boolean =
+        !isQueued && (isAccepted || isDelivered || effectiveStatus == SubAgentRunStatus.RUNNING)
+
+    fun statusVerb(effectiveStatus: SubAgentRunStatus): String {
+        if (isQueued) return "补充已排队"
+        if (isAccepted) {
+            return if (latestOperation == SubAgentCardOperation.FOLLOWUP) {
+                "第${turn}轮已接受"
+            } else {
+                "请求已接受"
+            }
+        }
+        if (isDelivered) return "补充已送达"
+        val prefix = if (turn > 1) "第${turn}轮 " else ""
+        return prefix + when (effectiveStatus) {
+            SubAgentRunStatus.RUNNING -> "正在工作"
+            SubAgentRunStatus.COMPLETED -> "已完成"
+            SubAgentRunStatus.FAILED -> "失败"
+            SubAgentRunStatus.CANCELLED -> "已取消"
+            SubAgentRunStatus.TIMED_OUT -> "超时"
+            SubAgentRunStatus.APPROVAL_REQUIRED -> "等待审批"
+            SubAgentRunStatus.INTERRUPTED -> "已中断"
+        }
     }
-    return SubAgentRunStatus.RUNNING
+}
+
+/**
+ * Fold the operation receipts in chronological order. A queued send retains
+ * the previous terminal status in [SubAgentCardState.status], while its card
+ * remains pending until a later followup/result is recorded.
+ */
+internal fun deriveSubAgentCardState(tools: List<UIMessagePart.Tool>): SubAgentCardState {
+    var status = SubAgentRunStatus.RUNNING
+    var turn = 1
+    var latestOperation: SubAgentCardOperation? = null
+    var deliveryState: String? = null
+    var latestUpdatedAtMs: Long? = null
+    var requestPending = false
+
+    tools.forEach { tool ->
+        val operation = tool.toolName.toSubAgentCardOperation() ?: return@forEach
+        val payload = tool.cachedSubAgentOutputJsonObject()
+        val reportedStatus = payload
+            ?.get("status")
+            ?.let { it as? JsonPrimitive }
+            ?.contentOrNull
+            ?.let { raw ->
+                SubAgentRunStatus.entries.firstOrNull { it.name.equals(raw, ignoreCase = true) }
+            }
+
+        latestOperation = operation
+        deliveryState = null
+        latestUpdatedAtMs = payload
+            ?.get("updated_at_ms")
+            ?.let { it as? JsonPrimitive }
+            ?.longOrNull
+        requestPending = false
+
+        when (operation) {
+            SubAgentCardOperation.FOLLOWUP -> {
+                turn += 1
+                if (reportedStatus != null) {
+                    status = reportedStatus
+                } else {
+                    status = SubAgentRunStatus.RUNNING
+                    requestPending = !tool.isExecuted
+                }
+            }
+
+            SubAgentCardOperation.SEND_MESSAGE -> {
+                deliveryState = payload
+                    ?.get("delivery_state")
+                    ?.let { it as? JsonPrimitive }
+                    ?.contentOrNull
+                    ?.lowercase()
+                when {
+                    deliveryState == "delivered" -> status = SubAgentRunStatus.RUNNING
+                    reportedStatus != null -> status = reportedStatus
+                    deliveryState == null -> requestPending = !tool.isExecuted
+                }
+            }
+
+            SubAgentCardOperation.INTERRUPT -> {
+                if (reportedStatus != null) {
+                    status = reportedStatus
+                } else {
+                    requestPending = !tool.isExecuted
+                }
+            }
+
+            SubAgentCardOperation.START,
+            SubAgentCardOperation.WAIT,
+            SubAgentCardOperation.READ,
+            SubAgentCardOperation.CANCEL,
+            -> {
+                if (reportedStatus != null) status = reportedStatus
+            }
+        }
+    }
+
+    return SubAgentCardState(
+        status = status,
+        turn = turn,
+        latestOperation = latestOperation,
+        deliveryState = deliveryState,
+        latestUpdatedAtMs = latestUpdatedAtMs,
+        requestPending = requestPending,
+    )
+}
+
+private fun String.toSubAgentCardOperation(): SubAgentCardOperation? = when (this) {
+    "subagent_start" -> SubAgentCardOperation.START
+    "subagent_wait" -> SubAgentCardOperation.WAIT
+    "subagent_read" -> SubAgentCardOperation.READ
+    "subagent_cancel" -> SubAgentCardOperation.CANCEL
+    "subagent_followup" -> SubAgentCardOperation.FOLLOWUP
+    "subagent_send_message" -> SubAgentCardOperation.SEND_MESSAGE
+    "subagent_interrupt" -> SubAgentCardOperation.INTERRUPT
+    else -> null
 }
 
 private fun extractLatestSubAgentName(tools: List<UIMessagePart.Tool>): String? {
@@ -251,22 +425,48 @@ private fun SubAgentRunSheet(
 
     // Re-derive status here (instead of receiving from parent) so the sheet stays correct even
     // when the outer card is offscreen and not recomposing.
-    val parsedStatus = parseLatestSubAgentStatus(step.tools)
-    val isRunning = parsedStatus == SubAgentRunStatus.RUNNING
-    val statusVerb = when (parsedStatus) {
-        SubAgentRunStatus.RUNNING -> "正在工作"
-        SubAgentRunStatus.COMPLETED -> "已完成"
-        SubAgentRunStatus.FAILED -> "失败"
-        SubAgentRunStatus.CANCELLED -> "已取消"
-        SubAgentRunStatus.TIMED_OUT -> "超时"
-        SubAgentRunStatus.APPROVAL_REQUIRED -> "等待审批"
-        SubAgentRunStatus.INTERRUPTED -> "已中断"
+    val cardState = deriveSubAgentCardState(step.tools)
+    val parsedStatus = cardState.status
+    val observedRunFlow = remember(step.runId) { manager.runStateFlow(step.runId) }
+    val observedRunState = observedRunFlow.collectAsState(initial = null)
+    val observedRun = observedRunState.value
+    var persistedState by remember(step.runId) {
+        mutableStateOf<app.amber.feature.subagent.ThreadGraphManager.ThreadGraphState?>(null)
     }
+    LaunchedEffect(step.runId) {
+        persistedState = manager.persistedState(step.runId)
+            ?.takeIf { it.status.isTerminalForDisplay() }
+    }
+    val persistedStatus = persistedState?.status
+    val persistedIsCurrentTurn = cardState.latestUpdatedAtMs?.let { latest ->
+        persistedState?.updatedAtMs?.let { it >= latest }
+    } == true
+    val timelineStatus = if (parsedStatus == SubAgentRunStatus.RUNNING && observedRun != null) {
+        observedRun.status
+    } else {
+        parsedStatus
+    }
+    val effectiveStatus = if (
+        cardState.canUsePersistedStatus &&
+        persistedIsCurrentTurn &&
+        timelineStatus == SubAgentRunStatus.RUNNING &&
+        persistedStatus != null
+    ) {
+        persistedStatus!!
+    } else {
+        timelineStatus
+    }
+    val isRunning = cardState.isCurrentTurnActive(effectiveStatus)
+    val statusVerb = cardState.statusVerb(effectiveStatus)
 
     // Live flow may be null when the manager has no record of this run (process restart, eviction).
     // In that case create an empty fallback flow so collectAsState works.
-    val liveFlow = remember(step.runId) { manager.liveTextFlow(step.runId) ?: MutableStateFlow("") }
-    val livePartsFlow = remember(step.runId) {
+    // The flow can be created after this sheet opens when a restored thread receives a followup;
+    // key the lookup by the manager's generation timestamp so the sheet adopts that live stream.
+    val liveFlow = remember(step.runId, observedRun?.updatedAtMs) {
+        manager.liveTextFlow(step.runId) ?: MutableStateFlow("")
+    }
+    val livePartsFlow = remember(step.runId, observedRun?.updatedAtMs) {
         manager.livePartsFlow(step.runId) ?: MutableStateFlow<List<UIMessagePart>>(emptyList())
     }
     val liveText by liveFlow.collectAsState()
@@ -280,7 +480,7 @@ private fun SubAgentRunSheet(
     // a restart when neither the live flow nor the transcript is available.
     var persistedAnswer by remember(step.runId) { mutableStateOf("") }
     val finalText = extractFinalSubAgentText(step.tools)
-    LaunchedEffect(step.runId, parsedStatus, liveText, snapshotText) {
+    LaunchedEffect(step.runId, effectiveStatus, liveText, snapshotText) {
         val mayBeStaleRunningAfterRestart = isRunning && snapshotRun == null
         if ((!isRunning || mayBeStaleRunningAfterRestart) &&
             liveText.isBlank() &&
@@ -352,7 +552,7 @@ private fun SubAgentRunSheet(
                     id = subagentId,
                     name = displayName,
                     avatarSize = 22.dp,
-                    status = parsedStatus,
+                    status = effectiveStatus,
                 )
                 Text(
                     text = "@$displayName",

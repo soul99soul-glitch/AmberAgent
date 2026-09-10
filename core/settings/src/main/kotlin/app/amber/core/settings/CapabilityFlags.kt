@@ -18,9 +18,9 @@ import app.amber.core.infra.PreferencesKeys
  *
  * Each capability gets an independent switch so behavior changes can be
  * gray-scaled per capability instead of behind one "iOS parity" master switch.
- * Release defaults are capability-specific: only the durable runtime core
- * (tool effects + typed terminal) is enabled when its key is absent. Other
- * capabilities remain off until explicitly enabled.
+ * Release defaults are capability-specific. The durable runtime core,
+ * validated backup providers, and thread graph are available when their keys
+ * are absent; explicit user overrides are preserved.
  */
 enum class Capability(
     val id: String,
@@ -31,10 +31,18 @@ enum class Capability(
     CapabilityPermissions("capability_permissions"),
     WorkspaceArtifactsV2("workspace_artifacts_v2"),
     RecipeRuntime("recipe_runtime"),
-    ThreadGraphV2("thread_graph_v2"),
-    OpenAIResponsesResume("openai_responses_resume"),
+    ThreadGraphV2("thread_graph_v2", defaultEnabled = true),
+    /**
+     * Server-side OpenAI Responses recovery. Default ON since the Phase 6
+     * mixed-state gate closed: the same run with a server COMPLETED response
+     * and local started effects keeps both sides honest (terminal COMPLETED,
+     * non-idempotent effects OUTCOME_UNKNOWN, retryable classes stay STARTED)
+     * — see RunRecoveryServiceResumeTest mixed-state tests. Explicit user
+     * false remains false across upgrades.
+     */
+    OpenAIResponsesResume("openai_responses_resume", defaultEnabled = true),
     NovelPackageV2("novel_package_v2"),
-    SyncProviderV2("sync_provider_v2"),
+    SyncProviderV2("sync_provider_v2", defaultEnabled = true),
     /**
      * P4-03 persistent JS cells (parity plan §10 P4-03, P3 priority): cell
      * create/run/wait/terminate/store/load tools. Default OFF; first-version

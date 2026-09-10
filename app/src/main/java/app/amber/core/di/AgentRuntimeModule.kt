@@ -67,7 +67,15 @@ val agentRuntimeModule = module {
     single { RoomAgentEventStore(get()) }
     single<app.amber.core.agent.runtime.AgentEventStore> { get<RoomAgentEventStore>() }
 
-    single { ChatEventProjector(get<RoomAgentEventStore>(), get(), get(), get()) }
+    single {
+        ChatEventProjector(
+            eventStore = get<RoomAgentEventStore>(),
+            conversationRepo = get(),
+            conversationAccess = get(),
+            json = get(),
+            restoreWriteGate = get(),
+        )
+    }
 
     single<AgentRunner> {
         // Resolve projector lazily inside runScopeFactory: ChatEventProjector
@@ -146,6 +154,7 @@ val agentRuntimeModule = module {
         CouncilRoomRepository(
             conversationDao = get(),
             appScope = get<AppScope>(),
+            restoreWriteGate = get(),
         )
     }
     single<app.amber.feature.modelcouncil.CouncilRoomTaskReporter> {

@@ -1,7 +1,10 @@
 package app.amber.feature.ui.pages.setting
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,10 +28,17 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import app.amber.core.conversation.exchange.ConversationExchangeCodec
+import app.amber.core.conversation.exchange.ConversationExchangeFileHandler
+import app.amber.core.conversation.exchange.ConversationExchangePendingImport
 import app.amber.core.storage.CleanupDryRun
 import app.amber.core.storage.StorageBreakdown
 import app.amber.core.utils.UiState
@@ -41,6 +51,9 @@ import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import org.koin.compose.koinInject
 import org.koin.androidx.compose.koinViewModel
 
 /**
@@ -50,12 +63,62 @@ import org.koin.androidx.compose.koinViewModel
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingStoragePage(vm: StorageVM = koinViewModel()) {
+fun SettingStoragePage(
+    vm: StorageVM = koinViewModel(),
+    exchangeHandler: ConversationExchangeFileHandler = koinInject(),
+) {
     val breakdown by vm.breakdown.collectAsState()
     val dryRun by vm.dryRun.collectAsState()
     val cleanupResult by vm.cleanupResult.collectAsState()
     val days by vm.days.collectAsState()
     val cleaning by vm.cleaning.collectAsState()
+    val exchangeScope = rememberCoroutineScope()
+    var exchangeBusy by remember { mutableStateOf(false) }
+    var exchangeMessage by remember { mutableStateOf<String?>(null) }
+    var pendingExchange by remember { mutableStateOf<ConversationExchangePendingImport?>(null) }
+
+    val createExchangeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument(ConversationExchangeCodec.MIME_TYPE),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        exchangeScope.launch {
+            exchangeBusy = true
+            exchangeMessage = null
+            try {
+                runCatching { exchangeHandler.exportAllToUri(uri) }
+                    .onSuccess { result ->
+                        exchangeMessage = "已导出 ${result.conversationCount} 个会话（${formatBytes(result.byteCount.toLong())}）"
+                    }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        exchangeMessage = "导出失败：${error.message.orEmpty()}"
+                    }
+            } finally {
+                exchangeBusy = false
+            }
+        }
+    }
+    val openExchangeLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        exchangeScope.launch {
+            exchangeBusy = true
+            exchangeMessage = null
+            try {
+                runCatching { exchangeHandler.prepareImportFromUri(uri) }
+                    .onSuccess { result ->
+                        pendingExchange = result
+                    }
+                    .onFailure { error ->
+                        if (error is CancellationException) throw error
+                        exchangeMessage = "无法读取交换文件：${error.message.orEmpty()}"
+                    }
+            } finally {
+                exchangeBusy = false
+            }
+        }
+    }
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
@@ -78,6 +141,18 @@ fun SettingStoragePage(vm: StorageVM = koinViewModel()) {
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             StorageUsageCard(breakdown, onRefresh = { vm.refresh() })
+            ConversationExchangeCard(
+                busy = exchangeBusy,
+                message = exchangeMessage,
+                onExport = {
+                    createExchangeLauncher.launch(ConversationExchangeCodec.suggestedFileName())
+                },
+                onImport = {
+                    openExchangeLauncher.launch(
+                        arrayOf(ConversationExchangeCodec.MIME_TYPE, "application/zip"),
+                    )
+                },
+            )
             CleanupCard(
                 days = days,
                 cleaning = cleaning,
@@ -128,6 +203,177 @@ fun SettingStoragePage(vm: StorageVM = koinViewModel()) {
 
         else -> Unit
     }
+
+    pendingExchange?.let { pending ->
+        ConversationExchangeImportDialog(
+            pending = pending,
+            busy = exchangeBusy,
+            onDismiss = { if (!exchangeBusy) pendingExchange = null },
+            onConfirm = {
+                pendingExchange = null
+                exchangeScope.launch {
+                    exchangeBusy = true
+                    exchangeMessage = null
+                    var importSucceeded = false
+                    try {
+                        runCatching { exchangeHandler.importPrepared(pending) }
+                            .onSuccess { result ->
+                                importSucceeded = true
+                                exchangeMessage = (
+                                    "已导入 ${result.importedCount} 个会话" +
+                                        if (result.overwrittenCount > 0) {
+                                            "，覆盖 ${result.overwrittenCount} 个同 ID 会话"
+                                        } else {
+                                            ""
+                                        }
+                                    ) + if (result.attachmentReferenceCount > 0) {
+                                        "；保留 ${result.attachmentReferenceCount} 个附件引用（未复制文件）"
+                                    } else {
+                                        ""
+                                    }
+                            }
+                            .onFailure { error ->
+                                if (error is CancellationException) throw error
+                                exchangeMessage = "导入失败：${error.message.orEmpty()}"
+                            }
+                    } finally {
+                        exchangeBusy = false
+                        if (importSucceeded) vm.refresh()
+                    }
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ConversationExchangeCard(
+    busy: Boolean,
+    message: String?,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    CardGroup(title = { SectionLabel("会话交换") }) {
+        rawItem {
+            Text(
+                "可与 iOS 交换普通会话；线程关系、禁用/受污染记忆模式暂不支持。本机附件不会随文件传输。",
+                style = LocalAmberType.current.secondary,
+                color = LocalAmberTokens.current.ink3,
+            )
+        }
+        rawItem {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onExport,
+                    enabled = !busy,
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.height(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("导出会话")
+                }
+                Button(
+                    modifier = Modifier.weight(1f),
+                    onClick = onImport,
+                    enabled = !busy,
+                ) {
+                    Text("导入会话")
+                }
+            }
+        }
+        message?.let { result ->
+            rawItem {
+                Text(
+                    result,
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink3,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConversationExchangeImportDialog(
+    pending: ConversationExchangePendingImport,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    val preview = pending.preview
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("确认导入会话") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "将导入 ${preview.conversationCount} 个会话，其中新增 ${preview.newConversationCount} 个。",
+                    style = LocalAmberType.current.secondary,
+                    color = LocalAmberTokens.current.ink3,
+                )
+                if (preview.conflicts.isNotEmpty()) {
+                    Text(
+                        "以下 ${preview.conflicts.size} 个同 ID 会话会被覆盖：",
+                        style = LocalAmberType.current.secondary,
+                        color = LocalAmberTokens.current.ink,
+                    )
+                    preview.conflicts.take(5).forEach { conflict ->
+                        Text(
+                            "· ${conflict.incomingTitle.ifBlank { "无标题" }}" +
+                                if (conflict.existingTitle.isBlank()) "" else "（当前：${conflict.existingTitle}）",
+                            style = LocalAmberType.current.meta,
+                            color = LocalAmberTokens.current.ink3,
+                        )
+                    }
+                    if (preview.conflicts.size > 5) {
+                        Text(
+                            "还有 ${preview.conflicts.size - 5} 个会话未展开。",
+                            style = LocalAmberType.current.meta,
+                            color = LocalAmberTokens.current.ink3,
+                        )
+                    }
+                }
+                if (preview.attachmentReferenceCount > 0) {
+                    Text(
+                        "包含 ${preview.attachmentReferenceCount} 个附件引用，文件本身不会随交换文件复制。",
+                        style = LocalAmberType.current.meta,
+                        color = LocalAmberTokens.current.ink3,
+                    )
+                }
+                Text(
+                    "导入会停止正在生成的会话并刷新其持久化快照。",
+                    style = LocalAmberType.current.meta,
+                    color = LocalAmberTokens.current.ink3,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !busy) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.height(16.dp),
+                        strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(if (busy) "导入中" else "确认导入")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") }
+        },
+    )
 }
 
 @Composable
@@ -204,7 +450,11 @@ private fun CleanupCard(
 ) {
     CardGroup(title = { SectionLabel("清理会话") }) {
         rawItem {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 listOf(7, 30, 90).forEach { candidate ->
                     FilterChip(
                         selected = days == candidate,

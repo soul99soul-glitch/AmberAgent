@@ -59,7 +59,7 @@ class AgentTaskRecoveryManagerTest {
     fun completedTaskWithOutputBecomesOutputOnly() {
         val recovered = manager.recoverOnStartup(
             snapshot(
-                type = "officepro",
+                type = "terminal",
                 status = AgentTaskStatus.COMPLETED,
                 outputRef = AgentTaskOutputRef(type = "report", path = "/tmp/report.md", exists = true),
             ),

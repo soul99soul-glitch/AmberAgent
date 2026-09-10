@@ -171,6 +171,9 @@ data class SyncSecretSnapshot(
     val webMountOauth: String? = null,
     val openAICodexOAuth: String? = null,
     val googleGeminiOAuth: String? = null,
+    val grokOAuth: String? = null,
+    val grokOAuthBackup: String? = null,
+    val antigravityOAuth: String? = null,
 )
 
 @Serializable

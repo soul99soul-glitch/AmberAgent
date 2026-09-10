@@ -5,6 +5,7 @@ import app.amber.agent.data.db.entity.ThemePackageEntity
 import app.amber.core.settings.Settings
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.prefs.SettingsAggregator
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import app.amber.feature.runtime.ContentDigest
 import kotlinx.coroutines.flow.Flow
@@ -82,6 +83,7 @@ class ThemePackageManager(
     private val dao: ThemePackageDAO,
     private val settingsStore: ThemeSettingsStore,
     private val now: () -> Instant = Instant::now,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
 ) {
 
     private val _tryOn = MutableStateFlow<ThemePackageTryOn?>(null)
@@ -130,35 +132,43 @@ class ThemePackageManager(
             return ThemePackageApplyResult.NotPrepared
         }
 
-        val current = settingsStore.settingsFlow.first()
-        val nextDisplay = ThemePackageApplier.applyTokens(prepared.pkg, current.displaySetting)
-            .copy(appliedThemePackageId = prepared.pkg.id)
-        val previousEntity = dao.getById(prepared.pkg.id)
-        val nextEntity = ThemePackageEntity(
-            id = prepared.pkg.id,
-            name = prepared.pkg.name,
-            json = preparedJson(prepared),
-            importedAtMs = now().toEpochMilli(),
-        )
+        return withThemeWrite {
+            // Read the current snapshot after the writer reaches the gate. A
+            // user action waiting behind restore must apply to the imported
+            // settings, not to the pre-restore snapshot it first observed.
+            val current = settingsStore.settingsFlow.first()
+            val nextDisplay = ThemePackageApplier.applyTokens(prepared.pkg, current.displaySetting)
+                .copy(appliedThemePackageId = prepared.pkg.id)
+            val previousEntity = dao.getById(prepared.pkg.id)
+            val nextEntity = ThemePackageEntity(
+                id = prepared.pkg.id,
+                name = prepared.pkg.name,
+                json = preparedJson(prepared),
+                importedAtMs = now().toEpochMilli(),
+            )
 
-        return try {
-            dao.upsert(nextEntity)
-            val result = if (nextDisplay == current.displaySetting) {
-                // A package may be identical to the active settings; applying it still
-                // persists the package so the user's explicit import is not lost.
-                ThemePackageApplyResult.Applied
-            } else {
-                updateWithRollback(current, current.copy(displaySetting = nextDisplay))
-            }
-            if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
-                clearTryOn()
-            } else {
+            try {
+                dao.upsert(nextEntity)
+                val result = if (nextDisplay == current.displaySetting) {
+                    // A package may be identical to the active settings; applying it still
+                    // persists the package so the user's explicit import is not lost.
+                    ThemePackageApplyResult.Applied
+                } else {
+                    updateWithRollback(current, current.copy(displaySetting = nextDisplay))
+                }
+                if (result == ThemePackageApplyResult.Applied || result == ThemePackageApplyResult.AlreadyApplied) {
+                    clearTryOn()
+                } else {
+                    restoreEntity(prepared.pkg.id, previousEntity)
+                }
+                result
+            } catch (_: Exception) {
+                // Roll back while this writer still owns the short persistence
+                // boundary; a restore/new writer cannot observe a half-applied
+                // theme package.
                 restoreEntity(prepared.pkg.id, previousEntity)
+                ThemePackageApplyResult.Reverted
             }
-            result
-        } catch (_: Exception) {
-            restoreEntity(prepared.pkg.id, previousEntity)
-            ThemePackageApplyResult.Reverted
         }
     }
 
@@ -177,49 +187,58 @@ class ThemePackageManager(
     )
 
     suspend fun apply(packageId: String): ThemePackageApplyResult {
-        val entity = dao.getById(packageId) ?: return ThemePackageApplyResult.NotFound
-        val pkg = runCatching { JsonInstant.decodeFromString(ThemePackage.serializer(), entity.json) }
-            .getOrNull() ?: return ThemePackageApplyResult.Corrupt
-        if (ThemePackageValidator.validatePackage(pkg) !is ThemePackageValidation.Valid) {
-            return ThemePackageApplyResult.Corrupt
-        }
-        val current = settingsStore.settingsFlow.first()
-        val nextDisplay = ThemePackageApplier.applyTokens(pkg, current.displaySetting)
-            .copy(appliedThemePackageId = pkg.id)
-        if (nextDisplay == current.displaySetting) {
-            clearTryOn()
-            return ThemePackageApplyResult.AlreadyApplied
-        }
-        return updateWithRollback(current, current.copy(displaySetting = nextDisplay)).also {
-            if (it == ThemePackageApplyResult.Applied) clearTryOn()
+        return withThemeWrite {
+            val entity = dao.getById(packageId) ?: return@withThemeWrite ThemePackageApplyResult.NotFound
+            val pkg = runCatching { JsonInstant.decodeFromString(ThemePackage.serializer(), entity.json) }
+                .getOrNull() ?: return@withThemeWrite ThemePackageApplyResult.Corrupt
+            if (ThemePackageValidator.validatePackage(pkg) !is ThemePackageValidation.Valid) {
+                return@withThemeWrite ThemePackageApplyResult.Corrupt
+            }
+            val current = settingsStore.settingsFlow.first()
+            val nextDisplay = ThemePackageApplier.applyTokens(pkg, current.displaySetting)
+                .copy(appliedThemePackageId = pkg.id)
+            if (nextDisplay == current.displaySetting) {
+                clearTryOn()
+                return@withThemeWrite ThemePackageApplyResult.AlreadyApplied
+            }
+            return@withThemeWrite updateWithRollback(current, current.copy(displaySetting = nextDisplay)).also {
+                if (it == ThemePackageApplyResult.Applied) clearTryOn()
+            }
         }
     }
 
     /** 应用内置主题（只写 baseFamily，清除包标记）；内置主题不可被移除/覆盖。 */
     suspend fun applyBuiltin(baseFamily: String): ThemePackageApplyResult {
         require(baseFamily in setOf("WARM", "SAGE")) { "未知的内置色系：$baseFamily" }
-        clearTryOn()
-        val current = settingsStore.settingsFlow.first()
-        if (current.displaySetting.amberBaseFamily == baseFamily &&
-            current.displaySetting.appliedThemePackageId == null
-        ) {
-            return ThemePackageApplyResult.AlreadyApplied
-        }
-        return updateWithRollback(
-            current,
-            current.copy(
-                displaySetting = current.displaySetting.copy(
-                    amberBaseFamily = baseFamily,
-                    appliedThemePackageId = null,
+        return withThemeWrite {
+            val current = settingsStore.settingsFlow.first()
+            if (current.displaySetting.amberBaseFamily == baseFamily &&
+                current.displaySetting.appliedThemePackageId == null
+            ) {
+                clearTryOn()
+                return@withThemeWrite ThemePackageApplyResult.AlreadyApplied
+            }
+            val result = updateWithRollback(
+                current,
+                current.copy(
+                    displaySetting = current.displaySetting.copy(
+                        amberBaseFamily = baseFamily,
+                        appliedThemePackageId = null,
+                    ),
                 ),
-            ),
-        )
+            )
+            if (result == ThemePackageApplyResult.Applied) clearTryOn()
+            result
+        }
     }
 
     /** 从主题库移除导入包（`builtin:` 条目不在库中，天然不可移除）。 */
     suspend fun remove(packageId: String): Boolean {
-        if (_tryOn.value?.pkg?.id == packageId) clearTryOn()
-        return dao.delete(packageId) > 0
+        return withThemeWrite {
+            val deleted = dao.delete(packageId) > 0
+            if (_tryOn.value?.pkg?.id == packageId) clearTryOn()
+            deleted
+        }
     }
 
     private fun preparedJson(prepared: ThemePackageTryOn): String =
@@ -249,4 +268,7 @@ class ThemePackageManager(
             runCatching { settingsStore.update(previous) }
             ThemePackageApplyResult.Reverted
         }
+
+    private suspend fun <T> withThemeWrite(block: suspend () -> T): T =
+        restoreWriteGate?.withCurrentWriterOrCancel(block) ?: block()
 }

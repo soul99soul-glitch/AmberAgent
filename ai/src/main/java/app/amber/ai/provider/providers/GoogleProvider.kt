@@ -26,6 +26,9 @@ import app.amber.ai.provider.TextModelGateway
 import app.amber.ai.provider.TextGenerationParams
 import app.amber.ai.provider.providers.vertex.ServiceAccountTokenProvider
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStatus
+import app.amber.ai.provider.providers.google.AntigravityAuthStatus
+import app.amber.ai.provider.providers.google.AntigravityOAuthClient
+import app.amber.ai.provider.providers.google.AntigravityAuthStore
 import app.amber.ai.ui.ImageAspectRatio
 import app.amber.ai.ui.ImageGenerationItem
 import app.amber.ai.ui.ImageGenerationResult
@@ -72,15 +75,26 @@ class GoogleProvider(
                 app.amber.ai.provider.providers.google.GoogleGeminiAuthStore(it),
             )
         }
+    private val antigravityOAuthClient: AntigravityOAuthClient? = context?.let {
+        AntigravityOAuthClient(client, AntigravityAuthStore(it))
+    }
 
     private fun isCodeAssistOAuthMode(providerSetting: ProviderSetting.Google): Boolean =
         providerSetting.authMode == app.amber.ai.provider.GoogleAuthMode.GEMINI_CODE_ASSIST_OAUTH
+    private fun isAntigravityOAuthMode(providerSetting: ProviderSetting.Google): Boolean =
+        providerSetting.authMode == app.amber.ai.provider.GoogleAuthMode.ANTIGRAVITY_OAUTH
 
     /** Network-free auth state used by provider_config_status. */
     fun oauthAuthStatus(providerSetting: ProviderSetting.Google): GoogleGeminiAuthStatus? {
         if (!isCodeAssistOAuthMode(providerSetting)) return null
         return geminiOAuthClient?.authStatus(providerSetting.id)
             ?: GoogleGeminiAuthStatus.clientUnavailable()
+    }
+
+    fun antigravityAuthStatus(providerSetting: ProviderSetting.Google): AntigravityAuthStatus? {
+        if (!isAntigravityOAuthMode(providerSetting)) return null
+        return antigravityOAuthClient?.authStatus(providerSetting.id)
+            ?: AntigravityAuthStatus.clientUnavailable()
     }
 
     /** Resolve the (accessToken, projectId) pair needed to send a v1internal request to
@@ -146,6 +160,11 @@ class GoogleProvider(
                     ?: error("Gemini OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
                 return@withContext app.amber.ai.provider.providers.google.defaultGeminiOAuthModelList()
             }
+            if (isAntigravityOAuthMode(providerSetting)) {
+                return@withContext antigravityOAuthClient
+                    ?.listModels(providerSetting.id)
+                    ?: error("Antigravity OAuth 客户端未初始化（GoogleProvider 缺少 Context 注入）。")
+            }
             val url = buildUrl(providerSetting = providerSetting, path = "models?pageSize=100")
             val request = transformRequest(
                 providerSetting = providerSetting,
@@ -195,18 +214,22 @@ class GoogleProvider(
         messages: List<UIMessage>,
         params: TextGenerationParams,
     ): MessageChunk = withContext(Dispatchers.IO) {
-        val isOAuth = isCodeAssistOAuthMode(providerSetting)
-        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isOAuth)
-        val request = if (isOAuth) {
-            val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
-            geminiOAuthClient!!
-                .generateContent(accessToken, params.model.modelId, projectId, requestBody)
-                .newBuilder()
-                .apply {
-                    params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
-                }
-                .build()
-        } else {
+        val isCodeAssist = isCodeAssistOAuthMode(providerSetting)
+        val isAntigravity = isAntigravityOAuthMode(providerSetting)
+        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isCodeAssist)
+        val request = when {
+            isCodeAssist -> {
+                val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
+                geminiOAuthClient!!.generateContent(accessToken, params.model.modelId, projectId, requestBody)
+                    .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()
+            }
+            isAntigravity -> {
+                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth 客户端未初始化。")
+                val session = oauth.requireUsableSession(providerSetting.id)
+                oauth.generateContent(session.accessToken, params.model.modelId, session.projectId!!, requestBody)
+                    .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()
+            }
+            else -> {
             val url = buildUrl(
                 providerSetting = providerSetting,
                 path = if (providerSetting.vertexAI) {
@@ -226,6 +249,7 @@ class GoogleProvider(
                     .configureReferHeaders(providerSetting.baseUrl)
                     .build()
             )
+            }
         }
 
         val response = client.newCall(request).await()
@@ -246,14 +270,13 @@ class GoogleProvider(
         // standard Gemini request body is wrapped in {model, project, request}; the
         // server's SSE chunks come back wrapped in {"response": {...standard chunk...}}.
         // Auth is `Authorization: Bearer <access_token>` instead of `x-goog-api-key`.
-        val isOAuth = isCodeAssistOAuthMode(providerSetting)
-        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isOAuth)
-        val request = if (isOAuth) {
-            val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
-            geminiOAuthClient!!
-                .streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody)
-                .newBuilder()
-                .apply {
+        val isCodeAssist = isCodeAssistOAuthMode(providerSetting)
+        val isAntigravity = isAntigravityOAuthMode(providerSetting)
+        val requestBody = contentAdapter.encodeRequest(messages, params, codeAssistTransport = isCodeAssist)
+        val request = when {
+            isCodeAssist -> {
+                val (accessToken, projectId) = resolveCodeAssistSession(providerSetting)
+                geminiOAuthClient!!.streamGenerateContent(accessToken, params.model.modelId, projectId, requestBody).newBuilder().apply {
                     // CRITICAL: use addHeader, not headers(). The latter REPLACES the
                     // entire header set including the Authorization Bearer we just put
                     // in streamGenerateContent — server then returns
@@ -261,7 +284,14 @@ class GoogleProvider(
                     params.customHeaders.forEach { (k, v) -> addHeader(k, v) }
                 }
                 .build()
-        } else {
+            }
+            isAntigravity -> {
+                val oauth = antigravityOAuthClient ?: error("Antigravity OAuth 客户端未初始化。")
+                val session = oauth.requireUsableSession(providerSetting.id)
+                oauth.streamGenerateContent(session.accessToken, params.model.modelId, session.projectId!!, requestBody)
+                    .newBuilder().apply { params.customHeaders.forEach { (k, v) -> addHeader(k, v) } }.build()
+            }
+            else -> {
             val url = buildUrl(
                 providerSetting = providerSetting,
                 path = if (providerSetting.vertexAI) {
@@ -281,6 +311,7 @@ class GoogleProvider(
                     .configureReferHeaders(providerSetting.baseUrl)
                     .build()
             )
+            }
         }
 
         Log.i(TAG, "streamText: model=${params.model.modelId}")

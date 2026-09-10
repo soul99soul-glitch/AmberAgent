@@ -13,6 +13,10 @@ import io.requery.android.database.sqlite.SQLiteCustomExtension
 import kotlinx.serialization.json.Json
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiOAuthClient
+import app.amber.ai.provider.providers.google.AntigravityAuthStore
+import app.amber.ai.provider.providers.google.AntigravityOAuthClient
+import app.amber.ai.provider.providers.grok.GrokAuthStore
+import app.amber.ai.provider.providers.grok.GrokOAuthClient
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.provider.providers.ClaudeProvider
@@ -69,11 +73,14 @@ import app.amber.feature.home.CouncilContinueSource
 import app.amber.feature.home.DeepReadContinueSource
 import app.amber.feature.home.ImageGenerationContinueSource
 import app.amber.feature.home.MiniAppDraftContinueSource
+import app.amber.feature.home.MiniAppRunnerContinueSource
+import app.amber.feature.home.NovelWorkspaceContinueSource
 import app.amber.feature.home.RoomContinueDismissStore
 import app.amber.feature.ui.theme.SettingsAggregatorThemeStore
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemeSettingsStore
 import app.amber.core.sync.core.SyncArchiveManager
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.sync.google.GoogleDriveAppDataClient
 import app.amber.core.sync.google.GoogleDriveSyncRepository
 import app.amber.core.sync.google.GoogleOAuthConfigGate
@@ -85,6 +92,7 @@ import app.amber.search.SearchService
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import org.koin.dsl.module
+import org.koin.core.qualifier.named
 import java.util.concurrent.TimeUnit
 
 val dataSourceModule = module {
@@ -133,7 +141,7 @@ val dataSourceModule = module {
         NativePathPrefs(dataStore = get<Context>().settingsStore, scope = get())
     }
 
-    // Capability parity plan (Phase 0): per-capability feature flags, all default off.
+    // Per-capability defaults; stored user overrides remain authoritative.
     single {
         CapabilityFlags(dataStore = get<Context>().settingsStore)
     }
@@ -219,6 +227,7 @@ val dataSourceModule = module {
                 AppDatabase.MIGRATION_13_14,
                 AppDatabase.MIGRATION_14_15,
                 AppDatabase.MIGRATION_15_16,
+                AppDatabase.MIGRATION_16_17,
             )
             .addCallback(object : RoomDatabase.Callback() {
                 override fun onOpen(db: SupportSQLiteDatabase) {
@@ -434,6 +443,7 @@ val dataSourceModule = module {
         app.amber.feature.miniapp.ConversationDraftStore(
             dao = get(),
             conversationDao = get(),
+            restoreWriteGate = get(),
         )
     }
 
@@ -462,6 +472,7 @@ val dataSourceModule = module {
             workspaceManager = get(),
             messageNodeDao = get(),
             conversationDao = get(),
+            restoreWriteGate = get(),
         )
     }
 
@@ -476,7 +487,10 @@ val dataSourceModule = module {
     }
 
     single<app.amber.ai.provider.ResponseResumeStore> {
-        app.amber.feature.runtime.RoomResponseResumeStore(dao = get())
+        app.amber.feature.runtime.RoomResponseResumeStore(
+            dao = get(),
+            restoreWriteGate = get(),
+        )
     }
 
     // P6-01: resolves a run's stored response to provider + API for the
@@ -506,7 +520,10 @@ val dataSourceModule = module {
     }
 
     single<app.amber.feature.subagent.ThreadGraphStore> {
-        app.amber.feature.runtime.RoomThreadGraphStore(dao = get())
+        app.amber.feature.runtime.RoomThreadGraphStore(
+            dao = get(),
+            restoreWriteGate = get(),
+        )
     }
 
     // P1-02: durable tool effect ledger (Room, same DB as conversations).
@@ -515,12 +532,16 @@ val dataSourceModule = module {
             dao = get(),
             runTerminalDao = get(),
             json = get(),
+            restoreWriteGate = get(),
         )
     }
 
     // P1-03: typed run terminal state (Room).
     single<RunTerminalStore> {
-        RoomRunTerminalStore(dao = get())
+        RoomRunTerminalStore(
+            dao = get(),
+            restoreWriteGate = get(),
+        )
     }
 
     // P1-02/P1-03: cold-start recovery — reconciles ledger effects and keeps
@@ -536,6 +557,7 @@ val dataSourceModule = module {
             storedResponseGateway = get(),
             capabilityFlags = get(),
             resumeStore = get(),
+            restoreWriteGate = get(),
         )
     }
 
@@ -631,6 +653,8 @@ val dataSourceModule = module {
     single { OpenAIProvider(client = get(), context = get()) }
     single { GoogleProvider(client = get(), context = get()) }
     single { ClaudeProvider(client = get(), context = get()) }
+    single { GrokAuthStore(context = get()) }
+    single { GrokOAuthClient(httpClient = get<OkHttpClient>(), authStore = get()) }
     single<app.amber.ai.provider.providers.openai.StoredResponseApi> {
         get<OpenAIProvider>().storedResponses
     }
@@ -639,6 +663,7 @@ val dataSourceModule = module {
             openAIProvider = get(),
             googleProvider = get(),
             claudeProvider = get(),
+            grokOAuthClient = get(),
         )
     }
 
@@ -660,6 +685,13 @@ val dataSourceModule = module {
     single { OpenAICodexAuthStore(context = get()) }
     single { GoogleGeminiAuthStore(context = get()) }
     single { GoogleGeminiOAuthClient(httpClient = get(), authStore = get()) }
+    single { AntigravityAuthStore(context = get()) }
+    single { AntigravityOAuthClient(httpClient = get(), authStore = get()) }
+
+    // Restore owns a process-wide write epoch. Chat and other background
+    // writers share this gate so stale in-memory callbacks cannot overwrite a
+    // newly imported snapshot after the UI confirmation has completed.
+    single { SyncRestoreWriteGate() }
 
     single {
         SyncArchiveManager(
@@ -671,10 +703,13 @@ val dataSourceModule = module {
             webMountOAuthTokenStore = get(),
             openAICodexAuthStore = get(),
             googleGeminiAuthStore = get(),
+            antigravityAuthStore = get(),
+            grokAuthStore = get(),
             json = get(),
             nativePathPrefs = get(),
             secretRedactor = get(),
             deviceBoundBackupKey = get(),
+            restoreWriteGate = get(),
         )
     }
 
@@ -683,7 +718,7 @@ val dataSourceModule = module {
 
     // P7-03：存储占用分析与按时间清理会话。
     single { app.amber.core.storage.StorageAnalyzer(context = get(), database = get()) }
-    single { app.amber.core.storage.SessionCleanupManager(context = get(), database = get()) }
+    single { app.amber.core.storage.SessionCleanupManager(context = get(), database = get(), restoreWriteGate = get()) }
 
     single { LocalBackupRepository(context = get(), syncArchiveManager = get()) }
 
@@ -722,18 +757,28 @@ val dataSourceModule = module {
     }
 
     // P8-08 首页「继续」聚合：各域来源 + 聚合器。
-    single<ContinueCandidateSource> {
+    single<ContinueCandidateSource>(named("continue.image_generation")) {
         ImageGenerationContinueSource(
             runTerminalStore = get(),
             toolEffectLedger = get(),
             conversationDao = get(),
+            toolEffectDao = get(),
         )
     }
-    single<ContinueCandidateSource> { CouncilContinueSource(conversationDao = get()) }
-    single<ContinueCandidateSource> { DeepReadContinueSource(hotListDao = get()) }
-    single<ContinueCandidateSource> { MiniAppDraftContinueSource(draftDao = get()) }
+    single<ContinueCandidateSource>(named("continue.council")) { CouncilContinueSource(conversationDao = get()) }
+    single<ContinueCandidateSource>(named("continue.deep_read")) { DeepReadContinueSource(hotListDao = get()) }
+    single<ContinueCandidateSource>(named("continue.mini_app_draft")) { MiniAppDraftContinueSource(draftDao = get()) }
+    single<ContinueCandidateSource>(named("continue.mini_app_runner")) { MiniAppRunnerContinueSource(miniAppDao = get()) }
+    single<ContinueCandidateSource>(named("continue.novel_workspace")) {
+        NovelWorkspaceContinueSource(repository = get())
+    }
 
-    single<ContinueDismissStore> { RoomContinueDismissStore(dao = get()) }
+    single<ContinueDismissStore> {
+        RoomContinueDismissStore(
+            dao = get(),
+            restoreWriteGate = get(),
+        )
+    }
 
     single {
         ContinueCandidateAggregator(
@@ -752,6 +797,7 @@ val dataSourceModule = module {
         ThemePackageManager(
             dao = get<AppDatabase>().themePackageDao(),
             settingsStore = get(),
+            restoreWriteGate = get(),
         )
     }
 }

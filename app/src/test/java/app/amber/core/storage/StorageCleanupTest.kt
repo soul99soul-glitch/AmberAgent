@@ -3,14 +3,23 @@ package app.amber.core.storage
 import android.app.Application
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.agent.data.db.entity.ConversationEntity
 import app.amber.agent.data.db.entity.ManagedFileEntity
 import app.amber.agent.data.db.entity.MessageNodeEntity
 import app.amber.core.files.FileFolders
+import app.amber.core.sync.core.SyncRestoreWriteGate
+import app.amber.core.sync.core.SyncRestoreWriteRejectedException
 import java.io.File
+import java.util.concurrent.Executor
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -36,7 +45,12 @@ class StorageCleanupTest {
     private lateinit var database: AppDatabase
     private lateinit var analyzer: StorageAnalyzer
     private lateinit var cleanup: SessionCleanupManager
+    private lateinit var restoreGate: SyncRestoreWriteGate
     private lateinit var testRoot: File
+
+    private val cancelCleanupOnFirstManagedDelete = AtomicBoolean(false)
+    private val firstManagedDeleteSeen = AtomicBoolean(false)
+    private val cleanupJob = AtomicReference<Job?>(null)
 
     private val now = 1_700_000_000_000L
     private val oldCutoff = now - 90L * 24 * 60 * 60 * 1000
@@ -50,6 +64,20 @@ class StorageCleanupTest {
 
         database = Room.databaseBuilder(context, AppDatabase::class.java, "amber_agent")
             .allowMainThreadQueries()
+            // Run the callback inline so cancellation happens after the first
+            // managed-file DELETE and before the transaction's next statement.
+            .setQueryCallback(
+                RoomDatabase.QueryCallback { sqlQuery, _ ->
+                    if (
+                        cancelCleanupOnFirstManagedDelete.get() &&
+                        sqlQuery.trimStart().startsWith("DELETE FROM managed_files") &&
+                        firstManagedDeleteSeen.compareAndSet(false, true)
+                    ) {
+                        cleanupJob.get()?.cancel()
+                    }
+                },
+                Executor { command -> command.run() },
+            )
             .build()
         database.openHelper.writableDatabase.execSQL(
             """
@@ -64,7 +92,8 @@ class StorageCleanupTest {
             """.trimIndent()
         )
         analyzer = StorageAnalyzer(context, database)
-        cleanup = SessionCleanupManager(context, database)
+        restoreGate = SyncRestoreWriteGate()
+        cleanup = SessionCleanupManager(context, database, restoreGate)
     }
 
     @After
@@ -246,6 +275,81 @@ class StorageCleanupTest {
         val second = cleanup.execute(cleanup.dryRun(cutoffAt = oldCutoff))
         assertEquals(0, second.conversationCount)
         assertEquals(0, second.attachmentCount)
+    }
+
+    @Test
+    fun preRestorePreviewCannotDeleteRestoredConversationOrFile() = runBlocking {
+        seedConversation("conv-a", updatedAt = now - 100L * 24 * 60 * 60 * 1000, pinned = false, messageCount = 1)
+        seedAttachment("conv-a", "upload/a.txt", "old".toByteArray())
+        val preview = cleanup.dryRun(oldCutoff)
+        restoreGate.withRestore {
+            File(context.filesDir, "upload/a.txt").writeText("restored")
+        }
+
+        val error = runCatching { cleanup.execute(preview) }.exceptionOrNull()
+        assertTrue(error is SyncRestoreWriteRejectedException)
+        assertEquals("restored", File(context.filesDir, "upload/a.txt").readText())
+        assertEquals(listOf("conv-a"), database.conversationDao().getAllIds())
+
+        assertEquals(1, cleanup.execute(cleanup.dryRun(oldCutoff)).conversationCount)
+        assertFalse(File(context.filesDir, "upload/a.txt").exists())
+    }
+
+    @Test
+    fun cleanupOnlyDeletesRegisteredAttachments() = runBlocking {
+        seedConversation("conv-a", updatedAt = now - 100L * 24 * 60 * 60 * 1000, pinned = false, messageCount = 1)
+        seedAttachment("conv-a", "upload/unregistered.txt", "keep".toByteArray())
+        database.openHelper.writableDatabase.execSQL("DELETE FROM managed_files")
+
+        val preview = cleanup.dryRun(oldCutoff)
+        assertEquals(0, preview.attachmentCount)
+        assertEquals(1, cleanup.execute(preview).conversationCount)
+        assertEquals("keep", File(context.filesDir, "upload/unregistered.txt").readText())
+    }
+
+    @Test
+    fun cleanupPreservesAttachmentStillReferencedByRecentConversation() = runBlocking {
+        seedConversation("old", updatedAt = now - 100L * 24 * 60 * 60 * 1000, pinned = false, messageCount = 1)
+        seedConversation("recent", updatedAt = now, pinned = false, messageCount = 1)
+        seedAttachment("old", "upload/shared.txt", "shared".toByteArray())
+        database.messageNodeDao().insert(
+            MessageNodeEntity(
+                id = "recent-attachment", conversationId = "recent", nodeIndex = 1,
+                messages = messageJsonWithAttachments("upload/shared.txt"), selectIndex = 0,
+            ),
+        )
+
+        val preview = cleanup.dryRun(oldCutoff)
+        assertEquals(0, preview.attachmentCount)
+        assertEquals(1, cleanup.execute(preview).conversationCount)
+        assertEquals("shared", File(context.filesDir, "upload/shared.txt").readText())
+        assertEquals(1, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
+        assertEquals(listOf("recent"), database.conversationDao().getAllIds())
+    }
+
+    @Test
+    fun cancellationDuringFirstDeleteStillCommitsPhysicalAndDatabaseCleanup() = runBlocking {
+        seedConversation("conv-a", updatedAt = now - 100L * 24 * 60 * 60 * 1000, pinned = false, messageCount = 1)
+        seedAttachment("conv-a", "upload/cancelled.txt", "delete".toByteArray())
+        val file = File(context.filesDir, "upload/cancelled.txt")
+        val plan = cleanup.dryRun(oldCutoff)
+
+        firstManagedDeleteSeen.set(false)
+        cleanupJob.set(null)
+        cancelCleanupOnFirstManagedDelete.set(true)
+        val job = launch(start = CoroutineStart.LAZY) {
+            cleanup.execute(plan)
+        }
+        cleanupJob.set(job)
+        job.start()
+        job.join()
+        cancelCleanupOnFirstManagedDelete.set(false)
+
+        assertTrue(firstManagedDeleteSeen.get())
+        assertTrue(job.isCancelled)
+        assertEquals(0, database.conversationDao().getAllIds().size)
+        assertEquals(0, database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().size)
+        assertFalse(file.exists())
     }
 
     // ---------------- fixtures ----------------

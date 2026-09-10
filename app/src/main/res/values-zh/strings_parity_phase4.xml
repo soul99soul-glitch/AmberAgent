@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_synara_workspace_error_title">Synara 工作台加载失败</string>
+    <string name="parity_synara_workspace_unknown_error">请检查连接后重试。</string>
+    <string name="parity_synara_workspace_retry">重试</string>
+    <string name="parity_synara_workspace_connection_settings">连接设置</string>
+
+    <string name="parity_miniapp_source_unsaved_title">有未保存的更改</string>
+    <string name="parity_miniapp_source_unsaved_badge">未保存</string>
+    <string name="parity_miniapp_source_unsaved_message">当前源码更改尚未保存，确定要关闭并放弃吗？</string>
+    <string name="parity_miniapp_source_keep_editing">继续编辑</string>
+    <string name="parity_miniapp_source_discard">放弃更改</string>
+    <string name="parity_miniapp_source_save_failed">保存失败</string>
+</resources>

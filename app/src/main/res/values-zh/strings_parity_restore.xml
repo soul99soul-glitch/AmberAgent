@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="restore_apply_failed_retry">恢复失败；加密备份源仍保留，请重新验证后重试。</string>
+    <string name="restore_partial_commit_retry">备份数据已写入，但设置、令牌或搜索索引收尾失败；请重新验证同一备份后重试。</string>
+    <string name="restore_verification_expired">恢复验证已失效，请重新验证备份。</string>
+    <string name="restore_committing">正在提交恢复，此阶段无法取消。</string>
+</resources>

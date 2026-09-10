@@ -1,11 +1,14 @@
 package app.amber.feature.runtime
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,7 +17,10 @@ import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.ai.GenerationRetrySetting
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -63,6 +69,62 @@ class AgentToolDispatcherTest {
         assertEquals(listOf("a", "b"), result.map { it.toolCallId })
         assertEquals("first", (result[0].output.single() as UIMessagePart.Text).text)
         assertEquals("second", (result[1].output.single() as UIMessagePart.Text).text)
+    }
+
+    @Test
+    fun executeBatchSerializesOneParallelGroupButRunsDifferentGroupsTogether() = runBlocking {
+        val firstSameGroupStarted = CompletableDeferred<Unit>()
+        val differentGroupStarted = CompletableDeferred<Unit>()
+        val releaseSameGroup = CompletableDeferred<Unit>()
+        val firstSameGroupCall = AtomicBoolean(true)
+        val sameGroupActive = AtomicInteger(0)
+        val sameGroupOverlap = AtomicBoolean(false)
+        val differentGroupEnteredBeforeRelease = AtomicBoolean(false)
+        val definition = Tool(
+            name = "wm_tab_list",
+            description = "",
+            execute = { input ->
+                val sessionId = input.jsonObject["session_id"]!!.jsonPrimitive.content
+                if (sessionId == "session-a") {
+                    val active = sameGroupActive.incrementAndGet()
+                    if (active > 1) sameGroupOverlap.set(true)
+                    try {
+                        if (firstSameGroupCall.compareAndSet(true, false)) {
+                            firstSameGroupStarted.complete(Unit)
+                            releaseSameGroup.await()
+                        }
+                        listOf(UIMessagePart.Text(sessionId))
+                    } finally {
+                        sameGroupActive.decrementAndGet()
+                    }
+                } else {
+                    if (!releaseSameGroup.isCompleted) differentGroupEnteredBeforeRelease.set(true)
+                    differentGroupStarted.complete(Unit)
+                    listOf(UIMessagePart.Text(sessionId))
+                }
+            },
+        )
+
+        val batch = async {
+            dispatcher.executeBatch(
+                tools = listOf(
+                    toolCall("wm_tab_list", id = "same-1", input = """{"session_id":"session-a"}"""),
+                    toolCall("wm_tab_list", id = "same-2", input = """{"session_id":"session-a"}"""),
+                    toolCall("wm_tab_list", id = "different", input = """{"session_id":"session-b"}"""),
+                ),
+                toolDefinitions = mapOf("wm_tab_list" to definition),
+                autoApproveTools = false,
+            )
+        }
+
+        withTimeout(5_000) { firstSameGroupStarted.await() }
+        withTimeout(5_000) { differentGroupStarted.await() }
+        assertTrue(differentGroupEnteredBeforeRelease.get())
+        assertFalse(sameGroupOverlap.get())
+
+        releaseSameGroup.complete(Unit)
+        val result = withTimeout(5_000) { batch.await() }
+        assertEquals(listOf("same-1", "same-2", "different"), result.map { it.toolCallId })
     }
 
     @Test

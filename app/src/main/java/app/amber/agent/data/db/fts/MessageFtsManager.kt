@@ -1,6 +1,7 @@
 package app.amber.agent.data.db.fts
 
 import android.util.Log
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.amber.ai.ui.UIMessage
@@ -242,9 +243,10 @@ class MessageFtsManager(private val database: AppDatabase) {
     }
 
     suspend fun search(keyword: String): List<MessageSearchResult> = withContext(Dispatchers.IO) {
-        val bodyHits = queryBodyHits(keyword)
-        val titleHits = queryTitleHits(keyword)
-        mergeMessageSearchResults(bodyHits, titleHits)
+        queryMessageSearchResults(
+            bodyQuery = { queryBodyHits(keyword) },
+            titleQuery = { queryTitleHits(keyword) },
+        )
     }
 
     private fun queryBodyHits(keyword: String): List<MessageSearchResult> {
@@ -264,8 +266,9 @@ class MessageFtsManager(private val database: AppDatabase) {
                 arrayOf(keyword)
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.w(TAG, "FTS query failed for keyword '$keyword': ${e.message}")
-            return results
+            throw e
         }
         cursor.use {
             while (it.moveToNext()) {
@@ -303,8 +306,9 @@ class MessageFtsManager(private val database: AppDatabase) {
                 arrayOf(keyword)
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             Log.w(TAG, "Title FTS query failed for keyword '$keyword': ${e.message}")
-            return results
+            throw e
         }
         cursor.use {
             while (it.moveToNext()) {
@@ -338,6 +342,20 @@ class MessageFtsManager(private val database: AppDatabase) {
             if (it.moveToFirst()) it.getString(0) else null
         }
     }
+}
+
+/**
+ * Runs both FTS projections as one operation. A failure in either projection
+ * must reach the caller; returning a partial merge would look like a valid
+ * empty search result and hide an index/query problem from the UI.
+ */
+internal suspend fun queryMessageSearchResults(
+    bodyQuery: suspend () -> List<MessageSearchResult>,
+    titleQuery: suspend () -> List<MessageSearchResult>,
+): List<MessageSearchResult> {
+    val bodyHits = bodyQuery()
+    val titleHits = titleQuery()
+    return mergeMessageSearchResults(bodyHits, titleHits)
 }
 
 private fun UIMessage.extractFtsText(): String =

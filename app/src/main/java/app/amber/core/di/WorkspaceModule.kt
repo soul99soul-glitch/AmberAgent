@@ -1,8 +1,6 @@
 package app.amber.core.di
 
-import app.amber.feature.office.FeishuOfficeEnhancementManager
 import app.amber.feature.tools.ExternalFileTools
-import app.amber.feature.tools.FeishuOfficeTools
 import app.amber.feature.tools.WorkspaceArtifactTools
 import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.workspace.WorkspaceManager
@@ -13,7 +11,7 @@ import app.amber.core.font.SlidesFontRepository
 import org.koin.dsl.module
 
 /**
- * Workspace + conversation-context + Feishu Office domain Koin module.
+ * Workspace + conversation-context domain Koin module.
  *
  * Bundles:
  *  - Workspace lifecycle (WorkspaceManager / WorkspaceTools /
@@ -22,8 +20,6 @@ import org.koin.dsl.module
  *  - Conversation context engine (ConversationContextRepository /
  *    AgentCapabilitySnapshotBuilder / ConversationContextEngine) — the
  *    M1.3.3 "ContextPlanner" layer (already in main, only DI wired here).
- *  - Feishu Office enhancement (FeishuOfficeEnhancementManager /
- *    FeishuOfficeTools) — feishu-doc agent surface.
  *  - Generic external file tools (ExternalFileTools).
  *
  * Extracted from AppModule in M1.5 continuation.
@@ -33,11 +29,7 @@ val workspaceModule = module {
 
     single { WorkspaceTools(get(), get()) }
 
-    single { FeishuOfficeEnhancementManager(get(), get(), get(), get(), get()) }
-
-    single { FeishuOfficeTools(get(), get(), get()) }
-
-    single { ConversationContextRepository(get(), get(), get()) }
+    single { ConversationContextRepository(get(), get(), get(), get()) }
 
     single { AgentCapabilitySnapshotBuilder(get()) }
 

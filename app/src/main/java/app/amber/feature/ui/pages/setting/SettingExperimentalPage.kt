@@ -36,13 +36,12 @@ import app.amber.ai.provider.Model
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.LayoutDashboard
-import com.composables.icons.lucide.FileText
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Newspaper
 import com.composables.icons.lucide.Server
+import com.composables.icons.lucide.Users
 import app.amber.agent.R
 import app.amber.agent.Screen
-import app.amber.feature.office.FeishuOfficeAnalysisTemplate
 import app.amber.feature.ui.components.nav.BackButton
 import app.amber.feature.ui.components.ui.CardGroup
 import app.amber.feature.ui.components.ui.workspaceColors
@@ -82,15 +81,8 @@ fun SettingExperimentalPage() {
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
-                        onClick = { navController.navigate(Screen.SettingExperimentalOfficePro) },
-                        icon = { Icon(Lucide.FileText, contentDescription = null) },
-                        title = stringResource(R.string.setting_officepro_title),
-                        description = stringResource(R.string.setting_officepro_desc),
-                    )
-                    ExperimentDivider()
-                    ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
-                        icon = { Icon(Lucide.FileText, contentDescription = null) },
+                        icon = { Icon(Lucide.Users, contentDescription = null) },
                         title = stringResource(R.string.setting_subagent_title),
                         description = stringResource(R.string.setting_subagent_desc),
                     )
@@ -314,7 +306,7 @@ internal fun ExperimentActionButton(
     }
     Surface(
         modifier = Modifier
-            .heightIn(min = 36.dp)
+            .heightIn(min = 48.dp)
             .clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(8.dp),
         color = container,

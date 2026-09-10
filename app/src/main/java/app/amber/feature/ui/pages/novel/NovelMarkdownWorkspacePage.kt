@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.novel
 
+import androidx.compose.ui.res.stringResource
+import app.amber.agent.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -118,8 +121,11 @@ import org.koin.core.parameter.parametersOf
 @Composable
 fun NovelMarkdownWorkspacePage(
     projectId: String,
+    branchSlug: String? = null,
+    jobId: String? = null,
     viewModel: NovelMarkdownWorkspaceViewModel = koinViewModel(
-        parameters = { parametersOf(projectId) },
+        key = "$projectId:$branchSlug:$jobId",
+        parameters = { parametersOf(projectId, app.amber.feature.novelworkspace.NovelWorkspaceFocus(branchSlug, jobId)) },
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -127,7 +133,10 @@ fun NovelMarkdownWorkspacePage(
     val type = LocalAmberType.current
     val appSettings = LocalSettings.current
     var tab by remember { mutableStateOf(0) }
-    var showGhostwrite by remember { mutableStateOf(false) }
+    var showGhostwrite by remember(projectId, branchSlug, jobId) { mutableStateOf(false) }
+    LaunchedEffect(jobId, state.ghostwriteJob?.jobId) {
+        if (jobId != null && state.ghostwriteJob?.jobId == jobId) showGhostwrite = true
+    }
     // Graphite TopModelMenu：与标准 chat 同款——顶栏下方卷帘下拉（替代 ModelSelector 弹层）。
     var modelMenuOpen by remember { mutableStateOf(false) }
 
@@ -157,7 +166,12 @@ fun NovelMarkdownWorkspacePage(
                     val currentModelUuid = state.writingModelId?.let {
                         runCatching { kotlin.uuid.Uuid.parse(it) }.getOrNull()
                     }
-                    Column {
+                    Column(
+                        modifier = Modifier.heightIn(min = 48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = state.exists && !state.loading) { modelMenuOpen = !modelMenuOpen },
+                        verticalArrangement = Arrangement.Center,
+                    ) {
                         Text(
                             state.title.ifEmpty { "小说工作区" },
                             style = type.sessionTitle,
@@ -173,8 +187,6 @@ fun NovelMarkdownWorkspacePage(
                         )
                         Row(
                             modifier = Modifier
-                                .clip(CircleShape)
-                                .clickable { modelMenuOpen = !modelMenuOpen }
                                 .padding(start = 4.dp, top = 6.dp, end = 4.dp, bottom = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -210,34 +222,37 @@ fun NovelMarkdownWorkspacePage(
                 },
                 navigationIcon = { BackButton() },
                 actions = {
-                    if (state.writingModelId != null) {
-                        IconButton(
-                            onClick = { viewModel.setWritingModel(null) },
-                            modifier = Modifier.size(48.dp),
+                    if (state.exists && !state.loading) {
+                        if (state.writingModelId != null) {
+                            IconButton(
+                                onClick = { viewModel.setWritingModel(null) },
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.X,
+                                    contentDescription = "改回跟随全局",
+                                    tint = LocalAmberTokens.current.ink3,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                        // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
+                        val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+                        Box(
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(entryAccent.accentSoft)
+                                .clickable { showGhostwrite = true }
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                imageVector = Lucide.X,
-                                contentDescription = "改回跟随全局",
-                                tint = LocalAmberTokens.current.ink3,
-                                modifier = Modifier.size(18.dp),
+                            Text(
+                                "代笔",
+                                style = type.meta.copy(fontWeight = FontWeight.SemiBold),
+                                color = entryAccent.accent,
                             )
                         }
-                    }
-                    // 代笔入口：accentSoft 底 + accent 字的入口胶囊（accent=进入选择，非装饰）。
-                    val entryAccent = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(entryAccent.accentSoft)
-                            .clickable { showGhostwrite = true }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "代笔",
-                            style = type.meta.copy(fontWeight = FontWeight.SemiBold),
-                            color = entryAccent.accent,
-                        )
                     }
                 },
                 // AMOLED 下 topBarColors 的 #161512 会在纯黑页面上拼出一条横带；
@@ -262,7 +277,7 @@ fun NovelMarkdownWorkspacePage(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        "项目不存在或已被删除。",
+                        state.errorMessage ?: "项目不存在或已被删除。",
                         style = type.secondary,
                         color = workspace.muted,
                         textAlign = TextAlign.Center,
@@ -271,12 +286,20 @@ fun NovelMarkdownWorkspacePage(
             }
             else -> {
                 Column(Modifier.fillMaxSize().padding(padding)) {
+                    if (state.unreadableJobFiles.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.parity_novel_unreadable_jobs, state.unreadableJobFiles.joinToString()),
+                            color = workspace.red,
+                            style = type.meta,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
                     // Compact segmented control — the stock TabRow ate too much height.
                     Row(
                         Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .height(40.dp)
+                            .height(48.dp)
                             .clip(RoundedCornerShape(10.dp))
                             .background(workspace.paper)
                             .border(1.dp, workspace.hairline, RoundedCornerShape(10.dp)),
@@ -287,10 +310,10 @@ fun NovelMarkdownWorkspacePage(
                                 Modifier
                                     .weight(1f)
                                     .fillMaxHeight()
+                                    .clickable { tab = index }
                                     .padding(3.dp)
                                     .clip(RoundedCornerShape(7.dp))
-                                    .background(if (selected) workspace.ink else Color.Transparent)
-                                    .clickable { tab = index },
+                                    .background(if (selected) workspace.ink else Color.Transparent),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
@@ -341,7 +364,7 @@ fun NovelMarkdownWorkspacePage(
         }
     }
 
-    if (showGhostwrite) {
+    if (showGhostwrite && state.exists && !state.loading) {
         MarkdownGhostwriteSheet(
             job = state.ghostwriteJob,
             busy = state.busy,
@@ -514,6 +537,15 @@ private fun MarkdownGhostwriteSheet(
                             onClick = onRetryFailed,
                         )
                     }
+                } else if (job.status == "completed" || job.status == "cancelled") {
+                    Text(
+                        stringResource(
+                            if (job.status == "completed") R.string.parity_novel_completed else R.string.parity_novel_cancelled,
+                            job.written, job.target,
+                        ),
+                        style = type.body,
+                        color = workspace.ink,
+                    )
                 } else {
                     val paused = job.status == "paused"
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -577,7 +609,7 @@ private fun MarkdownGhostwriteSheet(
                         )
                     }
                     Text(
-                        "每章一笔 commit，可随时暂停；崩了按 commit 续跑不重写。",
+                        "已收录章节会保留；暂停后可继续剩余章节。",
                         style = type.meta,
                         color = workspace.muted,
                     )
@@ -779,10 +811,12 @@ private fun PanelPill(
     }
     Box(
         Modifier
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(if (enabled) bg else workspace.row)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 9.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Text(text, style = type.meta, color = if (enabled) fg else workspace.faint)
     }
@@ -797,7 +831,7 @@ private fun PanelCtaButton(text: String, enabled: Boolean, onClick: () -> Unit) 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .heightIn(min = 48.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (enabled) chatTheme.accent else workspace.row)
             .clickable(enabled = enabled, onClick = onClick),
@@ -811,7 +845,7 @@ private fun PanelCtaButton(text: String, enabled: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 44dp flat round stepper chip. */
+/** Flat round stepper with a 48dp touch target. */
 @Composable
 private fun PanelRoundIcon(
     icon: ImageVector,
@@ -822,7 +856,7 @@ private fun PanelRoundIcon(
     val workspace = workspaceColors()
     Box(
         Modifier
-            .size(44.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .background(workspace.row)
             .border(1.dp, workspace.hairline, CircleShape)

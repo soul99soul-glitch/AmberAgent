@@ -1,0 +1,80 @@
+app/src/main/java/app/amber/agent/RouteActivity.kt:157: trailing whitespace.
++import app.amber.feature.ui.pages.webmount.WebMountSessionPage
+app/src/main/java/app/amber/agent/RouteActivity.kt:324: trailing whitespace.
++        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
+app/src/main/java/app/amber/agent/RouteActivity.kt:325: trailing whitespace.
++            if (navStack?.lastOrNull() != screen) navStack?.add(screen)
+app/src/main/java/app/amber/agent/RouteActivity.kt:326: trailing whitespace.
++        }
+app/src/main/java/app/amber/agent/RouteActivity.kt:390: trailing whitespace.
++        val eventBus = koinInject<AppEventBus>()
+app/src/main/java/app/amber/agent/RouteActivity.kt:412: trailing whitespace.
++            app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
+app/src/main/java/app/amber/agent/RouteActivity.kt:413: trailing whitespace.
++                return@remember screen
+app/src/main/java/app/amber/agent/RouteActivity.kt:414: trailing whitespace.
++            }
+app/src/main/java/app/amber/agent/RouteActivity.kt:447: trailing whitespace.
++        LaunchedEffect(backStack) {
+app/src/main/java/app/amber/agent/RouteActivity.kt:484: trailing whitespace.
++            ) {
+app/src/main/java/app/amber/agent/RouteActivity.kt:492: trailing whitespace.
++                Box(
+app/src/main/java/app/amber/agent/RouteActivity.kt:543: trailing whitespace.
++                                    nodeId = key.nodeId?.let { Uuid.parse(it) },
+app/src/main/java/app/amber/agent/RouteActivity.kt:544: trailing whitespace.
++                                    messageId = key.messageId,
+app/src/main/java/app/amber/agent/RouteActivity.kt:545: trailing whitespace.
++                                    toolCallId = key.toolCallId,
+app/src/main/java/app/amber/agent/RouteActivity.kt:620: trailing whitespace.
++                            entry<Screen.WebMountSession> { key ->
+app/src/main/java/app/amber/agent/RouteActivity.kt:621: trailing whitespace.
++                                WebMountSessionPage(
+app/src/main/java/app/amber/agent/RouteActivity.kt:622: trailing whitespace.
++                                    sessionId = key.sessionId,
+app/src/main/java/app/amber/agent/RouteActivity.kt:623: trailing whitespace.
++                                    reopen = key.reopen,
+app/src/main/java/app/amber/agent/RouteActivity.kt:624: trailing whitespace.
++                                )
+app/src/main/java/app/amber/agent/RouteActivity.kt:625: trailing whitespace.
++                            }
+app/src/main/java/app/amber/agent/RouteActivity.kt:626: trailing whitespace.
++
+app/src/main/java/app/amber/agent/RouteActivity.kt:775: trailing whitespace.
++                                NovelMarkdownWorkspacePage(
+app/src/main/java/app/amber/agent/RouteActivity.kt:776: trailing whitespace.
++                                    projectId = key.projectId,
+app/src/main/java/app/amber/agent/RouteActivity.kt:777: trailing whitespace.
++                                    branchSlug = key.branchSlug,
+app/src/main/java/app/amber/agent/RouteActivity.kt:778: trailing whitespace.
++                                    jobId = key.jobId,
+app/src/main/java/app/amber/agent/RouteActivity.kt:779: trailing whitespace.
++                                )
+app/src/main/java/app/amber/agent/RouteActivity.kt:908: trailing whitespace.
++        val nodeId: String? = null,
+app/src/main/java/app/amber/agent/RouteActivity.kt:909: trailing whitespace.
++        val messageId: String? = null,
+app/src/main/java/app/amber/agent/RouteActivity.kt:910: trailing whitespace.
++        val toolCallId: String? = null,
+app/src/main/java/app/amber/agent/RouteActivity.kt:980: trailing whitespace.
++    data class WebMountSession(
+app/src/main/java/app/amber/agent/RouteActivity.kt:981: trailing whitespace.
++        val sessionId: String,
+app/src/main/java/app/amber/agent/RouteActivity.kt:982: trailing whitespace.
++        val reopen: Boolean = false,
+app/src/main/java/app/amber/agent/RouteActivity.kt:983: trailing whitespace.
++    ) : Screen
+app/src/main/java/app/amber/agent/RouteActivity.kt:984: trailing whitespace.
++
+app/src/main/java/app/amber/agent/RouteActivity.kt:985: trailing whitespace.
++    @Serializable
+app/src/main/java/app/amber/agent/RouteActivity.kt:1109: trailing whitespace.
++    data class NovelMarkdown(
+app/src/main/java/app/amber/agent/RouteActivity.kt:1110: trailing whitespace.
++        val projectId: String,
+app/src/main/java/app/amber/agent/RouteActivity.kt:1111: trailing whitespace.
++        val branchSlug: String? = null,
+app/src/main/java/app/amber/agent/RouteActivity.kt:1112: trailing whitespace.
++        val jobId: String? = null,
+app/src/main/java/app/amber/agent/RouteActivity.kt:1113: trailing whitespace.
++    ) : Screen

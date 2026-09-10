@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.put
 import app.amber.ai.core.InputSchema
 import app.amber.ai.core.Tool
@@ -15,8 +16,10 @@ import app.amber.core.agent.utils.long
 import app.amber.core.agent.utils.requiredString
 import app.amber.core.agent.utils.string
 import app.amber.feature.webmount.primitives.NetworkLog
+import app.amber.feature.webmount.primitives.WebMountLeaseInvalidatedException
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
+import java.util.UUID
 
 internal fun createSignedFetchTool(
     deps: WebMountDeps,
@@ -63,58 +66,117 @@ internal fun createSignedFetchTool(
             val timeout = (input.long("timeout_ms") ?: 15_000L).coerceIn(1_000L, 60_000L)
             val scriptKey = input.string("sign_script") ?: "sign_request"
             val profileOverride = input.string("profile_id")
+            val writeRequest = method !in setOf("GET", "HEAD")
 
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val currentUrl = handle.loadState.value.currentUrl ?: url
-            val currentOrigin = ProfileRegistry.extractOrigin(currentUrl)
-                ?: error("session has no committed URL yet — call wm_open first")
-            val entry = profileOverride?.let { profileRegistry.byId(it) }
-                ?: profileRegistry.forUrl(currentUrl)
-                ?: error("no profile applies to $currentUrl (or override $profileOverride)")
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val actionId = if (writeRequest) UUID.randomUUID().toString() else null
+                val dispatchWithLease = deps.dispatchWithLease(input, lease)
+                val currentUrl = handle.loadState.value.currentUrl ?: url
+                val currentOrigin = ProfileRegistry.extractOrigin(currentUrl)
+                    ?: error("session has no committed URL yet — call wm_open first")
+                val entry = profileOverride?.let { profileRegistry.byId(it) }
+                    ?: profileRegistry.forUrl(currentUrl)
+                    ?: error("no profile applies to $currentUrl (or override $profileOverride)")
 
-            val args = listOf<JsonElement>(
-                JsonPrimitive(url),
-                JsonPrimitive(method),
-                body?.let { JsonPrimitive(it) } ?: JsonNull,
-                extraParams ?: buildJsonObject {},
-            )
-            // Holistic review B-2 fix: pass the outbound URL's host so
-            // ProfileBridge can enforce send_signed:<host> + origin.
-            val requestedHost = ProfileRegistry.extractOrigin(url)
-            val result = profileBridge.callSign(
-                handle = handle,
-                entry = entry,
-                currentOrigin = currentOrigin,
-                scriptKey = scriptKey,
-                args = args,
-                timeoutMs = timeout,
-                requestedUrlHost = requestedHost,
-            )
-            val response = when (result) {
-                is ProfileBridge.SignResult.Success -> buildJsonObject {
-                    put("ok", true)
-                    put("session_id", sessionId)
-                    put("profile_id", entry.profile.id)
-                    put("response", result.value)
+                val args = listOf<JsonElement>(
+                    JsonPrimitive(url),
+                    JsonPrimitive(method),
+                    body?.let { JsonPrimitive(it) } ?: JsonNull,
+                    extraParams ?: buildJsonObject {},
+                )
+                // Holistic review B-2 fix: pass the outbound URL's host so
+                // ProfileBridge can enforce send_signed:<host> + origin.
+                val requestedHost = ProfileRegistry.extractOrigin(url)
+                val result = try {
+                    profileBridge.callSign(
+                        handle = handle,
+                        entry = entry,
+                        currentOrigin = currentOrigin,
+                        scriptKey = scriptKey,
+                        args = args,
+                        timeoutMs = timeout,
+                        requestedUrlHost = requestedHost,
+                        dispatchWithLease = dispatchWithLease,
+                    )
+                } catch (_: WebMountLeaseInvalidatedException) {
+                    return@withAgentSession listOf(UIMessagePart.Text(buildJsonObject {
+                        put("ok", false)
+                        put("session_id", sessionId)
+                        put("error", "run_mismatch")
+                        if (writeRequest) putSignedFetchReceipt(
+                            actionId = requireNotNull(actionId),
+                            dispatched = false,
+                        )
+                        putWebMountWindowState(handle)
+                    }.toString()))
                 }
-                is ProfileBridge.SignResult.Error -> buildJsonObject {
-                    put("ok", false)
-                    put("session_id", sessionId)
-                    put("profile_id", entry.profile.id)
-                    put("error", result.message)
+                val response = when (result) {
+                    is ProfileBridge.SignResult.Success -> buildJsonObject {
+                        put("ok", true)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("response", result.value)
+                        if (writeRequest) putSignedFetchReceipt(
+                            actionId = requireNotNull(actionId),
+                            dispatched = true,
+                        )
+                        putWebMountWindowState(handle)
+                    }
+                    is ProfileBridge.SignResult.Error -> buildJsonObject {
+                        put("ok", false)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("error", result.message)
+                        if (writeRequest) {
+                            val dispatched = result.mayHaveBeenDispatched()
+                            putSignedFetchReceipt(
+                                actionId = requireNotNull(actionId),
+                                dispatched = dispatched,
+                            )
+                        }
+                        putWebMountWindowState(handle)
+                    }
+                    is ProfileBridge.SignResult.RateLimited -> buildJsonObject {
+                        put("ok", false)
+                        put("session_id", sessionId)
+                        put("profile_id", entry.profile.id)
+                        put("error", result.message)
+                        put("rate_limited", true)
+                        if (writeRequest) putSignedFetchReceipt(
+                            actionId = requireNotNull(actionId),
+                            dispatched = false,
+                        )
+                        putWebMountWindowState(handle)
+                    }
                 }
-                is ProfileBridge.SignResult.RateLimited -> buildJsonObject {
-                    put("ok", false)
-                    put("session_id", sessionId)
-                    put("profile_id", entry.profile.id)
-                    put("error", result.message)
-                    put("rate_limited", true)
-                }
+                listOf(UIMessagePart.Text(response.toString()))
             }
-            listOf(UIMessagePart.Text(response.toString()))
         }
     },
 )
+
+/** Add the common effect fields only for signed write requests. The response
+ * from a signing shim is transport evidence; it is not a business
+ * postcondition, so successful writes remain unknown until a caller verifies
+ * the resulting state explicitly. */
+private fun kotlinx.serialization.json.JsonObjectBuilder.putSignedFetchReceipt(
+    actionId: String,
+    dispatched: Boolean,
+) {
+    put("action_id", actionId)
+    put("dispatched", dispatched)
+    put("status", if (dispatched) "unknown" else "failed")
+    put("snapshot_id_before", null as String?)
+    put("snapshot_id_after", null as String?)
+    put("page_changed", false)
+    put("goal_verified", false)
+    if (dispatched) put("may_have_applied", true)
+    put("auto_retry_after_event", false)
+}
+
+private fun ProfileBridge.SignResult.Error.mayHaveBeenDispatched(): Boolean =
+    message.startsWith("callPageFn ") || message.startsWith("Sign function threw:")
 
 internal fun createNetworkInspectTool(deps: WebMountDeps): Tool = Tool(
     name = "wm_network_inspect",
@@ -135,14 +197,17 @@ internal fun createNetworkInspectTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_network_inspect", "WebMount 网络观察", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val max = (input.long("max") ?: 50L).coerceIn(0L, 200L).toInt()
-            val payload = buildJsonObject {
-                put("session_id", sessionId)
-                put("network_coverage", handle.bridgeInjectionCoverage)
-                put("result", handle.networkLog.inspect(handle.loadState.value.currentUrl, max))
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val max = (input.long("max") ?: 50L).coerceIn(0L, 200L).toInt()
+                val payload = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("network_coverage", handle.bridgeInjectionCoverage)
+                    put("result", handle.networkLog.inspect(handle.loadState.value.currentUrl, max))
+                    putWebMountWindowState(handle)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )
@@ -171,40 +236,44 @@ internal fun createFetchReplayTool(deps: WebMountDeps): Tool = Tool(
         deps.track("wm_fetch_replay", "WebMount 请求重放", input) {
             val sessionId = input.requiredString("session_id")
             val templateId = input.requiredString("request_template_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val template = handle.networkLog.template(templateId)
-                ?: error("request template not found: $templateId")
-            require(template.method in setOf("GET", "HEAD")) {
-                "wm_fetch_replay only supports observed GET/HEAD templates"
-            }
-            val currentUrl = handle.loadState.value.currentUrl
-                ?: error("session has no committed URL yet")
-            val replayUrl = NetworkLog.resolveUrl(currentUrl, template.rawUrl)
-            require(NetworkLog.originOf(currentUrl) == NetworkLog.originOf(replayUrl)) {
-                "wm_fetch_replay only supports same-origin requests"
-            }
-            require(!NetworkLog.isProbablyMutatingReplayUrl(replayUrl)) {
-                "wm_fetch_replay refused a GET/HEAD endpoint with mutation-like path hints"
-            }
-            val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1_000L, 200_000L)
-            val result = handle.callBridge(
-                "fetch_replay",
-                buildJsonObject {
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val template = handle.networkLog.template(templateId)
+                    ?: error("request template not found: $templateId")
+                require(template.method in setOf("GET", "HEAD")) {
+                    "wm_fetch_replay only supports observed GET/HEAD templates"
+                }
+                val currentUrl = handle.loadState.value.currentUrl
+                    ?: error("session has no committed URL yet")
+                val replayUrl = NetworkLog.resolveUrl(currentUrl, template.rawUrl)
+                require(NetworkLog.originOf(currentUrl) == NetworkLog.originOf(replayUrl)) {
+                    "wm_fetch_replay only supports same-origin requests"
+                }
+                require(!NetworkLog.isProbablyMutatingReplayUrl(replayUrl)) {
+                    "wm_fetch_replay refused a GET/HEAD endpoint with mutation-like path hints"
+                }
+                val maxChars = (input.long("max_chars") ?: 60_000L).coerceIn(1_000L, 200_000L)
+                val result = handle.callBridge(
+                    "fetch_replay",
+                    buildJsonObject {
+                        put("method", template.method)
+                        put("url", replayUrl)
+                        put("max_chars", maxChars)
+                    },
+                    timeoutMs = 30_000L,
+                    dispatchWithLease = deps.dispatchWithLease(input, lease),
+                )
+                val payload = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("request_template_id", templateId)
                     put("method", template.method)
-                    put("url", replayUrl)
-                    put("max_chars", maxChars)
-                },
-                timeoutMs = 30_000L,
-            )
-            val payload = buildJsonObject {
-                put("session_id", sessionId)
-                put("request_template_id", templateId)
-                put("method", template.method)
-                put("host", NetworkLog.originOf(replayUrl).orEmpty())
-                put("path", NetworkLog.redactedPath(replayUrl))
-                put("result", result)
+                    put("host", NetworkLog.originOf(replayUrl).orEmpty())
+                    put("path", NetworkLog.redactedPath(replayUrl))
+                    put("result", result)
+                    putWebMountWindowState(handle)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )
@@ -229,23 +298,26 @@ internal fun createRecipeCandidatesTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_recipe_candidates", "WebMount Recipe 候选", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val max = (input.long("max") ?: 50L).coerceIn(0L, 200L).toInt()
-            val inspected = handle.networkLog.inspect(handle.loadState.value.currentUrl, max)
-            val payload = buildJsonObject {
-                put("session_id", sessionId)
-                put("saved", false)
-                put("candidate_source", "observed_same_origin_network_templates")
-                put("runner", "wm_fetch_replay")
-                put("fallback_chain", buildJsonArray {
-                    add(JsonPrimitive("wm_observe"))
-                    add(JsonPrimitive("wm_extract"))
-                    add(JsonPrimitive("wm_visual_read"))
-                })
-                put("network_coverage", handle.bridgeInjectionCoverage)
-                put("candidates", inspected)
+            deps.withAgentSession(input, sessionId) { lease ->
+                val handle = lease.handle
+                val max = (input.long("max") ?: 50L).coerceIn(0L, 200L).toInt()
+                val inspected = handle.networkLog.inspect(handle.loadState.value.currentUrl, max)
+                val payload = buildJsonObject {
+                    put("session_id", sessionId)
+                    put("saved", false)
+                    put("candidate_source", "observed_same_origin_network_templates")
+                    put("runner", "wm_fetch_replay")
+                    put("fallback_chain", buildJsonArray {
+                        add(JsonPrimitive("wm_observe"))
+                        add(JsonPrimitive("wm_extract"))
+                        add(JsonPrimitive("wm_visual_read"))
+                    })
+                    put("network_coverage", handle.bridgeInjectionCoverage)
+                    put("candidates", inspected)
+                    putWebMountWindowState(handle)
+                }
+                listOf(UIMessagePart.Text(payload.toString()))
             }
-            listOf(UIMessagePart.Text(payload.toString()))
         }
     },
 )

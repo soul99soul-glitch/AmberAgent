@@ -24,6 +24,7 @@ import app.amber.core.di.webMountModule
 import app.amber.core.di.workspaceModule
 import app.amber.core.service.ConversationAccess
 import app.amber.feature.chat.impl.ChatSessionResolver
+import app.amber.feature.home.ContinueCandidateSource
 import app.amber.feature.modelcouncil.ModelCouncilTextRunner
 import app.amber.feature.runtime.StoredResponseGateway
 import app.amber.feature.subagent.SubAgentRunner
@@ -31,6 +32,7 @@ import org.junit.Test
 import org.koin.core.annotation.KoinInternalApi
 import org.koin.core.module.Module
 import kotlin.reflect.KClass
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -111,6 +113,36 @@ class KoinModulesVerifyTest {
             actual = missing.isEmpty() && missingConcrete.isEmpty(),
             message = "Missing Koin bindings: aliases=${missing.map { it.qualifiedName }}, " +
                 "concrete=${missingConcrete.map { it.qualifiedName }}.",
+        )
+    }
+
+    @OptIn(KoinInternalApi::class)
+    @Test
+    fun `continue sources keep independent named bindings`() {
+        val sourceDefinitions = loadedAtStartup
+            .flatMap { it.mappings.values }
+            .filter { factory ->
+                val definition = factory.beanDefinition
+                definition.primaryType == ContinueCandidateSource::class ||
+                    ContinueCandidateSource::class in definition.secondaryTypes
+            }
+        val qualifiers = sourceDefinitions
+            .mapNotNull { it.beanDefinition.qualifier?.value }
+            .toSet()
+        val expected = setOf(
+            "continue.image_generation",
+            "continue.council",
+            "continue.deep_read",
+            "continue.mini_app_draft",
+            "continue.mini_app_runner",
+            "continue.novel_workspace",
+        )
+
+        assertEquals(expected, qualifiers)
+        assertEquals(
+            expected.size,
+            sourceDefinitions.size,
+            "Each ContinueCandidateSource must have one distinct named Koin definition",
         )
     }
 }

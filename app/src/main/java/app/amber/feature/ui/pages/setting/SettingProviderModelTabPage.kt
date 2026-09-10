@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -34,6 +35,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -50,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastFilter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import app.amber.ai.provider.Modality
 import app.amber.ai.provider.Model
@@ -83,34 +86,81 @@ import app.amber.core.utils.plus
 import org.koin.compose.koinInject
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import kotlin.uuid.Uuid
 
 @Composable
 internal fun SettingProviderModelPage(
     provider: ProviderSetting,
-    onEdit: (ProviderSetting) -> Unit
+    onEdit: (ProviderSetting) -> Unit,
+    fetchedCandidates: ProviderModelCandidates? = null,
+    modelListRefreshKey: Int = 0,
+    currentModelId: Uuid? = null,
+    onSetCurrent: (Model) -> Unit = {},
 ) {
     ModelList(
         providerSetting = provider,
-        onUpdateProvider = onEdit
+        onUpdateProvider = onEdit,
+        fetchedCandidates = fetchedCandidates,
+        modelListRefreshKey = modelListRefreshKey,
+        currentModelId = currentModelId,
+        onSetCurrent = onSetCurrent,
     )
 }
 
 @Composable
 private fun ModelList(
     providerSetting: ProviderSetting,
-    onUpdateProvider: (ProviderSetting) -> Unit
+    onUpdateProvider: (ProviderSetting) -> Unit,
+    fetchedCandidates: ProviderModelCandidates?,
+    modelListRefreshKey: Int,
+    currentModelId: Uuid?,
+    onSetCurrent: (Model) -> Unit,
 ) {
     val providerCatalog = koinInject<ProviderCatalog>()
     val requestKey = remember(providerSetting) { providerSetting.modelListRequestKey() }
-    val modelList by produceState(emptyList(), requestKey) {
-        runCatching {
-            value = providerCatalog.text(providerSetting)
-                .listModels(providerSetting)
-                .sortedBy { it.modelId }
-                .toList()
-        }.onFailure {
-            it.printStackTrace()
+    val externalCandidates = fetchedCandidates
+        ?.takeIf { it.requestKey == requestKey }
+        ?.models
+    var fetchAttempt by remember(requestKey) { mutableIntStateOf(0) }
+    val autoFetchState by produceState<ModelListLoadState>(
+        ModelListLoadState.Loading,
+        requestKey,
+        externalCandidates != null,
+        modelListRefreshKey,
+        fetchAttempt,
+    ) {
+        // Reset before every provider/configuration change and explicit retry so
+        // an old catalog cannot look current while the new request is pending.
+        value = ModelListLoadState.Loading
+        if (externalCandidates != null) {
+            value = ModelListLoadState.Loaded(externalCandidates)
+            return@produceState
         }
+        try {
+            value = ModelListLoadState.Loaded(
+                if (providerSetting is ProviderSetting.OpenAI) {
+                    providerCatalog.listModels(providerSetting)
+                } else {
+                    providerCatalog.text(providerSetting).listModels(providerSetting)
+                }
+                    .sortedBy { it.modelId }
+                    .toList()
+            )
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            value = ModelListLoadState.Failed(error.message?.takeIf { it.isNotBlank() } ?: error.toString())
+        }
+    }
+    val modelList = externalCandidates ?: when (val state = autoFetchState) {
+        ModelListLoadState.Loading -> emptyList()
+        is ModelListLoadState.Loaded -> state.models
+        is ModelListLoadState.Failed -> emptyList()
+    }
+    val loadState = if (externalCandidates != null) {
+        ModelListLoadState.Loaded(externalCandidates)
+    } else {
+        autoFetchState
     }
     LaunchedEffect(providerSetting, modelList) {
         if (
@@ -193,6 +243,8 @@ private fun ModelList(
                         Column {
                             ModelRow(
                                 model = item,
+                                isCurrent = item.type == ModelType.CHAT && item.id == currentModelId,
+                                onSetCurrent = { onSetCurrent(item) },
                                 onDelete = {
                                     onUpdateProvider(providerSetting.delModel(item))
                                 },
@@ -213,6 +265,23 @@ private fun ModelList(
                         }
                     }
                 }
+            }
+            when (loadState) {
+                ModelListLoadState.Loading -> item("models_loading") {
+                    ModelListStatusRow(
+                        message = stringResource(R.string.setting_provider_page_models_fetching),
+                    )
+                }
+                is ModelListLoadState.Failed -> item("models_load_error") {
+                    ModelListStatusRow(
+                        message = stringResource(
+                            R.string.setting_provider_page_models_fetch_failed,
+                            loadState.message,
+                        ),
+                        onRetry = { fetchAttempt += 1 },
+                    )
+                }
+                is ModelListLoadState.Loaded -> Unit
             }
         }
 
@@ -279,7 +348,7 @@ private fun ModelList(
     }
 }
 
-private fun ProviderSetting.modelListRequestKey(): ProviderModelListRequestKey {
+internal fun ProviderSetting.modelListRequestKey(): ProviderModelListRequestKey {
     return when (this) {
         is ProviderSetting.OpenAI -> ProviderModelListRequestKey(
             type = "openai",
@@ -310,7 +379,7 @@ private fun ProviderSetting.modelListRequestKey(): ProviderModelListRequestKey {
     }
 }
 
-private data class ProviderModelListRequestKey(
+internal data class ProviderModelListRequestKey(
     val type: String,
     val id: String,
     val credentialsHash: Int,
@@ -318,6 +387,68 @@ private data class ProviderModelListRequestKey(
     val authMode: String,
     val extra: String,
 )
+
+internal data class ProviderModelCandidates(
+    val requestKey: ProviderModelListRequestKey,
+    val models: List<Model>,
+)
+
+private sealed interface ModelListLoadState {
+    data object Loading : ModelListLoadState
+    data class Loaded(val models: List<Model>) : ModelListLoadState
+    data class Failed(val message: String) : ModelListLoadState
+}
+
+@Composable
+private fun ModelListStatusRow(
+    message: String,
+    onRetry: (() -> Unit)? = null,
+) {
+    val t = LocalAmberTokens.current
+    val type = LocalAmberType.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            text = message,
+            style = type.meta.copy(fontSize = 11.sp),
+            color = t.ink3,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        if (onRetry != null) {
+            ProviderGhostButton(
+                text = stringResource(R.string.setting_provider_page_models_retry),
+                onClick = onRetry,
+                accent = false,
+                modifier = Modifier.width(72.dp),
+            )
+        }
+    }
+}
+
+internal fun ProviderSetting.OpenAI.codexOAuthLoginSelection(fetchedModels: List<Model>): List<Model> {
+    val existing = models.withoutCodexReviewModels()
+    return if (existing.isEmpty()) listOfNotNull(fetchedModels.firstOrNull()) else existing
+}
+
+internal fun codexOAuthResultIsCurrent(
+    requestGeneration: Int,
+    currentGeneration: Int,
+    requestKey: ProviderModelListRequestKey,
+    currentProvider: ProviderSetting.OpenAI,
+): Boolean = requestGeneration == currentGeneration &&
+    currentProvider.modelListRequestKey() == requestKey
+
+internal fun geminiOAuthResultIsCurrent(
+    requestKey: ProviderModelListRequestKey,
+    currentProvider: ProviderSetting.Google,
+): Boolean = currentProvider.modelListRequestKey() == requestKey
 
 /* enrich a picked model with the static registry knowledge base */
 private fun Model.withRegistryMetadata(): Model = copy(
@@ -332,6 +463,8 @@ private fun Model.withRegistryMetadata(): Model = copy(
 private fun ModelRow(
     model: Model,
     modifier: Modifier = Modifier,
+    isCurrent: Boolean,
+    onSetCurrent: () -> Unit,
     onDelete: () -> Unit,
     onOpenEditor: () -> Unit,
 ) {
@@ -426,6 +559,25 @@ private fun ModelRow(
                             maxLines = 1,
                         )
                     }
+                }
+            }
+
+            if (model.type == ModelType.CHAT) {
+                Box(
+                    modifier = Modifier.heightIn(min = 48.dp)
+                        .pressable(onClick = onSetCurrent, enabled = !isCurrent),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ProviderSquareTag(
+                    text = if (isCurrent) {
+                        "✓ ${stringResource(R.string.setting_provider_page_model_current)}"
+                    } else {
+                        stringResource(R.string.setting_provider_page_model_set_current)
+                    },
+                    selected = isCurrent,
+                    solid = true,
+                        onClick = null,
+                    )
                 }
             }
 
@@ -594,6 +746,14 @@ private fun ModelPickerSheet(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                                .pressable(onClick = {
+                                    draftIds = if (on) {
+                                        draftIds - model.modelId
+                                    } else {
+                                        draftIds + model.modelId
+                                    }
+                                })
                                 .padding(horizontal = 18.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -632,9 +792,7 @@ private fun ModelPickerSheet(
                                     },
                                     selected = on,
                                     solid = true,
-                                    onClick = {
-                                        draftIds = if (on) draftIds - model.modelId else draftIds + model.modelId
-                                    },
+                                    onClick = null,
                                 )
                             }
                         }

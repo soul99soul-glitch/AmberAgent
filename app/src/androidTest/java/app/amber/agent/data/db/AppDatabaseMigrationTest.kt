@@ -109,6 +109,38 @@ class AppDatabaseMigrationTest {
         db.close()
     }
 
+    @Test
+    fun migration_16_17_adds_continue_projection_columns_without_changing_rows() {
+        val version16 = helper.createDatabase(TEST_DB, 16)
+        version16.execSQL(
+            "INSERT INTO deep_read_cache " +
+                "(topic_id, title, output_json, created_at, expires_at, updated_at, pinned) " +
+                "VALUES ('topic-1', 'Topic', '{}', 1, 2, 1, 0)"
+        )
+        version16.execSQL(
+            "INSERT INTO mini_app " +
+                "(id, title, description, htmlContent, sourceConversationId, sourceMessageId, " +
+                "iconEmoji, category, permissionsJson, pinned, runCount, boardSummary, version, " +
+                "htmlHash, createdAt, updatedAt) " +
+                "VALUES ('app-1', 'App', 'desc', '<p>app</p>', NULL, NULL, NULL, NULL, '[]', " +
+                "0, 0, NULL, 1, NULL, 1, 1)"
+        )
+        version16.close()
+
+        val db = helper.runMigrationsAndValidate(
+            TEST_DB,
+            17,
+            true,
+            AppDatabase.MIGRATION_16_17,
+        )
+
+        assertEquals(1, db.countRows("deep_read_cache", "topic_id = 'topic-1'"))
+        assertTrue(db.isNullValue("deep_read_cache", "source_url", "topic_id = 'topic-1'"))
+        assertEquals(1, db.countRows("mini_app", "id = 'app-1'"))
+        assertTrue(db.isNullValue("mini_app", "lastRunAt", "id = 'app-1'"))
+        db.close()
+    }
+
     private fun SupportSQLiteDatabase.countRows(table: String, where: String): Int {
         query("SELECT COUNT(*) FROM $table WHERE $where").use { cursor ->
             assertTrue(cursor.moveToFirst())
@@ -127,6 +159,13 @@ class AppDatabaseMigrationTest {
         query("SELECT $column FROM $table WHERE $where LIMIT 1").use { cursor ->
             assertTrue(cursor.moveToFirst())
             return cursor.getInt(0)
+        }
+    }
+
+    private fun SupportSQLiteDatabase.isNullValue(table: String, column: String, where: String): Boolean {
+        query("SELECT $column FROM $table WHERE $where LIMIT 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            return cursor.isNull(0)
         }
     }
 

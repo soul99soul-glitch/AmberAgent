@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import androidx.core.net.toUri
+import kotlinx.coroutines.Dispatchers
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -22,6 +23,8 @@ import kotlinx.serialization.json.longOrNull
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.ai.provider.providers.openai.OpenAICodexAuthStore
 import app.amber.ai.provider.providers.google.GoogleGeminiAuthStore
+import app.amber.ai.provider.providers.google.AntigravityAuthStore
+import app.amber.ai.provider.providers.grok.GrokAuthStore
 import app.amber.agent.BuildConfig
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import app.amber.core.settings.Settings
@@ -37,10 +40,12 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.withContext
 
 class SyncArchiveManager(
     private val context: Context,
@@ -51,10 +56,14 @@ class SyncArchiveManager(
     private val webMountOAuthTokenStore: WebMountOAuthTokenStore,
     private val openAICodexAuthStore: OpenAICodexAuthStore,
     private val googleGeminiAuthStore: GoogleGeminiAuthStore,
+    private val antigravityAuthStore: AntigravityAuthStore? = null,
     private val json: Json,
     private val nativePathPrefs: NativePathPrefs,
     private val secretRedactor: SecretRedactor,
     private val deviceBoundBackupKey: DeviceBoundBackupKey,
+    private val restoreWriteGate: SyncRestoreWriteGate? = null,
+    /** Grok OAuth token store；可选以兼容旧测试构造，生产由 DI 注入。 */
+    private val grokAuthStore: GrokAuthStore? = null,
 ) {
     // Re-read the syncCrypto flag on every archive op so DataStore writes
     // take effect without a process restart. The flag check is sub-ms; the
@@ -63,16 +72,16 @@ class SyncArchiveManager(
         get() = SyncCrypto(nativeEnabled = nativePathPrefs.flow.value.syncCrypto)
     private val redactor = SyncRedactor(json)
 
-    suspend fun createArchive(request: SyncExportRequest): ByteArray {
+    suspend fun createArchive(request: SyncExportRequest): ByteArray = withContext(Dispatchers.IO) {
         val archive = createArchiveFile(request)
-        return try {
+        try {
             archive.readBytes()
         } finally {
             archive.delete()
         }
     }
 
-    suspend fun createArchiveFile(request: SyncExportRequest): File {
+    suspend fun createArchiveFile(request: SyncExportRequest): File = withContext(Dispatchers.IO) {
         // P7-02 红线：新备份只用自定义口令或设备绑定加密，历史固定回退口令
         // （NO_PASSPHRASE_FALLBACK）只存在于 v1 旧格式的读取兼容分支。
         val passphrase = when (request.encryptionMode) {
@@ -87,7 +96,7 @@ class SyncArchiveManager(
         val payloadFile = tempSyncFile("payload", ".zip")
         val encryptedPayloadFile = tempSyncFile("payload", ".enc")
         val archiveFile = tempSyncFile("archive", ".$SYNC_ARCHIVE_EXTENSION")
-        return try {
+        try {
             buildPayload(settings, request.mode, payloadFile)
             val params = crypto.newEncryptionParams()
             val encryptResult = crypto.encrypt(payloadFile, encryptedPayloadFile, passphrase, params)
@@ -131,54 +140,64 @@ class SyncArchiveManager(
      * （会话/消息/附件/估算空间）。**不写任何数据** —— 调用方展示 preview
      * 后调用 [applyRestore] 才写入，取消时调用 [discardVerification]。
      */
-    suspend fun verifyArchive(file: File, request: SyncRestoreRequest): SyncRestoreVerification {
-        val encryptedPayloadFile = tempSyncFile("restore-payload", ".enc")
-        val payloadFile = tempSyncFile("restore-payload", ".zip")
-        return try {
-            val parsed = parseArchive(file, encryptedPayloadFile)
-            require(crypto.sha256(encryptedPayloadFile) == parsed.manifest.payloadSha256) {
-                "备份文件校验失败"
-            }
-            val passphrase = resolveRestorePassphrase(parsed.manifest, request)
+    suspend fun verifyArchive(file: File, request: SyncRestoreRequest): SyncRestoreVerification =
+        withContext(Dispatchers.IO) {
+            val encryptedPayloadFile = tempSyncFile("restore-payload", ".enc")
+            val payloadFile = tempSyncFile("restore-payload", ".zip")
             try {
-                crypto.decrypt(encryptedPayloadFile, payloadFile, passphrase, parsed.manifest)
+                val parsed = parseArchive(file, encryptedPayloadFile)
+                require(crypto.sha256(encryptedPayloadFile) == parsed.manifest.payloadSha256) {
+                    "备份文件校验失败"
+                }
+                val passphrase = resolveRestorePassphrase(parsed.manifest, request)
+                try {
+                    crypto.decrypt(encryptedPayloadFile, payloadFile, passphrase, parsed.manifest)
+                } catch (error: Throwable) {
+                    // GCM 认证标签失败 = 口令错误或文件损坏；两者对外不区分。
+                    throw IllegalArgumentException("备份口令错误或备份文件已损坏", error)
+                }
+                val payloadPreview = readPayloadPreview(payloadFile)
+                SyncRestoreVerification(
+                    archiveFile = file,
+                    encryptedPayloadFile = encryptedPayloadFile,
+                    payloadFile = payloadFile,
+                    preview = SyncPreview(
+                        manifest = parsed.manifest,
+                        fileName = file.name,
+                        sizeBytes = file.length(),
+                    ),
+                    payloadPreview = payloadPreview,
+                )
             } catch (error: Throwable) {
-                // GCM 认证标签失败 = 口令错误或文件损坏；两者对外不区分。
-                throw IllegalArgumentException("备份口令错误或备份文件已损坏", error)
+                encryptedPayloadFile.delete()
+                payloadFile.delete()
+                throw error
             }
-            val payloadPreview = readPayloadPreview(payloadFile)
-            SyncRestoreVerification(
-                archiveFile = file,
-                encryptedPayloadFile = encryptedPayloadFile,
-                payloadFile = payloadFile,
-                preview = SyncPreview(
-                    manifest = parsed.manifest,
-                    fileName = file.name,
-                    sizeBytes = file.length(),
-                ),
-                payloadPreview = payloadPreview,
-            )
-        } catch (error: Throwable) {
-            encryptedPayloadFile.delete()
-            payloadFile.delete()
-            throw error
         }
-    }
 
     /**
      * P7-02 恢复第二步：把已验证的解密负载写入本机（仅 EVERYTHING 或
      * CONFIG_ONLY 范围内）。解密已在 [verifyArchive] 完成，这里不做任何
      * 口令相关操作。成功后清理临时文件。
      */
-    suspend fun applyRestore(verification: SyncRestoreVerification, request: SyncRestoreRequest): SyncPreview {
-        try {
-            requireRestorePayloadCompatible(verification, request)
-            restorePayload(verification.payloadFile, verification.preview.manifest, request)
-            return verification.preview
-        } finally {
-            verification.cleanup()
+    suspend fun applyRestore(verification: SyncRestoreVerification, request: SyncRestoreRequest): SyncPreview =
+        withContext(Dispatchers.IO) {
+            try {
+                require(verification.consume()) { "恢复验证结果已失效，请重新验证备份" }
+                requireRestorePayloadCompatible(verification, request)
+                val restore = suspend {
+                    restorePayload(verification.payloadFile, verification.preview.manifest, request)
+                }
+                if (restoreWriteGate == null) {
+                    restore()
+                } else {
+                    restoreWriteGate.withRestore { restore() }
+                }
+                verification.preview
+            } finally {
+                verification.cleanup()
+            }
         }
-    }
 
     /** P7-02：中途取消 —— 解密后未写入，不残留任何临时文件。 */
     fun discardVerification(verification: SyncRestoreVerification) {
@@ -243,15 +262,16 @@ class SyncArchiveManager(
         }
     }
 
-    suspend fun restoreArchive(bytes: ByteArray, request: SyncRestoreRequest): SyncPreview {
-        val archiveFile = tempSyncFile("restore", ".$SYNC_ARCHIVE_EXTENSION")
-        return try {
-            archiveFile.writeBytes(bytes)
-            restoreArchive(archiveFile, request)
-        } finally {
-            archiveFile.delete()
+    suspend fun restoreArchive(bytes: ByteArray, request: SyncRestoreRequest): SyncPreview =
+        withContext(Dispatchers.IO) {
+            val archiveFile = tempSyncFile("restore", ".$SYNC_ARCHIVE_EXTENSION")
+            try {
+                archiveFile.writeBytes(bytes)
+                restoreArchive(archiveFile, request)
+            } finally {
+                archiveFile.delete()
+            }
         }
-    }
 
     private fun buildPayload(
         settings: Settings,
@@ -293,6 +313,9 @@ class SyncArchiveManager(
                     webMountOauth = webMountOAuthTokenStore.exportRawJsonForSync(),
                     openAICodexOAuth = openAICodexAuthStore.exportRawJsonForSync(),
                     googleGeminiOAuth = googleGeminiAuthStore.exportRawJsonForSync(),
+                    grokOAuth = grokAuthStore?.exportRawJsonForSync(),
+                    grokOAuthBackup = grokAuthStore?.exportBackupRawJsonForSync(),
+                    antigravityOAuth = antigravityAuthStore?.exportRawJsonForSync(),
                 ),
                 mode,
             )
@@ -522,40 +545,63 @@ class SyncArchiveManager(
                         if (skipImages) add(FileFolders.IMAGES)
                     }
                     val fileJournal = prepareFileTreeRestore(stagedFilesRoot, skippedFileRoots)
+                    var dataCommitted = false
                     try {
                         restoreTables(filteredTableRows, skippedTables, fileJournal.token)
+                        // The database transaction and file replacement now
+                        // describe one imported data set. Keep the journal
+                        // until secrets/settings/FTS have finished so a crash
+                        // after this point is recovered as a partial commit,
+                        // never as an old-file rollback.
+                        dataCommitted = true
+                        restoreWriteGate?.markDataCommitted()
+                        fileJournal.markDataCommitted()
+                        restoreSecrets(secretsJson)
+                        fileJournal.markPhase(FILE_RESTORE_SECRETS_APPLIED)
+                        // The restore already owns the write gate. Use the
+                        // restore-only reconciliation path so this does not
+                        // reacquire the non-reentrant gate.
+                        filesManager.syncFolderDuringRestore(FileFolders.UPLOAD)
+                        messageFtsManager.rebuildAllFromDatabase()
+                        fileJournal.markPhase(FILE_RESTORE_FTS_APPLIED)
+                        applyRestoredSettings(restoredSettingsJson, finalSettings)
+                        fileJournal.markPhase(FILE_RESTORE_SETTINGS_APPLIED)
                         fileJournal.commit()
                     } catch (error: Throwable) {
-                        runCatching { fileJournal.rollback() }
-                            .exceptionOrNull()
-                            ?.let(error::addSuppressed)
-                        throw error
+                        if (!dataCommitted) {
+                            runCatching { fileJournal.rollback() }
+                                .exceptionOrNull()
+                                ?.let(error::addSuppressed)
+                            throw error
+                        }
+                        throw if (error is SyncRestorePartialCommitException) {
+                            error
+                        } else {
+                            SyncRestorePartialCommitException(error)
+                        }
                     }
                 }
                 RestoreScope.CONFIG_ONLY -> {
                     // No table or file work — the staged file tree we
                     // didn't even fill (due to the skipBulkPayload guard
                     // earlier) is wiped by the outer `finally` regardless.
+                    applyRestoredSettings(restoredSettingsJson, finalSettings)
                 }
             }
         } finally {
             stagedRestoreRoot.deleteRecursively()
         }
-        if (scope == RestoreScope.EVERYTHING) {
-            // Secrets (WebMount + Codex OAuth tokens) are session-bound.
-            // Restoring them on CONFIG_ONLY would clobber a freshly-paired
-            // OAuth session with an old token from the backup. Only do it
-            // when the user explicitly chose the full migrate-everything
-            // path. See Review Risk #4.
-            restoreSecrets(secretsJson)
-            // FTS index + file dir sync only need to run after a full
-            // table / file replace.
-            filesManager.syncFolder(FileFolders.UPLOAD)
-            messageFtsManager.rebuildAllFromDatabase()
-        }
-        // P1-01: 备份不含明文 —— 恢复时先把备份携带的 reference 写回 DataStore，
-        // 掩码值走 redact keep 规则找回本机 secret；跨设备恢复时本机没有对应
-        // secret 的字段保持未设置，用户重新录入。
+    }
+
+    /**
+     * P1-01: 备份不含明文 —— 恢复时先把备份携带的 reference 写回 DataStore，
+     * 掩码值走 redact keep 规则找回本机 secret；跨设备恢复时本机没有对应
+     * secret 的字段保持未设置，用户重新录入。
+     */
+    private suspend fun applyRestoredSettings(
+        restoredSettingsJson: String,
+        finalSettings: Settings,
+    ) {
         val restoredRefs = secretRedactor.extractRefsFromSettingsJson(json, restoredSettingsJson)
         settingsStore.restoreSecretRefs(restoredRefs)
         val refsByKey = restoredRefs.associateBy { it.descriptor().key }
@@ -747,11 +793,16 @@ class SyncArchiveManager(
         }
     }
 
-    private fun recoverInterruptedFileRestore() {
+    private suspend fun recoverInterruptedFileRestore() {
         val journalRoot = File(context.cacheDir, FILE_RESTORE_JOURNAL_DIR).canonicalFile
         if (!journalRoot.exists()) return
         val token = File(journalRoot, FILE_RESTORE_TOKEN).takeIf { it.isFile }?.readText()
         if (token != null && readDatabaseRestoreMarker() == token) {
+            // The DB marker proves that the transaction committed. Any
+            // journal state after that point may have stopped in secrets,
+            // settings, or FTS; retain the imported data and replay the one
+            // derived step that is safe without holding credentials.
+            messageFtsManager.rebuildAllFromDatabase()
             check(journalRoot.deleteRecursively()) { "Unable to clean completed restore journal" }
             clearDatabaseRestoreMarker(token)
             return
@@ -817,10 +868,17 @@ class SyncArchiveManager(
         private val replacedRoots: List<String>,
         val token: String,
     ) {
+        fun markDataCommitted() {
+            markPhase(FILE_RESTORE_DATA_COMMITTED)
+        }
+
+        fun markPhase(phase: String) {
+            writeJournalText(File(journalRoot, FILE_RESTORE_STATE), phase)
+        }
+
         fun commit() {
-            if (journalRoot.deleteRecursively()) {
-                clearDatabaseRestoreMarker(token)
-            }
+            check(journalRoot.deleteRecursively()) { "Unable to clean completed restore journal" }
+            clearDatabaseRestoreMarker(token)
         }
 
         fun rollback() {
@@ -837,10 +895,14 @@ class SyncArchiveManager(
 
     private fun restoreSecrets(secretsJson: String?) {
         if (secretsJson.isNullOrBlank()) return
-        val snapshot = runCatching { json.decodeFromString<SyncSecretSnapshot>(secretsJson) }.getOrNull() ?: return
+        val snapshot = runCatching { json.decodeFromString<SyncSecretSnapshot>(secretsJson) }
+            .getOrElse { error -> throw IllegalArgumentException("同步备份 secrets 数据损坏", error) }
         snapshot.webMountOauth?.let { webMountOAuthTokenStore.restoreRawJsonFromSync(it) }
         snapshot.openAICodexOAuth?.let { openAICodexAuthStore.restoreRawJsonFromSync(it) }
         snapshot.googleGeminiOAuth?.let { googleGeminiAuthStore.restoreRawJsonFromSync(it) }
+        snapshot.grokOAuth?.let { grokAuthStore?.restoreRawJsonFromSync(it) }
+        snapshot.grokOAuthBackup?.let { grokAuthStore?.restoreBackupRawJsonFromSync(it) }
+        snapshot.antigravityOAuth?.let { antigravityAuthStore?.restoreRawJsonFromSync(it) }
     }
 
     private fun zipArchive(
@@ -1049,6 +1111,10 @@ class SyncArchiveManager(
         private const val FILE_RESTORE_TOKEN = "token"
         private const val FILE_RESTORE_PENDING = "pending"
         private const val FILE_RESTORE_FILES_REPLACED = "files_replaced"
+        private const val FILE_RESTORE_DATA_COMMITTED = "data_committed"
+        private const val FILE_RESTORE_SECRETS_APPLIED = "secrets_applied"
+        private const val FILE_RESTORE_FTS_APPLIED = "fts_applied"
+        private const val FILE_RESTORE_SETTINGS_APPLIED = "settings_applied"
         private const val RESTORE_MARKER_TABLE = "amber_sync_restore_marker"
 
         // Pre-compressed/lossy formats: DEFLATE has no headroom and just burns CPU.
@@ -1143,6 +1209,18 @@ class SyncArchiveManager(
     }
 }
 
+/**
+ * Restore data (SQLite + file roots) is committed, but a post-commit side
+ * effect such as secrets/settings or FTS failed. The journal keeps this state
+ * durable so the next restore operation can rebuild derived data before a
+ * retry. Callers must re-verify the encrypted source before applying again.
+ */
+class SyncRestorePartialCommitException(cause: Throwable) :
+    IllegalStateException(
+        "备份数据已写入，但设置、令牌或搜索索引收尾失败；请重新验证同一备份后重试",
+        cause,
+    )
+
 private fun ZipInputStream.readBytesWithinLimit(limit: Int, entryName: String): ByteArray {
     val output = java.io.ByteArrayOutputStream()
     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -1187,8 +1265,14 @@ class SyncRestoreVerification internal constructor(
     /** 解密后才可见的负载预览（会话/消息/附件/估算空间）。 */
     val payloadPreview: SyncPayloadPreview,
 ) {
+    private val usable = AtomicBoolean(true)
+
+    /** Consume the plaintext verification exactly once before any writes. */
+    internal fun consume(): Boolean = usable.compareAndSet(true, false)
+
     /** 删除解密暂存文件（幂等；apply 后与中途取消都会调用）。 */
     internal fun cleanup() {
+        usable.set(false)
         encryptedPayloadFile.delete()
         payloadFile.delete()
     }

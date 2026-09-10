@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_webmount_task_card_title">浏览器任务</string>
+    <string name="parity_webmount_session_watch">查看</string>
+    <string name="parity_webmount_session_reopen">重开</string>
+    <string name="parity_webmount_session_needs_reopen">浏览器会话需要重开</string>
+    <string name="parity_webmount_session_agent_owned">Amber 正在使用</string>
+    <string name="parity_webmount_session_human_owned">你正在接管</string>
+    <string name="parity_webmount_session_loading">页面加载中</string>
+    <string name="parity_webmount_session_ready">已就绪</string>
+    <string name="parity_webmount_session_failed">页面加载失败</string>
+    <string name="parity_webmount_session_available">可查看</string>
+
+    <string name="parity_webmount_page_title">浏览器会话</string>
+    <string name="parity_webmount_primary_page">主页面</string>
+    <string name="parity_webmount_popup">弹出页面</string>
+    <string name="parity_webmount_popup_menu">切换页面</string>
+    <string name="parity_webmount_refresh">刷新页面</string>
+    <string name="parity_webmount_takeover">接管</string>
+    <string name="parity_webmount_release">交还 Amber</string>
+    <string name="parity_webmount_close">关闭会话</string>
+    <string name="parity_webmount_reopen_and_view">重开并查看</string>
+    <string name="parity_webmount_retry_takeover">重试</string>
+    <string name="parity_webmount_session_missing">此浏览器会话已不可用。</string>
+    <string name="parity_webmount_owner_conflict">此会话正在被其他所有者使用。</string>
+    <string name="parity_webmount_needs_reopen_detail">池中的浏览器已被释放，请重开后继续查看。</string>
+    <string name="parity_webmount_takeover_failed">无法接管此浏览器会话。</string>
+    <string name="parity_webmount_returned">已交还 Amber。</string>
+    <string name="parity_webmount_closed">浏览器会话已关闭。</string>
+    <string name="parity_webmount_dialog_alert_title">浏览器提示</string>
+    <string name="parity_webmount_dialog_confirm_title">浏览器确认</string>
+    <string name="parity_webmount_dialog_prompt_title">浏览器输入</string>
+    <string name="parity_webmount_dialog_input_hint">输入内容</string>
+    <string name="parity_webmount_dialog_ok">确定</string>
+    <string name="parity_webmount_dialog_cancel">取消</string>
+    <string name="parity_webmount_close_popup">关闭弹出页面</string>
+</resources>

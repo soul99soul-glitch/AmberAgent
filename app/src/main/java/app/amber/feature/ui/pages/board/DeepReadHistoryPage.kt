@@ -89,6 +89,7 @@ fun DeepReadHistoryPage(
                             Screen.DeepRead(
                                 topicId = item.topicId,
                                 title = item.title,
+                                sourceUrl = item.sourceUrl,
                                 fromHistory = true,
                             )
                         )

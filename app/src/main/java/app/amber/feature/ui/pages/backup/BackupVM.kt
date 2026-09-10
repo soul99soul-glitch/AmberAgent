@@ -11,7 +11,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import app.amber.core.settings.Capability
 import app.amber.core.settings.CapabilityFlags
 import app.amber.core.settings.Settings
@@ -25,6 +28,7 @@ import app.amber.core.sync.core.SyncMode
 import app.amber.core.sync.core.SyncPreview
 import app.amber.core.sync.core.SyncRestoreRequest
 import app.amber.core.sync.core.SyncRestoreVerification
+import app.amber.core.sync.core.SyncRestorePartialCommitException
 import app.amber.core.sync.google.GoogleDriveAuthSession
 import app.amber.core.sync.google.GoogleDriveAuthRequiredException
 import app.amber.core.sync.google.GoogleDriveAuthorizationOutcome
@@ -80,7 +84,6 @@ class BackupVM(
     val backupActivity = MutableStateFlow<BackupActivity?>(null)
     val pendingGoogleAuthorization = MutableStateFlow<PendingIntent?>(null)
     val pendingCloudRestore = MutableStateFlow(false)
-    val cloudConflict = MutableStateFlow<GoogleCloudConflict?>(null)
     val cloudSnapshots = MutableStateFlow<List<GoogleDriveFile>>(emptyList())
     val cloudSnapshotPickerVisible = MutableStateFlow(false)
 
@@ -109,9 +112,20 @@ class BackupVM(
 
     private var pendingCloudRestoreFile: File? = null
     private var pendingCloudRestoreRevision: String = ""
-    private var pendingCloudUploadRequest: SyncExportRequest? = null
+    /**
+     * Encrypted temp copy retained after a local apply failure so a retry can
+     * re-verify the same source without reusing the consumed plaintext.
+     */
+    private var pendingLocalRestoreArchiveFile: File? = null
+    /**
+     * The encryption dialog completes before the provider conflict dialog is
+     * shown. Keep that request only for the short conflict-resolution window;
+     * otherwise resolving the conflict would retry with an empty passphrase.
+     */
+    private var pendingUploadConflictRequest: PendingUploadConflictRequest? = null
     private var pendingLocalRestoreUri: Uri? = null
     private var googleAuthorizationInFlight = false
+    private var restoreInFlight = false
     /** P7-02：授权完成后自动继续的 Google 上传（口令与加密方式保留到会话就绪）。 */
     private var pendingGoogleUpload: PendingGoogleUpload? = null
 
@@ -364,26 +378,6 @@ class BackupVM(
         }
     }
 
-    fun confirmOverwriteCloud() {
-        val request = pendingCloudUploadRequest ?: return
-        if (googleUnavailable()) return
-        val session = googleSession.value ?: run {
-            connectGoogle()
-            googleMessage.value = "请先完成 Google Drive 授权，再覆盖云端快照。"
-            return
-        }
-        pendingCloudUploadRequest = null
-        cloudConflict.value = null
-        startGoogleUpload(session, request, overwrite = true)
-    }
-
-    fun dismissCloudConflict() {
-        pendingCloudUploadRequest = null
-        cloudConflict.value = null
-        backupActivity.value = null
-        operationState.value = UiState.Idle
-    }
-
     fun downloadGooglePreview() {
         if (googleUnavailable()) return
         val session = googleSession.value
@@ -575,7 +569,8 @@ class BackupVM(
 
     /**
      * P7-02 恢复第二步：解密已验证通过、UI 展示恢复 preview 并确认后写入。
-     * 失败可重试（验证结果仍在，直接重试 apply；或重新验证）。
+     * 失败后验证结果立即失效，保留加密源并回到口令验证步骤，避免复用
+     * 已清理的明文负载。
      */
     fun applyVerifiedRestore(
         scope: RestoreScope = RestoreScope.EVERYTHING,
@@ -587,14 +582,19 @@ class BackupVM(
             operationState.value = UiState.Error(IllegalStateException("没有已验证的备份，请重新选择备份文件"))
             return
         }
+        if (restoreInFlight) return
+        val verifiedPreview = verification.preview
+        val verifiedArchiveFile = verification.archiveFile
         operationState.value = UiState.Loading
         backupActivity.value = BackupActivity(
             title = "正在恢复备份",
             detail = "覆盖本机数据",
         )
+        restoreInFlight = true
         viewModelScope.launch {
-            runCatching {
-                archiveManager.applyRestore(
+            var dataApplied = false
+            try {
+                val preview = archiveManager.applyRestore(
                     verification,
                     SyncRestoreRequest(
                         passphrase = "",
@@ -603,42 +603,55 @@ class BackupVM(
                         preserveGenMedia = preserveGenMedia,
                     ),
                 )
-            }.onSuccess { preview ->
-                val manifest = preview.manifest
-                onRestoreApplied(manifest, verification.archiveFile)
+                dataApplied = true
+                // Keep the metadata update and source cleanup in the same
+                // guarded finish path. If either throws, the encrypted source
+                // remains available for a fresh verification.
+                onRestoreApplied(preview.manifest, verifiedArchiveFile)
                 backupActivity.value = null
                 operationState.value = UiState.Success(preview)
-            }.onFailure { error ->
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                // applyRestore always invalidates the plaintext verification in
+                // its finally block. Drop that object immediately so a failed
+                // apply can never replay stale plaintext; the next attempt
+                // must verify the retained encrypted source again.
+                archiveManager.discardVerification(verification)
+                pendingVerifiedRestore.value = null
+                pendingImportPreview.value = verifiedPreview
+                pendingRestoreRequest = null
+                // Keep the encrypted archive for a fresh verification. The
+                // local temp copy is removed only after a successful finish or
+                // explicit cancellation; deleting it here would make an apply
+                // failure unrecoverable without selecting the source again.
                 backupActivity.value = null
                 operationState.value = UiState.Error(error)
-                localMessage.value = "恢复失败：${error.message.orEmpty()}"
-                googleMessage.value = "恢复失败：${error.message.orEmpty()}"
-                webDavMessage.value = "恢复失败：${error.message.orEmpty()}"
-                folderMessage.value = "恢复失败：${error.message.orEmpty()}"
-                recordError(error)
+                val retryMessage = if (dataApplied || error is SyncRestorePartialCommitException) {
+                    "备份数据已写入，但设置、令牌或搜索索引收尾失败；请重新验证同一备份后重试。"
+                } else {
+                    "恢复失败；加密备份源仍保留，请重新验证后重试。"
+                }
+                localMessage.value = retryMessage
+                googleMessage.value = retryMessage
+                webDavMessage.value = retryMessage
+                folderMessage.value = retryMessage
+                runCatching { recordError(error) }
+            } finally {
+                restoreInFlight = false
             }
         }
     }
 
     /** 恢复写入成功后统一收尾（清理待恢复文件 + 更新 lastDownloadAt 等）。 */
     private suspend fun onRestoreApplied(manifest: app.amber.core.sync.core.SyncManifest, archiveFile: File) {
-        pendingImportPreview.value = null
-        pendingVerifiedRestore.value = null
-        pendingRestoreRequest = null
-        archiveFile.delete()
-        pendingCloudRestoreFile?.takeIf { it != archiveFile }?.delete()
-        pendingCloudRestoreFile = null
-        pendingCloudRestore.value = false
-        pendingProviderRestore.value = null
-        pendingLocalRestoreUri = null
         val wasGoogle = pendingRestoreSource.value == RestoreSource.Google
-        pendingRestoreSource.value = null
+        val remoteRevision = pendingCloudRestoreRevision
         settingsStore.update { current ->
             current.copy(
                 syncSettings = current.syncSettings.copy(
                     googleEnabled = wasGoogle || current.syncSettings.googleEnabled,
                     lastDownloadAt = System.currentTimeMillis(),
-                    lastRemoteRevision = if (wasGoogle) pendingCloudRestoreRevision else current.syncSettings.lastRemoteRevision,
+                    lastRemoteRevision = if (wasGoogle) remoteRevision else current.syncSettings.lastRemoteRevision,
                     lastError = "",
                     lastBackupVersionName = manifest.appVersionName,
                     lastBackupVersionCode = manifest.appVersionCode,
@@ -646,12 +659,31 @@ class BackupVM(
                 )
             )
         }
+        // Do not discard the encrypted source until the metadata write above
+        // succeeds. If that final write fails, the caller can re-verify the
+        // same source against the already imported data set.
+        pendingImportPreview.value = null
+        pendingVerifiedRestore.value = null
+        pendingRestoreRequest = null
+        archiveFile.delete()
+        pendingLocalRestoreArchiveFile
+            ?.takeIf { it != archiveFile }
+            ?.takeIf(localBackupRepository::isOwnedTempCopy)
+            ?.delete()
+        pendingLocalRestoreArchiveFile = null
+        pendingCloudRestoreFile?.takeIf { it != archiveFile }?.delete()
+        pendingCloudRestoreFile = null
+        pendingCloudRestore.value = false
+        pendingProviderRestore.value = null
+        pendingLocalRestoreUri = null
+        pendingRestoreSource.value = null
         pendingCloudRestoreRevision = ""
         localMessage.value = "已恢复备份，建议重启应用以确保所有数据生效。"
     }
 
     /** P7-02：取消恢复 —— 解密后未写入，不残留任何临时文件。 */
     fun dismissVerifiedRestore() {
+        val verifiedArchiveFile = pendingVerifiedRestore.value?.archiveFile
         pendingVerifiedRestore.value?.let { verification ->
             archiveManager.discardVerification(verification)
             val archiveFile = verification.archiveFile
@@ -665,6 +697,22 @@ class BackupVM(
             pendingCloudRestoreFile?.takeIf { it != archiveFile }?.delete()
             pendingCloudRestoreFile = null
         }
+        pendingLocalRestoreArchiveFile
+            ?.takeIf { it != verifiedArchiveFile }
+            ?.takeIf(localBackupRepository::isOwnedTempCopy)
+            ?.delete()
+        pendingLocalRestoreArchiveFile = null
+        // The verified dialog is also a restore-source cancellation boundary.
+        // Clear every source marker together so the next import cannot route
+        // through a deleted provider file or reuse an old remote revision.
+        pendingCloudRestoreFile?.takeIf { it != verifiedArchiveFile }?.delete()
+        pendingCloudRestoreFile = null
+        pendingCloudRestore.value = false
+        pendingCloudRestoreRevision = ""
+        pendingProviderRestore.value = null
+        pendingRestoreSource.value = null
+        pendingLocalRestoreUri = null
+        pendingImportPreview.value = null
         pendingVerifiedRestore.value = null
         pendingRestoreRequest = null
     }
@@ -686,31 +734,40 @@ class BackupVM(
             pendingCloudRestore.value -> RestoreSource.Google
             else -> RestoreSource.Local
         }
-        pendingRestoreRequest = SyncRestoreRequest(
+        val request = SyncRestoreRequest(
             passphrase = passphrase,
             scope = scope,
             preserveConversations = preserveConversations,
             preserveGenMedia = preserveGenMedia,
         )
+        pendingRestoreRequest = request
+        val source = pendingRestoreSource.value
         viewModelScope.launch {
-            runCatching { block(pendingRestoreRequest!!) }
-                .onSuccess { verification ->
-                    backupActivity.value = null
-                    pendingVerifiedRestore.value = verification
-                    pendingImportPreview.value = null
-                    operationState.value = UiState.Success(verification.preview)
+            try {
+                val verification = block(request)
+                if (source == RestoreSource.Local) {
+                    pendingLocalRestoreArchiveFile
+                        ?.takeIf { it != verification.archiveFile }
+                        ?.takeIf(localBackupRepository::isOwnedTempCopy)
+                        ?.delete()
+                    pendingLocalRestoreArchiveFile = verification.archiveFile
                 }
-                .onFailure { error ->
-                    backupActivity.value = null
-                    pendingRestoreSource.value = null
-                    pendingRestoreRequest = null
-                    operationState.value = UiState.Error(error)
-                    localMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    googleMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    webDavMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    folderMessage.value = "恢复验证失败：${error.message.orEmpty()}"
-                    recordError(error)
-                }
+                backupActivity.value = null
+                pendingVerifiedRestore.value = verification
+                pendingImportPreview.value = null
+                operationState.value = UiState.Success(verification.preview)
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                backupActivity.value = null
+                pendingRestoreSource.value = null
+                pendingRestoreRequest = null
+                operationState.value = UiState.Error(error)
+                localMessage.value = "恢复验证失败：${error.message.orEmpty()}"
+                googleMessage.value = "恢复验证失败：${error.message.orEmpty()}"
+                webDavMessage.value = "恢复验证失败：${error.message.orEmpty()}"
+                folderMessage.value = "恢复验证失败：${error.message.orEmpty()}"
+                recordError(error)
+            }
         }
     }
 
@@ -763,6 +820,11 @@ class BackupVM(
         if (resolved == null) {
             webDavSnapshots.value.firstOrNull { it.manifest.deviceId == currentDeviceId() }?.let { snapshot ->
                 pendingUploadConflict.value = UploadConflictChoice(snapshot, webDavSyncProvider.id)
+                pendingUploadConflictRequest = PendingUploadConflictRequest(
+                    providerId = webDavSyncProvider.id,
+                    passphrase = passphrase,
+                    encryptionMode = encryptionMode,
+                )
             }
             return
         }
@@ -808,7 +870,9 @@ class BackupVM(
                     pendingCloudRestoreFile = file
                     pendingCloudRestore.value = true
                     pendingProviderRestore.value = webDavSyncProvider.id
-                    pendingImportPreview.value = archiveManager.inspectArchive(file, snapshot.name)
+                    pendingImportPreview.value = withContext(Dispatchers.IO) {
+                        archiveManager.inspectArchive(file, snapshot.name)
+                    }
                     operationState.value = UiState.Success(pendingImportPreview.value!!)
                 }
                 .onFailure { error ->
@@ -918,6 +982,11 @@ class BackupVM(
         if (resolved == null) {
             localFolderSnapshots.value.firstOrNull { it.manifest.deviceId == currentDeviceId() }?.let { snapshot ->
                 pendingUploadConflict.value = UploadConflictChoice(snapshot, localFolderSyncProvider.id)
+                pendingUploadConflictRequest = PendingUploadConflictRequest(
+                    providerId = localFolderSyncProvider.id,
+                    passphrase = passphrase,
+                    encryptionMode = encryptionMode,
+                )
             }
             return
         }
@@ -962,7 +1031,9 @@ class BackupVM(
                     pendingCloudRestoreFile = file
                     pendingCloudRestore.value = true
                     pendingProviderRestore.value = localFolderSyncProvider.id
-                    pendingImportPreview.value = archiveManager.inspectArchive(file, snapshot.name)
+                    pendingImportPreview.value = withContext(Dispatchers.IO) {
+                        archiveManager.inspectArchive(file, snapshot.name)
+                    }
                     operationState.value = UiState.Success(pendingImportPreview.value!!)
                 }
                 .onFailure { error ->
@@ -1019,19 +1090,33 @@ class BackupVM(
             snapshot = snapshot,
             providerId = snapshot.providerId,
         )
+        pendingUploadConflictRequest = null
     }
 
     fun resolveUploadConflict(policy: UploadConflictPolicy) {
         val choice = pendingUploadConflict.value ?: return
+        val request = pendingUploadConflictRequest
         pendingUploadConflict.value = null
+        pendingUploadConflictRequest = null
         when (choice.providerId) {
-            webDavSyncProvider.id -> uploadWebDav(policy)
-            localFolderSyncProvider.id -> uploadLocalFolder(policy)
+            webDavSyncProvider.id -> uploadWebDav(
+                policy = policy,
+                passphrase = request?.takeIf { it.providerId == choice.providerId }?.passphrase.orEmpty(),
+                encryptionMode = request?.takeIf { it.providerId == choice.providerId }?.encryptionMode
+                    ?: SyncEncryptionMode.PASSPHRASE,
+            )
+            localFolderSyncProvider.id -> uploadLocalFolder(
+                policy = policy,
+                passphrase = request?.takeIf { it.providerId == choice.providerId }?.passphrase.orEmpty(),
+                encryptionMode = request?.takeIf { it.providerId == choice.providerId }?.encryptionMode
+                    ?: SyncEncryptionMode.PASSPHRASE,
+            )
         }
     }
 
     fun dismissUploadConflict() {
         pendingUploadConflict.value = null
+        pendingUploadConflictRequest = null
     }
 
     /**
@@ -1195,11 +1280,6 @@ class BackupVM(
     }
 }
 
-data class GoogleCloudConflict(
-    val remoteFile: GoogleDriveFile,
-    val localRevision: String,
-)
-
 /** P7-01：上传冲突选择（覆盖本机旧快照 / 创建副本）。 */
 data class UploadConflictChoice(
     val snapshot: SyncSnapshot,
@@ -1242,6 +1322,12 @@ enum class RestoreSource {
 }
 
 private data class PendingGoogleUpload(
+    val passphrase: String,
+    val encryptionMode: SyncEncryptionMode,
+)
+
+private data class PendingUploadConflictRequest(
+    val providerId: String,
     val passphrase: String,
     val encryptionMode: SyncEncryptionMode,
 )

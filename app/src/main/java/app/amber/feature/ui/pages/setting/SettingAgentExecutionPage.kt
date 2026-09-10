@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Icon
@@ -19,13 +20,14 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.SearchCheck
 import com.composables.icons.lucide.Megaphone
 import com.composables.icons.lucide.RefreshCw
 import com.composables.icons.lucide.Sparkles
-import com.composables.icons.lucide.Volume2
 import app.amber.agent.R
+import app.amber.agent.Screen
 import app.amber.core.settings.AgentOperationPreviewMode
 import app.amber.core.settings.MAX_AGENT_TOOL_LOOP_STEPS
 import app.amber.core.settings.MIN_AGENT_TOOL_LOOP_STEPS
@@ -35,6 +37,7 @@ import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.components.ui.Select
 import app.amber.feature.ui.components.ui.Switch
+import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.theme.CustomColors
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
@@ -42,6 +45,7 @@ import org.koin.androidx.compose.koinViewModel
 @Composable
 fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    val navController = LocalNavController.current
     val settings by vm.settings.collectAsStateWithLifecycle()
     val toolLoopStepOptions = remember { listOf(64, 128, 256, 384, 512) }
     val retryCountOptions = remember { listOf(1, 2, 3, 5) }
@@ -65,6 +69,27 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
             contentPadding = innerPadding + PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            item {
+                CardGroup(
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                    title = { Text(stringResource(R.string.setting_agent_execution_environment_section)) },
+                ) {
+                    item(
+                        onClick = { navController.navigate(Screen.SettingSandbox) },
+                        leadingContent = { Icon(Lucide.CodeXml, null) },
+                        supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
+                        headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
+                        trailingContent = {
+                            Icon(
+                                Lucide.ChevronRight,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                                tint = workspaceColors().muted,
+                            )
+                        },
+                    )
+                }
+            }
             item {
                 CardGroup(
                     modifier = Modifier.padding(horizontal = 8.dp),
@@ -292,25 +317,6 @@ fun SettingAgentExecutionPage(vm: SettingVM = koinViewModel()) {
                                     stringResource(R.string.setting_page_agent_live_mode_max_nodes_value, it)
                                 },
                                 // V3 ValueChip 内容自适应,
-                            )
-                        },
-                    )
-                    item(
-                        leadingContent = { Icon(Lucide.Volume2, null) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice_desc)) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_live_mode_voice)) },
-                        trailingContent = {
-                            Switch(
-                                checked = settings.agentRuntime.liveMode.voiceInputEnabled,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings(
-                                        settings.copy(
-                                            agentRuntime = settings.agentRuntime.copy(
-                                                liveMode = settings.agentRuntime.liveMode.copy(voiceInputEnabled = checked)
-                                            )
-                                        )
-                                    )
-                                }
                             )
                         },
                     )

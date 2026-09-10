@@ -16,7 +16,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -55,26 +59,26 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
     val shareSheetState = rememberShareSheetState()
+    var fetchedCandidates by remember(provider.id) { mutableStateOf<ProviderModelCandidates?>(null) }
+    var modelListRefreshKey by remember(provider.id) { mutableIntStateOf(0) }
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
 
-    val onEdit = { newProvider: ProviderSetting ->
-        val newSettings = settings.copy(
-            providers = settings.providers.map {
-                if (newProvider.id == it.id) {
-                    newProvider
-                } else {
-                    it
+    val onEdit: (ProviderSetting) -> Unit = { newProvider ->
+        vm.updateSettings { currentSettings ->
+            currentSettings.copy(
+                providers = currentSettings.providers.map {
+                    if (newProvider.id == it.id) newProvider else it
                 }
-            }
-        )
-        vm.updateSettings(newSettings)
+            )
+        }
     }
     val onDelete = {
-        val newSettings = settings.copy(
-            providers = settings.providers - provider
-        )
-        vm.updateSettings(newSettings)
+        vm.updateSettings { currentSettings ->
+            currentSettings.copy(
+                providers = currentSettings.providers.filterNot { it.id == provider.id }
+            )
+        }
         navController.popBackStack()
     }
 
@@ -174,6 +178,11 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                                 type = ToastType.Success
                             )
                         },
+                        onModelsFetched = { fetchedCandidates = it },
+                        onModelCandidatesInvalidated = {
+                            fetchedCandidates = null
+                            modelListRefreshKey += 1
+                        },
                         onDelete = {
                             onDelete()
                         }
@@ -183,7 +192,15 @@ fun SettingProviderDetailPage(id: Uuid, vm: SettingVM = koinViewModel()) {
                 1 -> {
                     SettingProviderModelPage(
                         provider = provider,
-                        onEdit = onEdit
+                        onEdit = onEdit,
+                        fetchedCandidates = fetchedCandidates,
+                        modelListRefreshKey = modelListRefreshKey,
+                        currentModelId = settings.chatModelId,
+                        onSetCurrent = { model ->
+                            vm.updateSettings { currentSettings ->
+                                currentSettings.copy(chatModelId = model.id)
+                            }
+                        },
                     )
                 }
             }

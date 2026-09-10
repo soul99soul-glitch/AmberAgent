@@ -111,7 +111,7 @@ class ThreadGraphManager(
                 status = SubAgentRunStatus.RUNNING.name,
                 task = encodeTaskPayload(run.definition, run.task),
                 startedAtMs = run.startedAtMs,
-                updatedAtMs = run.startedAtMs,
+                updatedAtMs = run.updatedAtMs,
             )
         )
     }

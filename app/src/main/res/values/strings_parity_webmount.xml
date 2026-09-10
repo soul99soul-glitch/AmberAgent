@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="parity_webmount_task_card_title">Browser task</string>
+    <string name="parity_webmount_session_watch">View</string>
+    <string name="parity_webmount_session_reopen">Reopen</string>
+    <string name="parity_webmount_session_needs_reopen">Browser session needs to be reopened</string>
+    <string name="parity_webmount_session_agent_owned">Amber is using this session</string>
+    <string name="parity_webmount_session_human_owned">You control this session</string>
+    <string name="parity_webmount_session_loading">Loading page</string>
+    <string name="parity_webmount_session_ready">Ready</string>
+    <string name="parity_webmount_session_failed">Page failed to load</string>
+    <string name="parity_webmount_session_available">Available to view</string>
+
+    <string name="parity_webmount_page_title">Browser session</string>
+    <string name="parity_webmount_primary_page">Main page</string>
+    <string name="parity_webmount_popup">Popup</string>
+    <string name="parity_webmount_popup_menu">Switch page</string>
+    <string name="parity_webmount_refresh">Refresh page</string>
+    <string name="parity_webmount_takeover">Take over</string>
+    <string name="parity_webmount_release">Return to Amber</string>
+    <string name="parity_webmount_close">Close session</string>
+    <string name="parity_webmount_reopen_and_view">Reopen and view</string>
+    <string name="parity_webmount_retry_takeover">Try again</string>
+    <string name="parity_webmount_session_missing">This browser session is no longer available.</string>
+    <string name="parity_webmount_owner_conflict">The session is being used by another owner.</string>
+    <string name="parity_webmount_needs_reopen_detail">The pooled browser was released. Reopen it to continue viewing.</string>
+    <string name="parity_webmount_takeover_failed">Unable to take over this browser session.</string>
+    <string name="parity_webmount_returned">Returned to Amber.</string>
+    <string name="parity_webmount_closed">Browser session closed.</string>
+    <string name="parity_webmount_dialog_alert_title">Browser alert</string>
+    <string name="parity_webmount_dialog_confirm_title">Browser confirmation</string>
+    <string name="parity_webmount_dialog_prompt_title">Browser input</string>
+    <string name="parity_webmount_dialog_input_hint">Enter a value</string>
+    <string name="parity_webmount_dialog_ok">OK</string>
+    <string name="parity_webmount_dialog_cancel">Cancel</string>
+    <string name="parity_webmount_close_popup">Close popup</string>
+</resources>

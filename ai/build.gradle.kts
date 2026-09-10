@@ -1,9 +1,23 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kotlin.compose)
+}
+
+val oauthLocalProperties = Properties().apply {
+    val configFile = rootProject.file("local.properties")
+    if (configFile.exists()) configFile.inputStream().use(::load)
+}
+
+fun oauthBuildValue(property: String, environment: String): String {
+    val value = providers.gradleProperty(property)
+        .orElse(providers.environmentVariable(environment))
+        .getOrElse(oauthLocalProperties.getProperty(property, ""))
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+        .replace("\n", "\\n").replace("\r", "\\r") + "\""
 }
 
 android {
@@ -15,6 +29,8 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
+        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_ID", oauthBuildValue("antigravityClientId", "ANTIGRAVITY_CLIENT_ID"))
+        buildConfigField("String", "ANTIGRAVITY_OAUTH_CLIENT_SECRET", oauthBuildValue("antigravityClientSecret", "ANTIGRAVITY_CLIENT_SECRET"))
 //        externalNativeBuild {
 //            cmake {
 //                cppFlags += listOf("-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
@@ -38,6 +54,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     testOptions {
         unitTests.isReturnDefaultValues = true

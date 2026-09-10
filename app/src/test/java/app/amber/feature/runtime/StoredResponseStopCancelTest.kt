@@ -24,7 +24,43 @@ import kotlin.uuid.Uuid
  * (plan §P6-01 #5): an unconfirmed cancel must NOT pretend the run was
  * cancelled; the caller keeps WAITING_EXTERNAL with the cursor for recovery.
  */
-class StoredResponseStopCancelTest {
+class StoredResponseStopCancelTest : DurableRuntimeTestBase() {
+
+    @Test
+    fun regenerationFinishesTheOldRunBeforeANewRunCanBeSelected() = runBlocking {
+        val store = InMemoryStore()
+        store.save("run_1", "resp_1", 5, "provider_1")
+        runTerminalStore.begin("run_1", "conv_1", null)
+        runTerminalStore.pause("run_1", RunTerminalState.RESUMABLE, PauseReason.PROCESS_RESTART)
+        val api = FakeApi(StoredResponseCancelResult.CancelledDecided)
+        val stopCancel = StoredResponseStopCancel(FakeGateway(session(api)), store)
+
+        assertTrue(stopCancel.cancelForRegeneration("run_1", runTerminalStore))
+
+        assertEquals("resp_1", api.cancelledResponseId)
+        assertNull(store.load("run_1"))
+        assertEquals(RunTerminalState.CANCELLED, runTerminalStore.get("run_1")!!.state)
+        assertNull(runTerminalStore.activeForConversation("conv_1"))
+    }
+
+    @Test
+    fun regenerationWaitsWhenTheOldResponseCannotBeCancelled() = runBlocking {
+        val store = InMemoryStore()
+        store.save("run_1", "resp_1", 5, "provider_1")
+        runTerminalStore.begin("run_1", "conv_1", null)
+        runTerminalStore.pause("run_1", RunTerminalState.RESUMABLE, PauseReason.PROCESS_RESTART)
+        val stopCancel = StoredResponseStopCancel(
+            FakeGateway(session(FakeApi(StoredResponseCancelResult.CancelFailed))), store,
+        )
+
+        assertEquals(false, stopCancel.cancelForRegeneration("run_1", runTerminalStore))
+
+        assertEquals(ResponseCursor("resp_1", 5, "provider_1"), store.load("run_1"))
+        val previous = runTerminalStore.activeForConversation("conv_1")!!
+        assertEquals("run_1", previous.runId)
+        assertEquals(RunTerminalState.WAITING_EXTERNAL, previous.state)
+        assertNull(previous.finishedAtMs)
+    }
 
     private open class FakeApi(var cancelResult: StoredResponseCancelResult) : StoredResponseApi {
         var cancelledResponseId: String? = null

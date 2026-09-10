@@ -42,6 +42,8 @@ class AgentTaskScheduler(
             queueState = AgentTaskQueueState.TERMINAL,
             summary = summary,
             cancelCapability = false,
+            clearError = true,
+            clearLastErrorCode = true,
         )
 
     suspend fun fail(taskId: String, message: String, code: String = "failed"): AgentTaskSnapshot? =

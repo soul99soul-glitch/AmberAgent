@@ -57,6 +57,8 @@ val novelModule = module {
             settingsAggregator = get(),
             ghostwriteController = get(),
             generator = get(),
+            requestedFocus = parameters.getOrNull<app.amber.feature.novelworkspace.NovelWorkspaceFocus>()
+                ?: app.amber.feature.novelworkspace.NovelWorkspaceFocus(),
         )
     }
 }

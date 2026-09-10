@@ -193,8 +193,6 @@ class SubAgentValidatorTest {
                 "session_read",
                 "terminal_execute",
                 "http_request",
-                "officepro_capture_context",
-                "officepro_context_digest",
             ),
         )
 

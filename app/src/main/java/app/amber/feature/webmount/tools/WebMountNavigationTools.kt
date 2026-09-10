@@ -16,8 +16,11 @@ import app.amber.core.agent.utils.string
 import app.amber.feature.webmount.core.WebMountManager
 import app.amber.feature.webmount.cookie.WebMountCookieProvider
 import app.amber.feature.webmount.primitives.SessionHandle
+import app.amber.feature.webmount.primitives.WebMountLeaseInvalidatedException
 import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.profile.SiteProfileEntry
+import kotlinx.coroutines.CancellationException
+import java.util.UUID
 
 internal fun createOpenTool(
     deps: WebMountDeps,
@@ -40,6 +43,7 @@ internal fun createOpenTool(
             properties = buildJsonObject {
                 put("url", stringProp("Absolute http(s) URL to navigate to."))
                 put("session_id", stringProp("Reuse an existing session. Omit to allocate a new one."))
+                put("reopen", booleanProp("Explicitly recreate a persisted session whose WebView was evicted or lost. Required when wm_tab_list reports needs_reopen=true."))
                 put("wait", stringProp("'semantic_idle' (default) | 'load' | 'dom_stable' | 'network_idle' | 'none'."))
                 put("timeout_ms", integerProp("Load timeout in ms. Default 30000, clamped to [1000, 60000]."))
             },
@@ -58,29 +62,54 @@ internal fun createOpenTool(
             }
             val timeoutMs = (input.long("timeout_ms") ?: SessionHandle.DEFAULT_LOAD_TIMEOUT_MS)
                 .coerceIn(1_000L, 60_000L)
-            val sessionId = input.string("session_id")
-            val handle = if (sessionId != null) deps.pool.acquire(sessionId) else deps.pool.acquireNew()
-            val payload: JsonObject = if (wait == "none") {
+            val requestedSessionId = input.string("session_id")
+            val reopen = input.boolean("reopen") == true
+            input.agentScopeFailure(requestedSessionId)?.let { return@track it }
+            // Generate an id before claiming the owner when this is a new
+            // session; the owner then performs the sole pool acquisition so
+            // no unowned WebView can be left behind on a failed claim.
+            val sessionId = requestedSessionId
+                ?: "wm_" + UUID.randomUUID().toString().substring(0, 12)
+            deps.withAgentSession(input, sessionId, allowReopen = reopen) { lease ->
+            val handle = lease.handle
+            val actionId = UUID.randomUUID().toString()
+            val beforeLoad = handle.loadState.value
+            val dispatchWithLease = deps.dispatchWithLease(input, lease)
+            val payload: JsonObject = try {
+                if (wait == "none") {
                 // Issue load but don't wait. Still routes through SessionHandle
                 // so _loadState is flipped to LOADING synchronously — without
                 // this, a follow-up wm_state would briefly see stale "ready"
                 // state from the prior navigation.
-                val state = handle.loadUrlNoWait(url)
+                val state = handle.loadUrlNoWait(url, dispatchWithLease = dispatchWithLease)
+                val pageChanged = state.loadId != beforeLoad.loadId ||
+                    (beforeLoad.currentUrl != null && beforeLoad.currentUrl != state.currentUrl)
                 // M2.1 review W-1: wait=none can't see the post-redirect URL
                 // yet; best-effort attach using the requested URL with a flag.
                 val profile = applicableProfileJson(profileRegistry, cookieProvider, manager, state.currentUrl ?: url)
                 buildJsonObject {
                     put("session_id", handle.sessionId)
-                    put("status", state.status.wireName)
+                    put("action_id", actionId)
+                    put("dispatched", true)
+                    put("status", "dispatched")
+                    put("load_status", state.status.wireName)
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", pageChanged)
+                    put("goal_verified", false)
+                    put("may_have_applied", true)
                     put("url", redactWebMountUrl(state.currentUrl ?: url).orEmpty())
                     put("requested_url", redactWebMountUrl(url).orEmpty())
+                    put("reopened", reopen)
                     put("waited", false)
+                    put("auto_retry_after_event", false)
+                    putWebMountWindowState(handle)
                     profile?.let { put("applicable_profile", it) }
                 }
             } else {
-                val state = handle.loadUrl(url, timeoutMs)
+                val state = handle.loadUrl(url, timeoutMs, dispatchWithLease = dispatchWithLease)
                 val semanticWait = if (wait in setOf("semantic_idle", "dom_stable", "network_idle")) {
-                    runCatching {
+                    try {
                         handle.callBridge(
                             "wait",
                             buildJsonObject {
@@ -88,8 +117,13 @@ internal fun createOpenTool(
                                 put("timeout_ms", (timeoutMs / 2).coerceIn(700L, 8_000L))
                             },
                             timeoutMs = (timeoutMs / 2).coerceIn(700L, 8_000L) + 1_500L,
+                            dispatchWithLease = dispatchWithLease,
                         )
-                    }.getOrNull()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Throwable) {
+                        null
+                    }
                 } else {
                     null
                 }
@@ -97,22 +131,68 @@ internal fun createOpenTool(
                 // (http→https, root→www) get the *actual* origin's profile,
                 // not a stale match against the requested URL.
                 val profile = applicableProfileJson(profileRegistry, cookieProvider, manager, state.currentUrl ?: url)
+                val pageChanged = state.loadId != beforeLoad.loadId ||
+                    (beforeLoad.currentUrl != null && beforeLoad.currentUrl != state.currentUrl)
                 buildJsonObject {
                     put("session_id", handle.sessionId)
-                    put("status", state.status.wireName)
+                    put("action_id", actionId)
+                    put("dispatched", true)
+                    put("status", if (state.status == SessionHandle.LoadStatus.FAILED) "unknown" else "dispatched")
+                    put("load_status", state.status.wireName)
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", pageChanged)
+                    put("goal_verified", false)
+                    if (state.status == SessionHandle.LoadStatus.FAILED) put("may_have_applied", true)
                     put("url", redactWebMountUrl(state.currentUrl ?: url).orEmpty())
                     put("title", state.title)
                     put("requested_url", redactWebMountUrl(url).orEmpty())
+                    put("reopened", reopen)
                     put("load_progress", state.progress)
                     put("error", state.error)
                     put("waited", true)
                     put("wait_mode", wait)
+                    put("auto_retry_after_event", false)
                     put("network_coverage", handle.bridgeInjectionCoverage)
+                    putWebMountWindowState(handle)
                     semanticWait?.let { put("semantic_wait", it) }
                     profile?.let { put("applicable_profile", it) }
                 }
             }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: WebMountLeaseInvalidatedException) {
+                return@withAgentSession listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("action_id", actionId)
+                    put("dispatched", false)
+                    put("status", "failed")
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", false)
+                    put("goal_verified", false)
+                    put("error", "run_mismatch")
+                    put("auto_retry_after_event", false)
+                    putWebMountWindowState(handle)
+                }.toString()))
+            } catch (error: Throwable) {
+                return@withAgentSession listOf(UIMessagePart.Text(buildJsonObject {
+                    put("session_id", sessionId)
+                    put("action_id", actionId)
+                    put("dispatched", true)
+                    put("status", "unknown")
+                    put("snapshot_id_before", null as String?)
+                    put("snapshot_id_after", null as String?)
+                    put("page_changed", false)
+                    put("goal_verified", false)
+                    put("may_have_applied", true)
+                    put("error", error.message ?: error.toString())
+                    put("auto_retry_after_event", false)
+                    putWebMountWindowState(handle)
+                }.toString()))
+            }
             listOf(UIMessagePart.Text(payload.toString()))
+            }
         }
     },
 )
@@ -146,8 +226,9 @@ internal fun createStateTool(
     execute = { input ->
         deps.track("wm_state", "WebMount 状态", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId)
-                ?: error("session not found: $sessionId")
+            deps.withAgentSession(input, sessionId) { lease ->
+            val handle = lease.handle
+            val dispatchWithLease = deps.dispatchWithLease(input, lease)
             val includeConsole = input.boolean("include_console") ?: true
             val consoleTail = (input.long("console_tail") ?: 16L).coerceIn(0L, 64L).toInt()
             val networkSince = (input.long("network_since") ?: 0L).coerceAtLeast(0L)
@@ -156,17 +237,20 @@ internal fun createStateTool(
                 put("include_console", includeConsole)
                 put("console_tail", consoleTail)
             }
-            val bridgePayload: JsonElement = runCatching { handle.callBridge("state", args) }
-                .getOrElse { error ->
+            val bridgePayload: JsonElement = try {
+                handle.callBridge("state", args, dispatchWithLease = dispatchWithLease)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
                     // Bridge failure is recoverable — surface partial state from Kotlin side.
                     val ls = handle.loadState.value
-                    return@getOrElse buildJsonObject {
+                    buildJsonObject {
                         put("url", redactWebMountUrl(ls.currentUrl))
                         put("title", ls.title)
                         put("ready_state", "unknown")
                         put("bridge_error", error.message ?: error.toString())
                     }
-                }
+            }
             val ls = handle.loadState.value
             val networkSnap = handle.networkLog.snapshot(networkSince, networkMax)
             val currentUrl = ls.currentUrl
@@ -182,9 +266,11 @@ internal fun createStateTool(
                 put("page", bridgePayload)
                 put("network", networkSnap)
                 put("network_total_events", handle.networkLog.totalEvents)
+                putWebMountWindowState(handle)
                 profile?.let { put("applicable_profile", it) }
             }
             listOf(UIMessagePart.Text(merged.toString()))
+            }
         }
     },
 )
@@ -218,7 +304,9 @@ internal fun createExtractTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_extract", "WebMount 提取", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
+            deps.withAgentSession(input, sessionId) { lease ->
+            val handle = lease.handle
+            val dispatchWithLease = deps.dispatchWithLease(input, lease)
             val args = buildJsonObject {
                 input.string("mode")?.let { put("mode", it) }
                 input.long("max_chars")?.let { put("max_chars", it) }
@@ -228,12 +316,19 @@ internal fun createExtractTool(deps: WebMountDeps): Tool = Tool(
                 input.string("root_selector")?.let { put("root_selector", it) }
                 input.string("selector")?.let { put("selector", it) }
             }
-            val payload = handle.callBridge("extract", args, timeoutMs = 15_000L)
+            val payload = handle.callBridge(
+                "extract",
+                args,
+                timeoutMs = 15_000L,
+                dispatchWithLease = dispatchWithLease,
+            )
             val merged = buildJsonObject {
                 put("session_id", sessionId)
                 put("result", payload)
+                putWebMountWindowState(handle)
             }
             listOf(UIMessagePart.Text(merged.toString()))
+            }
         }
     },
 )
@@ -251,6 +346,7 @@ internal fun createGetTool(deps: WebMountDeps): Tool = Tool(
             properties = buildJsonObject {
                 put("session_id", stringProp("Session id returned by wm_open."))
                 put("target", stringProp("Node ref returned by wm_extract, or a selector fallback."))
+                put("snapshot_id", stringProp("Snapshot id returned with the target ref; required for ref-based reads."))
                 put("selector", stringProp("Legacy CSS / text=... / xpath=... selector fallback."))
                 put("kind", stringProp("'text' (default) | 'value' | 'attr' | 'html'."))
                 put("attr_name", stringProp("Attribute name when kind='attr', e.g. href or aria-label."))
@@ -263,20 +359,30 @@ internal fun createGetTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_get", "WebMount 读取节点", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
+            deps.withAgentSession(input, sessionId) { lease ->
+            val handle = lease.handle
+            val dispatchWithLease = deps.dispatchWithLease(input, lease)
             val args = buildJsonObject {
                 input.string("target")?.let { put("target", it) }
+                input.string("snapshot_id")?.let { put("snapshot_id", it) }
                 input.string("selector")?.let { put("selector", it) }
                 input.string("kind")?.let { put("kind", it) }
                 input.string("attr_name")?.let { put("attr_name", it) }
                 input.long("max_chars")?.let { put("max_chars", it) }
                 input.boolean("visible_only")?.let { put("visible_only", it) }
             }
-            val payload = handle.callBridge("get", args, timeoutMs = 5_000L)
+            val payload = handle.callBridge(
+                "get",
+                args,
+                timeoutMs = 5_000L,
+                dispatchWithLease = dispatchWithLease,
+            )
             listOf(UIMessagePart.Text(buildJsonObject {
                 put("session_id", sessionId)
                 put("result", payload)
+                putWebMountWindowState(handle)
             }.toString()))
+            }
         }
     },
 )
@@ -295,12 +401,29 @@ internal fun createBackTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_back", "WebMount 后退", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val payload = handle.callBridge("back", buildJsonObject {}, timeoutMs = 3_000L)
-            listOf(UIMessagePart.Text(buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
-            }.toString()))
+            deps.withAgentSession(input, sessionId) { lease ->
+            val handle = lease.handle
+            val receipt = runVerifiedAction(
+                sessionId = sessionId,
+                handle = handle,
+                leaseIsActive = {
+                    deps.owner.isLeaseActive(
+                        lease.leaseId,
+                        input.webMountConversationId(),
+                        input.webMountRunId(),
+                    )
+                },
+                dispatchWithLease = deps.dispatchWithLease(input, lease),
+            ) {
+                handle.callBridge(
+                    "back",
+                    buildJsonObject {},
+                    timeoutMs = 3_000L,
+                    dispatchWithLease = deps.dispatchWithLease(input, lease),
+                )
+            }
+            listOf(UIMessagePart.Text(receipt.toString()))
+            }
         }
     },
 )
@@ -319,12 +442,29 @@ internal fun createForwardTool(deps: WebMountDeps): Tool = Tool(
     execute = { input ->
         deps.track("wm_forward", "WebMount 前进", input) {
             val sessionId = input.requiredString("session_id")
-            val handle = deps.pool.peek(sessionId) ?: error("session not found: $sessionId")
-            val payload = handle.callBridge("forward", buildJsonObject {}, timeoutMs = 3_000L)
-            listOf(UIMessagePart.Text(buildJsonObject {
-                put("session_id", sessionId)
-                put("result", payload)
-            }.toString()))
+            deps.withAgentSession(input, sessionId) { lease ->
+            val handle = lease.handle
+            val receipt = runVerifiedAction(
+                sessionId = sessionId,
+                handle = handle,
+                leaseIsActive = {
+                    deps.owner.isLeaseActive(
+                        lease.leaseId,
+                        input.webMountConversationId(),
+                        input.webMountRunId(),
+                    )
+                },
+                dispatchWithLease = deps.dispatchWithLease(input, lease),
+            ) {
+                handle.callBridge(
+                    "forward",
+                    buildJsonObject {},
+                    timeoutMs = 3_000L,
+                    dispatchWithLease = deps.dispatchWithLease(input, lease),
+                )
+            }
+            listOf(UIMessagePart.Text(receipt.toString()))
+            }
         }
     },
 )

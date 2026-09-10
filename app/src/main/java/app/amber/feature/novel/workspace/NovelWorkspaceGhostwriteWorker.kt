@@ -3,7 +3,6 @@ package app.amber.feature.novel.workspace
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
@@ -11,7 +10,6 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import app.amber.agent.CHAT_LIVE_UPDATE_NOTIFICATION_CHANNEL_ID
 import app.amber.agent.R
-import app.amber.agent.RouteActivity
 import app.amber.core.ai.Generator
 import app.amber.core.settings.getCurrentChatModel
 import app.amber.ai.provider.Model
@@ -80,6 +78,12 @@ class NovelWorkspaceGhostwriteWorker(
         if (job.isTerminal) return Result.success()
         if (job.status != NovelWorkspaceGhostwriteJob.STATUS_RUNNING) return Result.success()
 
+        val committedProgress = NovelWorkspaceGhostwriteJobs.progress(job, NovelWorkspaceStore(directory))
+        if (committedProgress >= job.targetChapterCount) {
+            finishJob(directory, job.id, executionId, NovelWorkspaceGhostwriteJob.STATUS_COMPLETED, null)
+            return Result.success()
+        }
+
         // Inject the DI-built coordinator (it owns the runtime) instead of building our own.
         val coordinator = get<NovelWorkspaceGhostwriteCoordinator>()
         val settingsAggregator = get<SettingsAggregator>()
@@ -145,7 +149,7 @@ class NovelWorkspaceGhostwriteWorker(
         }
 
         try {
-            setForeground(foregroundInfo(job, 0, job.targetChapterCount))
+            setForeground(foregroundInfo(job, committedProgress, job.targetChapterCount))
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
@@ -266,7 +270,9 @@ class NovelWorkspaceGhostwriteWorker(
         target: Int,
         notificationId: Int,
     ): Notification {
-        val launch = Intent(applicationContext, RouteActivity::class.java)
+        val launch = NovelWorkspaceNotificationRoute.intent(
+            applicationContext, checkNotNull(inputData.getString(KEY_PROJECT_ID)), job.branchSlug, job.id,
+        )
         val pendingIntent = PendingIntent.getActivity(
             applicationContext,
             notificationId,

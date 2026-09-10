@@ -15,6 +15,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import app.amber.core.sync.core.SyncRestoreWriteEpoch
+import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.feature.board.hotlist.providers.BuiltInHotListProviders
 import app.amber.feature.board.hotlist.providers.CustomHotListProvider
 import app.amber.feature.board.TodayBoardSetting
@@ -89,6 +92,13 @@ class HotListWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params), KoinComponent {
     override suspend fun doWork(): Result {
+        val restoreWriteEpoch = get<SyncRestoreWriteGate>().currentEpoch()
+        return withContext(SyncRestoreWriteEpoch(restoreWriteEpoch)) {
+            doWorkInternal()
+        }
+    }
+
+    private suspend fun doWorkInternal(): Result {
         val settings = get<SettingsAggregator>().settingsFlow.filterNot { it.init }.first()
         val board = settings.agentRuntime.todayBoard
         if (!board.enabled) return Result.success()

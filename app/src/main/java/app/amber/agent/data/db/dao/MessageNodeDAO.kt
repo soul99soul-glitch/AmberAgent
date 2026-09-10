@@ -91,6 +91,9 @@ interface MessageNodeDAO {
 
     @RawQuery
     suspend fun findNodeIdContainingMessageRaw(query: SupportSQLiteQuery): MessageNodeId?
+
+    @RawQuery
+    suspend fun findNodeIdContainingToolCallRaw(query: SupportSQLiteQuery): MessageNodeId?
 }
 
 data class MessageTokenStats(
@@ -115,6 +118,21 @@ suspend fun MessageNodeDAO.findNodeIdContainingMessage(
             "AND json_extract(j.value, '$.id') = ? " +
             "LIMIT 1",
         arrayOf(conversationId, messageId)
+    )
+)?.id
+
+suspend fun MessageNodeDAO.findNodeIdContainingToolCall(
+    conversationId: String,
+    toolCallId: String,
+): String? = findNodeIdContainingToolCallRaw(
+    SimpleSQLiteQuery(
+        "SELECT mn.id AS id " +
+            "FROM message_node mn, json_each(mn.messages) message, " +
+            "json_each(json_extract(message.value, '$.parts')) part " +
+            "WHERE mn.conversation_id = ? " +
+            "AND json_extract(part.value, '$.toolCallId') = ? " +
+            "LIMIT 1",
+        arrayOf(conversationId, toolCallId)
     )
 )?.id
 

@@ -41,6 +41,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -78,8 +79,24 @@ fun CouncilTaskStepView(
     loading: Boolean,
 ) {
     val manager: ModelCouncilManager = koinInject()
+    val context = LocalContext.current
+    val snapshot = manager.snapshot(step.runId)
+    var persistedPayloads by remember(step.runId) { mutableStateOf(emptyList<JsonObject>()) }
+    LaunchedEffect(step.runId, step.tools, snapshot == null) {
+        persistedPayloads = if (snapshot == null) {
+            withContext(Dispatchers.IO) {
+                readCouncilTranscriptPayloads(
+                    tools = step.tools,
+                    runRoot = File(context.filesDir, "amberagent/model-council/runs"),
+                )
+            }
+        } else {
+            emptyList()
+        }
+    }
     var showSheet by remember(step.runId) { mutableStateOf(false) }
-    val parsedStatus = parseLatestCouncilStatus(step.tools)
+    val fallbackPayloads = persistedPayloads.takeIf { snapshot == null }.orEmpty()
+    val parsedStatus = parseLatestCouncilStatus(step.tools, fallbackPayloads)
     val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
     val phaseLabels = listOf("听证", "辩论", "权衡", "裁决")
     var phaseIndex by remember(step.runId) { mutableIntStateOf(0) }
@@ -102,12 +119,12 @@ fun CouncilTaskStepView(
         ModelCouncilCardStatus.INTERRUPTED -> "已中断"
     }
     val title = if (isRunning) "@Council $statusVerb · $currentPhase" else "@Council $statusVerb"
-    val seatSubtitle = remember(step.runId, step.tools) {
-        val names = manager.snapshot(step.runId)?.seats
+    val seatSubtitle = remember(step.runId, step.tools, snapshot?.seats, fallbackPayloads) {
+        val names = snapshot?.seats
             ?.map { it.name.ifBlank { ModelCouncilRolePresets.byName(it.role)?.name ?: it.role } }
             ?.filter { it.isNotBlank() }
             ?.takeIf { it.isNotEmpty() }
-            ?: extractCouncilSeatEntries(step.tools).map { it.label }
+            ?: extractCouncilSeatEntries(step.tools, fallbackPayloads).map { it.label }
         names.takeIf { it.isNotEmpty() }?.joinToString(" / ", prefix = "席位 · ")
     }
     AgentToolCallCapsule(
@@ -125,30 +142,39 @@ fun CouncilTaskStepView(
     if (showSheet) {
         ModelCouncilRunSheet(
             step = step,
+            persistedPayloads = fallbackPayloads,
             onDismiss = { showSheet = false },
         )
     }
 }
 
-private enum class ModelCouncilCardStatus {
+internal enum class ModelCouncilCardStatus {
     RUNNING, COMPLETED, PARTIAL_FAILED, FAILED, CANCELLED, TIMED_OUT, INTERRUPTED
 }
 
 /** Walk model_council_* tools in reverse, find the most recent parsable `status`. */
-private fun parseLatestCouncilStatus(tools: List<UIMessagePart.Tool>): ModelCouncilCardStatus {
-    for (tool in tools.asReversed()) {
-        val statusStr = tool.cachedOutputJsonObject()?.get("status")
-            ?.let { it as? JsonPrimitive }?.contentOrNull ?: continue
-        ModelCouncilCardStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
-            ?.let { return it }
-    }
-    return ModelCouncilCardStatus.RUNNING
+internal fun parseLatestCouncilStatus(
+    tools: List<UIMessagePart.Tool>,
+    persistedPayloads: List<JsonObject> = emptyList(),
+): ModelCouncilCardStatus {
+    val toolStatus = latestCouncilStatus(tools.mapNotNull { it.cachedOutputJsonObject() })
+    // A terminal tool result (readMissingRun/finished read) is the current conversation's
+    // authoritative state. A start-only running result can be stale after a process restart,
+    // so let the durable transcript provide its terminal state in that case.
+    if (toolStatus != null && toolStatus != ModelCouncilCardStatus.RUNNING) return toolStatus
+    return latestCouncilStatus(persistedPayloads) ?: toolStatus ?: ModelCouncilCardStatus.RUNNING
 }
 
-private fun ModelCouncilCardStatus.toAgentToolStatus(): AgentToolStatus = when (this) {
+private fun latestCouncilStatus(payloads: List<JsonObject>): ModelCouncilCardStatus? =
+    payloads.asReversed().firstNotNullOfOrNull { parsed ->
+        val statusStr = (parsed["status"] as? JsonPrimitive)?.contentOrNull ?: return@firstNotNullOfOrNull null
+        ModelCouncilCardStatus.entries.firstOrNull { it.name.equals(statusStr, ignoreCase = true) }
+    }
+
+internal fun ModelCouncilCardStatus.toAgentToolStatus(): AgentToolStatus = when (this) {
     ModelCouncilCardStatus.RUNNING -> AgentToolStatus.RUNNING
-    ModelCouncilCardStatus.COMPLETED,
-    ModelCouncilCardStatus.PARTIAL_FAILED -> AgentToolStatus.SUCCEEDED
+    ModelCouncilCardStatus.COMPLETED -> AgentToolStatus.SUCCEEDED
+    ModelCouncilCardStatus.PARTIAL_FAILED -> AgentToolStatus.FAILED
     ModelCouncilCardStatus.FAILED,
     ModelCouncilCardStatus.TIMED_OUT,
     ModelCouncilCardStatus.INTERRUPTED -> AgentToolStatus.FAILED
@@ -163,6 +189,7 @@ private fun ModelCouncilCardStatus.toAgentToolStatus(): AgentToolStatus = when (
 @Composable
 private fun ModelCouncilRunSheet(
     step: ThinkingStep.CouncilTaskStep,
+    persistedPayloads: List<JsonObject>,
     onDismiss: () -> Unit,
 ) {
     val manager: ModelCouncilManager = koinInject()
@@ -178,7 +205,9 @@ private fun ModelCouncilRunSheet(
         }.getOrNull()
     }
 
-    val parsedStatus = parseLatestCouncilStatus(step.tools)
+    val snapshot = remember(step.runId) { manager.snapshot(step.runId) }
+    val fallbackPayloads = persistedPayloads.takeIf { snapshot == null }.orEmpty()
+    val parsedStatus = parseLatestCouncilStatus(step.tools, fallbackPayloads)
     val isRunning = parsedStatus == ModelCouncilCardStatus.RUNNING
     val statusVerb = when (parsedStatus) {
         ModelCouncilCardStatus.RUNNING -> "正在审议"
@@ -191,14 +220,13 @@ private fun ModelCouncilRunSheet(
     }
 
     // Resolve seat list from the snapshot (preserves run order). Synthesizer is appended last.
-    val snapshot = remember(step.runId) { manager.snapshot(step.runId) }
-    val seatTabs = remember(step.runId, snapshot?.seats, step.tools) {
+    val seatTabs = remember(step.runId, snapshot?.seats, step.tools, fallbackPayloads) {
         val seatEntries = snapshot?.seats?.map { seat ->
             CouncilTabEntry(
                 key = seat.seatId,
                 label = seat.name.ifBlank { ModelCouncilRolePresets.byName(seat.role)?.name ?: seat.role },
             )
-        }?.takeIf { it.isNotEmpty() } ?: extractCouncilSeatEntries(step.tools)
+        }?.takeIf { it.isNotEmpty() } ?: extractCouncilSeatEntries(step.tools, fallbackPayloads)
         // Synthesizer pane is conceptually the "verdict"; show it first so the user sees the
         // bottom-line answer immediately when the run finishes.
         listOf(CouncilTabEntry(ModelCouncilManager.SYNTHESIZER_SEAT_KEY, "综合裁决")) + seatEntries
@@ -281,11 +309,11 @@ private fun ModelCouncilRunSheet(
                 activeSeatKey?.let { manager.liveTextFlow(step.runId, it) } ?: MutableStateFlow("")
             }
             val liveText by seatFlow.collectAsState()
-            val finalText = remember(step.tools, activeSeatKey) {
+            val finalText = remember(step.tools, activeSeatKey, fallbackPayloads) {
                 if (activeSeatKey == ModelCouncilManager.SYNTHESIZER_SEAT_KEY) {
-                    extractFinalCouncilSynthesisText(step.tools)
+                    extractFinalCouncilSynthesisText(step.tools, fallbackPayloads)
                 } else if (activeSeatKey != null) {
-                    extractFinalCouncilSeatText(step.tools, activeSeatKey)
+                    extractFinalCouncilSeatText(step.tools, activeSeatKey, fallbackPayloads)
                 } else ""
             }
             val displayTextSource = if (isRunning) {
@@ -294,8 +322,8 @@ private fun ModelCouncilRunSheet(
                 finalText.ifBlank { liveText }
             }
             val displayText = remember(displayTextSource) { displayTextSource.cleanCouncilLineBreaks() }
-            val activeModelLabel = remember(step.tools, activeSeatKey) {
-                activeSeatKey?.let { extractCouncilModelLabel(step.tools, it) }.orEmpty()
+            val activeModelLabel = remember(step.tools, activeSeatKey, fallbackPayloads) {
+                activeSeatKey?.let { extractCouncilModelLabel(step.tools, it, fallbackPayloads) }.orEmpty()
             }
             val scrollState = rememberScrollState()
             var followBottom by remember(step.runId, activeSeatKey) { mutableStateOf(true) }
@@ -364,7 +392,7 @@ private fun ModelCouncilRunSheet(
     }
 }
 
-private data class CouncilTabEntry(val key: String, val label: String)
+internal data class CouncilTabEntry(val key: String, val label: String)
 
 private data class CouncilRoundSection(
     val label: String?,
@@ -526,9 +554,11 @@ private const val COUNCIL_ROUND_MARKER_TEXT = "--- 第"
 private val COUNCIL_ROUND_MARKER = Regex("""---\s*(第\s*\d+\s*轮)\s*---""")
 
 /** Pull the synthesizer's final text from the latest read/wait result (`result.finalRecommendation`). */
-private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): String {
-    for (tool in tools.asReversed()) {
-        val parsed = tool.cachedOutputJsonObject() ?: continue
+internal fun extractFinalCouncilSynthesisText(
+    tools: List<UIMessagePart.Tool>,
+    persistedPayloads: List<JsonObject> = emptyList(),
+): String {
+    for (parsed in councilPayloads(tools, persistedPayloads)) {
         val result = parsed.payloadObject("result") ?: continue
         val recommendation = ((result["final_recommendation"] as? JsonPrimitive)?.contentOrNull)
             ?.takeIf { it.isNotBlank() }
@@ -538,11 +568,24 @@ private fun extractFinalCouncilSynthesisText(tools: List<UIMessagePart.Tool>): S
     return ""
 }
 
+private fun councilPayloads(
+    tools: List<UIMessagePart.Tool>,
+    persistedPayloads: List<JsonObject>,
+): List<JsonObject> {
+    val toolPayloads = tools.mapNotNull { it.cachedOutputJsonObject() }
+    // Tool calls are the current conversation's authoritative state. The transcript only fills
+    // gaps after a process restart (for example, seats omitted by readMissingRun).
+    return toolPayloads.asReversed() + persistedPayloads.asReversed()
+}
+
 /** Pull the provider/model label for a council seat or synthesizer from the latest payload. */
-private fun extractCouncilModelLabel(tools: List<UIMessagePart.Tool>, seatId: String): String {
-    for (tool in tools.asReversed()) {
-        val parsed = tool.cachedOutputJsonObject() ?: continue
-        val labels = parsed["seat_model_labels"] as? JsonObject
+internal fun extractCouncilModelLabel(
+    tools: List<UIMessagePart.Tool>,
+    seatId: String,
+    persistedPayloads: List<JsonObject> = emptyList(),
+): String {
+    for (parsed in councilPayloads(tools, persistedPayloads)) {
+        val labels = parsed.payloadObject("seat_model_labels")
         val direct = (labels?.get(seatId) as? JsonPrimitive)?.contentOrNull
         if (!direct.isNullOrBlank()) return direct
 
@@ -562,9 +605,16 @@ private fun extractCouncilModelLabel(tools: List<UIMessagePart.Tool>, seatId: St
     return ""
 }
 
-private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<CouncilTabEntry> {
-    for (tool in tools.asReversed()) {
-        val parsed = tool.cachedOutputJsonObject() ?: continue
+internal fun extractCouncilSeatEntries(
+    tools: List<UIMessagePart.Tool>,
+    persistedPayloads: List<JsonObject> = emptyList(),
+): List<CouncilTabEntry> {
+    for (parsed in councilPayloads(tools, persistedPayloads)) {
+        val seats = parsed.payloadArray("seats")?.mapNotNull { (it as? JsonObject)?.toCouncilTabEntry() }
+            ?.distinctBy { it.key }
+            .orEmpty()
+        if (seats.isNotEmpty()) return seats
+
         val parsedTurns = parsed.payloadArray("turns") ?: continue
         val entries = linkedMapOf<String, String>()
         parsedTurns.forEach { turnElement ->
@@ -584,15 +634,33 @@ private fun extractCouncilSeatEntries(tools: List<UIMessagePart.Tool>): List<Cou
     return emptyList()
 }
 
+private fun JsonObject.toCouncilTabEntry(): CouncilTabEntry? {
+    val key = (this["seat_id"] as? JsonPrimitive)?.contentOrNull
+        ?.takeIf { it.isNotBlank() }
+        ?: return null
+    val label = (this["name"] as? JsonPrimitive)?.contentOrNull
+        ?.takeIf { it.isNotBlank() }
+        ?: (this["seat_name"] as? JsonPrimitive)?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+        ?: (this["role"] as? JsonPrimitive)?.contentOrNull
+            ?.takeIf { it.isNotBlank() }
+            ?.let { ModelCouncilRolePresets.byName(it)?.name ?: it }
+        ?: return null
+    return CouncilTabEntry(key = key, label = label)
+}
+
 /**
  * Pull a specific seat's content across ALL rounds from the latest tool result, joined the same
  * way the live flow renders them (with `--- 第 N 轮 ---` separators between rounds 2+). Walking
  * tools in reverse means we pick the most recent (richest) turns array; within it, all matching
  * turns are kept in original order.
  */
-private fun extractFinalCouncilSeatText(tools: List<UIMessagePart.Tool>, seatId: String): String {
-    for (tool in tools.asReversed()) {
-        val parsed = tool.cachedOutputJsonObject() ?: continue
+internal fun extractFinalCouncilSeatText(
+    tools: List<UIMessagePart.Tool>,
+    seatId: String,
+    persistedPayloads: List<JsonObject> = emptyList(),
+): String {
+    for (parsed in councilPayloads(tools, persistedPayloads)) {
         val parsedTurns = parsed.payloadArray("turns") ?: continue
         val matching = parsedTurns.mapNotNull { turnElement ->
             val turn = turnElement as? JsonObject ?: return@mapNotNull null
@@ -635,6 +703,48 @@ private fun JsonObject.payloadArray(name: String): JsonArray? {
         ?: (value as? JsonPrimitive)?.contentOrNull?.let { raw ->
             runCatching { JsonInstant.parseToJsonElement(raw).jsonArray }.getOrNull()
         }
+}
+
+/**
+ * Read the durable council events when the in-memory manager was lost on process restart. The
+ * transcript is only trusted inside the app-owned model-council run directory.
+ */
+internal fun readCouncilTranscriptPayloads(
+    tools: List<UIMessagePart.Tool>,
+    runRoot: File,
+): List<JsonObject> {
+    val transcriptPath = tools.asReversed().firstNotNullOfOrNull { tool ->
+        runCatching {
+            val parsed = tool.cachedOutputJsonObject() ?: return@runCatching null
+            (parsed["transcript_path"] as? JsonPrimitive)?.contentOrNull
+                ?: (parsed["run_id"] as? JsonPrimitive)?.contentOrNull
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { runId -> File(runRoot, "$runId.jsonl").absolutePath }
+        }.getOrNull()
+    } ?: return emptyList()
+
+    val root = runCatching { runRoot.canonicalFile }.getOrNull() ?: return emptyList()
+    val transcript = runCatching { File(transcriptPath).canonicalFile }.getOrNull() ?: return emptyList()
+    if (!transcript.isFile || transcript.extension != "jsonl") return emptyList()
+    if (transcript.parentFile?.canonicalFile != root) return emptyList()
+
+    val payloads = runCatching {
+        transcript.useLines { lines ->
+            lines.mapNotNull { line ->
+                runCatching {
+                    (JsonInstant.parseToJsonElement(line) as? JsonObject)
+                        ?.payloadObject("payload")
+                }.getOrNull()
+            }.toList()
+        }
+    }.getOrDefault(emptyList())
+
+    val turnEvents = payloads.mapNotNull { it.payloadObject("turn") }
+    return if (turnEvents.isEmpty() || payloads.any { it.payloadArray("turns") != null }) {
+        payloads
+    } else {
+        payloads + JsonObject(mapOf("turns" to JsonArray(turnEvents)))
+    }
 }
 
 /**
