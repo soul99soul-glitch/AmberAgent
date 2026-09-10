@@ -13,6 +13,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -190,6 +191,10 @@ private fun stableGenerationNotificationId(
     val hash = "$kind|$conversationId|${runId.orEmpty()}".hashCode() and Int.MAX_VALUE
     return offset + (hash % 1_000_000)
 }
+
+/** Shared completion/failure cleanup for a generation that may already be cancelled. */
+internal suspend fun finalizeChatGeneration(block: suspend () -> Unit) =
+    withContext(NonCancellable) { block() }
 
 private const val GENERATION_CHECKPOINT_INTERVAL_MS = 10_000L
 private const val INITIAL_TIMELINE_NODE_COUNT = 80
@@ -1825,6 +1830,7 @@ class ChatService(
         // Hoisted above runCatching so onFailure can still finalize the run
         // when generateText throws before the flow's onCompletion exists.
         var streamRecorder: app.amber.feature.chat.impl.ChatStreamCheckpointRecorder? = null
+        var completionOwnerCommitted = false
         val durablePath = useDurableRuntime()
         // P1-03: WAITING_USER runs survive restart — resume the same runId
         // instead of minting a new one, so approval continues the same run.
@@ -2103,157 +2109,160 @@ class ChatService(
                 },
                 responsesResume = responsesResume,
             ).onCompletion { cause ->
-                streamRecorder?.onRunFinished(cause)
-                // P1-05: the run's handles are done — release ownership. A
-                // stale notification carrying this runId will no longer cancel
-                // anything (a newer run registers under its own runId).
-                if (runId != null) {
-                    runOwnershipRegistry?.unregister(runId.value)
-                }
-                // P8-11: a flow that paused for user input (WAITING_USER) keeps
-                // the live notification with approve/deny/reply/stop actions —
-                // driven by the persisted pause state (P1-03), so the user can
-                // decide from the notification. Terminal outcomes dismiss it.
-                val waitingForApproval = getConversationFlow(conversationId).value.currentMessages
-                    .any { message ->
-                        message.parts.any { it is UIMessagePart.Tool && it.isPending }
+                finalizeChatGeneration {
+                    streamRecorder?.onRunFinished(cause)
+                    // P1-05: the run's handles are done — release ownership. A
+                    // stale notification carrying this runId will no longer cancel
+                    // anything (a newer run registers under its own runId).
+                    if (runId != null) {
+                        runOwnershipRegistry?.unregister(runId.value)
                     }
-                if (waitingForApproval && reportedTerminal is app.amber.core.ai.GenerationTerminal.WaitingUser) {
-                    updateAgentLiveStatus(
-                        conversationId = conversationId,
-                        messages = getConversationFlow(conversationId).value.currentMessages,
-                        senderName = senderName,
-                        settings = settings,
-                        runId = runId?.value,
-                    )
-                } else {
-                    cancelLiveUpdateNotification(conversationId)
-                }
-                // Persist the final in-memory conversation before publishing
-                // any terminal run state. The response cursor is cleared only
-                // after that checkpoint and the terminal owner both succeed.
-                val updatedConversation = getConversationFlow(conversationId).value.copy(
-                    messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
-                        node.copy(messages = node.messages.map { it.finishReasoning() })
-                    },
-                    updateAt = Instant.now()
-                )
-                updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
-                val conversationCheckpointed = checkpointConversation(
-                    conversationId,
-                    updatedConversation,
-                    force = true,
-                )
-                generationCheckpointAt.remove(conversationId)
-                // P1-03: foreground-service lifecycle follows the persisted
-                // terminal state, not the coroutine's exit. WAITING_USER is a
-                // pause — the keep-alive stays until the user decides.
-                var terminalOwnerSucceeded = !durablePath || runId == null
-                val terminalPublish = if (durablePath && runId != null) {
-                    val (state, reason) = terminalForFlowEnd(cause, reportedTerminal)
-                    // P6-01: when the user stopped but the server cancel could
-                    // not be confirmed, the run outcome is undecidable — keep
-                    // WAITING_EXTERNAL (never pretend CANCELLED) and leave the
-                    // resume cursor so recovery can settle it server-side.
-                    val serverCancelPending = pendingServerCancelFailures.remove(runId.value) == true
-                    terminalOwnerSucceeded = if (
-                        state != RunTerminalState.COMPLETED &&
-                            state != RunTerminalState.STEP_LIMIT ||
-                            conversationCheckpointed
-                    ) {
-                        runCatching {
-                            when {
-                                serverCancelPending -> {
-                                    runTerminalStore!!.pause(
-                                        runId.value,
-                                        RunTerminalState.WAITING_EXTERNAL,
-                                        PauseReason.USER_STOP,
-                                    )
-                                }
-
-                                state == RunTerminalState.WAITING_USER -> {
-                                    runTerminalStore!!.pause(runId.value, state, reason)
-                                }
-
-                                else -> {
-                                    runTerminalStore!!.finish(runId.value, state, reason)
-                                }
-                            }
-                            true
-                        }.onFailure { error ->
-                            Log.w(TAG, "terminal owner persist failed for $conversationId", error)
-                        }.getOrDefault(false)
-                    } else {
-                        Log.w(TAG, "terminal owner deferred because conversation checkpoint failed for $conversationId")
-                        false
-                    }
-                    if (
-                        terminalOwnerSucceeded &&
-                        conversationCheckpointed &&
-                        !serverCancelPending &&
-                        responsesResume != null &&
-                        (state == RunTerminalState.COMPLETED || state == RunTerminalState.STEP_LIMIT)
-                    ) {
-                        runCatching { responsesResume.store.clear(responsesResume.runId) }
-                            .onFailure { error ->
-                                Log.w(TAG, "stored response cursor clear failed for $conversationId", error)
-                            }
-                    }
-                    if (state == RunTerminalState.CANCELLED || state == RunTerminalState.FAILED || serverCancelPending) {
-                        // A stop/failure may leave a STARTED non-idempotent
-                        // effect behind — reconcile it so the user decides.
-                        runCatching { runRecovery!!.reconcileStartedEffects(runId.value) }
-                        runCatching { refreshOutcomeUnknown() }
-                    }
-                    // P4-02: cascade cancellation — a cancelled parent run also
-                    // cancels its child threads (replaces the pre-Phase-4
-                    // detach policy; gated by the thread_graph_v2 flag inside).
-                    if (state == RunTerminalState.CANCELLED) {
-                        runCatching {
-                            subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
+                    // P8-11: a flow that paused for user input (WAITING_USER) keeps
+                    // the live notification with approve/deny/reply/stop actions —
+                    // driven by the persisted pause state (P1-03), so the user can
+                    // decide from the notification. Terminal outcomes dismiss it.
+                    val waitingForApproval = getConversationFlow(conversationId).value.currentMessages
+                        .any { message ->
+                            message.parts.any { it is UIMessagePart.Tool && it.isPending }
                         }
+                    if (waitingForApproval && reportedTerminal is app.amber.core.ai.GenerationTerminal.WaitingUser) {
+                        updateAgentLiveStatus(
+                            conversationId = conversationId,
+                            messages = getConversationFlow(conversationId).value.currentMessages,
+                            senderName = senderName,
+                            settings = settings,
+                            runId = runId?.value,
+                        )
+                    } else {
+                        cancelLiveUpdateNotification(conversationId)
                     }
-                    if (serverCancelPending) RunTerminalState.WAITING_EXTERNAL else state
-                } else {
-                    null
-                }
-                // Keep a resumable WAITING_USER run bound to its identity, but
-                // close the WebMount run namespace for every terminal outcome.
-                if (
-                    runId != null &&
-                    terminalPublish != RunTerminalState.WAITING_USER &&
-                    terminalOwnerSucceeded
-                ) {
-                    localTools.endWebMountRun(
-                        runId = runId.value,
-                        conversationId = conversationId.toString(),
-                        reason = "generation finished",
-                        preservePendingHandoff = terminalPublish == RunTerminalState.COMPLETED,
+                    // Persist the final in-memory conversation before publishing
+                    // any terminal run state. The response cursor is cleared only
+                    // after that checkpoint and the terminal owner both succeed.
+                    val updatedConversation = getConversationFlow(conversationId).value.copy(
+                        messageNodes = getConversationFlow(conversationId).value.messageNodes.map { node ->
+                            node.copy(messages = node.messages.map { it.finishReasoning() })
+                        },
+                        updateAt = Instant.now()
                     )
-                }
-                val keepAlive = if (terminalPublish == null) {
-                    true // legacy path: keep-alive follows queued continuations below
-                } else {
-                    // durable path: keep-alive follows the persisted state
-                    runCatching { runTerminalStore?.get(runId!!.value)?.state?.isTerminal != true }
-                        .getOrDefault(true)
-                }
-                if (keepAlive && !hasQueuedContinuation(conversationId)) {
-                    stopGenerationKeepAlive(conversationId)
-                }
-                finishGenerationTask(generationTaskId, cause)
-                cleanupRunResourcesIfDone(conversationId, updatedConversation)
+                    updateConversation(conversationId, updatedConversation, checkDeletedFiles = false)
+                    val conversationCheckpointed = checkpointConversation(
+                        conversationId,
+                        updatedConversation,
+                        force = true,
+                    )
+                    generationCheckpointAt.remove(conversationId)
+                    // P1-03: foreground-service lifecycle follows the persisted
+                    // terminal state, not the coroutine's exit. WAITING_USER is a
+                    // pause — the keep-alive stays until the user decides.
+                    var terminalOwnerSucceeded = !durablePath || runId == null
+                    val terminalPublish = if (durablePath && runId != null) {
+                        val (state, reason) = terminalForFlowEnd(cause, reportedTerminal)
+                        // P6-01: when the user stopped but the server cancel could
+                        // not be confirmed, the run outcome is undecidable — keep
+                        // WAITING_EXTERNAL (never pretend CANCELLED) and leave the
+                        // resume cursor so recovery can settle it server-side.
+                        val serverCancelPending = pendingServerCancelFailures.remove(runId.value) == true
+                        terminalOwnerSucceeded = if (
+                            state != RunTerminalState.COMPLETED &&
+                                state != RunTerminalState.STEP_LIMIT ||
+                                conversationCheckpointed
+                        ) {
+                            runCatching {
+                                when {
+                                    serverCancelPending -> {
+                                        runTerminalStore!!.pause(
+                                            runId.value,
+                                            RunTerminalState.WAITING_EXTERNAL,
+                                            PauseReason.USER_STOP,
+                                        )
+                                    }
 
-                // Show notification only when the run truly completed
-                // (STEP_LIMIT / WAITING_USER are never "done").
-                val completed = (terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded) ||
-                    (terminalPublish == null && cause == null)
-                if (
-                    completed &&
-                    !isForeground.value &&
-                    settings.displaySetting.enableNotificationOnMessageGeneration
-                ) {
-                    sendGenerationDoneNotification(conversationId, senderName, runId?.value)
+                                    state == RunTerminalState.WAITING_USER -> {
+                                        runTerminalStore!!.pause(runId.value, state, reason)
+                                    }
+
+                                    else -> {
+                                        runTerminalStore!!.finish(runId.value, state, reason)
+                                    }
+                                }
+                                true
+                            }.onFailure { error ->
+                                Log.w(TAG, "terminal owner persist failed for $conversationId", error)
+                            }.getOrDefault(false)
+                        } else {
+                            Log.w(TAG, "terminal owner deferred because conversation checkpoint failed for $conversationId")
+                            false
+                        }
+                        if (
+                            terminalOwnerSucceeded &&
+                            conversationCheckpointed &&
+                            !serverCancelPending &&
+                            responsesResume != null &&
+                            (state == RunTerminalState.COMPLETED || state == RunTerminalState.STEP_LIMIT)
+                        ) {
+                            runCatching { responsesResume.store.clear(responsesResume.runId) }
+                                .onFailure { error ->
+                                    Log.w(TAG, "stored response cursor clear failed for $conversationId", error)
+                                }
+                        }
+                        if (state == RunTerminalState.CANCELLED || state == RunTerminalState.FAILED || serverCancelPending) {
+                            // A stop/failure may leave a STARTED non-idempotent
+                            // effect behind — reconcile it so the user decides.
+                            runCatching { runRecovery!!.reconcileStartedEffects(runId.value) }
+                            runCatching { refreshOutcomeUnknown() }
+                        }
+                        // P4-02: cascade cancellation — a cancelled parent run also
+                        // cancels its child threads (replaces the pre-Phase-4
+                        // detach policy; gated by the thread_graph_v2 flag inside).
+                        if (state == RunTerminalState.CANCELLED) {
+                            runCatching {
+                                subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
+                            }
+                        }
+                        if (serverCancelPending) RunTerminalState.WAITING_EXTERNAL else state
+                    } else {
+                        null
+                    }
+                    completionOwnerCommitted = terminalOwnerSucceeded
+                    // Keep a resumable WAITING_USER run bound to its identity, but
+                    // close the WebMount run namespace for every terminal outcome.
+                    if (
+                        runId != null &&
+                        terminalPublish != RunTerminalState.WAITING_USER &&
+                        terminalOwnerSucceeded
+                    ) {
+                        localTools.endWebMountRun(
+                            runId = runId.value,
+                            conversationId = conversationId.toString(),
+                            reason = "generation finished",
+                            preservePendingHandoff = terminalPublish == RunTerminalState.COMPLETED,
+                        )
+                    }
+                    val keepAlive = if (terminalPublish == null) {
+                        true // legacy path: keep-alive follows queued continuations below
+                    } else {
+                        // durable path: keep-alive follows the persisted state
+                        runCatching { runTerminalStore?.get(runId!!.value)?.state?.isTerminal != true }
+                            .getOrDefault(true)
+                    }
+                    if (keepAlive && !hasQueuedContinuation(conversationId)) {
+                        stopGenerationKeepAlive(conversationId)
+                    }
+                    finishGenerationTask(generationTaskId, cause)
+                    cleanupRunResourcesIfDone(conversationId, updatedConversation)
+
+                    // Show notification only when the run truly completed
+                    // (STEP_LIMIT / WAITING_USER are never "done").
+                    val completed = (terminalPublish == RunTerminalState.COMPLETED && terminalOwnerSucceeded) ||
+                        (terminalPublish == null && cause == null)
+                    if (
+                        completed &&
+                        !isForeground.value &&
+                        settings.displaySetting.enableNotificationOnMessageGeneration
+                    ) {
+                        sendGenerationDoneNotification(conversationId, senderName, runId?.value)
+                    }
                 }
             }.collect { chunk ->
                 when (chunk) {
@@ -2297,87 +2306,89 @@ class ChatService(
                 }
             }
         }.onFailure {
-            // No-op when onCompletion already finalized; covers failures
-            // thrown before the generation flow was even constructed.
-            streamRecorder?.onRunFinished(it)
-            trustedRunToolNames.remove(conversationId)
-            val failureState = if (durablePath && runId != null) {
-                if (it is CancellationException) RunTerminalState.CANCELLED else RunTerminalState.FAILED
-            } else {
-                null
-            }
-            if (!hasQueuedContinuation(conversationId)) {
-                stopGenerationKeepAlive(conversationId)
-            }
-            val latestConversation = getConversationFlow(conversationId).value
-            val conversationCheckpointed = checkpointConversation(
-                conversationId,
-                latestConversation,
-                force = true,
-            )
-            if (failureState != null && runId != null) {
-                runCatching {
-                    runTerminalStore!!.finish(
-                        runId.value,
-                        failureState,
-                        if (it is CancellationException) PauseReason.USER_STOP else null,
-                    )
-                    runRecovery!!.reconcileStartedEffects(runId.value)
-                    refreshOutcomeUnknown()
-                }.onFailure { error ->
-                    Log.w(TAG, "failure terminal owner persist failed for $conversationId", error)
+            finalizeChatGeneration {
+                // No-op when onCompletion already finalized; covers failures
+                // thrown before the generation flow was even constructed.
+                streamRecorder?.onRunFinished(it)
+                trustedRunToolNames.remove(conversationId)
+                val failureState = if (durablePath && runId != null) {
+                    if (it is CancellationException) RunTerminalState.CANCELLED else RunTerminalState.FAILED
+                } else {
+                    null
                 }
-                localTools.endWebMountRun(
-                    runId = runId.value,
-                    conversationId = conversationId.toString(),
-                    reason = if (it is CancellationException) "generation cancelled" else "generation failed",
+                if (!hasQueuedContinuation(conversationId)) {
+                    stopGenerationKeepAlive(conversationId)
+                }
+                val latestConversation = getConversationFlow(conversationId).value
+                val conversationCheckpointed = checkpointConversation(
+                    conversationId,
+                    latestConversation,
+                    force = true,
                 )
-                // P4-02: cascade cancellation (thread_graph_v2 gated inside).
-                if (failureState == RunTerminalState.CANCELLED) {
+                if (failureState != null && runId != null && !completionOwnerCommitted) {
                     runCatching {
-                        subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
+                        runTerminalStore!!.finish(
+                            runId.value,
+                            failureState,
+                            if (it is CancellationException) PauseReason.USER_STOP else null,
+                        )
+                        runRecovery!!.reconcileStartedEffects(runId.value)
+                        refreshOutcomeUnknown()
+                    }.onFailure { error ->
+                        Log.w(TAG, "failure terminal owner persist failed for $conversationId", error)
+                    }
+                    localTools.endWebMountRun(
+                        runId = runId.value,
+                        conversationId = conversationId.toString(),
+                        reason = if (it is CancellationException) "generation cancelled" else "generation failed",
+                    )
+                    // P4-02: cascade cancellation (thread_graph_v2 gated inside).
+                    if (failureState == RunTerminalState.CANCELLED) {
+                        runCatching {
+                            subAgentManager.cancelByRootRun(runId.value, conversationId.toString())
+                        }
                     }
                 }
-            }
-            generationCheckpointAt.remove(conversationId)
-            screenCaptureManager.releaseSession()
-            if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
-                cancelLiveUpdateNotification(conversationId)
-            } else {
-                liveStatusNotifier.notifyFailure(
-                    conversationId = conversationId,
-                    senderName = senderName,
-                    error = it,
-                    launchIntent = getPendingIntent(context, conversationId, runId?.value),
-                )
-            }
-
-            it.printStackTrace()
-            // Surface compaction failures with a targeted title + actionable hint instead
-            // of the generic "message generation failed" toast. Previously this was the
-            // root cause of the silent-stall bug: GLM 5.1 at near-context-limit triggered
-            // forceRatio compact → fell back to the same slow model → compact timed out →
-            // exception got wrapped as a generic generation error → 5-second ErrorCard →
-            // user never saw it. Now it points users at the 压缩模型 setting where the
-            // real fix lives.
-            val (errorTitle, surfacedError) = when (it) {
-                is app.amber.core.context.ContextCompactionFailedException -> {
-                    val hint = context.getString(
-                        R.string.error_auto_compact_failed_hint,
-                        it.phase,
-                        it.compactionReason,
+                generationCheckpointAt.remove(conversationId)
+                screenCaptureManager.releaseSession()
+                if (it is CancellationException || !settings.agentRuntime.enableLiveStatusNotification) {
+                    cancelLiveUpdateNotification(conversationId)
+                } else {
+                    liveStatusNotifier.notifyFailure(
+                        conversationId = conversationId,
+                        senderName = senderName,
+                        error = it,
+                        launchIntent = getPendingIntent(context, conversationId, runId?.value),
                     )
-                    context.getString(R.string.error_title_compress_conversation) to RuntimeException(hint, it)
                 }
-                // P1-04: the final token fit could not satisfy the hard budget
-                // even after trimming — the request was never sent. Surface a
-                // clear title; the exception message carries the token math.
-                is app.amber.core.context.ContextTooLargeException -> "上下文超出模型上限" to it
-                else -> context.getString(R.string.error_title_generation) to it
+
+                it.printStackTrace()
+                // Surface compaction failures with a targeted title + actionable hint instead
+                // of the generic "message generation failed" toast. Previously this was the
+                // root cause of the silent-stall bug: GLM 5.1 at near-context-limit triggered
+                // forceRatio compact → fell back to the same slow model → compact timed out →
+                // exception got wrapped as a generic generation error → 5-second ErrorCard →
+                // user never saw it. Now it points users at the 压缩模型 setting where the
+                // real fix lives.
+                val (errorTitle, surfacedError) = when (it) {
+                    is app.amber.core.context.ContextCompactionFailedException -> {
+                        val hint = context.getString(
+                            R.string.error_auto_compact_failed_hint,
+                            it.phase,
+                            it.compactionReason,
+                        )
+                        context.getString(R.string.error_title_compress_conversation) to RuntimeException(hint, it)
+                    }
+                    // P1-04: the final token fit could not satisfy the hard budget
+                    // even after trimming — the request was never sent. Surface a
+                    // clear title; the exception message carries the token math.
+                    is app.amber.core.context.ContextTooLargeException -> "上下文超出模型上限" to it
+                    else -> context.getString(R.string.error_title_generation) to it
+                }
+                addError(surfacedError, conversationId, title = errorTitle)
+                Logging.log(TAG, "handleMessageComplete: $it")
+                Logging.log(TAG, it.stackTraceToString())
             }
-            addError(surfacedError, conversationId, title = errorTitle)
-            Logging.log(TAG, "handleMessageComplete: $it")
-            Logging.log(TAG, it.stackTraceToString())
         }.onSuccess {
             val finalConversation = getConversationFlow(conversationId).value
             persistConversationWindow(conversationId, finalConversation, indexFts = true)
