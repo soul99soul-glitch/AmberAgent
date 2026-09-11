@@ -68,10 +68,10 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.BaselineShift
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -99,7 +99,7 @@ import app.amber.feature.ui.components.message.LocalSearchSources
 import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
 import app.amber.feature.ui.context.LocalSettings
-import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
@@ -150,6 +150,10 @@ private val BARE_WEB_URL_REGEX = Regex(
 private val TABLE_CELL_MARKDOWN_HINT_REGEX = Regex(
     """[`*_~\[\]()!#$<>\\]|https?://|(?:[A-Za-z0-9-]+\.)+(?:com|net|org|io|ai|cn|co|dev|app|me|info|xyz|news)|\n"""
 )
+private val TABLE_DELIMITER_ROW_REGEX = Regex(
+    """^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?\s*$"""
+)
+private val BLOCKQUOTE_MARKER_PREFIX_REGEX = Regex("""^\s*(?:>\s*)+""")
 
 // 预处理markdown内容
 private fun preProcess(content: String): String {
@@ -1288,7 +1292,12 @@ internal fun MarkdownTreeForParityTest(
 ) {
     CompositionLocalProvider(LocalMarkdownFillWidth provides true) {
         if (result.hasHtmlBlocks) {
-            MarkdownNew(content = content, modifier = modifier, style = style)
+            MarkdownNew(
+                content = content,
+                modifier = modifier,
+                style = style,
+                paragraphSpacing = style.fontSize.toDp(),
+            )
         } else {
             ProvideTextStyle(style) {
                 Column(modifier = modifier.padding(start = 4.dp)) {
@@ -1595,6 +1604,7 @@ internal fun MarkdownBlockLegacy(
                 modifier = modifier.amberTraceMeasure("Amber MarkdownBlock html measure"),
                 style = style,
                 onClickCitation = onClickCitation,
+                paragraphSpacing = style.fontSize.toDp(),
             )
         } else {
             ProvideTextStyle(style) {
@@ -2214,7 +2224,7 @@ private fun MarkdownNode(
             } else {
                 Text(
                     text = formula,
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = AmberMono,
                     modifier = modifier.padding(horizontal = 1.dp)
                 )
             }
@@ -2232,7 +2242,7 @@ private fun MarkdownNode(
                 } else {
                     Text(
                         text = formula,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = AmberMono,
                         modifier = revealModifier
                     )
                 }
@@ -2242,7 +2252,7 @@ private fun MarkdownNode(
         MdNodeType.InlineCode -> {
             val code = node.textIn(content).trim('`')
             Text(
-                text = code, fontFamily = FontFamily.Monospace, modifier = modifier
+                text = code, fontFamily = AmberMono, modifier = modifier
             )
         }
 
@@ -3024,7 +3034,10 @@ private fun TableNode(
     // 创建表头composable列表
     val headers = List(tableData.columnCount) { columnIndex ->
         @Composable {
-            TableCellContent(tableData.headers.getOrElse(columnIndex) { "" })
+            TableCellContent(
+                content = tableData.headers.getOrElse(columnIndex) { "" },
+                alignment = tableData.alignments.getOrElse(columnIndex) { TableAlign.NONE },
+            )
         }
     }
 
@@ -3032,7 +3045,10 @@ private fun TableNode(
     val rowComposables = tableData.rows.map { rowData ->
         List(tableData.columnCount) { columnIndex ->
             @Composable {
-                TableCellContent(rowData.getOrElse(columnIndex) { "" })
+                TableCellContent(
+                    content = rowData.getOrElse(columnIndex) { "" },
+                    alignment = tableData.alignments.getOrElse(columnIndex) { TableAlign.NONE },
+                )
             }
         }
     }
@@ -3050,6 +3066,7 @@ private fun TableNode(
                 modifier = revealModifier,
                 columnMinWidths = List(tableData.columnCount) { 80.dp },
                 columnMaxWidths = List(tableData.columnCount) { 200.dp },
+                columnAlignments = tableData.alignments.map(TableAlign::toComposeAlignment),
                 bodyCellModifier = { rowIndex, columnIndex ->
                     streamingRevealModifier(
                         key = streamingTableCellMotionKey(
@@ -3069,14 +3086,30 @@ private fun TableNode(
     }
 }
 
+private fun TableAlign.toComposeAlignment(): Alignment = when (this) {
+    TableAlign.LEFT, TableAlign.NONE -> Alignment.CenterStart
+    TableAlign.CENTER -> Alignment.Center
+    TableAlign.RIGHT -> Alignment.CenterEnd
+}
+
+private fun TableAlign.toTextAlign(): TextAlign = when (this) {
+    TableAlign.LEFT, TableAlign.NONE -> TextAlign.Start
+    TableAlign.CENTER -> TextAlign.Center
+    TableAlign.RIGHT -> TextAlign.End
+}
+
 @Composable
-private fun TableCellContent(content: String) {
+private fun TableCellContent(content: String, alignment: TableAlign) {
     if (TABLE_CELL_MARKDOWN_HINT_REGEX.containsMatchIn(content)) {
-        MarkdownBlock(content = content, fillWidth = false)
+        MarkdownBlock(
+            content = content,
+            fillWidth = false,
+            style = LocalTextStyle.current.copy(textAlign = alignment.toTextAlign()),
+        )
     } else {
         Text(
             text = content,
-            modifier = Modifier.padding(start = 4.dp),
+            textAlign = alignment.toTextAlign(),
             softWrap = true,
             overflow = TextOverflow.Visible,
             style = LocalTextStyle.current,
@@ -3088,6 +3121,7 @@ internal data class MarkdownTableData(
     val columnCount: Int,
     val headers: List<String>,
     val rows: List<List<String>>,
+    val alignments: List<TableAlign> = emptyList(),
 )
 
 internal fun extractStreamingMarkdownTableData(
@@ -3136,11 +3170,43 @@ internal fun extractMarkdownTableData(node: MdNode, content: String): MarkdownTa
             .filter { it.type == MdNodeType.TableCell }
             .map { it.textIn(content).trim() }
     }
+    val sourceAlignments = parseTableAlignments(node.textIn(content), columnCount)
+    val astAlignments = node.tableAlignments
+    val alignments = List(columnCount) { column ->
+        astAlignments?.getOrNull(column) ?: sourceAlignments[column]
+    }
     return MarkdownTableData(
         columnCount = columnCount,
         headers = headerCells,
         rows = rows,
+        alignments = alignments,
     )
+}
+
+/**
+ * Reads GFM's delimiter row from the already parsed table span. The AST carries the cell nodes,
+ * while the current JVM/native adapters do not encode delimiter alignment; keeping this small
+ * source slice here lets both trees feed the same table model without another parser.
+ */
+private fun parseTableAlignments(tableSource: String, columnCount: Int): List<TableAlign> {
+    val delimiter = tableSource.lineSequence()
+        .drop(1)
+        .map { it.replaceFirst(BLOCKQUOTE_MARKER_PREFIX_REGEX, "") }
+        .firstOrNull { TABLE_DELIMITER_ROW_REGEX.matches(it) }
+        ?: return List(columnCount) { TableAlign.NONE }
+    val cells = delimiter.trim().removePrefix("|").removeSuffix("|").split('|')
+    return List(columnCount) { column ->
+        val cell = cells.getOrNull(column)?.trim()
+        when {
+            cell != null && cell.startsWith(":") && cell.endsWith(":") -> {
+                TableAlign.CENTER
+            }
+
+            cell?.startsWith(":") == true -> TableAlign.LEFT
+            cell?.endsWith(":") == true -> TableAlign.RIGHT
+            else -> TableAlign.NONE
+        }
+    }
 }
 
 /**
@@ -3259,7 +3325,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
             val code = node.textIn(content).trim('`')
             withStyle(
                 SpanStyle(
-                    fontFamily = FontFamily.Monospace,
+                    fontFamily = AmberMono,
                     fontSize = 0.95.em,
                     background = colorScheme.secondaryContainer.copy(alpha = 0.2f),
                 )
@@ -3294,7 +3360,7 @@ internal fun AnnotatedString.Builder.appendMarkdownNodeContent(
                 val formula = node.textIn(content)
                 withStyle(
                     SpanStyle(
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = AmberMono,
                         fontSize = 0.95.em,
                     )
                 ) {

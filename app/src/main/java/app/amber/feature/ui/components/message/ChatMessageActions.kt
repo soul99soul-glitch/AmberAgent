@@ -19,7 +19,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Surface
@@ -61,6 +60,7 @@ import app.amber.agent.R
 import app.amber.core.model.MessageNode
 import app.amber.feature.ui.components.ui.ConfirmDialog
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.utils.toLocalString
 import app.amber.core.utils.toQuoteBlock
@@ -165,14 +165,13 @@ private fun MessageActionIconButton(
     // Graphite design §6.2/§7: the action row whispers (faint ink), flat & hairline,
     // no glow. Tint = LocalChatTheme.inkFaint (the same faint token the assistant
     // header date uses) instead of full-strength ink. Tap feedback is the Surface
-    // ripple; no resting-state outline. Structure (size/transparent/ripple) is kept
-    // identical to the previous WorkspaceIconButton so layout is unchanged.
+    // ripple; no resting-state outline. Keep the glyph compact inside a 48dp hit target.
     val tint = app.amber.feature.ui.pages.chat.LocalChatTheme.current.inkFaint
         .copy(alpha = if (enabled) 1f else 0.36f)
     Surface(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(34.dp),
+        modifier = Modifier.size(48.dp),
         shape = RoundedCornerShape(6.dp),
         color = Color.Transparent,
         contentColor = tint,
@@ -185,9 +184,7 @@ private fun MessageActionIconButton(
             Icon(
                 imageVector = imageVector,
                 contentDescription = contentDescription,
-                // Match the prior WorkspaceIconButton default glyph size (15dp) so only
-                // the tint changes, not the icon's footprint.
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(18.dp),
             )
         }
     }
@@ -360,7 +357,7 @@ fun ChatMessageActionsSheet(
             }
 
             ProvideTextStyle(
-                MaterialTheme.typography.labelSmall.copy(color = workspace.faint)
+                LocalAmberType.current.meta.copy(color = workspace.faint)
             ) {
                 Text(message.createdAt.toJavaLocalDateTime().toLocalString())
                 if (model != null) {
@@ -385,7 +382,7 @@ private fun MessageActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .heightIn(min = 44.dp)
+            .heightIn(min = 48.dp)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -398,7 +395,7 @@ private fun MessageActionRow(
         )
         Text(
             text = text,
-            style = MaterialTheme.typography.bodyMedium,
+            style = LocalAmberType.current.body,
             color = textColor,
         )
     }

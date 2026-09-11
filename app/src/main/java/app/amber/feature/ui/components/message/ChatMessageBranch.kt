@@ -4,12 +4,11 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -23,6 +22,7 @@ import com.composables.icons.lucide.ArrowLeft
 import com.composables.icons.lucide.ArrowRight
 import app.amber.ai.core.MessageRole
 import app.amber.core.model.MessageNode
+import app.amber.feature.ui.theme.LocalAmberType
 
 /**
  * P8-02: user bubble 显示 variant selector 的条件 —— 仅当用户节点存在多个 variant
@@ -45,14 +45,13 @@ fun ChatMessageBranchSelector(
         horizontalArrangement = horizontalArrangement,
     ) {
         if (node.messages.size > 1) {
-            Icon(
-                imageVector = Lucide.ArrowLeft,
-                contentDescription = "Prev",
+            Box(
                 modifier = Modifier
+                    .size(48.dp)
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == 0) 0.5f else 1f)
                     .clickable(
-                        enabled = interactionEnabled,
+                        enabled = interactionEnabled && node.selectIndex > 0,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
@@ -64,24 +63,28 @@ fun ChatMessageBranchSelector(
                                 )
                             }
                         }
-                    )
-                    .padding(8.dp)
-                    .size(16.dp)
-            )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Lucide.ArrowLeft,
+                    contentDescription = "Prev",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
 
             Text(
                 text = "${node.selectIndex + 1}/${node.messages.size}",
-                style = MaterialTheme.typography.bodySmall
+                style = LocalAmberType.current.meta,
             )
 
-            Icon(
-                imageVector = Lucide.ArrowRight,
-                contentDescription = "Next",
+            Box(
                 modifier = Modifier
+                    .size(48.dp)
                     .clip(CircleShape)
                     .alpha(if (node.selectIndex == node.messages.lastIndex) 0.5f else 1f)
                     .clickable(
-                        enabled = interactionEnabled,
+                        enabled = interactionEnabled && node.selectIndex < node.messages.lastIndex,
                         interactionSource = remember { MutableInteractionSource() },
                         indication = LocalIndication.current,
                         onClick = {
@@ -93,10 +96,15 @@ fun ChatMessageBranchSelector(
                                 )
                             }
                         }
-                    )
-                    .padding(8.dp)
-                    .size(16.dp),
-            )
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Lucide.ArrowRight,
+                    contentDescription = "Next",
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
     }
 }

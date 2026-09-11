@@ -91,7 +91,7 @@ import app.amber.feature.ui.components.message.SearchSourcesRegistry
 import app.amber.feature.ui.components.table.DataTable
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.context.LocalToaster
-import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.NotoSerifSC
 import app.amber.core.utils.openUrl
 import app.amber.core.utils.toDp
@@ -477,7 +477,7 @@ private fun HtmlList(
             val bulletBase = when (level % 3) {
                 0 -> "•"; 1 -> "◦"; else -> "▪"
             }
-            var orderedIndex = 1
+            var orderedIndex = element.attr("start").toLongOrNull() ?: 1L
             element.children().fastForEach { item ->
                 if (item.tagName().lowercase() == "li") {
                     val bullet = if (ordered) "${orderedIndex++}. " else "$bulletBase "
@@ -642,7 +642,7 @@ private fun HtmlMathBlock(formula: String) {
     } else {
         Text(
             text = formula,
-            fontFamily = FontFamily.Monospace,
+            fontFamily = AmberMono,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(vertical = 8.dp),
@@ -1055,7 +1055,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
 
         "code" -> withStyle(
             SpanStyle(
-                fontFamily = FontFamily.Monospace,
+                fontFamily = AmberMono,
                 fontSize = 0.95.em,
                 background = colorScheme.secondaryContainer.copy(alpha = 0.2f),
             ).merge(cssStyle ?: SpanStyle())
@@ -1141,7 +1141,7 @@ private fun AnnotatedString.Builder.appendHtmlInlineElement(
                         ),
                     )
                 } else {
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 0.95.em)) {
+                    withStyle(SpanStyle(fontFamily = AmberMono, fontSize = 0.95.em)) {
                         append(formula)
                     }
                 }
@@ -1524,7 +1524,7 @@ private fun parseFontFamily(fontFamily: String): FontFamily? {
     return when {
         // Route mono/serif requests to the project-bundled families so HTML font-family
         // hints in markdown render with full CJK coverage (matches the chat font picker).
-        normalized.contains("mono") || normalized.contains("courier") -> JetbrainsMono
+        normalized.contains("mono") || normalized.contains("courier") -> AmberMono
         normalized.contains("serif") || normalized.contains("georgia") || normalized.contains("times") -> NotoSerifSC
         normalized.contains("sans") || normalized.contains("arial") || normalized.contains("helvetica") -> FontFamily.SansSerif
         normalized.contains("cursive") -> FontFamily.Cursive

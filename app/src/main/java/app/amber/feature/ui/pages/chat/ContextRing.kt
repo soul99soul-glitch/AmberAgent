@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.amber.feature.ui.theme.LocalAmberTokens
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
@@ -114,6 +117,8 @@ fun ContextRing(
 
     Box(
         modifier = modifier
+            .heightIn(min = 48.dp)
+            .widthIn(min = 48.dp)
             .clip(RoundedCornerShape(8.dp))
             .clickable { expanded = !expanded }
             .padding(horizontal = 6.dp, vertical = 6.dp),
@@ -388,9 +393,8 @@ private fun UsageRow(
             )
             Text(
                 text = caption,
-                fontSize = 11.5.sp,
+                style = LocalAmberType.current.meta,
                 color = theme.inkFaint,
-                letterSpacing = 0.3.sp,
             )
         }
         Box(
@@ -399,7 +403,7 @@ private fun UsageRow(
                 .fillMaxWidth()
                 .height(5.dp)
                 .clip(RoundedCornerShape(999.dp))
-                .background(Color(0x0F0F1419)),  // 6% ink track
+                .background(theme.contextTrack),
         ) {
             Box(
                 modifier = Modifier
@@ -435,16 +439,13 @@ private fun MetaStat(label: String, value: String, theme: ChatTheme) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(
             text = label,
-            fontSize = 10.5.sp,
-            color = theme.inkFaint,
-            letterSpacing = 0.3.sp,
+            style = LocalAmberType.current.tinyTag,
+            color = LocalAmberTokens.current.ink3,
         )
         Text(
             text = value,
-            fontSize = 12.sp,
+            style = LocalAmberType.current.meta.copy(fontWeight = FontWeight.Medium),
             color = theme.ink,
-            fontWeight = FontWeight.Medium,
-            letterSpacing = 0.2.sp,
         )
     }
 }

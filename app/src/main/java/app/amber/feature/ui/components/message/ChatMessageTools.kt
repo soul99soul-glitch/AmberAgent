@@ -86,6 +86,7 @@ import app.amber.feature.ui.components.ui.WorkspaceStatusPill
 import app.amber.feature.ui.components.ui.WorkspaceTone
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.modifier.shimmer
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.jsonPrimitiveOrNull
 
 internal object ToolNames {
@@ -807,8 +808,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         WorkspaceIconButton(
                             onClick = { showDenyDialog = true },
                             modifier = Modifier.size(48.dp),
-                            size = 24.dp,
-                            iconSize = 12.dp,
+                            size = 32.dp,
+                            iconSize = 18.dp,
                             tone = WorkspaceTone.Danger,
                             icon = Lucide.X,
                             contentDescription = stringResource(R.string.chat_message_tool_deny),
@@ -816,8 +817,8 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         WorkspaceIconButton(
                             onClick = { onToolApproval(tool.toolCallId, true, "") },
                             modifier = Modifier.size(48.dp),
-                            size = 24.dp,
-                            iconSize = 12.dp,
+                            size = 32.dp,
+                            iconSize = 18.dp,
                             tone = WorkspaceTone.Success,
                             icon = Lucide.Check,
                             contentDescription = stringResource(R.string.chat_message_tool_approve),
@@ -902,7 +903,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     )
                     Text(
                         text = workspaceFilePath,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.meta,
                         color = workspace.ink,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -910,7 +911,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                     )
                     Text(
                         text = stringResource(R.string.chat_message_tool_preview_workspace_file),
-                        style = MaterialTheme.typography.labelSmall,
+                        style = LocalAmberType.current.tinyTag,
                         color = workspace.faint,
                     )
                 }
@@ -937,7 +938,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         content.getStringContent("content")?.let { memoryContent ->
                             Text(
                                 text = memoryContent,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = LocalAmberType.current.secondary,
                                 color = workspace.muted,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
@@ -949,7 +950,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         content.getStringContent("answer")?.let { answer ->
                             Text(
                                 text = answer,
-                                style = MaterialTheme.typography.labelSmall,
+                                style = LocalAmberType.current.secondary,
                                 color = workspace.muted,
                                 modifier = Modifier.shimmer(isLoading = loading),
                                 maxLines = 3,
@@ -968,7 +969,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                                 )
                                 Text(
                                     text = stringResource(R.string.chat_message_tool_search_results_count, items.size),
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = LocalAmberType.current.meta,
                                     color = workspace.faint,
                                 )
                             }
@@ -978,7 +979,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                         val url = arguments.getStringContent("url") ?: ""
                         Text(
                             text = url,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = LocalAmberType.current.meta,
                             color = workspace.faint,
                         )
                     }
@@ -1006,7 +1007,7 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
                             } else {
                                 stringResource(R.string.chat_message_tool_denied)
                             },
-                            style = MaterialTheme.typography.labelSmall,
+                            style = LocalAmberType.current.secondary,
                             color = workspace.red,
                         )
                     }

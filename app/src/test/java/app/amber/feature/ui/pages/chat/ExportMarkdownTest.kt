@@ -16,6 +16,25 @@ import kotlin.uuid.Uuid
  */
 class ExportMarkdownTest {
 
+    @Test
+    fun `multiline reasoning remains separate blockquote lines`() {
+        val conversation = Conversation(
+            assistantId = Uuid.random(),
+            title = "Reasoning export",
+            messageNodes = emptyList(),
+        )
+        val message = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Reasoning("First step\nSecond step"),
+                UIMessagePart.Text("Answer"),
+            ),
+        )
+        val markdown = buildMarkdownExport(conversation, listOf(message))
+        assertTrue(markdown.contains("> First step\n> Second step\n"))
+        assertTrue(markdown.contains("Answer"))
+    }
+
     private fun markdownFor(toolInput: String): String {
         val conversation = Conversation(
             assistantId = Uuid.random(),

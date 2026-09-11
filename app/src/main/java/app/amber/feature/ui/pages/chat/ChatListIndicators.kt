@@ -476,7 +476,7 @@ internal fun PendingUserMessageBubble(
                         )
                         IconButton(
                             onClick = onCancel,
-                            modifier = Modifier.size(26.dp),
+                            modifier = Modifier.size(48.dp),
                         ) {
                             Icon(
                                 imageVector = Lucide.X,

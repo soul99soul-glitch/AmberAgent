@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -54,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -70,6 +72,8 @@ import com.composables.icons.lucide.Clock
 import app.amber.agent.R
 import app.amber.feature.runtime.SandboxActivityUiState
 import app.amber.feature.runtime.ToolActivityStatus
+import app.amber.feature.ui.theme.JetBrainsMonoFamily
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.webview.WebViewLink
 import app.amber.feature.webview.WebViewLoadStatus
 import app.amber.feature.webview.WebViewOperationState
@@ -427,25 +431,29 @@ internal fun SandboxPeekBar(
     onNext: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val hasInlinePreview = activity.operationPreviewUrl() != null || activity.toolName != "agent_idle"
     // V3 convo-tool-result.jsx ToolResultPreview spec:
     //   设计稿 asymmetric padding (start=14 end=32 top=10 bottom=8); 父级 ChatInput
-    //   已加 horizontal=8 padding + spacedBy 8dp, 我们只控 horizontal (start=6 end=24).
+    //   已提供 16dp 主基线。明确待命且无 web 预览时去掉左侧缩略图；其他活动保留
+    //   既有文本/终端 peek，避免隐藏可用的操作上下文。
     //   bottom 给 0 (让卡片紧贴下面的 ChatInput 输入框), top 维持轻量缓冲.
     //   gap=10, align Bottom; 缩略图 72×96 (3:4 竖向); ResultPill 22dp 高 999 圆角
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 6.dp, end = 24.dp, top = 4.dp, bottom = 0.dp),
+            .padding(top = 4.dp),
         verticalAlignment = Alignment.Bottom,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        AgentOperationPreviewPeek(
-            activity = activity,
-            onOpen = onOpen,
-            modifier = Modifier
-                .width(72.dp)
-                .height(96.dp),
-        )
+        if (hasInlinePreview) {
+            AgentOperationPreviewPeek(
+                activity = activity,
+                onOpen = onOpen,
+                modifier = Modifier
+                    .width(72.dp)
+                    .height(96.dp),
+            )
+        }
         SandboxStepPeek(
             activity = activity,
             onOpen = onOpen,
@@ -678,72 +686,76 @@ private fun SandboxStepPeek(
     val context = LocalContext.current
     val workspace = workspaceColors()
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 convo-tool-result.jsx ResultPill spec:
-    //   高度 22dp (3dp 上下 padding + 16dp leading badge)
-    //   999 圆角 fillMaxWidth + toolPillBg + 1dp toolPillEdge
-    //   inline "tool · query" 11.5sp letter 0.2 W500/W400
-    //   右侧 9dp chevrons + 10.5sp tabular-nums
+    val type = LocalAmberType.current
+    val hasNavigation = onPrevious != null || onNext != null
+    val shape = if (hasNavigation) RoundedCornerShape(14.dp) else CircleShape
+    // Active history uses a second control row beside the 96dp preview; the common
+    // title row keeps cancellation available even on the first (non-navigable) step.
     Surface(
         modifier = modifier
-            .clip(CircleShape)
+            .clip(shape)
             .clickable { onOpen() },
-        shape = CircleShape,
+        shape = shape,
         color = theme.toolPillBg,
         contentColor = workspace.ink,
         shadowElevation = 0.dp,
         tonalElevation = 0.dp,
         border = BorderStroke(1.dp, theme.toolPillEdge),
     ) {
-        Row(
-            modifier = Modifier.padding(start = 3.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SandboxStepStatusIcon(status = activity.status)
-            Text(
-                text = activity.title,
-                modifier = Modifier.weight(1f),
-                fontSize = 10.5.sp,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
-                letterSpacing = 0.2.sp,
-                color = theme.toolLabelInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (onCancel != null) {
-                IconButton(
-                    onClick = onCancel,
-                    modifier = Modifier.size(18.dp),
-                ) {
-                    Icon(
-                        imageVector = Lucide.X,
-                        contentDescription = stringResource(R.string.stop),
-                        tint = workspace.amber,
-                        modifier = Modifier.size(10.dp),
+        Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                SandboxStepStatusIcon(status = activity.status)
+                Text(
+                    text = activity.title,
+                    modifier = Modifier.weight(1f),
+                    style = type.tinyTag.copy(
+                        fontFamily = JetBrainsMonoFamily,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        letterSpacing = 0.2.sp,
+                    ),
+                    color = theme.toolLabelInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!hasNavigation) {
+                    Text(
+                        text = activity.stepProgressText(context),
+                        style = type.tinyTag.copy(fontFamily = JetBrainsMonoFamily),
+                        color = theme.inkSoft,
+                        maxLines = 1,
                     )
                 }
+                if (onCancel != null) {
+                    IconButton(onClick = onCancel, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            imageVector = Lucide.X,
+                            contentDescription = stringResource(R.string.stop),
+                            tint = workspace.amber,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                SandboxStepArrow(
-                    enabled = onPrevious != null,
-                    onClick = onPrevious,
-                    left = true,
-                )
-                Text(
-                    text = activity.stepProgressText(context),
-                    fontSize = 9.5.sp,
-                    letterSpacing = 0.4.sp,
-                    color = theme.inkSoft,
-                    maxLines = 1,
-                )
-                SandboxStepArrow(
-                    enabled = onNext != null,
-                    onClick = onNext,
-                    left = false,
-                )
+            if (hasNavigation) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SandboxStepArrow(enabled = onPrevious != null, onClick = onPrevious, left = true)
+                    Text(
+                        text = activity.stepProgressText(context),
+                        modifier = Modifier.weight(1f),
+                        style = type.tinyTag.copy(fontFamily = JetBrainsMonoFamily),
+                        color = theme.inkSoft,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                    SandboxStepArrow(enabled = onNext != null, onClick = onNext, left = false)
+                }
             }
         }
     }
@@ -756,18 +768,21 @@ private fun SandboxStepArrow(
     left: Boolean,
 ) {
     val theme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    // V3 spec: 9dp chevrons stroke 2.4 inkSoft
+    // V3 spec: 48dp step hit area with an 18dp chevron glyph.
     Box(
         modifier = Modifier
-            .size(16.dp)
+            .size(48.dp)
             .clip(CircleShape)
             .clickable(enabled = enabled && onClick != null) { onClick?.invoke() },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = if (left) Lucide.ArrowLeft else Lucide.ArrowRight,
-            contentDescription = null,
-            modifier = Modifier.size(9.dp),
+            contentDescription = stringResource(
+                if (left) R.string.chat_message_tool_preview_previous
+                else R.string.chat_message_tool_preview_next,
+            ),
+            modifier = Modifier.size(18.dp),
             tint = theme.inkSoft.copy(alpha = if (enabled) 1f else 0.28f),
         )
     }
@@ -822,6 +837,8 @@ private fun SandboxSheetHeader(
     onNext: (() -> Unit)?,
 ) {
     val context = LocalContext.current
+    val type = LocalAmberType.current
+    val hasNavigation = onPrevious != null || onNext != null
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(22.dp),
@@ -830,63 +847,94 @@ private fun SandboxSheetHeader(
         tonalElevation = 1.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.75f)),
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
         ) {
-            SandboxStepStatusIcon(status = activity.status)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = activity.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                val supporting = when {
-                    isWebPreview -> activity.operationPreviewUrl()?.webHostPreview().orEmpty()
-                    activity.runtime.isNotBlank() -> activity.runtime
-                    else -> activity.toolName
-                }
-                Text(
-                    text = supporting,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (activity.canCancel && onCancel != null) {
-                Surface(
-                    onClick = onCancel,
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
-                ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                SandboxStepStatusIcon(status = activity.status)
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = stringResource(R.string.chat_sandbox_interrupt),
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        text = activity.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    val supporting = when {
+                        isWebPreview -> activity.operationPreviewUrl()?.webHostPreview().orEmpty()
+                        activity.runtime.isNotBlank() -> activity.runtime
+                        else -> activity.toolName
+                    }
+                    Text(
+                        text = supporting,
                         style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (activity.canCancel && onCancel != null) {
+                    Surface(
+                        onClick = onCancel,
+                        modifier = Modifier.heightIn(min = 48.dp),
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.chat_sandbox_interrupt),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                if (!hasNavigation) {
+                    Text(
+                        text = activity.stepProgressText(context),
+                        style = type.tinyTag.copy(fontFamily = JetBrainsMonoFamily),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                     )
                 }
             }
-            SandboxStepArrow(
-                enabled = onPrevious != null,
-                onClick = onPrevious,
-                left = true,
-            )
-            Text(
-                text = activity.stepProgressText(context),
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-            SandboxStepArrow(
-                enabled = onNext != null,
-                onClick = onNext,
-                left = false,
-            )
+            if (hasNavigation) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SandboxStepArrow(
+                        enabled = onPrevious != null,
+                        onClick = onPrevious,
+                        left = true,
+                    )
+                    Text(
+                        text = activity.stepProgressText(context),
+                        modifier = Modifier.weight(1f),
+                        style = type.tinyTag.copy(
+                            fontFamily = JetBrainsMonoFamily,
+                            letterSpacing = 0.4.sp,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        textAlign = TextAlign.Center,
+                    )
+                    SandboxStepArrow(
+                        enabled = onNext != null,
+                        onClick = onNext,
+                        left = false,
+                    )
+                }
+            }
         }
     }
 }
@@ -1158,7 +1206,7 @@ internal fun SandboxActivitySheet(
             modifier = Modifier
                 .fillMaxHeight(0.86f)
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val previewUrl = activity.operationPreviewUrl()

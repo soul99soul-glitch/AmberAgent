@@ -630,7 +630,7 @@ private fun ChatPageContent(
                             onAbandon = { onReconcileOutcomeUnknown(prompt.effectId, false) },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
                         )
                     }
                     // P8-01: 编辑确认栏 ——「仅保存」与「保存并重新生成」（默认主按钮）。
@@ -1106,7 +1106,7 @@ private fun UserMessageEditConfirmBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1697,7 +1697,7 @@ private fun TopBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp)
-                .padding(start = 20.dp, end = 20.dp),
+                .padding(start = 16.dp, end = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1720,7 +1720,7 @@ private fun TopBar(
                 }
                 Column(
                     modifier = Modifier
-                        .weight(1f, fill = false)
+                        .weight(1f)
                         .fillMaxHeight()
                         .clip(androidx.compose.foundation.shape.CircleShape)
                         .clickable { onToggleModelMenu() },
@@ -1758,12 +1758,9 @@ private fun TopBar(
                             text = currentChatModel?.modelId
                                 ?: stringResource(R.string.model_list_select_model),
                             maxLines = 1,
+                            // 模型标签只占剩余空间，保留箭头和其他顶栏操作的位置。
                             overflow = TextOverflow.Ellipsis,
-                            // 字号收到 10.5：进一步弱化 model、强化标题层级
-                            style = amberType.meta.copy(
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Medium,
-                            ),
+                            style = amberType.meta.copy(fontWeight = FontWeight.Medium),
                             // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
                             color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
                             modifier = Modifier.weight(1f, fill = false),

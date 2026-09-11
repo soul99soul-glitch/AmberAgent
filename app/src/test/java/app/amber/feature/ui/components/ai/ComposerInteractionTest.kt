@@ -3,6 +3,9 @@ package app.amber.feature.ui.components.ai
 import android.app.Application
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,9 +15,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.robolectric.RuntimeEnvironment
+import app.amber.agent.R
+import app.amber.feature.runtime.SandboxActivityUiState
+import app.amber.feature.runtime.ToolActivityStatus
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +58,60 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], application = Application::class)
 class ComposerInteractionTest {
+
+    @Test
+    fun activePreviewControlsFitNarrowComposerAndKeepTheirActions() {
+        var cancelled = 0
+        var previous = 0
+        var next = 0
+        var opened = 0
+        val historyVisible = mutableStateOf(true)
+        val context = RuntimeEnvironment.getApplication()
+        compose.setContent {
+            MaterialTheme {
+                // A 320dp phone with the production composer's 16dp side margins.
+                Box(Modifier.width(288.dp).testTag("preview-area")) {
+                    SandboxPeekBar(
+                        activity = SandboxActivityUiState(
+                            toolCallId = "layout-review",
+                            toolName = "file_read",
+                            title = "Reading project files",
+                            status = ToolActivityStatus.RUNNING,
+                            canCancel = true,
+                            stepIndex = 1,
+                            stepTotal = 3,
+                        ),
+                        onOpen = { opened++ },
+                        onCancel = { cancelled++ },
+                        onPrevious = if (historyVisible.value) ({ previous++ }) else null,
+                        onNext = if (historyVisible.value) ({ next++ }) else null,
+                    )
+                }
+            }
+        }
+        val area = compose.onNodeWithTag("preview-area").getUnclippedBoundsInRoot()
+        listOf(
+            R.string.stop,
+            R.string.chat_message_tool_preview_previous,
+            R.string.chat_message_tool_preview_next,
+        ).forEach { label ->
+            val control = compose.onNodeWithContentDescription(context.getString(label))
+            control.assertIsDisplayed()
+            val bounds = control.getUnclippedBoundsInRoot()
+            assertTrue("control must stay inside the preview: $bounds / $area", bounds.left >= area.left && bounds.right <= area.right)
+            control.performTouchInput { click() }
+        }
+        compose.runOnIdle {
+            assertEquals(1, cancelled)
+            assertEquals(1, previous)
+            assertEquals(1, next)
+            assertEquals(0, opened)
+            historyVisible.value = false
+        }
+        compose.onNodeWithContentDescription(context.getString(R.string.stop))
+            .assertIsDisplayed().performTouchInput { click() }
+        compose.runOnIdle { assertEquals("first step must still be cancellable", 2, cancelled) }
+    }
 
     @get:Rule
     val compose = createComposeRule()

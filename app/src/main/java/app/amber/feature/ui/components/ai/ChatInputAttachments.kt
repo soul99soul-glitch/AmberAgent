@@ -139,7 +139,7 @@ internal fun MediaFileInputRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 6.dp, vertical = 6.dp)
+            .padding(vertical = 6.dp)
             .horizontalScroll(rememberScrollState())
     ) {
         state.messageContent.fastForEach { part ->
@@ -304,7 +304,7 @@ private fun AttachmentChip(
         ProvideTextStyle(MaterialTheme.typography.labelSmall) {
             Row(
                 modifier = Modifier
-                    .heightIn(min = 32.dp)
+                    .heightIn(min = 48.dp)
                     .padding(start = 8.dp, end = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
@@ -318,15 +318,15 @@ private fun AttachmentChip(
                 )
                 Box(
                     modifier = Modifier
-                        .clip(CircleShape)
                         .size(48.dp)
+                        .clip(CircleShape)
                         .clickable(onClick = onRemove),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Lucide.X,
                         contentDescription = stringResource(R.string.chat_input_remove_attachment),
-                        tint = chipInk.copy(alpha = 0.72f),
+                        tint = chipInk,
                         modifier = Modifier.size(14.dp)
                     )
                 }

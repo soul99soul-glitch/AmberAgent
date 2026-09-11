@@ -3,6 +3,7 @@ package app.amber.feature.ui.components.richtext
 import app.amber.feature.ui.components.richtext.tree.JvmMdNode
 import app.amber.feature.ui.components.richtext.tree.MdNode
 import app.amber.feature.ui.components.richtext.tree.MdNodeType
+import app.amber.feature.ui.components.richtext.tree.TableAlign
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
 import org.junit.Assert.assertEquals
@@ -40,6 +41,36 @@ class MarkdownTableTest {
         assertEquals(
             "[《无能的郝哥》](https://m.bilibili.com/video/BV1abc?spm_id_from=333.337)",
             tableData?.rows?.single()?.get(1),
+        )
+    }
+
+    @Test
+    fun `gfm table carries delimiter row alignment into table data`() {
+        val content = """
+            | Left | Center | Right |
+            | :--- | :---: | ---: |
+            | a | b | c |
+        """.trimIndent()
+        val table = findTable(parseTree(content))
+
+        assertEquals(
+            listOf(TableAlign.LEFT, TableAlign.CENTER, TableAlign.RIGHT),
+            extractMarkdownTableData(table ?: error("table missing"), content)?.alignments,
+        )
+    }
+
+    @Test
+    fun `quoted single column table keeps alignment`() {
+        val content = """
+            > | Value |
+            > | :---: |
+            > | centered |
+        """.trimIndent()
+        val table = findTable(parseTree(content))
+
+        assertEquals(
+            listOf(TableAlign.CENTER),
+            extractMarkdownTableData(table ?: error("table missing"), content)?.alignments,
         )
     }
 

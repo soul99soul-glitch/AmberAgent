@@ -41,13 +41,14 @@ fun DataTable(
     headers: List<@Composable () -> Unit>,
     rows: List<List<@Composable () -> Unit>>,
     modifier: Modifier = Modifier,
-    cellPadding: Dp = 4.dp,
+    cellPadding: Dp = 8.dp,
     cellBorder: BorderStroke? = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
     headerBackground: Color = MaterialTheme.colorScheme.surfaceVariant,
     zebraStriping: Boolean = false,
     columnMinWidths: List<Dp> = emptyList(),
     columnMaxWidths: List<Dp> = emptyList(),
     cellAlignment: Alignment = Alignment.CenterStart,
+    columnAlignments: List<Alignment> = emptyList(),
     headerCellModifier: @Composable (column: Int) -> Modifier = { Modifier },
     bodyCellModifier: @Composable (row: Int, column: Int) -> Modifier = { _, _ -> Modifier },
 ) {
@@ -82,7 +83,7 @@ fun DataTable(
                     CellContentBox(
                         modifier = headerCellModifier(c),
                         padding = cellPadding,
-                        alignment = cellAlignment,
+                        alignment = columnAlignments.getOrNull(c) ?: cellAlignment,
                     ) {
                         headers.getOrNull(c)?.invoke()
                     }
@@ -102,7 +103,7 @@ fun DataTable(
                     CellContentBox(
                         modifier = bodyCellModifier(r, c),
                         padding = cellPadding,
-                        alignment = cellAlignment,
+                        alignment = columnAlignments.getOrNull(c) ?: cellAlignment,
                     ) {
                         rows[r].getOrNull(c)?.invoke()
                     }
@@ -151,8 +152,14 @@ fun DataTable(
             layout(finalWidth, finalHeight) {
                 tableFrame.placeRelative(0, 0)
 
-                fun Placeable.placeAligned(x: Int, y: Int, cellWidth: Int, cellHeight: Int) {
-                    val offset = cellAlignment.align(
+                fun Placeable.placeAligned(
+                    x: Int,
+                    y: Int,
+                    cellWidth: Int,
+                    cellHeight: Int,
+                    alignment: Alignment,
+                ) {
+                    val offset = alignment.align(
                         size = IntSize(width, height),
                         space = IntSize(cellWidth, cellHeight),
                         layoutDirection = currentLayoutDirection,
@@ -162,14 +169,26 @@ fun DataTable(
 
                 var x = 0
                 for (c in 0 until columnCount) {
-                    headerContent[c]?.placeAligned(x, 0, colWidths[c], headerHeight)
+                    headerContent[c]?.placeAligned(
+                        x,
+                        0,
+                        colWidths[c],
+                        headerHeight,
+                        columnAlignments.getOrNull(c) ?: cellAlignment,
+                    )
                     x += colWidths[c]
                 }
                 var y = headerHeight
                 for (r in 0 until rowCount) {
                     x = 0
                     for (c in 0 until columnCount) {
-                        bodyContent[r * columnCount + c]?.placeAligned(x, y, colWidths[c], rowHeights[r])
+                        bodyContent[r * columnCount + c]?.placeAligned(
+                            x,
+                            y,
+                            colWidths[c],
+                            rowHeights[r],
+                            columnAlignments.getOrNull(c) ?: cellAlignment,
+                        )
                         x += colWidths[c]
                     }
                     y += rowHeights[r]

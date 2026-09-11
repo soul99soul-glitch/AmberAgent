@@ -68,7 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
@@ -581,8 +580,8 @@ fun ChatInput(
                 .navigationBarsPadding()
                 // breathing room below the gesture/nav inset
                 .padding(bottom = 6.dp)
-                // 调整: composer 左右 8→12dp 离屏幕边线稍远一些 (不再"贴边")
-                .padding(horizontal = 12.dp)
+                // 与聊天正文保持 16dp 主基线；IME/nav inset 仍由上面的 modifiers 负责。
+                .padding(horizontal = 16.dp)
                 .padding(top = 10.dp),
             // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
             // 设计稿是预览卡紧贴输入框，2dp 足够留一条 hair 缝
@@ -679,7 +678,7 @@ fun ChatInput(
                 Row(
                     modifier = Modifier
                         .weight(1f)
-                        .heightIn(min = 46.dp)
+                        .heightIn(min = 48.dp)
                         .clip(pillShape)
                         .background(tokens.surface2)
                         .border(BorderStroke(1.dp, pillBorder), pillShape)
@@ -720,11 +719,8 @@ fun ChatInput(
                     label = "sendButtonFill",
                 )
                 val sendIconTint by animateColorAsState(
-                    // 发送/停止图标落在 accent 实心圆上时一律用浅色。accentInk 在 sage-green 这类
-                    // "浅 accent" 上被 accentInkFor 定成近黑 → 箭头/停止 X 变黑（用户反馈）。发送键
-                    // 作为主操作按钮惯例是浅色字形，故固定白色（与其余 4 个 accent 的 accentInk=白
-                    // 一致）；空态仍用中性 ink3。
-                    targetValue = if (sendEmpty && !loading) tokens.ink3 else Color.White,
+                    // 主操作图标跟随 accentInk；空态仍用中性 ink3，禁用语义不变。
+                    targetValue = if (sendEmpty && !loading) tokens.ink3 else tokens.accentInk,
                     label = "sendButtonIconTint",
                 )
                 val sendInteraction = remember { MutableInteractionSource() }

@@ -271,7 +271,7 @@ internal fun buildMarkdownExport(
                         .filter { it.isNotBlank() }
                         .map { "> $it" }
                         .forEach {
-                            append(it)
+                            appendLine(it)
                         }
                     appendLine()
                     appendLine()

@@ -35,4 +35,15 @@
 
 ## Phase 3
 
-实施中：聊天与消息、Markdown、导出；保留流式状态机与所有工具/审批owner。
+已完成：聊天header/composer/附件、消息操作/分支/审批chrome、图片索引、上下文/排队/跳转控件、Markdown与导出。保留流式状态机、缓存/reveal、单次表格测量、所有发送/取消/工具/审批owner。
+
+- reasoning导出逐行appendLine；现有ExportMarkdownTest增加一个多行用例。GFM alignment经现有AST source span提取进入单一columnAlignments，header/body及多行TextAlign共同消费；JvmMdTree.kt:175与NativeMdTree.kt:153明确当前AST不提供alignment，故有真实补齐依据。没有修改解析器或Rust wire。
+- HTML ol start保留；HTML消息调用处补段距，MarkdownNew显式0语义保留。代码工具栏48dp、glyph20、AmberMono；文件名改为可移植时间格式，不把原冒号推断成已复现SAF故障。
+- 首轮定点：Export 3、Table 6、Composer 4、ContextMeter 6，共19通过。既有Markdown renderer/edge回归42通过（含新增HTML起始编号用例），无快照更新。最终表格6再次通过。
+- 实际截图 `device/phase3-chat-after.png` 确认status列居中、数量列右对齐，代码操作可见，idle预览收紧；`phase3-chat-keyboard-before.png` 验证原IME位移正确，未叠加额外键盘padding。
+- 独立review发现active预览在320dp同时显示cancel和历史导航会挤掉next。已改Peek及SheetHeader为公共标题行+导航行；没有历史时cancel也保留，idle onOpen不丢，非Web文本/终端peek仍显示。最终ComposerInteraction 5通过，新用例直接渲染288dp内容宽的真实SandboxPeekBar并验证三个按钮边界、触摸回调、首步取消及不误触onOpen。
+- 三组独立review最终无阻断。编译、组内回归与 `git diff --check` 通过。生成完整本地阶段APK `/private/tmp/amber-ui-phase3.apk`。真实provider/付费生成未触发，不能把夹具渲染当成provider验收。
+
+## Phase 4
+
+实施中：看板/阅读、小说、议会/Live、扩展/小应用、备份/日志等剩余路由。已有共享主题覆盖不等于逐页视觉验收，继续按ROUTES和参考图补查。

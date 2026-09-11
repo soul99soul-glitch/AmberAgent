@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
@@ -149,8 +149,7 @@ fun GeneratedImageCarousel(
                 contentPadding = PaddingValues(start = 0.dp, end = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(images) { image ->
-                    val index = images.indexOf(image)
+                itemsIndexed(images) { index, image ->
                     ImageCard(
                         url = image.url,
                         widthDp = cardWidth,

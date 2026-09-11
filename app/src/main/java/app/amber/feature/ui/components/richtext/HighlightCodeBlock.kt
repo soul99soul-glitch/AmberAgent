@@ -11,7 +11,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,9 +22,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -75,7 +74,7 @@ import app.amber.feature.ui.context.Navigator
 import app.amber.feature.ui.modifier.onClick
 import app.amber.feature.ui.theme.AtomOneDarkPalette
 import app.amber.feature.ui.theme.AtomOneLightPalette
-import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.AmberMono
 import app.amber.feature.ui.theme.LocalDarkMode
 import app.amber.core.utils.base64Encode
 import app.amber.core.utils.toDp
@@ -270,7 +269,7 @@ private fun CodeBlockWithLineNumbersWrapped(
                         text = (index + 1).toString().padStart(lineNumberWidth, ' '),
                         fontSize = textStyle.fontSize,
                         lineHeight = textStyle.lineHeight,
-                        fontFamily = JetbrainsMono,
+                        fontFamily = AmberMono,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         softWrap = false,
                         modifier = Modifier.padding(end = 8.dp)
@@ -323,7 +322,7 @@ private fun CodeBlockDefault(
                         text = (index + 1).toString().padStart(lineNumberWidth, ' '),
                         fontSize = textStyle.fontSize,
                         lineHeight = textStyle.lineHeight,
-                        fontFamily = JetbrainsMono,
+                        fontFamily = AmberMono,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                         softWrap = false,
                     )
@@ -376,7 +375,7 @@ private fun SmoothHighlightText(
                 colors = colorPalette,
                 overflow = overflow,
                 softWrap = softWrap,
-                fontFamily = JetbrainsMono,
+                fontFamily = AmberMono,
             )
         } else {
             Text(
@@ -385,7 +384,7 @@ private fun SmoothHighlightText(
                 lineHeight = textStyle.lineHeight,
                 overflow = overflow,
                 softWrap = softWrap,
-                fontFamily = JetbrainsMono,
+                fontFamily = AmberMono,
             )
         }
     }
@@ -409,6 +408,7 @@ private fun HighlightCodeActions(
             text = language,
             fontSize = 12.sp,
             lineHeight = 12.sp,
+            fontFamily = AmberMono,
             color = MaterialTheme.colorScheme.onSurfaceVariant
                 .copy(alpha = 0.5f),
         )
@@ -417,78 +417,85 @@ private fun HighlightCodeActions(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val iconSize = 16.dp
+            val iconSize = 20.dp
             val iconTint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
 
-            Icon(
-                imageVector = Lucide.CloudDownload,
-                contentDescription = stringResource(id = R.string.chat_page_save),
-                tint = iconTint,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .onClick {
-                        val extension = when (language.lowercase()) {
-                            "kotlin" -> "kt"
-                            "java" -> "java"
-                            "python" -> "py"
-                            "javascript" -> "js"
-                            "typescript" -> "ts"
-                            "cpp", "c++" -> "cpp"
-                            "c" -> "c"
-                            "html" -> "html"
-                            "css" -> "css"
-                            "xml" -> "xml"
-                            "json" -> "json"
-                            "yaml", "yml" -> "yml"
-                            "markdown", "md" -> "md"
-                            "sql" -> "sql"
-                            "sh", "bash" -> "sh"
-                            "svg" -> "svg"
-                            else -> "txt"
-                        }
-                        createDocumentLauncher.launch(
-                            "code_${
-                                Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
-                            }.$extension"
-                        )
+            IconButton(
+                onClick = {
+                    val extension = when (language.lowercase()) {
+                        "kotlin" -> "kt"
+                        "java" -> "java"
+                        "python" -> "py"
+                        "javascript" -> "js"
+                        "typescript" -> "ts"
+                        "cpp", "c++" -> "cpp"
+                        "c" -> "c"
+                        "html" -> "html"
+                        "css" -> "css"
+                        "xml" -> "xml"
+                        "json" -> "json"
+                        "yaml", "yml" -> "yml"
+                        "markdown", "md" -> "md"
+                        "sql" -> "sql"
+                        "sh", "bash" -> "sh"
+                        "svg" -> "svg"
+                        else -> "txt"
                     }
-                    .padding(4.dp)
-                    .size(iconSize)
-            )
+                    val timestamp = Clock.System.now()
+                        .toLocalDateTime(TimeZone.currentSystemDefault())
+                        .let { localDateTime ->
+                            "${localDateTime.date}_" +
+                                localDateTime.time.hour.toString().padStart(2, '0') + "-" +
+                                localDateTime.time.minute.toString().padStart(2, '0') + "-" +
+                                localDateTime.time.second.toString().padStart(2, '0')
+                        }
+                    createDocumentLauncher.launch("code_${timestamp}.$extension")
+                },
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    imageVector = Lucide.CloudDownload,
+                    contentDescription = stringResource(id = R.string.chat_page_save),
+                    tint = iconTint,
+                    modifier = Modifier.size(iconSize),
+                )
+            }
 
-            Icon(
-                imageVector = Lucide.Copy,
-                contentDescription = stringResource(id = R.string.code_block_copy),
-                tint = iconTint,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .onClick {
-                        scope.launch {
-                            clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText("code", code)))
-                        }
+            IconButton(
+                onClick = {
+                    scope.launch {
+                        clipboardManager.setClipEntry(ClipEntry(ClipData.newPlainText("code", code)))
                     }
-                    .padding(4.dp)
-                    .size(iconSize)
-            )
+                },
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    imageVector = Lucide.Copy,
+                    contentDescription = stringResource(id = R.string.code_block_copy),
+                    tint = iconTint,
+                    modifier = Modifier.size(iconSize),
+                )
+            }
 
             if (completeCodeBlock && (language == "html" || language == "svg")) {
-                Icon(
-                    imageVector = Lucide.Eye,
-                    contentDescription = stringResource(id = R.string.code_block_preview),
-                    tint = iconTint,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .onClick {
-                            val content = if (language == "svg") {
-                                """<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;">$code</body></html>"""
-                            } else {
-                                code
-                            }
-                            navController.navigate(Screen.WebView(content = content.base64Encode()))
+                IconButton(
+                    onClick = {
+                        val content = if (language == "svg") {
+                            """<!DOCTYPE html><html><body style="margin:0;display:flex;justify-content:center;align-items:center;min-height:100vh;">$code</body></html>"""
+                        } else {
+                            code
                         }
-                        .padding(4.dp)
-                        .size(iconSize)
-                )
+                        navController.navigate(Screen.WebView(content = content.base64Encode()))
+                    },
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Icon(
+                        imageVector = Lucide.Eye,
+                        contentDescription = stringResource(id = R.string.code_block_preview),
+                        tint = iconTint,
+                        modifier = Modifier.size(iconSize),
+                    )
+                }
             }
         }
     }

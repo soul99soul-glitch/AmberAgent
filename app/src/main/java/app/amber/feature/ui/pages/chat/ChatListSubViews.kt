@@ -244,7 +244,7 @@ internal fun BoxScope.MessageJumper(
             // defaults to fillMaxWidth, which would otherwise propagate "fill the parent"
             // up through Column and stretch the floating card across the entire chat
             // area. Asking the Surface for its min-intrinsic width clamps Column to the
-            // max of its children's minIntrinsicWidth — the 36dp IconButtons — which is
+            // max of its children's minIntrinsicWidth — the 48dp IconButtons — which is
             // what we actually want the divider to inherit.
             modifier = Modifier
                 .padding(8.dp)
@@ -273,7 +273,7 @@ internal fun BoxScope.MessageJumper(
                             state.scrollToItem(state.layoutInfo.totalItemsCount - 1)
                         }
                     },
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         // 跳到顶：arrow-up-to-line 用带横线的端点字形，比双 chevron 更
@@ -296,7 +296,7 @@ internal fun BoxScope.MessageJumper(
                             state.animateScrollToItem(state.firstVisibleItemIndex + 1)
                         }
                     },
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         // 上一条：chevron 无 stem 形态，与 ArrowUpToLine 区分「步进 vs 端点」
@@ -320,7 +320,7 @@ internal fun BoxScope.MessageJumper(
                             )
                         }
                     },
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         imageVector = Lucide.ChevronDown,
@@ -341,7 +341,7 @@ internal fun BoxScope.MessageJumper(
                             state.scrollToItem(0)
                         }
                     },
-                    modifier = Modifier.size(36.dp),
+                    modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
                         imageVector = Lucide.ArrowDownToLine,

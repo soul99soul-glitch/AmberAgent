@@ -50,6 +50,13 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], application = Application::class)
 class MarkdownEdgeShapeRenderTest {
 
+    @Test
+    fun htmlOrderedListPreservesItsStartingNumber() {
+        val dump = renderJvmTreeDump("<ol start=\"7\"><li>First</li><li>Second</li></ol>")
+        assertTrue("first item must start at seven: $dump", dump.contains("text=7."))
+        assertTrue("second item must follow at eight: $dump", dump.contains("text=8."))
+    }
+
     private val swallowAsyncLoadFailures = CoroutineExceptionHandler { _, t ->
         // Mirrors MarkdownRendererSnapshotTest: UnsatisfiedLinkError or the QuickJS
         // context-layer wrapper of the same host-JVM highlighter unavailability.
