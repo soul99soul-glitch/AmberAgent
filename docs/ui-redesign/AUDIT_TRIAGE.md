@@ -1,6 +1,6 @@
 # 原 UI 审计复核与处置表
 
-以本实验分支 `d752f90` 为基线；原 main 未完成合并中的已删除 OfficePro 等状态不等于此分支。报告 `docs/ui-audit-2026-09-12.md` 的约 650 条没有逐条展开，不能复算总数。下面复核全部显式 F 编号及 P0 分类，不把风格偏好/未消费组件/理论复杂度直接计成功能 bug。
+以本实验分支 `d752f90` 为基线；创建分支时 main 未完成合并中的 OfficePro 等状态不等于此分支，后续 main 的独立更新也未自动并入。报告 `docs/ui-audit-2026-09-12.md` 的约 650 条没有逐条展开，不能复算总数。下面复核全部显式 F 编号及 P0 分类，不把风格偏好/未消费组件/理论复杂度直接计成功能 bug。
 
 路径前缀 `UI/` 指 `app/src/main/java/app/amber/feature/ui/`。定点验证命令随实现写入 PROGRESS，不用未经执行的命令冒充通过。
 
@@ -8,22 +8,22 @@
 |---|---|---|---|
 | F1 | 真问题：多行思考导出缺换行 | `UI/pages/chat/Export.kt:269`，ChatExportSheet→exportToMarkdown | Phase3，复用 ExportMarkdownTest 加最小多行用例 |
 | F2 | 潜在缺陷：removeIf捕获错对象；无生产组件调用 | `UI/components/ai/McpPicker.kt:115`，全仓只有定义 | 不作产品P0，不为死组件扩测试 |
-| F3 | 潜在契约缺陷：重复modifier；生产调用未传该参数 | `UI/components/ui/Form.kt:30,37`，padding仅Preview | Phase1/3如触及修正契约；不声称42个调用均布局错误 |
-| F4 | 条件性真问题：父页面重组丢分享弹窗；并非永远弹不出 | `UI/components/ui/ShareSheet.kt:131` → `pages/setting/SettingProviderDetailPage.kt:61,85,148` | Phase2，remember稳定state，验证显示/关闭/父重组 |
+| F3 | 潜在契约缺陷：重复modifier；生产调用未传该参数 | `UI/components/ui/Form.kt:30,37`，padding仅Preview | Phase2已只保留外层modifier；不声称42个调用均布局错误 |
+| F4 | 条件性真问题：父页面重组丢分享弹窗；并非永远弹不出 | `UI/components/ui/ShareSheet.kt:131` → `pages/setting/SettingProviderDetailPage.kt:61,85,148` | Phase2已用remember稳定state；源码复核显示/关闭及重组后的同一state引用 |
 | F5 | 多权限latent；当前只有通知/相机单权限调用 | `UI/components/ui/permission/RememberPermissionState.kt:73`；SettingDisplayPage:143、ChatInput:1161、ChatInputAttachments:691 | 不作当前故障；不扩权限架构 |
-| F6 | 本实验基线真问题：OfficePro通知开关只有remember，无消费/持久化 | HEAD `UI/pages/setting/SettingExperimentalOfficeProPage.kt:83,316` | Phase4，核对UI能力真实性，避免虚假开关；原未完成合并已删除此页，勿混淆 |
-| F7 | 本实验基线真问题：OfficePro间隔输入被丢弃，后端固定90分钟 | 同页:329、:645；DocRadar.subscribe | Phase4，不为原型新增调度系统，UI如实反映后端能力 |
+| F6 | 本实验基线真问题：OfficePro通知开关只有remember，无消费/持久化 | HEAD `UI/pages/setting/SettingExperimentalOfficeProPage.kt:83,316` | Phase4已移除虚假全局开关，保留逐文档真实通知；本实验基线保留此页 |
+| F7 | 本实验基线真问题：OfficePro间隔输入被丢弃，后端固定90分钟 | 同页:329、:645；DocRadar.subscribe | Phase4已改为只读90分钟；不新增调度系统 |
 | F8 | 真问题：MCP空名称可点保存却静默不作为 | `UI/pages/setting/SettingMcpPage.kt:591` 新建弹窗 | Phase2，禁用/校验状态与保存契约一致 |
 | F9 | 真问题：关闭测试对话框未取消外层scope请求；同色为另一个语义问题 | `UI/pages/setting/components/ProviderConnectionTester.kt:57,67,87,180` | Phase2，作用域收在弹窗生命周期；错误用error而非改signal决策；不实际调用付费provider作为布局测试 |
 | F10 | 条件性真问题：相等Image对象重复时indexOf回首项；仅URL相同不必相等 | `UI/components/message/GeneratedImageCarousel.kt:152`，ChatMessageTools直接传tool.output的Image列表 | Phase3用索引迭代；最多4图常规数据不构成已测性能瓶颈 |
 | F11 | 真问题：表格未消费alignment；HTML有序列表固定从1起 | `UI/components/richtext/Markdown.kt:2985` TableNode→TableCellContent；MarkdownNew.kt:480 | Phase3，最小对齐/起始序号修复，保留流式状态机 |
-| F12 | 真问题：议会副标题文本直接相接 | `UI/pages/councilroom/CouncilRoomPage.kt:402` Row无间隔；strings的subtitle无前导分隔 | Phase4，显式间距/分隔，长模式名窄屏检查 |
+| F12 | 真问题：议会副标题文本直接相接 | `UI/pages/councilroom/CouncilRoomPage.kt:402` Row无间隔；strings的subtitle无前导分隔 | Phase4已加6dp间距与weight；模拟器键盘截图通过 |
 | F13 | 真问题：Provider长名称先测量耗尽行宽，状态点被挤压 | `UI/pages/setting/SettingProviderPage.kt:633` Row中Text无weight，后接LiveDot | Phase2，给可缩文本weight，保留状态点空间 |
-| F14 | 真问题：小应用暗色标志取系统而非App主题 | `UI/pages/miniapp/MiniAppRunnerPage.kt:275,376` | Phase4，使用已解析的App主题；系统/App反向模式检查 |
-| F15 | 条件性真问题：WebDAV草稿可能捕获dummy空值 | `UI/pages/backup/BackupVM.kt:66` Eager stateIn初值dummy；BackupPage.kt:324 无key remember | Phase4，读取owner真实初值并保留本地编辑，不能每次设置变化覆盖草稿 |
+| F14 | 真问题：小应用暗色标志取系统而非App主题 | `UI/pages/miniapp/MiniAppRunnerPage.kt:275,376` | Phase4已读取App主题；真实WebView在系统浅色/App深色返回dark:true |
+| F15 | 条件性真问题：WebDAV草稿可能捕获dummy空值 | `UI/pages/backup/BackupVM.kt:66` Eager stateIn初值dummy；BackupPage.kt:324 无key remember | Phase4已直接读取owner settingsFlow，保留remember草稿；真实WebDAV账户表单未验收 |
 | F16 | 假阳性：去设置经proceed间接调用成功 | PermissionRationaleDialog→PermissionManager:29→PermissionState.kt:176 openAppSettings | 不改授权链；死参数不是用户故障 |
 | F17 | 当前生产假阳性：缓存label没有可见消费方 | `UI/pages/chat/ChatDrawerVM.kt:30,91` 确实在分页生成期计算label；但ChatPage已移除旧Drawer，SessionHomePage只给DateHeader生成key而不渲染label | Phase4补查实际消费闭环后撤销该产品缺陷；不引入无用午夜刷新定时器 |
-| F18 | 删除失败恢复缺失成立；归因手工state工厂不准确 | `UI/pages/history/HistoryPage.kt:132,204,214` 删除失败仅snackbar，未reset swipe | Phase4按删除结果复位；只换remember工厂不能修好 |
+| F18 | 删除失败恢复缺失成立；归因手工state工厂不准确 | `UI/pages/history/HistoryPage.kt:132,204,214` 删除失败仅snackbar，未reset swipe | Phase4已按删除失败结果复位；删除与Undo保留页面owner，源码review通过 |
 
 ## 原 P0 九项
 
@@ -53,7 +53,7 @@
 - Skill文件允许`examples/basic.md`，SkillManager→SkillPaths canonical边界检查拒绝越界；UI未禁`/`不是路径穿越漏洞。
 - BackupDialog退出是恢复后防旧内存回写的明确行为，保留。
 - Board刷新有结果变化effect提前结束，15秒只是超时兜底；撤销“固定转15秒”。
-- Log默认true在已保存false时可能短暂显示不符，低等级显示问题。
-- TodayBoard权限说明remember可能在从系统设置返回时陈旧，限文案，不等于权限绕过。
+- Log默认true在已保存false时可能短暂显示不符，Phase4已等待真实首值后启用控件。
+- TodayBoard权限说明可能从系统设置返回时陈旧，Phase4已随ON_RESUME刷新；只改文案读取，不改权限机制。
 - Live每项结果上游cleanAnalysisItem限90字符，原文“无限撑高”遗漏约束；小屏/大字体仍需布局验收。
-- SearXNG密码无掩码、混合HTML段距差异：源码成立，分别进入Phase2/3。
+- SearXNG密码无掩码、混合HTML段距差异在基线成立，已分别于Phase2/3修复；前者源码确认PasswordVisualTransformation，后者HTML renderer回归通过，详见PROGRESS。

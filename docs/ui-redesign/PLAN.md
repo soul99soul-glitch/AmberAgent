@@ -1,6 +1,6 @@
 # Android UI 精修实验计划
 
-日期：2026-09-12。分支：`codex/ui-refinement`，基线：`d752f90`。工作树：`/private/tmp/amber-android-ui`。原 main 的未完成合并不纳入本次基线、不修改。用户授权自主选择原型方案、分阶段实施并在每阶段进行独立 review。
+日期：2026-09-12。分支：`codex/ui-refinement`，基线：`d752f90`。交付工作树：`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`（实施期间为`/private/tmp/amber-android-ui`）。创建分支时 main 的未完成合并不纳入本次基线；其他任务随后推进 main 不会自动并入本实验。用户授权自主选择原型方案、分阶段实施并在每阶段进行独立 review。
 
 ## 目标与取舍
 
@@ -10,7 +10,7 @@
 
 吸纳：16dp 页面基线、14dp 统一行组、15dp 主按钮、52/64dp 最小行高、32dp 中性图标底座、清楚的标题与机器信息、单 accent 状态、带文字的创建入口、首页继续区与功能入口的关联。
 
-调整：原型 40px 点击区域按 Android 控件实际布局提供至少 48dp；行高用 minimum 而非固定高度；小字对比度优先于原型灰度；有意义的说明、状态与错误反馈保留；大字体允许换行。列表底部为 FAB 和系统手势留空间。原型 DESIGN 的 R6 五色瓦片与 HANDOFF 的 R7 回拨冲突时，采纳后者的中性瓦片与单 accent。
+调整：原型 40px 点击区域按 Android 控件实际布局提供至少 48dp；行高用 minimum 而非固定高度；小字对比度优先于原型灰度；有意义的说明、状态与错误反馈保留；大字体下，操作标签、说明和表单允许换行或横向滚动；首页会话标题/消息摘要、技能列表摘要保留省略，完整内容在详情展示。小应用标题独占两行宽度，超长名称仍可省略。这是为了保持列表浏览效率而有意偏离原型“全部不截断”的规则。列表底部为 FAB 和系统手势留空间。原型 DESIGN 的 R6 五色瓦片与 HANDOFF 的 R7 回拨冲突时，采纳后者的中性瓦片与单 accent。
 
 不照搬：全屏点纹、到处使用点阵字标、五色分类瓦片、强制阅读纸面永远浅色、把所有字体硬压为 UI 字阶、删除原型未覆盖路由、拆分 ViewModel/引入统一控制器等无关架构重构。点纹只考虑首页/空态，正文保持安静。
 
@@ -40,4 +40,4 @@
 
 每阶段结论、独立 review 结果、有效缺陷修复、截图与命令汇总写入 `PROGRESS.md`。原审计编号、触发、源码链和Phase对应见 `AUDIT_TRIAGE.md`。原型图只能证明设计参考，Compose preview mock 只能证明组件；实际页面验收另列，不能混称真机效果。
 
-构建使用 `:app:assembleDebug`，applicationId=`app.amber.agent.graphite`；不使用会覆盖canonical包的graphite buildType。隔离模拟器中安装、冷启动并确认主进程；网络provider/真实账户调用不作为外观验收的前提。当前无连接设备，模拟器准备与纯源码实施可独立推进，但在有实际页面截图前不签署产品视觉验收。
+构建使用 `:app:assembleDebug`，applicationId=`app.amber.agent.graphite`；不使用会覆盖canonical包的graphite buildType。隔离模拟器中安装、冷启动并确认主进程；网络provider/真实账户调用不作为外观验收的前提。最终使用隔离的 API 36 模拟器完成实际页面截图和导航，过程与边界见 PROGRESS。真机、账户和外部 provider 的验收单列，不以模拟器替代。

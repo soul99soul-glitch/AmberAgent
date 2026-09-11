@@ -58,4 +58,14 @@
 
 ## Phase 5
 
-进行中：最终跨页主题/窄屏复核、现有回归、独立总检与交付材料。
+最终实现与验证已完成，交付记录收口如下：
+
+- 总回归79项通过，0失败、0错误、0跳过：GraphiteComposePipeline 2、Composer 5、ModelMenu 5、ModelContextWindow 1、Export 3、MarkdownTable 6、MarkdownEdge 10、MarkdownRendererSnapshot 32、ContextMeter 6、NovelBranch 7、BackupCleanup 2。日志 `/private/tmp/amber-ui-final-check.log`。复用已有测试，不更新渲染快照。
+- 最终主题实测：Sage浅色设置、Warm浅色显示/技能/首页；此前已验证Warm深色、Sage深色和AMOLED。颜色模式与色系在APK更新冷启动后保留。360dp/fontScale1.3的Novel正文、模型菜单和键盘完整；回到411dp/fontScale1.0。相关截图以phase5命名。
+- 独立总检：functional_a复核主题→设置持久化→消费、共享组件、Home导航与Council创建清理、Provider/OAuth/分享回调，结论无真实可达回归。phase0_review的视觉/交付初审提出列表截断取舍与报告状态需要明确：PLAN已注明列表摘要有意省略；MiniApp名称改为独占两行，并用24sp完整行高消除中英混排卡片高度差，LineBreak.Heading避免中文末尾孤字。SearXNG/HTML段距的审计状态已改为修复完成。
+- 用户提供的原型吸纳原则和偏离点已写入PLAN；全部66个Screen的源码入口/owner清单在ROUTES。该清单是源码覆盖，不等同于66条端到端测试。
+- 最终限制：没有真实provider配置、Google OAuth构建配置或云账号，所以未触发付费模型生成、Google/WebDAV/iCloud真实备份恢复、Live高权限浮窗和通知外部系统流程。只在新模拟器操作本地夹具；原main代码及其并行变化没有被本任务修改。首次WebView初始化超时仍列为性能观察，不能当成已完成真机性能验收。
+
+- 最后仅视觉的MiniApp标题改动再次assemble成功（9s），最终APK安装与冷启动通过；源码提交`1c2983f`，包校验见BUILD.json。资料统计第五项的实际横滚证据已补phase5-profile-narrow-scrolled.png。
+
+- 最后独立视觉复核确认小应用孤字和卡片对齐问题关闭，无阻断。工作树已移至`/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement`；源码与APK SHA绑定见ACCEPTANCE/BUILD.json。Phase0–5完成，未合并或推送main。

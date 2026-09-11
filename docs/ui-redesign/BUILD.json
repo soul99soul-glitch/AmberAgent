@@ -1,0 +1,32 @@
+{
+  "sourceCommit": "1c2983f",
+  "applicationId": "app.amber.agent.graphite",
+  "apkBytes": 108308883,
+  "sha256": "90e0455460322bf57f63b8cbf9dbe5c50502f6bdda77c485912387971fbc20a9",
+  "abi": "arm64-v8a",
+  "variant": "debug",
+  "verification": "API36 emulator; 79 targeted JVM/Robolectric tests before final visual-only title adjustment; final assemble and install after adjustment",
+  "nativeLibraries": [
+    "lib/arm64-v8a/libandroidx.graphics.path.so",
+    "lib/arm64-v8a/libbarhopper_v3.so",
+    "lib/arm64-v8a/libdatastore_shared_counter.so",
+    "lib/arm64-v8a/libhighlight_parser.so",
+    "lib/arm64-v8a/libhtml_diff_normalizer.so",
+    "lib/arm64-v8a/libimage_processing_util_jni.so",
+    "lib/arm64-v8a/libmarkdown_parser.so",
+    "lib/arm64-v8a/libmarkdown_preprocess.so",
+    "lib/arm64-v8a/libmupdf_java.so",
+    "lib/arm64-v8a/liboffice_parsers.so",
+    "lib/arm64-v8a/libproot-loader.so",
+    "lib/arm64-v8a/libquickjs-android-wrapper.so",
+    "lib/arm64-v8a/libreader_extractor.so",
+    "lib/arm64-v8a/libregex_transformer.so",
+    "lib/arm64-v8a/libsimple.so",
+    "lib/arm64-v8a/libsqlite3x.so",
+    "lib/arm64-v8a/libsurface_util_jni.so",
+    "lib/arm64-v8a/libsync_crypto.so",
+    "lib/arm64-v8a/libucrop.so"
+  ],
+  "apkPath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement/app/build/outputs/apk/debug/app-universal-debug.apk",
+  "workspacePath": "/Users/arquiel/Downloads/AI/AmberAgent/android-ui-refinement"
+}
