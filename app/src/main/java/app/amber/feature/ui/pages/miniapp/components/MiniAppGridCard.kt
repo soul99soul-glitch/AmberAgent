@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -26,8 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.LineBreak
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.amber.agent.R
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.AlarmClock
@@ -94,14 +98,7 @@ fun MiniAppGridCard(
                         Text(app.iconEmoji ?: "▣", style = type.sessionTitle)
                     }
                 }
-                Text(
-                    text = app.title,
-                    style = type.sessionTitle,
-                    color = workspace.ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                Spacer(Modifier.weight(1f))
                 if (app.pinned) {
                     Icon(
                         imageVector = Lucide.Pin,
@@ -111,6 +108,22 @@ fun MiniAppGridCard(
                     )
                 }
             }
+            Text(
+                text = app.title,
+                style = type.sessionTitle.copy(
+                    lineHeight = 24.sp,
+                    lineBreak = LineBreak.Heading,
+                    lineHeightStyle = LineHeightStyle(
+                        alignment = LineHeightStyle.Alignment.Center,
+                        trim = LineHeightStyle.Trim.None,
+                    ),
+                ),
+                color = workspace.ink,
+                maxLines = 2,
+                minLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+            )
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.Bottom,
