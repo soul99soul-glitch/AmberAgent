@@ -370,12 +370,13 @@ fun SessionHomePage() {
 
         // 列表底部渐隐，给 FAB 让出视觉空间（对齐设计稿的 mask 渐隐）。
         // 让位 navigationBars：锚到「列表视口底」而非屏幕底，三键导航下不失效。
+        // 高度 72 = FAB 占位（bottom 24 + 胶囊高 48），盖住胶囊顶缘以上的列表行。
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(72.dp)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color.Transparent, tokens.bg),

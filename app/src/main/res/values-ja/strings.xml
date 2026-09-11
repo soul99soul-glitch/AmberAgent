@@ -400,7 +400,6 @@
   <string name="setting_page_built_in_tools_url_context">URLコンテキスト</string>
   <string name="setting_page_built_in_tools_url_context_desc">URLコンテンツ処理を有効化</string>
   <string name="setting_page_chat_storage">チャット保存</string>
-  <string name="setting_page_chat_storage_desc">%1$d ファイル、%2$.2f MB</string>
   <string name="setting_page_code_display_settings">コード表示</string>
   <string name="setting_page_color_mode">カラーモード</string>
   <string name="setting_page_color_mode_dark">ダーク</string>
@@ -3297,4 +3296,11 @@
   <string name="novel_catalog_root_directory">ルートディレクトリ</string>
   <string name="novel_migration_failed_count">%1$d冊の移行に失敗しました。元のファイルはディスクに残っています。詳細は設定で確認してください。</string>
   <string name="provider_user_agent_presets">User-Agent プリセット</string>
+  <string name="provider_file_import_select">JSON / Markdown ファイルから読み込む</string>
+  <string name="provider_file_import_title">プロバイダーの読み込みを確認</string>
+  <string name="provider_file_import_hint">選択した項目を新規プロバイダーとして追加します。同名の項目は初期状態で未選択です。既存設定は変更せず、キーは表示しません。</string>
+  <string name="provider_file_import_duplicate">同名の項目：選択すると新規追加</string>
+  <string name="provider_file_import_confirm">%d 件を読み込む</string>
+  <string name="provider_file_import_error">読み込めません。JSON 配列または providers オブジェクトを使用してください。Markdown の json コードブロックにも対応します（100万文字まで）。種類、URL、モデルの項目を確認してください。</string>
+  <string name="provider_file_import_save_error">保存できませんでした。再試行してください。</string>
 </resources>

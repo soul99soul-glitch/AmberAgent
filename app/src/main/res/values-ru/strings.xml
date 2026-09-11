@@ -400,7 +400,6 @@
   <string name="setting_page_built_in_tools_url_context">Контекст URL</string>
   <string name="setting_page_built_in_tools_url_context_desc">Включить обработку содержимого по URL</string>
   <string name="setting_page_chat_storage">Хранилище чатов</string>
-  <string name="setting_page_chat_storage_desc">%1$d файлов, %2$.2f МБ</string>
   <string name="setting_page_code_display_settings">Отображение кода</string>
   <string name="setting_page_color_mode">Цветовая схема</string>
   <string name="setting_page_color_mode_dark">Тёмная</string>
@@ -3297,4 +3296,11 @@
   <string name="novel_catalog_root_directory">Корневой каталог</string>
   <string name="novel_migration_failed_count">Не удалось перенести книг: %1$d. Исходные файлы остались на диске; подробности см. в настройках.</string>
   <string name="provider_user_agent_presets">Предустановки User-Agent</string>
+  <string name="provider_file_import_select">Импорт JSON / Markdown</string>
+  <string name="provider_file_import_title">Предпросмотр импорта</string>
+  <string name="provider_file_import_hint">Выбранные записи будут добавлены как новые. Совпадающие имена по умолчанию не выбраны. Существующие настройки не изменятся; ключи скрыты.</string>
+  <string name="provider_file_import_duplicate">Совпадающее имя: при выборе добавится новая запись</string>
+  <string name="provider_file_import_confirm">Импортировать: %d</string>
+  <string name="provider_file_import_error">Не удалось прочитать файл. Используйте JSON-массив или объект providers, в том числе в блоке json Markdown (до 1 млн символов). Проверьте типы, URL и поля моделей.</string>
+  <string name="provider_file_import_save_error">Не удалось сохранить импорт. Повторите попытку.</string>
 </resources>

@@ -503,7 +503,6 @@
   <string name="setting_page_built_in_tools_image_generation">Image Generation</string>
   <string name="setting_page_built_in_tools_image_generation_desc">Enable image generation capability</string>
   <string name="setting_page_chat_storage">Chat Storage</string>
-  <string name="setting_page_chat_storage_desc">%1$d files, %2$.2f MB</string>
   <string name="setting_page_code_display_settings">Code Display</string>
   <string name="setting_page_color_mode">Color Mode</string>
   <string name="setting_page_color_mode_dark">Dark</string>
@@ -514,9 +513,7 @@
   <string name="setting_page_config_api_title">Please configure API and model</string>
   <string name="setting_page_data_settings">Data Settings</string>
   <string name="setting_page_default_model">Models &amp; Prompts</string>
-  <string name="setting_page_default_model_desc">Default models, supporting task models, and prompts</string>
   <string name="setting_page_display_setting">Display &amp; Fonts</string>
-  <string name="setting_page_display_setting_desc">Fonts, themes, and message display</string>
   <string name="setting_page_appearance">Appearance</string>
   <string name="setting_page_extensions">Extensions</string>
   <string name="setting_page_extensions_desc">Manage quick messages and prompts</string>
@@ -524,22 +521,17 @@
   <string name="setting_page_general_settings">General Settings</string>
   <string name="setting_page_agent_runtime">Agent Settings</string>
   <string name="setting_page_agent_memory">Soul &amp; Memory</string>
-  <string name="setting_page_agent_memory_desc">Persistent knowledge retained across AmberAgent conversations</string>
   <string name="setting_page_agent_skills">Skills</string>
   <string name="setting_page_agent_skills_desc">Manage skill packages the Agent can load on demand</string>
   <string name="setting_page_cron_tasks">Cron Tasks</string>
   <string name="setting_page_cron_tasks_desc">View scheduled Agent jobs and planned run status</string>
   <string name="setting_page_agent_extensions">Skills</string>
-  <string name="setting_page_agent_extensions_desc">Skills, prompts and external tool servers</string>
   <string name="setting_page_agent_sandbox">Agent Runtime</string>
-  <string name="setting_page_agent_sandbox_desc">Workspace, Alpine/proot, SSH profiles and command runtime status</string>
   <string name="setting_page_agent_execution">Runtime</string>
-  <string name="setting_page_agent_execution_desc">Tool loop, preview, live status, and runtime environment</string>
   <string name="setting_page_tts">Text-to-Speech</string>
   <string name="setting_page_tts_desc">System TTS preview, speech rate, and stop</string>
   <string name="setting_page_agent_permissions">Permissions &amp; Approval</string>
   <string name="setting_page_experimental_features">Experimental Features</string>
-  <string name="setting_page_experimental_features_desc">Preview AmberAgent features that still need real-device validation</string>
   <string name="setting_page_advanced_features">Advanced Features</string>
   <string name="setting_page_webmount">WebMount</string>
   <string name="setting_page_webmount_desc">Turn websites into deterministic Agent tools</string>
@@ -3299,4 +3291,12 @@ My task:</string>
   <string name="novel_catalog_root_directory">Root directory</string>
   <string name="novel_migration_failed_count">Migration failed for %1$d book(s). Original files remain on disk; check Settings for details.</string>
   <string name="provider_user_agent_presets">User-Agent presets</string>
+  <string name="provider_file_import_select">Import JSON / Markdown file</string>
+  <string name="provider_file_import_title">Preview provider import</string>
+  <string name="provider_file_import_hint">Import selected entries as new providers. Matching names are unchecked by default. Existing configurations stay unchanged; keys are hidden.</string>
+  <string name="provider_file_import_duplicate">Matching name — import as new if selected</string>
+  <string name="provider_file_import_confirm">Import %d providers</string>
+  <string name="provider_file_import_error">Cannot read this file. Use a JSON provider array or a providers object, optionally in a Markdown json code block (up to 1M characters). Check provider types, URLs and model fields.</string>
+  <string name="provider_file_import_save_error">Could not save the import. Please try again.</string>
+  <string name="setting_page_agent_sandbox_desc">Workspace, Alpine/proot, SSH profiles and command runtime status</string>
 </resources>

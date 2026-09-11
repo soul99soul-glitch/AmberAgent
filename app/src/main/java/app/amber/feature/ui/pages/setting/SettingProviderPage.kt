@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +84,10 @@ import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.ImageUtils
 import org.koin.androidx.compose.koinViewModel
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
@@ -113,7 +118,10 @@ fun SettingProviderPage(vm: SettingVM = koinViewModel()) {
                 title = stringResource(R.string.setting_page_providers),
                 onBack = { navController.popBackStack() },
                 actions = {
-                    ImportProviderButton {
+                    ImportProviderButton(
+                        existingProviders = settings.providers,
+                        onImport = vm::importProviders,
+                    ) {
                         vm.updateSettings(
                             settings.copy(
                                 providers = listOf(it.copyProvider(Uuid.random())) + settings.providers
@@ -321,11 +329,36 @@ private fun ProviderStatSep() {
 
 @Composable
 private fun ImportProviderButton(
+    existingProviders: List<ProviderSetting>,
+    onImport: suspend (List<ProviderSetting>) -> Unit,
     onAdd: (ProviderSetting) -> Unit
 ) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
     var showImportDialog by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var fileProviders by remember { mutableStateOf<List<ProviderSetting>?>(null) }
+    var fileBusy by remember { mutableStateOf(false) }
+    val pickFileLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) scope.launch {
+            fileBusy = true
+            try {
+                fileProviders = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use(::readProviderImport)
+                        ?: error("Cannot open import file")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Parser and resolver exception messages may contain credentials from the file.
+                toaster.show(context.getString(R.string.provider_file_import_error), type = ToastType.Error)
+            } finally {
+                fileBusy = false
+            }
+        }
+    }
 
     val scanQrCodeLauncher = rememberLauncherForActivityResult(ScanQRCode()) { result ->
         handleQRResult(result, onAdd, toaster, context)
@@ -343,7 +376,7 @@ private fun ImportProviderButton(
         imageVector = Lucide.Share,
         contentDescription = stringResource(R.string.setting_provider_page_import_dialog_title),
         rotate180 = true,
-        onClick = { showImportDialog = true },
+        onClick = { if (!fileBusy) showImportDialog = true },
     )
 
     if (showImportDialog) {
@@ -360,6 +393,34 @@ private fun ImportProviderButton(
                         ActivityResultContracts.PickVisualMedia.ImageOnly
                     )
                 )
+            },
+            onPickFile = {
+                showImportDialog = false
+                pickFileLauncher.launch(arrayOf("application/json", "text/*", "application/octet-stream"))
+            },
+        )
+    }
+    fileProviders?.let { providers ->
+        ProviderFileImportPreview(
+            providers = providers,
+            existingProviders = existingProviders,
+            saving = fileBusy,
+            onDismiss = { if (!fileBusy) fileProviders = null },
+            onConfirm = { selected ->
+                scope.launch {
+                    fileBusy = true
+                    try {
+                        onImport(selected)
+                        fileProviders = null
+                        toaster.show(context.getString(R.string.setting_provider_page_import_success), type = ToastType.Success)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        toaster.show(context.getString(R.string.provider_file_import_save_error), type = ToastType.Error)
+                    } finally {
+                        fileBusy = false
+                    }
+                }
             },
         )
     }
@@ -446,6 +507,7 @@ private fun ProviderImportDialog(
     onDismiss: () -> Unit,
     onScanQr: () -> Unit,
     onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
@@ -480,6 +542,11 @@ private fun ProviderImportDialog(
                     text = stringResource(R.string.setting_provider_page_select_from_gallery),
                     imageVector = Lucide.Image,
                     onClick = onPickImage,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ProviderCommandButton(
+                    text = stringResource(R.string.provider_file_import_select),
+                    onClick = onPickFile,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 ProviderCommandButton(

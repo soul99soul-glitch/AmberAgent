@@ -81,6 +81,7 @@ import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.core.utils.plus
 import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
+import java.util.Locale
 
 @Composable
 fun SettingPage(vm: SettingVM = koinViewModel()) {
@@ -175,12 +176,12 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                 },
                             )
                         },
-                        headlineContent = { Text(stringResource(R.string.setting_page_appearance)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_appearance)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
                         leadingContent = { SettingLeadingIcon(Lucide.Settings) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_display_setting)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -198,31 +199,31 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
                         leadingContent = { SettingLeadingIcon(Lucide.Brain) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_agent_memory)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
                         leadingContent = { SettingLeadingIcon(Lucide.CodeXml) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_agent_execution)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingTts) },
                         leadingContent = { SettingLeadingIcon(Lucide.AudioLines) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_tts)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_tts)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
                         leadingContent = { SettingLeadingIcon(Lucide.Wrench) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_agent_extensions)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
                         leadingContent = { SettingLeadingIcon(Lucide.TriangleAlert) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_agent_permissions)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -239,20 +240,20 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                 ) {
                     item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
-                        leadingContent = { SettingLeadingIcon(Lucide.Cpu) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Server) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_providers)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { SettingLeadingIcon(Lucide.WandSparkles) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_default_model)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_search_service)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -270,55 +271,55 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalWebMount) },
                         leadingContent = { SettingLeadingIcon(Lucide.Globe) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_webmount)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_webmount)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalSubAgent) },
                         leadingContent = { SettingLeadingIcon(Lucide.Users) },
-                        headlineContent = { Text(stringResource(R.string.setting_subagent_title)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_subagent_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalModelCouncil) },
                         leadingContent = { SettingLeadingIcon(Lucide.MessageCircle) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_model_council)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_model_council)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.MiniAppList) },
                         leadingContent = { SettingLeadingIcon(Lucide.Grid2x2) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_miniapp)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_miniapp)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.NovelProjects) },
                         leadingContent = { SettingLeadingIcon(Lucide.Pen) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_novel)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_novel)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.TodayBoard) },
                         leadingContent = { SettingLeadingIcon(Lucide.BookOpenText) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_deep_read)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_deep_read)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimentalICloud) },
                         leadingContent = { SettingLeadingIcon(Lucide.Cloud) },
-                        headlineContent = { Text(stringResource(R.string.setting_icloud_title)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_icloud_title)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SynaraCompanion) },
-                        leadingContent = { SettingLeadingIcon(Lucide.Server) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_synara)) },
+                        leadingContent = { SettingLeadingIcon(Lucide.Cpu) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_synara)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
                         onClick = { navController.navigate(Screen.ZCode) },
                         leadingContent = { SettingLeadingIcon(Lucide.Braces) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_zcode)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_zcode)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -339,7 +340,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_backup)) },
                         trailingContent = { SettingChevron() },
                     )
                     item(
@@ -355,13 +356,11 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                 } else {
-                                    // Machine-fact (file count + size) → mono (design §3).
+                                    // Machine-fact (count · size) → mono（design §3）；数字+单位 locale 无关，
+                                    // 定长 US 格式避免本地化长句把 trailing 撑爆（EN/RU 曾溢出 6-31dp）。
                                     Text(
-                                        stringResource(
-                                            R.string.setting_page_chat_storage_desc,
-                                            storageState.first,
-                                            storageState.second / 1024 / 1024.0
-                                        ),
+                                        text = "${storageState.first} · " +
+                                            "%.2f MB".format(Locale.US, storageState.second / 1024 / 1024.0),
                                         style = LocalAmberType.current.meta,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
@@ -371,13 +370,13 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                                 SettingChevron()
                             }
                         },
-                        headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_chat_storage)) },
                     )
                     item(
                         // P7-03：存储占用与按时间清理会话。
                         onClick = { navController.navigate(Screen.SettingStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
-                        headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
+                        headlineContent = { SettingRowTitle(stringResource(R.string.setting_page_storage_cleanup)) },
                         trailingContent = { SettingChevron() },
                     )
                 }
@@ -408,6 +407,11 @@ private fun SettingLeadingIcon(
         iconSize = 21.dp,
         tone = tone,
     )
+}
+
+@Composable
+private fun SettingRowTitle(text: String) {
+    Text(text = text, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 @Composable

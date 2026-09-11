@@ -401,7 +401,6 @@
   <string name="setting_page_built_in_tools_url_context">URL 上下文</string>
   <string name="setting_page_built_in_tools_url_context_desc">啟用 URL 內容處理</string>
   <string name="setting_page_chat_storage">聊天記錄儲存</string>
-  <string name="setting_page_chat_storage_desc">%1$d 個檔案，%2$.2f MB</string>
   <string name="setting_page_code_display_settings">程式碼顯示</string>
   <string name="setting_page_color_mode">顏色模式</string>
   <string name="setting_page_color_mode_dark">深色模式</string>
@@ -3297,4 +3296,11 @@
   <string name="novel_catalog_root_directory">根目錄</string>
   <string name="novel_migration_failed_count">%1$d 本書遷移失敗。原始檔案仍保留在磁碟上；請在設定中查看詳情。</string>
   <string name="provider_user_agent_presets">User-Agent 預設</string>
+  <string name="provider_file_import_select">從 JSON / Markdown 檔案匯入</string>
+  <string name="provider_file_import_title">預覽批次匯入</string>
+  <string name="provider_file_import_hint">勾選項將作為新提供商匯入。同名項預設不勾選，不會覆蓋現有設定；金鑰不在預覽中顯示。</string>
+  <string name="provider_file_import_duplicate">同名項 · 勾選後作為新設定匯入</string>
+  <string name="provider_file_import_confirm">匯入 %d 個提供商</string>
+  <string name="provider_file_import_error">無法讀取檔案。請使用 JSON 提供商陣列或 providers 物件，也可放在 Markdown 的 json 程式碼區塊中（最多 100 萬字元）。請檢查提供商類型、位址和模型欄位。</string>
+  <string name="provider_file_import_save_error">匯入儲存失敗，請重試。</string>
 </resources>

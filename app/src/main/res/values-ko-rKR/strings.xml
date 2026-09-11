@@ -400,7 +400,6 @@
   <string name="setting_page_built_in_tools_url_context">URL 컨텍스트</string>
   <string name="setting_page_built_in_tools_url_context_desc">URL 콘텐츠 처리 활성화</string>
   <string name="setting_page_chat_storage">채팅 저장 공간</string>
-  <string name="setting_page_chat_storage_desc">%1$d개 파일, %2$.2f MB</string>
   <string name="setting_page_code_display_settings">코드 표시</string>
   <string name="setting_page_color_mode">색상 모드</string>
   <string name="setting_page_color_mode_dark">어두움</string>
@@ -3297,4 +3296,11 @@
   <string name="novel_catalog_root_directory">루트 디렉터리</string>
   <string name="novel_migration_failed_count">%1$d권을 마이그레이션하지 못했습니다. 원본 파일은 디스크에 남아 있습니다. 자세한 내용은 설정에서 확인하세요.</string>
   <string name="provider_user_agent_presets">User-Agent 프리셋</string>
+  <string name="provider_file_import_select">JSON / Markdown 파일 가져오기</string>
+  <string name="provider_file_import_title">제공업체 가져오기 미리보기</string>
+  <string name="provider_file_import_hint">선택한 항목을 새 제공업체로 추가합니다. 같은 이름의 항목은 기본적으로 선택하지 않습니다. 기존 설정은 유지하며 키는 표시하지 않습니다.</string>
+  <string name="provider_file_import_duplicate">같은 이름: 선택하면 새로 추가</string>
+  <string name="provider_file_import_confirm">제공업체 %d개 가져오기</string>
+  <string name="provider_file_import_error">파일을 읽을 수 없습니다. JSON 배열 또는 providers 객체를 사용하세요. Markdown의 json 코드 블록도 지원합니다(최대 100만 자). 유형, URL, 모델 필드를 확인하세요.</string>
+  <string name="provider_file_import_save_error">가져오기를 저장하지 못했습니다. 다시 시도하세요.</string>
 </resources>

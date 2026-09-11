@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.ai.mcp.McpManager
+import app.amber.ai.provider.ProviderSetting
 
 class SettingVM(
     private val settingsStore: SettingsAggregator,
@@ -27,6 +28,12 @@ class SettingVM(
     fun updateSettings(transform: (Settings) -> Settings) {
         viewModelScope.launch {
             settingsStore.update(transform)
+        }
+    }
+
+    suspend fun importProviders(providers: List<ProviderSetting>) {
+        settingsStore.update { current ->
+            current.copy(providers = providers + current.providers)
         }
     }
 }
