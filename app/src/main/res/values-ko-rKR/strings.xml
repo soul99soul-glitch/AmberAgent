@@ -411,9 +411,7 @@
   <string name="setting_page_config_api_title">API와 모델을 설정하세요</string>
   <string name="setting_page_data_settings">데이터 설정</string>
   <string name="setting_page_default_model">기본 모델 및 프롬프트</string>
-  <string name="setting_page_default_model_desc">기본 모델, 보조 작업 모델 및 프롬프트</string>
   <string name="setting_page_display_setting">디스플레이 설정</string>
-  <string name="setting_page_display_setting_desc">디스플레이 설정 관리</string>
   <string name="setting_page_extensions">확장 기능</string>
   <string name="setting_page_extensions_desc">프롬프트 인젝션, 스킬 등을 관리합니다</string>
   <string name="setting_page_general_settings">일반 설정</string>
@@ -423,13 +421,11 @@
   <string name="setting_page_message_display_settings">메시지 표시</string>
   <string name="setting_page_model_and_services">모델 및 서비스</string>
   <string name="setting_page_providers">제공업체</string>
-  <string name="setting_page_providers_desc">AI 제공업체 구성</string>
   <string name="setting_page_search_add_provider">제공업체 추가</string>
   <string name="setting_page_search_common_options">일반 옵션</string>
   <string name="setting_page_search_delete_provider">제공업체 삭제</string>
   <string name="setting_page_search_result_size">결과 크기</string>
   <string name="setting_page_search_service">검색 서비스</string>
-  <string name="setting_page_search_service_desc">검색 서비스 설정</string>
   <string name="setting_page_search_title">검색 서비스</string>
   <string name="setting_page_theme_setting">테마 설정</string>
   <string name="setting_provider_page_abilities">기능</string>
@@ -975,9 +971,7 @@
   <string name="setting_page_agent_auto_approve">전역 자동 승인</string>
   <string name="setting_page_agent_auto_approve_desc">일반 도구 호출을 자동 승인합니다. 고위험 자동 승인도 사용 설정하면 답변이 필요한 ask_user 프롬프트를 제외하고 승인 게이트가 있는 도구가 무인으로 실행됩니다.</string>
   <string name="setting_page_agent_execution">실행 및 표시</string>
-  <string name="setting_page_agent_execution_desc">도구 루프, 미리보기 및 실시간 상태</string>
   <string name="setting_page_agent_extensions">Skill 및 확장 프로그램</string>
-  <string name="setting_page_agent_extensions_desc">Skill, 프롬프트 및 외부 도구 서버</string>
   <string name="setting_page_agent_generation_keepalive">백그라운드 연결 유지</string>
   <string name="setting_page_agent_generation_keepalive_desc">Amber가 생성하는 동안 포그라운드 알림을 사용합니다.</string>
   <string name="setting_page_agent_generation_retry">생성 자동 재시도</string>
@@ -1008,17 +1002,14 @@
   <string name="setting_page_agent_live_status_privacy">민감한 실시간 상태 숨기기</string>
   <string name="setting_page_agent_live_status_privacy_desc">도구 유형과 상태만 표시하고 비공개 텍스트는 숨깁니다.</string>
   <string name="setting_page_agent_memory">핵심 메모리</string>
-  <string name="setting_page_agent_memory_desc">AmberAgent 대화 간에 유지되는 영구 지식</string>
   <string name="setting_page_agent_operation_preview">작업 미리보기</string>
   <string name="setting_page_agent_operation_preview_always">항상</string>
   <string name="setting_page_agent_operation_preview_auto">자동</string>
   <string name="setting_page_agent_operation_preview_desc">입력창 위에 Agent 실시간 작업 카드를 표시합니다.</string>
   <string name="setting_page_agent_operation_preview_hidden">숨김</string>
   <string name="setting_page_agent_permissions">권한 및 승인</string>
-  <string name="setting_page_agent_permissions_desc">시스템 액세스 및 도구 승인 정책</string>
   <string name="setting_page_agent_runtime">Agent 설정</string>
   <string name="setting_page_agent_sandbox">Agent 런타임</string>
-  <string name="setting_page_agent_sandbox_desc">워크스페이스, Alpine/proot 및 명령 런타임 상태</string>
   <string name="setting_page_agent_skills">Skill</string>
   <string name="setting_page_agent_skills_desc">Agent가 필요할 때 로드할 수 있는 Skill 패키지를 관리합니다</string>
   <string name="setting_page_agent_tool_loop_steps">도구 루프 한도</string>
@@ -1027,7 +1018,6 @@
   <string name="setting_page_cron_tasks">Cron 작업</string>
   <string name="setting_page_cron_tasks_desc">예약된 Agent 작업 및 예정된 실행 상태를 확인합니다</string>
   <string name="setting_page_experimental_features">실험 기능</string>
-  <string name="setting_page_experimental_features_desc">아직 실제 기기 검증이 필요한 AmberAgent 기능을 미리 봅니다</string>
   <string name="setting_page_favorites_desc">저장된 대화 스니펫 검토</string>
   <string name="setting_page_system_access">시스템 액세스</string>
   <string name="setting_page_system_access_desc">Agent 도구의 Android 권한을 부여하고 감사하세요.</string>
@@ -1457,9 +1447,7 @@
   <string name="setting_display_page_base_family_title">색상 계열</string>
   <string name="setting_display_page_base_family_warm">웜 Warm</string>
   <string name="setting_page_backup">동기화 및 백업</string>
-  <string name="setting_page_backup_desc">Google 클라우드 동기화, 로컬 암호화 백업 및 전체 데이터 복구</string>
   <string name="setting_page_storage_cleanup">저장 공간 및 정리</string>
-  <string name="setting_page_storage_cleanup_desc">저장 공간 사용량 분류와 기간별 대화 정리(고정한 대화는 유지)</string>
   <string name="setting_slides_fonts_desc">중국어 글꼴 패키지를 다운로드하여 생성된 슬라이드의 재현도를 높입니다</string>
   <string name="setting_slides_fonts_title">Slides 글꼴 리소스</string>
   <string name="setting_storage_attachment_count">파일 %1$d개</string>
@@ -3308,4 +3296,5 @@
   <string name="novel_batch_stage_polish">윤문 중</string>
   <string name="novel_catalog_root_directory">루트 디렉터리</string>
   <string name="novel_migration_failed_count">%1$d권을 마이그레이션하지 못했습니다. 원본 파일은 디스크에 남아 있습니다. 자세한 내용은 설정에서 확인하세요.</string>
+  <string name="provider_user_agent_presets">User-Agent 프리셋</string>
 </resources>

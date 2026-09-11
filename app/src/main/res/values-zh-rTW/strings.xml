@@ -412,9 +412,7 @@
   <string name="setting_page_config_api_title">請配置API和模型</string>
   <string name="setting_page_data_settings">資料設定</string>
   <string name="setting_page_default_model">預設模型與提示</string>
-  <string name="setting_page_default_model_desc">預設模型、輔助任務模型與提示詞</string>
   <string name="setting_page_display_setting">顯示設定</string>
-  <string name="setting_page_display_setting_desc">管理顯示設定</string>
   <string name="setting_page_extensions">擴充功能</string>
   <string name="setting_page_extensions_desc">管理提示注入、技能等功能</string>
   <string name="setting_page_general_settings">通用設定</string>
@@ -424,7 +422,6 @@
   <string name="setting_page_message_display_settings">訊息顯示</string>
   <string name="setting_page_model_and_services">模型與服務</string>
   <string name="setting_page_providers">提供商</string>
-  <string name="setting_page_providers_desc">配置AI提供商</string>
   <string name="setting_page_search_add_provider">新增提供商</string>
   <string name="setting_page_search_common_options">通用選項</string>
   <string name="setting_page_search_delete_provider">刪除提供商</string>
@@ -456,7 +453,6 @@
   <string name="setting_page_search_result_size">結果數量</string>
   <string name="setting_page_search_result_size_desc">每次搜尋最多返回的結果條數</string>
   <string name="setting_page_search_service">搜尋服務</string>
-  <string name="setting_page_search_service_desc">設定搜尋服務</string>
   <string name="setting_page_search_title">搜尋服務</string>
   <string name="setting_page_theme_setting">主題設定</string>
   <string name="setting_provider_page_abilities">能力</string>
@@ -975,9 +971,7 @@
   <string name="setting_page_agent_auto_approve">全域自動核准</string>
   <string name="setting_page_agent_auto_approve_desc">自動核准一般工具呼叫。若同時啟用高風險自動核准，除了需要你回答的 ask_user 提示外，需核准的工具都會在無人值守下執行。</string>
   <string name="setting_page_agent_execution">執行與顯示</string>
-  <string name="setting_page_agent_execution_desc">工具迴圈、預覽與即時狀態</string>
   <string name="setting_page_agent_extensions">Skill 與擴充功能</string>
-  <string name="setting_page_agent_extensions_desc">Skill、提示詞與外部工具伺服器</string>
   <string name="setting_page_agent_generation_keepalive">背景保活</string>
   <string name="setting_page_agent_generation_keepalive_desc">Amber 產生內容時使用前景通知。</string>
   <string name="setting_page_agent_generation_retry">自動重試產生</string>
@@ -1008,17 +1002,14 @@
   <string name="setting_page_agent_live_status_privacy">隱藏敏感的即時狀態</string>
   <string name="setting_page_agent_live_status_privacy_desc">僅顯示工具類型與狀態；隱藏私人文字。</string>
   <string name="setting_page_agent_memory">核心記憶</string>
-  <string name="setting_page_agent_memory_desc">跨 AmberAgent 對話保留的持久知識</string>
   <string name="setting_page_agent_operation_preview">操作預覽</string>
   <string name="setting_page_agent_operation_preview_always">一律</string>
   <string name="setting_page_agent_operation_preview_auto">自動</string>
   <string name="setting_page_agent_operation_preview_desc">在輸入框上方顯示 Agent 即時操作卡片。</string>
   <string name="setting_page_agent_operation_preview_hidden">隱藏</string>
   <string name="setting_page_agent_permissions">權限與核准</string>
-  <string name="setting_page_agent_permissions_desc">系統存取權與工具核准政策</string>
   <string name="setting_page_agent_runtime">Agent 設定</string>
   <string name="setting_page_agent_sandbox">Agent 執行環境</string>
-  <string name="setting_page_agent_sandbox_desc">Workspace、Alpine/proot 與指令執行狀態</string>
   <string name="setting_page_agent_skills">Skill</string>
   <string name="setting_page_agent_skills_desc">管理 Agent 可按需載入的 Skill 套件</string>
   <string name="setting_page_agent_tool_loop_steps">工具迴圈上限</string>
@@ -1027,7 +1018,6 @@
   <string name="setting_page_cron_tasks">Cron 工作</string>
   <string name="setting_page_cron_tasks_desc">檢視已排程的 Agent 工作與預定執行狀態</string>
   <string name="setting_page_experimental_features">實驗性功能</string>
-  <string name="setting_page_experimental_features_desc">預覽仍需實機驗證的 AmberAgent 功能</string>
   <string name="setting_page_favorites_desc">檢視已儲存的對話片段</string>
   <string name="setting_page_system_access">系統存取權</string>
   <string name="setting_page_system_access_desc">授予並稽核 Agent 工具的 Android 權限。</string>
@@ -1457,9 +1447,7 @@
   <string name="setting_display_page_base_family_title">色系</string>
   <string name="setting_display_page_base_family_warm">暖 Warm</string>
   <string name="setting_page_backup">同步與備份</string>
-  <string name="setting_page_backup_desc">Google 雲端同步、本機加密備份與完整資料復原</string>
   <string name="setting_page_storage_cleanup">儲存空間與清理</string>
-  <string name="setting_page_storage_cleanup_desc">儲存空間分類統計與依時間清理對話（保留置頂對話）</string>
   <string name="setting_slides_fonts_desc">下載中文字型包，提升生成式投影片的還原度</string>
   <string name="setting_slides_fonts_title">Slides 字型資源</string>
   <string name="setting_storage_attachment_count">%1$d 個檔案</string>
@@ -3308,4 +3296,5 @@
   <string name="novel_batch_stage_polish">潤色中</string>
   <string name="novel_catalog_root_directory">根目錄</string>
   <string name="novel_migration_failed_count">%1$d 本書遷移失敗。原始檔案仍保留在磁碟上；請在設定中查看詳情。</string>
+  <string name="provider_user_agent_presets">User-Agent 預設</string>
 </resources>

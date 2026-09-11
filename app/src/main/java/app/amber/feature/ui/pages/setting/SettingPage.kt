@@ -5,6 +5,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -19,7 +21,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -36,9 +37,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composables.icons.lucide.Lucide
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.WandSparkles
 import com.composables.icons.lucide.TriangleAlert
 import com.composables.icons.lucide.Brain
@@ -126,11 +129,6 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 
             item("generalSettings") {
                 var colorMode by rememberColorMode()
-                val selectedColorModeText = when (colorMode) {
-                    ColorMode.SYSTEM -> stringResource(R.string.setting_page_color_mode_system)
-                    ColorMode.LIGHT -> stringResource(R.string.setting_page_color_mode_light)
-                    ColorMode.DARK -> stringResource(R.string.setting_page_color_mode_dark)
-                }
                 SectionLabel(
                     text = stringResource(R.string.setting_page_general_settings),
                     modifier = Modifier.padding(start = 6.dp, bottom = 10.dp),
@@ -164,12 +162,11 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                             )
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_color_mode)) },
-                        supportingContent = { Text(selectedColorModeText) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingDisplay) },
                         leadingContent = { SettingLeadingIcon(Lucide.Settings) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_display_setting_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_display_setting)) },
                     )
                 }
@@ -187,37 +184,37 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentMemory) },
                         leadingContent = { SettingLeadingIcon(Lucide.Brain) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_memory_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_memory)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExtensions) },
                         leadingContent = { SettingLeadingIcon(Lucide.Package) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_extensions_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_extensions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentExecution) },
                         leadingContent = { SettingLeadingIcon(Lucide.SearchCheck) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_execution_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_execution)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingAgentPermissions) },
                         leadingContent = { SettingLeadingIcon(Lucide.TriangleAlert) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_permissions_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_permissions)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSandbox) },
                         leadingContent = { SettingLeadingIcon(Lucide.CodeXml) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_agent_sandbox_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_agent_sandbox)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingExperimental) },
                         leadingContent = { SettingLeadingIcon(Lucide.Rocket) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_experimental_features_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_experimental_features)) },
                     )
                 }
@@ -235,19 +232,19 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.SettingProvider) },
                         leadingContent = { SettingLeadingIcon(Lucide.Brain) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_providers_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_providers)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingModels) },
                         leadingContent = { SettingLeadingIcon(Lucide.WandSparkles) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_default_model_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_default_model)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingSearch) },
                         leadingContent = { SettingLeadingIcon(Lucide.ScanSearch) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_search_service_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_search_service)) },
                     )
                 }
@@ -268,25 +265,36 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                     item(
                         onClick = { navController.navigate(Screen.Backup) },
                         leadingContent = { SettingLeadingIcon(Lucide.DatabaseZap) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_backup_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_backup)) },
                     )
                     item(
                         onClick = { navController.navigate(Screen.SettingFiles) },
                         leadingContent = { SettingLeadingIcon(Lucide.ImageUp) },
-                        supportingContent = {
-                            if (storageState.first == -1) {
-                                Text(stringResource(R.string.calculating))
-                            } else {
-                                // Machine-fact (file count + size) → mono (design §3).
-                                Text(
-                                    stringResource(
-                                        R.string.setting_page_chat_storage_desc,
-                                        storageState.first,
-                                        storageState.second / 1024 / 1024.0
-                                    ),
-                                    style = LocalAmberType.current.meta,
-                                )
+                        trailingContent = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (storageState.first == -1) {
+                                    Text(
+                                        stringResource(R.string.calculating),
+                                        style = LocalAmberType.current.meta,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                } else {
+                                    // Machine-fact (file count + size) → mono (design §3).
+                                    Text(
+                                        stringResource(
+                                            R.string.setting_page_chat_storage_desc,
+                                            storageState.first,
+                                            storageState.second / 1024 / 1024.0
+                                        ),
+                                        style = LocalAmberType.current.meta,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                Spacer(Modifier.width(4.dp))
+                                SettingChevron()
                             }
                         },
                         headlineContent = { Text(stringResource(R.string.setting_page_chat_storage)) },
@@ -295,7 +303,7 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
                         // P7-03：存储占用与按时间清理会话。
                         onClick = { navController.navigate(Screen.SettingStorage) },
                         leadingContent = { SettingLeadingIcon(Lucide.ChartNoAxesColumnIncreasing) },
-                        supportingContent = { Text(stringResource(R.string.setting_page_storage_cleanup_desc)) },
+                        trailingContent = { SettingChevron() },
                         headlineContent = { Text(stringResource(R.string.setting_page_storage_cleanup)) },
                     )
                 }
@@ -307,14 +315,24 @@ fun SettingPage(vm: SettingVM = koinViewModel()) {
 @Composable
 private fun SettingLeadingIcon(
     icon: ImageVector,
-    tone: WorkspaceTone = WorkspaceTone.Neutral,
+    tone: WorkspaceTone = WorkspaceTone.Accent,
 ) {
-    // V3 settings-screen.jsx: stroke icon 21dp 无底色容器
+    // 一级设置行对齐 iOS 单行样式：accent tinted 圆角容器 + 21dp stroke icon
     WorkspaceLeadingIcon(
         icon = icon,
         size = 32.dp,
         iconSize = 21.dp,
         tone = tone,
+    )
+}
+
+@Composable
+private fun SettingChevron() {
+    Icon(
+        imageVector = Lucide.ChevronRight,
+        contentDescription = null,
+        modifier = Modifier.size(18.dp),
+        tint = workspaceColors().faint,
     )
 }
 

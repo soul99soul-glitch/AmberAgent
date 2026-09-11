@@ -73,6 +73,7 @@ import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
 import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.home.ContinueCandidate
 import app.amber.feature.home.ContinueRoute
 import app.amber.feature.home.ContinueStatus
@@ -88,7 +89,6 @@ import com.composables.icons.lucide.BookOpenText
 import com.composables.icons.lucide.MessageCircle
 import com.composables.icons.lucide.X
 import com.composables.icons.lucide.Clock
-import com.composables.icons.lucide.MessageSquarePlus
 import com.composables.icons.lucide.Trash2
 import com.composables.icons.lucide.Earth
 import com.composables.icons.lucide.Grid2x2
@@ -313,13 +313,12 @@ fun SessionHomePage() {
                 )
         )
 
-        // Floating new-session button
+        // Floating new-session button —— iOS 同款胶囊（铅笔 + 新对话）
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(end = 20.dp, bottom = 24.dp)
-                .size(56.dp)
                 .shadow(
                     elevation = 12.dp,
                     shape = CircleShape,
@@ -333,15 +332,26 @@ fun SessionHomePage() {
                     navController.navigate(Screen.Chat(id = Uuid.random().toString())) {
                         launchSingleTop = true
                     }
-                },
+                }
+                // 无障碍最小点按目标 48dp
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 18.dp, vertical = 13.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = Lucide.MessageSquarePlus,
-                contentDescription = stringResource(R.string.chat_page_new_message),
-                modifier = Modifier.size(24.dp),
-                tint = tokens.accentInk,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Lucide.Pen,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = tokens.accentInk,
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = stringResource(R.string.history_page_new_conversation),
+                    style = LocalAmberType.current.body.copy(fontWeight = FontWeight.SemiBold),
+                    color = tokens.accentInk,
+                )
+            }
         }
     }
 }

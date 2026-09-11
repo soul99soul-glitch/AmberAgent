@@ -515,30 +515,22 @@
   <string name="setting_page_config_api_title">Please configure API and model</string>
   <string name="setting_page_data_settings">Data Settings</string>
   <string name="setting_page_default_model">Models &amp; Prompts</string>
-  <string name="setting_page_default_model_desc">Default models, supporting task models, and prompts</string>
   <string name="setting_page_display_setting">Display Settings</string>
-  <string name="setting_page_display_setting_desc">Manage display settings</string>
   <string name="setting_page_extensions">Extensions</string>
   <string name="setting_page_extensions_desc">Manage quick messages and prompts</string>
   <string name="setting_page_favorites_desc">Review saved conversation snippets</string>
   <string name="setting_page_general_settings">General Settings</string>
   <string name="setting_page_agent_runtime">Agent Settings</string>
   <string name="setting_page_agent_memory">Core Memory</string>
-  <string name="setting_page_agent_memory_desc">Persistent knowledge retained across AmberAgent conversations</string>
   <string name="setting_page_agent_skills">Skills</string>
   <string name="setting_page_agent_skills_desc">Manage skill packages the Agent can load on demand</string>
   <string name="setting_page_cron_tasks">Cron Tasks</string>
   <string name="setting_page_cron_tasks_desc">View scheduled Agent jobs and planned run status</string>
   <string name="setting_page_agent_extensions">Skills &amp; Extensions</string>
-  <string name="setting_page_agent_extensions_desc">Skills, prompts and external tool servers</string>
   <string name="setting_page_agent_sandbox">Agent Runtime</string>
-  <string name="setting_page_agent_sandbox_desc">Workspace, Alpine/proot and command runtime status</string>
   <string name="setting_page_agent_execution">Run &amp; Display</string>
-  <string name="setting_page_agent_execution_desc">Tool loop, preview and live status</string>
   <string name="setting_page_agent_permissions">Permissions &amp; Approval</string>
-  <string name="setting_page_agent_permissions_desc">System access and tool approval policy</string>
   <string name="setting_page_experimental_features">Experimental Features</string>
-  <string name="setting_page_experimental_features_desc">Preview AmberAgent features that still need real-device validation</string>
   <string name="setting_page_agent_live_status">Fluid Cloud / Live Status</string>
   <string name="setting_page_agent_live_status_desc">Show live system status while tasks run.</string>
   <string name="setting_page_agent_live_status_privacy">Hide sensitive live status</string>
@@ -561,7 +553,6 @@
   <string name="setting_page_message_display_settings">Message Display</string>
   <string name="setting_page_model_and_services">Models &amp; Services</string>
   <string name="setting_page_providers">Providers</string>
-  <string name="setting_page_providers_desc">Configure AI providers</string>
   <string name="setting_page_search_add_provider">Add Provider</string>
   <string name="setting_page_search_common_options">Common Options</string>
   <string name="setting_page_search_delete_provider">Delete Provider</string>
@@ -593,7 +584,6 @@
   <string name="setting_page_search_result_size">Result Size</string>
   <string name="setting_page_search_result_size_desc">Maximum results returned per search</string>
   <string name="setting_page_search_service">Search Service</string>
-  <string name="setting_page_search_service_desc">Set up search service</string>
   <string name="setting_page_search_title">Search Service</string>
   <string name="setting_page_theme_setting">Theme Settings</string>
   <string name="log_page_network_logging_title">Network Request Logging</string>
@@ -1470,9 +1460,7 @@ What would you like to talk about today?</string>
   <string name="setting_display_page_base_family_title">Color family</string>
   <string name="setting_display_page_base_family_warm">Warm</string>
   <string name="setting_page_backup">Sync &amp; Backup</string>
-  <string name="setting_page_backup_desc">Google cloud sync, local encrypted backups, and complete data recovery</string>
   <string name="setting_page_storage_cleanup">Storage &amp; Cleanup</string>
-  <string name="setting_page_storage_cleanup_desc">Storage usage breakdown and time-based conversation cleanup (pinned conversations kept)</string>
   <string name="setting_slides_fonts_desc">Download Chinese font packages to improve generated slide fidelity</string>
   <string name="setting_slides_fonts_title">Slides font resources</string>
   <string name="setting_storage_attachment_count">%1$d files</string>
@@ -3321,4 +3309,5 @@ My task:</string>
   <string name="novel_batch_stage_polish">Polishing</string>
   <string name="novel_catalog_root_directory">Root directory</string>
   <string name="novel_migration_failed_count">Migration failed for %1$d book(s). Original files remain on disk; check Settings for details.</string>
+  <string name="provider_user_agent_presets">User-Agent presets</string>
 </resources>

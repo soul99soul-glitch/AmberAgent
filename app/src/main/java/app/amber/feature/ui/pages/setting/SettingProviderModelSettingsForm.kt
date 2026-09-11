@@ -72,6 +72,12 @@ private val providerModelJson = Json {
     prettyPrint = true
 }
 
+// Editable identification templates, not a full client fingerprint.
+private val modelUserAgentPresets = listOf(
+    "Cursor" to "Cursor",
+    "OpenCode" to "opencode/1.2.27",
+)
+
 private fun parseContextWindowInput(input: String): Int? {
     val compact = input.trim()
         .replace(",", "")
@@ -207,6 +213,9 @@ internal fun ModelSettingsForm(
 ) {
     val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
+    var contextWindowInput by remember(model.id, model.modelId) {
+        mutableStateOf(model.contextWindowTokens?.formatContextWindowInput().orEmpty())
+    }
 
     fun setModelId(id: String) {
         val inputModality = ModelRegistry.MODEL_INPUT_MODALITIES.getData(id)
@@ -280,8 +289,9 @@ internal fun ModelSettingsForm(
                         if (model.type == ModelType.CHAT) {
                             ProviderLedgerRow("context_length") {
                                 ProviderTextField(
-                                    value = model.contextWindowTokens?.formatContextWindowInput().orEmpty(),
+                                    value = contextWindowInput,
                                     onValueChange = {
+                                        contextWindowInput = it
                                         onModelChange(model.copy(contextWindowTokens = parseContextWindowInput(it)))
                                     },
                                     placeholder = stringResource(R.string.setting_provider_page_model_context_window_placeholder),
@@ -473,6 +483,33 @@ private fun ModelCustomHeaders(
             text = stringResource(R.string.provider_custom_headers),
             count = headers.size,
         )
+
+        Text(
+            text = stringResource(R.string.provider_user_agent_presets),
+            style = type.meta,
+            color = t.ink3,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            modelUserAgentPresets.forEach { (label, value) ->
+                ProviderSquareTag(
+                    text = label,
+                    selected = headers.any {
+                        it.name.equals("User-Agent", ignoreCase = true) && it.value == value
+                    },
+                    onClick = {
+                        onUpdate(
+                            headers.filterNot { it.name.equals("User-Agent", ignoreCase = true) } +
+                                CustomHeader("User-Agent", value)
+                        )
+                    },
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+            }
+        }
 
         headers.forEachIndexed { index, header ->
             var headerName by remember(header.name) { mutableStateOf(header.name) }
